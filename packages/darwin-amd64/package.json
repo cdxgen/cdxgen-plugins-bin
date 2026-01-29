@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-darwin-amd64",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Arm64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {

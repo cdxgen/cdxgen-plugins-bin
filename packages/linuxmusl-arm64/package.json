@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-linuxmusl-arm64",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Linux musl arm64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {
