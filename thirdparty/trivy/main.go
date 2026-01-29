@@ -10,6 +10,7 @@ import (
 func main() {
     os.Setenv("TRIVY_OFFLINE_SCAN", "true")
     os.Setenv("TRIVY_DISABLE_TELEMETRY", "true")
+    os.Setenv("TRIVY_SKIP_VERSION_CHECK", "true")
 	os.Exit(run())
 }
 

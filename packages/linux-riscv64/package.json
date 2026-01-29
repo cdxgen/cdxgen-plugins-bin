@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-linux-riscv64",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "RISC-V 64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {
