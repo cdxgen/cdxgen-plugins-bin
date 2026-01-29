@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite" // Required: sqlite driver for RPM DB and Java DB
 )
 
-var version = "2.0.0"
+var version = "2.0.1"
 
 func main() {
 	if err := run(); err != nil {

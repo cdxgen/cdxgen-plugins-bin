@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-linux-arm",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Arm binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {

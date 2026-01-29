@@ -10,14 +10,14 @@ sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/
 
-wget https://github.com/osquery/osquery/releases/download/5.20.0/osquery-5.20.0_1.linux_x86_64.tar.gz
-tar -xf osquery-5.20.0_1.linux_x86_64.tar.gz
+wget https://github.com/osquery/osquery/releases/download/5.21.0/osquery-5.21.0_1.linux_x86_64.tar.gz
+tar -xf osquery-5.21.0_1.linux_x86_64.tar.gz
 cp opt/osquery/bin/osqueryd plugins/osquery/osqueryi-linux-amd64
 upx -9 --lzma plugins/osquery/osqueryi-linux-amd64
 ./plugins/osquery/osqueryi-linux-amd64 --help
 sha256sum plugins/osquery/osqueryi-linux-amd64 > plugins/osquery/osqueryi-linux-amd64.sha256
 rm -rf etc usr var opt
-rm osquery-5.20.0_1.linux_x86_64.tar.gz
+rm osquery-5.21.0_1.linux_x86_64.tar.gz
 
 # Download the Dosai binary
 curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-linux-amd64 -o plugins/dosai/dosai-linux-amd64
