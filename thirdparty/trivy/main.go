@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/xerrors"
@@ -13,10 +14,13 @@ import (
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/types"
 
+	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/all"
+	_ "github.com/aquasecurity/trivy/pkg/fanal/applier"
+
 	_ "modernc.org/sqlite" // Required: sqlite driver for RPM DB and Java DB
 )
 
-var version = "2.0.1"
+var version = "2.0.2"
 
 func main() {
 	if err := run(); err != nil {
@@ -30,6 +34,7 @@ func run() error {
 	cacheFlags := flag.NewCacheFlagGroup()
 	dbFlags := flag.NewDBFlagGroup()
 	reportFlags := flag.NewReportFlagGroup()
+	pkgFlags := flag.NewPackageFlagGroup()
 	scanFlags := flag.NewScanFlagGroup()
 
 	cacheFlags.CacheBackend.Default = string(cache.TypeMemory)
@@ -38,7 +43,9 @@ func run() error {
 		globalFlags,
 		cacheFlags,
 		dbFlags,
+		flag.NewLicenseFlagGroup(),
 		reportFlags,
+		pkgFlags,
 		scanFlags,
 	}
 
@@ -49,7 +56,7 @@ func run() error {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log.InitLogger(false, true)
+			log.InitLogger(true, false)
 
 			opts, err := allFlags.ToOptions(args)
 			if err != nil {
@@ -58,12 +65,18 @@ func run() error {
 
 			opts.Format = types.FormatCycloneDX
 			opts.ReportFormat = "all"
+            opts.PkgTypes = []string{types.PkgTypeLibrary, types.PkgTypeOS}
+			opts.Scanners = types.Scanners{
+				types.SBOMScanner,
+				types.LicenseScanner,
+			}
 
-			opts.Scanners = []types.Scanner{}
-
+			opts.ListAllPkgs = true
 			opts.OfflineScan = true
-
+			opts.SkipDBUpdate = true
 			opts.DisableTelemetry = true
+			opts.Timeout = 5 * time.Minute
+			opts.SkipFiles = []string{"**/*.jar", "**/*.war", "**/*.par", "**/*.ear"}
 
 			if output, _ := cmd.Flags().GetString("output"); output != "" {
 				opts.Output = output
@@ -72,8 +85,6 @@ func run() error {
 			return artifact.Run(cmd.Context(), opts, artifact.TargetRootfs)
 		},
 	}
-
 	cmd.Flags().StringP("output", "o", "", "output file name")
-
 	return cmd.Execute()
 }
