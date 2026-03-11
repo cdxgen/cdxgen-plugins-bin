@@ -5,10 +5,11 @@ docker_cmd := docker
 
 build = GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
 sha = cd build && sha256sum $(appname)-$(1)-$(2)$(3) > $(appname)-$(1)-$(2)$(3).sha256
+generate_sbom = GOEXPERIMENT=jsonv2 cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json
 
 .PHONY: all windows darwin linux clean
 
-all: windows linux darwin
+all: windows linux darwin sbom
 
 clean: rm -rf build/
 
@@ -16,6 +17,9 @@ clean: rm -rf build/
 linux: build/linux_amd64 build/linux_arm64 build/linux_arm build/linux_ppc64le build/linux_riscv64
 
 linuxmusl: build/linuxmusl_amd64 build/linuxmusl_arm64
+
+sbom:
+	$(call generate_sbom)
 
 build/linux_386: $(sources)
 	$(call build,linux,386,)

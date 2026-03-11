@@ -4,6 +4,9 @@ on:
   push:
     tags:
     - 'v*'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 # https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/controlling-permissions-for-github_token
 permissions: {}
@@ -40,6 +43,7 @@ jobs:
         ./contrib/free_disk_space.sh
     - name: Release
       run: |
+        npm install -g @cyclonedx/cdxgen
         wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
         tar -xvf upx-5.1.1-amd64_linux.tar.xz
         chmod +x upx-5.1.1-amd64_linux/upx

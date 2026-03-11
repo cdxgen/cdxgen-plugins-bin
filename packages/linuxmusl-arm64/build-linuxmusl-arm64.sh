@@ -13,3 +13,4 @@ sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
+node ../../scripts/generate-metadata.js ./plugins

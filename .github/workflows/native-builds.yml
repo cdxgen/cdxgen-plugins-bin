@@ -26,6 +26,12 @@ jobs:
       packages: write  # needed for publishing to GH container registry
     steps:
     - uses: actions/checkout@v6
+    - name: Use Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 25.x
+        registry-url: https://registry.npmjs.org/
+        scope: '@cdxgen'
     - name: setup upx
       run: |
         wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
@@ -60,8 +66,8 @@ jobs:
     - run: oras version
     - name: Build
       run: |
+        npm install -g @cyclonedx/cdxgen
         bash thirdparty/sourcekitten/build.sh
-        ls -al thirdparty/sourcekitten/SourceKitten/.build
         ls -l thirdparty/sourcekitten/SourceKitten/.build/release
         echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
       env:
@@ -71,11 +77,15 @@ jobs:
       run: |
         pushd thirdparty/trivy
         make build/linuxmusl_amd64
-        sudo chown -R $USER:$USER build/
+        sudo chown -R $USER:$USER build/        
         upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-amd64
+        sha256sum ./build/trivy-cdxgen-linuxmusl-amd64 > ./build/trivy-cdxgen-linuxmusl-amd64.sha256
+        make sbom
         popd
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/
+        cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
+        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
@@ -83,6 +93,8 @@ jobs:
           --artifact-type application/vnd.oras.config.v1+json \
           ./trivy-cdxgen-linuxmusl-amd64:application/vnd.cdxgen.plugins.layer.v1+tar \
           ./trivy-cdxgen-linuxmusl-amd64.sha256:application/vnd.cdxgen.plugins.layer.v1+tar \
+          ./sbom-trivy-postbuild.cdx.json:sbom/cyclonedx+tar \
+          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
           ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
           ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
       if: matrix.os == 'ubuntu-24.04'
@@ -92,9 +104,13 @@ jobs:
         make build/linuxmusl_arm64
         sudo chown -R $USER:$USER build/
         upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-arm64
+        sha256sum ./build/trivy-cdxgen-linuxmusl-arm64 > ./build/trivy-cdxgen-linuxmusl-arm64.sha256
+        make sbom
         popd
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/
+        cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
+        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
@@ -102,6 +118,8 @@ jobs:
           --artifact-type application/vnd.oras.config.v1+json \
           ./trivy-cdxgen-linuxmusl-arm64:application/vnd.cdxgen.plugins.layer.v1+tar \
           ./trivy-cdxgen-linuxmusl-arm64.sha256:application/vnd.cdxgen.plugins.layer.v1+tar \
+          ./sbom-trivy-postbuild.cdx.json:sbom/cyclonedx+tar \
+          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
           ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
           ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
       if: matrix.os == 'ubuntu-24.04-arm'
@@ -111,6 +129,7 @@ jobs:
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-amd64 \
           --artifact-type application/vnd.oras.config.v1+json \
           ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
+          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
           ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
       if: matrix.os == 'macos-15-intel'
     - name: Upload darwin arm64
@@ -119,5 +138,6 @@ jobs:
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-arm64 \
           --artifact-type application/vnd.oras.config.v1+json \
           ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
+          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
           ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
       if: matrix.os == 'macos-15'
