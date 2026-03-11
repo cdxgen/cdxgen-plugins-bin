@@ -31,7 +31,7 @@ jobs:
     - uses: swift-actions/setup-swift@v3
       if: matrix.os == 'ubuntu-latest'
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
     - uses: oras-project/setup-oras@v1
