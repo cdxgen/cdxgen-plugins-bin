@@ -12,4 +12,5 @@ swift build -c release
 chmod +x .build/release/sourcekitten
 ./.build/release/sourcekitten --help
 shasum -a 256 .build/release/sourcekitten > .build/release/sourcekitten.sha256 || true
+cdxgen -t swift -o .build/release/sbom-sourcekitten-postbuild.cdx.json
 popd

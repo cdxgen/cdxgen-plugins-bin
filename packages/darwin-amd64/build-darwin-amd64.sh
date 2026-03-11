@@ -18,5 +18,7 @@ for plug in trivy
 do
     mkdir -p plugins/$plug
     mv ../../plugins/$plug/*darwin-amd64* plugins/$plug/
+    cp ../../plugins/$plug/sbom* plugins/$plug/
 done
 
+node ../../scripts/generate-metadata.js ./plugins

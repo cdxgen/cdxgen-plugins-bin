@@ -8,7 +8,7 @@ for plug in trivy
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    make build/linux_ppc64le
+    make build/linux_ppc64le sbom
     chmod +x build/*
     cp -rf build/* ../../plugins/$plug/
     rm -rf build

@@ -20,7 +20,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: 23.x
+        node-version: 25.x
         registry-url: https://registry.npmjs.org/
     - uses: actions/setup-go@v6
       with:
@@ -42,6 +42,7 @@ jobs:
         ./contrib/free_disk_space.sh
     - name: Build
       run: |
+        npm install -g @cyclonedx/cdxgen
         wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
         tar -xvf upx-5.1.1-amd64_linux.tar.xz
         chmod +x upx-5.1.1-amd64_linux/upx
@@ -94,7 +95,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: 23.x
+        node-version: 25.x
         registry-url: https://registry.npmjs.org/
     - uses: actions/setup-go@v6
       with:
@@ -104,4 +105,5 @@ jobs:
         python-version: '3.13'
     - name: Build
       run: |
+        npm install -g @cyclonedx/cdxgen
         .\build.ps1
