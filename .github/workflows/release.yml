@@ -28,8 +28,6 @@ jobs:
         go-version: '^1.25.6'
     - uses: swift-actions/setup-swift@v2
       if: matrix.os == 'ubuntu-latest'
-      with:
-        swift-version: '6.0'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
     - name: Set up Docker Buildx
@@ -42,10 +40,10 @@ jobs:
         ./contrib/free_disk_space.sh
     - name: Release
       run: |
-        wget https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-amd64_linux.tar.xz
-        tar -xvf upx-5.1.0-amd64_linux.tar.xz
-        chmod +x upx-5.1.0-amd64_linux/upx
-        sudo cp upx-5.1.0-amd64_linux/upx /usr/local/bin/
+        wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
+        tar -xvf upx-5.1.1-amd64_linux.tar.xz
+        chmod +x upx-5.1.1-amd64_linux/upx
+        sudo cp upx-5.1.1-amd64_linux/upx /usr/local/bin/
         bash build.sh
         npm publish --provenance --access=public
 
