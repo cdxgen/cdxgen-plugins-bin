@@ -28,7 +28,7 @@ jobs:
     - uses: actions/setup-python@v6
       with:
         python-version: '3.13'
-    - uses: swift-actions/setup-swift@v2
+    - uses: swift-actions/setup-swift@v3
       if: matrix.os == 'ubuntu-latest'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
