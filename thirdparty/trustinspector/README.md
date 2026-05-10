@@ -13,3 +13,13 @@ The helper provides lightweight JSON output for trust-oriented OS and rootfs ins
 - macOS Gatekeeper posture fallback when direct host inspection is requested
 
 The tool is intentionally cdxgen-oriented and emits stable, merge-friendly JSON rather than full CycloneDX documents.
+
+## Command modes
+
+- `trustinspector rootfs <dir>` — inspect trust anchors inside an unpacked root filesystem
+- `trustinspector paths <path> [path...]` — inspect signing/notarization state for selected binaries or apps
+- `trustinspector host` — inspect host trust posture such as Gatekeeper or WDAC active policies
+
+## CI notes
+
+The repository test workflow now includes a Windows smoke path that builds the helper, validates manifest generation, runs `trustinspector host`, and inspects a signed Windows system binary with `trustinspector paths`.

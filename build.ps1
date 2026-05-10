@@ -1,6 +1,7 @@
 New-Item -ItemType Directory -Path plugins\osquery -Force
 New-Item -ItemType Directory -Path plugins\dosai -Force
 New-Item -ItemType Directory -Path plugins\trivy -Force
+New-Item -ItemType Directory -Path plugins\trustinspector -Force
 
 $upxVersion = "5.1.1"
 $upxArchive = "upx-$upxVersion-win64.zip"
@@ -43,6 +44,16 @@ go build -ldflags "-H=windowsgui -s -w" -o build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
 Remove-Item build -Recurse -Force
 cd ..\..
+
+cd thirdparty\trustinspector
+$env:CGO_ENABLED = "0"
+go build -ldflags "-H=windowsgui -s -w" -o build\trustinspector-cdxgen-windows-amd64.exe
+& "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trustinspector-cdxgen-windows-amd64.exe
+copy build\* ..\..\plugins\trustinspector\
+Remove-Item build -Recurse -Force
+cd ..\..
+
+node .\scripts\generate-metadata.js .\plugins
 
 Remove-Item "osquery-$osqueryVersion.windows_x86_64" -Recurse -Force
 Remove-Item $osqueryArchive -Recurse -Force

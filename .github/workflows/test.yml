@@ -110,3 +110,33 @@ jobs:
       run: |
         npm install -g @cyclonedx/cdxgen
         .\build.ps1
+    - name: Windows trustinspector E2E smoke
+      shell: pwsh
+      run: |
+        $ManifestPath = Join-Path (Get-Location) 'plugins\plugins-manifest.json'
+        if (-not (Test-Path $ManifestPath)) {
+          throw 'plugins-manifest.json was not generated on Windows.'
+        }
+        $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        if (-not ($Manifest.plugins.name -contains 'trustinspector')) {
+          throw 'trustinspector metadata was not recorded in plugins-manifest.json.'
+        }
+
+        $TrustInspector = Join-Path (Get-Location) 'plugins\trustinspector\trustinspector-cdxgen-windows-amd64.exe'
+        if (-not (Test-Path $TrustInspector)) {
+          throw 'trustinspector helper was not staged in plugins\trustinspector.'
+        }
+
+        $HostResult = & $TrustInspector host | Out-String | ConvertFrom-Json
+        if ($null -eq $HostResult.hostFindings) {
+          throw 'trustinspector host output did not include hostFindings.'
+        }
+
+        $TargetBinary = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $PathResult = & $TrustInspector paths $TargetBinary | Out-String | ConvertFrom-Json
+        if (($PathResult.inspections | Measure-Object).Count -lt 1) {
+          throw 'trustinspector paths output did not include any inspections.'
+        }
+        if (-not ($PathResult.inspections[0].properties | Where-Object { $_.name -eq 'cdx:windows:authenticode:status' })) {
+          throw 'trustinspector paths output did not include Authenticode status properties.'
+        }

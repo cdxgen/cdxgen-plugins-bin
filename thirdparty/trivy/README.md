@@ -17,6 +17,7 @@ Compared to the stock `cmd/trivy/main.go`, this wrapper is intentionally optimiz
   - installed command paths
   - installed file counts
   - installed file paths
+  - package trust-state metadata (`PackageArchitecture`, `PackageMaintainer`, `PackageOrigin`, `PackageSource`, `PackageStatus`, `PackageVendor`)
   - OS lifecycle metadata (`OSFamily`, `OSName`, `OSEOL`, `OSExtendedSupport`)
 
 ## Optional enrichment knobs
