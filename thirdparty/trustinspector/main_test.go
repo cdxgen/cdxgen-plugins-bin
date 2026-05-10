@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,13 +87,13 @@ func TestParseCertificateMaterials(t *testing.T) {
 		t.Fatalf("generate rsa key: %v", err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(42),
-		Subject: pkix.Name{CommonName: "demo-root", Organization: []string{"Example Org"}},
-		Issuer: pkix.Name{CommonName: "demo-root", Organization: []string{"Example Org"}},
-		NotBefore: time.Unix(1700000000, 0),
-		NotAfter:  time.Unix(1800000000, 0),
-		IsCA:      true,
-		KeyUsage:  x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SerialNumber:          big.NewInt(42),
+		Subject:               pkix.Name{CommonName: "demo-root", Organization: []string{"Example Org"}},
+		Issuer:                pkix.Name{CommonName: "demo-root", Organization: []string{"Example Org"}},
+		NotBefore:             time.Unix(1700000000, 0),
+		NotAfter:              time.Unix(1800000000, 0),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
@@ -117,8 +118,8 @@ func TestParseCertificateMaterials(t *testing.T) {
 
 func TestMapToPropertiesSkipsExcludedKeys(t *testing.T) {
 	properties := mapToProperties(map[string]any{
-		"path": "C:/demo.exe",
-		"cdx:windows:authenticode:status": "Valid",
+		"path":                                "C:/demo.exe",
+		"cdx:windows:authenticode:status":     "Valid",
 		"cdx:windows:authenticode:isOSBinary": true,
 	}, "path")
 	if len(properties) != 2 {
@@ -126,6 +127,44 @@ func TestMapToPropertiesSkipsExcludedKeys(t *testing.T) {
 	}
 	if !hasProperty(properties, "cdx:windows:authenticode:status", "Valid") {
 		t.Fatalf("missing authenticode status property: %#v", properties)
+	}
+}
+
+func TestInspectWindowsPathsRetainsInspectionErrors(t *testing.T) {
+	oldRunner := windowsPowerShellJSONRunner
+	windowsPowerShellJSONRunner = func(script string, payload map[string]any) ([]map[string]any, error) {
+		return []map[string]any{{
+			"path":                            `C:\demo.exe`,
+			"cdx:windows:authenticode:status": "error",
+			"cdx:windows:authenticode:error":  "Access is denied.",
+		}}, nil
+	}
+	defer func() {
+		windowsPowerShellJSONRunner = oldRunner
+	}()
+
+	inspections := inspectWindowsPaths([]string{`C:\demo.exe`})
+	if len(inspections) != 1 {
+		t.Fatalf("expected one inspection, got %#v", inspections)
+	}
+	if !hasProperty(inspections[0].Properties, "cdx:windows:authenticode:status", "error") {
+		t.Fatalf("missing error status property: %#v", inspections[0].Properties)
+	}
+	if !hasProperty(inspections[0].Properties, "cdx:windows:authenticode:error", "Access is denied.") {
+		t.Fatalf("missing error property: %#v", inspections[0].Properties)
+	}
+}
+
+func TestPathsInspectionPowerShellScriptUsesLiteralPathAndReportsErrors(t *testing.T) {
+	script := pathsInspectionPowerShellScript()
+	if !strings.Contains(script, "Get-AuthenticodeSignature -LiteralPath $path -ErrorAction Stop") {
+		t.Fatalf("expected script to use LiteralPath, got %s", script)
+	}
+	if !strings.Contains(script, "'cdx:windows:authenticode:status' = 'error'") {
+		t.Fatalf("expected script to emit explicit error status, got %s", script)
+	}
+	if !strings.Contains(script, "'cdx:windows:authenticode:error'") {
+		t.Fatalf("expected script to emit explicit error details, got %s", script)
 	}
 }
 

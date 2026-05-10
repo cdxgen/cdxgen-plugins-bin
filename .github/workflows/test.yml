@@ -52,41 +52,52 @@ jobs:
         pip3 install blint
         blint -i plugins -o /tmp/reports --no-error
         npm publish --dry-run
-        pushd packages/windows-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/linuxmusl-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linuxmusl-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-riscv64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-arm
-        npm publish --dry-run
-        popd
-        pushd packages/windows-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/darwin-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/darwin-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/ppc64
-        npm publish --dry-run
-        popd
       env:
         NODE_OPTIONS: --max_old_space_size=4096        
+    - name: Upload packaged plugins
+      uses: actions/upload-artifact@v4
+      with:
+        name: packaged-plugins
+        path: packages/
+        if-no-files-found: error
+        retention-days: 1
+  pkg_publish:
+    needs: pkg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        package_dir:
+        - packages/windows-amd64
+        - packages/linux-amd64
+        - packages/linux-arm64
+        - packages/linuxmusl-amd64
+        - packages/linuxmusl-arm64
+        - packages/linux-riscv64
+        - packages/linux-arm
+        - packages/windows-arm64
+        - packages/darwin-arm64
+        - packages/darwin-amd64
+        - packages/ppc64
+    steps:
+    - name: Use Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      with:
+        node-version: 25.x
+        registry-url: https://registry.npmjs.org/
+    - name: Download packaged plugins
+      uses: actions/download-artifact@v4
+      with:
+        name: packaged-plugins
+        path: .
+    - name: Verify package publish dry-run
+      run: |
+        pushd ${{ matrix.package_dir }}
+        npm publish --dry-run
+        popd
   winpkg:
     runs-on: windows-latest
     permissions:
@@ -132,10 +143,33 @@ jobs:
           throw 'trustinspector host output did not include hostFindings.'
         }
 
-        $TargetBinary = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $Candidates = [System.Collections.Generic.List[string]]::new()
+        foreach ($CommandName in @('powershell.exe', 'pwsh.exe')) {
+          try {
+            $Resolved = (Get-Command $CommandName -ErrorAction Stop | Select-Object -First 1).Source
+            if ($Resolved -and (Test-Path $Resolved)) {
+              $Candidates.Add($Resolved)
+            }
+          } catch {
+          }
+        }
+        foreach ($PathCandidate in @(
+          (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
+          (Join-Path $env:SystemRoot 'System32\cmd.exe'),
+          (Join-Path $env:SystemRoot 'System32\notepad.exe'),
+          $TrustInspector
+        )) {
+          if ($PathCandidate -and (Test-Path $PathCandidate)) {
+            $Candidates.Add($PathCandidate)
+          }
+        }
+        $TargetBinary = $Candidates | Select-Object -Unique | Select-Object -First 1
+        if (-not $TargetBinary) {
+          throw 'Unable to locate any Windows executable to inspect with trustinspector.'
+        }
         $PathResult = & $TrustInspector paths $TargetBinary | Out-String | ConvertFrom-Json
         if (($PathResult.inspections | Measure-Object).Count -lt 1) {
-          throw 'trustinspector paths output did not include any inspections.'
+          throw "trustinspector paths output did not include any inspections for target $TargetBinary."
         }
         if (-not ($PathResult.inspections[0].properties | Where-Object { $_.name -eq 'cdx:windows:authenticode:status' })) {
           throw 'trustinspector paths output did not include Authenticode status properties.'

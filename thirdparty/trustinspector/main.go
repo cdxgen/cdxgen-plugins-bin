@@ -75,6 +75,8 @@ type output struct {
 	HostFindings []hostFinding    `json:"hostFindings,omitempty"`
 }
 
+var windowsPowerShellJSONRunner = runWindowsPowerShellJSON
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -701,7 +703,7 @@ func inspectDarwinHost() []hostFinding {
 }
 
 func inspectWindowsPaths(paths []string) []pathInspection {
-	results, err := runWindowsPowerShellJSON(pathsInspectionPowerShellScript(), map[string]any{
+	results, err := windowsPowerShellJSONRunner(pathsInspectionPowerShellScript(), map[string]any{
 		"paths": uniqueSortedStrings(paths),
 	})
 	if err != nil {
@@ -719,7 +721,7 @@ func inspectWindowsPaths(paths []string) []pathInspection {
 }
 
 func inspectWindowsHost() []hostFinding {
-	results, err := runWindowsPowerShellJSON(wdacInspectionPowerShellScript(), nil)
+	results, err := windowsPowerShellJSONRunner(wdacInspectionPowerShellScript(), nil)
 	if err != nil {
 		return nil
 	}
@@ -750,7 +752,7 @@ $results = @()
 foreach ($path in $payload.paths) {
   if (-not (Test-Path -LiteralPath $path)) { continue }
   try {
-    $sig = Get-AuthenticodeSignature -FilePath $path -ErrorAction Stop
+	$sig = Get-AuthenticodeSignature -LiteralPath $path -ErrorAction Stop
     $entry = [ordered]@{
       path = $path
       'cdx:windows:authenticode:status' = [string]$sig.Status
@@ -770,7 +772,11 @@ foreach ($path in $payload.paths) {
     }
     $results += [pscustomobject]$entry
   } catch {
-    continue
+	$results += [pscustomobject]@{
+	  path = $path
+	  'cdx:windows:authenticode:status' = 'error'
+	  'cdx:windows:authenticode:error' = [string]$_.Exception.Message
+	}
   }
 }
 $results | ConvertTo-Json -Depth 6 -Compress`
