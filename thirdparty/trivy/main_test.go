@@ -35,6 +35,17 @@ func TestExtractInstalledCommandsUsesExecutableBitsForRootfs(t *testing.T) {
 	}
 }
 
+func TestExtractInstalledCommandsSkipsMissingFiles(t *testing.T) {
+	rootfs := t.TempDir()
+	paths, commands := extractInstalledCommands(rootfs, []string{"/usr/bin/missing-demo"})
+	if len(paths) != 0 {
+		t.Fatalf("expected no command paths for missing file, got %#v", paths)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("expected no commands for missing file, got %#v", commands)
+	}
+}
+
 func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 	rootfs := t.TempDir()
 	execPath := filepath.Join(rootfs, "usr", "bin", "bash")
@@ -119,6 +130,43 @@ func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 	assertHasProperty(t, osComponent.Properties, propertyOSFamily, string(ftypes.Debian))
 	assertHasProperty(t, osComponent.Properties, propertyOSName, "12")
 	assertHasProperty(t, osComponent.Properties, propertyOSExtended, "true")
+}
+
+func TestEnrichReportBOMRetainsTrustMetadataWhenExecutionSignalsAreDisabled(t *testing.T) {
+	rootfs := t.TempDir()
+	statusPath := filepath.Join(rootfs, "var", "lib", "dpkg", "status")
+	if err := os.MkdirAll(filepath.Dir(statusPath), 0o755); err != nil {
+		t.Fatalf("mkdir status dir: %v", err)
+	}
+	if err := os.WriteFile(statusPath, []byte("Package: bash\nVersion: 1.0-1\nStatus: install ok installed\nArchitecture: amd64\nSource: bash-src\n\n"), 0o644); err != nil {
+		t.Fatalf("write status file: %v", err)
+	}
+
+	report := trivytypes.Report{
+		ArtifactName: "rootfs",
+		ArtifactType: ftypes.TypeFilesystem,
+		Results: trivytypes.Results{{
+			Target: "debian",
+			Class:  trivytypes.ClassOSPkg,
+			Type:   ftypes.TargetType("deb"),
+			Packages: []ftypes.Package{{
+				ID:      "bash@1.0",
+				Name:    "bash",
+				Version: "1.0",
+			}},
+		}},
+	}
+
+	if err := enrichReportBOM(&report, rootfs, artifact.TargetRootfs, enrichmentOptions{}); err != nil {
+		t.Fatalf("enrich report bom: %v", err)
+	}
+	pkgComponent := findComponentByProperty(report.BOM, core.PropertyPkgID, "bash@1.0")
+	if pkgComponent == nil {
+		t.Fatal("expected package component to be present")
+	}
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageArchitecture, "amd64")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageSource, "bash-src")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageStatus, "install ok installed")
 }
 
 func TestParseAPKCapabilities(t *testing.T) {

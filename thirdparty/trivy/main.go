@@ -445,7 +445,7 @@ func isExecutableOnDisk(rootfsTarget, installedFile string) bool {
 	resolvedPath := filepath.Join(rootfsTarget, filepath.FromSlash(strings.TrimPrefix(installedFile, "/")))
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return true
+		return os.IsPermission(err)
 	}
 	if info.IsDir() {
 		return false
@@ -463,7 +463,8 @@ func applyPackageNativeIdentity(component *core.Component, decoration packageDec
 }
 
 func appendPackageProperties(properties core.Properties, decoration packageDecoration, opts enrichmentOptions) core.Properties {
-	if len(decoration.capabilities) == 0 && len(decoration.installedFiles) == 0 && len(decoration.installedCommands) == 0 && len(decoration.installedCommandPaths) == 0 {
+	hasTrustMetadata := decoration.architecture != "" || decoration.origin != "" || decoration.source != "" || decoration.status != "" || decoration.vendor != ""
+	if len(decoration.capabilities) == 0 && len(decoration.installedFiles) == 0 && len(decoration.installedCommands) == 0 && len(decoration.installedCommandPaths) == 0 && !hasTrustMetadata {
 		return properties
 	}
 	properties = appendProperties(properties,

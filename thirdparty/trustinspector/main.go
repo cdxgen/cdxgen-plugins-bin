@@ -70,9 +70,9 @@ type hostFinding struct {
 }
 
 type output struct {
-	Materials   []trustMaterial `json:"materials,omitempty"`
-	Inspections []pathInspection `json:"inspections,omitempty"`
-	HostFindings []hostFinding   `json:"hostFindings,omitempty"`
+	Materials    []trustMaterial  `json:"materials,omitempty"`
+	Inspections  []pathInspection `json:"inspections,omitempty"`
+	HostFindings []hostFinding    `json:"hostFindings,omitempty"`
 }
 
 func main() {
@@ -696,7 +696,7 @@ func inspectDarwinHost() []hostFinding {
 		Name:        "gatekeeper-system-policy",
 		Version:     status,
 		Description: statusOutput,
-		Properties: []property{{Name: "cdx:darwin:gatekeeper:status", Value: status}},
+		Properties:  []property{{Name: "cdx:darwin:gatekeeper:status", Value: status}},
 	}}
 }
 

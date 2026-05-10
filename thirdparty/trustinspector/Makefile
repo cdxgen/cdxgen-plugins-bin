@@ -1,4 +1,4 @@
-PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin:
+PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := trustinspector-cdxgen
 sources := main.go
 

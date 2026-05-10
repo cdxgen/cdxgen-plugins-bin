@@ -190,7 +190,7 @@ async function main() {
         component.hashes = [{ alg: "SHA-256", content: fileHash }];
       }
     } else if (!binaryFile.endsWith(".app")) {
-      fileHash = computeHash(`plugins/${tool}/${binaryFile}`);
+      fileHash = computeHash(path.join(toolDir, binaryFile));
       component.hashes = [{ alg: "SHA-256", content: fileHash }];
     }
     allComponents.push(component);
