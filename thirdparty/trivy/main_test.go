@@ -55,7 +55,7 @@ func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 	if err := os.WriteFile(docPath, []byte("docs"), 0o644); err != nil {
 		t.Fatalf("write doc file: %v", err)
 	}
-	if err := os.WriteFile(statusPath, []byte("Package: bash\nVersion: 1.0-1\nStatus: install ok installed\nProvides: shell-interpreter\n\n"), 0o644); err != nil {
+	if err := os.WriteFile(statusPath, []byte("Package: bash\nVersion: 1.0-1\nStatus: install ok installed\nArchitecture: amd64\nMaintainer: Debian Bash Maintainers <bash@example.test>\nSource: bash-src\nProvides: shell-interpreter\n\n"), 0o644); err != nil {
 		t.Fatalf("write status file: %v", err)
 	}
 
@@ -104,6 +104,10 @@ func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 	assertHasProperty(t, pkgComponent.Properties, propertyInstalledCommand, "bash")
 	assertHasProperty(t, pkgComponent.Properties, propertyInstalledCommandPath, "/usr/bin/bash")
 	assertHasProperty(t, pkgComponent.Properties, propertyInstalledFile, "/usr/share/doc/bash/README")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageArchitecture, "amd64")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageMaintainer, "Debian Bash Maintainers <bash@example.test>")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageSource, "bash-src")
+	assertHasProperty(t, pkgComponent.Properties, propertyPackageStatus, "install ok installed")
 
 	osComponent := findComponentByType(report.BOM, core.TypeOS)
 	if osComponent == nil {
@@ -155,6 +159,56 @@ func TestParseDPKGCapabilities(t *testing.T) {
 	got := capabilities["mawk@1.3.4.20240123"]
 	if len(got) != 3 || got[0] != "awk" || got[1] != "editor" || got[2] != "text-editor" {
 		t.Fatalf("unexpected dpkg capabilities: %#v", got)
+	}
+}
+
+func TestParseDPKGPackageTrust(t *testing.T) {
+	rootfs := t.TempDir()
+	statusPath := filepath.Join(rootfs, "var", "lib", "dpkg", "status")
+	if err := os.MkdirAll(filepath.Dir(statusPath), 0o755); err != nil {
+		t.Fatalf("mkdir status dir: %v", err)
+	}
+	content := strings.Join([]string{
+		"Package: mawk",
+		"Version: 1.3.4.20240123-1",
+		"Status: install ok installed",
+		"Architecture: amd64",
+		"Maintainer: Debian QA Group <packages@example.test>",
+		"Origin: Debian",
+		"Source: mawk-src",
+		"",
+	}, "\n")
+	if err := os.WriteFile(statusPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write status file: %v", err)
+	}
+	trustMetadata := parseDPKGPackageTrust(rootfs)["mawk@1.3.4.20240123"]
+	if trustMetadata.architecture != "amd64" || trustMetadata.maintainer != "Debian QA Group <packages@example.test>" || trustMetadata.origin != "Debian" || trustMetadata.source != "mawk-src" || trustMetadata.status != "install ok installed" {
+		t.Fatalf("unexpected dpkg trust metadata: %#v", trustMetadata)
+	}
+}
+
+func TestParseAPKPackageTrust(t *testing.T) {
+	rootfs := t.TempDir()
+	apkDbPath := filepath.Join(rootfs, "lib", "apk", "db", "installed")
+	if err := os.MkdirAll(filepath.Dir(apkDbPath), 0o755); err != nil {
+		t.Fatalf("mkdir apk db dir: %v", err)
+	}
+	content := strings.Join([]string{
+		"P:busybox",
+		"V:1.36.1-r2",
+		"A:x86_64",
+		"m:Busybox Maintainers <busybox@example.test>",
+		"o:busybox",
+		"S:busybox-src",
+		"s:trusted",
+		"",
+	}, "\n")
+	if err := os.WriteFile(apkDbPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write apk db: %v", err)
+	}
+	trustMetadata := parseAPKPackageTrust(rootfs)["busybox@1.36.1-r2"]
+	if trustMetadata.architecture != "x86_64" || trustMetadata.maintainer != "Busybox Maintainers <busybox@example.test>" || trustMetadata.origin != "busybox" || trustMetadata.source != "busybox-src" || trustMetadata.status != "trusted" {
+		t.Fatalf("unexpected apk trust metadata: %#v", trustMetadata)
 	}
 }
 

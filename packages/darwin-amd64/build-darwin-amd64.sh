@@ -6,7 +6,8 @@ rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
 rm -rf plugins/sourcekitten
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten
+rm -rf plugins/trustinspector
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-amd64 -o plugins/sourcekitten/
 
@@ -14,7 +15,7 @@ curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-o
 chmod +x plugins/dosai/dosai-darwin-amd64
 sha256sum plugins/dosai/dosai-darwin-amd64 > plugins/dosai/dosai-darwin-amd64.sha256
 
-for plug in trivy
+for plug in trivy trustinspector
 do
     mkdir -p plugins/$plug
     mv ../../plugins/$plug/*darwin-amd64* plugins/$plug/

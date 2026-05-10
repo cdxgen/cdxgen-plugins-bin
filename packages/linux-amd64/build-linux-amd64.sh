@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Remove old plugin directories to ensure a clean build
-rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai
-mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai
+rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector
+mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/sourcekitten/
 sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
@@ -20,19 +20,21 @@ curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-l
 chmod +x plugins/dosai/dosai-linux-amd64
 sha256sum plugins/dosai/dosai-linux-amd64 > plugins/dosai/dosai-linux-amd64.sha256
 
-plug="trivy"
-mkdir -p "plugins/$plug"
-if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-amd64* 2>/dev/null)" ]; then
-    mv ../../plugins/$plug/*linux-amd64* "plugins/$plug/"
-    cp ../../plugins/$plug/sbom* "plugins/$plug/"
-    for file in "plugins/$plug"/*linux-amd64*; do
-        if [[ "$file" != *.sha256 ]]; then
-            upx -9 --lzma "$file" || true
-            sha256sum "$file" > "${file}.sha256"
-        fi
-    done
-else
-    echo "Warning: No files found for $plug in ../../plugins/$plug/"
-fi
+for plug in trivy trustinspector
+do
+    mkdir -p "plugins/$plug"
+    if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-amd64* 2>/dev/null)" ]; then
+        mv ../../plugins/$plug/*linux-amd64* "plugins/$plug/"
+        cp ../../plugins/$plug/sbom* "plugins/$plug/"
+        for file in "plugins/$plug"/*linux-amd64*; do
+            if [[ "$file" != *.sha256 ]]; then
+                upx -9 --lzma "$file" || true
+                sha256sum "$file" > "${file}.sha256"
+            fi
+        done
+    else
+        echo "Warning: No files found for $plug in ../../plugins/$plug/"
+    fi
+done
 
 node ../../scripts/generate-metadata.js ./plugins

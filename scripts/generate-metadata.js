@@ -2,9 +2,89 @@ import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 
+const pluginsPackageJson = JSON.parse(
+  fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+);
 const osqueryVersion = "5.23.0";
 const sourcekittenVersion = "0.37.2";
 const trivyVersion = "v0.68.2";
+const trustInspectorVersion = pluginsPackageJson.version;
+
+function pluginComponentMetadata(dosaiVersion) {
+  return {
+    osquery: {
+      version: osqueryVersion,
+      description:
+        "SQL powered operating system instrumentation, monitoring, and analytics.",
+      purl: `pkg:github/osquery/osquery@${osqueryVersion}`,
+      licenses: [{ expression: "Apache-2.0 OR GPL-2.0-only" }],
+      externalReferences: [
+        { url: "https://github.com/osquery/osquery", type: "vcs" },
+        { url: "https://github.com/osquery/osquery/releases", type: "distribution" },
+      ],
+    },
+    dosai: {
+      version: dosaiVersion.replace(/^v/, ""),
+      description:
+        "Dotnet Source and Assembly Inspector (Dosai) is a tool to list details about the namespaces and methods from sources and assemblies.",
+      purl: `pkg:github/owasp-dep-scan/dosai@${dosaiVersion.replace(/^v/, "")}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        { url: "https://github.com/owasp-dep-scan/dosai", type: "vcs" },
+        {
+          url: "https://github.com/owasp-dep-scan/dosai/releases",
+          type: "distribution",
+        },
+      ],
+    },
+    trivy: {
+      version: trivyVersion,
+      description:
+        "Find vulnerabilities, misconfigurations, secrets, SBOM in containers, Kubernetes, code repositories, clouds and more. This is a custom wrapper maintained by the cdxgen team.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trivy-cdxgen@${trivyVersion}`,
+      licenses: [{ license: { id: "Apache-2.0" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trivy",
+          type: "vcs",
+        },
+        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+      ],
+    },
+    sourcekitten: {
+      version: sourcekittenVersion,
+      description:
+        "An adorable little framework and command line tool for interacting with SourceKit.",
+      purl: `pkg:github/jpsim/sourcekitten@${sourcekittenVersion}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        { url: "https://github.com/jpsim/SourceKitten", type: "vcs" },
+        {
+          url: "https://github.com/jpsim/SourceKitten/issues",
+          type: "issue-tracker",
+        },
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/pkgs/container/cdxgen-plugins-bin",
+          type: "distribution-intake",
+        },
+      ],
+    },
+    trustinspector: {
+      version: trustInspectorVersion,
+      description:
+        "cdxgen trust-material inspection helper for repository keys, certificate stores, macOS code-signing, notarization, and Windows trust policy inventory.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trustinspector-cdxgen@${trustInspectorVersion}`,
+      licenses: [{ license: { id: "Apache-2.0" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trustinspector",
+          type: "vcs",
+        },
+        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+      ],
+    },
+  };
+}
 
 function computeHash(filePath) {
   const fileBuffer = fs.readFileSync(filePath);
@@ -47,7 +127,9 @@ async function main() {
   const allComponents = [];
   const allDependencies = [];
   const dosaiVersion = await getLatestGithubRelease('owasp-dep-scan/dosai');
-  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten'];
+  const toolMetadata = pluginComponentMetadata(dosaiVersion);
+  const manifestPlugins = [];
+  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector'];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
     if (!fs.existsSync(toolDir)) {
@@ -60,11 +142,12 @@ async function main() {
     if (!binaryFile) {
       continue;
     }
-    let version = 'unknown';
-    let description = `${tool} binary`;
-    let purl = '';
-    let licenses = [];
-    let externalReferences;
+    const toolInfo = toolMetadata[tool] || {};
+    let version = toolInfo.version || 'unknown';
+    let description = toolInfo.description || `${tool} binary`;
+    let purl = toolInfo.purl || '';
+    let licenses = toolInfo.licenses || [];
+    let externalReferences = toolInfo.externalReferences;
     const evidence = {
       "identity": [
         {
@@ -78,44 +161,6 @@ async function main() {
           ]
         }
       ]
-    }
-    if (tool === 'osquery') {
-      version = osqueryVersion;
-      description = 'SQL powered operating system instrumentation, monitoring, and analytics.';
-      purl = `pkg:github/osquery/osquery@${version}`;
-      licenses = [{ "expression": "Apache-2.0 OR GPL-2.0-only" }];
-      externalReferences = [
-        {url: "https://github.com/osquery/osquery", type: "vcs"},
-        {url: "https://github.com/osquery/osquery/releases", type: "distribution"},
-      ];
-    } else if (tool === 'dosai') {
-      version = dosaiVersion.replace(/^v/, ''); // strip 'v'
-      description = 'Dotnet Source and Assembly Inspector (Dosai) is a tool to list details about the namespaces and methods from sources and assemblies.';
-      purl = `pkg:github/owasp-dep-scan/dosai@${version}`;
-      licenses = [{ "license": { "id": "MIT" } }];
-      externalReferences = [
-        {url: "https://github.com/owasp-dep-scan/dosai", type: "vcs"},
-        {url: "https://github.com/owasp-dep-scan/dosai/releases", type: "distribution"},
-      ];
-    } else if (tool === 'trivy') {
-      version = trivyVersion;
-      description = 'Find vulnerabilities, misconfigurations, secrets, SBOM in containers, Kubernetes, code repositories, clouds and more. This is a custom wrapper maintained by the cdxgen team.';
-      purl = `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trivy-cdxgen@${version}`;
-      licenses = [{ "license": { "id": "Apache-2.0" } }];
-      externalReferences = [
-        {url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trivy", type: "vcs"},
-        {url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker"},
-      ];
-    } else if (tool === 'sourcekitten') {
-      version = sourcekittenVersion;
-      description = 'An adorable little framework and command line tool for interacting with SourceKit.';
-      purl = `pkg:github/jpsim/sourcekitten@${version}`;
-      licenses = [{ "license": { "id": "MIT" } }];
-      externalReferences = [
-        {url: "https://github.com/jpsim/SourceKitten", type: "vcs"},
-        {url: "https://github.com/jpsim/SourceKitten/issues", type: "issue-tracker"},
-        {url: "https://github.com/cdxgen/cdxgen-plugins-bin/pkgs/container/cdxgen-plugins-bin", type: "distribution-intake"},
-      ];
     }
     const component = {
       type: "application",
@@ -132,18 +177,31 @@ async function main() {
           name: "internal:binary_path",
           value: `plugins/${tool}/${binaryFile}`
         },
+        {
+          name: "cdx:plugin:manifest:name",
+          value: tool,
+        },
       ]
     };
+    let fileHash = null;
     if (shaFile) {
-      const fileHash = readHashFromFile(path.join(toolDir, shaFile));
+      fileHash = readHashFromFile(path.join(toolDir, shaFile));
       if (fileHash) {
         component.hashes = [{ alg: "SHA-256", content: fileHash }];
       }
     } else if (!binaryFile.endsWith(".app")) {
-      const fileHash = computeHash(`plugins/${tool}/${binaryFile}`);
+      fileHash = computeHash(`plugins/${tool}/${binaryFile}`);
       component.hashes = [{ alg: "SHA-256", content: fileHash }];
     }
     allComponents.push(component);
+    manifestPlugins.push({
+      name: tool,
+      version,
+      binaryPath: `plugins/${tool}/${binaryFile}`,
+      sha256: fileHash || undefined,
+      sbomFile: sbomFile ? `plugins/${tool}/${sbomFile}` : undefined,
+      component,
+    });
     if (sbomFile) {
       try {
         const sbomContent = JSON.parse(fs.readFileSync(path.join(toolDir, sbomFile), 'utf-8'));
@@ -183,7 +241,26 @@ async function main() {
   }
   const outFile = path.join(targetDir, 'sbom-postbuild.cdx.json');
   fs.writeFileSync(outFile, JSON.stringify(outData, null, null));
+  const manifestFile = path.join(targetDir, 'plugins-manifest.json');
+  fs.writeFileSync(
+    manifestFile,
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        package: {
+          name: pluginsPackageJson.name,
+          version: pluginsPackageJson.version,
+          repository: pluginsPackageJson.repository?.url,
+          homepage: pluginsPackageJson.homepage,
+        },
+        plugins: manifestPlugins,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`Successfully wrote metadata to ${outFile}`);
+  console.log(`Successfully wrote metadata manifest to ${manifestFile}`);
 }
 
 main().catch(console.error);

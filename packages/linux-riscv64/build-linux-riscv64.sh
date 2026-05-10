@@ -3,8 +3,9 @@
 set -e
 
 rm -rf plugins/trivy
+rm -rf plugins/trustinspector
 
-for plug in trivy
+for plug in trivy trustinspector
 do
     mkdir -p plugins/$plug
     if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-riscv64* 2>/dev/null)" ]; then

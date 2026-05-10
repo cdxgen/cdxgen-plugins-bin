@@ -43,6 +43,12 @@ const (
 	propertyInstalledCommandCount = "InstalledCommandCount"
 	propertyCapability            = "Capability"
 	propertyCapabilityCount       = "CapabilityCount"
+	propertyPackageArchitecture   = "PackageArchitecture"
+	propertyPackageMaintainer     = "PackageMaintainer"
+	propertyPackageOrigin         = "PackageOrigin"
+	propertyPackageSource         = "PackageSource"
+	propertyPackageStatus         = "PackageStatus"
+	propertyPackageVendor         = "PackageVendor"
 	propertyOSFamily              = "OSFamily"
 	propertyOSName                = "OSName"
 	propertyOSEOL                 = "OSEOL"
@@ -60,6 +66,12 @@ type packageDecoration struct {
 	installedFiles        []string
 	installedCommands     []string
 	installedCommandPaths []string
+	architecture          string
+	maintainer            string
+	origin                string
+	source                string
+	status                string
+	vendor                string
 }
 
 func main() {
@@ -337,11 +349,13 @@ func collectPackageDecorations(results trivytypes.Results, target string, target
 	decorations := make(map[string]packageDecoration)
 	rootfsTarget := ""
 	capabilitiesByPackage := make(map[string][]string)
+	trustMetadataByPackage := make(map[string]packageDecoration)
 	if targetKind == artifact.TargetRootfs {
 		rootfsTarget = target
 		if opts.includeCapabilities {
 			capabilitiesByPackage = collectPackageCapabilities(target)
 		}
+		trustMetadataByPackage = collectPackageTrustMetadata(target)
 	}
 	for _, result := range results {
 		if result.Class != trivytypes.ClassOSPkg {
@@ -361,11 +375,25 @@ func collectPackageDecorations(results trivytypes.Results, target string, target
 				decoration.installedCommandPaths = append(decoration.installedCommandPaths, paths...)
 				decoration.installedCommands = append(decoration.installedCommands, commands...)
 			}
+			if trustDecoration, ok := trustMetadataByPackage[pkgID]; ok {
+				decoration.architecture = firstNonEmpty(trustDecoration.architecture, decoration.architecture)
+				decoration.maintainer = firstNonEmpty(trustDecoration.maintainer, decoration.maintainer)
+				decoration.origin = firstNonEmpty(trustDecoration.origin, decoration.origin)
+				decoration.source = firstNonEmpty(trustDecoration.source, decoration.source)
+				decoration.status = firstNonEmpty(trustDecoration.status, decoration.status)
+				decoration.vendor = firstNonEmpty(trustDecoration.vendor, decoration.vendor)
+			}
 			decorations[pkgID] = packageDecoration{
 				capabilities:          uniqueSorted(decoration.capabilities),
 				installedFiles:        uniqueSorted(decoration.installedFiles),
 				installedCommands:     uniqueSorted(decoration.installedCommands),
 				installedCommandPaths: uniqueSorted(decoration.installedCommandPaths),
+				architecture:          decoration.architecture,
+				maintainer:            decoration.maintainer,
+				origin:                decoration.origin,
+				source:                decoration.source,
+				status:                decoration.status,
+				vendor:                decoration.vendor,
 			}
 		}
 	}
@@ -433,6 +461,12 @@ func appendPackageProperties(properties core.Properties, decoration packageDecor
 		core.Property{Name: propertyCapabilityCount, Value: strconv.Itoa(len(decoration.capabilities))},
 		core.Property{Name: propertyInstalledFileCount, Value: strconv.Itoa(len(decoration.installedFiles))},
 		core.Property{Name: propertyInstalledCommandCount, Value: strconv.Itoa(len(decoration.installedCommands))},
+		core.Property{Name: propertyPackageArchitecture, Value: decoration.architecture},
+		core.Property{Name: propertyPackageMaintainer, Value: decoration.maintainer},
+		core.Property{Name: propertyPackageOrigin, Value: decoration.origin},
+		core.Property{Name: propertyPackageSource, Value: decoration.source},
+		core.Property{Name: propertyPackageStatus, Value: decoration.status},
+		core.Property{Name: propertyPackageVendor, Value: decoration.vendor},
 	)
 	if opts.includeCapabilities {
 		for _, capability := range decoration.capabilities {
@@ -519,6 +553,27 @@ func collectPackageCapabilities(rootfsTarget string) map[string][]string {
 	return capabilitiesByPackage
 }
 
+func collectPackageTrustMetadata(rootfsTarget string) map[string]packageDecoration {
+	trustMetadataByPackage := make(map[string]packageDecoration)
+	mergePackageTrustMetadata(trustMetadataByPackage, parseAPKPackageTrust(rootfsTarget))
+	mergePackageTrustMetadata(trustMetadataByPackage, parseDPKGPackageTrust(rootfsTarget))
+	mergePackageTrustMetadata(trustMetadataByPackage, parseRPMPackageTrust(rootfsTarget))
+	return trustMetadataByPackage
+}
+
+func mergePackageTrustMetadata(dst map[string]packageDecoration, src map[string]packageDecoration) {
+	for pkgID, trustMetadata := range src {
+		existing := dst[pkgID]
+		existing.architecture = firstNonEmpty(existing.architecture, trustMetadata.architecture)
+		existing.maintainer = firstNonEmpty(existing.maintainer, trustMetadata.maintainer)
+		existing.origin = firstNonEmpty(existing.origin, trustMetadata.origin)
+		existing.source = firstNonEmpty(existing.source, trustMetadata.source)
+		existing.status = firstNonEmpty(existing.status, trustMetadata.status)
+		existing.vendor = firstNonEmpty(existing.vendor, trustMetadata.vendor)
+		dst[pkgID] = existing
+	}
+}
+
 func mergePackageCapabilities(dst map[string][]string, src map[string][]string) {
 	for pkgID, capabilities := range src {
 		dst[pkgID] = append(dst[pkgID], capabilities...)
@@ -565,6 +620,58 @@ func parseAPKCapabilities(rootfsTarget string) map[string][]string {
 	return map[string][]string{}
 }
 
+func parseAPKPackageTrust(rootfsTarget string) map[string]packageDecoration {
+	for _, dbPath := range []string{
+		filepath.Join(rootfsTarget, "lib", "apk", "db", "installed"),
+		filepath.Join(rootfsTarget, "usr", "lib", "apk", "db", "installed"),
+	} {
+		data, err := os.ReadFile(dbPath)
+		if err != nil {
+			continue
+		}
+		trustMetadataByPackage := make(map[string]packageDecoration)
+		var currentName string
+		var currentVersion string
+		var current packageDecoration
+		flush := func() {
+			if currentName == "" || currentVersion == "" {
+				return
+			}
+			trustMetadataByPackage[fmt.Sprintf("%s@%s", currentName, currentVersion)] = current
+		}
+		for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+			if len(line) < 2 {
+				flush()
+				currentName = ""
+				currentVersion = ""
+				current = packageDecoration{}
+				continue
+			}
+			switch {
+			case strings.HasPrefix(line, "P:"):
+				currentName = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "V:"):
+				currentVersion = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "A:"):
+				current.architecture = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "m:"):
+				current.maintainer = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "o:"):
+				current.origin = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "S:"):
+				current.source = strings.TrimSpace(line[2:])
+			case strings.HasPrefix(line, "s:"):
+				current.status = strings.TrimSpace(line[2:])
+			}
+		}
+		flush()
+		if len(trustMetadataByPackage) > 0 {
+			return trustMetadataByPackage
+		}
+	}
+	return map[string]packageDecoration{}
+}
+
 func parseDPKGCapabilities(rootfsTarget string) map[string][]string {
 	capabilitiesByPackage := make(map[string][]string)
 	for _, statusPath := range dpkgStatusPaths(rootfsTarget) {
@@ -599,6 +706,35 @@ func parseDPKGCapabilities(rootfsTarget string) map[string][]string {
 		}
 	}
 	return capabilitiesByPackage
+}
+
+func parseDPKGPackageTrust(rootfsTarget string) map[string]packageDecoration {
+	trustMetadataByPackage := make(map[string]packageDecoration)
+	for _, statusPath := range dpkgStatusPaths(rootfsTarget) {
+		data, err := os.ReadFile(statusPath)
+		if err != nil {
+			continue
+		}
+		for _, header := range parseDebianControlHeaders(data) {
+			name := header.Get("Package")
+			version := header.Get("Version")
+			if name == "" || version == "" {
+				continue
+			}
+			debVersion, err := debversion.NewVersion(version)
+			if err != nil {
+				continue
+			}
+			trustMetadataByPackage[fmt.Sprintf("%s@%s", name, debVersion.Version())] = packageDecoration{
+				architecture: header.Get("Architecture"),
+				maintainer:   header.Get("Maintainer"),
+				origin:       header.Get("Origin"),
+				source:       header.Get("Source"),
+				status:       header.Get("Status"),
+			}
+		}
+	}
+	return trustMetadataByPackage
 }
 
 func dpkgStatusPaths(rootfsTarget string) []string {
@@ -692,6 +828,47 @@ func parseRPMCapabilities(rootfsTarget string) map[string][]string {
 	return map[string][]string{}
 }
 
+func parseRPMPackageTrust(rootfsTarget string) map[string]packageDecoration {
+	for _, dbPath := range []string{
+		filepath.Join(rootfsTarget, "usr", "lib", "sysimage", "rpm", "Packages"),
+		filepath.Join(rootfsTarget, "var", "lib", "rpm", "Packages"),
+		filepath.Join(rootfsTarget, "usr", "lib", "sysimage", "rpm", "Packages.db"),
+		filepath.Join(rootfsTarget, "var", "lib", "rpm", "Packages.db"),
+		filepath.Join(rootfsTarget, "usr", "lib", "sysimage", "rpm", "rpmdb.sqlite"),
+		filepath.Join(rootfsTarget, "var", "lib", "rpm", "rpmdb.sqlite"),
+		filepath.Join(rootfsTarget, "usr", "share", "rpm", "rpmdb.sqlite"),
+	} {
+		if _, err := os.Stat(dbPath); err != nil {
+			continue
+		}
+		db, err := rpmdb.Open(dbPath)
+		if err != nil {
+			continue
+		}
+		pkgList, err := db.ListPackages()
+		_ = db.Close()
+		if err != nil {
+			continue
+		}
+		trustMetadataByPackage := make(map[string]packageDecoration)
+		for _, pkg := range pkgList {
+			arch := pkg.Arch
+			if arch == "" {
+				arch = "None"
+			}
+			trustMetadataByPackage[fmt.Sprintf("%s@%s-%s.%s", pkg.Name, pkg.Version, pkg.Release, arch)] = packageDecoration{
+				architecture: arch,
+				source:       pkg.SourceRpm,
+				vendor:       pkg.Vendor,
+			}
+		}
+		if len(trustMetadataByPackage) > 0 {
+			return trustMetadataByPackage
+		}
+	}
+	return map[string]packageDecoration{}
+}
+
 func trimVersionRequirement(value string) string {
 	if idx := strings.Index(value, " ("); idx >= 0 {
 		value = value[:idx]
@@ -703,4 +880,14 @@ func trimVersionRequirement(value string) string {
 	value = strings.TrimSuffix(value, "(")
 	value = strings.TrimSuffix(value, ")")
 	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

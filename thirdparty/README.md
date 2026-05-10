@@ -9,3 +9,7 @@ The files here were copied from https://github.com/aquasecurity/trivy/blob/main/
 ## sourcekitten
 
 Sourcekitten binaries are built from this [repo](https://github.com/jpsim/SourceKitten).
+
+## trustinspector
+
+`trustinspector` is a cdxgen-maintained helper that emits trust-focused JSON for repository keyrings, certificate stores, macOS code-signing/notarization state, and Windows Authenticode / WDAC inventory. See [./trustinspector/README.md](./trustinspector/README.md).

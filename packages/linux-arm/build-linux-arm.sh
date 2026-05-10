@@ -5,13 +5,14 @@ set -e
 rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
-mkdir -p plugins/osquery plugins/dosai
+rm -rf plugins/trustinspector
+mkdir -p plugins/osquery plugins/dosai plugins/trustinspector
 
 curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-linux-arm -o plugins/dosai/dosai-linux-arm
 chmod +x plugins/dosai/dosai-linux-arm
 sha256sum plugins/dosai/dosai-linux-arm > plugins/dosai/dosai-linux-arm.sha256
 
-for plug in trivy
+for plug in trivy trustinspector
 do
     mkdir -p plugins/$plug
     if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-arm* 2>/dev/null)" ]; then
