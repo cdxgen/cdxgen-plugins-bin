@@ -36,17 +36,15 @@ jobs:
         scope: '@cdxgen'
     - name: setup upx
       run: |
-        wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
-        tar -xvf upx-5.1.1-amd64_linux.tar.xz
-        chmod +x upx-5.1.1-amd64_linux/upx
-        sudo cp upx-5.1.1-amd64_linux/upx /usr/local/bin/
+        bash ./scripts/thirdparty-downloads.sh install-upx linux-amd64 ./upx
+        sudo install -m 0755 ./upx /usr/local/bin/upx
+        rm -f ./upx
       if: matrix.os == 'ubuntu-24.04'
     - name: setup upx
       run: |
-        wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-arm64_linux.tar.xz
-        tar -xvf upx-5.1.1-arm64_linux.tar.xz
-        chmod +x upx-5.1.1-arm64_linux/upx
-        sudo cp upx-5.1.1-arm64_linux/upx /usr/local/bin/
+        bash ./scripts/thirdparty-downloads.sh install-upx linux-arm64 ./upx
+        sudo install -m 0755 ./upx /usr/local/bin/upx
+        rm -f ./upx
       if: matrix.os == 'ubuntu-24.04-arm'
     - name: Setup swift
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'

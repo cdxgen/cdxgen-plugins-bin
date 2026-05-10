@@ -2,7 +2,7 @@ import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 
-const osqueryVersion = "5.22.1";
+const osqueryVersion = "5.23.0";
 const sourcekittenVersion = "0.37.2";
 const trivyVersion = "v0.68.2";
 
