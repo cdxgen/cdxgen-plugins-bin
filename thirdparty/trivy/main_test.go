@@ -105,9 +105,12 @@ func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 	assertHasProperty(t, pkgComponent.Properties, propertyInstalledCommandPath, "/usr/bin/bash")
 	assertHasProperty(t, pkgComponent.Properties, propertyInstalledFile, "/usr/share/doc/bash/README")
 	assertHasProperty(t, pkgComponent.Properties, propertyPackageArchitecture, "amd64")
-	assertHasProperty(t, pkgComponent.Properties, propertyPackageMaintainer, "Debian Bash Maintainers <bash@example.test>")
 	assertHasProperty(t, pkgComponent.Properties, propertyPackageSource, "bash-src")
 	assertHasProperty(t, pkgComponent.Properties, propertyPackageStatus, "install ok installed")
+	if pkgComponent.Supplier != "Debian Bash Maintainers <bash@example.test>" {
+		t.Fatalf("unexpected package supplier: %#v", pkgComponent.Supplier)
+	}
+	assertMissingProperty(t, pkgComponent.Properties, "PackageMaintainer")
 
 	osComponent := findComponentByType(report.BOM, core.TypeOS)
 	if osComponent == nil {
@@ -240,4 +243,13 @@ func assertHasProperty(t *testing.T, properties core.Properties, name, value str
 		}
 	}
 	t.Fatalf("missing property %s=%s in %#v", name, value, properties)
+}
+
+func assertMissingProperty(t *testing.T, properties core.Properties, name string) {
+	t.Helper()
+	for _, property := range properties {
+		if property.Name == name {
+			t.Fatalf("unexpected property %s in %#v", name, properties)
+		}
+	}
 }

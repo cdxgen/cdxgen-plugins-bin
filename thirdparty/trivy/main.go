@@ -44,7 +44,6 @@ const (
 	propertyCapability            = "Capability"
 	propertyCapabilityCount       = "CapabilityCount"
 	propertyPackageArchitecture   = "PackageArchitecture"
-	propertyPackageMaintainer     = "PackageMaintainer"
 	propertyPackageOrigin         = "PackageOrigin"
 	propertyPackageSource         = "PackageSource"
 	propertyPackageStatus         = "PackageStatus"
@@ -338,6 +337,7 @@ func enrichReportBOM(report *trivytypes.Report, target string, targetKind artifa
 		if !ok {
 			continue
 		}
+		applyPackageNativeIdentity(component, decoration)
 		component.Properties = appendPackageProperties(component.Properties, decoration, opts)
 	}
 
@@ -453,6 +453,15 @@ func isExecutableOnDisk(rootfsTarget, installedFile string) bool {
 	return info.Mode()&0o111 != 0
 }
 
+func applyPackageNativeIdentity(component *core.Component, decoration packageDecoration) {
+	if component == nil {
+		return
+	}
+	if component.Supplier == "" {
+		component.Supplier = firstNonEmpty(decoration.maintainer, decoration.vendor)
+	}
+}
+
 func appendPackageProperties(properties core.Properties, decoration packageDecoration, opts enrichmentOptions) core.Properties {
 	if len(decoration.capabilities) == 0 && len(decoration.installedFiles) == 0 && len(decoration.installedCommands) == 0 && len(decoration.installedCommandPaths) == 0 {
 		return properties
@@ -462,7 +471,6 @@ func appendPackageProperties(properties core.Properties, decoration packageDecor
 		core.Property{Name: propertyInstalledFileCount, Value: strconv.Itoa(len(decoration.installedFiles))},
 		core.Property{Name: propertyInstalledCommandCount, Value: strconv.Itoa(len(decoration.installedCommands))},
 		core.Property{Name: propertyPackageArchitecture, Value: decoration.architecture},
-		core.Property{Name: propertyPackageMaintainer, Value: decoration.maintainer},
 		core.Property{Name: propertyPackageOrigin, Value: decoration.origin},
 		core.Property{Name: propertyPackageSource, Value: decoration.source},
 		core.Property{Name: propertyPackageStatus, Value: decoration.status},

@@ -39,7 +39,7 @@ Invoke-WebRequest -Uri https://github.com/owasp-dep-scan/dosai/releases/latest/d
 cd thirdparty\trivy
 $env:GOEXPERIMENT = "jsonv2"
 $env:CGO_ENABLED = "0"
-go build -ldflags "-H=windowsgui -s -w" -o build\trivy-windows-amd64.exe
+go build -ldflags "-s -w" -o build\trivy-windows-amd64.exe
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
 Remove-Item build -Recurse -Force
@@ -47,7 +47,7 @@ cd ..\..
 
 cd thirdparty\trustinspector
 $env:CGO_ENABLED = "0"
-go build -ldflags "-H=windowsgui -s -w" -o build\trustinspector-cdxgen-windows-amd64.exe
+go build -ldflags "-s -w" -o build\trustinspector-cdxgen-windows-amd64.exe
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trustinspector-cdxgen-windows-amd64.exe
 copy build\* ..\..\plugins\trustinspector\
 Remove-Item build -Recurse -Force

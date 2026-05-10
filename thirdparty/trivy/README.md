@@ -17,8 +17,11 @@ Compared to the stock `cmd/trivy/main.go`, this wrapper is intentionally optimiz
   - installed command paths
   - installed file counts
   - installed file paths
-  - package trust-state metadata (`PackageArchitecture`, `PackageMaintainer`, `PackageOrigin`, `PackageSource`, `PackageStatus`, `PackageVendor`)
+  - package trust-state metadata (`PackageArchitecture`, `PackageOrigin`, `PackageSource`, `PackageStatus`, `PackageVendor`)
+  - native CycloneDX `supplier` population from maintainer metadata when available
   - OS lifecycle metadata (`OSFamily`, `OSName`, `OSEOL`, `OSExtendedSupport`)
+
+When the wrapper output is consumed by `cdxgen`, maintainer/vendor trust metadata is further promoted into native CycloneDX component fields such as `authors` and `manufacturer` when that can be done without overwriting differing existing values.
 
 ## Optional enrichment knobs
 
