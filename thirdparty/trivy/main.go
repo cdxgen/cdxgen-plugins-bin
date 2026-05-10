@@ -235,7 +235,12 @@ func applyCDXGenDefaults(opts *flag.Options) {
 	opts.Quiet = !opts.Debug
 	opts.Scanners = trivytypes.Scanners{trivytypes.SBOMScanner}
 	opts.SkipDBUpdate = true
-	opts.SkipFiles = append(opts.SkipFiles, "**/*.jar,**/*.war,**/*.par,**/*.ear")
+	opts.SkipFiles = append(opts.SkipFiles,
+		"**/*.jar",
+		"**/*.war",
+		"**/*.par",
+		"**/*.ear",
+	)
 	opts.SkipJavaDBUpdate = true
 	opts.SkipVersionCheck = true
 }

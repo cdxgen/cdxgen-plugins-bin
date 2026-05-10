@@ -8,6 +8,7 @@ import (
 
 	"github.com/aquasecurity/trivy/pkg/commands/artifact"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
+	"github.com/aquasecurity/trivy/pkg/flag"
 	"github.com/aquasecurity/trivy/pkg/sbom/core"
 	trivytypes "github.com/aquasecurity/trivy/pkg/types"
 )
@@ -235,6 +236,20 @@ func TestParseDPKGPackageTrust(t *testing.T) {
 	trustMetadata := parseDPKGPackageTrust(rootfs)["mawk@1.3.4.20240123"]
 	if trustMetadata.architecture != "amd64" || trustMetadata.maintainer != "Debian QA Group <packages@example.test>" || trustMetadata.origin != "Debian" || trustMetadata.source != "mawk-src" || trustMetadata.status != "install ok installed" {
 		t.Fatalf("unexpected dpkg trust metadata: %#v", trustMetadata)
+	}
+}
+
+func TestApplyCDXGenDefaultsAddsSeparateSkipFilePatterns(t *testing.T) {
+	var opts flag.Options
+	applyCDXGenDefaults(&opts)
+	want := []string{"**/*.jar", "**/*.war", "**/*.par", "**/*.ear"}
+	if len(opts.SkipFiles) != len(want) {
+		t.Fatalf("unexpected skip files: %#v", opts.SkipFiles)
+	}
+	for i, pattern := range want {
+		if opts.SkipFiles[i] != pattern {
+			t.Fatalf("unexpected skip file pattern at index %d: %#v", i, opts.SkipFiles)
+		}
 	}
 }
 

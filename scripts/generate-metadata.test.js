@@ -4,12 +4,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   computeHash,
   readHashFromFile,
   resolveBinaryHash,
 } from "./generate-metadata.js";
+
+const scriptPath = fileURLToPath(new URL("./generate-metadata.js", import.meta.url));
 
 test("readHashFromFile rejects invalid sidecar content", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-test-"));
@@ -46,7 +49,6 @@ test("generate-metadata writes the computed hash to the manifest when the sideca
     fs.writeFileSync(binaryFile, "binary-payload");
     fs.writeFileSync(path.join(toolDir, `${binaryName}.sha256`), "invalid sha value\n");
 
-    const scriptPath = path.resolve("/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/scripts/generate-metadata.js");
     const result = spawnSync(process.execPath, [scriptPath, tempDir], {
       encoding: "utf-8",
     });

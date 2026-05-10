@@ -23,4 +23,11 @@ bash "$helper_script" "$source_dir" "$destination_dir" "linux-amd64"
 cmp "$source_dir/-dangerous-linux-amd64" "$destination_dir/-dangerous-linux-amd64"
 cmp "$source_dir/sbom-trivy.cdx.json" "$destination_dir/sbom-trivy.cdx.json"
 
+hash_only_source="$tmpdir/source/hash-only"
+hash_only_dest="$tmpdir/destination/hash-only"
+mkdir -p "$hash_only_source" "$hash_only_dest"
+printf 'hash-sidecar' > "$hash_only_source/trivy-linux-amd64.sha256"
+warning_output="$(bash "$helper_script" "$hash_only_source" "$hash_only_dest" "linux-amd64" 2>&1 >/dev/null)"
+[[ "$warning_output" == *"Warning: No files found for hash-only"* ]]
+
 echo "stage-built-plugins helper test passed"

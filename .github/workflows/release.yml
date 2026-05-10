@@ -34,7 +34,6 @@ jobs:
         go-version: '^1.25.6'
         cache: false
     - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
-      if: matrix.os == 'ubuntu-latest'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
     - name: Set up Docker Buildx

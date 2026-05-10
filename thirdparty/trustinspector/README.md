@@ -16,9 +16,9 @@ The tool is intentionally cdxgen-oriented and emits stable, merge-friendly JSON 
 
 ## Command modes
 
-- `trustinspector rootfs <dir>` — inspect trust anchors inside an unpacked root filesystem
-- `trustinspector paths <path> [path...]` — inspect signing/notarization state for selected binaries or apps
-- `trustinspector host` — inspect host trust posture such as Gatekeeper or WDAC active policies
+- `trustinspector-cdxgen rootfs <dir>` — inspect trust anchors inside an unpacked root filesystem
+- `trustinspector-cdxgen paths <path> [path...]` — inspect signing/notarization state for selected binaries or apps
+- `trustinspector-cdxgen host` — inspect host trust posture such as Gatekeeper or WDAC active policies
 
 ## JSON output shape
 

@@ -31,7 +31,8 @@ stage_plugin_files() {
     fi
     cp -f "$file_path" "$destination_dir/"
     if [[ "$(basename "$file_path")" == *"$platform_fragment"* ]] \
-      && [[ "$(basename "$file_path")" != sbom* ]]; then
+      && [[ "$(basename "$file_path")" != sbom* ]] \
+      && [[ "$(basename "$file_path")" != *.sha256 ]]; then
       staged_binary=1
     fi
   done < <(
