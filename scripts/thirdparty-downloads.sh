@@ -3,16 +3,19 @@ set -euo pipefail
 
 readonly OSQUERY_VERSION="5.23.0"
 readonly UPX_VERSION="5.1.1"
+readonly DOSAI_VERSION="2.1.1"
 
 print_usage() {
   cat <<'EOF'
 Usage:
   thirdparty-downloads.sh download <asset-key> <output-path>
   thirdparty-downloads.sh install-osquery <platform> <destination-path>
+  thirdparty-downloads.sh install-dosai <platform> <destination-path>
   thirdparty-downloads.sh install-upx <platform> <destination-path>
 
 Supported platforms:
   osquery: linux-amd64 linux-arm64 darwin-arm64 windows-amd64 windows-arm64
+  dosai:   linux-amd64 linux-arm linux-arm64 linuxmusl-amd64 linuxmusl-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64
   upx:     linux-amd64 linux-arm64
 EOF
 }
@@ -67,6 +70,51 @@ resolve_asset() {
       asset_filename="osquery-${OSQUERY_VERSION}.windows_arm64.zip"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
       asset_sha256="92a820a39c12f7516040b62dc8e8546469c821f505eed0b7ff1eb7e43cc4b018"
+      ;;
+    dosai-linux-amd64)
+      asset_filename="Dosai-linux-amd64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="04ea140d2ebac353458d3f67f5874ca95442b43600b4d9e0aeafa6b051715d41"
+      ;;
+    dosai-linux-arm)
+      asset_filename="Dosai-linux-arm"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="59933fd3783e09196443f2b6202270f8acfbd51580f273becde0f83df096c6c1"
+      ;;
+    dosai-linux-arm64)
+      asset_filename="Dosai-linux-arm64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="9e8093d05c58446ae47832bb1b388881a274b1355bc94c3cc1836bdbf263aeae"
+      ;;
+    dosai-linuxmusl-amd64)
+      asset_filename="Dosai-linux-musl-x64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="e534e187313de488d931c73dd977b465ab6c16144e25800b42ebfd421ec068bc"
+      ;;
+    dosai-linuxmusl-arm64)
+      asset_filename="Dosai-linux-musl-arm64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="29723d231ccbbdf85964e33ae6eb3754ae488bbd087e9da826ff037e5c2da5c8"
+      ;;
+    dosai-darwin-amd64)
+      asset_filename="Dosai-osx-x64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="06caad7f5c915d2590db4a5ae168b036998d24049ef0002fd561aa63ea238d59"
+      ;;
+    dosai-darwin-arm64)
+      asset_filename="Dosai-osx-arm64"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="7856242e82cd5f794a51695e2ad9bc26a68362ff4132a5c55c489804e1050f9b"
+      ;;
+    dosai-windows-amd64)
+      asset_filename="Dosai.exe"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="4a7ae864f37e77088981eb6c1967f067612d4c5191e204eeb871225a9cd1e103"
+      ;;
+    dosai-windows-arm64)
+      asset_filename="Dosai-windows-arm64.exe"
+      asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
+      asset_sha256="b2c06c3868c06d269d772a8be938fa64848bddb828183f4abd808ea235ff0785"
       ;;
     upx-linux-amd64)
       asset_filename="upx-${UPX_VERSION}-amd64_linux.tar.xz"
@@ -142,6 +190,16 @@ install_osquery() {
   rm -rf "$tmpdir"
 }
 
+install_dosai() {
+  local platform="$1"
+  local destination_path="$2"
+  local asset_key="dosai-${platform}"
+  resolve_asset "$asset_key"
+  mkdir -p "$(dirname "$destination_path")"
+  download_asset "$asset_key" "$destination_path"
+  chmod 0755 "$destination_path"
+}
+
 install_upx() {
   local platform="$1"
   local destination_path="$2"
@@ -188,6 +246,10 @@ main() {
       [[ $# -eq 2 ]] || { print_usage >&2; exit 1; }
       install_osquery "$1" "$2"
       ;;
+    install-dosai)
+      [[ $# -eq 2 ]] || { print_usage >&2; exit 1; }
+      install_dosai "$1" "$2"
+      ;;
     install-upx)
       [[ $# -eq 2 ]] || { print_usage >&2; exit 1; }
       install_upx "$1" "$2"
@@ -199,4 +261,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

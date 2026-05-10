@@ -8,6 +8,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +167,79 @@ func TestPathsInspectionPowerShellScriptUsesLiteralPathAndReportsErrors(t *testi
 	}
 	if !strings.Contains(script, "'cdx:windows:authenticode:error'") {
 		t.Fatalf("expected script to emit explicit error details, got %s", script)
+	}
+}
+
+func TestNormalizeInspectablePathReturnsCleanAbsolutePath(t *testing.T) {
+	value, err := normalizeInspectablePath(filepath.Join(".", "fixtures", "..", "demo.bin"))
+	if err != nil {
+		t.Fatalf("normalize path: %v", err)
+	}
+	if !filepath.IsAbs(value) {
+		t.Fatalf("expected absolute path, got %s", value)
+	}
+	if strings.Contains(value, "..") {
+		t.Fatalf("expected cleaned path, got %s", value)
+	}
+}
+
+func TestInspectDarwinPathsUsesNormalizedAbsolutePath(t *testing.T) {
+	tempDir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWD)
+	}()
+
+	filename := "-demo-tool"
+	absPath := filepath.Join(tempDir, filename)
+	normalizedPath, err := normalizeInspectablePath(filename)
+	if err != nil {
+		t.Fatalf("normalize path: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	oldRunner := commandRunner
+	var seenPaths []string
+	commandRunner = func(name string, args ...string) (string, string, error) {
+		seenPaths = append(seenPaths, args[len(args)-1])
+		switch name {
+		case "codesign":
+			return "", "Identifier=com.example.demo\nTeamIdentifier=ABCDE12345", nil
+		case "spctl":
+			return "", normalizedPath + ": accepted\nsource=Notarized Developer ID", nil
+		default:
+			return "", "", nil
+		}
+	}
+	defer func() {
+		commandRunner = oldRunner
+	}()
+
+	inspections := inspectDarwinPaths([]string{filename})
+	if len(inspections) != 1 {
+		t.Fatalf("expected one inspection, got %#v", inspections)
+	}
+	if inspections[0].Path != normalizedPath {
+		t.Fatalf("expected absolute inspected path %s, got %s", normalizedPath, inspections[0].Path)
+	}
+	if len(seenPaths) != 2 {
+		t.Fatalf("expected codesign and spctl invocations, got %#v", seenPaths)
+	}
+	for _, seenPath := range seenPaths {
+		if seenPath != normalizedPath {
+			t.Fatalf("expected absolute command path %s, got %s", normalizedPath, seenPath)
+		}
+		if strings.HasPrefix(seenPath, "-") {
+			t.Fatalf("expected normalized path not to start with '-', got %s", seenPath)
+		}
 	}
 }
 

@@ -9,6 +9,9 @@ $upxArchiveSha256 = "fa5380bca4c2718547aaa0134bc0d8a7fa27e102f0ac6371573d60d1c21
 $osqueryVersion = "5.23.0"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
 $osqueryArchiveSha256 = "5ddb8e1c23fd870838ef4ff47c0d2e5a080f22a6944fc4870d726e7b20e962a4"
+$dosaiVersion = "2.1.1"
+$dosaiArchive = "Dosai.exe"
+$dosaiArchiveSha256 = "4a7ae864f37e77088981eb6c1967f067612d4c5191e204eeb871225a9cd1e103"
 
 function Assert-Sha256 {
   param(
@@ -34,7 +37,8 @@ copy "osquery-$osqueryVersion.windows_x86_64\Program Files\osquery\osqueryi.exe"
 & ".\upx-$upxVersion-win64\upx.exe" -9 --lzma plugins\osquery\osqueryi-windows-amd64.exe
 plugins\osquery\osqueryi-windows-amd64.exe --help
 
-Invoke-WebRequest -Uri https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai.exe -UseBasicParsing -OutFile plugins/dosai/dosai-windows-amd64.exe
+Invoke-WebRequest -Uri "https://github.com/owasp-dep-scan/dosai/releases/download/v$dosaiVersion/$dosaiArchive" -UseBasicParsing -OutFile plugins/dosai/dosai-windows-amd64.exe
+Assert-Sha256 -Path plugins/dosai/dosai-windows-amd64.exe -ExpectedHash $dosaiArchiveSha256
 
 cd thirdparty\trivy
 $env:GOEXPERIMENT = "jsonv2"

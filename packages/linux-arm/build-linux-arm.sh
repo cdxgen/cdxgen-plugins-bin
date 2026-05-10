@@ -8,24 +8,18 @@ rm -rf plugins/dosai
 rm -rf plugins/trustinspector
 mkdir -p plugins/osquery plugins/dosai plugins/trustinspector
 
-curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-linux-arm -o plugins/dosai/dosai-linux-arm
-chmod +x plugins/dosai/dosai-linux-arm
+bash ../../scripts/thirdparty-downloads.sh install-dosai linux-arm plugins/dosai/dosai-linux-arm
 sha256sum plugins/dosai/dosai-linux-arm > plugins/dosai/dosai-linux-arm.sha256
 
 for plug in trivy trustinspector
 do
     mkdir -p plugins/$plug
-    if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-arm* 2>/dev/null)" ]; then
-          mv ../../plugins/$plug/*linux-arm* plugins/$plug/
-          cp ../../plugins/$plug/sbom* plugins/$plug/
-          for file in "plugins/$plug"/*linux-arm*; do
-              if [[ "$file" != *.sha256 ]]; then
-                  upx -9 --lzma "$file" || true
-                  sha256sum "$file" > "${file}.sha256"
-              fi
-          done
-      else
-          echo "Warning: No files found for $plug in ../../plugins/$plug/"
-      fi
+    bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-arm" "linux-arm64"
+    while IFS= read -r -d '' file; do
+        if [[ "$file" != *.sha256 ]]; then
+            upx -9 --lzma "$file" || true
+            sha256sum "$file" > "${file}.sha256"
+        fi
+    done < <(find "plugins/$plug" -maxdepth 1 -type f -name '*linux-arm*' ! -name '*linux-arm64*' -print0)
 done
 node ../../scripts/generate-metadata.js ./plugins

@@ -76,6 +76,7 @@ type output struct {
 }
 
 var windowsPowerShellJSONRunner = runWindowsPowerShellJSON
+var commandRunner = runCommand
 
 func main() {
 	if len(os.Args) < 2 {
@@ -593,20 +594,32 @@ func certificateKeyStrength(cert *x509.Certificate) int {
 func inspectDarwinPaths(paths []string) []pathInspection {
 	var inspections []pathInspection
 	for _, candidate := range uniqueSortedStrings(paths) {
-		if _, err := os.Stat(candidate); err != nil {
+		normalizedCandidate, err := normalizeInspectablePath(candidate)
+		if err != nil {
 			continue
 		}
-		properties := uniqueProperties(append(runCodeSignInspection(candidate), runSpctlInspection(candidate)...))
+		if _, err := os.Stat(normalizedCandidate); err != nil {
+			continue
+		}
+		properties := uniqueProperties(append(runCodeSignInspection(normalizedCandidate), runSpctlInspection(normalizedCandidate)...))
 		if len(properties) == 0 {
 			continue
 		}
-		inspections = append(inspections, pathInspection{Path: candidate, Properties: properties})
+		inspections = append(inspections, pathInspection{Path: normalizedCandidate, Properties: properties})
 	}
 	return inspections
 }
 
+func normalizeInspectablePath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(absPath), nil
+}
+
 func runCodeSignInspection(path string) []property {
-	stdout, stderr, err := runCommand("codesign", "-dv", "--verbose=4", path)
+	stdout, stderr, err := commandRunner("codesign", "-dv", "--verbose=4", path)
 	if err != nil && stderr == "" {
 		return nil
 	}
@@ -650,7 +663,7 @@ func parseCodeSignOutput(output string) []property {
 }
 
 func runSpctlInspection(path string) []property {
-	stdout, stderr, _ := runCommand("spctl", "--assess", "--type", "execute", "--verbose=4", path)
+	stdout, stderr, _ := commandRunner("spctl", "--assess", "--type", "execute", "--verbose=4", path)
 	combined := strings.TrimSpace(strings.Join([]string{stdout, stderr}, "\n"))
 	if combined == "" {
 		return nil

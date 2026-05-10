@@ -15,26 +15,19 @@ upx -9 --lzma plugins/osquery/osqueryi-linux-amd64
 ./plugins/osquery/osqueryi-linux-amd64 --help
 sha256sum plugins/osquery/osqueryi-linux-amd64 > plugins/osquery/osqueryi-linux-amd64.sha256
 
-# Download the Dosai binary
-curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-linux-amd64 -o plugins/dosai/dosai-linux-amd64
-chmod +x plugins/dosai/dosai-linux-amd64
+bash ../../scripts/thirdparty-downloads.sh install-dosai linux-amd64 plugins/dosai/dosai-linux-amd64
 sha256sum plugins/dosai/dosai-linux-amd64 > plugins/dosai/dosai-linux-amd64.sha256
 
 for plug in trivy trustinspector
 do
     mkdir -p "plugins/$plug"
-    if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*linux-amd64* 2>/dev/null)" ]; then
-        mv ../../plugins/$plug/*linux-amd64* "plugins/$plug/"
-        cp ../../plugins/$plug/sbom* "plugins/$plug/"
-        for file in "plugins/$plug"/*linux-amd64*; do
-            if [[ "$file" != *.sha256 ]]; then
-                upx -9 --lzma "$file" || true
-                sha256sum "$file" > "${file}.sha256"
-            fi
-        done
-    else
-        echo "Warning: No files found for $plug in ../../plugins/$plug/"
-    fi
+    bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-amd64"
+    while IFS= read -r -d '' file; do
+        if [[ "$file" != *.sha256 ]]; then
+            upx -9 --lzma "$file" || true
+            sha256sum "$file" > "${file}.sha256"
+        fi
+    done < <(find "plugins/$plug" -maxdepth 1 -type f -name '*linux-amd64*' -print0)
 done
 
 node ../../scripts/generate-metadata.js ./plugins
