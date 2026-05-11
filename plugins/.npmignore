@@ -1,2 +1,3 @@
-trivy/sbom-*-postbuild.cdx.json
-sourcekitten/sbom-*-postbuild.cdx.json
+# The root package is a lightweight metapackage. Platform-specific packages
+# publish the actual helper binaries.
+*
