@@ -3,21 +3,17 @@
 set -e
 
 rm -rf plugins/trivy
+rm -rf plugins/trustinspector
 
-for plug in trivy
+for plug in trivy trustinspector
 do
     mkdir -p plugins/$plug
-    if [ -d "../../plugins/$plug" ] && [ "$(ls -A ../../plugins/$plug/*ppc64* 2>/dev/null)" ]; then
-        mv ../../plugins/$plug/*ppc64* plugins/$plug/
-        cp ../../plugins/$plug/sbom* plugins/$plug/
-        for file in "plugins/$plug"/*ppc64*; do
-            if [[ "$file" != *.sha256 ]]; then
-                upx -9 --lzma "$file" || true
-                sha256sum "$file" > "${file}.sha256"
-            fi
-        done
-    else
-        echo "Warning: No files found for $plug in ../../plugins/$plug/"
-    fi
+    bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "ppc64"
+    while IFS= read -r -d '' file; do
+        if [[ "$file" != *.sha256 ]]; then
+            upx -9 --lzma "$file" || true
+            sha256sum "$file" > "${file}.sha256"
+        fi
+    done < <(find "plugins/$plug" -maxdepth 1 -type f -name '*ppc64*' -print0)
 done
 node ../../scripts/generate-metadata.js ./plugins

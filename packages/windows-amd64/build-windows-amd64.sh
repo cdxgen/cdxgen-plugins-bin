@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
-mkdir -p plugins/osquery plugins/dosai
+rm -rf plugins/trustinspector
+mkdir -p plugins/osquery plugins/dosai plugins/trustinspector
 
-wget https://github.com/osquery/osquery/releases/download/5.22.1/osquery-5.22.1.windows_x86_64.zip
-unzip osquery-5.22.1.windows_x86_64.zip
-cp "osquery-5.22.1.windows_x86_64/Program Files/osquery/osqueryi.exe" plugins/osquery/osqueryi-windows-amd64.exe
+bash ../../scripts/thirdparty-downloads.sh install-osquery windows-amd64 plugins/osquery/osqueryi-windows-amd64.exe
 upx -9 --lzma plugins/osquery/osqueryi-windows-amd64.exe
 sha256sum plugins/osquery/osqueryi-windows-amd64.exe > plugins/osquery/osqueryi-windows-amd64.exe.sha256
-rm -rf osquery-5.22.1.windows_x86_64
-rm osquery-5.22.1.windows_x86_64.zip
 
-curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai.exe -o plugins/dosai/dosai-windows-amd64.exe
+bash ../../scripts/thirdparty-downloads.sh install-dosai windows-amd64 plugins/dosai/dosai-windows-amd64.exe
 sha256sum plugins/dosai/dosai-windows-amd64.exe > plugins/dosai/dosai-windows-amd64.exe.sha256
 
-for plug in trivy
+for plug in trivy trustinspector
 do
-    mkdir -p plugins/$plug
-    mv ../../plugins/$plug/*windows-amd64* plugins/$plug/
-    cp ../../plugins/$plug/sbom* plugins/$plug/
+  mkdir -p "plugins/$plug"
+  bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "windows-amd64"
 done
 node ../../scripts/generate-metadata.js ./plugins

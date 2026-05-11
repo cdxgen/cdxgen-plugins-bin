@@ -2,15 +2,15 @@
 set -e  # Exit on error
 
 # Remove old plugin directories to ensure a clean build
-rm -rf plugins/trivy plugins/dosai
-mkdir -p plugins/trivy plugins/dosai
+rm -rf plugins/trivy plugins/dosai plugins/trustinspector
+mkdir -p plugins/trivy plugins/dosai plugins/trustinspector
 
-# Download the Dosai binary
-curl -L https://github.com/owasp-dep-scan/dosai/releases/latest/download/Dosai-linux-musl-arm64 -o plugins/dosai/dosai
-chmod +x plugins/dosai/dosai
+bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins/dosai/dosai
 sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
+
+bash ../../scripts/stage-built-plugins.sh ../../plugins/trustinspector plugins/trustinspector linux-arm64
 node ../../scripts/generate-metadata.js ./plugins

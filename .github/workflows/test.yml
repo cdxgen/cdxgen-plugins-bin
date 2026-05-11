@@ -17,24 +17,25 @@ jobs:
       contents: read
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
       with:
         node-version: 25.x
         registry-url: https://registry.npmjs.org/
-    - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
       with:
         go-version: '^1.25.6'
     - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: '3.13'
-    - uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
-      if: matrix.os == 'ubuntu-latest'
+    - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
     - name: Set up QEMU
       uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-    - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+    - uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3  # v2.0.0
     - run: oras version
     - name: Trim CI agent
       run: |
@@ -43,61 +44,92 @@ jobs:
     - name: Build
       run: |
         npm install -g @cyclonedx/cdxgen
-        wget https://github.com/upx/upx/releases/download/v5.1.1/upx-5.1.1-amd64_linux.tar.xz
-        tar -xvf upx-5.1.1-amd64_linux.tar.xz
-        chmod +x upx-5.1.1-amd64_linux/upx
-        sudo cp upx-5.1.1-amd64_linux/upx /usr/local/bin/
+        bash ./scripts/thirdparty-downloads.sh install-upx linux-amd64 ./upx
+        sudo install -m 0755 ./upx /usr/local/bin/upx
+        rm -f ./upx
         bash build.sh
         pip3 install blint
         blint -i plugins -o /tmp/reports --no-error
         npm publish --dry-run
-        pushd packages/windows-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/linuxmusl-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/linuxmusl-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-riscv64
-        npm publish --dry-run
-        popd
-        pushd packages/linux-arm
-        npm publish --dry-run
-        popd
-        pushd packages/windows-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/darwin-arm64
-        npm publish --dry-run
-        popd
-        pushd packages/darwin-amd64
-        npm publish --dry-run
-        popd
-        pushd packages/ppc64
-        npm publish --dry-run
-        popd
       env:
         NODE_OPTIONS: --max_old_space_size=4096        
+    - name: Upload packaged plugins
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: packaged-plugins
+        path: packages/
+        if-no-files-found: error
+        retention-days: 1
+  pkg_publish:
+    needs: pkg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        package_name:
+        - windows-amd64
+        - linux-amd64
+        - linux-arm64
+        - linuxmusl-amd64
+        - linuxmusl-arm64
+        - linux-riscv64
+        - linux-arm
+        - windows-arm64
+        - darwin-arm64
+        - darwin-amd64
+        - ppc64
+    steps:
+    - name: Use Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      with:
+        node-version: 25.x
+        registry-url: https://registry.npmjs.org/
+    - name: Download packaged plugins
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: packaged-plugins
+        path: .
+    - name: Verify package publish dry-run
+      run: |
+        package_name='${{ matrix.package_name }}'
+        package_dir=''
+        for candidate in \
+          "packages/${package_name}" \
+          "${package_name}" \
+          "packages/packages/${package_name}"
+        do
+          if [[ -d "$candidate" ]]; then
+            package_dir="$candidate"
+            break
+          fi
+        done
+
+        if [[ -z "$package_dir" ]]; then
+          echo "Downloaded package directory not found for ${package_name}" >&2
+          find . -maxdepth 3 -type d | sort >&2
+          exit 1
+        fi
+
+        pushd "$package_dir"
+        npm publish --dry-run
+        popd
   winpkg:
     runs-on: windows-latest
     permissions:
       contents: read
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
       with:
         node-version: 25.x
         registry-url: https://registry.npmjs.org/
-    - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
       with:
         go-version: '^1.25.6'
     - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -107,3 +139,56 @@ jobs:
       run: |
         npm install -g @cyclonedx/cdxgen
         .\build.ps1
+    - name: Windows trustinspector E2E smoke
+      shell: pwsh
+      run: |
+        $ManifestPath = Join-Path (Get-Location) 'plugins\plugins-manifest.json'
+        if (-not (Test-Path $ManifestPath)) {
+          throw 'plugins-manifest.json was not generated on Windows.'
+        }
+        $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        if (-not ($Manifest.plugins.name -contains 'trustinspector')) {
+          throw 'trustinspector metadata was not recorded in plugins-manifest.json.'
+        }
+
+        $TrustInspector = Join-Path (Get-Location) 'plugins\trustinspector\trustinspector-cdxgen-windows-amd64.exe'
+        if (-not (Test-Path $TrustInspector)) {
+          throw 'trustinspector helper was not staged in plugins\trustinspector.'
+        }
+
+        $HostResult = & $TrustInspector host | Out-String | ConvertFrom-Json
+        if ($null -eq $HostResult.hostFindings) {
+          throw 'trustinspector host output did not include hostFindings.'
+        }
+
+        $Candidates = [System.Collections.Generic.List[string]]::new()
+        foreach ($CommandName in @('powershell.exe', 'pwsh.exe')) {
+          try {
+            $Resolved = (Get-Command $CommandName -ErrorAction Stop | Select-Object -First 1).Source
+            if ($Resolved -and (Test-Path $Resolved)) {
+              $Candidates.Add($Resolved)
+            }
+          } catch {
+          }
+        }
+        foreach ($PathCandidate in @(
+          (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
+          (Join-Path $env:SystemRoot 'System32\cmd.exe'),
+          (Join-Path $env:SystemRoot 'System32\notepad.exe'),
+          $TrustInspector
+        )) {
+          if ($PathCandidate -and (Test-Path $PathCandidate)) {
+            $Candidates.Add($PathCandidate)
+          }
+        }
+        $TargetBinary = $Candidates | Select-Object -Unique | Select-Object -First 1
+        if (-not $TargetBinary) {
+          throw 'Unable to locate any Windows executable to inspect with trustinspector.'
+        }
+        $PathResult = & $TrustInspector paths $TargetBinary | Out-String | ConvertFrom-Json
+        if (($PathResult.inspections | Measure-Object).Count -lt 1) {
+          throw "trustinspector paths output did not include any inspections for target $TargetBinary."
+        }
+        if (-not ($PathResult.inspections[0].properties | Where-Object { $_.name -eq 'cdx:windows:authenticode:status' })) {
+          throw 'trustinspector paths output did not include Authenticode status properties.'
+        }
