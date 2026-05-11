@@ -56,28 +56,7 @@ jobs:
         bash build.sh
         pip3 install blint
         blint -i plugins -o /tmp/reports --no-error
-        root_pack_output="$(npm pack --dry-run --json)"
-        PACK_OUTPUT="$root_pack_output" node <<'EOF'
-        const payload = JSON.parse(process.env.PACK_OUTPUT);
-        if (!Array.isArray(payload) || payload.length !== 1) {
-          throw new Error(`Unexpected npm pack payload: ${process.env.PACK_OUTPUT}`);
-        }
-
-        const [{ files, unpackedSize }] = payload;
-        const unexpectedPluginFiles = files
-          .map((entry) => entry.path)
-          .filter(
-            (filePath) => filePath.startsWith("plugins/") && !["plugins/.gitkeep", "plugins/.npmignore"].includes(filePath),
-          );
-        if (unexpectedPluginFiles.length > 0) {
-          throw new Error(
-            `Root package unexpectedly includes plugin payload files: ${unexpectedPluginFiles.join(", ")}`,
-          );
-        }
-        if (unpackedSize > 131072) {
-          throw new Error(`Root package unpacked size is unexpectedly large: ${unpackedSize}`);
-        }
-        EOF
+        bash ./scripts/root-package-publish.test.sh
         npm publish --dry-run
       env:
         NODE_OPTIONS: --max_old_space_size=4096        
