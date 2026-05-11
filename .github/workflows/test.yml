@@ -41,6 +41,12 @@ jobs:
       run: |
         chmod +x contrib/free_disk_space.sh
         ./contrib/free_disk_space.sh
+    - name: Run packaging helper tests
+      run: |
+        bash ./scripts/thirdparty-downloads.test.sh
+        bash ./scripts/stage-built-plugins.test.sh
+        bash ./scripts/root-package-publish.test.sh
+        node --test ./scripts/generate-metadata.test.js
     - name: Build
       run: |
         npm install -g @cyclonedx/cdxgen
@@ -50,6 +56,7 @@ jobs:
         bash build.sh
         pip3 install blint
         blint -i plugins -o /tmp/reports --no-error
+        bash ./scripts/root-package-publish.test.sh
         npm publish --dry-run
       env:
         NODE_OPTIONS: --max_old_space_size=4096        
