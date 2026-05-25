@@ -162,7 +162,7 @@ func (a *Analyzer) signalForSelector(pkg *packages.Package, sel *ast.SelectorExp
 
 func (a *Analyzer) signal(pkg *packages.Package, category string, severity string, symbol string, description string, recommendation string, node ast.Node, props map[string]string) model.SecuritySignal {
 	r := a.nodeRange(node)
-	return model.SecuritySignal{ID: stableID(pkg.ID, category, symbol, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Category: category, Severity: severity, Confidence: "type-resolved", PackagePath: pkg.PkgPath, Symbol: symbol, Description: description, Recommendation: recommendation, Range: r, Properties: props}
+	return model.SecuritySignal{ID: stableID(pkg.ID, category, symbol, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Category: category, Severity: severity, Confidence: "type-resolved", UsageScope: fileRole(r.Start.Filename), PackagePath: pkg.PkgPath, Symbol: symbol, Description: description, Recommendation: recommendation, Range: r, Properties: props}
 }
 
 func nativeArtifactsForPackage(pkg *packages.Package) []model.NativeArtifact {

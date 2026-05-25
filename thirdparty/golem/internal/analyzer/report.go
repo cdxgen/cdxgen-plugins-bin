@@ -105,6 +105,7 @@ func Analyze(options Options) (*model.Report, error) {
 	}
 	report.RootModules = sortedModules(a.rootModules)
 	report.Modules = sortedModules(a.moduleByPath)
+	report.SupplyChain = a.supplyChainEvidence(report.Modules)
 	if options.CallGraphMode != "none" {
 		report.CallGraph = a.buildCallGraph(pkgs)
 	}
@@ -137,12 +138,45 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	report.Stats.PackageCount = len(report.Packages)
 	report.Stats.ModuleCount = len(report.Modules)
 	report.Stats.FileCount = len(report.Files)
+	for _, file := range report.Files {
+		if file.Generated {
+			report.Stats.GeneratedFileCount++
+		}
+	}
 	report.Stats.ImportCount = len(report.Imports)
 	report.Stats.DeclarationCount = len(report.Declarations)
 	report.Stats.UsageCount = len(report.Usages)
+	for _, usage := range report.Usages {
+		switch usage.UsageScope {
+		case "test":
+			report.Stats.TestUsageCount++
+		case "benchmark":
+			report.Stats.BenchmarkUsageCount++
+		case "fuzz":
+			report.Stats.FuzzUsageCount++
+		case "example":
+			report.Stats.ExampleUsageCount++
+		default:
+			report.Stats.RuntimeUsageCount++
+		}
+	}
 	report.Stats.BuildDirectiveCount = len(report.BuildDirectives)
 	report.Stats.NativeArtifactCount = len(report.NativeArtifacts)
 	report.Stats.SecuritySignalCount = len(report.SecuritySignals)
+	if report.SupplyChain != nil {
+		report.Stats.GoModReplaceCount = len(report.SupplyChain.Replaces)
+		report.Stats.GoModExcludeCount = len(report.SupplyChain.Excludes)
+		report.Stats.VendorModuleCount = report.SupplyChain.VendorModuleCount
+		report.Stats.WorkspaceModuleCount = report.SupplyChain.WorkspaceModuleCount
+		for _, module := range report.SupplyChain.Modules {
+			if module.PrivateModuleCandidate {
+				report.Stats.PrivateModuleHintCount++
+			}
+			if len(module.LicenseFiles) > 0 {
+				report.Stats.LicenseFileModuleCount++
+			}
+		}
+	}
 	report.Stats.DiagnosticCount = len(report.Diagnostics)
 	if report.CallGraph != nil {
 		report.Stats.DiagnosticCount += len(report.CallGraph.Diagnostics)

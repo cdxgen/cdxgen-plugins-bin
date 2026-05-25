@@ -56,8 +56,11 @@ type FileEvidence struct {
 	Path            string            `json:"path"`
 	PackageName     string            `json:"packageName,omitempty"`
 	PackagePath     string            `json:"packagePath,omitempty"`
+	Role            string            `json:"role,omitempty"`
+	TestFile        bool              `json:"testFile,omitempty"`
 	Compiled        bool              `json:"compiled"`
 	Generated       bool              `json:"generated"`
+	GeneratedBy     string            `json:"generatedBy,omitempty"`
 	IgnoredReason   string            `json:"ignoredReason,omitempty"`
 	Imports         []ImportUsage     `json:"imports,omitempty"`
 	Declarations    []Declaration     `json:"declarations,omitempty"`
@@ -88,6 +91,7 @@ type SecuritySignal struct {
 	Category       string            `json:"category"`
 	Severity       string            `json:"severity,omitempty"`
 	Confidence     string            `json:"confidence,omitempty"`
+	UsageScope     string            `json:"usageScope,omitempty"`
 	PackagePath    string            `json:"packagePath,omitempty"`
 	Symbol         string            `json:"symbol,omitempty"`
 	Description    string            `json:"description,omitempty"`
@@ -99,6 +103,7 @@ type ImportUsage struct {
 	Path           string  `json:"path"`
 	Name           string  `json:"name,omitempty"`
 	AliasKind      string  `json:"aliasKind,omitempty"`
+	UsageScope     string  `json:"usageScope,omitempty"`
 	PackageID      string  `json:"packageId,omitempty"`
 	PackageName    string  `json:"packageName,omitempty"`
 	Module         *Module `json:"module,omitempty"`
@@ -113,6 +118,8 @@ type Declaration struct {
 	ID                 string  `json:"id"`
 	Name               string  `json:"name"`
 	Kind               string  `json:"kind"`
+	TestKind           string  `json:"testKind,omitempty"`
+	UsageScope         string  `json:"usageScope,omitempty"`
 	PackagePath        string  `json:"packagePath,omitempty"`
 	Receiver           string  `json:"receiver,omitempty"`
 	Signature          string  `json:"signature,omitempty"`
@@ -131,6 +138,7 @@ type LibraryUsage struct {
 	QualifiedName   string            `json:"qualifiedName,omitempty"`
 	PackagePath     string            `json:"packagePath,omitempty"`
 	PackageName     string            `json:"packageName,omitempty"`
+	UsageScope      string            `json:"usageScope,omitempty"`
 	Module          *Module           `json:"module,omitempty"`
 	Standard        bool              `json:"standard"`
 	Local           bool              `json:"local"`
@@ -151,11 +159,13 @@ type LibraryUsage struct {
 	Properties      map[string]string `json:"properties,omitempty"`
 }
 type EnclosingContext struct {
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Signature string `json:"signature,omitempty"`
-	Receiver  string `json:"receiver,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	TestKind   string `json:"testKind,omitempty"`
+	UsageScope string `json:"usageScope,omitempty"`
+	Signature  string `json:"signature,omitempty"`
+	Receiver   string `json:"receiver,omitempty"`
 }
 type PackageEvidence struct {
 	ID              string           `json:"id"`
@@ -218,16 +228,62 @@ type CallGraphEdge struct {
 	Properties  map[string]string `json:"properties,omitempty"`
 }
 type Stats struct {
-	PackageCount        int `json:"packageCount"`
-	ModuleCount         int `json:"moduleCount"`
-	FileCount           int `json:"fileCount"`
-	ImportCount         int `json:"importCount"`
-	DeclarationCount    int `json:"declarationCount"`
-	UsageCount          int `json:"usageCount"`
-	BuildDirectiveCount int `json:"buildDirectiveCount"`
-	NativeArtifactCount int `json:"nativeArtifactCount"`
-	SecuritySignalCount int `json:"securitySignalCount"`
-	DiagnosticCount     int `json:"diagnosticCount"`
+	PackageCount           int `json:"packageCount"`
+	ModuleCount            int `json:"moduleCount"`
+	FileCount              int `json:"fileCount"`
+	GeneratedFileCount     int `json:"generatedFileCount"`
+	ImportCount            int `json:"importCount"`
+	DeclarationCount       int `json:"declarationCount"`
+	UsageCount             int `json:"usageCount"`
+	RuntimeUsageCount      int `json:"runtimeUsageCount"`
+	TestUsageCount         int `json:"testUsageCount"`
+	BenchmarkUsageCount    int `json:"benchmarkUsageCount"`
+	FuzzUsageCount         int `json:"fuzzUsageCount"`
+	ExampleUsageCount      int `json:"exampleUsageCount"`
+	BuildDirectiveCount    int `json:"buildDirectiveCount"`
+	NativeArtifactCount    int `json:"nativeArtifactCount"`
+	SecuritySignalCount    int `json:"securitySignalCount"`
+	GoModReplaceCount      int `json:"goModReplaceCount"`
+	GoModExcludeCount      int `json:"goModExcludeCount"`
+	VendorModuleCount      int `json:"vendorModuleCount"`
+	WorkspaceModuleCount   int `json:"workspaceModuleCount"`
+	PrivateModuleHintCount int `json:"privateModuleHintCount"`
+	LicenseFileModuleCount int `json:"licenseFileModuleCount"`
+	DiagnosticCount        int `json:"diagnosticCount"`
+}
+
+type GoModDirective struct {
+	Kind             string            `json:"kind"`
+	ModulePath       string            `json:"modulePath,omitempty"`
+	Version          string            `json:"version,omitempty"`
+	TargetModulePath string            `json:"targetModulePath,omitempty"`
+	TargetVersion    string            `json:"targetVersion,omitempty"`
+	LocalReplacement bool              `json:"localReplacement,omitempty"`
+	TargetPathKind   string            `json:"targetPathKind,omitempty"`
+	Source           string            `json:"source,omitempty"`
+	Properties       map[string]string `json:"properties,omitempty"`
+}
+type ModuleCompliance struct {
+	Path                   string            `json:"path,omitempty"`
+	Version                string            `json:"version,omitempty"`
+	PURL                   string            `json:"purl,omitempty"`
+	Main                   bool              `json:"main,omitempty"`
+	Vendored               bool              `json:"vendored,omitempty"`
+	PrivateModuleCandidate bool              `json:"privateModuleCandidate,omitempty"`
+	LicenseFiles           []string          `json:"licenseFiles,omitempty"`
+	Properties             map[string]string `json:"properties,omitempty"`
+}
+type SupplyChainEvidence struct {
+	GoDirectiveVersion     string             `json:"goDirectiveVersion,omitempty"`
+	ToolchainDirective     string             `json:"toolchainDirective,omitempty"`
+	GoWorkPresent          bool               `json:"goWorkPresent,omitempty"`
+	WorkspaceModuleCount   int                `json:"workspaceModuleCount,omitempty"`
+	VendorDirectoryPresent bool               `json:"vendorDirectoryPresent,omitempty"`
+	VendorModuleCount      int                `json:"vendorModuleCount,omitempty"`
+	Replaces               []GoModDirective   `json:"replaces,omitempty"`
+	Excludes               []GoModDirective   `json:"excludes,omitempty"`
+	Modules                []ModuleCompliance `json:"modules,omitempty"`
+	Properties             map[string]string  `json:"properties,omitempty"`
 }
 type Report struct {
 	SchemaVersion   string            `json:"schemaVersion"`
@@ -244,7 +300,8 @@ type Report struct {
 	BuildDirectives []BuildDirective  `json:"buildDirectives,omitempty"`
 	NativeArtifacts []NativeArtifact  `json:"nativeArtifacts,omitempty"`
 	SecuritySignals []SecuritySignal  `json:"securitySignals,omitempty"`
-	CallGraph       *CallGraph        `json:"callGraph,omitempty"`
-	Diagnostics     []Diagnostic      `json:"diagnostics,omitempty"`
-	Stats           Stats             `json:"stats"`
+	SupplyChain     *SupplyChainEvidence `json:"supplyChain,omitempty"`
+	CallGraph       *CallGraph           `json:"callGraph,omitempty"`
+	Diagnostics     []Diagnostic         `json:"diagnostics,omitempty"`
+	Stats           Stats                `json:"stats"`
 }

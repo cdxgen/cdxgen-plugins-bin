@@ -51,11 +51,11 @@ func (a *Analyzer) fileEvidence(pkg *packages.Package, pe model.PackageEvidence)
 	compiled := map[string]bool{}
 	for _, f := range pkg.CompiledGoFiles {
 		compiled[f] = true
-		byFile[f] = &model.FileEvidence{Path: f, PackageName: pkg.Name, PackagePath: pkg.PkgPath, Compiled: true, Generated: isGeneratedFile(f)}
+		byFile[f] = newFileEvidence(f, pkg, true)
 	}
 	for _, f := range pkg.GoFiles {
 		if _, ok := byFile[f]; !ok {
-			byFile[f] = &model.FileEvidence{Path: f, PackageName: pkg.Name, PackagePath: pkg.PkgPath, Compiled: compiled[f], Generated: isGeneratedFile(f)}
+			byFile[f] = newFileEvidence(f, pkg, compiled[f])
 		}
 	}
 	for _, imp := range pe.Imports {
@@ -88,9 +88,14 @@ func (a *Analyzer) fileEvidence(pkg *packages.Package, pe model.PackageEvidence)
 
 func ensureFile(files map[string]*model.FileEvidence, path string, pkg *packages.Package, compiled map[string]bool) *model.FileEvidence {
 	if files[path] == nil {
-		files[path] = &model.FileEvidence{Path: path, PackageName: pkg.Name, PackagePath: pkg.PkgPath, Compiled: compiled[path], Generated: isGeneratedFile(path)}
+		files[path] = newFileEvidence(path, pkg, compiled[path])
 	}
 	return files[path]
+}
+
+func newFileEvidence(path string, pkg *packages.Package, compiled bool) *model.FileEvidence {
+	generated, generatedBy := generatedInfo(path)
+	return &model.FileEvidence{Path: path, PackageName: pkg.Name, PackagePath: pkg.PkgPath, Role: fileRole(path), TestFile: fileRole(path) != "runtime", Compiled: compiled, Generated: generated, GeneratedBy: generatedBy}
 }
 
 func (a *Analyzer) importsForFile(pkg *packages.Package, file *ast.File) []model.ImportUsage {
@@ -119,7 +124,8 @@ func (a *Analyzer) importsForFile(pkg *packages.Package, file *ast.File) []model
 			pkgID = importPkg.ID
 			pkgName = importPkg.Name
 		}
-		imports = append(imports, model.ImportUsage{Path: path, Name: alias, AliasKind: aliasKind, PackageID: pkgID, PackageName: pkgName, Module: mod, Standard: isStandardPackage(path, mod), Local: isLocalModule(mod), Direct: true, Range: a.nodeRange(spec), Resolved: resolved, ResolutionNote: resolutionNote(resolved)})
+		rangeInfo := a.nodeRange(spec)
+		imports = append(imports, model.ImportUsage{Path: path, Name: alias, AliasKind: aliasKind, UsageScope: fileRole(rangeInfo.Start.Filename), PackageID: pkgID, PackageName: pkgName, Module: mod, Standard: isStandardPackage(path, mod), Local: isLocalModule(mod), Direct: true, Range: rangeInfo, Resolved: resolved, ResolutionNote: resolutionNote(resolved)})
 	}
 	return imports
 }
@@ -139,7 +145,8 @@ func (a *Analyzer) declarationsForFile(pkg *packages.Package, file *ast.File) []
 				case *ast.ValueSpec:
 					for _, name := range s.Names {
 						typeText := typeOfDef(pkg, name)
-						declarations = append(declarations, model.Declaration{ID: stableID(pkg.PkgPath, "", name.Name, typeText), Name: name.Name, Kind: kind, PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(name.Name), Range: a.nodeRange(name)})
+						rangeInfo := a.nodeRange(name)
+						declarations = append(declarations, model.Declaration{ID: stableID(pkg.PkgPath, "", name.Name, typeText), Name: name.Name, Kind: kind, UsageScope: fileRole(rangeInfo.Start.Filename), PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(name.Name), Range: rangeInfo})
 					}
 				}
 			}
@@ -156,7 +163,9 @@ func (a *Analyzer) funcDeclaration(pkg *packages.Package, d *ast.FuncDecl) model
 		kind = "method"
 	}
 	signature := typeOfDef(pkg, d.Name)
-	return model.Declaration{ID: stableID(pkg.PkgPath, receiver, name, signature), Name: name, Kind: kind, PackagePath: pkg.PkgPath, Receiver: receiver, Signature: signature, Exported: ast.IsExported(name), Range: a.nodeRange(d)}
+	rangeInfo := a.nodeRange(d)
+	testKind := testKindForFunc(name, signature)
+	return model.Declaration{ID: stableID(pkg.PkgPath, receiver, name, signature), Name: name, Kind: kind, TestKind: testKind, UsageScope: usageScopeForFileAndFunc(rangeInfo.Start.Filename, name, signature), PackagePath: pkg.PkgPath, Receiver: receiver, Signature: signature, Exported: ast.IsExported(name), Range: rangeInfo}
 }
 
 func typeOfDef(pkg *packages.Package, ident *ast.Ident) string {
@@ -171,7 +180,8 @@ func typeOfDef(pkg *packages.Package, ident *ast.Ident) string {
 
 func (a *Analyzer) typeDeclaration(pkg *packages.Package, s *ast.TypeSpec) model.Declaration {
 	typeText := typeOfDef(pkg, s.Name)
-	decl := model.Declaration{ID: stableID(pkg.PkgPath, "", s.Name.Name, typeText), Name: s.Name.Name, Kind: "type", PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(s.Name.Name), Range: a.nodeRange(s)}
+	rangeInfo := a.nodeRange(s)
+	decl := model.Declaration{ID: stableID(pkg.PkgPath, "", s.Name.Name, typeText), Name: s.Name.Name, Kind: "type", UsageScope: fileRole(rangeInfo.Start.Filename), PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(s.Name.Name), Range: rangeInfo}
 	if s.Assign.IsValid() {
 		decl.Alias = true
 		if pkg.TypesInfo != nil {
@@ -300,7 +310,9 @@ func (a *Analyzer) referenceUsage(pkg *packages.Package, expr ast.Expr, imports 
 }
 
 func (a *Analyzer) enclosingContext(pkg *packages.Package, fn *ast.FuncDecl) model.EnclosingContext {
-	ctx := model.EnclosingContext{Name: fn.Name.Name, Kind: "function", Receiver: receiverString(fn.Recv), Signature: typeOfDef(pkg, fn.Name)}
+	rangeInfo := a.nodeRange(fn)
+	signature := typeOfDef(pkg, fn.Name)
+	ctx := model.EnclosingContext{Name: fn.Name.Name, Kind: "function", TestKind: testKindForFunc(fn.Name.Name, signature), UsageScope: usageScopeForFileAndFunc(rangeInfo.Start.Filename, fn.Name.Name, signature), Receiver: receiverString(fn.Recv), Signature: signature}
 	if ctx.Receiver != "" {
 		ctx.Kind = "method"
 	}
@@ -347,6 +359,7 @@ func (a *Analyzer) callUsage(pkg *packages.Package, call *ast.CallExpr, imports 
 			usage.ArgumentCount = len(call.Args)
 			usage.Range = a.nodeRange(fun)
 			usage.Enclosing = enclosing
+			usage.UsageScope = usageScopeForUsage(usage.Range, enclosing)
 			if usage.Properties == nil {
 				usage.Properties = map[string]string{}
 			}
@@ -391,7 +404,8 @@ func (a *Analyzer) objectUsage(pkg *packages.Package, obj types.Object, n ast.No
 	if sig, ok := obj.Type().(*types.Signature); ok {
 		signature = types.TypeString(sig, qualifier(pkg.PkgPath))
 	}
-	usage := model.LibraryUsage{ID: stableUsageID(pkg.ID, qualified, a.nodeRange(n)), Kind: "reference", Name: obj.Name(), QualifiedName: qualified, PackagePath: pkgPath, PackageName: pkgName, Module: mod, Standard: isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), SymbolKind: objectKind(obj), Type: typeText, Signature: signature, Builtin: isBuiltinObject(obj), Range: a.nodeRange(n), Enclosing: enclosing, Properties: constantProperties(obj)}
+	rangeInfo := a.nodeRange(n)
+	usage := model.LibraryUsage{ID: stableUsageID(pkg.ID, qualified, rangeInfo), Kind: "reference", Name: obj.Name(), QualifiedName: qualified, PackagePath: pkgPath, PackageName: pkgName, UsageScope: usageScopeForUsage(rangeInfo, enclosing), Module: mod, Standard: isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), SymbolKind: objectKind(obj), Type: typeText, Signature: signature, Builtin: isBuiltinObject(obj), Range: rangeInfo, Enclosing: enclosing, Properties: constantProperties(obj)}
 	if recv := receiverFromObject(obj, pkg.PkgPath); recv != "" {
 		usage.Receiver = recv
 		usage.Method = true

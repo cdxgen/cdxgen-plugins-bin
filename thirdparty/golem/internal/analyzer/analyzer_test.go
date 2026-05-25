@@ -101,6 +101,54 @@ func TestAnalyzeAdvancedAliasesAndFunctionValues(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAdvancedScopesAndSupplyChainEvidence(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "advanced"), IncludeLocal: true, Tests: true, CallGraphMode: "none", ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string]int{}
+	for _, usage := range report.Usages {
+		if usage.PackagePath == "example.com/golem/dep/lib" {
+			scopes[usage.UsageScope]++
+		}
+	}
+	for _, scope := range []string{"runtime", "test", "benchmark", "fuzz", "example"} {
+		if scopes[scope] == 0 {
+			t.Fatalf("expected %s usage scope for dep lib, got %#v", scope, scopes)
+		}
+	}
+	var generatedSeen bool
+	for _, file := range report.Files {
+		if filepath.Base(file.Path) == "generated.go" && file.Generated && file.GeneratedBy == "protoc-gen-go" {
+			generatedSeen = true
+		}
+	}
+	if !generatedSeen {
+		t.Fatalf("expected generated file attribution, got %#v", report.Files)
+	}
+	if report.SupplyChain == nil {
+		t.Fatal("expected supply-chain evidence")
+	}
+	if len(report.SupplyChain.Replaces) != 1 || !report.SupplyChain.Replaces[0].LocalReplacement {
+		t.Fatalf("expected local replace evidence, got %#v", report.SupplyChain.Replaces)
+	}
+	if len(report.SupplyChain.Excludes) != 1 || report.SupplyChain.Excludes[0].ModulePath != "example.com/unused/module" {
+		t.Fatalf("expected exclude evidence, got %#v", report.SupplyChain.Excludes)
+	}
+	var licenseSeen bool
+	for _, module := range report.SupplyChain.Modules {
+		if module.Path == "example.com/golem/dep" && len(module.LicenseFiles) > 0 && module.LicenseFiles[0] == "LICENSE" {
+			licenseSeen = true
+		}
+	}
+	if !licenseSeen {
+		t.Fatalf("expected dependency license evidence, got %#v", report.SupplyChain.Modules)
+	}
+	if report.Stats.TestUsageCount == 0 || report.Stats.BenchmarkUsageCount == 0 || report.Stats.FuzzUsageCount == 0 || report.Stats.ExampleUsageCount == 0 || report.Stats.GeneratedFileCount == 0 {
+		t.Fatalf("expected expanded usage/generated stats, got %#v", report.Stats)
+	}
+}
+
 func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("security fixture build tags target darwin/linux")
