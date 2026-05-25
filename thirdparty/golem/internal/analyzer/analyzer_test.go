@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -97,5 +98,49 @@ func TestAnalyzeAdvancedAliasesAndFunctionValues(t *testing.T) {
 	}
 	if !externalInterfaceMethod {
 		t.Fatalf("expected external interface method dispatch evidence, got %#v", report.Usages)
+	}
+}
+
+func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("security fixture build tags target darwin/linux")
+	}
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "security"), IncludeLocal: true, CallGraphMode: "none", ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Stats.BuildDirectiveCount < 4 {
+		t.Fatalf("expected build/generate/embed directives, got %#v", report.BuildDirectives)
+	}
+	var generateSeen bool
+	var embedSeen bool
+	for _, directive := range report.BuildDirectives {
+		if directive.Kind == "go-generate" && directive.Command == "go" {
+			generateSeen = true
+		}
+		if directive.Kind == "go-embed" && directive.Target == "config" && len(directive.Patterns) == 1 {
+			embedSeen = true
+		}
+	}
+	if !generateSeen || !embedSeen {
+		t.Fatalf("expected go:generate and go:embed evidence, got %#v", report.BuildDirectives)
+	}
+	var nativeSeen bool
+	for _, artifact := range report.NativeArtifacts {
+		if artifact.Kind == "assembly" && filepath.Base(artifact.Path) == "native.s" {
+			nativeSeen = true
+		}
+	}
+	if !nativeSeen {
+		t.Fatalf("expected native assembly artifact evidence, got %#v", report.NativeArtifacts)
+	}
+	categories := map[string]bool{}
+	for _, signal := range report.SecuritySignals {
+		categories[signal.Category] = true
+	}
+	for _, category := range []string{"process-execution", "weak-crypto", "weak-randomness", "unsafe", "http-client", "tls-insecure"} {
+		if !categories[category] {
+			t.Fatalf("expected security signal category %s in %#v", category, report.SecuritySignals)
+		}
 	}
 }

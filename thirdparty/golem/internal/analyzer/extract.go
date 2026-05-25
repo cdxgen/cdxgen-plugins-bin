@@ -34,10 +34,15 @@ func (a *Analyzer) packageEvidence(pkg *packages.Package) model.PackageEvidence 
 		imports := a.importsForFile(pkg, file)
 		decls := a.declarationsForFile(pkg, file)
 		usages := a.usagesForFile(pkg, file, imports)
+		directives := a.buildDirectivesForFile(file)
+		signals := a.securitySignalsForFile(pkg, file)
 		pe.Imports = append(pe.Imports, imports...)
 		pe.Declarations = append(pe.Declarations, decls...)
 		pe.Usages = append(pe.Usages, usages...)
+		pe.BuildDirectives = append(pe.BuildDirectives, directives...)
+		pe.SecuritySignals = append(pe.SecuritySignals, signals...)
 	}
+	pe.NativeArtifacts = nativeArtifactsForPackage(pkg)
 	return pe
 }
 
@@ -64,6 +69,14 @@ func (a *Analyzer) fileEvidence(pkg *packages.Package, pe model.PackageEvidence)
 	for _, usage := range pe.Usages {
 		file := ensureFile(byFile, usage.Range.Start.Filename, pkg, compiled)
 		file.Usages = append(file.Usages, usage)
+	}
+	for _, directive := range pe.BuildDirectives {
+		file := ensureFile(byFile, directive.Range.Start.Filename, pkg, compiled)
+		file.BuildDirectives = append(file.BuildDirectives, directive)
+	}
+	for _, signal := range pe.SecuritySignals {
+		file := ensureFile(byFile, signal.Range.Start.Filename, pkg, compiled)
+		file.SecuritySignals = append(file.SecuritySignals, signal)
 	}
 	files := make([]model.FileEvidence, 0, len(byFile))
 	for _, file := range byFile {

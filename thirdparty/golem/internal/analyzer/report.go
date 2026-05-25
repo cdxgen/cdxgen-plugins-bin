@@ -97,6 +97,9 @@ func Analyze(options Options) (*model.Report, error) {
 		report.Imports = append(report.Imports, pe.Imports...)
 		report.Declarations = append(report.Declarations, pe.Declarations...)
 		report.Usages = append(report.Usages, pe.Usages...)
+		report.BuildDirectives = append(report.BuildDirectives, pe.BuildDirectives...)
+		report.NativeArtifacts = append(report.NativeArtifacts, pe.NativeArtifacts...)
+		report.SecuritySignals = append(report.SecuritySignals, pe.SecuritySignals...)
 		report.Diagnostics = append(report.Diagnostics, pe.Diagnostics...)
 		report.Files = append(report.Files, a.fileEvidence(pkg, pe)...)
 	}
@@ -137,6 +140,9 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	report.Stats.ImportCount = len(report.Imports)
 	report.Stats.DeclarationCount = len(report.Declarations)
 	report.Stats.UsageCount = len(report.Usages)
+	report.Stats.BuildDirectiveCount = len(report.BuildDirectives)
+	report.Stats.NativeArtifactCount = len(report.NativeArtifacts)
+	report.Stats.SecuritySignalCount = len(report.SecuritySignals)
 	report.Stats.DiagnosticCount = len(report.Diagnostics)
 	if report.CallGraph != nil {
 		report.Stats.DiagnosticCount += len(report.CallGraph.Diagnostics)
@@ -153,4 +159,9 @@ func sortReport(report *model.Report) {
 	})
 	sort.Slice(report.Declarations, func(i, j int) bool { return report.Declarations[i].ID < report.Declarations[j].ID })
 	sort.Slice(report.Usages, func(i, j int) bool { return report.Usages[i].ID < report.Usages[j].ID })
+	sort.Slice(report.BuildDirectives, func(i, j int) bool {
+		return report.BuildDirectives[i].Range.Start.Filename+report.BuildDirectives[i].Kind < report.BuildDirectives[j].Range.Start.Filename+report.BuildDirectives[j].Kind
+	})
+	sort.Slice(report.NativeArtifacts, func(i, j int) bool { return report.NativeArtifacts[i].Path < report.NativeArtifacts[j].Path })
+	sort.Slice(report.SecuritySignals, func(i, j int) bool { return report.SecuritySignals[i].ID < report.SecuritySignals[j].ID })
 }

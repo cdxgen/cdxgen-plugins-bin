@@ -53,15 +53,47 @@ type Module struct {
 	Replace   *Module `json:"replace,omitempty"`
 }
 type FileEvidence struct {
-	Path          string         `json:"path"`
-	PackageName   string         `json:"packageName,omitempty"`
-	PackagePath   string         `json:"packagePath,omitempty"`
-	Compiled      bool           `json:"compiled"`
-	Generated     bool           `json:"generated"`
-	IgnoredReason string         `json:"ignoredReason,omitempty"`
-	Imports       []ImportUsage  `json:"imports,omitempty"`
-	Declarations  []Declaration  `json:"declarations,omitempty"`
-	Usages        []LibraryUsage `json:"usages,omitempty"`
+	Path            string            `json:"path"`
+	PackageName     string            `json:"packageName,omitempty"`
+	PackagePath     string            `json:"packagePath,omitempty"`
+	Compiled        bool              `json:"compiled"`
+	Generated       bool              `json:"generated"`
+	IgnoredReason   string            `json:"ignoredReason,omitempty"`
+	Imports         []ImportUsage     `json:"imports,omitempty"`
+	Declarations    []Declaration     `json:"declarations,omitempty"`
+	Usages          []LibraryUsage    `json:"usages,omitempty"`
+	BuildDirectives []BuildDirective  `json:"buildDirectives,omitempty"`
+	SecuritySignals []SecuritySignal  `json:"securitySignals,omitempty"`
+	Properties      map[string]string `json:"properties,omitempty"`
+}
+type BuildDirective struct {
+	Kind       string            `json:"kind"`
+	Text       string            `json:"text,omitempty"`
+	Command    string            `json:"command,omitempty"`
+	Arguments  []string          `json:"arguments,omitempty"`
+	Target     string            `json:"target,omitempty"`
+	Patterns   []string          `json:"patterns,omitempty"`
+	Range      Range             `json:"range"`
+	Properties map[string]string `json:"properties,omitempty"`
+}
+type NativeArtifact struct {
+	Path       string            `json:"path"`
+	Kind       string            `json:"kind"`
+	Extension  string            `json:"extension,omitempty"`
+	PackageID  string            `json:"packageId,omitempty"`
+	Properties map[string]string `json:"properties,omitempty"`
+}
+type SecuritySignal struct {
+	ID             string            `json:"id"`
+	Category       string            `json:"category"`
+	Severity       string            `json:"severity,omitempty"`
+	Confidence     string            `json:"confidence,omitempty"`
+	PackagePath    string            `json:"packagePath,omitempty"`
+	Symbol         string            `json:"symbol,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Recommendation string            `json:"recommendation,omitempty"`
+	Range          Range             `json:"range"`
+	Properties     map[string]string `json:"properties,omitempty"`
 }
 type ImportUsage struct {
 	Path           string  `json:"path"`
@@ -126,19 +158,22 @@ type EnclosingContext struct {
 	Receiver  string `json:"receiver,omitempty"`
 }
 type PackageEvidence struct {
-	ID              string         `json:"id"`
-	Name            string         `json:"name"`
-	PackagePath     string         `json:"packagePath"`
-	Module          *Module        `json:"module,omitempty"`
-	Standard        bool           `json:"standard"`
-	Local           bool           `json:"local"`
-	GoFiles         []string       `json:"goFiles,omitempty"`
-	CompiledGoFiles []string       `json:"compiledGoFiles,omitempty"`
-	OtherFiles      []string       `json:"otherFiles,omitempty"`
-	Imports         []ImportUsage  `json:"imports,omitempty"`
-	Declarations    []Declaration  `json:"declarations,omitempty"`
-	Usages          []LibraryUsage `json:"usages,omitempty"`
-	Diagnostics     []Diagnostic   `json:"diagnostics,omitempty"`
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	PackagePath     string           `json:"packagePath"`
+	Module          *Module          `json:"module,omitempty"`
+	Standard        bool             `json:"standard"`
+	Local           bool             `json:"local"`
+	GoFiles         []string         `json:"goFiles,omitempty"`
+	CompiledGoFiles []string         `json:"compiledGoFiles,omitempty"`
+	OtherFiles      []string         `json:"otherFiles,omitempty"`
+	Imports         []ImportUsage    `json:"imports,omitempty"`
+	Declarations    []Declaration    `json:"declarations,omitempty"`
+	Usages          []LibraryUsage   `json:"usages,omitempty"`
+	BuildDirectives []BuildDirective `json:"buildDirectives,omitempty"`
+	NativeArtifacts []NativeArtifact `json:"nativeArtifacts,omitempty"`
+	SecuritySignals []SecuritySignal `json:"securitySignals,omitempty"`
+	Diagnostics     []Diagnostic     `json:"diagnostics,omitempty"`
 }
 type CallGraph struct {
 	Mode        string          `json:"mode"`
@@ -183,27 +218,33 @@ type CallGraphEdge struct {
 	Properties  map[string]string `json:"properties,omitempty"`
 }
 type Stats struct {
-	PackageCount     int `json:"packageCount"`
-	ModuleCount      int `json:"moduleCount"`
-	FileCount        int `json:"fileCount"`
-	ImportCount      int `json:"importCount"`
-	DeclarationCount int `json:"declarationCount"`
-	UsageCount       int `json:"usageCount"`
-	DiagnosticCount  int `json:"diagnosticCount"`
+	PackageCount        int `json:"packageCount"`
+	ModuleCount         int `json:"moduleCount"`
+	FileCount           int `json:"fileCount"`
+	ImportCount         int `json:"importCount"`
+	DeclarationCount    int `json:"declarationCount"`
+	UsageCount          int `json:"usageCount"`
+	BuildDirectiveCount int `json:"buildDirectiveCount"`
+	NativeArtifactCount int `json:"nativeArtifactCount"`
+	SecuritySignalCount int `json:"securitySignalCount"`
+	DiagnosticCount     int `json:"diagnosticCount"`
 }
 type Report struct {
-	SchemaVersion string            `json:"schemaVersion"`
-	Tool          ToolInfo          `json:"tool"`
-	Runtime       RuntimeInfo       `json:"runtime"`
-	Options       AnalysisOptions   `json:"options"`
-	RootModules   []Module          `json:"rootModules,omitempty"`
-	Modules       []Module          `json:"modules,omitempty"`
-	Packages      []PackageEvidence `json:"packages,omitempty"`
-	Files         []FileEvidence    `json:"files,omitempty"`
-	Imports       []ImportUsage     `json:"imports,omitempty"`
-	Declarations  []Declaration     `json:"declarations,omitempty"`
-	Usages        []LibraryUsage    `json:"usages,omitempty"`
-	CallGraph     *CallGraph        `json:"callGraph,omitempty"`
-	Diagnostics   []Diagnostic      `json:"diagnostics,omitempty"`
-	Stats         Stats             `json:"stats"`
+	SchemaVersion   string            `json:"schemaVersion"`
+	Tool            ToolInfo          `json:"tool"`
+	Runtime         RuntimeInfo       `json:"runtime"`
+	Options         AnalysisOptions   `json:"options"`
+	RootModules     []Module          `json:"rootModules,omitempty"`
+	Modules         []Module          `json:"modules,omitempty"`
+	Packages        []PackageEvidence `json:"packages,omitempty"`
+	Files           []FileEvidence    `json:"files,omitempty"`
+	Imports         []ImportUsage     `json:"imports,omitempty"`
+	Declarations    []Declaration     `json:"declarations,omitempty"`
+	Usages          []LibraryUsage    `json:"usages,omitempty"`
+	BuildDirectives []BuildDirective  `json:"buildDirectives,omitempty"`
+	NativeArtifacts []NativeArtifact  `json:"nativeArtifacts,omitempty"`
+	SecuritySignals []SecuritySignal  `json:"securitySignals,omitempty"`
+	CallGraph       *CallGraph        `json:"callGraph,omitempty"`
+	Diagnostics     []Diagnostic      `json:"diagnostics,omitempty"`
+	Stats           Stats             `json:"stats"`
 }
