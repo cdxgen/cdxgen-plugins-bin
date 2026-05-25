@@ -11,6 +11,7 @@ const sourcekittenVersion = "0.37.3";
 const trivyVersion = "v0.68.2";
 const dosaiVersion = "v3.0.3";
 const trustInspectorVersion = pluginsPackageJson.version;
+const golemVersion = pluginsPackageJson.version;
 
 function pluginComponentMetadata() {
   return {
@@ -69,6 +70,21 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/pkgs/container/cdxgen-plugins-bin",
           type: "distribution-intake",
         },
+      ],
+    },
+
+    golem: {
+      version: golemVersion,
+      description:
+        "Go Library Evidence Mapper (golem) extracts semantic Go source evidence and optional call graphs for cdxgen.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/golem@${golemVersion}`,
+      licenses: [{ license: { id: "Apache-2.0" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/golem",
+          type: "vcs",
+        },
+        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
       ],
     },
     trustinspector: {
@@ -142,7 +158,7 @@ async function main() {
   const allDependencies = [];
   const toolMetadata = pluginComponentMetadata();
   const manifestPlugins = [];
-  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector'];
+  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem'];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
     if (!fs.existsSync(toolDir)) {

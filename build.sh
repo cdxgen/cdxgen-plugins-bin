@@ -5,10 +5,10 @@ rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
 rm -rf plugins/sourcekitten
-rm -rf plugins/trustinspector
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector
+rm -rf plugins/trustinspector plugins/golem
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem
 
-for plug in trivy trustinspector
+for plug in trivy trustinspector golem
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
