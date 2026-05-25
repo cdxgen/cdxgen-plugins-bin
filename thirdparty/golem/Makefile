@@ -1,6 +1,6 @@
 PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := golem
-version ?= 0.1.0
+version ?= 2.2.0
 sources := $(shell find cmd internal -type f -name '*.go')
 ldflags := -s -w -X main.version=$(version)
 
