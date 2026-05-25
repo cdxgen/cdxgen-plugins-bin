@@ -48,3 +48,54 @@ func TestAnalyzeSimpleProjectStaticCallGraph(t *testing.T) {
 		t.Fatalf("expected graph nodes and edges, got %#v", report.CallGraph.Stats)
 	}
 }
+
+func TestAnalyzeAdvancedAliasesAndFunctionValues(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "advanced"), IncludeLocal: true, CallGraphMode: "none", ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var namedAliasImport bool
+	for _, imp := range report.Imports {
+		if imp.Path == "example.com/golem/dep/lib" && imp.Name == "alias" && imp.AliasKind == "named" {
+			namedAliasImport = true
+			if imp.Module == nil || imp.Module.PURL != "pkg:golang/example.com/golem/dep@v0.0.0" {
+				t.Fatalf("expected slash-preserving Go module purl, got %#v", imp.Module)
+			}
+		}
+	}
+	if !namedAliasImport {
+		t.Fatalf("expected named import alias evidence in %#v", report.Imports)
+	}
+	var typeAliasCount int
+	for _, decl := range report.Declarations {
+		if decl.Alias && decl.AliasedPackagePath == "example.com/golem/dep/lib" && decl.AliasedModule != nil {
+			typeAliasCount++
+		}
+	}
+	if typeAliasCount < 2 {
+		t.Fatalf("expected external type alias provenance, got %#v", report.Declarations)
+	}
+	var functionValueCalls int
+	var methodValueCalls int
+	var externalInterfaceMethod bool
+	for _, usage := range report.Usages {
+		switch usage.Kind {
+		case "functionValueCall":
+			functionValueCalls++
+		case "methodValueCall":
+			methodValueCalls++
+		}
+		if usage.Name == "Greet" && usage.PackagePath == "example.com/golem/dep/lib" && usage.Enclosing != nil && usage.Enclosing.Name == "useInterface" {
+			externalInterfaceMethod = true
+		}
+	}
+	if functionValueCalls < 3 {
+		t.Fatalf("expected function value call evidence, got %#v", report.Usages)
+	}
+	if methodValueCalls < 2 {
+		t.Fatalf("expected method value/expression call evidence, got %#v", report.Usages)
+	}
+	if !externalInterfaceMethod {
+		t.Fatalf("expected external interface method dispatch evidence, got %#v", report.Usages)
+	}
+}

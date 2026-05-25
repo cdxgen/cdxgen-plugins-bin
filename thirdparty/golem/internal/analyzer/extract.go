@@ -122,8 +122,7 @@ func (a *Analyzer) declarationsForFile(pkg *packages.Package, file *ast.File) []
 			for _, spec := range d.Specs {
 				switch s := spec.(type) {
 				case *ast.TypeSpec:
-					typeText := typeOfDef(pkg, s.Name)
-					declarations = append(declarations, model.Declaration{ID: stableID(pkg.PkgPath, "", s.Name.Name, typeText), Name: s.Name.Name, Kind: "type", PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(s.Name.Name), Range: a.nodeRange(s)})
+					declarations = append(declarations, a.typeDeclaration(pkg, s))
 				case *ast.ValueSpec:
 					for _, name := range s.Names {
 						typeText := typeOfDef(pkg, name)
@@ -157,6 +156,23 @@ func typeOfDef(pkg *packages.Package, ident *ast.Ident) string {
 	return ""
 }
 
+func (a *Analyzer) typeDeclaration(pkg *packages.Package, s *ast.TypeSpec) model.Declaration {
+	typeText := typeOfDef(pkg, s.Name)
+	decl := model.Declaration{ID: stableID(pkg.PkgPath, "", s.Name.Name, typeText), Name: s.Name.Name, Kind: "type", PackagePath: pkg.PkgPath, Type: typeText, Exported: ast.IsExported(s.Name.Name), Range: a.nodeRange(s)}
+	if s.Assign.IsValid() {
+		decl.Alias = true
+		if pkg.TypesInfo != nil {
+			aliasedType := pkg.TypesInfo.TypeOf(s.Type)
+			if aliasedType != nil {
+				decl.AliasedType = types.TypeString(aliasedType, qualifier(pkg.PkgPath))
+				decl.AliasedPackagePath = packagePathFromType(aliasedType)
+				decl.AliasedModule = a.moduleForPackagePath(decl.AliasedPackagePath)
+			}
+		}
+	}
+	return decl
+}
+
 func (a *Analyzer) usagesForFile(pkg *packages.Package, file *ast.File, imports []model.ImportUsage) []model.LibraryUsage {
 	importByName := map[string]model.ImportUsage{}
 	for _, imp := range imports {
@@ -169,29 +185,105 @@ func (a *Analyzer) usagesForFile(pkg *packages.Package, file *ast.File, imports 
 		}
 	}
 	var usages []model.LibraryUsage
-	var stack []model.EnclosingContext
-	ast.Inspect(file, func(n ast.Node) bool {
-		if n == nil {
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
+	globalAliases := usageScope{}
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			a.inspectGenDeclValues(pkg, d, importByName, nil, globalAliases, &usages)
+		case *ast.FuncDecl:
+			ctx := a.enclosingContext(pkg, d)
+			aliases := globalAliases.clone()
+			if d.Body != nil {
+				a.inspectUsageNode(pkg, d.Body, importByName, &ctx, aliases, &usages)
 			}
+		}
+	}
+	return dedupeUsages(usages)
+}
+
+type usageScope map[string]model.LibraryUsage
+
+func (s usageScope) clone() usageScope {
+	out := usageScope{}
+	for key, value := range s {
+		out[key] = value
+	}
+	return out
+}
+
+func (a *Analyzer) inspectGenDeclValues(pkg *packages.Package, decl *ast.GenDecl, imports map[string]model.ImportUsage, enclosing *model.EnclosingContext, aliases usageScope, usages *[]model.LibraryUsage) {
+	for _, spec := range decl.Specs {
+		valueSpec, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for i, value := range valueSpec.Values {
+			if usage, ok := a.referenceUsage(pkg, value, imports, enclosing); ok && a.includeUsage(usage) {
+				*usages = append(*usages, usage)
+				if i < len(valueSpec.Names) {
+					aliases[valueSpec.Names[i].Name] = usage
+				}
+			}
+		}
+	}
+}
+
+func (a *Analyzer) inspectUsageNode(pkg *packages.Package, root ast.Node, imports map[string]model.ImportUsage, enclosing *model.EnclosingContext, aliases usageScope, usages *[]model.LibraryUsage) {
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil {
 			return true
 		}
 		switch x := n.(type) {
-		case *ast.FuncDecl:
-			stack = append(stack, a.enclosingContext(pkg, x))
-		case *ast.SelectorExpr:
-			if usage, ok := a.selectorUsage(pkg, x, importByName, enclosing(stack), false, 0); ok && a.includeUsage(usage) {
-				usages = append(usages, usage)
+		case *ast.AssignStmt:
+			a.recordAssignmentAliases(pkg, x.Lhs, x.Rhs, imports, enclosing, aliases, usages)
+		case *ast.DeclStmt:
+			if genDecl, ok := x.Decl.(*ast.GenDecl); ok {
+				a.inspectGenDeclValues(pkg, genDecl, imports, enclosing, aliases, usages)
 			}
 		case *ast.CallExpr:
-			if usage, ok := a.callUsage(pkg, x, importByName, enclosing(stack)); ok && a.includeUsage(usage) {
-				usages = append(usages, usage)
+			if usage, ok := a.callUsage(pkg, x, imports, aliases, enclosing); ok && a.includeUsage(usage) {
+				*usages = append(*usages, usage)
+			}
+		case *ast.SelectorExpr:
+			if usage, ok := a.selectorUsage(pkg, x, imports, enclosing, false, 0); ok && a.includeUsage(usage) {
+				*usages = append(*usages, usage)
 			}
 		}
 		return true
 	})
-	return dedupeUsages(usages)
+}
+
+func (a *Analyzer) recordAssignmentAliases(pkg *packages.Package, lhs []ast.Expr, rhs []ast.Expr, imports map[string]model.ImportUsage, enclosing *model.EnclosingContext, aliases usageScope, usages *[]model.LibraryUsage) {
+	for i, right := range rhs {
+		if i >= len(lhs) {
+			break
+		}
+		leftIdent, ok := lhs[i].(*ast.Ident)
+		if !ok || leftIdent.Name == "_" {
+			continue
+		}
+		if usage, ok := a.referenceUsage(pkg, right, imports, enclosing); ok && a.includeUsage(usage) {
+			aliases[leftIdent.Name] = usage
+			*usages = append(*usages, usage)
+		}
+	}
+}
+
+func (a *Analyzer) referenceUsage(pkg *packages.Package, expr ast.Expr, imports map[string]model.ImportUsage, enclosing *model.EnclosingContext) (model.LibraryUsage, bool) {
+	switch x := expr.(type) {
+	case *ast.SelectorExpr:
+		return a.selectorUsage(pkg, x, imports, enclosing, false, 0)
+	case *ast.Ident:
+		obj := pkg.TypesInfo.Uses[x]
+		if obj == nil {
+			return model.LibraryUsage{}, false
+		}
+		usage := a.objectUsage(pkg, obj, x, enclosing)
+		usage.Kind = "reference"
+		return usage, usage.Name != ""
+	default:
+		return model.LibraryUsage{}, false
+	}
 }
 
 func (a *Analyzer) enclosingContext(pkg *packages.Package, fn *ast.FuncDecl) model.EnclosingContext {
@@ -226,11 +318,29 @@ func (a *Analyzer) selectorUsage(pkg *packages.Package, sel *ast.SelectorExpr, i
 	return usage, usage.Name != ""
 }
 
-func (a *Analyzer) callUsage(pkg *packages.Package, call *ast.CallExpr, imports map[string]model.ImportUsage, enclosing *model.EnclosingContext) (model.LibraryUsage, bool) {
+func (a *Analyzer) callUsage(pkg *packages.Package, call *ast.CallExpr, imports map[string]model.ImportUsage, aliases usageScope, enclosing *model.EnclosingContext) (model.LibraryUsage, bool) {
 	switch fun := call.Fun.(type) {
 	case *ast.SelectorExpr:
 		return a.selectorUsage(pkg, fun, imports, enclosing, true, len(call.Args))
 	case *ast.Ident:
+		if aliased, found := aliases[fun.Name]; found {
+			usage := aliased
+			usage.ID = stableUsageID(pkg.ID, usage.QualifiedName+".alias."+fun.Name, a.nodeRange(fun))
+			usage.Kind = "functionValueCall"
+			if usage.Method {
+				usage.Kind = "methodValueCall"
+			}
+			usage.Call = true
+			usage.ArgumentCount = len(call.Args)
+			usage.Range = a.nodeRange(fun)
+			usage.Enclosing = enclosing
+			if usage.Properties == nil {
+				usage.Properties = map[string]string{}
+			}
+			usage.Properties["calledThrough"] = fun.Name
+			usage.Properties["aliasKind"] = "function-value"
+			return usage, usage.Name != ""
+		}
 		obj := pkg.TypesInfo.Uses[fun]
 		if obj == nil {
 			return model.LibraryUsage{}, false

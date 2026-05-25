@@ -78,15 +78,19 @@ type ImportUsage struct {
 	ResolutionNote string  `json:"resolutionNote,omitempty"`
 }
 type Declaration struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Kind        string `json:"kind"`
-	PackagePath string `json:"packagePath,omitempty"`
-	Receiver    string `json:"receiver,omitempty"`
-	Signature   string `json:"signature,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Exported    bool   `json:"exported"`
-	Range       Range  `json:"range"`
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	Kind               string  `json:"kind"`
+	PackagePath        string  `json:"packagePath,omitempty"`
+	Receiver           string  `json:"receiver,omitempty"`
+	Signature          string  `json:"signature,omitempty"`
+	Type               string  `json:"type,omitempty"`
+	Alias              bool    `json:"alias,omitempty"`
+	AliasedType        string  `json:"aliasedType,omitempty"`
+	AliasedPackagePath string  `json:"aliasedPackagePath,omitempty"`
+	AliasedModule      *Module `json:"aliasedModule,omitempty"`
+	Exported           bool    `json:"exported"`
+	Range              Range   `json:"range"`
 }
 type LibraryUsage struct {
 	ID              string            `json:"id"`

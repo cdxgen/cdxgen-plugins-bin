@@ -18,8 +18,19 @@ golem analyze --dir . --callgraph pointer --format json --out golem-pointer.json
 - `gexf` — call graph sidecar suitable for Gephi and similar tools.
 Graph formats require a non-`none` call graph mode.
 ## Build
+
 ```bash
 go test ./...
 make all
 ```
+
 The Makefile cross-compiles static binaries for Linux, macOS, and Windows targets used by `cdxgen-plugins-bin`.
+
+## Real repository smoke tests
+
+```bash
+go build -trimpath -ldflags "-s -w" -o build/golem-darwin-arm64 ./cmd/golem
+python3 scripts/real-e2e.py --golem ./build/golem-darwin-arm64
+```
+
+The real E2E script is opt-in because it clones public GitHub repositories and can trigger Go module downloads while loading package metadata.

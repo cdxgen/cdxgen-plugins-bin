@@ -53,10 +53,10 @@ func convertModule(mod *packages.Module) *model.Module {
 }
 
 func modulePURL(mod *model.Module) string {
-	if mod == nil || mod.Path == "" {
+	if mod == nil || mod.Path == "" || strings.HasPrefix(mod.Path, ".") || strings.HasPrefix(mod.Path, "/") {
 		return ""
 	}
-	p := "pkg:golang/" + url.PathEscape(mod.Path)
+	p := "pkg:golang/" + mod.Path
 	if mod.Version != "" {
 		p += "@" + url.QueryEscape(mod.Version)
 	}
@@ -152,6 +152,51 @@ func receiverFromObject(obj types.Object, currentPkgPath string) string {
 	}
 	if sig, ok := obj.Type().(*types.Signature); ok && sig.Recv() != nil {
 		return types.TypeString(sig.Recv().Type(), qualifier(currentPkgPath))
+	}
+	return ""
+}
+
+func packagePathFromType(t types.Type) string {
+	if t == nil {
+		return ""
+	}
+	t = types.Unalias(t)
+	switch typed := t.(type) {
+	case *types.Named:
+		if typed.Obj() != nil && typed.Obj().Pkg() != nil {
+			return typed.Obj().Pkg().Path()
+		}
+	case *types.Pointer:
+		return packagePathFromType(typed.Elem())
+	case *types.Slice:
+		return packagePathFromType(typed.Elem())
+	case *types.Array:
+		return packagePathFromType(typed.Elem())
+	case *types.Map:
+		if keyPath := packagePathFromType(typed.Key()); keyPath != "" {
+			return keyPath
+		}
+		return packagePathFromType(typed.Elem())
+	case *types.Chan:
+		return packagePathFromType(typed.Elem())
+	case *types.Signature:
+		if typed.Recv() != nil {
+			return packagePathFromType(typed.Recv().Type())
+		}
+		if typed.Results() != nil {
+			for i := 0; i < typed.Results().Len(); i++ {
+				if resultPath := packagePathFromType(typed.Results().At(i).Type()); resultPath != "" {
+					return resultPath
+				}
+			}
+		}
+		if typed.Params() != nil {
+			for i := 0; i < typed.Params().Len(); i++ {
+				if paramPath := packagePathFromType(typed.Params().At(i).Type()); paramPath != "" {
+					return paramPath
+				}
+			}
+		}
 	}
 	return ""
 }
