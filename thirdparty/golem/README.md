@@ -11,6 +11,7 @@ golem analyze --dir /path/to/go/project --format json --out golem.json
 golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
 golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
 golem analyze --dir . --callgraph pointer --format json --out golem-pointer.json
+golem analyze --dir . --dataflow security --dataflow-graph-out dataflows.graphml --format json --out golem-dataflow.json
 ```
 
 When used through cdxgen, the normal entry point is `evinse`:
@@ -34,8 +35,16 @@ Advanced cdxgen options map directly to Golem analysis settings:
 
 - `none`: source and library evidence only.
 - `static`: fast static SSA call graph. This is the cdxgen Evinse default.
+- `cha`: Class Hierarchy Analysis for broader interface dispatch candidates.
 - `rta`: Rapid Type Analysis from discovered `init` and `main` roots.
+- `vta`: Variable Type Analysis for more precise dynamic call resolution when affordable.
 - `pointer`: points-to call graph for main packages. This is the most expensive mode.
+
+## API endpoint, service, and data-flow evidence
+
+Golem extracts API endpoint and service evidence suitable for downstream CycloneDX `services` enrichment. It recognizes common `net/http` route/listener patterns, route groups from popular Go frameworks, RPC registration-style calls, and sanitized literal external URLs. URL evidence removes user info, query strings, and fragments before emission so tokens and other secret-bearing values are not copied into the report.
+
+Semantic data-flow slicing is available with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. The slicer uses Go SSA and emits compact source-to-sink nodes, edges, slices, summaries, and optional GraphML/GEXF sidecars. Built-in pattern packs cover CLI/env/HTTP/framework input, process execution, filesystem, data APIs, crypto APIs, and cgo/native interop. Custom source/sink/passthrough/sanitizer packs can be supplied with `--dataflow-patterns`.
 
 ## Output formats
 

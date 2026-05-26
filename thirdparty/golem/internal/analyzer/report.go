@@ -102,17 +102,23 @@ func Analyze(options Options) (*model.Report, error) {
 	}
 	for _, pkg := range pkgs {
 		pe := a.packageEvidence(pkg)
+		ef := a.endpointFactsForPackage(pkg)
 		report.Packages = append(report.Packages, pe)
 		report.Imports = append(report.Imports, pe.Imports...)
 		report.Declarations = append(report.Declarations, pe.Declarations...)
 		report.Usages = append(report.Usages, pe.Usages...)
 		report.BuildDirectives = append(report.BuildDirectives, pe.BuildDirectives...)
 		report.NativeArtifacts = append(report.NativeArtifacts, pe.NativeArtifacts...)
+		report.APIEndpoints = append(report.APIEndpoints, ef.endpoints...)
+		report.ExternalURLs = append(report.ExternalURLs, ef.urls...)
 		report.SecuritySignals = append(report.SecuritySignals, pe.SecuritySignals...)
 		report.Crypto = mergeCryptoEvidence(report.Crypto, pe.Crypto)
 		report.Diagnostics = append(report.Diagnostics, pe.Diagnostics...)
 		report.Files = append(report.Files, a.fileEvidence(pkg, pe)...)
 	}
+	report.APIEndpoints = dedupeEndpoints(report.APIEndpoints)
+	report.ExternalURLs = dedupeExternalURLs(report.ExternalURLs)
+	report.Services = servicesFromEndpointFacts(report.APIEndpoints, report.ExternalURLs)
 	report.RootModules = sortedModules(a.rootModules)
 	report.Modules = sortedModules(a.moduleByPath)
 	report.SupplyChain = a.supplyChainEvidence(report.Modules)
@@ -175,6 +181,9 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	}
 	report.Stats.BuildDirectiveCount = len(report.BuildDirectives)
 	report.Stats.NativeArtifactCount = len(report.NativeArtifacts)
+	report.Stats.APIEndpointCount = len(report.APIEndpoints)
+	report.Stats.ExternalURLCount = len(report.ExternalURLs)
+	report.Stats.ServiceCount = len(report.Services)
 	report.Stats.SecuritySignalCount = len(report.SecuritySignals)
 	if report.Crypto != nil {
 		report.Stats.CryptoLibraryCount = len(report.Crypto.Libraries)
@@ -224,6 +233,9 @@ func sortReport(report *model.Report) {
 		return report.BuildDirectives[i].Range.Start.Filename+report.BuildDirectives[i].Kind < report.BuildDirectives[j].Range.Start.Filename+report.BuildDirectives[j].Kind
 	})
 	sort.Slice(report.NativeArtifacts, func(i, j int) bool { return report.NativeArtifacts[i].Path < report.NativeArtifacts[j].Path })
+	sort.Slice(report.APIEndpoints, func(i, j int) bool { return report.APIEndpoints[i].ID < report.APIEndpoints[j].ID })
+	sort.Slice(report.ExternalURLs, func(i, j int) bool { return report.ExternalURLs[i].ID < report.ExternalURLs[j].ID })
+	sort.Slice(report.Services, func(i, j int) bool { return report.Services[i].ID < report.Services[j].ID })
 	sort.Slice(report.SecuritySignals, func(i, j int) bool { return report.SecuritySignals[i].ID < report.SecuritySignals[j].ID })
 	sortCryptoEvidence(report.Crypto)
 	sortDataFlowEvidence(report.DataFlow)

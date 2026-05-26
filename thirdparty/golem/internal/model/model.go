@@ -89,6 +89,49 @@ type NativeArtifact struct {
 	PackageID  string            `json:"packageId,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
+type APIEndpoint struct {
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"`
+	Framework   string            `json:"framework,omitempty"`
+	Method      string            `json:"method,omitempty"`
+	Path        string            `json:"path,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Scheme      string            `json:"scheme,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Handler     string            `json:"handler,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type ExternalURL struct {
+	ID          string            `json:"id"`
+	URL         string            `json:"url"`
+	Scheme      string            `json:"scheme,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Path        string            `json:"path,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type ServiceEndpoint struct {
+	EndpointID string            `json:"endpointId,omitempty"`
+	Method     string            `json:"method,omitempty"`
+	Path       string            `json:"path,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Properties map[string]string `json:"properties,omitempty"`
+}
+type ServiceEvidence struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Kind        string            `json:"kind"`
+	Host        string            `json:"host,omitempty"`
+	Scheme      string            `json:"scheme,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Endpoints   []ServiceEndpoint `json:"endpoints,omitempty"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
 type SecuritySignal struct {
 	ID             string            `json:"id"`
 	Category       string            `json:"category"`
@@ -429,6 +472,9 @@ type Stats struct {
 	ExampleUsageCount      int `json:"exampleUsageCount"`
 	BuildDirectiveCount    int `json:"buildDirectiveCount"`
 	NativeArtifactCount    int `json:"nativeArtifactCount"`
+	APIEndpointCount       int `json:"apiEndpointCount"`
+	ExternalURLCount       int `json:"externalUrlCount"`
+	ServiceCount           int `json:"serviceCount"`
 	SecuritySignalCount    int `json:"securitySignalCount"`
 	GoModReplaceCount      int `json:"goModReplaceCount"`
 	GoModExcludeCount      int `json:"goModExcludeCount"`
@@ -495,6 +541,9 @@ type Report struct {
 	Usages          []LibraryUsage       `json:"usages,omitempty"`
 	BuildDirectives []BuildDirective     `json:"buildDirectives,omitempty"`
 	NativeArtifacts []NativeArtifact     `json:"nativeArtifacts,omitempty"`
+	APIEndpoints    []APIEndpoint        `json:"apiEndpoints,omitempty"`
+	ExternalURLs    []ExternalURL        `json:"externalUrls,omitempty"`
+	Services        []ServiceEvidence    `json:"services,omitempty"`
 	SecuritySignals []SecuritySignal     `json:"securitySignals,omitempty"`
 	Crypto          *CryptoEvidence      `json:"crypto,omitempty"`
 	DataFlow        *DataFlowEvidence    `json:"dataFlow,omitempty"`

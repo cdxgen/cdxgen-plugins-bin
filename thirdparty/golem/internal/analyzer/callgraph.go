@@ -8,8 +8,10 @@ import (
 	"sort"
 
 	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
+	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/pointer"
 	"golang.org/x/tools/go/ssa"
@@ -28,6 +30,8 @@ func (a *Analyzer) buildCallGraph(pkgs []*packages.Package) *model.CallGraph {
 	switch a.options.CallGraphMode {
 	case "static":
 		graph = static.CallGraph(prog)
+	case "cha":
+		graph = cha.CallGraph(prog)
 	case "rta":
 		result := rta.Analyze(mainAndInitRoots(ssaPkgs), true)
 		if result != nil {
@@ -51,6 +55,9 @@ func (a *Analyzer) buildCallGraph(pkgs []*packages.Package) *model.CallGraph {
 		} else {
 			graph = result.CallGraph
 		}
+	case "vta":
+		initial := static.CallGraph(prog)
+		graph = vta.CallGraph(reachableFunctions(initial), initial)
 	default:
 		cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: fmt.Sprintf("unsupported callgraph mode %q", a.options.CallGraphMode)})
 	}
@@ -58,6 +65,19 @@ func (a *Analyzer) buildCallGraph(pkgs []*packages.Package) *model.CallGraph {
 		return cg
 	}
 	return a.convertCallGraph(cg, graph)
+}
+
+func reachableFunctions(graph *callgraph.Graph) map[*ssa.Function]bool {
+	funcs := map[*ssa.Function]bool{}
+	if graph == nil {
+		return funcs
+	}
+	for fn := range graph.Nodes {
+		if fn != nil {
+			funcs[fn] = true
+		}
+	}
+	return funcs
 }
 
 func (a *Analyzer) convertCallGraph(out *model.CallGraph, graph *callgraph.Graph) *model.CallGraph {

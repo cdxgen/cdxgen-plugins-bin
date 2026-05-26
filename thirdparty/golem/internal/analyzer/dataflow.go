@@ -22,7 +22,7 @@ type dataFlowTrace struct {
 	nodeIDs        []string
 	edgeIDs        []string
 	params         map[int]bool
-	tauntKinds     []string
+	taintKinds     []string
 	fieldPaths     []string
 	sourceID       string
 	sourceCategory string
@@ -51,6 +51,7 @@ type dataFlowBuilder struct {
 	out           *model.DataFlowEvidence
 	patterns      *model.DataFlowPatternSet
 	summaries     map[*ssa.Function]*internalSummary
+	endpoints     map[string][]model.APIEndpoint
 	nodeSeen      map[string]bool
 	edgeSeen      map[string]bool
 	sliceSeen     map[string]bool
@@ -73,7 +74,7 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package) *model.DataFlowEviden
 		funcs = append(funcs, fn)
 	}
 	sort.Slice(funcs, func(i, j int) bool { return funcs[i].String() < funcs[j].String() })
-	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, summaries: map[*ssa.Function]*internalSummary{}, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: a.options.DataFlowMax}
+	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: a.options.DataFlowMax}
 	b.inferSummaries(funcs)
 	for _, fn := range funcs {
 		b.analyzeFunction(fn)
@@ -155,14 +156,14 @@ func loadDataFlowPatterns(mode string, packs []string, path string) (*model.Data
 func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPatternSet {
 	selected := map[string]bool{}
 	if len(packs) == 0 {
-		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native"} {
+		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks"} {
 			selected[p] = true
 		}
 	} else {
 		for _, p := range packs {
 			p = strings.ToLower(strings.TrimSpace(p))
 			if p == "all" {
-				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native"} {
+				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks"} {
 					selected[name] = true
 				}
 			} else if p != "" {
@@ -191,31 +192,44 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addSource("function", "os.LookupEnv", "environment", "environment", "secret")
 		addSource("function", "flag.Arg", "cli", "user-input")
 		addSource("function", "flag.Args", "cli", "user-input")
-		addSource("parameter", "^(input|query|command|cmd|path|file|filename|url|uri|token|key|secret|password)$", "parameter", "user-input")
+		paramPattern := dfPattern("source", "parameter", "^(input|query|command|cmd|path|file|filename|url|uri|token|key|secret|password)$", "parameter", "user-input")
+		paramPattern.Match = "regex"
+		set.Sources = append(set.Sources, paramPattern)
+		addSource("type", "*net/http.Request", "http-request", "user-input")
+		addSource("type", "http.Request", "http-request", "user-input")
+		addSource("type", "context.Context", "context", "request-context")
 		for _, name := range []string{"fmt.Sprintf", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format"} {
 			addPass("function", name, "conversion")
 		}
 	}
 	if selected["http"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "github.com/gin-gonic/gin", "Param", "Query", "PostForm", "github.com/labstack/echo", "github.com/gofiber/fiber"} {
+		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "URL.Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "Query", "PostForm", "DefaultQuery", "GetHeader", "Bind", "ShouldBind", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "github.com/gofiber/fiber", "Params", "Query", "Body", "Cookies"} {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
 		addSink("function", "fmt.Fprintf", "formatted-output", "user-input")
+		addSink("function", "http.Redirect", "redirect", "url")
+	}
+	if selected["frameworks"] || mode == "all" || mode == "security" {
+		for _, sourceType := range []string{"gin.Context", "*gin.Context", "echo.Context", "fiber.Ctx", "*fiber.Ctx", "chi.Context", "mux.RouteMatch"} {
+			addSource("type", sourceType, "framework-context", "user-input")
+		}
+		for _, passthrough := range []string{"github.com/gin-gonic/gin.Context", "github.com/labstack/echo", "github.com/gofiber/fiber", "github.com/go-chi/chi", "github.com/gorilla/mux"} {
+			addPass("function", passthrough, "framework")
+		}
 	}
 	if selected["process"] || mode == "all" || mode == "security" {
 		addSink("function", "os/exec.Command", "command-execution", "user-input")
-		addSink("function", "Command", "command-execution", "user-input")
-		addSink("function", "CommandContext", "command-execution", "user-input")
+		addSink("function", "os/exec.CommandContext", "command-execution", "user-input")
 	}
 	if selected["data"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
+		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jackc/pgx", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
 			addSink("function", name, "data", "user-input")
 		}
 		addSan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", "sql")
 	}
 	if selected["filesystem"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"os.OpenFile", "os.WriteFile", "os.Create", "os.Mkdir", "os.MkdirAll", "archive/zip", "archive/tar"} {
+		for _, name := range []string{"os.Open", "os.OpenFile", "os.WriteFile", "os.ReadFile", "os.Create", "os.Mkdir", "os.MkdirAll", "os.Remove", "os.RemoveAll", "archive/zip", "archive/tar", "http.ServeFile"} {
 			addSink("function", name, "filesystem", "path")
 		}
 		addPass("function", "path/filepath.Join", "path")
@@ -223,7 +237,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addSan("function", "path/filepath.Base", "path-validation", "path")
 	}
 	if selected["crypto"] || mode == "all" || mode == "crypto" || mode == "security" {
-		for _, name := range []string{"crypto/aes.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "github.com/golang-jwt/jwt"} {
+		for _, name := range []string{"crypto/aes.NewCipher", "crypto/des.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "github.com/golang-jwt/jwt", "github.com/dgrijalva/jwt-go"} {
 			addSink("function", name, "crypto", "secret", "crypto-key")
 		}
 		addSource("name", "(?i)(private.*key|secret|password|token|nonce|iv|salt)", "crypto-material", "secret", "crypto-key")
@@ -362,7 +376,12 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 	for i, p := range fn.Params {
 		for _, pat := range b.matchParameterSource(fn, i, p) {
 			n := b.addNode("source", p.Name(), p.String(), p.Type().String(), fn, p.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, nil)
-			state.values[p] = combineTraces(state.values[p], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, tauntKinds: taintsForPattern(pat), confidence: pat.Confidence})
+			state.values[p] = combineTraces(state.values[p], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence})
+		}
+		for _, endpoint := range b.matchEndpointHandlerParam(fn, p) {
+			pat := model.DataFlowPattern{Target: "source", Kind: "parameter", Match: "exact", Pattern: fn.String(), Category: "http-endpoint", TaintKinds: []string{"user-input"}, Confidence: "high"}
+			n := b.addNode("source", p.Name(), p.String(), p.Type().String(), fn, p.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"endpointId": endpoint.ID, "endpointPath": endpoint.Path, "endpointMethod": endpoint.Method})
+			state.values[p] = combineTraces(state.values[p], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence})
 		}
 	}
 	for _, block := range fn.Blocks {
@@ -371,19 +390,19 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 			switch x := instr.(type) {
 			case *ssa.Store:
 				if tr, ok := b.taintOf(state, x.Val); ok {
-					n := b.addNode("store", valueName(x.Addr), valueSymbol(x.Addr), valueType(x.Val), fn, x.Pos(), false, false, "", tr.tauntKinds, strings.Join(tr.fieldPaths, "."), tr.confidence, nil)
+					n := b.addNode("store", valueName(x.Addr), valueSymbol(x.Addr), valueType(x.Val), fn, x.Pos(), false, false, "", tr.taintKinds, strings.Join(tr.fieldPaths, "."), tr.confidence, nil)
 					tr = b.connectTrace(tr, n, "store", x.Pos(), valueName(x.Addr))
 					state.memory[addrKey(x.Addr)] = tr
 				}
 			case *ssa.MapUpdate:
 				if tr, ok := b.taintOf(state, x.Value); ok {
-					n := b.addNode("map-store", valueName(x.Map), valueSymbol(x.Map), valueType(x.Value), fn, x.Pos(), false, false, "", tr.tauntKinds, "[*]", tr.confidence, nil)
+					n := b.addNode("map-store", valueName(x.Map), valueSymbol(x.Map), valueType(x.Value), fn, x.Pos(), false, false, "", tr.taintKinds, "[*]", tr.confidence, nil)
 					tr = b.connectTrace(tr, n, "map-store", x.Pos(), valueName(x.Map))
 					state.memory[addrKey(x.Map)+"[*]"] = tr.withFieldPath("[*]")
 				}
 			case *ssa.Send:
 				if tr, ok := b.taintOf(state, x.X); ok {
-					n := b.addNode("channel-send", valueName(x.Chan), valueSymbol(x.Chan), valueType(x.X), fn, x.Pos(), false, false, "", tr.tauntKinds, "chan", tr.confidence, nil)
+					n := b.addNode("channel-send", valueName(x.Chan), valueSymbol(x.Chan), valueType(x.X), fn, x.Pos(), false, false, "", tr.taintKinds, "chan", tr.confidence, nil)
 					state.chans[addrKey(x.Chan)] = b.connectTrace(tr, n, "channel-send", x.Pos(), valueName(x.Chan))
 				}
 			case *ssa.Call:
@@ -409,7 +428,7 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 	}
 	for _, pat := range b.matchCall(common, b.patterns.Sources) {
 		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"pattern": pat.Pattern})
-		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, tauntKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
+		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
 	}
 	if len(b.matchCall(common, b.patterns.Sanitizers)) > 0 {
 		return
@@ -418,13 +437,13 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 		if summary := b.summaries[callee]; summary != nil {
 			for _, pat := range summary.sourceReturns {
 				n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"summaryFunction": callee.String()})
-				state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, tauntKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
+				state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
 			}
 			args := callArgs(common)
 			for idx := range summary.paramReturn {
 				if idx >= 0 && idx < len(args) {
 					if tr, ok := b.taintOf(state, args[idx]); ok {
-						n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.tauntKinds, "", tr.confidence, map[string]string{"summaryFunction": callee.String(), "parameterIndex": fmt.Sprint(idx)})
+						n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, map[string]string{"summaryFunction": callee.String(), "parameterIndex": fmt.Sprint(idx)})
 						state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "interprocedural-return", call.Pos(), fmt.Sprint(idx)))
 					}
 				}
@@ -443,7 +462,7 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 	}
 	if b.shouldPropagate(common) {
 		if tr, ok := b.combineCallArgTaints(state, common); ok {
-			n := b.addNode("call", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.tauntKinds, "", tr.confidence, nil)
+			n := b.addNode("call", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, nil)
 			state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "call-return", call.Pos(), callName(common)))
 		}
 	}
@@ -479,7 +498,7 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		return
 	}
 	idx := argIndex
-	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.tauntKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), map[string]string{"pattern": pat.Pattern})
+	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.taintKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), map[string]string{"pattern": pat.Pattern})
 	tr = b.connectTrace(tr, sink, "sink", pos, fmt.Sprint(argIndex))
 	sourceID := firstNonEmpty(tr.sourceID, firstString(tr.nodeIDs))
 	if sourceID == "" {
@@ -490,7 +509,7 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		return
 	}
 	b.sliceSeen[id] = true
-	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: uniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: uniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.tauntKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Summary: summary})
+	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: uniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: uniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Summary: summary})
 }
 
 func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Function, pos token.Pos, source, sink bool, category string, taints []string, fieldPath, confidence string, props map[string]string) model.DataFlowNode {
@@ -632,7 +651,7 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 	case *ssa.Const:
 		if x.Value != nil && x.Value.Kind() == constant.String {
 			for _, pat := range b.matchValueSource(x) {
-				return dataFlowTrace{generated: true, tauntKinds: taintsForPattern(pat), confidence: pat.Confidence}, true
+				return dataFlowTrace{generated: true, taintKinds: taintsForPattern(pat), confidence: pat.Confidence}, true
 			}
 		}
 	}
@@ -810,6 +829,44 @@ func (b *dataFlowBuilder) matchParameterSource(fn *ssa.Function, idx int, p *ssa
 	}
 	_ = idx
 	return out
+}
+
+func endpointHandlersForPackages(a *Analyzer, pkgs []*packages.Package) map[string][]model.APIEndpoint {
+	out := map[string][]model.APIEndpoint{}
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		facts := a.endpointFactsForPackage(pkg)
+		for _, endpoint := range facts.endpoints {
+			handler := strings.TrimSpace(endpoint.Handler)
+			if handler == "" || handler == "func literal" {
+				continue
+			}
+			out[handler] = append(out[handler], endpoint)
+			if pkg.PkgPath != "" {
+				out[pkg.PkgPath+"."+handler] = append(out[pkg.PkgPath+"."+handler], endpoint)
+			}
+		}
+	}
+	return out
+}
+
+func (b *dataFlowBuilder) matchEndpointHandlerParam(fn *ssa.Function, p *ssa.Parameter) []model.APIEndpoint {
+	if fn == nil || p == nil || len(b.endpoints) == 0 {
+		return nil
+	}
+	endpoints := append([]model.APIEndpoint{}, b.endpoints[fn.Name()]...)
+	endpoints = append(endpoints, b.endpoints[fn.String()]...)
+	if len(endpoints) == 0 {
+		return nil
+	}
+	typeText := p.Type().String()
+	name := strings.ToLower(p.Name())
+	if strings.Contains(typeText, "net/http.Request") || strings.Contains(typeText, "gin.Context") || strings.Contains(typeText, "echo.Context") || strings.Contains(typeText, "fiber.Ctx") || strings.Contains(typeText, "context.Context") || name == "r" || name == "req" || name == "request" || name == "c" || name == "ctx" {
+		return endpoints
+	}
+	return nil
 }
 
 func matchDataFlowPatterns(patterns []model.DataFlowPattern, symbol, name, pkgPath, typ, code string) []model.DataFlowPattern {
@@ -1032,7 +1089,7 @@ func combineTraces(a, b dataFlowTrace) dataFlowTrace {
 	if b.empty() {
 		return a
 	}
-	out := dataFlowTrace{nodeIDs: uniqueStrings(append(a.nodeIDs, b.nodeIDs...)), edgeIDs: uniqueStrings(append(a.edgeIDs, b.edgeIDs...)), params: map[int]bool{}, tauntKinds: uniqueStrings(append(a.tauntKinds, b.tauntKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
+	out := dataFlowTrace{nodeIDs: uniqueStrings(append(a.nodeIDs, b.nodeIDs...)), edgeIDs: uniqueStrings(append(a.edgeIDs, b.edgeIDs...)), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
 	for k := range a.params {
 		out.params[k] = true
 	}

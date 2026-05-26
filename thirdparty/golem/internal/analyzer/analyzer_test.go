@@ -3,6 +3,7 @@ package analyzer
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,23 @@ func TestAnalyzeSimpleProjectStaticCallGraph(t *testing.T) {
 	}
 	if report.CallGraph.Stats.NodeCount == 0 || report.CallGraph.Stats.EdgeCount == 0 {
 		t.Fatalf("expected graph nodes and edges, got %#v", report.CallGraph.Stats)
+	}
+}
+
+func TestAnalyzeSimpleProjectAdvancedCallGraphModes(t *testing.T) {
+	for _, mode := range []string{"cha", "vta"} {
+		t.Run(mode, func(t *testing.T) {
+			report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "simple"), IncludeLocal: true, CallGraphMode: mode, ToolVersion: "test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.CallGraph == nil {
+				t.Fatal("expected call graph")
+			}
+			if report.CallGraph.Stats.NodeCount == 0 || report.CallGraph.Stats.EdgeCount == 0 {
+				t.Fatalf("expected graph nodes and edges for %s, got %#v diagnostics=%#v", mode, report.CallGraph.Stats, report.CallGraph.Diagnostics)
+			}
+		})
 	}
 }
 
@@ -231,6 +249,9 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if report.Stats.DataFlowSourceCount == 0 || report.Stats.DataFlowSinkCount == 0 || report.Stats.DataFlowSliceCount == 0 {
 		t.Fatalf("expected data-flow stats, got %#v", report.Stats)
 	}
+	if report.Stats.APIEndpointCount < 3 || report.Stats.ExternalURLCount == 0 || report.Stats.ServiceCount < 2 {
+		t.Fatalf("expected endpoint/url/service stats, got endpoints=%#v urls=%#v services=%#v stats=%#v", report.APIEndpoints, report.ExternalURLs, report.Services, report.Stats)
+	}
 	if report.DataFlow.Stats.SliceCount < 6 {
 		t.Fatalf("expected interprocedural, field, channel, closure, crypto, and native slices, got %#v", report.DataFlow.Slices)
 	}
@@ -264,5 +285,33 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
+	}
+	paths := map[string]bool{}
+	listeners := map[string]bool{}
+	for _, endpoint := range report.APIEndpoints {
+		paths[endpoint.Path] = true
+		if endpoint.Kind == "http-listener" {
+			listeners[endpoint.Host] = true
+		}
+	}
+	for _, path := range []string{"/search", "/api/exec"} {
+		if !paths[path] {
+			t.Fatalf("expected endpoint path %s in %#v", path, report.APIEndpoints)
+		}
+	}
+	if !listeners[":8080"] {
+		t.Fatalf("expected :8080 listener endpoint in %#v", report.APIEndpoints)
+	}
+	var sanitizedURL bool
+	for _, external := range report.ExternalURLs {
+		if external.URL == "https://api.example.com/v1/search" && external.Host == "api.example.com" {
+			sanitizedURL = true
+		}
+		if strings.Contains(external.URL, "token=") || strings.Contains(external.URL, "fragment") {
+			t.Fatalf("external URL was not sanitized: %#v", external)
+		}
+	}
+	if !sanitizedURL {
+		t.Fatalf("expected sanitized external URL evidence in %#v", report.ExternalURLs)
 	}
 }

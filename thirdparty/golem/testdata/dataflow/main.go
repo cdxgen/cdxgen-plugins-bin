@@ -8,6 +8,7 @@ import "C"
 
 import (
 	"crypto/aes"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -59,4 +60,17 @@ func NativeFlow(r *http.Request) {
 	cs := C.CString(v)
 	defer C.free(unsafe.Pointer(cs))
 	C.native_sink(cs)
+}
+
+func Handler(w http.ResponseWriter, r *http.Request) {
+	q := r.FormValue("q")
+	_, _ = fmt.Fprintf(w, q)
+}
+
+func RegisterEndpoints() {
+	http.HandleFunc("/search", Handler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/exec", Handler)
+	_ = http.ListenAndServe(":8080", mux)
+	_ = "https://api.example.com/v1/search?token=redacted#fragment"
 }
