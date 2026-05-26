@@ -71,20 +71,38 @@ func isLocalReplacement(path string, version string) bool {
 	if version != "" || path == "" {
 		return false
 	}
-	return strings.HasPrefix(path, ".") || strings.HasPrefix(path, string(filepath.Separator))
+	return isRelativeReplacementPath(path) || isAbsoluteReplacementPath(path)
 }
 
 func replacementPathKind(path string, version string) string {
 	if version != "" {
 		return "module"
 	}
-	if strings.HasPrefix(path, string(filepath.Separator)) {
+	if isAbsoluteReplacementPath(path) {
 		return "absolute"
 	}
-	if strings.HasPrefix(path, ".") {
+	if isRelativeReplacementPath(path) {
 		return "relative"
 	}
 	return "module"
+}
+
+func isRelativeReplacementPath(path string) bool {
+	return strings.HasPrefix(path, ".")
+}
+
+func isAbsoluteReplacementPath(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, string(filepath.Separator)) {
+		return true
+	}
+	if len(path) >= 3 && isWindowsDriveLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+		return true
+	}
+	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, `//`)
+}
+
+func isWindowsDriveLetter(b byte) bool {
+	return b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
 }
 
 func vendorModules(root string) map[string]bool {

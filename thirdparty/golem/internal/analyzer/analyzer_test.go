@@ -171,6 +171,35 @@ func TestAnalyzeAdvancedScopesAndSupplyChainEvidence(t *testing.T) {
 	}
 }
 
+func TestReplacementPathClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		version  string
+		local    bool
+		pathKind string
+	}{
+		{name: "relative dot slash", path: "./dep", local: true, pathKind: "relative"},
+		{name: "relative dot dot", path: "../dep", local: true, pathKind: "relative"},
+		{name: "posix absolute", path: "/opt/dep", local: true, pathKind: "absolute"},
+		{name: "windows drive backslash absolute", path: `C:\dep`, local: true, pathKind: "absolute"},
+		{name: "windows drive slash absolute", path: `D:/src/dep`, local: true, pathKind: "absolute"},
+		{name: "windows unc absolute", path: `\\server\share\dep`, local: true, pathKind: "absolute"},
+		{name: "module path", path: "example.com/dep", local: false, pathKind: "module"},
+		{name: "versioned replacement", path: "example.com/dep", version: "v1.2.3", local: false, pathKind: "module"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLocalReplacement(tt.path, tt.version); got != tt.local {
+				t.Fatalf("isLocalReplacement(%q, %q)=%v want %v", tt.path, tt.version, got, tt.local)
+			}
+			if got := replacementPathKind(tt.path, tt.version); got != tt.pathKind {
+				t.Fatalf("replacementPathKind(%q, %q)=%q want %q", tt.path, tt.version, got, tt.pathKind)
+			}
+		})
+	}
+}
+
 func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("security fixture build tags target darwin/linux")
