@@ -2,6 +2,8 @@
 
 Golem (Go Library Evidence Mapper) is a native Go helper for cdxgen. It analyzes Go source projects with the Go toolchain and emits detailed semantic evidence about packages, modules, imports, declarations, type-resolved library usages, build directives, native interop artifacts, security-sensitive API signals, and optional call graphs.
 
+It also emits a dedicated `crypto` evidence attribute for Go cryptography review. This includes crypto libraries, algorithms, protocols, related material indicators, operations, and crypto-specific findings. Values are kept small and safe: source locations, symbols, categories, counts, OIDs, and material types are emitted; raw keys, secrets, embedded file contents, and generator command output are not.
+
 ## Usage
 
 ```bash
@@ -20,13 +22,13 @@ evinse -i bom.json -o bom.evinse.json -l go --golem-callgraph static /absolute/p
 
 Advanced cdxgen options map directly to Golem analysis settings:
 
-| cdxgen option | Golem behavior |
-| --- | --- |
-| `--golem-command` | Use a specific helper binary instead of the bundled one. |
-| `--golem-callgraph none|static|rta|pointer` | Select call graph depth and cost. |
-| `--golem-patterns ./...` | Select Go package patterns. |
-| `--golem-tags tag1,tag2` | Load packages with build tags. |
-| `--golem-tests` | Include test variants in package loading and evidence. |
+| cdxgen option            | Golem behavior                                           |
+| ------------------------ | -------------------------------------------------------- | --- | -------- | --------------------------------- |
+| `--golem-command`        | Use a specific helper binary instead of the bundled one. |
+| `--golem-callgraph none  | static                                                   | rta | pointer` | Select call graph depth and cost. |
+| `--golem-patterns ./...` | Select Go package patterns.                              |
+| `--golem-tags tag1,tag2` | Load packages with build tags.                           |
+| `--golem-tests`          | Include test variants in package loading and evidence.   |
 
 ## Call graph modes
 
@@ -66,6 +68,7 @@ Important property groups include:
 - module posture: `cdx:golem:modulePath`, `cdx:golem:goVersion`, `cdx:golem:localReplacement`, `cdx:golem:vendored`, `cdx:golem:privateModuleCandidate`, `cdx:golem:licenseFileCount`
 - usage evidence: `cdx:golem:usageScopes`, `cdx:golem:testOnly`, `cdx:golem:occurrenceEvidenceKinds`, import/symbol occurrence counts
 - security review: `cdx:golem:securitySignalCategory`, `cdx:golem:securitySignalSeverity`, metadata signal category and severity summaries
+- crypto/CBOM review: `cdx:golem:cryptoLibraryCount`, `cdx:golem:cryptoAssetCount`, `cdx:golem:cryptoOperationCount`, `cdx:golem:cryptoMaterialCount`, `cdx:golem:cryptoProtocolCount`, `cdx:golem:cryptoFindingCount`, `cdx:golem:cryptoAlgorithms`, `cdx:golem:cryptoFinding`
 
 The cdxgen repo documents the consumer side in `docs/GO_EVINSE_GOLEM.md`, `docs/GO_EVINSE_GOLEM_THREAT_MODEL.md`, `docs/CUSTOM_PROPERTIES.md`, and `docs/BOM_AUDIT.md`.
 
@@ -80,8 +83,13 @@ The JSON report includes Go-specific evidence useful for AppSec and compliance r
 - cgo directives and `import "C"`/`C.symbol` signals when present
 - security-sensitive API signals for unsafe, reflection, syscall, plugin loading, process execution, environment access, HTTP, TLS, weak crypto, weak randomness, archive handling, templates, database opens, and filesystem writes
 - focused heuristics such as `tls.Config{InsecureSkipVerify:true}`
+- dedicated crypto evidence under `crypto`, including algorithms such as MD5, SHA-1/SHA-2, AES, RSA, Ed25519, HMAC, PBKDF2, and X25519 when type-resolved selectors are present
+- related cryptographic material indicators such as private keys, public keys, tokens, nonces, salts, credentials, and passwords, detected from symbol names and literal presence without copying literal values
+- crypto protocol evidence such as TLS usage and TLS misconfiguration findings
 
 Signal values are categories/counts/symbol names and source locations only; `golem` does not copy raw environment values, command output, embedded file contents, or secrets into JSON.
+
+The first crypto implementation is intentionally not a full data-flow engine. It is a precise source/classification layer that cdxgen can convert into CycloneDX cryptographic assets. Source-to-sink flows for key material, plaintext, ciphertext, and protocol sinks should be added as a separate graph pass so the output can preserve the same safety and compactness guarantees.
 
 ## Threat model notes
 

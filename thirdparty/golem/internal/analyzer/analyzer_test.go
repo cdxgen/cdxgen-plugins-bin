@@ -191,4 +191,31 @@ func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
 			t.Fatalf("expected security signal category %s in %#v", category, report.SecuritySignals)
 		}
 	}
+	if report.Crypto == nil {
+		t.Fatal("expected dedicated crypto evidence")
+	}
+	if report.Stats.CryptoLibraryCount == 0 || report.Stats.CryptoAssetCount == 0 || report.Stats.CryptoOperationCount == 0 || report.Stats.CryptoProtocolCount == 0 || report.Stats.CryptoFindingCount == 0 {
+		t.Fatalf("expected crypto stats, got %#v", report.Stats)
+	}
+	var md5Seen bool
+	var tlsSeen bool
+	var weakFindingSeen bool
+	for _, asset := range report.Crypto.Assets {
+		if asset.Name == "md5" && asset.AssetType == "algorithm" && asset.OID != "" {
+			md5Seen = true
+		}
+	}
+	for _, protocol := range report.Crypto.Protocols {
+		if protocol.Type == "tls" {
+			tlsSeen = true
+		}
+	}
+	for _, finding := range report.Crypto.Findings {
+		if finding.RuleID == "GOLEM-CRYPTO-WEAK-MD5" || finding.RuleID == "GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY" {
+			weakFindingSeen = true
+		}
+	}
+	if !md5Seen || !tlsSeen || !weakFindingSeen {
+		t.Fatalf("expected md5/tls crypto evidence, got %#v", report.Crypto)
+	}
 }

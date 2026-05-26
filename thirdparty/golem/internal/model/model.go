@@ -67,6 +67,7 @@ type FileEvidence struct {
 	Usages          []LibraryUsage    `json:"usages,omitempty"`
 	BuildDirectives []BuildDirective  `json:"buildDirectives,omitempty"`
 	SecuritySignals []SecuritySignal  `json:"securitySignals,omitempty"`
+	Crypto          *CryptoEvidence   `json:"crypto,omitempty"`
 	Properties      map[string]string `json:"properties,omitempty"`
 }
 type BuildDirective struct {
@@ -98,6 +99,86 @@ type SecuritySignal struct {
 	Recommendation string            `json:"recommendation,omitempty"`
 	Range          Range             `json:"range"`
 	Properties     map[string]string `json:"properties,omitempty"`
+}
+type CryptoLibrary struct {
+	ID          string            `json:"id"`
+	Path        string            `json:"path"`
+	Family      string            `json:"family,omitempty"`
+	Standard    bool              `json:"standard"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type CryptoAsset struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	AssetType   string            `json:"assetType"`
+	Primitive   string            `json:"primitive,omitempty"`
+	Strength    string            `json:"strength,omitempty"`
+	Standard    string            `json:"standard,omitempty"`
+	OID         string            `json:"oid,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Symbol      string            `json:"symbol,omitempty"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type CryptoOperation struct {
+	ID            string            `json:"id"`
+	OperationType string            `json:"operationType"`
+	Algorithm     string            `json:"algorithm,omitempty"`
+	AssetID       string            `json:"assetId,omitempty"`
+	PackagePath   string            `json:"packagePath,omitempty"`
+	Symbol        string            `json:"symbol,omitempty"`
+	UsageScope    string            `json:"usageScope,omitempty"`
+	Range         Range             `json:"range"`
+	Properties    map[string]string `json:"properties,omitempty"`
+}
+type CryptoMaterial struct {
+	ID          string            `json:"id"`
+	Type        string            `json:"type"`
+	Name        string            `json:"name,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Symbol      string            `json:"symbol,omitempty"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type CryptoProtocol struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Version     string            `json:"version,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Symbol      string            `json:"symbol,omitempty"`
+	UsageScope  string            `json:"usageScope,omitempty"`
+	Range       Range             `json:"range"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type CryptoFinding struct {
+	ID             string            `json:"id"`
+	RuleID         string            `json:"ruleId"`
+	Severity       string            `json:"severity,omitempty"`
+	Confidence     string            `json:"confidence,omitempty"`
+	Summary        string            `json:"summary"`
+	Recommendation string            `json:"recommendation,omitempty"`
+	PackagePath    string            `json:"packagePath,omitempty"`
+	UsageScope     string            `json:"usageScope,omitempty"`
+	AssetID        string            `json:"assetId,omitempty"`
+	OperationID    string            `json:"operationId,omitempty"`
+	MaterialID     string            `json:"materialId,omitempty"`
+	Range          Range             `json:"range"`
+	Properties     map[string]string `json:"properties,omitempty"`
+}
+type CryptoEvidence struct {
+	Libraries  []CryptoLibrary   `json:"libraries,omitempty"`
+	Assets     []CryptoAsset     `json:"assets,omitempty"`
+	Operations []CryptoOperation `json:"operations,omitempty"`
+	Materials  []CryptoMaterial  `json:"materials,omitempty"`
+	Protocols  []CryptoProtocol  `json:"protocols,omitempty"`
+	Findings   []CryptoFinding   `json:"findings,omitempty"`
+	Properties map[string]string `json:"properties,omitempty"`
 }
 type ImportUsage struct {
 	Path           string  `json:"path"`
@@ -183,6 +264,7 @@ type PackageEvidence struct {
 	BuildDirectives []BuildDirective `json:"buildDirectives,omitempty"`
 	NativeArtifacts []NativeArtifact `json:"nativeArtifacts,omitempty"`
 	SecuritySignals []SecuritySignal `json:"securitySignals,omitempty"`
+	Crypto          *CryptoEvidence  `json:"crypto,omitempty"`
 	Diagnostics     []Diagnostic     `json:"diagnostics,omitempty"`
 }
 type CallGraph struct {
@@ -249,6 +331,12 @@ type Stats struct {
 	WorkspaceModuleCount   int `json:"workspaceModuleCount"`
 	PrivateModuleHintCount int `json:"privateModuleHintCount"`
 	LicenseFileModuleCount int `json:"licenseFileModuleCount"`
+	CryptoLibraryCount     int `json:"cryptoLibraryCount"`
+	CryptoAssetCount       int `json:"cryptoAssetCount"`
+	CryptoOperationCount   int `json:"cryptoOperationCount"`
+	CryptoMaterialCount    int `json:"cryptoMaterialCount"`
+	CryptoProtocolCount    int `json:"cryptoProtocolCount"`
+	CryptoFindingCount     int `json:"cryptoFindingCount"`
 	DiagnosticCount        int `json:"diagnosticCount"`
 }
 
@@ -286,20 +374,21 @@ type SupplyChainEvidence struct {
 	Properties             map[string]string  `json:"properties,omitempty"`
 }
 type Report struct {
-	SchemaVersion   string            `json:"schemaVersion"`
-	Tool            ToolInfo          `json:"tool"`
-	Runtime         RuntimeInfo       `json:"runtime"`
-	Options         AnalysisOptions   `json:"options"`
-	RootModules     []Module          `json:"rootModules,omitempty"`
-	Modules         []Module          `json:"modules,omitempty"`
-	Packages        []PackageEvidence `json:"packages,omitempty"`
-	Files           []FileEvidence    `json:"files,omitempty"`
-	Imports         []ImportUsage     `json:"imports,omitempty"`
-	Declarations    []Declaration     `json:"declarations,omitempty"`
-	Usages          []LibraryUsage    `json:"usages,omitempty"`
-	BuildDirectives []BuildDirective  `json:"buildDirectives,omitempty"`
-	NativeArtifacts []NativeArtifact  `json:"nativeArtifacts,omitempty"`
-	SecuritySignals []SecuritySignal  `json:"securitySignals,omitempty"`
+	SchemaVersion   string               `json:"schemaVersion"`
+	Tool            ToolInfo             `json:"tool"`
+	Runtime         RuntimeInfo          `json:"runtime"`
+	Options         AnalysisOptions      `json:"options"`
+	RootModules     []Module             `json:"rootModules,omitempty"`
+	Modules         []Module             `json:"modules,omitempty"`
+	Packages        []PackageEvidence    `json:"packages,omitempty"`
+	Files           []FileEvidence       `json:"files,omitempty"`
+	Imports         []ImportUsage        `json:"imports,omitempty"`
+	Declarations    []Declaration        `json:"declarations,omitempty"`
+	Usages          []LibraryUsage       `json:"usages,omitempty"`
+	BuildDirectives []BuildDirective     `json:"buildDirectives,omitempty"`
+	NativeArtifacts []NativeArtifact     `json:"nativeArtifacts,omitempty"`
+	SecuritySignals []SecuritySignal     `json:"securitySignals,omitempty"`
+	Crypto          *CryptoEvidence      `json:"crypto,omitempty"`
 	SupplyChain     *SupplyChainEvidence `json:"supplyChain,omitempty"`
 	CallGraph       *CallGraph           `json:"callGraph,omitempty"`
 	Diagnostics     []Diagnostic         `json:"diagnostics,omitempty"`

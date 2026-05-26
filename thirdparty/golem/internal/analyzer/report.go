@@ -100,6 +100,7 @@ func Analyze(options Options) (*model.Report, error) {
 		report.BuildDirectives = append(report.BuildDirectives, pe.BuildDirectives...)
 		report.NativeArtifacts = append(report.NativeArtifacts, pe.NativeArtifacts...)
 		report.SecuritySignals = append(report.SecuritySignals, pe.SecuritySignals...)
+		report.Crypto = mergeCryptoEvidence(report.Crypto, pe.Crypto)
 		report.Diagnostics = append(report.Diagnostics, pe.Diagnostics...)
 		report.Files = append(report.Files, a.fileEvidence(pkg, pe)...)
 	}
@@ -163,6 +164,14 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	report.Stats.BuildDirectiveCount = len(report.BuildDirectives)
 	report.Stats.NativeArtifactCount = len(report.NativeArtifacts)
 	report.Stats.SecuritySignalCount = len(report.SecuritySignals)
+	if report.Crypto != nil {
+		report.Stats.CryptoLibraryCount = len(report.Crypto.Libraries)
+		report.Stats.CryptoAssetCount = len(report.Crypto.Assets)
+		report.Stats.CryptoOperationCount = len(report.Crypto.Operations)
+		report.Stats.CryptoMaterialCount = len(report.Crypto.Materials)
+		report.Stats.CryptoProtocolCount = len(report.Crypto.Protocols)
+		report.Stats.CryptoFindingCount = len(report.Crypto.Findings)
+	}
 	if report.SupplyChain != nil {
 		report.Stats.GoModReplaceCount = len(report.SupplyChain.Replaces)
 		report.Stats.GoModExcludeCount = len(report.SupplyChain.Excludes)
@@ -198,4 +207,5 @@ func sortReport(report *model.Report) {
 	})
 	sort.Slice(report.NativeArtifacts, func(i, j int) bool { return report.NativeArtifacts[i].Path < report.NativeArtifacts[j].Path })
 	sort.Slice(report.SecuritySignals, func(i, j int) bool { return report.SecuritySignals[i].ID < report.SecuritySignals[j].ID })
+	sortCryptoEvidence(report.Crypto)
 }

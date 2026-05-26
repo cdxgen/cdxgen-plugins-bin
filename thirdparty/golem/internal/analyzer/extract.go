@@ -36,11 +36,13 @@ func (a *Analyzer) packageEvidence(pkg *packages.Package) model.PackageEvidence 
 		usages := a.usagesForFile(pkg, file, imports)
 		directives := a.buildDirectivesForFile(file)
 		signals := a.securitySignalsForFile(pkg, file)
+		crypto := a.cryptoEvidenceForFile(pkg, file)
 		pe.Imports = append(pe.Imports, imports...)
 		pe.Declarations = append(pe.Declarations, decls...)
 		pe.Usages = append(pe.Usages, usages...)
 		pe.BuildDirectives = append(pe.BuildDirectives, directives...)
 		pe.SecuritySignals = append(pe.SecuritySignals, signals...)
+		pe.Crypto = mergeCryptoEvidence(pe.Crypto, crypto)
 	}
 	pe.NativeArtifacts = nativeArtifactsForPackage(pkg)
 	return pe
@@ -78,8 +80,35 @@ func (a *Analyzer) fileEvidence(pkg *packages.Package, pe model.PackageEvidence)
 		file := ensureFile(byFile, signal.Range.Start.Filename, pkg, compiled)
 		file.SecuritySignals = append(file.SecuritySignals, signal)
 	}
+	if pe.Crypto != nil {
+		for _, library := range pe.Crypto.Libraries {
+			file := ensureFile(byFile, library.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Libraries: []model.CryptoLibrary{library}})
+		}
+		for _, asset := range pe.Crypto.Assets {
+			file := ensureFile(byFile, asset.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Assets: []model.CryptoAsset{asset}})
+		}
+		for _, operation := range pe.Crypto.Operations {
+			file := ensureFile(byFile, operation.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Operations: []model.CryptoOperation{operation}})
+		}
+		for _, material := range pe.Crypto.Materials {
+			file := ensureFile(byFile, material.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Materials: []model.CryptoMaterial{material}})
+		}
+		for _, protocol := range pe.Crypto.Protocols {
+			file := ensureFile(byFile, protocol.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Protocols: []model.CryptoProtocol{protocol}})
+		}
+		for _, finding := range pe.Crypto.Findings {
+			file := ensureFile(byFile, finding.Range.Start.Filename, pkg, compiled)
+			file.Crypto = mergeCryptoEvidence(file.Crypto, &model.CryptoEvidence{Findings: []model.CryptoFinding{finding}})
+		}
+	}
 	files := make([]model.FileEvidence, 0, len(byFile))
 	for _, file := range byFile {
+		sortCryptoEvidence(file.Crypto)
 		files = append(files, *file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
