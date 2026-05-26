@@ -1,0 +1,125 @@
+name: Golem E2E repository tests
+
+on:
+  pull_request:
+    paths:
+    - '.github/workflows/golem-e2e.yml'
+    - 'thirdparty/golem/**'
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: 'Comma-separated built-in repo names or all'
+        required: false
+        default: 'fatih-color,gorilla-mux,gin-examples,govwa,go-sqlite3'
+      callgraph_modes:
+        description: 'Comma-separated call graph modes'
+        required: false
+        default: 'none,static'
+      dataflow_modes:
+        description: 'Comma-separated data-flow modes'
+        required: false
+        default: 'none,security,all'
+      dataflow_callgraph:
+        description: 'Data-flow call graph mode'
+        required: false
+        default: 'static'
+      max_procs:
+        description: 'Golem --max-procs value; 0 uses all cores'
+        required: false
+        default: '0'
+      dataflow_workers:
+        description: 'Golem --dataflow-workers value; 0 follows max procs'
+        required: false
+        default: '0'
+      memory_limit:
+        description: 'Golem soft memory limit, for example 6GiB'
+        required: false
+        default: '6GiB'
+      progress:
+        description: 'Emit progress logs from Golem analyses'
+        required: false
+        default: 'true'
+  schedule:
+  - cron: '21 3 * * 2'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+# https://docs.github.com/en/actions/writing-workflows/choosing-your-workflow/controlling-permissions-for-github_token
+permissions: {}
+
+jobs:
+  golem-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CGO_ENABLED: '1'
+      GOFLAGS: '-mod=mod'
+      GOLEM_E2E_REPOS: ${{ github.event.inputs.repos || 'fatih-color,gorilla-mux,gin-examples,govwa,go-sqlite3' }}
+      GOLEM_E2E_CALLGRAPH_MODES: ${{ github.event.inputs.callgraph_modes || 'none,static' }}
+      GOLEM_E2E_DATAFLOW_MODES: ${{ github.event.inputs.dataflow_modes || 'none,security,all' }}
+      GOLEM_E2E_DATAFLOW_CALLGRAPH: ${{ github.event.inputs.dataflow_callgraph || 'static' }}
+      GOLEM_E2E_MAX_PROCS: ${{ github.event.inputs.max_procs || '0' }}
+      GOLEM_E2E_DATAFLOW_WORKERS: ${{ github.event.inputs.dataflow_workers || '0' }}
+      GOLEM_E2E_MEMORY_LIMIT: ${{ github.event.inputs.memory_limit || '6GiB' }}
+      GOLEM_E2E_PROGRESS: ${{ github.event.inputs.progress || 'true' }}
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version: '^1.25.6'
+        cache-dependency-path: thirdparty/golem/go.sum
+
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: '3.13'
+
+    - name: Install native build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends build-essential git ca-certificates
+
+    - name: Unit tests
+      working-directory: thirdparty/golem
+      run: go test ./...
+
+    - name: Build golem
+      working-directory: thirdparty/golem
+      run: |
+        mkdir -p build
+        go build -trimpath -ldflags '-s -w -X main.version=e2e' -o build/golem-ci ./cmd/golem
+        ./build/golem-ci version
+
+    - name: Real repository E2E analyses
+      working-directory: thirdparty/golem
+      run: |
+        python3 scripts/real-e2e.py \
+          --golem ./build/golem-ci \
+          --workdir /tmp/golem-real-repos \
+          --out /tmp/golem-real-results \
+          --repos "$GOLEM_E2E_REPOS" \
+          --modes "$GOLEM_E2E_CALLGRAPH_MODES" \
+          --dataflow-modes "$GOLEM_E2E_DATAFLOW_MODES" \
+          --dataflow-callgraph "$GOLEM_E2E_DATAFLOW_CALLGRAPH" \
+          --max-procs "$GOLEM_E2E_MAX_PROCS" \
+          --dataflow-workers "$GOLEM_E2E_DATAFLOW_WORKERS" \
+          --memory-limit "$GOLEM_E2E_MEMORY_LIMIT" \
+          --clone-timeout 120 \
+          --analyze-timeout 240 \
+          --fail-on-repo-error \
+          $([ "$GOLEM_E2E_PROGRESS" = "true" ] && printf %s --progress)
+
+    - name: Upload E2E reports
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: golem-e2e-results
+        path: /tmp/golem-real-results
+        if-no-files-found: ignore
+        retention-days: 7

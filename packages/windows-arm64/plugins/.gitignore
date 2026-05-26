@@ -3,3 +3,5 @@ trivy/
 cargo-auditable/
 osquery/
 dosai/
+sourcekitten/
+golem/

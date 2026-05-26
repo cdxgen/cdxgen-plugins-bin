@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Remove old plugin directories to ensure a clean build
-rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector
-mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector
+rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem
+mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/sourcekitten/
 sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
@@ -18,7 +18,7 @@ sha256sum plugins/osquery/osqueryi-linux-amd64 > plugins/osquery/osqueryi-linux-
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-amd64 plugins/dosai/dosai-linux-amd64
 sha256sum plugins/dosai/dosai-linux-amd64 > plugins/dosai/dosai-linux-amd64.sha256
 
-for plug in trivy trustinspector
+for plug in trivy trustinspector golem
 do
     mkdir -p "plugins/$plug"
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-amd64"

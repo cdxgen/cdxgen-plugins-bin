@@ -2,6 +2,7 @@ New-Item -ItemType Directory -Path plugins\osquery -Force
 New-Item -ItemType Directory -Path plugins\dosai -Force
 New-Item -ItemType Directory -Path plugins\trivy -Force
 New-Item -ItemType Directory -Path plugins\trustinspector -Force
+New-Item -ItemType Directory -Path plugins\golem -Force
 
 $upxVersion = "5.1.1"
 $upxArchive = "upx-$upxVersion-win64.zip"
@@ -46,6 +47,16 @@ $env:CGO_ENABLED = "0"
 go build -ldflags "-s -w" -o build\trivy-windows-amd64.exe
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
+Remove-Item build -Recurse -Force
+cd ..\..
+
+
+cd thirdparty\golem
+$env:CGO_ENABLED = "0"
+go test ./...
+go build -trimpath -ldflags "-s -w" -o build\golem-windows-amd64.exe .\cmd\golem
+& "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\golem-windows-amd64.exe
+copy build\* ..\..\plugins\golem\
 Remove-Item build -Recurse -Force
 cd ..\..
 

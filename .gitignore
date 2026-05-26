@@ -112,3 +112,4 @@ test/obj
 
 .vscode/
 sbom-go-postbuild.cdx.json
+thirdparty/golem/build
