@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"unsafe"
 )
 
@@ -81,6 +82,17 @@ func NativeFlow(r *http.Request) {
 	cs := C.CString(v)
 	defer C.free(unsafe.Pointer(cs))
 	C.native_sink(cs)
+}
+
+func ReflectionFlow(r *http.Request) {
+	rv := reflect.ValueOf(r.FormValue("cmd"))
+	s, _ := rv.Interface().(string)
+	_ = exec.Command("sh", "-c", s)
+}
+
+func UnsafeFlow(r *http.Request) {
+	b := []byte(r.FormValue("ptr"))
+	_ = unsafe.String(&b[0], len(b))
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/tools/go/callgraph"
@@ -21,17 +22,18 @@ import (
 )
 
 type dataFlowTrace struct {
-	nodeIDs        []string
-	edgeIDs        []string
-	params         map[int]bool
-	taintKinds     []string
-	fieldPaths     []string
-	sourceID       string
-	sourceCategory string
-	sourcePURL     string
-	sourcePatterns []model.DataFlowPattern
-	confidence     string
-	generated      bool
+	nodeIDs             []string
+	edgeIDs             []string
+	params              map[int]bool
+	taintKinds          []string
+	fieldPaths          []string
+	sanitizedCategories []string
+	sourceID            string
+	sourceCategory      string
+	sourcePURL          string
+	sourcePatterns      []model.DataFlowPattern
+	confidence          string
+	generated           bool
 }
 
 type dataFlowState struct {
@@ -59,8 +61,15 @@ type dataFlowBuilder struct {
 	nodeSeen       map[string]bool
 	edgeSeen       map[string]bool
 	sliceSeen      map[string]bool
+	diagnosticSeen map[string]bool
+	sliceBudget    *dataFlowBudget
 	maxSlices      int
 	instructionCt  int
+}
+
+type dataFlowBudget struct {
+	max  int64
+	used atomic.Int64
 }
 
 func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, progress *progressLogger) *model.DataFlowEvidence {
@@ -77,7 +86,7 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	workers := dataFlowWorkerCount(a.options, len(funcs))
 	progress.Memoryf("data-flow starting mode=%s functions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), workers, a.options.DataFlowMax)
 	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
-	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: a.options.DataFlowMax}
+	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax}
 	progress.Memoryf("data-flow inferring summaries")
 	b.inferSummaries(funcs)
 	progress.Memoryf("data-flow summaries inferred")
@@ -107,6 +116,8 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	out.Stats.InstructionCount = b.instructionCt
 	out.Stats.WorkerCount = workers
 	out.Stats.ElapsedMillis = int(time.Since(started).Milliseconds())
+	out.Stats.TruncationReasons = dataFlowTruncationReasons(out.Diagnostics)
+	out.Stats.Truncated = len(out.Stats.TruncationReasons) > 0
 	for _, n := range out.Nodes {
 		if n.Source {
 			out.Stats.SourceCount++
@@ -284,6 +295,12 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		p.RemovesTaintKinds = removes
 		set.Sanitizers = append(set.Sanitizers, p)
 	}
+	addCategorySan := func(kind, pattern, category string, sanitizes []string, removes ...string) {
+		p := dfPattern("sanitizer", kind, pattern, category)
+		p.RemovesTaintKinds = removes
+		p.SanitizesCategories = sanitizes
+		set.Sanitizers = append(set.Sanitizers, p)
+	}
 	if selected["base"] || mode == "all" || mode == "security" {
 		addSource("symbol", "os.Args", "cli", "user-input")
 		addSource("function", "os.Getenv", "environment", "environment", "secret")
@@ -296,7 +313,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addSource("type", "*net/http.Request", "http-request", "user-input")
 		addSource("type", "http.Request", "http-request", "user-input")
 		addSource("type", "context.Context", "context", "request-context")
-		for _, name := range []string{"fmt.Sprintf", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format"} {
+		for _, name := range []string{"fmt.Sprintf", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
 			addPass("function", name, "conversion")
 		}
 	}
@@ -324,7 +341,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jackc/pgx", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
 			addSink("function", name, "data", "user-input")
 		}
-		addSan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", "sql")
+		addCategorySan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", []string{"data"}, "sql")
 	}
 	if selected["filesystem"] || mode == "all" || mode == "security" {
 		for _, name := range []string{"os.Open", "os.OpenFile", "os.WriteFile", "os.ReadFile", "os.Create", "os.Mkdir", "os.MkdirAll", "os.Remove", "os.RemoveAll", "archive/zip", "archive/tar", "http.ServeFile"} {
@@ -332,7 +349,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		}
 		addPass("function", "path/filepath.Join", "path")
 		addPass("function", "path.Join", "path")
-		addSan("function", "path/filepath.Base", "path-validation", "path", "user-input")
+		addCategorySan("function", "path/filepath.Base", "path-validation", []string{"filesystem"}, "path")
 	}
 	if selected["crypto"] || mode == "all" || mode == "crypto" || mode == "security" {
 		for _, name := range []string{"crypto/aes.NewCipher", "crypto/des.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "github.com/golang-jwt/jwt", "github.com/dgrijalva/jwt-go"} {
@@ -346,6 +363,9 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addPass("function", "_Cfunc_CString", "native-conversion")
 		addPass("function", "_Cgo_ptr", "native-conversion")
 		addSink("package", "unsafe", "unsafe", "native")
+		for _, name := range []string{"unsafe.String", "unsafe.Slice", "reflect.Value.Call", "reflect.Value).Call", "reflect.Value.CallSlice", "reflect.Value).CallSlice"} {
+			addSink("function", name, "unsafe", "native")
+		}
 		df := dfPattern("sink", "function", "syscall.", "syscall", "native")
 		set.Sinks = append(set.Sinks, df)
 	}
@@ -422,6 +442,7 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 			case *ssa.Store:
 				if tr, ok := b.summaryTaintOf(state, x.Val); ok {
 					state.memory[addrKey(x.Addr)] = tr
+					b.rememberAggregateStore(state, x.Addr, tr)
 				}
 			case *ssa.MapUpdate:
 				if tr, ok := b.summaryTaintOf(state, x.Value); ok {
@@ -469,6 +490,56 @@ func newDataFlowState() dataFlowState {
 	return dataFlowState{values: map[ssa.Value]dataFlowTrace{}, memory: map[string]dataFlowTrace{}, chans: map[string]dataFlowTrace{}, visiting: map[ssa.Value]bool{}}
 }
 
+func newDataFlowBudget(max int) *dataFlowBudget {
+	if max <= 0 {
+		return &dataFlowBudget{}
+	}
+	return &dataFlowBudget{max: int64(max)}
+}
+
+func (b *dataFlowBudget) reserve() bool {
+	if b == nil || b.max <= 0 {
+		return true
+	}
+	for {
+		used := b.used.Load()
+		if used >= b.max {
+			return false
+		}
+		if b.used.CompareAndSwap(used, used+1) {
+			return true
+		}
+	}
+}
+
+func (b *dataFlowBudget) release() {
+	if b == nil || b.max <= 0 {
+		return
+	}
+	for {
+		used := b.used.Load()
+		if used <= 0 {
+			return
+		}
+		if b.used.CompareAndSwap(used, used-1) {
+			return
+		}
+	}
+}
+
+func (b *dataFlowBudget) exhausted() bool {
+	return b != nil && b.max > 0 && b.used.Load() >= b.max
+}
+
+func (b *dataFlowBuilder) rememberAggregateStore(state dataFlowState, addr ssa.Value, tr dataFlowTrace) {
+	switch a := addr.(type) {
+	case *ssa.IndexAddr:
+		state.memory[addrKey(a.X)+"[*]"] = tr.withFieldPath("[*]")
+	case *ssa.FieldAddr:
+		state.memory[addrKey(a.X)+fmt.Sprintf(".field%d", a.Field)] = tr.withFieldPath(fmt.Sprintf("field%d", a.Field))
+	}
+}
+
 type dataFlowFunctionResult struct {
 	index        int
 	functionName string
@@ -497,7 +568,7 @@ func (b *dataFlowBuilder) analyzeFunctions(funcs []*ssa.Function, workers int, p
 			for idx := range jobs {
 				fn := funcs[idx]
 				localOut := &model.DataFlowEvidence{Mode: b.out.Mode, Patterns: b.patterns}
-				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: b.maxSlices}
+				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: b.sliceBudget, maxSlices: b.maxSlices}
 				local.analyzeFunction(fn)
 				results <- dataFlowFunctionResult{index: idx, functionName: fn.String(), evidence: localOut, instructions: local.instructionCt}
 			}
@@ -536,6 +607,9 @@ func (b *dataFlowBuilder) mergeFunctionEvidence(df *model.DataFlowEvidence) {
 	if df == nil {
 		return
 	}
+	for _, diag := range df.Diagnostics {
+		b.addDiagnosticOnce(diag.Kind, diag.Message)
+	}
 	for _, node := range df.Nodes {
 		if b.nodeSeen[node.ID] {
 			continue
@@ -552,6 +626,7 @@ func (b *dataFlowBuilder) mergeFunctionEvidence(df *model.DataFlowEvidence) {
 	}
 	for _, slice := range df.Slices {
 		if b.maxSlices > 0 && len(b.out.Slices) >= b.maxSlices {
+			b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("data-flow slice limit reached at %d slices; additional slices were omitted", b.maxSlices))
 			return
 		}
 		if b.sliceSeen[slice.ID] {
@@ -577,6 +652,10 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 	}
 	for _, block := range fn.Blocks {
 		for _, instr := range block.Instrs {
+			if b.sliceBudget.exhausted() {
+				b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("data-flow slice limit reached at %d slices; additional slices were omitted", b.maxSlices))
+				return
+			}
 			b.instructionCt++
 			switch x := instr.(type) {
 			case *ssa.Store:
@@ -584,6 +663,7 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 					n := b.addNode("store", valueName(x.Addr), valueSymbol(x.Addr), valueType(x.Val), fn, x.Pos(), false, false, "", tr.taintKinds, strings.Join(tr.fieldPaths, "."), tr.confidence, nil)
 					tr = b.connectTrace(tr, n, "store", x.Pos(), valueName(x.Addr))
 					state.memory[addrKey(x.Addr)] = tr
+					b.rememberAggregateStore(state, x.Addr, tr)
 				}
 			case *ssa.MapUpdate:
 				if tr, ok := b.taintOf(state, x.Value); ok {
@@ -663,7 +743,7 @@ func (b *dataFlowBuilder) sanitizedCallTrace(fn *ssa.Function, state dataFlowSta
 	removed := map[string]bool{}
 	fullStop := false
 	for _, pat := range patterns {
-		if len(pat.RemovesTaintKinds) == 0 {
+		if len(pat.RemovesTaintKinds) == 0 && len(pat.SanitizesCategories) == 0 {
 			fullStop = true
 		}
 		for _, kind := range pat.RemovesTaintKinds {
@@ -673,6 +753,7 @@ func (b *dataFlowBuilder) sanitizedCallTrace(fn *ssa.Function, state dataFlowSta
 	if fullStop {
 		return dataFlowTrace{}, true
 	}
+	tr.sanitizedCategories = uniqueStrings(append(tr.sanitizedCategories, sanitizerCategories(patterns)...))
 	var kept []string
 	for _, kind := range tr.taintKinds {
 		if !removed[strings.ToLower(kind)] {
@@ -682,7 +763,7 @@ func (b *dataFlowBuilder) sanitizedCallTrace(fn *ssa.Function, state dataFlowSta
 	if len(kept) == 0 {
 		return dataFlowTrace{}, true
 	}
-	n := b.addNode("sanitizer", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, firstNonEmpty(patterns[0].Category, "sanitizer"), kept, "", tr.confidence, map[string]string{"removedTaintKinds": strings.Join(sortedMapKeys(removed), ",")})
+	n := b.addNode("sanitizer", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, firstNonEmpty(patterns[0].Category, "sanitizer"), kept, "", tr.confidence, map[string]string{"removedTaintKinds": strings.Join(sortedMapKeys(removed), ","), "sanitizesCategories": strings.Join(tr.sanitizedCategories, ",")})
 	tr.taintKinds = uniqueStrings(kept)
 	return b.connectTrace(tr, n, "sanitizer", call.Pos(), callName(common)), true
 }
@@ -728,6 +809,9 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 		if arg, ok := summaryCallArgument(common, callee, idx); ok {
 			if tr, ok := b.taintOf(state, arg); ok {
 				for cat := range cats {
+					if !traceAllowsSink(tr, cat) {
+						continue
+					}
 					pat := model.DataFlowPattern{Target: "sink", Kind: "function", Match: "exact", Pattern: callee.String(), Category: cat, Confidence: "medium"}
 					b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, fmt.Sprintf("Taint reaches %s sink in %s", edgeKind, callee.String()))
 				}
@@ -768,7 +852,7 @@ func (b *dataFlowBuilder) processAsyncCall(fn *ssa.Function, state dataFlowState
 	for _, pat := range b.matchCall(common, b.patterns.Sinks) {
 		args := callArgs(common)
 		for idx, arg := range args {
-			if tr, ok := b.taintOf(state, arg); ok {
+			if tr, ok := b.taintOf(state, arg); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 				b.emitSliceSink(fn, tr, pos, callName(common), callSymbol(common), "", pat, idx, "Taint reaches asynchronous "+kind+" sink")
 			}
 		}
@@ -778,30 +862,32 @@ func (b *dataFlowBuilder) processAsyncCall(fn *ssa.Function, state dataFlowState
 func (b *dataFlowBuilder) emitSink(fn *ssa.Function, state dataFlowState, call ssa.Value, common *ssa.CallCommon, pat model.DataFlowPattern) {
 	args := callArgs(common)
 	for idx, arg := range args {
-		if tr, ok := b.taintOf(state, arg); ok {
+		if tr, ok := b.taintOf(state, arg); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 			b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, "Taint reaches "+firstNonEmpty(pat.Category, "sink"))
 		}
 	}
 	if recv := receiverValue(common); recv != nil {
-		if tr, ok := b.taintOf(state, recv); ok {
+		if tr, ok := b.taintOf(state, recv); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 			b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, -1, "Taint reaches sink receiver")
 		}
 	}
 }
 
 func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos token.Pos, name, symbol, typ string, pat model.DataFlowPattern, argIndex int, summary string) {
-	if b.maxSlices > 0 && len(b.out.Slices) >= b.maxSlices {
-		return
-	}
 	idx := argIndex
-	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.taintKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), map[string]string{"pattern": pat.Pattern})
-	tr = b.connectTrace(tr, sink, "sink", pos, fmt.Sprint(argIndex))
 	sourceID := firstNonEmpty(tr.sourceID, firstString(tr.nodeIDs))
 	if sourceID == "" {
 		return
 	}
+	if !b.sliceBudget.reserve() {
+		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("data-flow slice limit reached at %d slices; additional slices were omitted", b.maxSlices))
+		return
+	}
+	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.taintKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), map[string]string{"pattern": pat.Pattern})
+	tr = b.connectTrace(tr, sink, "sink", pos, fmt.Sprint(argIndex))
 	id := stableID("df-slice", sourceID, sink.ID, strings.Join(tr.edgeIDs, ":"), fmt.Sprint(argIndex))
 	if b.sliceSeen[id] {
+		b.sliceBudget.release()
 		return
 	}
 	b.sliceSeen[id] = true
@@ -931,6 +1017,8 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 		return b.taintOf(state, x.X)
 	case *ssa.MakeInterface:
 		return b.taintOf(state, x.X)
+	case *ssa.TypeAssert:
+		return b.taintOf(state, x.X)
 	case *ssa.Slice:
 		if tr, ok := state.memory[addrKey(x.X)+"[*]"]; ok {
 			return tr.withFieldPath("[*]"), true
@@ -995,7 +1083,7 @@ func (b *dataFlowBuilder) recordSummarySink(fn *ssa.Function, common *ssa.CallCo
 	changed := false
 	for _, pat := range b.matchCall(common, b.patterns.Sinks) {
 		for idx, arg := range callArgs(common) {
-			if tr, ok := b.taintOf(state, arg); ok {
+			if tr, ok := b.taintOf(state, arg); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 				for p := range tr.params {
 					changed = b.addParamSink(fn, p, firstNonEmpty(pat.Category, "sink")) || changed
 				}
@@ -1011,6 +1099,9 @@ func (b *dataFlowBuilder) recordSummarySink(fn *ssa.Function, common *ssa.CallCo
 					if tr, ok := b.taintOf(state, args[paramIdx]); ok {
 						for callerParam := range tr.params {
 							for cat := range cats {
+								if !traceAllowsSink(tr, cat) {
+									continue
+								}
 								changed = b.addParamSink(fn, callerParam, cat) || changed
 							}
 						}
@@ -1232,6 +1323,9 @@ func callSymbol(common *ssa.CallCommon) string {
 	if callee := common.StaticCallee(); callee != nil {
 		return callee.String()
 	}
+	if name := unsafeBuiltinName(common); name != "" {
+		return "unsafe." + name
+	}
 	if common.Method != nil {
 		return objectSymbol(common.Method)
 	}
@@ -1244,6 +1338,9 @@ func callName(common *ssa.CallCommon) string {
 	}
 	if callee := common.StaticCallee(); callee != nil {
 		return callee.Name()
+	}
+	if name := unsafeBuiltinName(common); name != "" {
+		return name
 	}
 	if common.Method != nil {
 		return common.Method.Name()
@@ -1265,10 +1362,29 @@ func callPackage(common *ssa.CallCommon) string {
 	if callee := common.StaticCallee(); callee != nil {
 		return callPackageForFunction(callee)
 	}
+	if unsafeBuiltinName(common) != "" {
+		return "unsafe"
+	}
 	if common.Method != nil && common.Method.Pkg() != nil {
 		return common.Method.Pkg().Path()
 	}
 	return ""
+}
+
+func unsafeBuiltinName(common *ssa.CallCommon) string {
+	if common == nil {
+		return ""
+	}
+	builtin, ok := common.Value.(*ssa.Builtin)
+	if !ok || builtin == nil {
+		return ""
+	}
+	switch builtin.Name() {
+	case "String", "Slice", "StringData", "SliceData", "Add":
+		return builtin.Name()
+	default:
+		return ""
+	}
 }
 
 func callPackageForFunction(fn *ssa.Function) string {
@@ -1386,13 +1502,63 @@ func combineTraces(a, b dataFlowTrace) dataFlowTrace {
 	if b.empty() {
 		return a
 	}
-	out := dataFlowTrace{nodeIDs: uniqueStrings(append(a.nodeIDs, b.nodeIDs...)), edgeIDs: uniqueStrings(append(a.edgeIDs, b.edgeIDs...)), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
+	out := dataFlowTrace{nodeIDs: uniqueStrings(append(a.nodeIDs, b.nodeIDs...)), edgeIDs: uniqueStrings(append(a.edgeIDs, b.edgeIDs...)), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
 	for k := range a.params {
 		out.params[k] = true
 	}
 	for k := range b.params {
 		out.params[k] = true
 	}
+	return out
+}
+
+func sanitizerCategories(patterns []model.DataFlowPattern) []string {
+	var out []string
+	for _, pat := range patterns {
+		out = append(out, pat.SanitizesCategories...)
+	}
+	return uniqueStrings(out)
+}
+
+func traceAllowsSink(tr dataFlowTrace, category string) bool {
+	category = strings.ToLower(strings.TrimSpace(category))
+	if category == "" {
+		return true
+	}
+	for _, sanitized := range tr.sanitizedCategories {
+		if strings.EqualFold(sanitized, category) {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *dataFlowBuilder) addDiagnosticOnce(kind, message string) {
+	if b == nil || b.out == nil || message == "" {
+		return
+	}
+	key := kind + "\x00" + message
+	if b.diagnosticSeen == nil {
+		b.diagnosticSeen = map[string]bool{}
+	}
+	if b.diagnosticSeen[key] {
+		return
+	}
+	b.diagnosticSeen[key] = true
+	b.out.Diagnostics = append(b.out.Diagnostics, model.Diagnostic{Kind: kind, Message: message})
+}
+
+func dataFlowTruncationReasons(diagnostics []model.Diagnostic) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, diag := range diagnostics {
+		if diag.Kind != "dataflow-budget" || diag.Message == "" || seen[diag.Message] {
+			continue
+		}
+		seen[diag.Message] = true
+		out = append(out, diag.Message)
+	}
+	sort.Strings(out)
 	return out
 }
 

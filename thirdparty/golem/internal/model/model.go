@@ -359,16 +359,17 @@ type CallGraphEdge struct {
 	Properties  map[string]string `json:"properties,omitempty"`
 }
 type DataFlowPattern struct {
-	Target            string   `json:"target"`
-	Kind              string   `json:"kind"`
-	Match             string   `json:"match"`
-	Pattern           string   `json:"pattern"`
-	Category          string   `json:"category,omitempty"`
-	PURL              string   `json:"purl,omitempty"`
-	Description       string   `json:"description,omitempty"`
-	TaintKinds        []string `json:"taintKinds,omitempty"`
-	RemovesTaintKinds []string `json:"removesTaintKinds,omitempty"`
-	Confidence        string   `json:"confidence,omitempty"`
+	Target              string   `json:"target"`
+	Kind                string   `json:"kind"`
+	Match               string   `json:"match"`
+	Pattern             string   `json:"pattern"`
+	Category            string   `json:"category,omitempty"`
+	PURL                string   `json:"purl,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	TaintKinds          []string `json:"taintKinds,omitempty"`
+	RemovesTaintKinds   []string `json:"removesTaintKinds,omitempty"`
+	SanitizesCategories []string `json:"sanitizesCategories,omitempty"`
+	Confidence          string   `json:"confidence,omitempty"`
 }
 type DataFlowPatternSet struct {
 	Sources      []DataFlowPattern `json:"sources,omitempty"`
@@ -442,16 +443,18 @@ type DataFlowMethodSummary struct {
 	Properties       map[string]string     `json:"properties,omitempty"`
 }
 type DataFlowStats struct {
-	SourceCount      int `json:"sourceCount"`
-	SinkCount        int `json:"sinkCount"`
-	SliceCount       int `json:"sliceCount"`
-	NodeCount        int `json:"nodeCount"`
-	EdgeCount        int `json:"edgeCount"`
-	SummaryCount     int `json:"summaryCount"`
-	FunctionCount    int `json:"functionCount"`
-	InstructionCount int `json:"instructionCount"`
-	WorkerCount      int `json:"workerCount,omitempty"`
-	ElapsedMillis    int `json:"elapsedMillis,omitempty"`
+	SourceCount       int      `json:"sourceCount"`
+	SinkCount         int      `json:"sinkCount"`
+	SliceCount        int      `json:"sliceCount"`
+	NodeCount         int      `json:"nodeCount"`
+	EdgeCount         int      `json:"edgeCount"`
+	SummaryCount      int      `json:"summaryCount"`
+	FunctionCount     int      `json:"functionCount"`
+	InstructionCount  int      `json:"instructionCount"`
+	WorkerCount       int      `json:"workerCount,omitempty"`
+	ElapsedMillis     int      `json:"elapsedMillis,omitempty"`
+	Truncated         bool     `json:"truncated,omitempty"`
+	TruncationReasons []string `json:"truncationReasons,omitempty"`
 }
 type DataFlowEvidence struct {
 	Mode        string                  `json:"mode"`

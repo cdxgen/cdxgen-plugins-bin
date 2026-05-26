@@ -279,6 +279,7 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 		}
 	}
 	functions := map[string]bool{}
+	var categorySanitizerSeen bool
 	for _, node := range report.DataFlow.Nodes {
 		if node.Sink {
 			functions[node.Function] = true
@@ -286,8 +287,14 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 				t.Fatalf("sanitized path flow should not produce filesystem sink node: %#v", node)
 			}
 		}
+		if node.Kind == "sanitizer" && node.Function == "example.com/golem/dataflow.SanitizedPathFlow" && strings.Contains(node.Properties["sanitizesCategories"], "filesystem") {
+			categorySanitizerSeen = true
+		}
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow"} {
+	if !categorySanitizerSeen {
+		t.Fatalf("expected category-aware filesystem sanitizer evidence in %#v", report.DataFlow.Nodes)
+	}
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
@@ -320,6 +327,28 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if !sanitizedURL {
 		t.Fatalf("expected sanitized external URL evidence in %#v", report.ExternalURLs)
 	}
+}
+
+func TestAnalyzeDataFlowSliceLimitDiagnostics(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "none", DataFlowMax: 1, DataFlowWorkers: 1, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DataFlow == nil {
+		t.Fatal("expected data-flow evidence")
+	}
+	if got := len(report.DataFlow.Slices); got != 1 {
+		t.Fatalf("expected exactly one slice after DataFlowMax limit, got %d", got)
+	}
+	if !report.DataFlow.Stats.Truncated || len(report.DataFlow.Stats.TruncationReasons) == 0 {
+		t.Fatalf("expected truncation stats, got %#v diagnostics=%#v", report.DataFlow.Stats, report.DataFlow.Diagnostics)
+	}
+	for _, diag := range report.DataFlow.Diagnostics {
+		if diag.Kind == "dataflow-budget" && strings.Contains(diag.Message, "slice limit") {
+			return
+		}
+	}
+	t.Fatalf("expected slice limit diagnostic, got %#v", report.DataFlow.Diagnostics)
 }
 
 func TestParseByteSize(t *testing.T) {
