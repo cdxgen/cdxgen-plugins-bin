@@ -194,7 +194,7 @@ def main():
     parser.add_argument("--out", default="/tmp/golem-real-results", help="output directory")
     parser.add_argument("--clone-timeout", type=int, default=90)
     parser.add_argument("--analyze-timeout", type=int, default=180)
-    parser.add_argument("--modes", default="none,static,rta,pointer", help="comma-separated callgraph modes to test")
+    parser.add_argument("--modes", default="none,static,rta,vta", help="comma-separated callgraph modes to test")
     parser.add_argument("--dataflow-modes", default="none,security,all", help="comma-separated data-flow modes to test")
     parser.add_argument("--dataflow-callgraph", default="static", help="data-flow call graph mode: none, static, cha, rta, or vta")
     parser.add_argument("--max-procs", type=int, default=None, help="pass --max-procs to golem; omitted leaves the binary default")

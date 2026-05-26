@@ -41,7 +41,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	patterns := flags.String("patterns", "./...", "comma-separated go/packages patterns")
 	formatValue := flags.String("format", "json", "output format: json, graphml, or gexf")
 	outFile := flags.String("out", "", "output file path; defaults to stdout")
-	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, vta, or pointer")
+	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, or vta")
 	dataflow := flags.String("dataflow", "none", "data-flow mode: none, security, crypto, or all")
 	dataflowPatterns := flags.String("dataflow-patterns", "", "optional JSON file with data-flow sources, sinks, passthroughs, and sanitizers")
 	dataflowPacks := flags.String("dataflow-pattern-packs", "all", "comma-separated data-flow pattern packs: all, base, http, frameworks, data, filesystem, process, crypto, native, config, cloud")
@@ -75,8 +75,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if mode == "" {
 		mode = "none"
 	}
-	if mode != "none" && mode != "static" && mode != "cha" && mode != "rta" && mode != "vta" && mode != "pointer" {
-		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, cha, rta, vta, or pointer", *callgraph)
+	if mode != "none" && mode != "static" && mode != "cha" && mode != "rta" && mode != "vta" {
+		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, cha, rta, or vta", *callgraph)
 	}
 	dfMode := strings.ToLower(strings.TrimSpace(*dataflow))
 	if dfMode == "" {
@@ -93,7 +93,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return fmt.Errorf("unsupported dataflow-callgraph mode %q: expected none, static, cha, rta, or vta", *dataflowCallgraph)
 	}
 	if format != exporter.FormatJSON && mode == "none" {
-		return errors.New("graphml and gexf exports require --callgraph static, rta, or pointer")
+		return errors.New("graphml and gexf exports require --callgraph static, cha, rta, or vta")
 	}
 	memoryLimitBytes, err := analyzer.ParseByteSize(*memoryLimit)
 	if err != nil {
@@ -149,7 +149,7 @@ Options:
   --patterns <patterns>    Comma-separated go/packages patterns (default: ./...)
   --format <format>        json, graphml, or gexf (default: json)
   --out <file>             Output file path (default: stdout)
-  --callgraph <mode>       none, static, cha, rta, vta, or pointer (default: none)
+  --callgraph <mode>       none, static, cha, rta, or vta (default: none)
   --dataflow <mode>        none, security, crypto, or all (default: none)
   --dataflow-patterns <f>  Custom data-flow pattern JSON
   --dataflow-pattern-packs Comma-separated packs: all, base, http, frameworks, data, filesystem, process, crypto, native, config, cloud

@@ -425,6 +425,9 @@ func TestAnalyzeDataFlowSliceLimitDiagnostics(t *testing.T) {
 	if !report.DataFlow.Stats.Truncated || len(report.DataFlow.Stats.TruncationReasons) == 0 {
 		t.Fatalf("expected truncation stats, got %#v diagnostics=%#v", report.DataFlow.Stats, report.DataFlow.Diagnostics)
 	}
+	if report.Stats.DiagnosticCount < len(report.DataFlow.Diagnostics) {
+		t.Fatalf("expected report diagnostic count to include data-flow diagnostics, got stats=%#v diagnostics=%#v", report.Stats, report.DataFlow.Diagnostics)
+	}
 	for _, diag := range report.DataFlow.Diagnostics {
 		if diag.Kind == "dataflow-budget" && strings.Contains(diag.Message, "slice limit") {
 			return

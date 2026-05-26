@@ -10,7 +10,7 @@ It also emits a dedicated `crypto` evidence attribute for Go cryptography review
 golem analyze --dir /path/to/go/project --format json --out golem.json
 golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
 golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
-golem analyze --dir . --callgraph pointer --format json --out golem-pointer.json
+golem analyze --dir . --callgraph vta --format json --out golem-vta.json
 golem analyze --dir . --dataflow security --dataflow-callgraph cha --dataflow-graph-out dataflows.graphml --format json --out golem-dataflow.json
 ```
 
@@ -23,13 +23,13 @@ evinse -i bom.json -o bom.evinse.json -l go --golem-callgraph static /absolute/p
 
 Advanced cdxgen options map directly to Golem analysis settings:
 
-| cdxgen option                                            | Golem behavior                                           |
-| -------------------------------------------------------- | -------------------------------------------------------- |
-| `--golem-command`                                        | Use a specific helper binary instead of the bundled one. |
-| `--golem-callgraph none\|static\|cha\|rta\|vta\|pointer` | Select call graph depth and cost.                        |
-| `--golem-patterns ./...`                                 | Select Go package patterns.                              |
-| `--golem-tags tag1,tag2`                                 | Load packages with build tags.                           |
-| `--golem-tests`                                          | Include test variants in package loading and evidence.   |
+| cdxgen option                                   | Golem behavior                                           |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| `--golem-command`                               | Use a specific helper binary instead of the bundled one. |
+| `--golem-callgraph none\|static\|cha\|rta\|vta` | Select call graph depth and cost.                        |
+| `--golem-patterns ./...`                        | Select Go package patterns.                              |
+| `--golem-tags tag1,tag2`                        | Load packages with build tags.                           |
+| `--golem-tests`                                 | Include test variants in package loading and evidence.   |
 
 ## Call graph modes
 
@@ -38,7 +38,6 @@ Advanced cdxgen options map directly to Golem analysis settings:
 - `cha`: Class Hierarchy Analysis for broader interface dispatch candidates.
 - `rta`: Rapid Type Analysis from discovered `init` and `main` roots.
 - `vta`: Variable Type Analysis for more precise dynamic call resolution when affordable.
-- `pointer`: points-to call graph for main packages. This is the most expensive mode.
 
 ## API endpoint, service, and data-flow evidence
 

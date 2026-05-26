@@ -41,7 +41,7 @@ The published packages currently bundle helper binaries such as:
 - `osqueryi-*` for live-host OBOM collection
 - `sourcekitten` and `dosai` for Swift/.NET enrichment
 - `trustinspector-cdxgen-*` for deep trust inspection of repository keyrings, CA stores, macOS code-sign/notarization state, and Windows Authenticode / WDAC policy inventory
-- `golem-*` for Go source semantic library evidence and optional static/RTA/pointer call graph exports
+- `golem-*` for Go source semantic library evidence and optional static/CHA/RTA/VTA call graph exports
 
 ## Golem evidence contract
 

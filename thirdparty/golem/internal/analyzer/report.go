@@ -228,7 +228,6 @@ func (a *Analyzer) populateStats(report *model.Report) {
 		report.Stats.DataFlowSourceCount = report.DataFlow.Stats.SourceCount
 		report.Stats.DataFlowSinkCount = report.DataFlow.Stats.SinkCount
 		report.Stats.DataFlowSliceCount = report.DataFlow.Stats.SliceCount
-		report.Stats.DiagnosticCount += len(report.DataFlow.Diagnostics)
 	}
 	if report.SupplyChain != nil {
 		report.Stats.GoModReplaceCount = len(report.SupplyChain.Replaces)
@@ -247,6 +246,9 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	report.Stats.DiagnosticCount = len(report.Diagnostics)
 	if report.CallGraph != nil {
 		report.Stats.DiagnosticCount += len(report.CallGraph.Diagnostics)
+	}
+	if report.DataFlow != nil {
+		report.Stats.DiagnosticCount += len(report.DataFlow.Diagnostics)
 	}
 }
 

@@ -3,8 +3,6 @@ package analyzer
 import (
 	"fmt"
 	"go/types"
-	"io"
-	"os"
 	"sort"
 
 	"golang.org/x/tools/go/callgraph"
@@ -12,7 +10,6 @@ import (
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
 	"golang.org/x/tools/go/callgraph/vta"
-	"golang.org/x/tools/go/pointer"
 	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
@@ -53,22 +50,6 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 			graph = result.CallGraph
 		} else {
 			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: "RTA requires at least one reachable root function"})
-		}
-	case "pointer":
-		mains := mainPackages(ctx.packages)
-		if len(mains) == 0 {
-			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: "pointer analysis requires at least one main package with main function"})
-			return nil, algorithm, diagnostics
-		}
-		result, err := quietPointerAnalyze(&pointer.Config{Mains: mains, BuildCallGraph: true})
-		if err != nil {
-			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: err.Error()})
-			algorithm = "pointer-rta-fallback"
-			if fallback := rta.Analyze(mainAndInitRoots(ctx.packages), true); fallback != nil {
-				graph = fallback.CallGraph
-			}
-		} else {
-			graph = result.CallGraph
 		}
 	case "vta":
 		initial := static.CallGraph(ctx.program)
@@ -192,29 +173,4 @@ func mainAndInitRoots(pkgs []*ssa.Package) []*ssa.Function {
 		}
 	}
 	return roots
-}
-
-func mainPackages(pkgs []*ssa.Package) []*ssa.Package {
-	var mains []*ssa.Package
-	for _, pkg := range pkgs {
-		if pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Func("main") != nil {
-			mains = append(mains, pkg)
-		}
-	}
-	return mains
-}
-
-func quietPointerAnalyze(config *pointer.Config) (*pointer.Result, error) {
-	originalStderr := os.Stderr
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		return pointer.Analyze(config)
-	}
-	os.Stderr = writer
-	result, analyzeErr := pointer.Analyze(config)
-	_ = writer.Close()
-	os.Stderr = originalStderr
-	_, _ = io.Copy(io.Discard, reader)
-	_ = reader.Close()
-	return result, analyzeErr
 }

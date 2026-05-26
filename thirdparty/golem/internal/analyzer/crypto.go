@@ -2,12 +2,14 @@ package analyzer
 
 import (
 	"fmt"
-	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 	"go/ast"
 	"go/token"
-	"golang.org/x/tools/go/packages"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
+
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
 type cryptoClassification struct {
