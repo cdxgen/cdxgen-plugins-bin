@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"go/build"
 	"go/token"
 	"path/filepath"
 	"runtime"
@@ -90,28 +91,34 @@ func Analyze(options Options) (*model.Report, error) {
 			GOOS:       runtime.GOOS,
 			GOARCH:     runtime.GOARCH,
 			GoVersion:  runtime.Version(),
-			Goroot:     runtime.GOROOT(),
+			Goroot:     build.Default.GOROOT,
 			WorkingDir: absDir,
 			Patterns:   append([]string{}, options.Patterns...),
 			BuildTags:  append([]string{}, options.BuildTags...),
 			Tests:      options.Tests,
 		},
 		Options: model.AnalysisOptions{
-			Directory:             absDir,
-			Patterns:              append([]string{}, options.Patterns...),
-			BuildTags:             append([]string{}, options.BuildTags...),
-			Tests:                 options.Tests,
-			IncludeStdlib:         options.IncludeStdlib,
-			IncludeLocal:          options.IncludeLocal,
-			CallGraphMode:         options.CallGraphMode,
-			DataFlowMode:          options.DataFlowMode,
-			DataFlowCallGraphMode: options.DataFlowCallGraphMode,
-			DataFlowPacks:         append([]string{}, options.DataFlowPacks...),
-			DataFlowWorkers:       dataFlowWorkerCount(options, 0),
-			MaxProcs:              runtime.GOMAXPROCS(0),
-			MemoryLimitBytes:      options.MemoryLimit,
-			IncludeSSA:            options.IncludeSSA,
-			IncludeSources:        options.IncludeSources,
+			Directory:                       absDir,
+			Patterns:                        append([]string{}, options.Patterns...),
+			BuildTags:                       append([]string{}, options.BuildTags...),
+			Tests:                           options.Tests,
+			IncludeStdlib:                   options.IncludeStdlib,
+			IncludeLocal:                    options.IncludeLocal,
+			CallGraphMode:                   options.CallGraphMode,
+			DataFlowMode:                    options.DataFlowMode,
+			DataFlowCallGraphMode:           options.DataFlowCallGraphMode,
+			DataFlowPacks:                   append([]string{}, options.DataFlowPacks...),
+			DataFlowWorkers:                 dataFlowWorkerCount(options, 0),
+			DataFlowLargeRepoFunctions:      dataFlowLargeRepoFunctions(options),
+			DataFlowMaxFunctionInstructions: dataFlowMaxFunctionInstructions(options),
+			DataFlowMaxTraceNodes:           dataFlowMaxTraceNodes(options),
+			DataFlowMaxTraceEdges:           dataFlowMaxTraceEdges(options),
+			DataFlowSkipGenerated:           options.DataFlowSkipGenerated,
+			DataFlowSkipTests:               options.DataFlowSkipTests,
+			MaxProcs:                        runtime.GOMAXPROCS(0),
+			MemoryLimitBytes:                options.MemoryLimit,
+			IncludeSSA:                      options.IncludeSSA,
+			IncludeSources:                  options.IncludeSources,
 		},
 	}
 	if loadErr != nil {

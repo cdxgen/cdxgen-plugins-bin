@@ -23,13 +23,13 @@ evinse -i bom.json -o bom.evinse.json -l go --golem-callgraph static /absolute/p
 
 Advanced cdxgen options map directly to Golem analysis settings:
 
-| cdxgen option            | Golem behavior                                           |
-| ------------------------ | -------------------------------------------------------- | --- | -------- | --------------------------------- |
-| `--golem-command`        | Use a specific helper binary instead of the bundled one. |
-| `--golem-callgraph none  | static                                                   | rta | pointer` | Select call graph depth and cost. |
-| `--golem-patterns ./...` | Select Go package patterns.                              |
-| `--golem-tags tag1,tag2` | Load packages with build tags.                           |
-| `--golem-tests`          | Include test variants in package loading and evidence.   |
+| cdxgen option                                            | Golem behavior                                           |
+| -------------------------------------------------------- | -------------------------------------------------------- |
+| `--golem-command`                                        | Use a specific helper binary instead of the bundled one. |
+| `--golem-callgraph none\|static\|cha\|rta\|vta\|pointer` | Select call graph depth and cost.                        |
+| `--golem-patterns ./...`                                 | Select Go package patterns.                              |
+| `--golem-tags tag1,tag2`                                 | Load packages with build tags.                           |
+| `--golem-tests`                                          | Include test variants in package loading and evidence.   |
 
 ## Call graph modes
 
@@ -44,11 +44,83 @@ Advanced cdxgen options map directly to Golem analysis settings:
 
 Golem extracts API endpoint and service evidence suitable for downstream CycloneDX `services` enrichment. It recognizes common `net/http` route/listener patterns, route groups from popular Go frameworks, RPC registration-style calls, and sanitized literal external URLs. URL evidence removes user info, query strings, and fragments before emission so tokens and other secret-bearing values are not copied into the report.
 
-Semantic data-flow slicing is available with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. The slicer uses Go SSA and emits compact source-to-sink nodes, edges, slices, summaries, and optional GraphML/GEXF sidecars. Built-in pattern packs cover CLI/env/HTTP/framework input, process execution, filesystem, data APIs, crypto APIs, and cgo/native interop. Custom source/sink/passthrough/sanitizer packs can be supplied with `--dataflow-patterns`.
+Semantic data-flow slicing is available with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. The slicer uses Go SSA and emits compact source-to-sink nodes, edges, slices, summaries, and optional GraphML/GEXF sidecars. Built-in pattern packs cover CLI/env input, HTTP/framework input and response APIs, process execution, filesystem, data APIs, crypto APIs, cgo/native interop, CLI/config frameworks, and cloud SDK/service boundaries. Custom source/sink/passthrough/sanitizer packs can be supplied with `--dataflow-patterns`.
 
 `--dataflow-callgraph` controls dynamic summary replay for interface and function-value-heavy programs. `static` is the default, `cha` is more conservative for interface dispatch, and `vta` can be useful when its experimental x/tools implementation supports the analyzed shape. Sanitizer patterns can remove configured taint kinds via `removesTaintKinds`; for example path base-name extraction can suppress path traversal flows while still preserving unrelated taint kinds.
 
 For large repositories, Golem uses all available Go scheduler cores by default during analysis. Use `--max-procs` to cap scheduler parallelism, `--dataflow-workers` to cap the per-function data-flow worker pool, and `--memory-limit` to set Go's soft memory limit (for example `4GiB` or `800MiB`). Add `--progress` and optionally `--progress-interval 10s` to emit coarse package-loading, SSA, call graph, and data-flow progress logs to stderr.
+
+Data-flow materialization budgets are configurable for large or generated-heavy repositories:
+
+| Option                                 | Default | Behavior                                                                                                                                |
+| -------------------------------------- | ------: | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dataflow-max-slices`                |  `1000` | Maximum source-to-sink slices emitted before truncation diagnostics are added.                                                          |
+| `--dataflow-large-repo-functions`      |  `1000` | Function count at which large-repo per-function materialization safeguards apply; `0` disables this threshold.                          |
+| `--dataflow-max-function-instructions` |   `200` | In large repositories, skip per-function slice materialization for functions above this SSA instruction count; `0` disables this guard. |
+| `--dataflow-max-trace-nodes`           |    `64` | Maximum ordered node IDs retained per in-memory trace.                                                                                  |
+| `--dataflow-max-trace-edges`           |   `128` | Maximum ordered edge IDs retained per in-memory trace.                                                                                  |
+| `--dataflow-skip-generated`            | `false` | Skip generated files during per-function data-flow slice materialization.                                                               |
+| `--dataflow-skip-tests`                | `false` | Skip test, example, and benchmark files during per-function data-flow slice materialization.                                            |
+
+Slice evidence includes prioritization metadata for downstream review: `ruleId`, `ruleName`, `severity`, `riskScore`, `confidence`, source/sink categories, source/sink package paths and PURLs, sink argument index, source/sink scope, source/sink criticality, taint kinds, sanitizer node IDs, path length, edge kinds, duplicate grouping, and a stable `flowKey`.
+
+Built-in pattern packs are selected with `--dataflow-pattern-packs` and default to `all`. Explicit packs narrow built-ins, for example `--dataflow-pattern-packs process,filesystem` limits built-ins to process and filesystem patterns. Available packs are:
+
+- `base`: CLI arguments, environment values, parameter-name heuristics, conversion passthroughs, and logging/formatted-output sinks.
+- `http`: `net/http`, URL, request, response, redirect, and escaping patterns.
+- `frameworks`: Gin, Echo, Fiber, Chi, and Gorilla-style framework context/response patterns.
+- `process`: command execution and dynamic plugin loading.
+- `data`: SQL, sqlx, pgx, GORM, MongoDB, Redis, Kafka, NATS, and decoder/deserializer sinks.
+- `filesystem`: file/path/archive APIs and path sanitizers.
+- `crypto`: crypto material sources and cryptographic API sinks.
+- `native`: cgo, unsafe, syscall, reflection-call, and native interop patterns.
+- `config`: Cobra, pflag, and Viper configuration sources.
+- `cloud`: AWS, Google Cloud, and Azure SDK package boundary sinks.
+
+Custom pattern JSON uses the same fields as the emitted `dataFlow.patterns` metadata. The most common fields are `target` (`source`, `sink`, `passthrough`, or `sanitizer`), `kind` (`function`, `symbol`, `type`, `package`, `name`, or `parameter`), `match` (`contains`, `exact`, `prefix`, `suffix`, or `regex`), `pattern`, `category`, `taintKinds`, `removesTaintKinds`, `sanitizesCategories`, `relevantArguments`, `receiverRelevant`, `ruleId`, `ruleName`, `severity`, `riskScore`, and `confidence`:
+
+```json
+{
+  "sources": [
+    {
+      "target": "source",
+      "kind": "function",
+      "match": "exact",
+      "pattern": "example.com/acme/config.Secret",
+      "category": "configuration",
+      "taintKinds": ["secret"],
+      "confidence": "high"
+    }
+  ],
+  "sinks": [
+    {
+      "target": "sink",
+      "kind": "function",
+      "match": "exact",
+      "pattern": "example.com/acme/deploy.Run",
+      "category": "command-execution",
+      "taintKinds": ["user-input", "secret"],
+      "relevantArguments": [1],
+      "ruleId": "ACME-CMD-001",
+      "ruleName": "Deployment command injection review",
+      "severity": "high",
+      "riskScore": 80,
+      "confidence": "medium"
+    }
+  ],
+  "sanitizers": [
+    {
+      "target": "sanitizer",
+      "kind": "function",
+      "match": "exact",
+      "pattern": "example.com/acme/safe.CleanPath",
+      "category": "path-validation",
+      "removesTaintKinds": ["path"],
+      "sanitizesCategories": ["filesystem"]
+    }
+  ]
+}
+```
 
 ## Output formats
 

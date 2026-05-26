@@ -13,27 +13,33 @@ import (
 const SchemaVersion = "https://cyclonedx.github.io/cdxgen/golem/schema/v1"
 
 type Options struct {
-	Dir                   string
-	Patterns              []string
-	BuildTags             []string
-	Tests                 bool
-	IncludeStdlib         bool
-	IncludeLocal          bool
-	CallGraphMode         string
-	DataFlowMode          string
-	DataFlowPacks         []string
-	DataFlowConfig        string
-	DataFlowMax           int
-	DataFlowCallGraphMode string
-	DataFlowWorkers       int
-	MaxProcs              int
-	MemoryLimit           int64
-	Progress              bool
-	ProgressInterval      time.Duration
-	ProgressWriter        io.Writer
-	IncludeSSA            bool
-	IncludeSources        bool
-	ToolVersion           string
+	Dir                             string
+	Patterns                        []string
+	BuildTags                       []string
+	Tests                           bool
+	IncludeStdlib                   bool
+	IncludeLocal                    bool
+	CallGraphMode                   string
+	DataFlowMode                    string
+	DataFlowPacks                   []string
+	DataFlowConfig                  string
+	DataFlowMax                     int
+	DataFlowCallGraphMode           string
+	DataFlowWorkers                 int
+	DataFlowLargeRepoFunctions      int
+	DataFlowMaxFunctionInstructions int
+	DataFlowMaxTraceNodes           int
+	DataFlowMaxTraceEdges           int
+	DataFlowSkipGenerated           bool
+	DataFlowSkipTests               bool
+	MaxProcs                        int
+	MemoryLimit                     int64
+	Progress                        bool
+	ProgressInterval                time.Duration
+	ProgressWriter                  io.Writer
+	IncludeSSA                      bool
+	IncludeSources                  bool
+	ToolVersion                     string
 }
 
 type Analyzer struct {

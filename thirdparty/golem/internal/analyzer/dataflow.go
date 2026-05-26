@@ -22,10 +22,10 @@ import (
 )
 
 const (
-	maxTraceNodeIDs                  = 64
-	maxTraceEdgeIDs                  = 128
-	largeRepoFunctionCount           = 1000
-	largeRepoMaxFunctionInstructions = 200
+	defaultDataFlowMaxTraceNodes           = 64
+	defaultDataFlowMaxTraceEdges           = 128
+	defaultDataFlowLargeRepoFunctions      = 1000
+	defaultDataFlowMaxFunctionInstructions = 200
 )
 
 type dataFlowTrace struct {
@@ -71,6 +71,8 @@ type dataFlowBuilder struct {
 	diagnosticSeen map[string]bool
 	sliceBudget    *dataFlowBudget
 	maxSlices      int
+	maxTraceNodes  int
+	maxTraceEdges  int
 	instructionCt  int
 }
 
@@ -81,7 +83,7 @@ type dataFlowBudget struct {
 
 func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, progress *progressLogger) *model.DataFlowEvidence {
 	started := time.Now()
-	patterns, diagnostics := loadDataFlowPatterns(a.options.DataFlowMode, a.options.DataFlowPacks, a.options.DataFlowConfig)
+	patterns, diagnostics := loadDataFlowPatterns(a.options.DataFlowPacks, a.options.DataFlowConfig)
 	regexps, regexDiagnostics := compileDataFlowRegexps(patterns)
 	diagnostics = append(diagnostics, regexDiagnostics...)
 	out := &model.DataFlowEvidence{Mode: a.options.DataFlowMode, Patterns: patterns, Diagnostics: diagnostics}
@@ -91,17 +93,17 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	}
 	funcs := ctx.filteredFunctions(a.includeDataFlowFunction)
 	sortDataFlowFunctions(funcs)
-	analysisFuncs, skippedFuncs := dataFlowAnalysisFunctions(funcs)
+	analysisFuncs, skippedFuncs := a.dataFlowAnalysisFunctions(funcs)
 	workers := dataFlowWorkerCount(a.options, len(analysisFuncs))
 	progress.Memoryf("data-flow starting mode=%s functions=%d analyzedFunctions=%d skippedFunctions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), len(analysisFuncs), skippedFuncs, workers, a.options.DataFlowMax)
 	progress.Logf("data-flow scheduled first=%s largest=%s", describeDataFlowFunctions(analysisFuncs, 6, false), describeDataFlowFunctions(analysisFuncs, 6, true))
 	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
-	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax}
+	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax, maxTraceNodes: dataFlowMaxTraceNodes(a.options), maxTraceEdges: dataFlowMaxTraceEdges(a.options)}
 	progress.Memoryf("data-flow inferring summaries")
 	b.inferSummaries(funcs)
 	progress.Memoryf("data-flow summaries inferred")
 	if skippedFuncs > 0 {
-		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("skipped %d very large functions above %d SSA instructions during slice materialization; summaries were still inferred", skippedFuncs, largeRepoMaxFunctionInstructions))
+		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("skipped %d very large functions above %d SSA instructions during slice materialization; summaries were still inferred", skippedFuncs, dataFlowMaxFunctionInstructions(a.options)))
 	}
 	b.analyzeFunctions(analysisFuncs, workers, progress)
 	progress.Memoryf("data-flow function analysis complete")
@@ -145,20 +147,74 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	return out
 }
 
-func dataFlowAnalysisFunctions(funcs []*ssa.Function) ([]*ssa.Function, int) {
-	if len(funcs) < largeRepoFunctionCount {
+func (a *Analyzer) dataFlowAnalysisFunctions(funcs []*ssa.Function) ([]*ssa.Function, int) {
+	largeRepoFunctions := dataFlowLargeRepoFunctions(a.options)
+	maxInstructions := dataFlowMaxFunctionInstructions(a.options)
+	if largeRepoFunctions <= 0 || maxInstructions <= 0 || len(funcs) < largeRepoFunctions {
 		return funcs, 0
 	}
 	out := make([]*ssa.Function, 0, len(funcs))
 	skipped := 0
 	for _, fn := range funcs {
-		if ssaFunctionInstructionCount(fn) > largeRepoMaxFunctionInstructions {
+		if a.skipDataFlowFunctionMaterialization(fn, maxInstructions) {
 			skipped++
 			continue
 		}
 		out = append(out, fn)
 	}
 	return out, skipped
+}
+
+func (a *Analyzer) skipDataFlowFunctionMaterialization(fn *ssa.Function, maxInstructions int) bool {
+	if ssaFunctionInstructionCount(fn) > maxInstructions {
+		return true
+	}
+	filename := a.position(fn.Pos()).Filename
+	if a.options.DataFlowSkipTests && dataFlowTestLikeFunction(filename, fn) {
+		return true
+	}
+	if a.options.DataFlowSkipGenerated && isGeneratedFile(filename) {
+		return true
+	}
+	return false
+}
+
+func dataFlowTestLikeFunction(filename string, fn *ssa.Function) bool {
+	if fileRole(filename) == "test" {
+		return true
+	}
+	if fn == nil || fn.Signature == nil {
+		return false
+	}
+	return testKindForFunc(fn.Name(), fn.Signature.String()) != ""
+}
+
+func dataFlowLargeRepoFunctions(options Options) int {
+	if options.DataFlowLargeRepoFunctions > 0 {
+		return options.DataFlowLargeRepoFunctions
+	}
+	return defaultDataFlowLargeRepoFunctions
+}
+
+func dataFlowMaxFunctionInstructions(options Options) int {
+	if options.DataFlowMaxFunctionInstructions > 0 {
+		return options.DataFlowMaxFunctionInstructions
+	}
+	return defaultDataFlowMaxFunctionInstructions
+}
+
+func dataFlowMaxTraceNodes(options Options) int {
+	if options.DataFlowMaxTraceNodes > 0 {
+		return options.DataFlowMaxTraceNodes
+	}
+	return defaultDataFlowMaxTraceNodes
+}
+
+func dataFlowMaxTraceEdges(options Options) int {
+	if options.DataFlowMaxTraceEdges > 0 {
+		return options.DataFlowMaxTraceEdges
+	}
+	return defaultDataFlowMaxTraceEdges
 }
 
 func sortDataFlowFunctions(funcs []*ssa.Function) {
@@ -275,8 +331,8 @@ func (a *Analyzer) includeDataFlowFunction(fn *ssa.Function) bool {
 	return true
 }
 
-func loadDataFlowPatterns(mode string, packs []string, path string) (*model.DataFlowPatternSet, []model.Diagnostic) {
-	set := builtinDataFlowPatterns(mode, packs)
+func loadDataFlowPatterns(packs []string, path string) (*model.DataFlowPatternSet, []model.Diagnostic) {
+	set := builtinDataFlowPatterns(packs)
 	var diagnostics []model.Diagnostic
 	if strings.TrimSpace(path) == "" {
 		return set, diagnostics
@@ -336,17 +392,17 @@ func dataFlowPatternKey(p model.DataFlowPattern) string {
 	return strings.Join([]string{p.Target, p.Kind, strings.ToLower(p.Match), p.Pattern}, "\x00")
 }
 
-func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPatternSet {
+func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	selected := map[string]bool{}
 	if len(packs) == 0 {
-		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks"} {
+		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud"} {
 			selected[p] = true
 		}
 	} else {
 		for _, p := range packs {
 			p = strings.ToLower(strings.TrimSpace(p))
 			if p == "all" {
-				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks"} {
+				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud"} {
 					selected[name] = true
 				}
 			} else if p != "" {
@@ -360,6 +416,11 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 	}
 	addSink := func(kind, pattern, category string, taints ...string) {
 		set.Sinks = append(set.Sinks, dfPattern("sink", kind, pattern, category, taints...))
+	}
+	addSinkArgs := func(kind, pattern, category string, args []int, taints ...string) {
+		p := dfPattern("sink", kind, pattern, category, taints...)
+		p.RelevantArguments = args
+		set.Sinks = append(set.Sinks, p)
 	}
 	addPass := func(kind, pattern, category string) {
 		set.Passthroughs = append(set.Passthroughs, dfPattern("passthrough", kind, pattern, category))
@@ -375,7 +436,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		p.SanitizesCategories = sanitizes
 		set.Sanitizers = append(set.Sanitizers, p)
 	}
-	if selected["base"] || mode == "all" || mode == "security" {
+	if selected["base"] {
 		addSource("symbol", "os.Args", "cli", "user-input")
 		addSource("function", "os.Getenv", "environment", "environment", "secret")
 		addSource("function", "os.LookupEnv", "environment", "environment", "secret")
@@ -393,40 +454,46 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 			addSink("function", name, "logging", "user-input", "secret")
 		}
 	}
-	if selected["http"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "ShouldBind", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "github.com/gofiber/fiber", "Params", "Body", "Cookies"} {
+	if selected["http"] {
+		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "BindJSON", "ShouldBind", "ShouldBindJSON", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "Bind", "github.com/gofiber/fiber", "Params", "Body", "BodyRaw", "BodyParser", "Cookies"} {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
 		addSink("function", "fmt.Fprintf", "formatted-output", "user-input")
-		addSink("function", "http.Error", "http-response", "user-input")
+		addSinkArgs("function", "http.Error", "http-response", []int{1}, "user-input")
 		addSink("function", "encoding/json.(*Encoder).Encode", "http-response", "user-input")
-		addSink("function", "http.Redirect", "redirect", "url")
+		addSinkArgs("function", "http.Redirect", "redirect", []int{2}, "url")
 		addCategorySan("function", "net/url.QueryEscape", "url-encoding", []string{"redirect"}, "url")
 		addCategorySan("function", "net/url.PathEscape", "url-encoding", []string{"redirect"}, "url")
 		addCategorySan("function", "html/template.HTMLEscapeString", "html-escaping", []string{"http-response", "formatted-output"})
 	}
-	if selected["frameworks"] || mode == "all" || mode == "security" {
+	if selected["frameworks"] {
 		for _, sourceType := range []string{"gin.Context", "*gin.Context", "echo.Context", "fiber.Ctx", "*fiber.Ctx", "chi.Context", "mux.RouteMatch"} {
 			addSource("type", sourceType, "framework-context", "user-input")
+		}
+		for _, name := range []string{"gin.Context.JSON", "gin.Context).JSON", "gin.Context.String", "gin.Context).String", "gin.Context.HTML", "gin.Context).HTML", "echo.Context.JSON", "echo.Context.String", "fiber.Ctx.JSON", "fiber.Ctx).JSON", "fiber.Ctx.Send", "fiber.Ctx).Send", "fiber.Ctx.SendString", "fiber.Ctx).SendString"} {
+			addSink("function", name, "http-response", "user-input")
+		}
+		for _, name := range []string{"gin.Context.Redirect", "gin.Context).Redirect", "echo.Context.Redirect", "fiber.Ctx.Redirect", "fiber.Ctx).Redirect"} {
+			addSink("function", name, "redirect", "url")
 		}
 		for _, passthrough := range []string{"github.com/gin-gonic/gin.Context", "github.com/labstack/echo", "github.com/gofiber/fiber", "github.com/go-chi/chi", "github.com/gorilla/mux"} {
 			addPass("function", passthrough, "framework")
 		}
 	}
-	if selected["process"] || mode == "all" || mode == "security" {
+	if selected["process"] {
 		addSink("function", "os/exec.Command", "command-execution", "user-input")
 		addSink("function", "os/exec.CommandContext", "command-execution", "user-input")
 		addSink("function", "plugin.Open", "dynamic-loading", "user-input", "path")
 		addPass("function", "plugin.Lookup", "dynamic-loading")
 	}
-	if selected["data"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jackc/pgx", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
+	if selected["data"] {
+		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jmoiron/sqlx.Queryx", "github.com/jmoiron/sqlx.Select", "github.com/jmoiron/sqlx.Get", "github.com/jackc/pgx", "github.com/jackc/pgx.Query", "github.com/jackc/pgx.Exec", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "gorm.io/gorm.(*DB).Where", "go.mongodb.org/mongo-driver/mongo", "github.com/redis/go-redis", "github.com/redis/go-redis/v9", "github.com/segmentio/kafka-go", "github.com/nats-io/nats.go", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
 			addSink("function", name, "data", "user-input")
 		}
 		addCategorySan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", []string{"data"}, "sql")
 	}
-	if selected["filesystem"] || mode == "all" || mode == "security" {
+	if selected["filesystem"] {
 		for _, name := range []string{"os.Open", "os.OpenFile", "os.WriteFile", "os.ReadFile", "os.Create", "os.Mkdir", "os.MkdirAll", "os.Remove", "os.RemoveAll", "archive/zip", "archive/tar", "http.ServeFile"} {
 			addSink("function", name, "filesystem", "path")
 		}
@@ -434,14 +501,14 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addPass("function", "path.Join", "path")
 		addCategorySan("function", "path/filepath.Base", "path-validation", []string{"filesystem"}, "path")
 	}
-	if selected["crypto"] || mode == "all" || mode == "crypto" || mode == "security" {
-		for _, name := range []string{"crypto/aes.NewCipher", "crypto/des.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "github.com/golang-jwt/jwt", "github.com/dgrijalva/jwt-go"} {
+	if selected["crypto"] {
+		for _, name := range []string{"crypto/aes.NewCipher", "crypto/des.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "golang.org/x/crypto/bcrypt.GenerateFromPassword", "golang.org/x/crypto/scrypt.Key", "github.com/golang-jwt/jwt", "github.com/golang-jwt/jwt/v4", "github.com/golang-jwt/jwt/v5", "github.com/dgrijalva/jwt-go", "golang.org/x/oauth2"} {
 			addSink("function", name, "crypto", "secret", "crypto-key")
 		}
 		addSource("name", "(?i)(private.*key|secret|password|token|nonce|iv|salt)", "crypto-material", "secret", "crypto-key")
 		addSan("function", "crypto/rand.Read", "secure-random", "insecure-random")
 	}
-	if selected["native"] || mode == "all" || mode == "security" {
+	if selected["native"] {
 		addSink("function", "_Cfunc_", "native-interop", "native")
 		addPass("function", "_Cfunc_CString", "native-conversion")
 		addPass("function", "_Cgo_ptr", "native-conversion")
@@ -451,6 +518,16 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		}
 		df := dfPattern("sink", "function", "syscall.", "syscall", "native")
 		set.Sinks = append(set.Sinks, df)
+	}
+	if selected["config"] {
+		for _, name := range []string{"github.com/spf13/cobra.Command", "github.com/spf13/cobra.(*Command).Flag", "github.com/spf13/cobra.(*Command).Flags", "github.com/spf13/pflag", "github.com/spf13/viper.Get", "github.com/spf13/viper.GetString", "github.com/spf13/viper.GetStringMap", "github.com/spf13/viper.GetStringSlice", "github.com/spf13/viper.GetBool", "github.com/spf13/viper.GetInt", "github.com/spf13/viper.GetDuration"} {
+			addSource("function", name, "configuration", "user-input")
+		}
+	}
+	if selected["cloud"] {
+		for _, name := range []string{"github.com/aws/aws-sdk-go", "github.com/aws/aws-sdk-go-v2", "cloud.google.com/go", "google.golang.org/api", "github.com/Azure/azure-sdk-for-go"} {
+			addSink("package", name, "external-service", "user-input", "secret")
+		}
 	}
 	set.Sources = normalizePatterns("source", set.Sources)
 	set.Sinks = normalizePatterns("sink", set.Sinks)
@@ -481,11 +558,68 @@ func normalizePatterns(target string, in []model.DataFlowPattern) []model.DataFl
 		if p.Confidence == "" {
 			p.Confidence = "medium"
 		}
+		p = enrichDataFlowPatternDefaults(p)
 		if p.Pattern != "" {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+func enrichDataFlowPatternDefaults(p model.DataFlowPattern) model.DataFlowPattern {
+	if p.Target == "sink" {
+		if len(p.RelevantArguments) == 0 {
+			switch p.Category {
+			case "redirect":
+				if strings.Contains(p.Pattern, "http.Redirect") {
+					p.RelevantArguments = []int{2}
+				}
+			case "http-response":
+				if strings.Contains(p.Pattern, "http.Error") {
+					p.RelevantArguments = []int{1}
+				}
+			}
+		}
+		if p.RuleID == "" || p.RuleName == "" || p.Severity == "" || p.RiskScore == 0 {
+			ruleID, ruleName, severity, score := dataFlowRuleForCategory(p.Category)
+			p.RuleID = firstNonEmpty(p.RuleID, ruleID)
+			p.RuleName = firstNonEmpty(p.RuleName, ruleName)
+			p.Severity = firstNonEmpty(p.Severity, severity)
+			if p.RiskScore == 0 {
+				p.RiskScore = score
+			}
+		}
+	}
+	return p
+}
+
+func dataFlowRuleForCategory(category string) (id, name, severity string, score int) {
+	switch strings.ToLower(category) {
+	case "command-execution":
+		return "GOLEM-DATAFLOW-COMMAND-INJECTION", "User input reaches process execution", "critical", 95
+	case "data":
+		return "GOLEM-DATAFLOW-DATA-QUERY", "User input reaches data query or deserialization API", "high", 80
+	case "filesystem":
+		return "GOLEM-DATAFLOW-PATH-TRAVERSAL", "User input reaches filesystem operation", "high", 80
+	case "redirect":
+		return "GOLEM-DATAFLOW-OPEN-REDIRECT", "User input reaches redirect target", "medium", 60
+	case "http-response", "formatted-output":
+		return "GOLEM-DATAFLOW-REFLECTED-OUTPUT", "User input reaches response/output", "medium", 55
+	case "logging":
+		return "GOLEM-DATAFLOW-LOG-INJECTION-OR-SECRET-LEAK", "User input or secret reaches logs", "medium", 55
+	case "crypto":
+		return "GOLEM-DATAFLOW-CRYPTO-MATERIAL", "Sensitive material reaches cryptographic API", "high", 75
+	case "native-interop", "unsafe", "syscall":
+		return "GOLEM-DATAFLOW-UNSAFE-NATIVE", "User input reaches unsafe/native boundary", "high", 85
+	case "dynamic-loading":
+		return "GOLEM-DATAFLOW-DYNAMIC-LOADING", "User input reaches dynamic loading", "high", 85
+	case "panic":
+		return "GOLEM-DATAFLOW-PANIC", "User input reaches panic", "medium", 50
+	case "external-service":
+		return "GOLEM-DATAFLOW-EXTERNAL-SERVICE", "User input or secret reaches external service SDK", "medium", 55
+	default:
+		return "GOLEM-DATAFLOW-GENERIC", "Source reaches sink", "medium", 50
+	}
 }
 
 func (b *dataFlowBuilder) inferSummaries(funcs []*ssa.Function) {
@@ -659,7 +793,7 @@ func (b *dataFlowBuilder) analyzeFunctions(funcs []*ssa.Function, workers int, p
 			for idx := range jobs {
 				fn := funcs[idx]
 				localOut := &model.DataFlowEvidence{Mode: b.out.Mode, Patterns: b.patterns}
-				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: b.sliceBudget, maxSlices: b.maxSlices}
+				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: b.sliceBudget, maxSlices: b.maxSlices, maxTraceNodes: b.maxTraceNodes, maxTraceEdges: b.maxTraceEdges}
 				local.analyzeFunction(fn)
 				results <- dataFlowFunctionResult{index: idx, functionName: fn.String(), evidence: localOut, instructions: local.instructionCt}
 			}
@@ -881,7 +1015,7 @@ func (b *dataFlowBuilder) emitPanicSink(fn *ssa.Function, state dataFlowState, p
 		return
 	}
 	if tr, ok := b.taintOf(state, p.X); ok && traceAllowsSink(tr, "panic") {
-		pat := model.DataFlowPattern{Target: "sink", Kind: "builtin", Match: "exact", Pattern: "panic", Category: "panic", TaintKinds: []string{"user-input", "secret"}, Confidence: "medium"}
+		pat := enrichDataFlowPatternDefaults(model.DataFlowPattern{Target: "sink", Kind: "builtin", Match: "exact", Pattern: "panic", Category: "panic", TaintKinds: []string{"user-input", "secret"}, Confidence: "medium"})
 		b.emitSliceSink(fn, tr, p.Pos(), "panic", "panic", valueType(p.X), pat, 0, "Taint reaches panic")
 	}
 }
@@ -967,7 +1101,7 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 					if !traceAllowsSink(tr, cat) {
 						continue
 					}
-					pat := model.DataFlowPattern{Target: "sink", Kind: "function", Match: "exact", Pattern: callee.String(), Category: cat, Confidence: "medium"}
+					pat := enrichDataFlowPatternDefaults(model.DataFlowPattern{Target: "sink", Kind: "function", Match: "exact", Pattern: callee.String(), Category: cat, Confidence: "medium"})
 					b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, fmt.Sprintf("Taint reaches %s sink in %s", edgeKind, callee.String()))
 				}
 			}
@@ -1056,13 +1190,23 @@ func (b *dataFlowBuilder) emitSink(fn *ssa.Function, state dataFlowState, call s
 		}
 	}
 	if recv := receiverValue(common); recv != nil {
-		if tr, ok := b.taintOf(state, recv); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
-			b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, -1, "Taint reaches sink receiver")
+		if sinkReceiverRelevant(pat) {
+			if tr, ok := b.taintOf(state, recv); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
+				b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, -1, "Taint reaches sink receiver")
+			}
 		}
 	}
 }
 
 func sinkArgumentRelevant(common *ssa.CallCommon, pat model.DataFlowPattern, idx int) bool {
+	if len(pat.RelevantArguments) > 0 {
+		for _, relevant := range pat.RelevantArguments {
+			if relevant == idx {
+				return true
+			}
+		}
+		return false
+	}
 	category := strings.ToLower(firstNonEmpty(pat.Category, "sink"))
 	symbol := callSymbol(common)
 	switch category {
@@ -1078,6 +1222,13 @@ func sinkArgumentRelevant(common *ssa.CallCommon, pat model.DataFlowPattern, idx
 	return true
 }
 
+func sinkReceiverRelevant(pat model.DataFlowPattern) bool {
+	if pat.ReceiverRelevant {
+		return true
+	}
+	return len(pat.RelevantArguments) == 0
+}
+
 func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos token.Pos, name, symbol, typ string, pat model.DataFlowPattern, argIndex int, summary string) {
 	idx := argIndex
 	sourceID := firstNonEmpty(tr.sourceID, firstString(tr.nodeIDs))
@@ -1088,7 +1239,14 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("data-flow slice limit reached at %d slices; additional slices were omitted", b.maxSlices))
 		return
 	}
-	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.taintKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), map[string]string{"pattern": pat.Pattern})
+	props := map[string]string{"pattern": pat.Pattern}
+	if pat.RuleID != "" {
+		props["ruleId"] = pat.RuleID
+	}
+	if pat.Severity != "" {
+		props["severity"] = pat.Severity
+	}
+	sink := b.addNode("sink", name, symbol, typ, fn, pos, false, true, pat.Category, mergeStrings(tr.taintKinds, taintsForPattern(pat)), "", firstNonEmpty(pat.Confidence, tr.confidence), props)
 	tr = b.connectTrace(tr, sink, "sink", pos, fmt.Sprint(argIndex))
 	id := stableID("df-slice", sourceID, sink.ID, strings.Join(tr.edgeIDs, ":"), fmt.Sprint(argIndex))
 	if b.sliceSeen[id] {
@@ -1096,7 +1254,7 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		return
 	}
 	b.sliceSeen[id] = true
-	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
+	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), RuleID: pat.RuleID, RuleName: pat.RuleName, Severity: pat.Severity, RiskScore: pat.RiskScore, Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
 }
 
 func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Function, pos token.Pos, source, sink bool, category string, taints []string, fieldPath, confidence string, props map[string]string) model.DataFlowNode {
@@ -1135,8 +1293,8 @@ func (b *dataFlowBuilder) connectTrace(tr dataFlowTrace, node model.DataFlowNode
 		b.edgeSeen[id] = true
 		b.out.Edges = append(b.out.Edges, model.DataFlowEdge{ID: id, SourceID: previousID, TargetID: node.ID, Kind: kind, Label: label, Position: b.analyzer.position(pos)})
 	}
-	tr.edgeIDs = appendLimitedUnique(tr.edgeIDs, id, maxTraceEdgeIDs)
-	tr.nodeIDs = appendLimitedUnique(tr.nodeIDs, node.ID, maxTraceNodeIDs)
+	tr.edgeIDs = appendLimitedUnique(tr.edgeIDs, id, b.maxTraceEdges)
+	tr.nodeIDs = appendLimitedUnique(tr.nodeIDs, node.ID, b.maxTraceNodes)
 	return tr
 }
 
@@ -1706,7 +1864,7 @@ func combineTraces(a, b dataFlowTrace) dataFlowTrace {
 	if b.empty() {
 		return a
 	}
-	out := dataFlowTrace{nodeIDs: orderedUniqueLimit(append(a.nodeIDs, b.nodeIDs...), maxTraceNodeIDs), edgeIDs: orderedUniqueLimit(append(a.edgeIDs, b.edgeIDs...), maxTraceEdgeIDs), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
+	out := dataFlowTrace{nodeIDs: orderedUniqueLimit(append(a.nodeIDs, b.nodeIDs...), defaultDataFlowMaxTraceNodes), edgeIDs: orderedUniqueLimit(append(a.edgeIDs, b.edgeIDs...), defaultDataFlowMaxTraceEdges), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
 	for k := range a.params {
 		out.params[k] = true
 	}
@@ -1789,6 +1947,8 @@ func enrichDataFlowSlices(df *model.DataFlowEvidence) {
 			s.SourceSymbol = source.Symbol
 			s.SourceFunction = source.Function
 			s.SourcePackagePath = source.PackagePath
+			s.SourceScope = fileRole(source.Position.Filename)
+			s.SourceCriticality = sourceCriticality(s.SourceCategory)
 			s.SourcePURL = firstNonEmpty(s.SourcePURL, source.PURL)
 			if s.SourceCategory == "" {
 				s.SourceCategory = source.Category
@@ -1799,6 +1959,8 @@ func enrichDataFlowSlices(df *model.DataFlowEvidence) {
 			s.SinkSymbol = sink.Symbol
 			s.SinkFunction = sink.Function
 			s.SinkPackagePath = sink.PackagePath
+			s.SinkScope = fileRole(sink.Position.Filename)
+			s.SinkCriticality = sinkCriticality(s.SinkCategory)
 			s.SinkPURL = firstNonEmpty(s.SinkPURL, sink.PURL)
 			if s.SinkCategory == "" {
 				s.SinkCategory = sink.Category
@@ -1849,6 +2011,32 @@ func enrichDataFlowSlices(df *model.DataFlowEvidence) {
 	df.Stats.DuplicateGroupCount = len(duplicateGroups)
 	if len(df.Slices) > 0 {
 		df.Stats.AveragePathLength = float64(totalPathLength) / float64(len(df.Slices))
+	}
+}
+
+func sourceCriticality(category string) string {
+	switch strings.ToLower(category) {
+	case "http-input", "http-endpoint", "cli", "environment", "crypto-material":
+		return "high"
+	case "http-request", "framework-context", "configuration":
+		return "medium"
+	case "parameter":
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+func sinkCriticality(category string) string {
+	switch strings.ToLower(category) {
+	case "command-execution", "native-interop", "unsafe", "syscall", "dynamic-loading":
+		return "critical"
+	case "filesystem", "data", "crypto":
+		return "high"
+	case "redirect", "http-response", "formatted-output", "logging", "external-service":
+		return "medium"
+	default:
+		return "medium"
 	}
 }
 

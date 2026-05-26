@@ -26,21 +26,27 @@ type RuntimeInfo struct {
 	Tests      bool     `json:"tests"`
 }
 type AnalysisOptions struct {
-	Directory             string   `json:"directory"`
-	Patterns              []string `json:"patterns"`
-	BuildTags             []string `json:"buildTags,omitempty"`
-	Tests                 bool     `json:"tests"`
-	IncludeStdlib         bool     `json:"includeStdlib"`
-	IncludeLocal          bool     `json:"includeLocal"`
-	CallGraphMode         string   `json:"callGraphMode"`
-	DataFlowMode          string   `json:"dataFlowMode,omitempty"`
-	DataFlowCallGraphMode string   `json:"dataFlowCallGraphMode,omitempty"`
-	DataFlowPacks         []string `json:"dataFlowPacks,omitempty"`
-	DataFlowWorkers       int      `json:"dataFlowWorkers,omitempty"`
-	MaxProcs              int      `json:"maxProcs,omitempty"`
-	MemoryLimitBytes      int64    `json:"memoryLimitBytes,omitempty"`
-	IncludeSSA            bool     `json:"includeSsa"`
-	IncludeSources        bool     `json:"includeSources"`
+	Directory                       string   `json:"directory"`
+	Patterns                        []string `json:"patterns"`
+	BuildTags                       []string `json:"buildTags,omitempty"`
+	Tests                           bool     `json:"tests"`
+	IncludeStdlib                   bool     `json:"includeStdlib"`
+	IncludeLocal                    bool     `json:"includeLocal"`
+	CallGraphMode                   string   `json:"callGraphMode"`
+	DataFlowMode                    string   `json:"dataFlowMode,omitempty"`
+	DataFlowCallGraphMode           string   `json:"dataFlowCallGraphMode,omitempty"`
+	DataFlowPacks                   []string `json:"dataFlowPacks,omitempty"`
+	DataFlowWorkers                 int      `json:"dataFlowWorkers,omitempty"`
+	DataFlowLargeRepoFunctions      int      `json:"dataFlowLargeRepoFunctions,omitempty"`
+	DataFlowMaxFunctionInstructions int      `json:"dataFlowMaxFunctionInstructions,omitempty"`
+	DataFlowMaxTraceNodes           int      `json:"dataFlowMaxTraceNodes,omitempty"`
+	DataFlowMaxTraceEdges           int      `json:"dataFlowMaxTraceEdges,omitempty"`
+	DataFlowSkipGenerated           bool     `json:"dataFlowSkipGenerated,omitempty"`
+	DataFlowSkipTests               bool     `json:"dataFlowSkipTests,omitempty"`
+	MaxProcs                        int      `json:"maxProcs,omitempty"`
+	MemoryLimitBytes                int64    `json:"memoryLimitBytes,omitempty"`
+	IncludeSSA                      bool     `json:"includeSsa"`
+	IncludeSources                  bool     `json:"includeSources"`
 }
 type Diagnostic struct {
 	PackageID string   `json:"packageId,omitempty"`
@@ -369,6 +375,12 @@ type DataFlowPattern struct {
 	TaintKinds          []string `json:"taintKinds,omitempty"`
 	RemovesTaintKinds   []string `json:"removesTaintKinds,omitempty"`
 	SanitizesCategories []string `json:"sanitizesCategories,omitempty"`
+	RelevantArguments   []int    `json:"relevantArguments,omitempty"`
+	ReceiverRelevant    bool     `json:"receiverRelevant,omitempty"`
+	RuleID              string   `json:"ruleId,omitempty"`
+	RuleName            string   `json:"ruleName,omitempty"`
+	Severity            string   `json:"severity,omitempty"`
+	RiskScore           int      `json:"riskScore,omitempty"`
 	Confidence          string   `json:"confidence,omitempty"`
 }
 type DataFlowPatternSet struct {
@@ -435,6 +447,14 @@ type DataFlowSlice struct {
 	SinkArgumentIndex *int              `json:"sinkArgumentIndex,omitempty"`
 	TaintKinds        []string          `json:"taintKinds,omitempty"`
 	FieldPaths        []string          `json:"fieldPaths,omitempty"`
+	RuleID            string            `json:"ruleId,omitempty"`
+	RuleName          string            `json:"ruleName,omitempty"`
+	Severity          string            `json:"severity,omitempty"`
+	RiskScore         int               `json:"riskScore,omitempty"`
+	SourceScope       string            `json:"sourceScope,omitempty"`
+	SinkScope         string            `json:"sinkScope,omitempty"`
+	SourceCriticality string            `json:"sourceCriticality,omitempty"`
+	SinkCriticality   string            `json:"sinkCriticality,omitempty"`
 	Confidence        string            `json:"confidence,omitempty"`
 	Description       string            `json:"description,omitempty"`
 	Properties        map[string]string `json:"properties,omitempty"`

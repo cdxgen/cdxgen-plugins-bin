@@ -277,6 +277,9 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 		if slice.FlowKey == "" || slice.PathLength != len(slice.EdgeIDs) || len(slice.EdgeKinds) == 0 || slice.SourceFunction == "" || slice.SinkFunction == "" || slice.SinkSymbol == "" {
 			t.Fatalf("expected enriched slice quality metadata, got %#v", slice)
 		}
+		if slice.RuleID == "" || slice.RuleName == "" || slice.Severity == "" || slice.RiskScore == 0 || slice.SourceScope == "" || slice.SinkScope == "" || slice.SourceCriticality == "" || slice.SinkCriticality == "" {
+			t.Fatalf("expected rule/severity/scope metadata, got %#v", slice)
+		}
 		if slice.Description == "" {
 			t.Fatalf("expected slice description, got %#v", slice)
 		}
@@ -354,6 +357,57 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	}
 	if !sanitizedURL {
 		t.Fatalf("expected sanitized external URL evidence in %#v", report.ExternalURLs)
+	}
+}
+
+func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowLargeRepoFunctions: 7, DataFlowMaxFunctionInstructions: 33, DataFlowMaxTraceNodes: 11, DataFlowMaxTraceEdges: 12, DataFlowSkipGenerated: true, DataFlowSkipTests: true, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Options.DataFlowLargeRepoFunctions != 7 || report.Options.DataFlowMaxFunctionInstructions != 33 || report.Options.DataFlowMaxTraceNodes != 11 || report.Options.DataFlowMaxTraceEdges != 12 || !report.Options.DataFlowSkipGenerated || !report.Options.DataFlowSkipTests {
+		t.Fatalf("expected configured data-flow options in report, got %#v", report.Options)
+	}
+	set := builtinDataFlowPatterns([]string{"all"})
+	var redirectArgs, httpErrorArgs, viperSource, cloudSink bool
+	for _, sink := range set.Sinks {
+		if sink.Pattern == "http.Redirect" && len(sink.RelevantArguments) == 1 && sink.RelevantArguments[0] == 2 && sink.RuleID == "GOLEM-DATAFLOW-OPEN-REDIRECT" {
+			redirectArgs = true
+		}
+		if sink.Pattern == "http.Error" && len(sink.RelevantArguments) == 1 && sink.RelevantArguments[0] == 1 && sink.RuleID == "GOLEM-DATAFLOW-REFLECTED-OUTPUT" {
+			httpErrorArgs = true
+		}
+		if sink.Category == "external-service" && strings.Contains(sink.Pattern, "aws-sdk-go") {
+			cloudSink = true
+		}
+	}
+	for _, source := range set.Sources {
+		if strings.Contains(source.Pattern, "viper.GetString") && source.Category == "configuration" {
+			viperSource = true
+		}
+	}
+	if !redirectArgs || !httpErrorArgs || !viperSource || !cloudSink {
+		t.Fatalf("expected enriched pattern metadata/packs redirect=%v httpError=%v viper=%v cloud=%v", redirectArgs, httpErrorArgs, viperSource, cloudSink)
+	}
+	narrow := builtinDataFlowPatterns([]string{"process"})
+	for _, source := range narrow.Sources {
+		if strings.Contains(source.Pattern, "viper") || strings.Contains(source.Pattern, "gin") {
+			t.Fatalf("explicit process pack should not include config/framework sources: %#v", narrow.Sources)
+		}
+	}
+	for _, sink := range narrow.Sinks {
+		if sink.Category != "command-execution" && sink.Category != "dynamic-loading" {
+			t.Fatalf("explicit process pack should only include process sinks, got %#v", narrow.Sinks)
+		}
+	}
+}
+
+func TestDataFlowTestLikeFunctionPredicate(t *testing.T) {
+	if !dataFlowTestLikeFunction(filepath.Join("pkg", "handler_test.go"), nil) {
+		t.Fatal("expected _test.go file to be treated as test-like")
+	}
+	if dataFlowTestLikeFunction(filepath.Join("pkg", "handler.go"), nil) {
+		t.Fatal("expected runtime .go file not to be treated as test-like")
 	}
 }
 

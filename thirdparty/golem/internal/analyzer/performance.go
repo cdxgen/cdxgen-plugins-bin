@@ -69,6 +69,18 @@ func normalizePerformanceOptions(options *Options) {
 	if options.DataFlowWorkers < 0 {
 		options.DataFlowWorkers = 0
 	}
+	if options.DataFlowLargeRepoFunctions < 0 {
+		options.DataFlowLargeRepoFunctions = 0
+	}
+	if options.DataFlowMaxFunctionInstructions < 0 {
+		options.DataFlowMaxFunctionInstructions = 0
+	}
+	if options.DataFlowMaxTraceNodes < 0 {
+		options.DataFlowMaxTraceNodes = 0
+	}
+	if options.DataFlowMaxTraceEdges < 0 {
+		options.DataFlowMaxTraceEdges = 0
+	}
 	if options.ProgressInterval <= 0 {
 		options.ProgressInterval = defaultProgressInterval
 	}
