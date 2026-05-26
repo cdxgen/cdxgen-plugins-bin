@@ -408,21 +408,36 @@ type DataFlowEdge struct {
 	Properties map[string]string `json:"properties,omitempty"`
 }
 type DataFlowSlice struct {
-	ID                string   `json:"id"`
-	SourceID          string   `json:"sourceId"`
-	SinkID            string   `json:"sinkId"`
-	NodeIDs           []string `json:"nodeIds,omitempty"`
-	EdgeIDs           []string `json:"edgeIds,omitempty"`
-	SourceCategory    string   `json:"sourceCategory,omitempty"`
-	SinkCategory      string   `json:"sinkCategory,omitempty"`
-	SourcePURL        string   `json:"sourcePurl,omitempty"`
-	SinkPURL          string   `json:"sinkPurl,omitempty"`
-	SinkArgument      string   `json:"sinkArgument,omitempty"`
-	SinkArgumentIndex *int     `json:"sinkArgumentIndex,omitempty"`
-	TaintKinds        []string `json:"taintKinds,omitempty"`
-	FieldPaths        []string `json:"fieldPaths,omitempty"`
-	Confidence        string   `json:"confidence,omitempty"`
-	Summary           string   `json:"summary,omitempty"`
+	ID                string            `json:"id"`
+	SourceID          string            `json:"sourceId"`
+	SinkID            string            `json:"sinkId"`
+	FlowKey           string            `json:"flowKey,omitempty"`
+	DuplicateOf       string            `json:"duplicateOf,omitempty"`
+	DuplicateIndex    int               `json:"duplicateIndex,omitempty"`
+	NodeIDs           []string          `json:"nodeIds,omitempty"`
+	EdgeIDs           []string          `json:"edgeIds,omitempty"`
+	EdgeKinds         []string          `json:"edgeKinds,omitempty"`
+	SanitizerNodeIDs  []string          `json:"sanitizerNodeIds,omitempty"`
+	PathLength        int               `json:"pathLength,omitempty"`
+	SourceCategory    string            `json:"sourceCategory,omitempty"`
+	SinkCategory      string            `json:"sinkCategory,omitempty"`
+	SourceName        string            `json:"sourceName,omitempty"`
+	SourceSymbol      string            `json:"sourceSymbol,omitempty"`
+	SourceFunction    string            `json:"sourceFunction,omitempty"`
+	SourcePackagePath string            `json:"sourcePackagePath,omitempty"`
+	SourcePURL        string            `json:"sourcePurl,omitempty"`
+	SinkName          string            `json:"sinkName,omitempty"`
+	SinkSymbol        string            `json:"sinkSymbol,omitempty"`
+	SinkFunction      string            `json:"sinkFunction,omitempty"`
+	SinkPackagePath   string            `json:"sinkPackagePath,omitempty"`
+	SinkPURL          string            `json:"sinkPurl,omitempty"`
+	SinkArgument      string            `json:"sinkArgument,omitempty"`
+	SinkArgumentIndex *int              `json:"sinkArgumentIndex,omitempty"`
+	TaintKinds        []string          `json:"taintKinds,omitempty"`
+	FieldPaths        []string          `json:"fieldPaths,omitempty"`
+	Confidence        string            `json:"confidence,omitempty"`
+	Description       string            `json:"description,omitempty"`
+	Properties        map[string]string `json:"properties,omitempty"`
 }
 type DataFlowSummaryFlow struct {
 	ParameterIndex int      `json:"parameterIndex"`
@@ -443,18 +458,26 @@ type DataFlowMethodSummary struct {
 	Properties       map[string]string     `json:"properties,omitempty"`
 }
 type DataFlowStats struct {
-	SourceCount       int      `json:"sourceCount"`
-	SinkCount         int      `json:"sinkCount"`
-	SliceCount        int      `json:"sliceCount"`
-	NodeCount         int      `json:"nodeCount"`
-	EdgeCount         int      `json:"edgeCount"`
-	SummaryCount      int      `json:"summaryCount"`
-	FunctionCount     int      `json:"functionCount"`
-	InstructionCount  int      `json:"instructionCount"`
-	WorkerCount       int      `json:"workerCount,omitempty"`
-	ElapsedMillis     int      `json:"elapsedMillis,omitempty"`
-	Truncated         bool     `json:"truncated,omitempty"`
-	TruncationReasons []string `json:"truncationReasons,omitempty"`
+	SourceCount            int      `json:"sourceCount"`
+	SinkCount              int      `json:"sinkCount"`
+	SliceCount             int      `json:"sliceCount"`
+	NodeCount              int      `json:"nodeCount"`
+	EdgeCount              int      `json:"edgeCount"`
+	SummaryCount           int      `json:"summaryCount"`
+	CandidateFunctionCount int      `json:"candidateFunctionCount,omitempty"`
+	FunctionCount          int      `json:"functionCount"`
+	SkippedFunctionCount   int      `json:"skippedFunctionCount,omitempty"`
+	InstructionCount       int      `json:"instructionCount"`
+	WorkerCount            int      `json:"workerCount,omitempty"`
+	ElapsedMillis          int      `json:"elapsedMillis,omitempty"`
+	Truncated              bool     `json:"truncated,omitempty"`
+	TruncationReasons      []string `json:"truncationReasons,omitempty"`
+	UniqueFlowCount        int      `json:"uniqueFlowCount,omitempty"`
+	DuplicateSliceCount    int      `json:"duplicateSliceCount,omitempty"`
+	DuplicateGroupCount    int      `json:"duplicateGroupCount,omitempty"`
+	MaxPathLength          int      `json:"maxPathLength,omitempty"`
+	AveragePathLength      float64  `json:"averagePathLength,omitempty"`
+	SanitizedSliceCount    int      `json:"sanitizedSliceCount,omitempty"`
 }
 type DataFlowEvidence struct {
 	Mode        string                  `json:"mode"`

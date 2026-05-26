@@ -21,6 +21,13 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
+const (
+	maxTraceNodeIDs                  = 64
+	maxTraceEdgeIDs                  = 128
+	largeRepoFunctionCount           = 1000
+	largeRepoMaxFunctionInstructions = 200
+)
+
 type dataFlowTrace struct {
 	nodeIDs             []string
 	edgeIDs             []string
@@ -83,14 +90,20 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 		return out
 	}
 	funcs := ctx.filteredFunctions(a.includeDataFlowFunction)
-	workers := dataFlowWorkerCount(a.options, len(funcs))
-	progress.Memoryf("data-flow starting mode=%s functions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), workers, a.options.DataFlowMax)
+	sortDataFlowFunctions(funcs)
+	analysisFuncs, skippedFuncs := dataFlowAnalysisFunctions(funcs)
+	workers := dataFlowWorkerCount(a.options, len(analysisFuncs))
+	progress.Memoryf("data-flow starting mode=%s functions=%d analyzedFunctions=%d skippedFunctions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), len(analysisFuncs), skippedFuncs, workers, a.options.DataFlowMax)
+	progress.Logf("data-flow scheduled first=%s largest=%s", describeDataFlowFunctions(analysisFuncs, 6, false), describeDataFlowFunctions(analysisFuncs, 6, true))
 	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
 	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax}
 	progress.Memoryf("data-flow inferring summaries")
 	b.inferSummaries(funcs)
 	progress.Memoryf("data-flow summaries inferred")
-	b.analyzeFunctions(funcs, workers, progress)
+	if skippedFuncs > 0 {
+		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("skipped %d very large functions above %d SSA instructions during slice materialization; summaries were still inferred", skippedFuncs, largeRepoMaxFunctionInstructions))
+	}
+	b.analyzeFunctions(analysisFuncs, workers, progress)
 	progress.Memoryf("data-flow function analysis complete")
 	for _, summary := range b.summaries {
 		if len(summary.model.ParamToReturn) > 0 || len(summary.model.ParamToSink) > 0 || len(summary.sourceReturns) > 0 || summary.model.ReceiverToReturn || summary.model.Passthrough {
@@ -107,12 +120,15 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 			out.Summaries = append(out.Summaries, summary.model)
 		}
 	}
+	enrichDataFlowSlices(out)
 	sortDataFlowEvidence(out)
 	out.Stats.NodeCount = len(out.Nodes)
 	out.Stats.EdgeCount = len(out.Edges)
 	out.Stats.SliceCount = len(out.Slices)
 	out.Stats.SummaryCount = len(out.Summaries)
-	out.Stats.FunctionCount = len(funcs)
+	out.Stats.CandidateFunctionCount = len(funcs)
+	out.Stats.FunctionCount = len(analysisFuncs)
+	out.Stats.SkippedFunctionCount = skippedFuncs
 	out.Stats.InstructionCount = b.instructionCt
 	out.Stats.WorkerCount = workers
 	out.Stats.ElapsedMillis = int(time.Since(started).Milliseconds())
@@ -127,6 +143,64 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 		}
 	}
 	return out
+}
+
+func dataFlowAnalysisFunctions(funcs []*ssa.Function) ([]*ssa.Function, int) {
+	if len(funcs) < largeRepoFunctionCount {
+		return funcs, 0
+	}
+	out := make([]*ssa.Function, 0, len(funcs))
+	skipped := 0
+	for _, fn := range funcs {
+		if ssaFunctionInstructionCount(fn) > largeRepoMaxFunctionInstructions {
+			skipped++
+			continue
+		}
+		out = append(out, fn)
+	}
+	return out, skipped
+}
+
+func sortDataFlowFunctions(funcs []*ssa.Function) {
+	sort.SliceStable(funcs, func(i, j int) bool {
+		ic, jc := ssaFunctionInstructionCount(funcs[i]), ssaFunctionInstructionCount(funcs[j])
+		if ic != jc {
+			return ic < jc
+		}
+		return funcs[i].String() < funcs[j].String()
+	})
+}
+
+func ssaFunctionInstructionCount(fn *ssa.Function) int {
+	if fn == nil {
+		return 0
+	}
+	var count int
+	for _, block := range fn.Blocks {
+		if block != nil {
+			count += len(block.Instrs)
+		}
+	}
+	return count
+}
+
+func describeDataFlowFunctions(funcs []*ssa.Function, limit int, largest bool) string {
+	if len(funcs) == 0 || limit <= 0 {
+		return ""
+	}
+	start, end, step := 0, len(funcs), 1
+	if largest {
+		start, end, step = len(funcs)-1, -1, -1
+	}
+	var parts []string
+	for i := start; i != end && len(parts) < limit; i += step {
+		fn := funcs[i]
+		if fn == nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s(%d)", fn.String(), ssaFunctionInstructionCount(fn)))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (a *Analyzer) dataFlowDynamicCallees(ctx *ssaContext, out *model.DataFlowEvidence) map[ssa.CallInstruction][]*ssa.Function {
@@ -312,7 +386,6 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		set.Sources = append(set.Sources, paramPattern)
 		addSource("type", "*net/http.Request", "http-request", "user-input")
 		addSource("type", "http.Request", "http-request", "user-input")
-		addSource("type", "context.Context", "context", "request-context")
 		for _, name := range []string{"fmt.Sprintf", "fmt.Sprint", "fmt.Sprintln", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "net/url.QueryEscape", "net/url.PathEscape", "net/url.JoinPath", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
 			addPass("function", name, "conversion")
 		}
@@ -857,7 +930,7 @@ func (b *dataFlowBuilder) interfaceSummaryCallees(common *ssa.CallCommon) []*ssa
 	var out []*ssa.Function
 	seen := map[*ssa.Function]bool{}
 	for callee, summary := range b.summaries {
-		if callee == nil || seen[callee] || callee.Name() != common.Method.Name() {
+		if callee == nil || seen[callee] || callee.Name() != common.Method.Name() || !interfaceSummaryCompatible(common, callee) {
 			continue
 		}
 		if len(summary.paramReturn) == 0 && len(summary.paramSink) == 0 && len(summary.sourceReturns) == 0 {
@@ -900,6 +973,34 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 			}
 		}
 	}
+}
+
+func interfaceSummaryCompatible(common *ssa.CallCommon, callee *ssa.Function) bool {
+	if common == nil || common.Signature() == nil || callee == nil || callee.Signature == nil {
+		return false
+	}
+	callSig := common.Signature()
+	calleeSig := callee.Signature
+	callParams := callSig.Params()
+	calleeParams := calleeSig.Params()
+	calleeOffset := 0
+	if calleeSig.Recv() != nil {
+		calleeOffset = 1
+	}
+	if callParams.Len() != calleeParams.Len()-calleeOffset || callSig.Results().Len() != calleeSig.Results().Len() {
+		return false
+	}
+	for i := 0; i < callParams.Len(); i++ {
+		if callParams.At(i).Type().String() != calleeParams.At(i+calleeOffset).Type().String() {
+			return false
+		}
+	}
+	for i := 0; i < callSig.Results().Len(); i++ {
+		if callSig.Results().At(i).Type().String() != calleeSig.Results().At(i).Type().String() {
+			return false
+		}
+	}
+	return true
 }
 
 func summaryCallArgument(common *ssa.CallCommon, callee *ssa.Function, paramIndex int) (ssa.Value, bool) {
@@ -995,7 +1096,7 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		return
 	}
 	b.sliceSeen[id] = true
-	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: uniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: uniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Summary: summary})
+	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
 }
 
 func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Function, pos token.Pos, source, sink bool, category string, taints []string, fieldPath, confidence string, props map[string]string) model.DataFlowNode {
@@ -1028,15 +1129,14 @@ func (b *dataFlowBuilder) connectTrace(tr dataFlowTrace, node model.DataFlowNode
 		tr.nodeIDs = append(tr.nodeIDs, node.ID)
 		return tr
 	}
-	for _, sourceID := range tr.nodeIDs {
-		id := stableID("df-edge", sourceID, node.ID, kind, label, fmt.Sprint(b.analyzer.position(pos).Line))
-		if !b.edgeSeen[id] {
-			b.edgeSeen[id] = true
-			b.out.Edges = append(b.out.Edges, model.DataFlowEdge{ID: id, SourceID: sourceID, TargetID: node.ID, Kind: kind, Label: label, Position: b.analyzer.position(pos)})
-		}
-		tr.edgeIDs = append(tr.edgeIDs, id)
+	previousID := tr.nodeIDs[len(tr.nodeIDs)-1]
+	id := stableID("df-edge", previousID, node.ID, kind, label, fmt.Sprint(b.analyzer.position(pos).Line))
+	if !b.edgeSeen[id] {
+		b.edgeSeen[id] = true
+		b.out.Edges = append(b.out.Edges, model.DataFlowEdge{ID: id, SourceID: previousID, TargetID: node.ID, Kind: kind, Label: label, Position: b.analyzer.position(pos)})
 	}
-	tr.nodeIDs = append(tr.nodeIDs, node.ID)
+	tr.edgeIDs = appendLimitedUnique(tr.edgeIDs, id, maxTraceEdgeIDs)
+	tr.nodeIDs = appendLimitedUnique(tr.nodeIDs, node.ID, maxTraceNodeIDs)
 	return tr
 }
 
@@ -1606,7 +1706,7 @@ func combineTraces(a, b dataFlowTrace) dataFlowTrace {
 	if b.empty() {
 		return a
 	}
-	out := dataFlowTrace{nodeIDs: uniqueStrings(append(a.nodeIDs, b.nodeIDs...)), edgeIDs: uniqueStrings(append(a.edgeIDs, b.edgeIDs...)), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
+	out := dataFlowTrace{nodeIDs: orderedUniqueLimit(append(a.nodeIDs, b.nodeIDs...), maxTraceNodeIDs), edgeIDs: orderedUniqueLimit(append(a.edgeIDs, b.edgeIDs...), maxTraceEdgeIDs), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
 	for k := range a.params {
 		out.params[k] = true
 	}
@@ -1666,6 +1766,92 @@ func dataFlowTruncationReasons(diagnostics []model.Diagnostic) []string {
 	return out
 }
 
+func enrichDataFlowSlices(df *model.DataFlowEvidence) {
+	if df == nil || len(df.Slices) == 0 {
+		return
+	}
+	nodes := map[string]model.DataFlowNode{}
+	for _, node := range df.Nodes {
+		nodes[node.ID] = node
+	}
+	edges := map[string]model.DataFlowEdge{}
+	for _, edge := range df.Edges {
+		edges[edge.ID] = edge
+	}
+	firstByFlow := map[string]string{}
+	countByFlow := map[string]int{}
+	duplicateGroups := map[string]bool{}
+	totalPathLength := 0
+	for i := range df.Slices {
+		s := &df.Slices[i]
+		if source, ok := nodes[s.SourceID]; ok {
+			s.SourceName = source.Name
+			s.SourceSymbol = source.Symbol
+			s.SourceFunction = source.Function
+			s.SourcePackagePath = source.PackagePath
+			s.SourcePURL = firstNonEmpty(s.SourcePURL, source.PURL)
+			if s.SourceCategory == "" {
+				s.SourceCategory = source.Category
+			}
+		}
+		if sink, ok := nodes[s.SinkID]; ok {
+			s.SinkName = sink.Name
+			s.SinkSymbol = sink.Symbol
+			s.SinkFunction = sink.Function
+			s.SinkPackagePath = sink.PackagePath
+			s.SinkPURL = firstNonEmpty(s.SinkPURL, sink.PURL)
+			if s.SinkCategory == "" {
+				s.SinkCategory = sink.Category
+			}
+		}
+		var edgeKinds []string
+		for _, edgeID := range s.EdgeIDs {
+			if edge, ok := edges[edgeID]; ok {
+				edgeKinds = append(edgeKinds, edge.Kind)
+			}
+		}
+		s.EdgeKinds = uniqueStrings(edgeKinds)
+		var sanitizerIDs []string
+		for _, nodeID := range s.NodeIDs {
+			if node, ok := nodes[nodeID]; ok && node.Kind == "sanitizer" {
+				sanitizerIDs = append(sanitizerIDs, nodeID)
+			}
+		}
+		s.SanitizerNodeIDs = uniqueStrings(sanitizerIDs)
+		s.PathLength = len(s.EdgeIDs)
+		totalPathLength += s.PathLength
+		if s.PathLength > df.Stats.MaxPathLength {
+			df.Stats.MaxPathLength = s.PathLength
+		}
+		if len(s.SanitizerNodeIDs) > 0 {
+			df.Stats.SanitizedSliceCount++
+		}
+		arg := ""
+		if s.SinkArgumentIndex != nil {
+			arg = fmt.Sprint(*s.SinkArgumentIndex)
+		}
+		s.FlowKey = stableID("df-flow", s.SourceCategory, s.SinkCategory, s.SourceFunction, s.SinkFunction, s.SinkSymbol, arg, strings.Join(s.TaintKinds, ","), strings.Join(s.FieldPaths, ","))
+		countByFlow[s.FlowKey]++
+		if first := firstByFlow[s.FlowKey]; first != "" {
+			s.DuplicateOf = first
+			s.DuplicateIndex = countByFlow[s.FlowKey]
+			duplicateGroups[s.FlowKey] = true
+		} else {
+			firstByFlow[s.FlowKey] = s.ID
+		}
+	}
+	df.Stats.UniqueFlowCount = len(firstByFlow)
+	for _, count := range countByFlow {
+		if count > 1 {
+			df.Stats.DuplicateSliceCount += count - 1
+		}
+	}
+	df.Stats.DuplicateGroupCount = len(duplicateGroups)
+	if len(df.Slices) > 0 {
+		df.Stats.AveragePathLength = float64(totalPathLength) / float64(len(df.Slices))
+	}
+}
+
 func taintsForPattern(p model.DataFlowPattern) []string {
 	if len(p.TaintKinds) > 0 {
 		return p.TaintKinds
@@ -1678,6 +1864,45 @@ func taintsForPattern(p model.DataFlowPattern) []string {
 
 func mergeStrings(a, b []string) []string {
 	return uniqueStrings(append(append([]string{}, a...), b...))
+}
+
+func appendLimitedUnique(values []string, value string, limit int) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	if limit > 0 && len(values) >= limit {
+		copy(values, values[1:])
+		values[len(values)-1] = value
+		return values
+	}
+	return append(values, value)
+}
+
+func orderedUniqueStrings(in []string) []string {
+	return orderedUniqueLimit(in, 0)
+}
+
+func orderedUniqueLimit(in []string, limit int) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, value := range in {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func uniqueStrings(in []string) []string {

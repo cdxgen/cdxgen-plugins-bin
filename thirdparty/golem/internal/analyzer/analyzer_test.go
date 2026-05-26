@@ -274,6 +274,15 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 		if len(slice.NodeIDs) == 0 || len(slice.EdgeIDs) == 0 {
 			t.Fatalf("expected populated slice path, got %#v", slice)
 		}
+		if slice.FlowKey == "" || slice.PathLength != len(slice.EdgeIDs) || len(slice.EdgeKinds) == 0 || slice.SourceFunction == "" || slice.SinkFunction == "" || slice.SinkSymbol == "" {
+			t.Fatalf("expected enriched slice quality metadata, got %#v", slice)
+		}
+		if slice.Description == "" {
+			t.Fatalf("expected slice description, got %#v", slice)
+		}
+	}
+	if report.DataFlow.Stats.UniqueFlowCount == 0 || report.DataFlow.Stats.MaxPathLength == 0 || report.DataFlow.Stats.AveragePathLength == 0 {
+		t.Fatalf("expected enriched slice quality stats, got %#v", report.DataFlow.Stats)
 	}
 	for key, found := range expectedCategories {
 		if !found {
