@@ -68,6 +68,25 @@ func modulePURL(mod *model.Module) string {
 	return p
 }
 
+func packagePURL(pkgPath string, mod *model.Module) string {
+	if pkgPath == "" || strings.HasPrefix(pkgPath, ".") || strings.HasPrefix(pkgPath, "/") {
+		return ""
+	}
+	if mod != nil && mod.Path != "" {
+		p := modulePURL(mod)
+		if p == "" {
+			return ""
+		}
+		if pkgPath != mod.Path && strings.HasPrefix(pkgPath, mod.Path+"/") {
+			if subpath := strings.TrimPrefix(pkgPath, mod.Path+"/"); subpath != "" {
+				p += "#" + subpath
+			}
+		}
+		return p
+	}
+	return "pkg:golang/" + pkgPath
+}
+
 func moduleKey(mod *model.Module) string {
 	if mod == nil {
 		return ""

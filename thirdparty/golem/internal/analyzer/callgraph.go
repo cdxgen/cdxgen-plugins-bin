@@ -75,6 +75,7 @@ func reachableFunctions(graph *callgraph.Graph) map[*ssa.Function]bool {
 
 func (a *Analyzer) convertCallGraph(out *model.CallGraph, graph *callgraph.Graph) *model.CallGraph {
 	nodeIDs := map[*callgraph.Node]string{}
+	nodeModels := map[*callgraph.Node]model.CallGraphNode{}
 	for fn, node := range graph.Nodes {
 		if fn == nil || node == nil {
 			continue
@@ -84,6 +85,7 @@ func (a *Analyzer) convertCallGraph(out *model.CallGraph, graph *callgraph.Graph
 			continue
 		}
 		nodeIDs[node] = n.ID
+		nodeModels[node] = n
 		out.Nodes = append(out.Nodes, n)
 	}
 	seenEdges := map[string]bool{}
@@ -113,7 +115,9 @@ func (a *Analyzer) convertCallGraph(out *model.CallGraph, graph *callgraph.Graph
 				continue
 			}
 			seenEdges[id] = true
-			out.Edges = append(out.Edges, model.CallGraphEdge{ID: id, SourceID: sourceID, TargetID: targetID, SourceName: edge.Caller.Func.String(), TargetName: edge.Callee.Func.String(), CallType: callType, Static: callType == "static", Position: pos})
+			sourcePURL := nodeModels[edge.Caller].PURL
+			sinkPURL := nodeModels[edge.Callee].PURL
+			out.Edges = append(out.Edges, model.CallGraphEdge{ID: id, SourceID: sourceID, TargetID: targetID, SourceName: edge.Caller.Func.String(), TargetName: edge.Callee.Func.String(), SourcePURL: sourcePURL, SinkPURL: sinkPURL, PURLs: orderedUniqueStrings([]string{sourcePURL, sinkPURL}), CallType: callType, Static: callType == "static", Position: pos})
 		}
 	}
 	sort.Slice(out.Nodes, func(i, j int) bool { return out.Nodes[i].ID < out.Nodes[j].ID })
@@ -143,7 +147,7 @@ func (a *Analyzer) callGraphNode(fn *ssa.Function) model.CallGraphNode {
 	if fn.Object() != nil {
 		name = fn.Object().Name()
 	}
-	return model.CallGraphNode{ID: fn.String(), Name: name, Label: fn.String(), Kind: "function", PackagePath: pkgPath, PackageName: pkgName, Module: mod, PURL: modulePURL(mod), Standard: isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), External: !isLocalModule(mod), Synthetic: fn.Synthetic != "", Signature: sig, Receiver: receiver, Position: a.position(fn.Pos())}
+	return model.CallGraphNode{ID: fn.String(), Name: name, Label: fn.String(), Kind: "function", PackagePath: pkgPath, PackageName: pkgName, Module: mod, PURL: packagePURL(pkgPath, mod), Standard: isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), External: !isLocalModule(mod), Synthetic: fn.Synthetic != "", Signature: sig, Receiver: receiver, Position: a.position(fn.Pos())}
 }
 
 func (a *Analyzer) includeGraphNode(node model.CallGraphNode) bool {

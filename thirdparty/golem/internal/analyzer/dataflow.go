@@ -1254,7 +1254,8 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 		return
 	}
 	b.sliceSeen[id] = true
-	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: pat.PURL, SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), RuleID: pat.RuleID, RuleName: pat.RuleName, Severity: pat.Severity, RiskScore: pat.RiskScore, Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
+	sinkPURL := firstNonEmpty(pat.PURL, sink.PURL)
+	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: sinkPURL, PURLs: orderedUniqueStrings([]string{tr.sourcePURL, sinkPURL}), SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), RuleID: pat.RuleID, RuleName: pat.RuleName, Severity: pat.Severity, RiskScore: pat.RiskScore, Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
 }
 
 func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Function, pos token.Pos, source, sink bool, category string, taints []string, fieldPath, confidence string, props map[string]string) model.DataFlowNode {
@@ -1270,7 +1271,7 @@ func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Functi
 		if fn.Pkg != nil && fn.Pkg.Pkg != nil {
 			pkgPath = fn.Pkg.Pkg.Path()
 			mod = b.analyzer.moduleForPackagePath(pkgPath)
-			purl = modulePURL(mod)
+			purl = packagePURL(pkgPath, mod)
 		}
 	}
 	id := stableID("df-node", kind, fnID, symbol, name, position.Filename, fmt.Sprint(position.Line), fmt.Sprint(position.Column), category)
@@ -1966,6 +1967,13 @@ func enrichDataFlowSlices(df *model.DataFlowEvidence) {
 				s.SinkCategory = sink.Category
 			}
 		}
+		purls := []string{s.SourcePURL, s.SinkPURL}
+		for _, nodeID := range s.NodeIDs {
+			if node, ok := nodes[nodeID]; ok {
+				purls = append(purls, node.PURL)
+			}
+		}
+		s.PURLs = orderedUniqueStrings(append(s.PURLs, purls...))
 		var edgeKinds []string
 		for _, edgeID := range s.EdgeIDs {
 			if edge, ok := edges[edgeID]; ok {

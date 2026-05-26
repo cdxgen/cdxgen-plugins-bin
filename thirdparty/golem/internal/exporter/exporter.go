@@ -80,18 +80,18 @@ func GraphML(graph *model.CallGraph) string {
 	b.WriteString("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n")
 	keys := []string{"label", "kind", "packagePath", "packageName", "purl", "standard", "local", "external", "signature", "receiver"}
 	for _, key := range keys {
-		fmt.Fprintf(&b, "  <key id=\"%s\" for=\"node\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "  <key id=\"%s\" for=\"node\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
-	edgeKeys := []string{"callType", "static", "location", "sourceName", "targetName"}
+	edgeKeys := []string{"callType", "static", "location", "sourceName", "targetName", "sourcePurl", "sinkPurl", "purls"}
 	for _, key := range edgeKeys {
-		fmt.Fprintf(&b, "  <key id=\"%s\" for=\"edge\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "  <key id=\"%s\" for=\"edge\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("  <graph id=\"callgraph\" edgedefault=\"directed\">\n")
 	if graph != nil {
 		nodes := append([]model.CallGraphNode{}, graph.Nodes...)
 		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 		for _, node := range nodes {
-			fmt.Fprintf(&b, "    <node id=\"%s\">\n", xmlEscape(node.ID))
+			writef(&b, "    <node id=\"%s\">\n", xmlEscape(node.ID))
 			graphMLData(&b, "label", firstNonEmpty(node.Label, node.Name))
 			graphMLData(&b, "kind", node.Kind)
 			graphMLData(&b, "packagePath", node.PackagePath)
@@ -107,12 +107,15 @@ func GraphML(graph *model.CallGraph) string {
 		edges := append([]model.CallGraphEdge{}, graph.Edges...)
 		sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
 		for _, edge := range edges {
-			fmt.Fprintf(&b, "    <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
+			writef(&b, "    <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
 			graphMLData(&b, "callType", edge.CallType)
 			graphMLData(&b, "static", fmt.Sprint(edge.Static))
 			graphMLData(&b, "location", formatLocation(edge.Position))
 			graphMLData(&b, "sourceName", edge.SourceName)
 			graphMLData(&b, "targetName", edge.TargetName)
+			graphMLData(&b, "sourcePurl", edge.SourcePURL)
+			graphMLData(&b, "sinkPurl", edge.SinkPURL)
+			graphMLData(&b, "purls", strings.Join(edge.PURLs, ","))
 			b.WriteString("    </edge>\n")
 		}
 	}
@@ -128,12 +131,12 @@ func GEXF(graph *model.CallGraph) string {
 	b.WriteString("  <graph mode=\"static\" defaultedgetype=\"directed\">\n")
 	b.WriteString("    <attributes class=\"node\">\n")
 	for _, key := range []string{"kind", "packagePath", "packageName", "purl", "standard", "local", "external", "signature", "receiver"} {
-		fmt.Fprintf(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("    </attributes>\n")
 	b.WriteString("    <attributes class=\"edge\">\n")
-	for _, key := range []string{"callType", "static", "location", "sourceName", "targetName"} {
-		fmt.Fprintf(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+	for _, key := range []string{"callType", "static", "location", "sourceName", "targetName", "sourcePurl", "sinkPurl", "purls"} {
+		writef(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("    </attributes>\n")
 	b.WriteString("    <nodes>\n")
@@ -141,7 +144,7 @@ func GEXF(graph *model.CallGraph) string {
 		nodes := append([]model.CallGraphNode{}, graph.Nodes...)
 		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 		for _, node := range nodes {
-			fmt.Fprintf(&b, "      <node id=\"%s\" label=\"%s\">\n", xmlEscape(node.ID), xmlEscape(firstNonEmpty(node.Label, node.Name)))
+			writef(&b, "      <node id=\"%s\" label=\"%s\">\n", xmlEscape(node.ID), xmlEscape(firstNonEmpty(node.Label, node.Name)))
 			b.WriteString("        <attvalues>\n")
 			gexfValue(&b, "kind", node.Kind)
 			gexfValue(&b, "packagePath", node.PackagePath)
@@ -160,13 +163,16 @@ func GEXF(graph *model.CallGraph) string {
 		edges := append([]model.CallGraphEdge{}, graph.Edges...)
 		sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
 		for _, edge := range edges {
-			fmt.Fprintf(&b, "      <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
+			writef(&b, "      <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
 			b.WriteString("        <attvalues>\n")
 			gexfValue(&b, "callType", edge.CallType)
 			gexfValue(&b, "static", fmt.Sprint(edge.Static))
 			gexfValue(&b, "location", formatLocation(edge.Position))
 			gexfValue(&b, "sourceName", edge.SourceName)
 			gexfValue(&b, "targetName", edge.TargetName)
+			gexfValue(&b, "sourcePurl", edge.SourcePURL)
+			gexfValue(&b, "sinkPurl", edge.SinkPURL)
+			gexfValue(&b, "purls", strings.Join(edge.PURLs, ","))
 			b.WriteString("        </attvalues>\n")
 			b.WriteString("      </edge>\n")
 		}
@@ -182,17 +188,17 @@ func DataFlowGraphMLGraph(df *model.DataFlowEvidence) string {
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	b.WriteString("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n")
 	for _, key := range []string{"label", "kind", "symbol", "type", "packagePath", "purl", "function", "source", "sink", "category", "taintKinds", "fieldPath", "confidence", "location"} {
-		fmt.Fprintf(&b, "  <key id=\"%s\" for=\"node\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "  <key id=\"%s\" for=\"node\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	for _, key := range []string{"kind", "label", "location"} {
-		fmt.Fprintf(&b, "  <key id=\"edge_%s\" for=\"edge\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "  <key id=\"edge_%s\" for=\"edge\" attr.name=\"%s\" attr.type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("  <graph id=\"dataflows\" edgedefault=\"directed\">\n")
 	if df != nil {
 		nodes := append([]model.DataFlowNode{}, df.Nodes...)
 		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 		for _, node := range nodes {
-			fmt.Fprintf(&b, "    <node id=\"%s\">\n", xmlEscape(node.ID))
+			writef(&b, "    <node id=\"%s\">\n", xmlEscape(node.ID))
 			graphMLData(&b, "label", firstNonEmpty(node.Name, node.Symbol, node.ID))
 			graphMLData(&b, "kind", node.Kind)
 			graphMLData(&b, "symbol", node.Symbol)
@@ -212,7 +218,7 @@ func DataFlowGraphMLGraph(df *model.DataFlowEvidence) string {
 		edges := append([]model.DataFlowEdge{}, df.Edges...)
 		sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
 		for _, edge := range edges {
-			fmt.Fprintf(&b, "    <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
+			writef(&b, "    <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
 			graphMLData(&b, "edge_kind", edge.Kind)
 			graphMLData(&b, "edge_label", edge.Label)
 			graphMLData(&b, "edge_location", formatLocation(edge.Position))
@@ -231,12 +237,12 @@ func DataFlowGEXFGraph(df *model.DataFlowEvidence) string {
 	b.WriteString("  <graph mode=\"static\" defaultedgetype=\"directed\">\n")
 	b.WriteString("    <attributes class=\"node\">\n")
 	for _, key := range []string{"kind", "symbol", "type", "packagePath", "purl", "function", "source", "sink", "category", "taintKinds", "fieldPath", "confidence", "location"} {
-		fmt.Fprintf(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("    </attributes>\n")
 	b.WriteString("    <attributes class=\"edge\">\n")
 	for _, key := range []string{"kind", "label", "location"} {
-		fmt.Fprintf(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
+		writef(&b, "      <attribute id=\"%s\" title=\"%s\" type=\"string\" />\n", xmlEscape(key), xmlEscape(key))
 	}
 	b.WriteString("    </attributes>\n")
 	b.WriteString("    <nodes>\n")
@@ -244,7 +250,7 @@ func DataFlowGEXFGraph(df *model.DataFlowEvidence) string {
 		nodes := append([]model.DataFlowNode{}, df.Nodes...)
 		sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 		for _, node := range nodes {
-			fmt.Fprintf(&b, "      <node id=\"%s\" label=\"%s\">\n", xmlEscape(node.ID), xmlEscape(firstNonEmpty(node.Name, node.Symbol, node.ID)))
+			writef(&b, "      <node id=\"%s\" label=\"%s\">\n", xmlEscape(node.ID), xmlEscape(firstNonEmpty(node.Name, node.Symbol, node.ID)))
 			b.WriteString("        <attvalues>\n")
 			gexfValue(&b, "kind", node.Kind)
 			gexfValue(&b, "symbol", node.Symbol)
@@ -269,7 +275,7 @@ func DataFlowGEXFGraph(df *model.DataFlowEvidence) string {
 		edges := append([]model.DataFlowEdge{}, df.Edges...)
 		sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
 		for _, edge := range edges {
-			fmt.Fprintf(&b, "      <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
+			writef(&b, "      <edge id=\"%s\" source=\"%s\" target=\"%s\">\n", xmlEscape(edge.ID), xmlEscape(edge.SourceID), xmlEscape(edge.TargetID))
 			b.WriteString("        <attvalues>\n")
 			gexfValue(&b, "kind", edge.Kind)
 			gexfValue(&b, "label", edge.Label)
@@ -284,12 +290,16 @@ func DataFlowGEXFGraph(df *model.DataFlowEvidence) string {
 	return b.String()
 }
 
+func writef(b *bytes.Buffer, format string, args ...any) {
+	_, _ = fmt.Fprintf(b, format, args...)
+}
+
 func graphMLData(b *bytes.Buffer, key string, value string) {
-	fmt.Fprintf(b, "      <data key=\"%s\">%s</data>\n", xmlEscape(key), xmlEscape(value))
+	writef(b, "      <data key=\"%s\">%s</data>\n", xmlEscape(key), xmlEscape(value))
 }
 
 func gexfValue(b *bytes.Buffer, key string, value string) {
-	fmt.Fprintf(b, "          <attvalue for=\"%s\" value=\"%s\" />\n", xmlEscape(key), xmlEscape(value))
+	writef(b, "          <attvalue for=\"%s\" value=\"%s\" />\n", xmlEscape(key), xmlEscape(value))
 }
 
 func xmlEscape(value string) string {

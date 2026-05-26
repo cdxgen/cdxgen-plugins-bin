@@ -357,6 +357,9 @@ type CallGraphEdge struct {
 	TargetID    string            `json:"targetId"`
 	SourceName  string            `json:"sourceName,omitempty"`
 	TargetName  string            `json:"targetName,omitempty"`
+	SourcePURL  string            `json:"sourcePurl,omitempty"`
+	SinkPURL    string            `json:"sinkPurl,omitempty"`
+	PURLs       []string          `json:"purls,omitempty"`
 	CallType    string            `json:"callType"`
 	Static      bool              `json:"static"`
 	Synthetic   bool              `json:"synthetic,omitempty"`
@@ -443,6 +446,7 @@ type DataFlowSlice struct {
 	SinkFunction      string            `json:"sinkFunction,omitempty"`
 	SinkPackagePath   string            `json:"sinkPackagePath,omitempty"`
 	SinkPURL          string            `json:"sinkPurl,omitempty"`
+	PURLs             []string          `json:"purls,omitempty"`
 	SinkArgument      string            `json:"sinkArgument,omitempty"`
 	SinkArgumentIndex *int              `json:"sinkArgumentIndex,omitempty"`
 	TaintKinds        []string          `json:"taintKinds,omitempty"`

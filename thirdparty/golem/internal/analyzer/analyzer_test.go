@@ -53,6 +53,21 @@ func TestAnalyzeSimpleProjectStaticCallGraph(t *testing.T) {
 	if report.CallGraph.Stats.NodeCount == 0 || report.CallGraph.Stats.EdgeCount == 0 {
 		t.Fatalf("expected graph nodes and edges, got %#v", report.CallGraph.Stats)
 	}
+	var nodePURLSeen bool
+	for _, node := range report.CallGraph.Nodes {
+		if node.PackagePath == "example.com/golem/simple/lib" && node.PURL == "pkg:golang/example.com/golem/simple#lib" {
+			nodePURLSeen = true
+		}
+	}
+	if !nodePURLSeen {
+		t.Fatalf("expected package-level call graph node purl, got %#v", report.CallGraph.Nodes)
+	}
+	for _, edge := range report.CallGraph.Edges {
+		if edge.SourcePURL != "" && edge.SinkPURL != "" && len(edge.PURLs) > 0 {
+			return
+		}
+	}
+	t.Fatalf("expected call graph edge purl metadata, got %#v", report.CallGraph.Edges)
 }
 
 func TestAnalyzeSimpleProjectAdvancedCallGraphModes(t *testing.T) {
@@ -312,6 +327,12 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 		}
 		if slice.Description == "" {
 			t.Fatalf("expected slice description, got %#v", slice)
+		}
+		if slice.SourcePURL == "" || slice.SinkPURL == "" || len(slice.PURLs) == 0 {
+			t.Fatalf("expected slice purl metadata, got %#v", slice)
+		}
+		if slice.SourcePURL != "pkg:golang/example.com/golem/dataflow" || slice.SinkPURL != "pkg:golang/example.com/golem/dataflow" || slice.PURLs[0] != "pkg:golang/example.com/golem/dataflow" {
+			t.Fatalf("expected package-level data-flow purls, got %#v", slice)
 		}
 	}
 	if report.DataFlow.Stats.UniqueFlowCount == 0 || report.DataFlow.Stats.MaxPathLength == 0 || report.DataFlow.Stats.AveragePathLength == 0 {

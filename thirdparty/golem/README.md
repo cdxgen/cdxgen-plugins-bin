@@ -61,7 +61,7 @@ Data-flow materialization budgets are configurable for large or generated-heavy 
 | `--dataflow-skip-generated`            | `false` | Skip generated files during per-function data-flow slice materialization.                                                               |
 | `--dataflow-skip-tests`                | `false` | Skip test, example, and benchmark files during per-function data-flow slice materialization.                                            |
 
-Slice evidence includes prioritization metadata for downstream review: `ruleId`, `ruleName`, `severity`, `riskScore`, `confidence`, source/sink categories, source/sink package paths and PURLs, sink argument index, source/sink scope, source/sink criticality, taint kinds, sanitizer node IDs, path length, edge kinds, duplicate grouping, and a stable `flowKey`.
+Slice evidence includes prioritization metadata for downstream review: `ruleId`, `ruleName`, `severity`, `riskScore`, `confidence`, source/sink categories, source/sink package paths, `sourcePurl`, `sinkPurl`, aggregate `purls`, sink argument index, source/sink scope, source/sink criticality, taint kinds, sanitizer node IDs, path length, edge kinds, duplicate grouping, and a stable `flowKey`. Call graph nodes and edges also include package PURLs where module/package context is available.
 
 Built-in pattern packs are selected with `--dataflow-pattern-packs` and default to `all`. Explicit packs narrow built-ins, for example `--dataflow-pattern-packs process,filesystem` limits built-ins to process and filesystem patterns. Available packs are:
 
