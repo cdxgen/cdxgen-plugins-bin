@@ -5,7 +5,6 @@ import (
 	"go/token"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -16,9 +15,8 @@ import (
 
 func Analyze(options Options) (*model.Report, error) {
 	normalizePerformanceOptions(&options)
-	previousProcs, previousMemoryLimit := applyRuntimeLimits(options)
-	defer runtime.GOMAXPROCS(previousProcs)
-	defer debug.SetMemoryLimit(previousMemoryLimit)
+	runtimeLimits := applyRuntimeLimits(options)
+	defer restoreRuntimeLimits(runtimeLimits)
 	progress := newProgressLogger(options)
 	if options.Dir == "" {
 		options.Dir = "."

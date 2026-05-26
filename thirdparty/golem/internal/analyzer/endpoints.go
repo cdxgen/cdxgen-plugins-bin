@@ -50,9 +50,9 @@ func (a *Analyzer) endpointFactsForFile(pkg *packages.Package, file *ast.File) e
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.AssignStmt:
-			a.recordRouteGroups(pkg, x, prefixByIdent)
+			a.recordRouteGroups(x, prefixByIdent)
 		case *ast.ValueSpec:
-			a.recordRouteGroupValues(pkg, x, prefixByIdent)
+			a.recordRouteGroupValues(x, prefixByIdent)
 		case *ast.CallExpr:
 			if ep, ok := a.endpointForCall(pkg, x, prefixByIdent); ok {
 				facts.endpoints = append(facts.endpoints, ep)
@@ -67,7 +67,7 @@ func (a *Analyzer) endpointFactsForFile(pkg *packages.Package, file *ast.File) e
 	return facts
 }
 
-func (a *Analyzer) recordRouteGroups(pkg *packages.Package, stmt *ast.AssignStmt, groups map[string]string) {
+func (a *Analyzer) recordRouteGroups(stmt *ast.AssignStmt, groups map[string]string) {
 	for i, rhs := range stmt.Rhs {
 		call, ok := rhs.(*ast.CallExpr)
 		if !ok || i >= len(stmt.Lhs) {
@@ -77,25 +77,25 @@ func (a *Analyzer) recordRouteGroups(pkg *packages.Package, stmt *ast.AssignStmt
 		if !ok || ident.Name == "_" {
 			continue
 		}
-		if prefix, ok := a.groupPrefixForCall(pkg, call, groups); ok {
+		if prefix, ok := a.groupPrefixForCall(call, groups); ok {
 			groups[ident.Name] = prefix
 		}
 	}
 }
 
-func (a *Analyzer) recordRouteGroupValues(pkg *packages.Package, spec *ast.ValueSpec, groups map[string]string) {
+func (a *Analyzer) recordRouteGroupValues(spec *ast.ValueSpec, groups map[string]string) {
 	for i, rhs := range spec.Values {
 		call, ok := rhs.(*ast.CallExpr)
 		if !ok || i >= len(spec.Names) || spec.Names[i] == nil {
 			continue
 		}
-		if prefix, ok := a.groupPrefixForCall(pkg, call, groups); ok {
+		if prefix, ok := a.groupPrefixForCall(call, groups); ok {
 			groups[spec.Names[i].Name] = prefix
 		}
 	}
 }
 
-func (a *Analyzer) groupPrefixForCall(pkg *packages.Package, call *ast.CallExpr, groups map[string]string) (string, bool) {
+func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]string) (string, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel == nil || sel.Sel.Name != "Group" || len(call.Args) == 0 {
 		return "", false
@@ -108,7 +108,6 @@ func (a *Analyzer) groupPrefixForCall(pkg *packages.Package, call *ast.CallExpr,
 	if ident, ok := sel.X.(*ast.Ident); ok {
 		base = groups[ident.Name]
 	}
-	_ = pkg
 	return joinRoutePath(base, prefix), true
 }
 

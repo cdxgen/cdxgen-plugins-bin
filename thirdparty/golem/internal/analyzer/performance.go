@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -19,6 +20,12 @@ type progressLogger struct {
 	interval time.Duration
 	start    time.Time
 	last     time.Time
+}
+
+type runtimeLimitState struct {
+	previousProcs       int
+	previousMemoryLimit int64
+	memoryLimitChanged  bool
 }
 
 func newProgressLogger(options Options) *progressLogger {
@@ -86,8 +93,8 @@ func normalizePerformanceOptions(options *Options) {
 	}
 }
 
-func applyRuntimeLimits(options Options) (previousProcs int, previousMemoryLimit int64) {
-	previousProcs = runtime.GOMAXPROCS(0)
+func applyRuntimeLimits(options Options) runtimeLimitState {
+	state := runtimeLimitState{previousProcs: runtime.GOMAXPROCS(0)}
 	procs := options.MaxProcs
 	if procs == 0 {
 		procs = runtime.NumCPU()
@@ -95,11 +102,18 @@ func applyRuntimeLimits(options Options) (previousProcs int, previousMemoryLimit
 	if procs > 0 {
 		runtime.GOMAXPROCS(procs)
 	}
-	previousMemoryLimit = debug.SetMemoryLimit(-1)
 	if options.MemoryLimit > 0 {
-		debug.SetMemoryLimit(options.MemoryLimit)
+		state.previousMemoryLimit = debug.SetMemoryLimit(options.MemoryLimit)
+		state.memoryLimitChanged = true
 	}
-	return previousProcs, previousMemoryLimit
+	return state
+}
+
+func restoreRuntimeLimits(state runtimeLimitState) {
+	runtime.GOMAXPROCS(state.previousProcs)
+	if state.memoryLimitChanged {
+		debug.SetMemoryLimit(state.previousMemoryLimit)
+	}
 }
 
 func dataFlowWorkerCount(options Options, total int) int {
@@ -147,10 +161,14 @@ func ParseByteSize(value string) (int64, error) {
 		return 0, fmt.Errorf("invalid byte size %q", value)
 	}
 	n, err := strconv.ParseFloat(lower, 64)
-	if err != nil || n < 0 {
+	if err != nil || n < 0 || math.IsNaN(n) || math.IsInf(n, 0) {
 		return 0, fmt.Errorf("invalid byte size %q", value)
 	}
-	return int64(n * float64(mult)), nil
+	bytes := n * float64(mult)
+	if math.IsInf(bytes, 0) || bytes >= float64(math.MaxInt64) {
+		return 0, fmt.Errorf("invalid byte size %q", value)
+	}
+	return int64(bytes), nil
 }
 
 func formatBytes(n int64) string {

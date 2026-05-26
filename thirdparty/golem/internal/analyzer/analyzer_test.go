@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -455,10 +456,41 @@ func TestParseByteSize(t *testing.T) {
 			t.Fatalf("ParseByteSize(%q)=%d want %d", input, got, want)
 		}
 	}
-	for _, input := range []string{"abc", "MiB", "-1MiB"} {
+	for _, input := range []string{"abc", "MiB", "-1MiB", "NaN", "Inf", "+Inf", "9223372036854775808", "9223372036854775808B", "9000000000000000000GiB"} {
 		if _, err := ParseByteSize(input); err == nil {
 			t.Fatalf("ParseByteSize(%q) expected error", input)
 		}
+	}
+}
+
+func TestApplyRuntimeLimitsMemoryLimitBehavior(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(0)
+	previousMemoryLimit := debug.SetMemoryLimit(256 << 20)
+	defer runtime.GOMAXPROCS(previousProcs)
+	defer debug.SetMemoryLimit(previousMemoryLimit)
+
+	state := applyRuntimeLimits(Options{MaxProcs: previousProcs})
+	if state.memoryLimitChanged {
+		t.Fatalf("memory limit should not be marked changed without an override: %#v", state)
+	}
+	if got := debug.SetMemoryLimit(-1); got != 256<<20 {
+		t.Fatalf("memory limit changed without override: got %d", got)
+	}
+	restoreRuntimeLimits(state)
+	if got := debug.SetMemoryLimit(-1); got != 256<<20 {
+		t.Fatalf("memory limit changed after restore without override: got %d", got)
+	}
+
+	state = applyRuntimeLimits(Options{MaxProcs: previousProcs, MemoryLimit: 128 << 20})
+	if !state.memoryLimitChanged {
+		t.Fatalf("memory limit should be marked changed with an override: %#v", state)
+	}
+	if got := debug.SetMemoryLimit(-1); got != 128<<20 {
+		t.Fatalf("memory limit override was not applied: got %d", got)
+	}
+	restoreRuntimeLimits(state)
+	if got := debug.SetMemoryLimit(-1); got != 256<<20 {
+		t.Fatalf("memory limit override was not restored: got %d", got)
 	}
 }
 
