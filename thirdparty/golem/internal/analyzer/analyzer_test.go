@@ -261,6 +261,8 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	expectedCategories := map[string]bool{
 		"http-input->command-execution": false,
 		"http-input->filesystem":        false,
+		"http-input->logging":           false,
+		"http-input->panic":             false,
 		"environment->crypto":           false,
 		"http-input->native-interop":    false,
 	}
@@ -280,40 +282,57 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	}
 	functions := map[string]bool{}
 	var categorySanitizerSeen bool
+	var redirectSanitizerSeen bool
 	for _, node := range report.DataFlow.Nodes {
 		if node.Sink {
 			functions[node.Function] = true
 			if node.Function == "example.com/golem/dataflow.SanitizedPathFlow" && node.Category == "filesystem" {
 				t.Fatalf("sanitized path flow should not produce filesystem sink node: %#v", node)
 			}
+			if node.Function == "example.com/golem/dataflow.SanitizedRedirectFlow" && node.Category == "redirect" {
+				t.Fatalf("sanitized redirect flow should not produce redirect sink node: %#v", node)
+			}
 		}
 		if node.Kind == "sanitizer" && node.Function == "example.com/golem/dataflow.SanitizedPathFlow" && strings.Contains(node.Properties["sanitizesCategories"], "filesystem") {
 			categorySanitizerSeen = true
+		}
+		if node.Kind == "sanitizer" && node.Function == "example.com/golem/dataflow.SanitizedRedirectFlow" && strings.Contains(node.Properties["sanitizesCategories"], "redirect") {
+			redirectSanitizerSeen = true
 		}
 	}
 	if !categorySanitizerSeen {
 		t.Fatalf("expected category-aware filesystem sanitizer evidence in %#v", report.DataFlow.Nodes)
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow"} {
+	if !redirectSanitizerSeen {
+		t.Fatalf("expected category-aware redirect sanitizer evidence in %#v", report.DataFlow.Nodes)
+	}
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
 	}
 	paths := map[string]bool{}
 	listeners := map[string]bool{}
+	var wrappedHandlerSeen bool
 	for _, endpoint := range report.APIEndpoints {
 		paths[endpoint.Path] = true
 		if endpoint.Kind == "http-listener" {
 			listeners[endpoint.Host] = true
 		}
+		if endpoint.Path == "/wrapped" && endpoint.Handler == "Handler" {
+			wrappedHandlerSeen = true
+		}
 	}
-	for _, path := range []string{"/search", "/api/exec"} {
+	for _, path := range []string{"/search", "/api/exec", "/wrapped"} {
 		if !paths[path] {
 			t.Fatalf("expected endpoint path %s in %#v", path, report.APIEndpoints)
 		}
 	}
 	if !listeners[":8080"] {
 		t.Fatalf("expected :8080 listener endpoint in %#v", report.APIEndpoints)
+	}
+	if !wrappedHandlerSeen {
+		t.Fatalf("expected middleware-wrapped endpoint to resolve Handler in %#v", report.APIEndpoints)
 	}
 	var sanitizedURL bool
 	for _, external := range report.ExternalURLs {

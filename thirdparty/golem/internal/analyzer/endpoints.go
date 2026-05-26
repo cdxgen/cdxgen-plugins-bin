@@ -175,7 +175,7 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 		path = joinRoutePath(groups[receiver], path)
 	}
 	handler := ""
-	if handlerArg >= 0 && len(call.Args) > handlerArg {
+	if len(call.Args) > handlerArg {
 		handler = exprEndpointName(call.Args[handlerArg])
 	}
 	r := a.nodeRange(call)
@@ -293,6 +293,12 @@ func exprEndpointName(expr ast.Expr) string {
 	case *ast.FuncLit:
 		return "func literal"
 	case *ast.CallExpr:
+		for i := len(x.Args) - 1; i >= 0; i-- {
+			argName := exprEndpointName(x.Args[i])
+			if argName != "" && argName != "func literal" {
+				return argName
+			}
+		}
 		name, _ := callSelectorName(x)
 		return name
 	default:

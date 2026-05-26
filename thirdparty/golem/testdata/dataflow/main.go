@@ -9,7 +9,9 @@ import "C"
 import (
 	"crypto/aes"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +68,16 @@ func ChannelFlow(r *http.Request) {
 	_ = os.WriteFile(v, []byte("x"), 0o600)
 }
 
+func SelectFlow(r *http.Request) {
+	ch := make(chan string, 1)
+	ch <- r.FormValue("cmd")
+	select {
+	case v := <-ch:
+		_ = exec.Command("sh", "-c", v)
+	default:
+	}
+}
+
 func ClosureFlow(r *http.Request) {
 	v := r.FormValue("cmd")
 	f := func() string { return v }
@@ -95,13 +107,31 @@ func UnsafeFlow(r *http.Request) {
 	_ = unsafe.String(&b[0], len(b))
 }
 
+func LoggingFlow(r *http.Request) {
+	log.Printf("token=%s", r.FormValue("token"))
+}
+
+func PanicFlow(r *http.Request) {
+	panic(r.FormValue("panic"))
+}
+
+func SanitizedRedirectFlow(w http.ResponseWriter, r *http.Request) {
+	safe := url.QueryEscape(r.FormValue("next"))
+	http.Redirect(w, r, safe, http.StatusFound)
+}
+
 func Handler(w http.ResponseWriter, r *http.Request) {
 	q := r.FormValue("q")
 	_, _ = fmt.Fprintf(w, q)
 }
 
+func wrap(next http.HandlerFunc) http.HandlerFunc {
+	return next
+}
+
 func RegisterEndpoints() {
 	http.HandleFunc("/search", Handler)
+	http.HandleFunc("/wrapped", wrap(Handler))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/exec", Handler)
 	_ = http.ListenAndServe(":8080", mux)

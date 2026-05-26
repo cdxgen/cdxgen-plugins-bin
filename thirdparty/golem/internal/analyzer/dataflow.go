@@ -313,17 +313,25 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		addSource("type", "*net/http.Request", "http-request", "user-input")
 		addSource("type", "http.Request", "http-request", "user-input")
 		addSource("type", "context.Context", "context", "request-context")
-		for _, name := range []string{"fmt.Sprintf", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
+		for _, name := range []string{"fmt.Sprintf", "fmt.Sprint", "fmt.Sprintln", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "net/url.QueryEscape", "net/url.PathEscape", "net/url.JoinPath", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
 			addPass("function", name, "conversion")
+		}
+		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"} {
+			addSink("function", name, "logging", "user-input", "secret")
 		}
 	}
 	if selected["http"] || mode == "all" || mode == "security" {
-		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "URL.Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "Query", "PostForm", "DefaultQuery", "GetHeader", "Bind", "ShouldBind", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "github.com/gofiber/fiber", "Params", "Query", "Body", "Cookies"} {
+		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "ShouldBind", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "github.com/gofiber/fiber", "Params", "Body", "Cookies"} {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
 		addSink("function", "fmt.Fprintf", "formatted-output", "user-input")
+		addSink("function", "http.Error", "http-response", "user-input")
+		addSink("function", "encoding/json.(*Encoder).Encode", "http-response", "user-input")
 		addSink("function", "http.Redirect", "redirect", "url")
+		addCategorySan("function", "net/url.QueryEscape", "url-encoding", []string{"redirect"}, "url")
+		addCategorySan("function", "net/url.PathEscape", "url-encoding", []string{"redirect"}, "url")
+		addCategorySan("function", "html/template.HTMLEscapeString", "html-escaping", []string{"http-response", "formatted-output"})
 	}
 	if selected["frameworks"] || mode == "all" || mode == "security" {
 		for _, sourceType := range []string{"gin.Context", "*gin.Context", "echo.Context", "fiber.Ctx", "*fiber.Ctx", "chi.Context", "mux.RouteMatch"} {
@@ -336,6 +344,8 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 	if selected["process"] || mode == "all" || mode == "security" {
 		addSink("function", "os/exec.Command", "command-execution", "user-input")
 		addSink("function", "os/exec.CommandContext", "command-execution", "user-input")
+		addSink("function", "plugin.Open", "dynamic-loading", "user-input", "path")
+		addPass("function", "plugin.Lookup", "dynamic-loading")
 	}
 	if selected["data"] || mode == "all" || mode == "security" {
 		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jackc/pgx", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
@@ -452,11 +462,19 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 				if tr, ok := b.summaryTaintOf(state, x.X); ok {
 					state.chans[addrKey(x.Chan)] = tr
 				}
+			case *ssa.Select:
+				b.processSummarySelect(state, x)
 			case *ssa.Call:
 				if tr, ok := b.summaryCallTaint(state, x.Common()); ok {
 					state.values[x] = tr
 				}
 				changed = b.recordSummarySink(fn, x.Common(), state) || changed
+			case *ssa.Panic:
+				if tr, ok := b.summaryTaintOf(state, x.X); ok {
+					for p := range tr.params {
+						changed = b.addParamSink(fn, p, "panic") || changed
+					}
+				}
 			case *ssa.Defer:
 				changed = b.recordSummarySink(fn, x.Common(), state) || changed
 			case *ssa.Go:
@@ -676,8 +694,14 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 					n := b.addNode("channel-send", valueName(x.Chan), valueSymbol(x.Chan), valueType(x.X), fn, x.Pos(), false, false, "", tr.taintKinds, "chan", tr.confidence, nil)
 					state.chans[addrKey(x.Chan)] = b.connectTrace(tr, n, "channel-send", x.Pos(), valueName(x.Chan))
 				}
+			case *ssa.Select:
+				if tr, ok := b.processSelect(fn, state, x); ok {
+					state.values[x] = tr
+				}
 			case *ssa.Call:
 				b.processCall(fn, state, x, x.Common())
+			case *ssa.Panic:
+				b.emitPanicSink(fn, state, x)
 			case *ssa.Defer:
 				b.processAsyncCall(fn, state, x.Common(), x.Pos(), "defer")
 			case *ssa.Go:
@@ -728,6 +752,64 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 			n := b.addNode("call", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, nil)
 			state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "call-return", call.Pos(), callName(common)))
 		}
+	}
+}
+
+func (b *dataFlowBuilder) processSummarySelect(state dataFlowState, sel *ssa.Select) {
+	if sel == nil {
+		return
+	}
+	var receives []dataFlowTrace
+	for _, st := range sel.States {
+		if st.Chan == nil {
+			continue
+		}
+		if st.Send != nil {
+			if tr, ok := b.summaryTaintOf(state, st.Send); ok {
+				state.chans[addrKey(st.Chan)] = tr
+			}
+			continue
+		}
+		if tr, ok := state.chans[addrKey(st.Chan)]; ok {
+			receives = append(receives, tr)
+		}
+	}
+	if tr, ok := combineTraceList(receives); ok {
+		state.values[sel] = tr
+	}
+}
+
+func (b *dataFlowBuilder) processSelect(fn *ssa.Function, state dataFlowState, sel *ssa.Select) (dataFlowTrace, bool) {
+	if sel == nil {
+		return dataFlowTrace{}, false
+	}
+	var receives []dataFlowTrace
+	for _, st := range sel.States {
+		if st.Chan == nil {
+			continue
+		}
+		if st.Send != nil {
+			if tr, ok := b.taintOf(state, st.Send); ok {
+				n := b.addNode("select-send", valueName(st.Chan), valueSymbol(st.Chan), valueType(st.Send), fn, st.Pos, false, false, "", tr.taintKinds, "chan", tr.confidence, nil)
+				state.chans[addrKey(st.Chan)] = b.connectTrace(tr, n, "select-send", st.Pos, valueName(st.Chan))
+			}
+			continue
+		}
+		if tr, ok := state.chans[addrKey(st.Chan)]; ok {
+			n := b.addNode("select-receive", valueName(st.Chan), valueSymbol(st.Chan), valueType(st.Chan), fn, st.Pos, false, false, "", tr.taintKinds, "chan", tr.confidence, nil)
+			receives = append(receives, b.connectTrace(tr, n, "select-receive", st.Pos, valueName(st.Chan)))
+		}
+	}
+	return combineTraceList(receives)
+}
+
+func (b *dataFlowBuilder) emitPanicSink(fn *ssa.Function, state dataFlowState, p *ssa.Panic) {
+	if p == nil || p.X == nil {
+		return
+	}
+	if tr, ok := b.taintOf(state, p.X); ok && traceAllowsSink(tr, "panic") {
+		pat := model.DataFlowPattern{Target: "sink", Kind: "builtin", Match: "exact", Pattern: "panic", Category: "panic", TaintKinds: []string{"user-input", "secret"}, Confidence: "medium"}
+		b.emitSliceSink(fn, tr, p.Pos(), "panic", "panic", valueType(p.X), pat, 0, "Taint reaches panic")
 	}
 }
 
@@ -852,6 +934,9 @@ func (b *dataFlowBuilder) processAsyncCall(fn *ssa.Function, state dataFlowState
 	for _, pat := range b.matchCall(common, b.patterns.Sinks) {
 		args := callArgs(common)
 		for idx, arg := range args {
+			if !sinkArgumentRelevant(common, pat, idx) {
+				continue
+			}
 			if tr, ok := b.taintOf(state, arg); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 				b.emitSliceSink(fn, tr, pos, callName(common), callSymbol(common), "", pat, idx, "Taint reaches asynchronous "+kind+" sink")
 			}
@@ -862,6 +947,9 @@ func (b *dataFlowBuilder) processAsyncCall(fn *ssa.Function, state dataFlowState
 func (b *dataFlowBuilder) emitSink(fn *ssa.Function, state dataFlowState, call ssa.Value, common *ssa.CallCommon, pat model.DataFlowPattern) {
 	args := callArgs(common)
 	for idx, arg := range args {
+		if !sinkArgumentRelevant(common, pat, idx) {
+			continue
+		}
 		if tr, ok := b.taintOf(state, arg); ok && traceAllowsSink(tr, firstNonEmpty(pat.Category, "sink")) {
 			b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, "Taint reaches "+firstNonEmpty(pat.Category, "sink"))
 		}
@@ -871,6 +959,22 @@ func (b *dataFlowBuilder) emitSink(fn *ssa.Function, state dataFlowState, call s
 			b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, -1, "Taint reaches sink receiver")
 		}
 	}
+}
+
+func sinkArgumentRelevant(common *ssa.CallCommon, pat model.DataFlowPattern, idx int) bool {
+	category := strings.ToLower(firstNonEmpty(pat.Category, "sink"))
+	symbol := callSymbol(common)
+	switch category {
+	case "redirect":
+		if strings.Contains(symbol, "net/http.Redirect") || strings.Contains(symbol, "http.Redirect") {
+			return idx == 2
+		}
+	case "http-response":
+		if strings.Contains(symbol, "http.Error") {
+			return idx == 1
+		}
+	}
+	return true
 }
 
 func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos token.Pos, name, symbol, typ string, pat model.DataFlowPattern, argIndex int, summary string) {
