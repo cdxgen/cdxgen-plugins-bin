@@ -1,22 +1,73 @@
 # golem
+
 Golem (Go Library Evidence Mapper) is a native Go helper for cdxgen. It analyzes Go source projects with the Go toolchain and emits detailed semantic evidence about packages, modules, imports, declarations, type-resolved library usages, build directives, native interop artifacts, security-sensitive API signals, and optional call graphs.
+
 ## Usage
+
 ```bash
 golem analyze --dir /path/to/go/project --format json --out golem.json
 golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
 golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
 golem analyze --dir . --callgraph pointer --format json --out golem-pointer.json
 ```
+
+When used through cdxgen, the normal entry point is `evinse`:
+
+```bash
+cdxgen -t go -o bom.json /absolute/path/to/go/project
+evinse -i bom.json -o bom.evinse.json -l go --golem-callgraph static /absolute/path/to/go/project
+```
+
+Advanced cdxgen options map directly to Golem analysis settings:
+
+| cdxgen option | Golem behavior |
+| --- | --- |
+| `--golem-command` | Use a specific helper binary instead of the bundled one. |
+| `--golem-callgraph none|static|rta|pointer` | Select call graph depth and cost. |
+| `--golem-patterns ./...` | Select Go package patterns. |
+| `--golem-tags tag1,tag2` | Load packages with build tags. |
+| `--golem-tests` | Include test variants in package loading and evidence. |
+
 ## Call graph modes
-- `none` — default; source/library evidence only.
-- `static` — fast static SSA call graph.
-- `rta` — Rapid Type Analysis from discovered `init` and `main` roots.
-- `pointer` — points-to call graph for main packages. This is the most expensive mode.
+
+- `none`: source and library evidence only.
+- `static`: fast static SSA call graph. This is the cdxgen Evinse default.
+- `rta`: Rapid Type Analysis from discovered `init` and `main` roots.
+- `pointer`: points-to call graph for main packages. This is the most expensive mode.
+
 ## Output formats
-- `json` — complete evidence schema.
-- `graphml` — call graph sidecar suitable for graph tools.
-- `gexf` — call graph sidecar suitable for Gephi and similar tools.
+
+- `json`: complete evidence schema consumed by cdxgen.
+- `graphml`: call graph sidecar suitable for graph tools.
+- `gexf`: call graph sidecar suitable for Gephi and similar tools.
+
 Graph formats require a non-`none` call graph mode.
+
+## cdxgen evidence mapping
+
+cdxgen maps the JSON report into CycloneDX without requiring a new BOM format.
+
+```
+golem modules/imports/usages/call graph
+  |
+  v
+evinse -l go
+  |
+  +--> component.evidence.occurrences
+  +--> component.evidence.callstack.frames
+  +--> component.properties: cdx:golem:*
+  +--> metadata.component.properties: cdx:golem:*
+```
+
+Important property groups include:
+
+- run metadata: `cdx:golem:toolVersion`, `cdx:golem:callGraphMode`, package/module/file counts, call graph node/edge counts
+- build posture: `cdx:golem:buildDirectiveKinds`, `cdx:golem:goGenerateCount`, `cdx:golem:goEmbedCount`, `cdx:golem:nativeArtifactCount`, `cdx:golem:nativeArtifactKinds`
+- module posture: `cdx:golem:modulePath`, `cdx:golem:goVersion`, `cdx:golem:localReplacement`, `cdx:golem:vendored`, `cdx:golem:privateModuleCandidate`, `cdx:golem:licenseFileCount`
+- usage evidence: `cdx:golem:usageScopes`, `cdx:golem:testOnly`, `cdx:golem:occurrenceEvidenceKinds`, import/symbol occurrence counts
+- security review: `cdx:golem:securitySignalCategory`, `cdx:golem:securitySignalSeverity`, metadata signal category and severity summaries
+
+The cdxgen repo documents the consumer side in `docs/GO_EVINSE_GOLEM.md`, `docs/GO_EVINSE_GOLEM_THREAT_MODEL.md`, `docs/CUSTOM_PROPERTIES.md`, and `docs/BOM_AUDIT.md`.
 
 ## Security and compliance evidence
 
@@ -31,6 +82,23 @@ The JSON report includes Go-specific evidence useful for AppSec and compliance r
 - focused heuristics such as `tls.Config{InsecureSkipVerify:true}`
 
 Signal values are categories/counts/symbol names and source locations only; `golem` does not copy raw environment values, command output, embedded file contents, or secrets into JSON.
+
+## Threat model notes
+
+Golem treats the target Go repository as untrusted input. It loads packages and classifies source-level facts, but it must not execute `go:generate` commands and must not copy secret-bearing file contents into the output. Reviewers should still treat module paths and source locations as potentially internal information before publishing an enriched BOM.
+
+The evidence is meant to prioritize review. A high-severity API signal is not proof of exploitability, and test-only usage is not proof of safety. Pair Golem output with code review, vulnerability data, build provenance, and runtime context.
+
+## BOM audit and REPL workflow
+
+After `evinse -l go`, cdxgen users can audit and inspect Golem properties directly:
+
+```bash
+cdx-audit --bom bom.evinse.json --direct-bom-audit --categories golem
+cdxi bom.evinse.json
+```
+
+Useful `cdxi` commands are `.golemsummary`, `.golemhotspots`, `.golemcoverage`, `.occurrences`, and `.callstack`.
 
 ## Build
 
