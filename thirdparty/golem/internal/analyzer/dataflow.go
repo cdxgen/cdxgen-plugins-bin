@@ -10,10 +10,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
@@ -47,38 +49,40 @@ type internalSummary struct {
 }
 
 type dataFlowBuilder struct {
-	analyzer      *Analyzer
-	out           *model.DataFlowEvidence
-	patterns      *model.DataFlowPatternSet
-	summaries     map[*ssa.Function]*internalSummary
-	endpoints     map[string][]model.APIEndpoint
-	nodeSeen      map[string]bool
-	edgeSeen      map[string]bool
-	sliceSeen     map[string]bool
-	maxSlices     int
-	instructionCt int
+	analyzer       *Analyzer
+	out            *model.DataFlowEvidence
+	patterns       *model.DataFlowPatternSet
+	regexps        map[string]*regexp.Regexp
+	summaries      map[*ssa.Function]*internalSummary
+	endpoints      map[string][]model.APIEndpoint
+	dynamicCallees map[ssa.CallInstruction][]*ssa.Function
+	nodeSeen       map[string]bool
+	edgeSeen       map[string]bool
+	sliceSeen      map[string]bool
+	maxSlices      int
+	instructionCt  int
 }
 
-func (a *Analyzer) buildDataFlow(pkgs []*packages.Package) *model.DataFlowEvidence {
+func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, progress *progressLogger) *model.DataFlowEvidence {
+	started := time.Now()
 	patterns, diagnostics := loadDataFlowPatterns(a.options.DataFlowMode, a.options.DataFlowPacks, a.options.DataFlowConfig)
+	regexps, regexDiagnostics := compileDataFlowRegexps(patterns)
+	diagnostics = append(diagnostics, regexDiagnostics...)
 	out := &model.DataFlowEvidence{Mode: a.options.DataFlowMode, Patterns: patterns, Diagnostics: diagnostics}
-	mode := ssa.BuilderMode(ssa.InstantiateGenerics | ssa.GlobalDebug)
-	prog, _ := ssautil.AllPackages(pkgs, mode)
-	prog.Build()
-	funcSet := ssautil.AllFunctions(prog)
-	funcs := make([]*ssa.Function, 0, len(funcSet))
-	for fn := range funcSet {
-		if fn == nil || fn.Blocks == nil || !a.includeDataFlowFunction(fn) {
-			continue
-		}
-		funcs = append(funcs, fn)
+	if ctx == nil || ctx.program == nil {
+		out.Diagnostics = append(out.Diagnostics, model.Diagnostic{Kind: "dataflow", Message: "SSA context was not available"})
+		return out
 	}
-	sort.Slice(funcs, func(i, j int) bool { return funcs[i].String() < funcs[j].String() })
-	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: a.options.DataFlowMax}
+	funcs := ctx.filteredFunctions(a.includeDataFlowFunction)
+	workers := dataFlowWorkerCount(a.options, len(funcs))
+	progress.Memoryf("data-flow starting mode=%s functions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), workers, a.options.DataFlowMax)
+	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
+	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: a.options.DataFlowMax}
+	progress.Memoryf("data-flow inferring summaries")
 	b.inferSummaries(funcs)
-	for _, fn := range funcs {
-		b.analyzeFunction(fn)
-	}
+	progress.Memoryf("data-flow summaries inferred")
+	b.analyzeFunctions(funcs, workers, progress)
+	progress.Memoryf("data-flow function analysis complete")
 	for _, summary := range b.summaries {
 		if len(summary.model.ParamToReturn) > 0 || len(summary.model.ParamToSink) > 0 || len(summary.sourceReturns) > 0 || summary.model.ReceiverToReturn || summary.model.Passthrough {
 			if len(summary.sourceReturns) > 0 {
@@ -101,6 +105,8 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package) *model.DataFlowEviden
 	out.Stats.SummaryCount = len(out.Summaries)
 	out.Stats.FunctionCount = len(funcs)
 	out.Stats.InstructionCount = b.instructionCt
+	out.Stats.WorkerCount = workers
+	out.Stats.ElapsedMillis = int(time.Since(started).Milliseconds())
 	for _, n := range out.Nodes {
 		if n.Source {
 			out.Stats.SourceCount++
@@ -108,6 +114,58 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package) *model.DataFlowEviden
 		if n.Sink {
 			out.Stats.SinkCount++
 		}
+	}
+	return out
+}
+
+func (a *Analyzer) dataFlowDynamicCallees(ctx *ssaContext, out *model.DataFlowEvidence) map[ssa.CallInstruction][]*ssa.Function {
+	mode := a.options.DataFlowCallGraphMode
+	if mode == "" || mode == "none" {
+		return nil
+	}
+	graph, algorithm, diagnostics := a.buildRawCallGraph(ctx, mode)
+	for _, diag := range diagnostics {
+		diag.Kind = "dataflow-callgraph"
+		out.Diagnostics = append(out.Diagnostics, diag)
+	}
+	if graph == nil {
+		return nil
+	}
+	if out.Patterns != nil {
+		if out.Patterns.Packs == nil {
+			out.Patterns.Packs = []string{}
+		}
+	}
+	out.Diagnostics = append(out.Diagnostics, model.Diagnostic{Kind: "dataflow-callgraph", Message: "using " + algorithm + " call graph for dynamic summary replay"})
+	return callGraphCalleeIndex(graph)
+}
+
+func callGraphCalleeIndex(graph *callgraph.Graph) map[ssa.CallInstruction][]*ssa.Function {
+	out := map[ssa.CallInstruction][]*ssa.Function{}
+	seen := map[ssa.CallInstruction]map[*ssa.Function]bool{}
+	if graph == nil {
+		return out
+	}
+	for _, node := range graph.Nodes {
+		if node == nil {
+			continue
+		}
+		for _, edge := range node.Out {
+			if edge == nil || edge.Site == nil || edge.Callee == nil || edge.Callee.Func == nil {
+				continue
+			}
+			if seen[edge.Site] == nil {
+				seen[edge.Site] = map[*ssa.Function]bool{}
+			}
+			if seen[edge.Site][edge.Callee.Func] {
+				continue
+			}
+			seen[edge.Site][edge.Callee.Func] = true
+			out[edge.Site] = append(out[edge.Site], edge.Callee.Func)
+		}
+	}
+	for site := range out {
+		sort.Slice(out[site], func(i, j int) bool { return out[site][i].String() < out[site][j].String() })
 	}
 	return out
 }
@@ -151,6 +209,46 @@ func loadDataFlowPatterns(mode string, packs []string, path string) (*model.Data
 	set.Passthroughs = append(set.Passthroughs, normalizePatterns("passthrough", user.Passthroughs)...)
 	set.Sanitizers = append(set.Sanitizers, normalizePatterns("sanitizer", user.Sanitizers)...)
 	return set, diagnostics
+}
+
+func compileDataFlowRegexps(set *model.DataFlowPatternSet) (map[string]*regexp.Regexp, []model.Diagnostic) {
+	compiled := map[string]*regexp.Regexp{}
+	if set == nil {
+		return compiled, nil
+	}
+	var diagnostics []model.Diagnostic
+	for _, p := range allDataFlowPatterns(set) {
+		if strings.ToLower(p.Match) != "regex" || p.Pattern == "" {
+			continue
+		}
+		key := dataFlowPatternKey(p)
+		if _, ok := compiled[key]; ok {
+			continue
+		}
+		re, err := regexp.Compile(p.Pattern)
+		if err != nil {
+			diagnostics = append(diagnostics, model.Diagnostic{Kind: "dataflow-patterns", Message: fmt.Sprintf("invalid regex pattern %q for %s %s: %v", p.Pattern, p.Target, p.Kind, err)})
+			continue
+		}
+		compiled[key] = re
+	}
+	return compiled, diagnostics
+}
+
+func allDataFlowPatterns(set *model.DataFlowPatternSet) []model.DataFlowPattern {
+	if set == nil {
+		return nil
+	}
+	out := make([]model.DataFlowPattern, 0, len(set.Sources)+len(set.Sinks)+len(set.Passthroughs)+len(set.Sanitizers))
+	out = append(out, set.Sources...)
+	out = append(out, set.Sinks...)
+	out = append(out, set.Passthroughs...)
+	out = append(out, set.Sanitizers...)
+	return out
+}
+
+func dataFlowPatternKey(p model.DataFlowPattern) string {
+	return strings.Join([]string{p.Target, p.Kind, strings.ToLower(p.Match), p.Pattern}, "\x00")
 }
 
 func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPatternSet {
@@ -234,7 +332,7 @@ func builtinDataFlowPatterns(mode string, packs []string) *model.DataFlowPattern
 		}
 		addPass("function", "path/filepath.Join", "path")
 		addPass("function", "path.Join", "path")
-		addSan("function", "path/filepath.Base", "path-validation", "path")
+		addSan("function", "path/filepath.Base", "path-validation", "path", "user-input")
 	}
 	if selected["crypto"] || mode == "all" || mode == "crypto" || mode == "security" {
 		for _, name := range []string{"crypto/aes.NewCipher", "crypto/des.NewCipher", "crypto/hmac.New", "crypto/x509.ParsePKCS1PrivateKey", "crypto/x509.ParsePKCS8PrivateKey", "crypto/x509.ParseCertificate", "crypto/tls.LoadX509KeyPair", "golang.org/x/crypto/pbkdf2.Key", "github.com/golang-jwt/jwt", "github.com/dgrijalva/jwt-go"} {
@@ -371,6 +469,99 @@ func newDataFlowState() dataFlowState {
 	return dataFlowState{values: map[ssa.Value]dataFlowTrace{}, memory: map[string]dataFlowTrace{}, chans: map[string]dataFlowTrace{}, visiting: map[ssa.Value]bool{}}
 }
 
+type dataFlowFunctionResult struct {
+	index        int
+	functionName string
+	evidence     *model.DataFlowEvidence
+	instructions int
+}
+
+func (b *dataFlowBuilder) analyzeFunctions(funcs []*ssa.Function, workers int, progress *progressLogger) {
+	if len(funcs) == 0 {
+		return
+	}
+	if workers <= 1 {
+		for i, fn := range funcs {
+			b.analyzeFunction(fn)
+			progress.MaybeLogf("data-flow analyzed %d/%d functions nodes=%d edges=%d slices=%d", i+1, len(funcs), len(b.out.Nodes), len(b.out.Edges), len(b.out.Slices))
+		}
+		return
+	}
+	jobs := make(chan int)
+	results := make(chan dataFlowFunctionResult, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				fn := funcs[idx]
+				localOut := &model.DataFlowEvidence{Mode: b.out.Mode, Patterns: b.patterns}
+				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, maxSlices: b.maxSlices}
+				local.analyzeFunction(fn)
+				results <- dataFlowFunctionResult{index: idx, functionName: fn.String(), evidence: localOut, instructions: local.instructionCt}
+			}
+		}()
+	}
+	go func() {
+		for i := range funcs {
+			jobs <- i
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
+	completed := 0
+	nextMerge := 0
+	pending := map[int]dataFlowFunctionResult{}
+	for result := range results {
+		completed++
+		pending[result.index] = result
+		for {
+			ready, ok := pending[nextMerge]
+			if !ok {
+				break
+			}
+			delete(pending, nextMerge)
+			b.instructionCt += ready.instructions
+			b.mergeFunctionEvidence(ready.evidence)
+			nextMerge++
+		}
+		progress.MaybeLogf("data-flow analyzed %d/%d functions latest=%s merged=%d nodes=%d edges=%d slices=%d", completed, len(funcs), result.functionName, nextMerge, len(b.out.Nodes), len(b.out.Edges), len(b.out.Slices))
+	}
+}
+
+func (b *dataFlowBuilder) mergeFunctionEvidence(df *model.DataFlowEvidence) {
+	if df == nil {
+		return
+	}
+	for _, node := range df.Nodes {
+		if b.nodeSeen[node.ID] {
+			continue
+		}
+		b.nodeSeen[node.ID] = true
+		b.out.Nodes = append(b.out.Nodes, node)
+	}
+	for _, edge := range df.Edges {
+		if b.edgeSeen[edge.ID] {
+			continue
+		}
+		b.edgeSeen[edge.ID] = true
+		b.out.Edges = append(b.out.Edges, edge)
+	}
+	for _, slice := range df.Slices {
+		if b.maxSlices > 0 && len(b.out.Slices) >= b.maxSlices {
+			return
+		}
+		if b.sliceSeen[slice.ID] {
+			continue
+		}
+		b.sliceSeen[slice.ID] = true
+		b.out.Slices = append(b.out.Slices, slice)
+	}
+}
+
 func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 	state := newDataFlowState()
 	for i, p := range fn.Params {
@@ -430,34 +621,26 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"pattern": pat.Pattern})
 		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
 	}
-	if len(b.matchCall(common, b.patterns.Sanitizers)) > 0 {
+	if sanitized, ok := b.sanitizedCallTrace(fn, state, call, common); ok {
+		if !sanitized.empty() {
+			state.values[call] = combineTraces(state.values[call], sanitized)
+		}
 		return
 	}
 	if callee := common.StaticCallee(); callee != nil {
-		if summary := b.summaries[callee]; summary != nil {
-			for _, pat := range summary.sourceReturns {
-				n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"summaryFunction": callee.String()})
-				state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
+		b.replaySummary(fn, state, call, common, callee, "interprocedural")
+	}
+	if site, ok := call.(ssa.CallInstruction); ok {
+		for _, callee := range b.dynamicCallees[site] {
+			if common.StaticCallee() == callee {
+				continue
 			}
-			args := callArgs(common)
-			for idx := range summary.paramReturn {
-				if idx >= 0 && idx < len(args) {
-					if tr, ok := b.taintOf(state, args[idx]); ok {
-						n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, map[string]string{"summaryFunction": callee.String(), "parameterIndex": fmt.Sprint(idx)})
-						state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "interprocedural-return", call.Pos(), fmt.Sprint(idx)))
-					}
-				}
-			}
-			for idx, cats := range summary.paramSink {
-				if idx >= 0 && idx < len(args) {
-					if tr, ok := b.taintOf(state, args[idx]); ok {
-						for cat := range cats {
-							pat := model.DataFlowPattern{Target: "sink", Kind: "function", Match: "exact", Pattern: callee.String(), Category: cat, Confidence: "medium"}
-							b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, fmt.Sprintf("Taint reaches summarized sink in %s", callee.String()))
-						}
-					}
-				}
-			}
+			b.replaySummary(fn, state, call, common, callee, "dynamic-summary")
+		}
+	}
+	if common.Method != nil {
+		for _, callee := range b.interfaceSummaryCallees(common) {
+			b.replaySummary(fn, state, call, common, callee, "interface-summary")
 		}
 	}
 	if b.shouldPropagate(common) {
@@ -466,6 +649,119 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 			state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "call-return", call.Pos(), callName(common)))
 		}
 	}
+}
+
+func (b *dataFlowBuilder) sanitizedCallTrace(fn *ssa.Function, state dataFlowState, call ssa.Value, common *ssa.CallCommon) (dataFlowTrace, bool) {
+	patterns := b.matchCall(common, b.patterns.Sanitizers)
+	if len(patterns) == 0 {
+		return dataFlowTrace{}, false
+	}
+	tr, ok := b.combineCallArgTaints(state, common)
+	if !ok {
+		return dataFlowTrace{}, true
+	}
+	removed := map[string]bool{}
+	fullStop := false
+	for _, pat := range patterns {
+		if len(pat.RemovesTaintKinds) == 0 {
+			fullStop = true
+		}
+		for _, kind := range pat.RemovesTaintKinds {
+			removed[strings.ToLower(kind)] = true
+		}
+	}
+	if fullStop {
+		return dataFlowTrace{}, true
+	}
+	var kept []string
+	for _, kind := range tr.taintKinds {
+		if !removed[strings.ToLower(kind)] {
+			kept = append(kept, kind)
+		}
+	}
+	if len(kept) == 0 {
+		return dataFlowTrace{}, true
+	}
+	n := b.addNode("sanitizer", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, firstNonEmpty(patterns[0].Category, "sanitizer"), kept, "", tr.confidence, map[string]string{"removedTaintKinds": strings.Join(sortedMapKeys(removed), ",")})
+	tr.taintKinds = uniqueStrings(kept)
+	return b.connectTrace(tr, n, "sanitizer", call.Pos(), callName(common)), true
+}
+
+func (b *dataFlowBuilder) interfaceSummaryCallees(common *ssa.CallCommon) []*ssa.Function {
+	if common == nil || common.Method == nil {
+		return nil
+	}
+	var out []*ssa.Function
+	seen := map[*ssa.Function]bool{}
+	for callee, summary := range b.summaries {
+		if callee == nil || seen[callee] || callee.Name() != common.Method.Name() {
+			continue
+		}
+		if len(summary.paramReturn) == 0 && len(summary.paramSink) == 0 && len(summary.sourceReturns) == 0 {
+			continue
+		}
+		out = append(out, callee)
+		seen[callee] = true
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
+}
+
+func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, call ssa.Value, common *ssa.CallCommon, callee *ssa.Function, edgeKind string) {
+	summary := b.summaries[callee]
+	if summary == nil {
+		return
+	}
+	for _, pat := range summary.sourceReturns {
+		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind})
+		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
+	}
+	for idx := range summary.paramReturn {
+		if arg, ok := summaryCallArgument(common, callee, idx); ok {
+			if tr, ok := b.taintOf(state, arg); ok {
+				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, map[string]string{"summaryFunction": callee.String(), "parameterIndex": fmt.Sprint(idx), "summaryKind": edgeKind})
+				state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, edgeKind+"-return", call.Pos(), fmt.Sprint(idx)))
+			}
+		}
+	}
+	for idx, cats := range summary.paramSink {
+		if arg, ok := summaryCallArgument(common, callee, idx); ok {
+			if tr, ok := b.taintOf(state, arg); ok {
+				for cat := range cats {
+					pat := model.DataFlowPattern{Target: "sink", Kind: "function", Match: "exact", Pattern: callee.String(), Category: cat, Confidence: "medium"}
+					b.emitSliceSink(fn, tr, call.Pos(), callName(common), callSymbol(common), valueType(call), pat, idx, fmt.Sprintf("Taint reaches %s sink in %s", edgeKind, callee.String()))
+				}
+			}
+		}
+	}
+}
+
+func summaryCallArgument(common *ssa.CallCommon, callee *ssa.Function, paramIndex int) (ssa.Value, bool) {
+	if common == nil || callee == nil || paramIndex < 0 {
+		return nil, false
+	}
+	args := callArgs(common)
+	hasReceiver := callee.Signature != nil && callee.Signature.Recv() != nil
+	if hasReceiver {
+		if paramIndex == 0 {
+			if recv := receiverValue(common); recv != nil {
+				return recv, true
+			}
+			if common.Value != nil && !common.IsInvoke() {
+				return common.Value, true
+			}
+			return nil, false
+		}
+		argIndex := paramIndex - 1
+		if argIndex >= 0 && argIndex < len(args) {
+			return args[argIndex], true
+		}
+		return nil, false
+	}
+	if paramIndex < len(args) {
+		return args[paramIndex], true
+	}
+	return nil, false
 }
 
 func (b *dataFlowBuilder) processAsyncCall(fn *ssa.Function, state dataFlowState, common *ssa.CallCommon, pos token.Pos, kind string) {
@@ -811,16 +1107,16 @@ func (b *dataFlowBuilder) matchCall(common *ssa.CallCommon, patterns []model.Dat
 	name := callName(common)
 	pkgPath := callPackage(common)
 	typ := callType(common)
-	return matchDataFlowPatterns(patterns, symbol, name, pkgPath, typ, "")
+	return b.matchDataFlowPatterns(patterns, symbol, name, pkgPath, typ, "")
 }
 
 func (b *dataFlowBuilder) matchValueSource(v ssa.Value) []model.DataFlowPattern {
-	return matchDataFlowPatterns(b.patterns.Sources, valueSymbol(v), valueName(v), valuePackage(v), valueType(v), valueConstString(v))
+	return b.matchDataFlowPatterns(b.patterns.Sources, valueSymbol(v), valueName(v), valuePackage(v), valueType(v), valueConstString(v))
 }
 
 func (b *dataFlowBuilder) matchParameterSource(fn *ssa.Function, idx int, p *ssa.Parameter) []model.DataFlowPattern {
 	text := p.Name() + " " + p.Type().String()
-	matches := matchDataFlowPatterns(b.patterns.Sources, fn.String()+"."+p.Name(), p.Name(), callPackageForFunction(fn), p.Type().String(), text)
+	matches := b.matchDataFlowPatterns(b.patterns.Sources, fn.String()+"."+p.Name(), p.Name(), callPackageForFunction(fn), p.Type().String(), text)
 	out := matches[:0]
 	for _, m := range matches {
 		if m.Kind == "parameter" || m.Kind == "name" || m.Kind == "type" || m.Kind == "symbol" {
@@ -869,7 +1165,7 @@ func (b *dataFlowBuilder) matchEndpointHandlerParam(fn *ssa.Function, p *ssa.Par
 	return nil
 }
 
-func matchDataFlowPatterns(patterns []model.DataFlowPattern, symbol, name, pkgPath, typ, code string) []model.DataFlowPattern {
+func (b *dataFlowBuilder) matchDataFlowPatterns(patterns []model.DataFlowPattern, symbol, name, pkgPath, typ, code string) []model.DataFlowPattern {
 	var out []model.DataFlowPattern
 	for _, p := range patterns {
 		value := symbol
@@ -885,14 +1181,14 @@ func matchDataFlowPatterns(patterns []model.DataFlowPattern, symbol, name, pkgPa
 		case "code":
 			value = code
 		}
-		if patternMatches(value, p) {
+		if patternMatches(value, p, b.regexps) {
 			out = append(out, p)
 		}
 	}
 	return out
 }
 
-func patternMatches(value string, p model.DataFlowPattern) bool {
+func patternMatches(value string, p model.DataFlowPattern, regexps map[string]*regexp.Regexp) bool {
 	if value == "" || p.Pattern == "" {
 		return false
 	}
@@ -904,7 +1200,8 @@ func patternMatches(value string, p model.DataFlowPattern) bool {
 	case "suffix":
 		return strings.HasSuffix(strings.ToLower(value), strings.ToLower(p.Pattern))
 	case "regex":
-		return regexp.MustCompile(p.Pattern).MatchString(value)
+		re := regexps[dataFlowPatternKey(p)]
+		return re != nil && re.MatchString(value)
 	default:
 		return strings.Contains(strings.ToLower(value), strings.ToLower(p.Pattern))
 	}

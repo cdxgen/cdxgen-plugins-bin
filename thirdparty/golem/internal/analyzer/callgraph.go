@@ -12,59 +12,71 @@ import (
 	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
 	"golang.org/x/tools/go/callgraph/vta"
-	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/pointer"
 	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
-func (a *Analyzer) buildCallGraph(pkgs []*packages.Package) *model.CallGraph {
+func (a *Analyzer) buildCallGraph(ctx *ssaContext) *model.CallGraph {
 	cg := &model.CallGraph{Mode: a.options.CallGraphMode, Algorithm: a.options.CallGraphMode}
-	mode := ssa.BuilderMode(ssa.InstantiateGenerics | ssa.GlobalDebug)
-	prog, ssaPkgs := ssautil.AllPackages(pkgs, mode)
-	prog.Build()
+	if ctx == nil || ctx.program == nil {
+		cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: "SSA context was not available"})
+		return cg
+	}
+	graph, algorithm, diagnostics := a.buildRawCallGraph(ctx, a.options.CallGraphMode)
+	cg.Algorithm = algorithm
+	cg.Diagnostics = append(cg.Diagnostics, diagnostics...)
+	if graph == nil {
+		return cg
+	}
+	return a.convertCallGraph(cg, graph)
+}
 
+func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.Graph, string, []model.Diagnostic) {
+	if ctx == nil || ctx.program == nil {
+		return nil, mode, []model.Diagnostic{{Kind: "callgraph", Message: "SSA context was not available"}}
+	}
 	var graph *callgraph.Graph
-	switch a.options.CallGraphMode {
+	algorithm := mode
+	var diagnostics []model.Diagnostic
+	switch mode {
+	case "", "none":
+		return nil, mode, nil
 	case "static":
-		graph = static.CallGraph(prog)
+		graph = static.CallGraph(ctx.program)
 	case "cha":
-		graph = cha.CallGraph(prog)
+		graph = cha.CallGraph(ctx.program)
 	case "rta":
-		result := rta.Analyze(mainAndInitRoots(ssaPkgs), true)
+		result := rta.Analyze(mainAndInitRoots(ctx.packages), true)
 		if result != nil {
 			graph = result.CallGraph
 		} else {
-			cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: "RTA requires at least one reachable root function"})
+			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: "RTA requires at least one reachable root function"})
 		}
 	case "pointer":
-		mains := mainPackages(ssaPkgs)
+		mains := mainPackages(ctx.packages)
 		if len(mains) == 0 {
-			cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: "pointer analysis requires at least one main package with main function"})
-			break
+			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: "pointer analysis requires at least one main package with main function"})
+			return nil, algorithm, diagnostics
 		}
 		result, err := quietPointerAnalyze(&pointer.Config{Mains: mains, BuildCallGraph: true})
 		if err != nil {
-			cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: err.Error()})
-			cg.Algorithm = "pointer-rta-fallback"
-			if fallback := rta.Analyze(mainAndInitRoots(ssaPkgs), true); fallback != nil {
+			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: err.Error()})
+			algorithm = "pointer-rta-fallback"
+			if fallback := rta.Analyze(mainAndInitRoots(ctx.packages), true); fallback != nil {
 				graph = fallback.CallGraph
 			}
 		} else {
 			graph = result.CallGraph
 		}
 	case "vta":
-		initial := static.CallGraph(prog)
+		initial := static.CallGraph(ctx.program)
 		graph = vta.CallGraph(reachableFunctions(initial), initial)
 	default:
-		cg.Diagnostics = append(cg.Diagnostics, model.Diagnostic{Kind: "callgraph", Message: fmt.Sprintf("unsupported callgraph mode %q", a.options.CallGraphMode)})
+		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: fmt.Sprintf("unsupported callgraph mode %q", mode)})
 	}
-	if graph == nil {
-		return cg
-	}
-	return a.convertCallGraph(cg, graph)
+	return graph, algorithm, diagnostics
 }
 
 func reachableFunctions(graph *callgraph.Graph) map[*ssa.Function]bool {

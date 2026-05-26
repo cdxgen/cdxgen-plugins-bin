@@ -12,11 +12,22 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"unsafe"
 )
 
 type carrier struct {
 	value string
+}
+
+type Runner interface {
+	Run(string)
+}
+
+type ShellRunner struct{}
+
+func (ShellRunner) Run(v string) {
+	_ = exec.Command("sh", "-c", v)
 }
 
 func requestValue(r *http.Request) string {
@@ -31,10 +42,20 @@ func Interprocedural(r *http.Request) {
 	runCommand(requestValue(r))
 }
 
+func InterfaceFlow(r *http.Request) {
+	var runner Runner = ShellRunner{}
+	runner.Run(r.FormValue("cmd"))
+}
+
 func FieldFlow(r *http.Request) {
 	c := &carrier{}
 	c.value = r.PostFormValue("name")
 	_ = os.WriteFile(c.value, []byte("x"), 0o600)
+}
+
+func SanitizedPathFlow(r *http.Request) {
+	safe := filepath.Base(r.FormValue("file"))
+	_ = os.WriteFile(safe, []byte("x"), 0o600)
 }
 
 func ChannelFlow(r *http.Request) {

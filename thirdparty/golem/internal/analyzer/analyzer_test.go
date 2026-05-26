@@ -1,10 +1,13 @@
 package analyzer
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAnalyzeSimpleProject(t *testing.T) {
@@ -239,7 +242,7 @@ func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
 }
 
 func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
-	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowMax: 100, ToolVersion: "test"})
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowCallGraphMode: "cha", DataFlowMax: 100, ToolVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +282,12 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	for _, node := range report.DataFlow.Nodes {
 		if node.Sink {
 			functions[node.Function] = true
+			if node.Function == "example.com/golem/dataflow.SanitizedPathFlow" && node.Category == "filesystem" {
+				t.Fatalf("sanitized path flow should not produce filesystem sink node: %#v", node)
+			}
 		}
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow"} {
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
@@ -314,4 +320,67 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if !sanitizedURL {
 		t.Fatalf("expected sanitized external URL evidence in %#v", report.ExternalURLs)
 	}
+}
+
+func TestParseByteSize(t *testing.T) {
+	tests := map[string]int64{
+		"":       0,
+		"0":      0,
+		"1024":   1024,
+		"1KiB":   1024,
+		"1.5MiB": 1572864,
+		"2GB":    2000000000,
+		"3g":     3 << 30,
+	}
+	for input, want := range tests {
+		got, err := ParseByteSize(input)
+		if err != nil {
+			t.Fatalf("ParseByteSize(%q) returned error: %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("ParseByteSize(%q)=%d want %d", input, got, want)
+		}
+	}
+	for _, input := range []string{"abc", "MiB", "-1MiB"} {
+		if _, err := ParseByteSize(input); err == nil {
+			t.Fatalf("ParseByteSize(%q) expected error", input)
+		}
+	}
+}
+
+func TestAnalyzeProgressAndResourceOptions(t *testing.T) {
+	var logs bytes.Buffer
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowWorkers: 2, MaxProcs: 1, MemoryLimit: 256 << 20, Progress: true, ProgressInterval: time.Nanosecond, ProgressWriter: &logs, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Options.MaxProcs != 1 || report.Options.MemoryLimitBytes != 256<<20 || report.Options.DataFlowWorkers != 2 {
+		t.Fatalf("expected resource options in report, got %#v", report.Options)
+	}
+	text := logs.String()
+	for _, expected := range []string{"analysis starting", "loading packages", "building SSA", "data-flow starting", "analysis complete"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected progress log %q in %s", expected, text)
+		}
+	}
+}
+
+func TestAnalyzeInvalidDataFlowRegexDiagnostic(t *testing.T) {
+	patternFile := filepath.Join(t.TempDir(), "patterns.json")
+	if err := os.WriteFile(patternFile, []byte(`{"sources":[{"kind":"function","match":"regex","pattern":"[","category":"broken"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowConfig: patternFile, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DataFlow == nil {
+		t.Fatal("expected data-flow evidence")
+	}
+	for _, diag := range report.DataFlow.Diagnostics {
+		if strings.Contains(diag.Message, "invalid regex pattern") {
+			return
+		}
+	}
+	t.Fatalf("expected invalid regex diagnostic, got %#v", report.DataFlow.Diagnostics)
 }

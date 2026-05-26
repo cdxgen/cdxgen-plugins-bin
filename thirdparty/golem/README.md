@@ -11,7 +11,7 @@ golem analyze --dir /path/to/go/project --format json --out golem.json
 golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
 golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
 golem analyze --dir . --callgraph pointer --format json --out golem-pointer.json
-golem analyze --dir . --dataflow security --dataflow-graph-out dataflows.graphml --format json --out golem-dataflow.json
+golem analyze --dir . --dataflow security --dataflow-callgraph cha --dataflow-graph-out dataflows.graphml --format json --out golem-dataflow.json
 ```
 
 When used through cdxgen, the normal entry point is `evinse`:
@@ -45,6 +45,10 @@ Advanced cdxgen options map directly to Golem analysis settings:
 Golem extracts API endpoint and service evidence suitable for downstream CycloneDX `services` enrichment. It recognizes common `net/http` route/listener patterns, route groups from popular Go frameworks, RPC registration-style calls, and sanitized literal external URLs. URL evidence removes user info, query strings, and fragments before emission so tokens and other secret-bearing values are not copied into the report.
 
 Semantic data-flow slicing is available with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. The slicer uses Go SSA and emits compact source-to-sink nodes, edges, slices, summaries, and optional GraphML/GEXF sidecars. Built-in pattern packs cover CLI/env/HTTP/framework input, process execution, filesystem, data APIs, crypto APIs, and cgo/native interop. Custom source/sink/passthrough/sanitizer packs can be supplied with `--dataflow-patterns`.
+
+`--dataflow-callgraph` controls dynamic summary replay for interface and function-value-heavy programs. `static` is the default, `cha` is more conservative for interface dispatch, and `vta` can be useful when its experimental x/tools implementation supports the analyzed shape. Sanitizer patterns can remove configured taint kinds via `removesTaintKinds`; for example path base-name extraction can suppress path traversal flows while still preserving unrelated taint kinds.
+
+For large repositories, Golem uses all available Go scheduler cores by default during analysis. Use `--max-procs` to cap scheduler parallelism, `--dataflow-workers` to cap the per-function data-flow worker pool, and `--memory-limit` to set Go's soft memory limit (for example `4GiB` or `800MiB`). Add `--progress` and optionally `--progress-interval 10s` to emit coarse package-loading, SSA, call graph, and data-flow progress logs to stderr.
 
 ## Output formats
 

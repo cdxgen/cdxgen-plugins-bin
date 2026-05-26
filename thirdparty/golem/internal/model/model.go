@@ -26,17 +26,21 @@ type RuntimeInfo struct {
 	Tests      bool     `json:"tests"`
 }
 type AnalysisOptions struct {
-	Directory      string   `json:"directory"`
-	Patterns       []string `json:"patterns"`
-	BuildTags      []string `json:"buildTags,omitempty"`
-	Tests          bool     `json:"tests"`
-	IncludeStdlib  bool     `json:"includeStdlib"`
-	IncludeLocal   bool     `json:"includeLocal"`
-	CallGraphMode  string   `json:"callGraphMode"`
-	DataFlowMode   string   `json:"dataFlowMode,omitempty"`
-	DataFlowPacks  []string `json:"dataFlowPacks,omitempty"`
-	IncludeSSA     bool     `json:"includeSsa"`
-	IncludeSources bool     `json:"includeSources"`
+	Directory             string   `json:"directory"`
+	Patterns              []string `json:"patterns"`
+	BuildTags             []string `json:"buildTags,omitempty"`
+	Tests                 bool     `json:"tests"`
+	IncludeStdlib         bool     `json:"includeStdlib"`
+	IncludeLocal          bool     `json:"includeLocal"`
+	CallGraphMode         string   `json:"callGraphMode"`
+	DataFlowMode          string   `json:"dataFlowMode,omitempty"`
+	DataFlowCallGraphMode string   `json:"dataFlowCallGraphMode,omitempty"`
+	DataFlowPacks         []string `json:"dataFlowPacks,omitempty"`
+	DataFlowWorkers       int      `json:"dataFlowWorkers,omitempty"`
+	MaxProcs              int      `json:"maxProcs,omitempty"`
+	MemoryLimitBytes      int64    `json:"memoryLimitBytes,omitempty"`
+	IncludeSSA            bool     `json:"includeSsa"`
+	IncludeSources        bool     `json:"includeSources"`
 }
 type Diagnostic struct {
 	PackageID string   `json:"packageId,omitempty"`
@@ -446,6 +450,8 @@ type DataFlowStats struct {
 	SummaryCount     int `json:"summaryCount"`
 	FunctionCount    int `json:"functionCount"`
 	InstructionCount int `json:"instructionCount"`
+	WorkerCount      int `json:"workerCount,omitempty"`
+	ElapsedMillis    int `json:"elapsedMillis,omitempty"`
 }
 type DataFlowEvidence struct {
 	Mode        string                  `json:"mode"`

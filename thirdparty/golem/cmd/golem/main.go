@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/analyzer"
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/exporter"
@@ -44,9 +45,15 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	dataflow := flags.String("dataflow", "none", "data-flow mode: none, security, crypto, or all")
 	dataflowPatterns := flags.String("dataflow-patterns", "", "optional JSON file with data-flow sources, sinks, passthroughs, and sanitizers")
 	dataflowPacks := flags.String("dataflow-pattern-packs", "all", "comma-separated data-flow pattern packs: all, base, http, data, filesystem, process, crypto, native")
+	dataflowCallgraph := flags.String("dataflow-callgraph", "static", "call graph mode for data-flow dynamic summary replay: none, static, cha, rta, or vta")
 	dataflowMax := flags.Int("dataflow-max-slices", 1000, "maximum data-flow slices to emit")
+	dataflowWorkers := flags.Int("dataflow-workers", 0, "data-flow worker count; 0 uses GOMAXPROCS/all available cores")
 	dataflowGraphFormat := flags.String("dataflow-graph-format", "graphml", "data-flow graph sidecar format: graphml or gexf")
 	dataflowGraphOut := flags.String("dataflow-graph-out", "", "optional data-flow graph sidecar output path")
+	maxProcs := flags.Int("max-procs", 0, "maximum Go scheduler threads; 0 uses all available CPU cores")
+	memoryLimit := flags.String("memory-limit", "", "optional Go soft memory limit such as 4GiB, 800MiB, or 2GB")
+	progress := flags.Bool("progress", false, "emit coarse progress logs to stderr during large analyses")
+	progressInterval := flags.Duration("progress-interval", 5*time.Second, "minimum interval between progress logs")
 	tags := flags.String("tags", "", "comma-separated Go build tags")
 	tests := flags.Bool("tests", false, "include test variants")
 	includeStdlib := flags.Bool("include-stdlib", false, "include standard library usages and call graph nodes")
@@ -72,10 +79,21 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if dfMode != "none" && dfMode != "security" && dfMode != "crypto" && dfMode != "all" {
 		return fmt.Errorf("unsupported dataflow mode %q: expected none, security, crypto, or all", *dataflow)
 	}
+	dfCallgraphMode := strings.ToLower(strings.TrimSpace(*dataflowCallgraph))
+	if dfCallgraphMode == "" {
+		dfCallgraphMode = "static"
+	}
+	if dfCallgraphMode != "none" && dfCallgraphMode != "static" && dfCallgraphMode != "cha" && dfCallgraphMode != "rta" && dfCallgraphMode != "vta" {
+		return fmt.Errorf("unsupported dataflow-callgraph mode %q: expected none, static, cha, rta, or vta", *dataflowCallgraph)
+	}
 	if format != exporter.FormatJSON && mode == "none" {
 		return errors.New("graphml and gexf exports require --callgraph static, rta, or pointer")
 	}
-	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, ToolVersion: version})
+	memoryLimitBytes, err := analyzer.ParseByteSize(*memoryLimit)
+	if err != nil {
+		return err
+	}
+	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
 	if err != nil {
 		return err
 	}
@@ -129,9 +147,15 @@ Options:
   --dataflow <mode>        none, security, crypto, or all (default: none)
   --dataflow-patterns <f>  Custom data-flow pattern JSON
   --dataflow-pattern-packs Comma-separated packs: all, base, http, data, filesystem, process, crypto, native
+  --dataflow-callgraph     none, static, cha, rta, or vta for data-flow dynamic summary replay
   --dataflow-max-slices    Maximum source-to-sink slices to emit (default: 1000)
+  --dataflow-workers       Data-flow worker count; 0 uses all available cores
   --dataflow-graph-format  graphml or gexf for data-flow sidecar (default: graphml)
   --dataflow-graph-out     Optional data-flow graph sidecar path
+  --max-procs              Go scheduler CPU threads; 0 uses all available cores
+  --memory-limit           Optional Go soft memory limit, e.g. 4GiB or 800MiB
+  --progress               Emit coarse progress logs to stderr
+  --progress-interval      Minimum interval between progress logs (default: 5s)
   --tags <tags>            Comma-separated Go build tags
   --tests                  Include test variants
   --include-stdlib         Include standard-library usages and call graph nodes

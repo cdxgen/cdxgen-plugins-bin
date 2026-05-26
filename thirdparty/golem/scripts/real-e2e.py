@@ -22,6 +22,7 @@ DEFAULT_REPOS = [
     ("urfave-cli", "https://github.com/urfave/cli.git", "./..."),
     ("go-chi", "https://github.com/go-chi/chi.git", "./..."),
     ("hey", "https://github.com/rakyll/hey.git", "./..."),
+    ("prometheus", "https://github.com/prometheus/prometheus.git", "./..."),
 ]
 
 REPO_EXPECTATIONS = {
@@ -181,6 +182,7 @@ def main():
     parser.add_argument("--analyze-timeout", type=int, default=180)
     parser.add_argument("--modes", default="none,static,rta,pointer", help="comma-separated callgraph modes to test")
     parser.add_argument("--dataflow-modes", default="none,security,all", help="comma-separated data-flow modes to test")
+    parser.add_argument("--dataflow-callgraph", default="static", help="data-flow call graph mode: none, static, cha, rta, or vta")
     parser.add_argument("--repos", default="all", help="comma-separated built-in repo names or all")
     parser.add_argument("--skip-fixture", action="store_true", help="skip local semantic data-flow fixture validation")
     parser.add_argument("--fail-on-repo-error", action="store_true", help="exit non-zero when any real repo clone/analyze fails")
@@ -218,7 +220,7 @@ def main():
                 suffix = f"{mode}-df-{dataflow_mode}"
                 output = out / f"{name}-{suffix}.json"
                 graph = out / f"{name}-{suffix}.graphml"
-                cmd = [args.golem, "analyze", "--dir", str(target), "--patterns", patterns, "--callgraph", mode, "--dataflow", dataflow_mode, "--format", "json", "--out", str(output)]
+                cmd = [args.golem, "analyze", "--dir", str(target), "--patterns", patterns, "--callgraph", mode, "--dataflow", dataflow_mode, "--dataflow-callgraph", args.dataflow_callgraph, "--format", "json", "--out", str(output)]
                 if dataflow_mode != "none":
                     cmd.extend(["--dataflow-graph-out", str(graph)])
                 print(f"RUN {name} callgraph={mode} dataflow={dataflow_mode}", flush=True)

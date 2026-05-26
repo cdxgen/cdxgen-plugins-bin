@@ -4,6 +4,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -13,6 +14,11 @@ import (
 )
 
 func Analyze(options Options) (*model.Report, error) {
+	normalizePerformanceOptions(&options)
+	previousProcs, previousMemoryLimit := applyRuntimeLimits(options)
+	defer runtime.GOMAXPROCS(previousProcs)
+	defer debug.SetMemoryLimit(previousMemoryLimit)
+	progress := newProgressLogger(options)
 	if options.Dir == "" {
 		options.Dir = "."
 	}
@@ -32,9 +38,14 @@ func Analyze(options Options) (*model.Report, error) {
 		options.DataFlowMode = "none"
 	}
 	options.DataFlowMode = strings.ToLower(strings.TrimSpace(options.DataFlowMode))
+	if options.DataFlowCallGraphMode == "" {
+		options.DataFlowCallGraphMode = "static"
+	}
+	options.DataFlowCallGraphMode = strings.ToLower(strings.TrimSpace(options.DataFlowCallGraphMode))
 	if options.DataFlowMax <= 0 {
 		options.DataFlowMax = 1000
 	}
+	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 
 	fset := token.NewFileSet()
 	cfg := &packages.Config{
@@ -56,7 +67,9 @@ func Analyze(options Options) (*model.Report, error) {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(options.BuildTags, ",")}
 	}
 
+	progress.Memoryf("loading packages")
 	pkgs, loadErr := packages.Load(cfg, options.Patterns...)
+	progress.Memoryf("loaded %d package roots", len(pkgs))
 	a := &Analyzer{
 		fset:          fset,
 		options:       options,
@@ -84,17 +97,21 @@ func Analyze(options Options) (*model.Report, error) {
 			Tests:      options.Tests,
 		},
 		Options: model.AnalysisOptions{
-			Directory:      absDir,
-			Patterns:       append([]string{}, options.Patterns...),
-			BuildTags:      append([]string{}, options.BuildTags...),
-			Tests:          options.Tests,
-			IncludeStdlib:  options.IncludeStdlib,
-			IncludeLocal:   options.IncludeLocal,
-			CallGraphMode:  options.CallGraphMode,
-			DataFlowMode:   options.DataFlowMode,
-			DataFlowPacks:  append([]string{}, options.DataFlowPacks...),
-			IncludeSSA:     options.IncludeSSA,
-			IncludeSources: options.IncludeSources,
+			Directory:             absDir,
+			Patterns:              append([]string{}, options.Patterns...),
+			BuildTags:             append([]string{}, options.BuildTags...),
+			Tests:                 options.Tests,
+			IncludeStdlib:         options.IncludeStdlib,
+			IncludeLocal:          options.IncludeLocal,
+			CallGraphMode:         options.CallGraphMode,
+			DataFlowMode:          options.DataFlowMode,
+			DataFlowCallGraphMode: options.DataFlowCallGraphMode,
+			DataFlowPacks:         append([]string{}, options.DataFlowPacks...),
+			DataFlowWorkers:       dataFlowWorkerCount(options, 0),
+			MaxProcs:              runtime.GOMAXPROCS(0),
+			MemoryLimitBytes:      options.MemoryLimit,
+			IncludeSSA:            options.IncludeSSA,
+			IncludeSources:        options.IncludeSources,
 		},
 	}
 	if loadErr != nil {
@@ -122,14 +139,21 @@ func Analyze(options Options) (*model.Report, error) {
 	report.RootModules = sortedModules(a.rootModules)
 	report.Modules = sortedModules(a.moduleByPath)
 	report.SupplyChain = a.supplyChainEvidence(report.Modules)
+	var ssaCtx *ssaContext
+	if options.CallGraphMode != "none" || options.DataFlowMode != "none" {
+		ssaCtx = a.buildSSA(pkgs, progress)
+	}
 	if options.CallGraphMode != "none" {
-		report.CallGraph = a.buildCallGraph(pkgs)
+		progress.Memoryf("building call graph mode=%s", options.CallGraphMode)
+		report.CallGraph = a.buildCallGraph(ssaCtx)
+		progress.Memoryf("built call graph")
 	}
 	if options.DataFlowMode != "none" {
-		report.DataFlow = a.buildDataFlow(pkgs)
+		report.DataFlow = a.buildDataFlow(pkgs, ssaCtx, progress)
 	}
 	a.populateStats(report)
 	sortReport(report)
+	progress.Memoryf("analysis complete")
 	return report, nil
 }
 
