@@ -219,3 +219,50 @@ func TestAnalyzeSecurityAndComplianceEvidence(t *testing.T) {
 		t.Fatalf("expected md5/tls crypto evidence, got %#v", report.Crypto)
 	}
 }
+
+func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "all", DataFlowMax: 100, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DataFlow == nil {
+		t.Fatal("expected data-flow evidence")
+	}
+	if report.Stats.DataFlowSourceCount == 0 || report.Stats.DataFlowSinkCount == 0 || report.Stats.DataFlowSliceCount == 0 {
+		t.Fatalf("expected data-flow stats, got %#v", report.Stats)
+	}
+	if report.DataFlow.Stats.SliceCount < 6 {
+		t.Fatalf("expected interprocedural, field, channel, closure, crypto, and native slices, got %#v", report.DataFlow.Slices)
+	}
+	expectedCategories := map[string]bool{
+		"http-input->command-execution": false,
+		"http-input->filesystem":        false,
+		"environment->crypto":           false,
+		"http-input->native-interop":    false,
+	}
+	for _, slice := range report.DataFlow.Slices {
+		key := slice.SourceCategory + "->" + slice.SinkCategory
+		if _, ok := expectedCategories[key]; ok {
+			expectedCategories[key] = true
+		}
+		if len(slice.NodeIDs) == 0 || len(slice.EdgeIDs) == 0 {
+			t.Fatalf("expected populated slice path, got %#v", slice)
+		}
+	}
+	for key, found := range expectedCategories {
+		if !found {
+			t.Fatalf("expected data-flow category %s in %#v", key, report.DataFlow.Slices)
+		}
+	}
+	functions := map[string]bool{}
+	for _, node := range report.DataFlow.Nodes {
+		if node.Sink {
+			functions[node.Function] = true
+		}
+	}
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow"} {
+		if !functions[name] {
+			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
+		}
+	}
+}

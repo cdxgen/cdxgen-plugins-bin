@@ -18,6 +18,10 @@ type Options struct {
 	IncludeStdlib  bool
 	IncludeLocal   bool
 	CallGraphMode  string
+	DataFlowMode   string
+	DataFlowPacks  []string
+	DataFlowConfig string
+	DataFlowMax    int
 	IncludeSSA     bool
 	IncludeSources bool
 	ToolVersion    string

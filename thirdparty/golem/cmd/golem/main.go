@@ -41,6 +41,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	formatValue := flags.String("format", "json", "output format: json, graphml, or gexf")
 	outFile := flags.String("out", "", "output file path; defaults to stdout")
 	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, rta, or pointer")
+	dataflow := flags.String("dataflow", "none", "data-flow mode: none, security, crypto, or all")
+	dataflowPatterns := flags.String("dataflow-patterns", "", "optional JSON file with data-flow sources, sinks, passthroughs, and sanitizers")
+	dataflowPacks := flags.String("dataflow-pattern-packs", "all", "comma-separated data-flow pattern packs: all, base, http, data, filesystem, process, crypto, native")
+	dataflowMax := flags.Int("dataflow-max-slices", 1000, "maximum data-flow slices to emit")
+	dataflowGraphFormat := flags.String("dataflow-graph-format", "graphml", "data-flow graph sidecar format: graphml or gexf")
+	dataflowGraphOut := flags.String("dataflow-graph-out", "", "optional data-flow graph sidecar output path")
 	tags := flags.String("tags", "", "comma-separated Go build tags")
 	tests := flags.Bool("tests", false, "include test variants")
 	includeStdlib := flags.Bool("include-stdlib", false, "include standard library usages and call graph nodes")
@@ -59,12 +65,31 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if mode != "none" && mode != "static" && mode != "rta" && mode != "pointer" {
 		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, rta, or pointer", *callgraph)
 	}
+	dfMode := strings.ToLower(strings.TrimSpace(*dataflow))
+	if dfMode == "" {
+		dfMode = "none"
+	}
+	if dfMode != "none" && dfMode != "security" && dfMode != "crypto" && dfMode != "all" {
+		return fmt.Errorf("unsupported dataflow mode %q: expected none, security, crypto, or all", *dataflow)
+	}
 	if format != exporter.FormatJSON && mode == "none" {
 		return errors.New("graphml and gexf exports require --callgraph static, rta, or pointer")
 	}
-	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, ToolVersion: version})
+	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, ToolVersion: version})
 	if err != nil {
 		return err
+	}
+	if *dataflowGraphOut != "" {
+		if report.DataFlow == nil {
+			return errors.New("--dataflow-graph-out requires --dataflow security, crypto, or all")
+		}
+		graphFormat, err := exporter.ParseDataFlowGraphFormat(*dataflowGraphFormat)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*dataflowGraphOut, []byte(exporter.DataFlowGraph(report.DataFlow, graphFormat)), 0o644); err != nil {
+			return err
+		}
 	}
 	writer := stdout
 	var file *os.File
@@ -101,6 +126,12 @@ Options:
   --format <format>        json, graphml, or gexf (default: json)
   --out <file>             Output file path (default: stdout)
   --callgraph <mode>       none, static, rta, or pointer (default: none)
+  --dataflow <mode>        none, security, crypto, or all (default: none)
+  --dataflow-patterns <f>  Custom data-flow pattern JSON
+  --dataflow-pattern-packs Comma-separated packs: all, base, http, data, filesystem, process, crypto, native
+  --dataflow-max-slices    Maximum source-to-sink slices to emit (default: 1000)
+  --dataflow-graph-format  graphml or gexf for data-flow sidecar (default: graphml)
+  --dataflow-graph-out     Optional data-flow graph sidecar path
   --tags <tags>            Comma-separated Go build tags
   --tests                  Include test variants
   --include-stdlib         Include standard-library usages and call graph nodes

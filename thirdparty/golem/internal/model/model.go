@@ -33,6 +33,8 @@ type AnalysisOptions struct {
 	IncludeStdlib  bool     `json:"includeStdlib"`
 	IncludeLocal   bool     `json:"includeLocal"`
 	CallGraphMode  string   `json:"callGraphMode"`
+	DataFlowMode   string   `json:"dataFlowMode,omitempty"`
+	DataFlowPacks  []string `json:"dataFlowPacks,omitempty"`
 	IncludeSSA     bool     `json:"includeSsa"`
 	IncludeSources bool     `json:"includeSources"`
 }
@@ -309,6 +311,109 @@ type CallGraphEdge struct {
 	Description string            `json:"description,omitempty"`
 	Properties  map[string]string `json:"properties,omitempty"`
 }
+type DataFlowPattern struct {
+	Target            string   `json:"target"`
+	Kind              string   `json:"kind"`
+	Match             string   `json:"match"`
+	Pattern           string   `json:"pattern"`
+	Category          string   `json:"category,omitempty"`
+	PURL              string   `json:"purl,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	TaintKinds        []string `json:"taintKinds,omitempty"`
+	RemovesTaintKinds []string `json:"removesTaintKinds,omitempty"`
+	Confidence        string   `json:"confidence,omitempty"`
+}
+type DataFlowPatternSet struct {
+	Sources      []DataFlowPattern `json:"sources,omitempty"`
+	Sinks        []DataFlowPattern `json:"sinks,omitempty"`
+	Passthroughs []DataFlowPattern `json:"passthroughs,omitempty"`
+	Sanitizers   []DataFlowPattern `json:"sanitizers,omitempty"`
+	Packs        []string          `json:"packs,omitempty"`
+}
+type DataFlowNode struct {
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"`
+	Name        string            `json:"name,omitempty"`
+	Symbol      string            `json:"symbol,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	PackagePath string            `json:"packagePath,omitempty"`
+	Module      *Module           `json:"module,omitempty"`
+	PURL        string            `json:"purl,omitempty"`
+	FunctionID  string            `json:"functionId,omitempty"`
+	Function    string            `json:"function,omitempty"`
+	Position    Position          `json:"position,omitempty"`
+	Source      bool              `json:"source,omitempty"`
+	Sink        bool              `json:"sink,omitempty"`
+	Category    string            `json:"category,omitempty"`
+	TaintKinds  []string          `json:"taintKinds,omitempty"`
+	FieldPath   string            `json:"fieldPath,omitempty"`
+	Confidence  string            `json:"confidence,omitempty"`
+	Properties  map[string]string `json:"properties,omitempty"`
+}
+type DataFlowEdge struct {
+	ID         string            `json:"id"`
+	SourceID   string            `json:"sourceId"`
+	TargetID   string            `json:"targetId"`
+	Kind       string            `json:"kind"`
+	Label      string            `json:"label,omitempty"`
+	Position   Position          `json:"position,omitempty"`
+	Properties map[string]string `json:"properties,omitempty"`
+}
+type DataFlowSlice struct {
+	ID                string   `json:"id"`
+	SourceID          string   `json:"sourceId"`
+	SinkID            string   `json:"sinkId"`
+	NodeIDs           []string `json:"nodeIds,omitempty"`
+	EdgeIDs           []string `json:"edgeIds,omitempty"`
+	SourceCategory    string   `json:"sourceCategory,omitempty"`
+	SinkCategory      string   `json:"sinkCategory,omitempty"`
+	SourcePURL        string   `json:"sourcePurl,omitempty"`
+	SinkPURL          string   `json:"sinkPurl,omitempty"`
+	SinkArgument      string   `json:"sinkArgument,omitempty"`
+	SinkArgumentIndex *int     `json:"sinkArgumentIndex,omitempty"`
+	TaintKinds        []string `json:"taintKinds,omitempty"`
+	FieldPaths        []string `json:"fieldPaths,omitempty"`
+	Confidence        string   `json:"confidence,omitempty"`
+	Summary           string   `json:"summary,omitempty"`
+}
+type DataFlowSummaryFlow struct {
+	ParameterIndex int      `json:"parameterIndex"`
+	ResultIndex    int      `json:"resultIndex,omitempty"`
+	FieldPath      string   `json:"fieldPath,omitempty"`
+	Categories     []string `json:"categories,omitempty"`
+	TaintKinds     []string `json:"taintKinds,omitempty"`
+}
+type DataFlowMethodSummary struct {
+	FunctionID       string                `json:"functionId"`
+	Function         string                `json:"function"`
+	PackagePath      string                `json:"packagePath,omitempty"`
+	ParamToReturn    []DataFlowSummaryFlow `json:"paramToReturn,omitempty"`
+	ParamToSink      []DataFlowSummaryFlow `json:"paramToSink,omitempty"`
+	ReceiverToReturn bool                  `json:"receiverToReturn,omitempty"`
+	Passthrough      bool                  `json:"passthrough,omitempty"`
+	Confidence       string                `json:"confidence,omitempty"`
+	Properties       map[string]string     `json:"properties,omitempty"`
+}
+type DataFlowStats struct {
+	SourceCount      int `json:"sourceCount"`
+	SinkCount        int `json:"sinkCount"`
+	SliceCount       int `json:"sliceCount"`
+	NodeCount        int `json:"nodeCount"`
+	EdgeCount        int `json:"edgeCount"`
+	SummaryCount     int `json:"summaryCount"`
+	FunctionCount    int `json:"functionCount"`
+	InstructionCount int `json:"instructionCount"`
+}
+type DataFlowEvidence struct {
+	Mode        string                  `json:"mode"`
+	Nodes       []DataFlowNode          `json:"nodes,omitempty"`
+	Edges       []DataFlowEdge          `json:"edges,omitempty"`
+	Slices      []DataFlowSlice         `json:"slices,omitempty"`
+	Patterns    *DataFlowPatternSet     `json:"patterns,omitempty"`
+	Summaries   []DataFlowMethodSummary `json:"summaries,omitempty"`
+	Diagnostics []Diagnostic            `json:"diagnostics,omitempty"`
+	Stats       DataFlowStats           `json:"stats"`
+}
 type Stats struct {
 	PackageCount           int `json:"packageCount"`
 	ModuleCount            int `json:"moduleCount"`
@@ -337,6 +442,9 @@ type Stats struct {
 	CryptoMaterialCount    int `json:"cryptoMaterialCount"`
 	CryptoProtocolCount    int `json:"cryptoProtocolCount"`
 	CryptoFindingCount     int `json:"cryptoFindingCount"`
+	DataFlowSourceCount    int `json:"dataFlowSourceCount"`
+	DataFlowSinkCount      int `json:"dataFlowSinkCount"`
+	DataFlowSliceCount     int `json:"dataFlowSliceCount"`
 	DiagnosticCount        int `json:"diagnosticCount"`
 }
 
@@ -389,6 +497,7 @@ type Report struct {
 	NativeArtifacts []NativeArtifact     `json:"nativeArtifacts,omitempty"`
 	SecuritySignals []SecuritySignal     `json:"securitySignals,omitempty"`
 	Crypto          *CryptoEvidence      `json:"crypto,omitempty"`
+	DataFlow        *DataFlowEvidence    `json:"dataFlow,omitempty"`
 	SupplyChain     *SupplyChainEvidence `json:"supplyChain,omitempty"`
 	CallGraph       *CallGraph           `json:"callGraph,omitempty"`
 	Diagnostics     []Diagnostic         `json:"diagnostics,omitempty"`

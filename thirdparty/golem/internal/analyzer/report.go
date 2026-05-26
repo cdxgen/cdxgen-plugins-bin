@@ -28,6 +28,13 @@ func Analyze(options Options) (*model.Report, error) {
 		options.CallGraphMode = "none"
 	}
 	options.CallGraphMode = strings.ToLower(strings.TrimSpace(options.CallGraphMode))
+	if options.DataFlowMode == "" {
+		options.DataFlowMode = "none"
+	}
+	options.DataFlowMode = strings.ToLower(strings.TrimSpace(options.DataFlowMode))
+	if options.DataFlowMax <= 0 {
+		options.DataFlowMax = 1000
+	}
 
 	fset := token.NewFileSet()
 	cfg := &packages.Config{
@@ -84,6 +91,8 @@ func Analyze(options Options) (*model.Report, error) {
 			IncludeStdlib:  options.IncludeStdlib,
 			IncludeLocal:   options.IncludeLocal,
 			CallGraphMode:  options.CallGraphMode,
+			DataFlowMode:   options.DataFlowMode,
+			DataFlowPacks:  append([]string{}, options.DataFlowPacks...),
 			IncludeSSA:     options.IncludeSSA,
 			IncludeSources: options.IncludeSources,
 		},
@@ -109,6 +118,9 @@ func Analyze(options Options) (*model.Report, error) {
 	report.SupplyChain = a.supplyChainEvidence(report.Modules)
 	if options.CallGraphMode != "none" {
 		report.CallGraph = a.buildCallGraph(pkgs)
+	}
+	if options.DataFlowMode != "none" {
+		report.DataFlow = a.buildDataFlow(pkgs)
 	}
 	a.populateStats(report)
 	sortReport(report)
@@ -172,6 +184,12 @@ func (a *Analyzer) populateStats(report *model.Report) {
 		report.Stats.CryptoProtocolCount = len(report.Crypto.Protocols)
 		report.Stats.CryptoFindingCount = len(report.Crypto.Findings)
 	}
+	if report.DataFlow != nil {
+		report.Stats.DataFlowSourceCount = report.DataFlow.Stats.SourceCount
+		report.Stats.DataFlowSinkCount = report.DataFlow.Stats.SinkCount
+		report.Stats.DataFlowSliceCount = report.DataFlow.Stats.SliceCount
+		report.Stats.DiagnosticCount += len(report.DataFlow.Diagnostics)
+	}
 	if report.SupplyChain != nil {
 		report.Stats.GoModReplaceCount = len(report.SupplyChain.Replaces)
 		report.Stats.GoModExcludeCount = len(report.SupplyChain.Excludes)
@@ -208,4 +226,5 @@ func sortReport(report *model.Report) {
 	sort.Slice(report.NativeArtifacts, func(i, j int) bool { return report.NativeArtifacts[i].Path < report.NativeArtifacts[j].Path })
 	sort.Slice(report.SecuritySignals, func(i, j int) bool { return report.SecuritySignals[i].ID < report.SecuritySignals[j].ID })
 	sortCryptoEvidence(report.Crypto)
+	sortDataFlowEvidence(report.DataFlow)
 }
