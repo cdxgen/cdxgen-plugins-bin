@@ -1,211 +1,140 @@
-# golem
+# Golem
 
-Golem (Go Library Evidence Mapper) is a native Go helper for cdxgen. It analyzes Go source projects with the Go toolchain and emits detailed semantic evidence about packages, modules, imports, declarations, type-resolved library usages, build directives, native interop artifacts, security-sensitive API signals, and optional call graphs.
+Golem (Go Library Evidence Mapper) is a static analyzer for Go source trees. It loads a module or workspace with the Go toolchain, resolves types, builds SSA when needed, and writes a compact JSON report about code structure, dependencies, call relationships, cryptographic use, and selected data flows.
 
-It also emits a dedicated `crypto` evidence attribute for Go cryptography review. This includes crypto libraries, algorithms, protocols, related material indicators, operations, and crypto-specific findings. Values are kept small and safe: source locations, symbols, categories, counts, OIDs, and material types are emitted; raw keys, secrets, embedded file contents, and generator command output are not.
+The analyzer is designed for evidence collection rather than exploit proof. It keeps output small and reviewable: symbols, source locations, package context, module metadata, graph edges, classifications, and summary counts are emitted. Raw secrets, embedded file contents, command output, and generated command execution are not emitted.
 
-## Usage
+## Quick start
 
-```bash
-golem analyze --dir /path/to/go/project --format json --out golem.json
-golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
-golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
-golem analyze --dir . --callgraph vta --format json --out golem-vta.json
-golem analyze --dir . --dataflow security --dataflow-callgraph cha --dataflow-graph-out dataflows.graphml --format json --out golem-dataflow.json
-```
-
-When used through cdxgen, the normal entry point is `evinse`:
+Build or run Golem from this directory:
 
 ```bash
-cdxgen -t go -o bom.json /absolute/path/to/go/project
-evinse -i bom.json -o bom.evinse.json -l go --golem-callgraph static /absolute/path/to/go/project
+go run ./cmd/golem analyze --dir /path/to/go/project --format json --out golem.json
 ```
 
-Advanced cdxgen options map directly to Golem analysis settings:
+Useful analysis variants:
 
-| cdxgen option                                   | Golem behavior                                           |
-| ----------------------------------------------- | -------------------------------------------------------- |
-| `--golem-command`                               | Use a specific helper binary instead of the bundled one. |
-| `--golem-callgraph none\|static\|cha\|rta\|vta` | Select call graph depth and cost.                        |
-| `--golem-patterns ./...`                        | Select Go package patterns.                              |
-| `--golem-tags tag1,tag2`                        | Load packages with build tags.                           |
-| `--golem-tests`                                 | Include test variants in package loading and evidence.   |
-
-## Call graph modes
-
-- `none`: source and library evidence only.
-- `static`: fast static SSA call graph. This is the cdxgen Evinse default.
-- `cha`: Class Hierarchy Analysis for broader interface dispatch candidates.
-- `rta`: Rapid Type Analysis from discovered `init` and `main` roots.
-- `vta`: Variable Type Analysis for more precise dynamic call resolution when affordable.
-
-## API endpoint, service, and data-flow evidence
-
-Golem extracts API endpoint and service evidence suitable for downstream CycloneDX `services` enrichment. It recognizes common `net/http` route/listener patterns, route groups from popular Go frameworks, RPC registration-style calls, and sanitized literal external URLs. URL evidence removes user info, query strings, and fragments before emission so tokens and other secret-bearing values are not copied into the report.
-
-Semantic data-flow slicing is available with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. The slicer uses Go SSA and emits compact source-to-sink nodes, edges, slices, summaries, and optional GraphML/GEXF sidecars. Built-in pattern packs cover CLI/env input, HTTP/framework input and response APIs, process execution, filesystem, data APIs, crypto APIs, cgo/native interop, CLI/config frameworks, and cloud SDK/service boundaries. Custom source/sink/passthrough/sanitizer packs can be supplied with `--dataflow-patterns`.
-
-`--dataflow-callgraph` controls dynamic summary replay for interface and function-value-heavy programs. `static` is the default, `cha` is more conservative for interface dispatch, and `vta` can be useful when its experimental x/tools implementation supports the analyzed shape. Sanitizer patterns can remove configured taint kinds via `removesTaintKinds`; for example path base-name extraction can suppress path traversal flows while still preserving unrelated taint kinds.
-
-For large repositories, Golem uses all available Go scheduler cores by default during analysis. Use `--max-procs` to cap scheduler parallelism, `--dataflow-workers` to cap the per-function data-flow worker pool, and `--memory-limit` to set Go's soft memory limit (for example `4GiB` or `800MiB`). Add `--progress` and optionally `--progress-interval 10s` to emit coarse package-loading, SSA, call graph, and data-flow progress logs to stderr.
-
-Data-flow materialization budgets are configurable for large or generated-heavy repositories:
-
-| Option                                 | Default | Behavior                                                                                                                                |
-| -------------------------------------- | ------: | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `--dataflow-max-slices`                |  `1000` | Maximum source-to-sink slices emitted before truncation diagnostics are added.                                                          |
-| `--dataflow-large-repo-functions`      |  `1000` | Function count at which large-repo per-function materialization safeguards apply; `0` disables this threshold.                          |
-| `--dataflow-max-function-instructions` |   `200` | In large repositories, skip per-function slice materialization for functions above this SSA instruction count; `0` disables this guard. |
-| `--dataflow-max-trace-nodes`           |    `64` | Maximum ordered node IDs retained per in-memory trace.                                                                                  |
-| `--dataflow-max-trace-edges`           |   `128` | Maximum ordered edge IDs retained per in-memory trace.                                                                                  |
-| `--dataflow-skip-generated`            | `false` | Skip generated files during per-function data-flow slice materialization.                                                               |
-| `--dataflow-skip-tests`                | `false` | Skip test, example, and benchmark files during per-function data-flow slice materialization.                                            |
-
-Slice evidence includes prioritization metadata for downstream review: `ruleId`, `ruleName`, `severity`, `riskScore`, `confidence`, source/sink categories, source/sink package paths, `sourcePurl`, `sinkPurl`, aggregate `purls`, sink argument index, source/sink scope, source/sink criticality, taint kinds, sanitizer node IDs, path length, edge kinds, duplicate grouping, and a stable `flowKey`. Call graph nodes and edges also include package PURLs where module/package context is available.
-
-Built-in pattern packs are selected with `--dataflow-pattern-packs` and default to `all`. Explicit packs narrow built-ins, for example `--dataflow-pattern-packs process,filesystem` limits built-ins to process and filesystem patterns. Available packs are:
-
-- `base`: CLI arguments, environment values, parameter-name heuristics, conversion passthroughs, and logging/formatted-output sinks.
-- `http`: `net/http`, URL, request, response, redirect, and escaping patterns.
-- `frameworks`: Gin, Echo, Fiber, Chi, and Gorilla-style framework context/response patterns.
-- `process`: command execution and dynamic plugin loading.
-- `data`: SQL, sqlx, pgx, GORM, MongoDB, Redis, Kafka, NATS, and decoder/deserializer sinks.
-- `filesystem`: file/path/archive APIs and path sanitizers.
-- `crypto`: crypto material sources and cryptographic API sinks.
-- `native`: cgo, unsafe, syscall, reflection-call, and native interop patterns.
-- `config`: Cobra, pflag, and Viper configuration sources.
-- `cloud`: AWS, Google Cloud, and Azure SDK package boundary sinks.
-
-Custom pattern JSON uses the same fields as the emitted `dataFlow.patterns` metadata. The most common fields are `target` (`source`, `sink`, `passthrough`, or `sanitizer`), `kind` (`function`, `symbol`, `type`, `package`, `name`, or `parameter`), `match` (`contains`, `exact`, `prefix`, `suffix`, or `regex`), `pattern`, `category`, `taintKinds`, `removesTaintKinds`, `sanitizesCategories`, `relevantArguments`, `receiverRelevant`, `ruleId`, `ruleName`, `severity`, `riskScore`, and `confidence`:
-
-```json
-{
-  "sources": [
-    {
-      "target": "source",
-      "kind": "function",
-      "match": "exact",
-      "pattern": "example.com/acme/config.Secret",
-      "category": "configuration",
-      "taintKinds": ["secret"],
-      "confidence": "high"
-    }
-  ],
-  "sinks": [
-    {
-      "target": "sink",
-      "kind": "function",
-      "match": "exact",
-      "pattern": "example.com/acme/deploy.Run",
-      "category": "command-execution",
-      "taintKinds": ["user-input", "secret"],
-      "relevantArguments": [1],
-      "ruleId": "ACME-CMD-001",
-      "ruleName": "Deployment command injection review",
-      "severity": "high",
-      "riskScore": 80,
-      "confidence": "medium"
-    }
-  ],
-  "sanitizers": [
-    {
-      "target": "sanitizer",
-      "kind": "function",
-      "match": "exact",
-      "pattern": "example.com/acme/safe.CleanPath",
-      "category": "path-validation",
-      "removesTaintKinds": ["path"],
-      "sanitizesCategories": ["filesystem"]
-    }
-  ]
-}
+```bash
+go run ./cmd/golem analyze --dir . --callgraph static --format graphml --out callgraph.graphml
+go run ./cmd/golem analyze --dir . --callgraph rta --format gexf --out callgraph.gexf
+go run ./cmd/golem analyze --dir . --dataflow security --dataflow-graph-out dataflows.graphml --out golem-dataflow.json
+go run ./cmd/golem analyze --dir . --tags prod,linux --tests --out golem-tests.json
 ```
+
+The default package pattern is `./...`. Use `--patterns` to narrow the load set and `--tags` or `--tests` to match the build shape you want to inspect.
+
+## What Golem reads
+
+Golem uses `golang.org/x/tools/go/packages` with syntax, imports, dependencies, types, type information, file lists, module metadata, and type sizes enabled. Package loading is therefore close to what `go list` and the compiler see for the requested patterns, build tags, and test setting.
+
+The first analysis pass walks package ASTs and type information. It records imports, declarations, type-resolved library usages, build directives, native sidecar files, service and endpoint clues, security-sensitive API signals, and cryptographic evidence. SSA is built only when a call graph or data-flow mode is requested.
+
+The JSON model is defined in `internal/model/model.go`. The main report contains package-level and file-level evidence, global rollups, diagnostics, optional call graph data, and optional data-flow data.
 
 ## Output formats
 
-- `json`: complete evidence schema consumed by cdxgen.
-- `graphml`: call graph sidecar suitable for graph tools.
-- `gexf`: call graph sidecar suitable for Gephi and similar tools.
+`json` is the complete report format. `graphml` and `gexf` export the call graph only and require `--callgraph static`, `cha`, `rta`, or `vta`. Data-flow graph sidecars are written with `--dataflow-graph-out` and use `--dataflow-graph-format graphml` or `gexf`.
 
-Graph formats require a non-`none` call graph mode.
+## Call graphs
 
-## cdxgen evidence mapping
+Call graphs are built from Go SSA using the implementations in `golang.org/x/tools/go/callgraph`:
 
-cdxgen maps the JSON report into CycloneDX without requiring a new BOM format.
+| Mode | Implementation | Practical behavior |
+| --- | --- | --- |
+| `none` | No graph | Fastest mode. Reports source evidence only. |
+| `static` | `static.CallGraph` | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited. |
+| `cha` | `cha.CallGraph` | More conservative for interface dispatch. Usually more edges. |
+| `rta` | `rta.Analyze` | Starts from discovered `init` and `main` roots. Useful for executable reachability. |
+| `vta` | `vta.CallGraph` | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by `x/tools`. |
 
-```
-golem modules/imports/usages/call graph
-  |
-  v
-evinse -l go
-  |
-  +--> component.evidence.occurrences
-  +--> component.evidence.callstack.frames
-  +--> component.properties: cdx:golem:*
-  +--> metadata.component.properties: cdx:golem:*
-```
+Golem converts the raw graph into stable node and edge records. A node represents an SSA function with package path, package name, module, package URL when available, receiver, signature, local or external classification, standard library classification, synthetic flag, and source position. An edge records caller, callee, call site location, package URLs for both ends, and whether the call site has a static callee.
 
-Important property groups include:
+Graph filtering is explicit. Standard-library functions are excluded unless `--include-stdlib` is set. Local module functions are included by default and can be disabled with `--include-local=false`.
 
-- run metadata: `cdx:golem:toolVersion`, `cdx:golem:callGraphMode`, package/module/file counts, call graph node/edge counts
-- build posture: `cdx:golem:buildDirectiveKinds`, `cdx:golem:goGenerateCount`, `cdx:golem:goEmbedCount`, `cdx:golem:nativeArtifactCount`, `cdx:golem:nativeArtifactKinds`
-- module posture: `cdx:golem:modulePath`, `cdx:golem:goVersion`, `cdx:golem:localReplacement`, `cdx:golem:vendored`, `cdx:golem:privateModuleCandidate`, `cdx:golem:licenseFileCount`
-- usage evidence: `cdx:golem:usageScopes`, `cdx:golem:testOnly`, `cdx:golem:occurrenceEvidenceKinds`, import/symbol occurrence counts
-- security review: `cdx:golem:securitySignalCategory`, `cdx:golem:securitySignalSeverity`, metadata signal category and severity summaries
-- crypto/CBOM review: `cdx:golem:cryptoLibraryCount`, `cdx:golem:cryptoAssetCount`, `cdx:golem:cryptoOperationCount`, `cdx:golem:cryptoMaterialCount`, `cdx:golem:cryptoProtocolCount`, `cdx:golem:cryptoFindingCount`, `cdx:golem:cryptoAlgorithms`, `cdx:golem:cryptoFinding`
+Call graphs are also used by data-flow analysis when `--dataflow-callgraph` is not `none`. In that case Golem indexes dynamic callees by call site and replays method summaries through those edges.
 
-The cdxgen repo documents the consumer side in `docs/GO_EVINSE_GOLEM.md`, `docs/GO_EVINSE_GOLEM_THREAT_MODEL.md`, `docs/CUSTOM_PROPERTIES.md`, and `docs/BOM_AUDIT.md`.
+## Cryptographic evidence
 
-## Security and compliance evidence
+Cryptographic evidence is collected during the AST and type-information pass. It is not a full cryptographic protocol verifier. Its purpose is to make crypto-relevant code easy to find and classify.
 
-The JSON report includes Go-specific evidence useful for AppSec and compliance review:
+The implementation has four main inputs:
 
-- build constraints from `//go:build` and legacy `// +build`
-- `//go:generate` directives without executing generator commands
-- `//go:embed` patterns, targets, and safe risk indicators for embedded credentials or crypto material
-- native sidecar files such as C/C++/Objective-C/assembly/native object files
-- cgo directives and `import "C"`/`C.symbol` signals when present
-- security-sensitive API signals for unsafe, reflection, syscall, plugin loading, process execution, environment access, HTTP, TLS, weak crypto, weak randomness, archive handling, templates, database opens, and filesystem writes
-- focused heuristics such as `tls.Config{InsecureSkipVerify:true}`
-- dedicated crypto evidence under `crypto`, including algorithms such as MD5, SHA-1/SHA-2, AES, RSA, Ed25519, HMAC, PBKDF2, and X25519 when type-resolved selectors are present
-- related cryptographic material indicators such as private keys, public keys, tokens, nonces, salts, credentials, and passwords, detected from symbol names and literal presence without copying literal values
-- crypto protocol evidence such as TLS usage and TLS misconfiguration findings
+1. Imports are mapped to crypto families. For example, `crypto/aes` is classified as symmetric crypto, `crypto/tls` as protocol use, `crypto/x509` as certificate handling, and `golang.org/x/crypto/*` as external crypto support.
+2. Selector expressions are resolved through `packages.Package.TypesInfo`. Known symbols such as `crypto/md5.Sum`, `crypto/aes.NewCipher`, `crypto/rsa.GenerateKey`, `crypto/ed25519.Sign`, `crypto/hmac.New`, `crypto/rand.Read`, `crypto/x509.ParseCertificate`, `crypto/tls.LoadX509KeyPair`, `pbkdf2.Key`, and `curve25519.X25519` are classified into assets, operations, material types, protocols, strengths, standards, OIDs, and findings.
+3. TLS configuration literals are inspected for `InsecureSkipVerify: true` and produce a critical finding.
+4. Assignments and value declarations are checked for string literals bound to names that look like key material or secrets, such as private keys, public keys, secrets, passwords, tokens, credentials, IVs, nonces, salts, and generic keys. The literal value is not copied into the report.
 
-Signal values are categories/counts/symbol names and source locations only; `golem` does not copy raw environment values, command output, embedded file contents, or secrets into JSON.
+The crypto section emits `libraries`, `assets`, `operations`, `materials`, `protocols`, and `findings`. IDs are stable, records are deduplicated, and evidence is attached both to files and to the aggregate report. Findings distinguish type-resolved evidence from name-and-literal indicators through the `confidence` field.
 
-The first crypto implementation is intentionally not a full data-flow engine. It is a precise source/classification layer that cdxgen can convert into CycloneDX cryptographic assets. Source-to-sink flows for key material, plaintext, ciphertext, and protocol sinks should be added as a separate graph pass so the output can preserve the same safety and compactness guarantees.
+This approach is strong at finding direct, type-resolved use of known Go crypto APIs and weak primitives such as MD5, SHA-1, and DES. It is intentionally weaker for custom wrappers, reflection-heavy code, generated bindings, protocol state validation, key lifetime analysis, and determining whether a weak primitive is used in a security context or only as a checksum.
 
-## Threat model notes
+## Data-flow analysis
 
-Golem treats the target Go repository as untrusted input. It loads packages and classifies source-level facts, but it must not execute `go:generate` commands and must not copy secret-bearing file contents into the output. Reviewers should still treat module paths and source locations as potentially internal information before publishing an enriched BOM.
+Data-flow analysis is enabled with `--dataflow security`, `--dataflow crypto`, or `--dataflow all`. It is implemented as an SSA-based taint slicer in `internal/analyzer/dataflow.go`. Pattern packs select the source and sink categories. The `all` mode also lets the candidate function set include non-local third-party functions; the other enabled modes focus materialized analysis on local code unless standard library inclusion is requested.
 
-The evidence is meant to prioritize review. A high-severity API signal is not proof of exploitability, and test-only usage is not proof of safety. Pair Golem output with code review, vulnerability data, build provenance, and runtime context.
+The analyzer starts by loading source, sink, passthrough, and sanitizer patterns. Built-in packs cover base CLI and environment input, HTTP input and response APIs, common web frameworks, process execution, filesystem operations, data APIs, cryptographic APIs, native interop, configuration libraries, and cloud SDK boundaries. Custom JSON can extend these patterns through `--dataflow-patterns`.
 
-## BOM audit and REPL workflow
+A data-flow run has two phases. First, Golem infers per-function summaries for parameter-to-return flows, parameter-to-sink flows, and calls that return source values. This summary pass iterates up to four times so simple interprocedural relationships can stabilize. Second, Golem analyzes selected functions and materializes concrete source-to-sink slices.
 
-After `evinse -l go`, cdxgen users can audit and inspect Golem properties directly:
+Within a function, taint is tracked through SSA values, stores, loads, map updates, field and index addresses, channel sends and receives, `select`, `phi` nodes, conversions, interface wrapping, type assertions, slices, binary operations, and closure bindings. Calls are handled by matching patterns, replaying summaries for static callees, replaying dynamic summaries from the selected call graph, and using compatibility checks for interface method summaries. Known passthrough calls propagate taint from arguments or receivers to returns.
 
-```bash
-cdx-audit --bom bom.evinse.json --direct-bom-audit --categories golem
-cdxi bom.evinse.json
-```
+Sanitizers can either stop a trace completely or remove selected taint kinds. They can also mark categories as sanitized, which suppresses later sinks in those categories while allowing unrelated taint to continue. This lets a path sanitizer reduce filesystem findings without hiding a secret flowing to a log sink.
 
-Useful `cdxi` commands are `.golemsummary`, `.golemhotspots`, `.golemcoverage`, `.occurrences`, and `.callstack`.
+A slice contains source and sink IDs, node and edge IDs, categories, taint kinds, package paths, package URLs, sink argument information, rule metadata, severity, risk score, confidence, path length, sanitizer nodes, duplicate grouping, and a stable `flowKey`. Data-flow graph sidecars include the nodes and edges used by the slices.
 
-## Build
+Large repositories can be controlled with these limits:
+
+| Option | Default | Purpose |
+| --- | ---: | --- |
+| `--dataflow-max-slices` | `1000` | Stop materializing slices after this count and emit truncation diagnostics. |
+| `--dataflow-workers` | `0` | Number of per-function workers. `0` uses available scheduler parallelism. |
+| `--dataflow-large-repo-functions` | `1000` | Function count where large-repo materialization safeguards start. |
+| `--dataflow-max-function-instructions` | `200` | Skip slice materialization for very large functions in large repositories. Summaries are still inferred. |
+| `--dataflow-max-trace-nodes` | `64` | Maximum node IDs retained in an in-memory trace. |
+| `--dataflow-max-trace-edges` | `128` | Maximum edge IDs retained in an in-memory trace. |
+| `--dataflow-skip-generated` | `false` | Skip generated files during slice materialization. |
+| `--dataflow-skip-tests` | `false` | Skip tests, examples, and benchmarks during slice materialization. |
+
+Use `--max-procs` to cap Go scheduler parallelism, `--memory-limit` to set Go's soft memory limit, and `--progress` to print coarse package loading, SSA, call graph, and data-flow progress logs.
+
+## Strengths
+
+Golem benefits from Go's parser, type checker, package loader, and SSA representation rather than text-only matching. That gives it accurate package paths, symbols, signatures, receivers, build tags, test variants, and source positions for compiled code.
+
+The report is deterministic enough for review workflows: evidence is sorted, IDs are stable, repeated findings are deduplicated, and graph exports can be compared between runs. The analyzer also avoids copying secret-bearing content into output and records diagnostics when package loading, graph construction, or data-flow budgets affect completeness.
+
+Data-flow analysis is intentionally practical. It combines local SSA propagation, memory and channel modeling, summaries, optional call graph replay, sanitizer semantics, and review-focused metadata. This catches common flows such as request input to response, CLI input to process execution, environment or configuration data to logs, paths to filesystem APIs, and secret-looking material to crypto APIs.
+
+## Weaknesses and assumptions
+
+Golem is static analysis. It does not execute the program, evaluate runtime configuration, or prove reachability under real deployment conditions. A reported flow is a review candidate, not an exploit claim. Missing a flow is also possible, especially when behavior depends on reflection, code generation, build-time side effects, plugins, dynamic loading, complex aliasing, or values constructed outside the loaded package set.
+
+The data-flow engine is path-insensitive and mostly field-insensitive. It uses compact traces and bounded materialization, so long or highly branched flows may be truncated. Summaries are approximate and intentionally small. Interface and function-value calls improve when a call graph is enabled, but dynamic dispatch remains conservative.
+
+Crypto evidence classifies API use and obvious material indicators. It does not validate protocol handshakes, key sizes derived at runtime, entropy quality beyond recognized APIs, certificate validation logic beyond simple patterns, or whether a weak primitive is acceptable for a non-security checksum.
+
+Package loading follows the local Go environment. Missing modules, unsupported build tags, cgo settings, platform differences, or incomplete workspaces can change what Golem sees. Always inspect diagnostics before treating absence of evidence as meaningful.
+
+## Threat model
+
+Threat model notes live in `THREAT_MODEL.md`. In short, Golem treats the analyzed repository as untrusted input, does not run `go:generate`, and avoids copying raw secret values into the report. Source paths, package names, module paths, and symbols can still be sensitive metadata.
+
+## Build and test
 
 ```bash
 go test ./...
+go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
+```
+
+Cross-platform release builds are handled by the Makefile:
+
+```bash
 make all
 ```
 
-The Makefile cross-compiles static binaries for Linux, macOS, and Windows targets used by `cdxgen-plugins-bin`.
-
-## Real repository smoke tests
+An opt-in real repository smoke test is available. It may clone public repositories and download Go modules:
 
 ```bash
-go build -trimpath -ldflags "-s -w" -o build/golem-darwin-arm64 ./cmd/golem
-python3 scripts/real-e2e.py --golem ./build/golem-darwin-arm64
+go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
+python3 scripts/real-e2e.py --golem ./build/golem
 ```
-
-The real E2E script is opt-in because it clones public GitHub repositories and can trigger Go module downloads while loading package metadata.
