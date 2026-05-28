@@ -45,6 +45,7 @@ jobs:
       run: |
         bash ./scripts/thirdparty-downloads.test.sh
         bash ./scripts/stage-built-plugins.test.sh
+        bash ./scripts/publish-helper-oras.test.sh
         bash ./scripts/root-package-publish.test.sh
         node --test ./scripts/generate-metadata.test.js
     - name: Build
@@ -54,6 +55,14 @@ jobs:
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
         bash build.sh
+        [[ -f packages/linuxmusl-amd64/plugins/golem/golem-linuxmusl-amd64 ]]
+        [[ -f packages/linuxmusl-amd64/plugins/golem/golem-linuxmusl-amd64.sha256 ]]
+        [[ -f packages/linuxmusl-amd64/plugins/trustinspector/trustinspector-cdxgen-linuxmusl-amd64 ]]
+        [[ -f packages/linuxmusl-amd64/plugins/trustinspector/trustinspector-cdxgen-linuxmusl-amd64.sha256 ]]
+        [[ -f packages/linuxmusl-arm64/plugins/golem/golem-linuxmusl-arm64 ]]
+        [[ -f packages/linuxmusl-arm64/plugins/golem/golem-linuxmusl-arm64.sha256 ]]
+        [[ -f packages/linuxmusl-arm64/plugins/trustinspector/trustinspector-cdxgen-linuxmusl-arm64 ]]
+        [[ -f packages/linuxmusl-arm64/plugins/trustinspector/trustinspector-cdxgen-linuxmusl-arm64.sha256 ]]
         pip3 install blint
         blint -i plugins -o /tmp/reports --no-error
         bash ./scripts/root-package-publish.test.sh

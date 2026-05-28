@@ -12,6 +12,8 @@ oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/trivy/
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 
-bash ../../scripts/stage-built-plugins.sh ../../plugins/trustinspector plugins/trustinspector linux-amd64
-bash ../../scripts/stage-built-plugins.sh ../../plugins/golem plugins/golem linux-amd64
+for plug in trustinspector golem
+do
+  bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linuxmusl-amd64"
+done
 node ../../scripts/generate-metadata.js ./plugins
