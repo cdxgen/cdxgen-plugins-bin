@@ -10,9 +10,9 @@ $upxArchiveSha256 = "fa5380bca4c2718547aaa0134bc0d8a7fa27e102f0ac6371573d60d1c21
 $osqueryVersion = "5.23.0"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
 $osqueryArchiveSha256 = "5ddb8e1c23fd870838ef4ff47c0d2e5a080f22a6944fc4870d726e7b20e962a4"
-$dosaiVersion = "3.0.4"
+$dosaiVersion = "3.0.5"
 $dosaiArchive = "Dosai.exe"
-$dosaiArchiveSha256 = "826e6b142fdaf2286e2b44322f74e20281806cc46a0c1a466cb85203b9b2c708"
+$dosaiArchiveSha256 = "34fbbe401a6d62d127516ff1c1e145923a494698e788c0f0c2088e22a391aabc"
 
 function Assert-Sha256 {
   param(
