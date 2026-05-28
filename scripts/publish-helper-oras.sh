@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly HELPER_ARTIFACT_TYPE="application/vnd.cdxgen.plugins.helper.v1"
+readonly HELPER_BINARY_MEDIA_TYPE="application/octet-stream"
+readonly HELPER_CHECKSUM_MEDIA_TYPE="text/plain"
+readonly HELPER_SBOM_MEDIA_TYPE="application/vnd.cyclonedx+json"
+
 print_usage() {
   cat <<'EOF'
 Usage:
@@ -36,6 +41,14 @@ publish_artifacts() {
     candidates+=("$candidate")
   done < <(find "$tool_dir" -maxdepth 1 -type f -name "$binary_glob" -print0)
 
+  if [[ "${#candidates[@]}" -gt 0 ]]; then
+    local sorted_candidates=()
+    while IFS= read -r candidate; do
+      sorted_candidates+=("$candidate")
+    done < <(printf '%s\n' "${candidates[@]}" | LC_ALL=C sort)
+    candidates=("${sorted_candidates[@]}")
+  fi
+
   for binary_path in "${candidates[@]}"; do
     [[ -f "$binary_path" ]] || continue
     case "$(basename "$binary_path")" in
@@ -56,13 +69,13 @@ publish_artifacts() {
 
     local oras_args=(
       push "${repository}:${tag}"
-      --artifact-type application/vnd.cdxgen.plugins.binary.v1+json
-      "${binary_path}:application/vnd.cdxgen.plugins.layer.v1+tar"
-      "${sha_path}:application/vnd.cdxgen.plugins.layer.v1+tar"
+      --artifact-type "${HELPER_ARTIFACT_TYPE}"
+      "${binary_path}:${HELPER_BINARY_MEDIA_TYPE}"
+      "${sha_path}:${HELPER_CHECKSUM_MEDIA_TYPE}"
     )
 
     if [[ -n "$sbom_file" ]]; then
-      oras_args+=("${sbom_file}:sbom/cyclonedx+json")
+      oras_args+=("${sbom_file}:${HELPER_SBOM_MEDIA_TYPE}")
     fi
 
     oras "${oras_args[@]}"

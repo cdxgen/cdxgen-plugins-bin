@@ -28,14 +28,14 @@ printf 'beadfeed\n' > "$tool_dir/golem-windows-amd64.exe.sha256"
 
 bash "$helper_script" ghcr.io/cdxgen/cdxgen-plugins-bin "$tool_dir" 'golem-*'
 
-first_call="$(sed -n '1p' "$log_file")"
-second_call="$(sed -n '2p' "$log_file")"
+log_contents="$(cat "$log_file")"
 
-[[ "$first_call" == *"ghcr.io/cdxgen/cdxgen-plugins-bin:golem-linuxmusl-amd64"* ]]
-[[ "$first_call" == *"$tool_dir/golem-linuxmusl-amd64:application/vnd.cdxgen.plugins.layer.v1+tar"* ]]
-[[ "$first_call" == *"$tool_dir/golem-linuxmusl-amd64.sha256:application/vnd.cdxgen.plugins.layer.v1+tar"* ]]
-[[ "$first_call" == *"$tool_dir/sbom-golem-postbuild.cdx.json:sbom/cyclonedx+json"* ]]
-[[ "$second_call" == *"ghcr.io/cdxgen/cdxgen-plugins-bin:golem-windows-amd64"* ]]
-[[ "$second_call" == *"$tool_dir/golem-windows-amd64.exe:application/vnd.cdxgen.plugins.layer.v1+tar"* ]]
+[[ "$log_contents" == *"--artifact-type application/vnd.cdxgen.plugins.helper.v1"* ]]
+[[ "$log_contents" == *"ghcr.io/cdxgen/cdxgen-plugins-bin:golem-linuxmusl-amd64"* ]]
+[[ "$log_contents" == *"$tool_dir/golem-linuxmusl-amd64:application/octet-stream"* ]]
+[[ "$log_contents" == *"$tool_dir/golem-linuxmusl-amd64.sha256:text/plain"* ]]
+[[ "$log_contents" == *"$tool_dir/sbom-golem-postbuild.cdx.json:application/vnd.cyclonedx+json"* ]]
+[[ "$log_contents" == *"ghcr.io/cdxgen/cdxgen-plugins-bin:golem-windows-amd64"* ]]
+[[ "$log_contents" == *"$tool_dir/golem-windows-amd64.exe:application/octet-stream"* ]]
 
 echo "publish-helper-oras helper test passed"

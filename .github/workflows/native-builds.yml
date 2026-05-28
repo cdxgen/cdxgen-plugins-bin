@@ -107,13 +107,13 @@ jobs:
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 \
-          --artifact-type application/vnd.oras.config.v1+json \
-          ./trivy-cdxgen-linuxmusl-amd64:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./trivy-cdxgen-linuxmusl-amd64.sha256:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sbom-trivy-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
+          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
+          ./trivy-cdxgen-linuxmusl-amd64:application/octet-stream \
+          ./trivy-cdxgen-linuxmusl-amd64.sha256:text/plain \
+          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sourcekitten:application/octet-stream \
+          ./sourcekitten.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04'
     - name: Upload linux arm64
       run: |
@@ -132,29 +132,29 @@ jobs:
         cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 \
-          --artifact-type application/vnd.oras.config.v1+json \
-          ./trivy-cdxgen-linuxmusl-arm64:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./trivy-cdxgen-linuxmusl-arm64.sha256:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sbom-trivy-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
+          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
+          ./trivy-cdxgen-linuxmusl-arm64:application/octet-stream \
+          ./trivy-cdxgen-linuxmusl-arm64.sha256:text/plain \
+          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sourcekitten:application/octet-stream \
+          ./sourcekitten.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04-arm'
     - name: Upload darwin amd64
       run: |
         cd thirdparty/sourcekitten/SourceKitten/.build/release/
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-amd64 \
-          --artifact-type application/vnd.oras.config.v1+json \
-          ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
+          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
+          ./sourcekitten:application/octet-stream \
+          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sourcekitten.sha256:text/plain
       if: matrix.os == 'macos-15-intel'
     - name: Upload darwin arm64
       run: |
         cd thirdparty/sourcekitten/SourceKitten/.build/release/
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-arm64 \
-          --artifact-type application/vnd.oras.config.v1+json \
-          ./sourcekitten:application/vnd.cdxgen.plugins.layer.v1+tar \
-          ./sbom-sourcekitten-postbuild.cdx.json:sbom/cyclonedx+tar \
-          ./sourcekitten.sha256:application/vnd.cdxgen.plugins.layer.v1+tar
+          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
+          ./sourcekitten:application/octet-stream \
+          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
+          ./sourcekitten.sha256:text/plain
       if: matrix.os == 'macos-15'
