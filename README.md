@@ -43,6 +43,11 @@ The published packages currently bundle helper binaries such as:
 - `trustinspector-cdxgen-*` for deep trust inspection of repository keyrings, CA stores, macOS code-sign/notarization state, and Windows Authenticode / WDAC policy inventory
 - `golem-*` for Go source semantic library evidence and optional static/CHA/RTA/VTA call graph exports
 
+Helper binaries are also published individually for automation-friendly retrieval:
+
+- GitHub Releases upload the raw helper binaries alongside their `.sha256` sidecars, for example `golem-linuxmusl-amd64` + `golem-linuxmusl-amd64.sha256`
+- GHCR / ORAS publishes one tag per helper binary using the binary filename as the tag, for example `ghcr.io/cdxgen/cdxgen-plugins-bin:golem-linuxmusl-amd64` and `ghcr.io/cdxgen/cdxgen-plugins-bin:trustinspector-cdxgen-linuxmusl-arm64`
+
 ## Golem evidence contract
 
 Golem is intentionally evidence-oriented rather than content-copying. Its JSON report is expected to contain small values such as module paths, package paths, source locations, symbol kinds, usage scopes, counts, categories, and call graph edges. It should not include raw secrets, raw environment values, embedded file contents, generated source contents, or raw `go:generate` command bodies.
