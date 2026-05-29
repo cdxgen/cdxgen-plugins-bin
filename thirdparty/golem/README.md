@@ -23,6 +23,8 @@ go run ./cmd/golem analyze --dir . --tags prod,linux --tests --out golem-tests.j
 
 The default package pattern is `./...`. Use `--patterns` to narrow the load set and `--tags` or `--tests` to match the build shape you want to inspect.
 
+If `--dir` does not contain `go.mod` or `go.work`, Golem automatically discovers child directories containing `go.mod` and merges results across them. Use `--no-recurse` to disable this behavior.
+
 ## What Golem reads
 
 Golem uses `golang.org/x/tools/go/packages` with syntax, imports, dependencies, types, type information, file lists, module metadata, and type sizes enabled. Package loading is therefore close to what `go list` and the compiler see for the requested patterns, build tags, and test setting.
@@ -30,6 +32,8 @@ Golem uses `golang.org/x/tools/go/packages` with syntax, imports, dependencies, 
 The first analysis pass walks package ASTs and type information. It records imports, declarations, type-resolved library usages, build directives, native sidecar files, service and endpoint clues, security-sensitive API signals, and cryptographic evidence. SSA is built only when a call graph or data-flow mode is requested.
 
 The JSON model is defined in `internal/model/model.go`. The main report contains package-level and file-level evidence, global rollups, diagnostics, optional call graph data, and optional data-flow data.
+
+For a field-by-field JSON reference, see `JSON_ATTRIBUTE_REFERENCE.md`.
 
 ## Output formats
 
@@ -81,6 +85,8 @@ Within a function, taint is tracked through SSA values, stores, loads, map updat
 Sanitizers can either stop a trace completely or remove selected taint kinds. They can also mark categories as sanitized, which suppresses later sinks in those categories while allowing unrelated taint to continue. This lets a path sanitizer reduce filesystem findings without hiding a secret flowing to a log sink.
 
 A slice contains source and sink IDs, node and edge IDs, categories, taint kinds, package paths, package URLs, sink argument information, rule metadata, severity, risk score, confidence, path length, sanitizer nodes, duplicate grouping, and a stable `flowKey`. Data-flow graph sidecars include the nodes and edges used by the slices.
+
+By default, Golem drops call graph edges and data-flow slices that are entirely rooted in external Go module cache paths (for example `/go/pkg/mod/...`) to reduce third-party-only noise in downstream evidence. Use `--include-all-flows` to keep those flows.
 
 Large repositories can be controlled with these limits:
 

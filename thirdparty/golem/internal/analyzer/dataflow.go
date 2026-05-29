@@ -450,12 +450,12 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"fmt.Sprintf", "fmt.Sprint", "fmt.Sprintln", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "net/url.QueryEscape", "net/url.PathEscape", "net/url.JoinPath", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
 			addPass("function", name, "conversion")
 		}
-		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"} {
+		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "go.uber.org/zap.(*Logger).Info", "go.uber.org/zap.(*Logger).Warn", "go.uber.org/zap.(*Logger).Error", "go.uber.org/zap.(*SugaredLogger).Info", "go.uber.org/zap.(*SugaredLogger).Infof", "go.uber.org/zap.(*SugaredLogger).Error", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"} {
 			addSink("function", name, "logging", "user-input", "secret")
 		}
 	}
 	if selected["http"] {
-		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "BindJSON", "ShouldBind", "ShouldBindJSON", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "Bind", "github.com/gofiber/fiber", "Params", "Body", "BodyRaw", "BodyParser", "Cookies"} {
+		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "BindJSON", "ShouldBind", "ShouldBindJSON", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "Bind", "github.com/gofiber/fiber", "Params", "Body", "BodyRaw", "BodyParser", "Cookies", "github.com/gorilla/mux.Vars", "github.com/go-chi/chi.URLParam", "github.com/go-chi/chi.URLParamFromCtx", "google.golang.org/grpc/metadata.FromIncomingContext", "google.golang.org/grpc.(*ServerStream).RecvMsg"} {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
@@ -527,6 +527,9 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	if selected["cloud"] {
 		for _, name := range []string{"github.com/aws/aws-sdk-go", "github.com/aws/aws-sdk-go-v2", "cloud.google.com/go", "google.golang.org/api", "github.com/Azure/azure-sdk-for-go"} {
 			addSink("package", name, "external-service", "user-input", "secret")
+		}
+		for _, name := range []string{"net/http.(*Client).Do", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg"} {
+			addSink("function", name, "external-service", "user-input", "secret")
 		}
 	}
 	set.Sources = normalizePatterns("source", set.Sources)

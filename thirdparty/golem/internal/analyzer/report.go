@@ -29,6 +29,9 @@ func Analyze(options Options) (*model.Report, error) {
 	if len(options.Patterns) == 0 {
 		options.Patterns = []string{"./..."}
 	}
+	if merged, ok, err := analyzeAcrossChildModules(options, absDir, progress); ok {
+		return merged, err
+	}
 	if options.CallGraphMode == "" {
 		options.CallGraphMode = "none"
 	}
@@ -97,6 +100,8 @@ func Analyze(options Options) (*model.Report, error) {
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,
+			NoRecurse:                       options.NoRecurse,
+			IncludeAllFlows:                 options.IncludeAllFlows,
 			Patterns:                        append([]string{}, options.Patterns...),
 			BuildTags:                       append([]string{}, options.BuildTags...),
 			Tests:                           options.Tests,
@@ -156,6 +161,7 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.DataFlowMode != "none" {
 		report.DataFlow = a.buildDataFlow(pkgs, ssaCtx, progress)
 	}
+	filterExternalOnlyModuleCacheFlows(report, options.IncludeAllFlows)
 	a.populateStats(report)
 	sortReport(report)
 	progress.Memoryf("analysis complete")

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
 func TestAnalyzeSimpleProject(t *testing.T) {
@@ -420,7 +422,7 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		t.Fatalf("expected configured data-flow options in report, got %#v", report.Options)
 	}
 	set := builtinDataFlowPatterns([]string{"all"})
-	var redirectArgs, httpErrorArgs, viperSource, cloudSink bool
+	var redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink bool
 	for _, sink := range set.Sinks {
 		if sink.Pattern == "http.Redirect" && len(sink.RelevantArguments) == 1 && sink.RelevantArguments[0] == 2 && sink.RuleID == "GOLEM-DATAFLOW-OPEN-REDIRECT" {
 			redirectArgs = true
@@ -431,14 +433,24 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		if sink.Category == "external-service" && strings.Contains(sink.Pattern, "aws-sdk-go") {
 			cloudSink = true
 		}
+		if sink.Category == "logging" && strings.Contains(sink.Pattern, "go.uber.org/zap") {
+			zapSink = true
+		}
+		if sink.Category == "external-service" && strings.Contains(sink.Pattern, "grpc.(*ClientConn).Invoke") {
+			grpcClientSink = true
+		}
 	}
+	var grpcSource bool
 	for _, source := range set.Sources {
 		if strings.Contains(source.Pattern, "viper.GetString") && source.Category == "configuration" {
 			viperSource = true
 		}
+		if strings.Contains(source.Pattern, "grpc/metadata.FromIncomingContext") && source.Category == "http-input" {
+			grpcSource = true
+		}
 	}
-	if !redirectArgs || !httpErrorArgs || !viperSource || !cloudSink {
-		t.Fatalf("expected enriched pattern metadata/packs redirect=%v httpError=%v viper=%v cloud=%v", redirectArgs, httpErrorArgs, viperSource, cloudSink)
+	if !redirectArgs || !httpErrorArgs || !viperSource || !cloudSink || !zapSink || !grpcClientSink || !grpcSource {
+		t.Fatalf("expected enriched pattern metadata redirect=%v httpError=%v viper=%v cloud=%v zap=%v grpcClient=%v grpcSource=%v", redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink, grpcSource)
 	}
 	narrow := builtinDataFlowPatterns([]string{"process"})
 	for _, source := range narrow.Sources {
@@ -450,6 +462,82 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		if sink.Category != "command-execution" && sink.Category != "dynamic-loading" {
 			t.Fatalf("explicit process pack should only include process sinks, got %#v", narrow.Sinks)
 		}
+	}
+}
+
+func TestDiscoverChildGoModuleDirs(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(root, "svc-a"),
+		filepath.Join(root, "svc-b", "nested"),
+		filepath.Join(root, ".git", "hooks"),
+	} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mod := range []string{
+		filepath.Join(root, "svc-a", "go.mod"),
+		filepath.Join(root, "svc-b", "nested", "go.mod"),
+	} {
+		if err := os.WriteFile(mod, []byte("module example.com/test\n\ngo 1.22\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "go.mod"), []byte("module should/not/be/seen\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := discoverChildGoModuleDirs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 2 {
+		t.Fatalf("expected 2 discovered module dirs, got %#v", dirs)
+	}
+	if dirs[0] != filepath.Join(root, "svc-a") || dirs[1] != filepath.Join(root, "svc-b", "nested") {
+		t.Fatalf("unexpected module dirs %#v", dirs)
+	}
+}
+
+func TestFilterExternalOnlyModuleCacheFlows(t *testing.T) {
+	report := &model.Report{
+		CallGraph: &model.CallGraph{
+			Nodes: []model.CallGraphNode{
+				{ID: "local", Position: model.Position{Filename: "/workspace/service/main.go"}},
+				{ID: "ext-a", Position: model.Position{Filename: "/Users/me/go/pkg/mod/example.com/lib/a.go"}},
+				{ID: "ext-b", Position: model.Position{Filename: "/Users/me/go/pkg/mod/example.com/lib/b.go"}},
+			},
+			Edges: []model.CallGraphEdge{
+				{ID: "drop-edge", SourceID: "ext-a", TargetID: "ext-b"},
+				{ID: "keep-edge", SourceID: "local", TargetID: "ext-a"},
+			},
+		},
+		DataFlow: &model.DataFlowEvidence{
+			Nodes: []model.DataFlowNode{
+				{ID: "local-node", Position: model.Position{Filename: "/workspace/service/main.go"}, Source: true},
+				{ID: "local-sink", Position: model.Position{Filename: "/workspace/service/main.go"}, Sink: true},
+				{ID: "ext-src", Position: model.Position{Filename: "/Users/me/go/pkg/mod/example.com/lib/a.go"}, Source: true},
+				{ID: "ext-sink", Position: model.Position{Filename: "/Users/me/go/pkg/mod/example.com/lib/b.go"}, Sink: true},
+			},
+			Edges: []model.DataFlowEdge{{ID: "local-edge"}, {ID: "ext-edge"}},
+			Slices: []model.DataFlowSlice{
+				{ID: "keep-slice", SourceID: "local-node", SinkID: "local-sink", NodeIDs: []string{"local-node", "local-sink"}, EdgeIDs: []string{"local-edge"}, FlowKey: "local"},
+				{ID: "drop-slice", SourceID: "ext-src", SinkID: "ext-sink", NodeIDs: []string{"ext-src", "ext-sink"}, EdgeIDs: []string{"ext-edge"}, FlowKey: "ext"},
+			},
+		},
+	}
+	filterExternalOnlyModuleCacheFlows(report, false)
+	if len(report.CallGraph.Edges) != 1 || report.CallGraph.Edges[0].ID != "keep-edge" {
+		t.Fatalf("expected only mixed callgraph edge to remain, got %#v", report.CallGraph.Edges)
+	}
+	if len(report.DataFlow.Slices) != 1 || report.DataFlow.Slices[0].ID != "keep-slice" {
+		t.Fatalf("expected only non-cache dataflow slice to remain, got %#v", report.DataFlow.Slices)
+	}
+
+	includeAll := &model.Report{CallGraph: &model.CallGraph{Nodes: report.CallGraph.Nodes, Edges: []model.CallGraphEdge{{ID: "ext-only", SourceID: "ext-a", TargetID: "ext-b"}}}}
+	filterExternalOnlyModuleCacheFlows(includeAll, true)
+	if len(includeAll.CallGraph.Edges) != 1 {
+		t.Fatalf("expected include-all-flows to keep edges, got %#v", includeAll.CallGraph.Edges)
 	}
 }
 

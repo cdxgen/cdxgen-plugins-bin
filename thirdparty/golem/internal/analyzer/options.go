@@ -10,10 +10,12 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
-const SchemaVersion = "https://cyclonedx.github.io/cdxgen/golem/schema/v1"
+const SchemaVersion = "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v1"
 
 type Options struct {
 	Dir                             string
+	NoRecurse                       bool
+	IncludeAllFlows                 bool
 	Patterns                        []string
 	BuildTags                       []string
 	Tests                           bool

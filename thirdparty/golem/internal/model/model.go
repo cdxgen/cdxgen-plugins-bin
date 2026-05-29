@@ -27,6 +27,8 @@ type RuntimeInfo struct {
 }
 type AnalysisOptions struct {
 	Directory                       string   `json:"directory"`
+	NoRecurse                       bool     `json:"noRecurse,omitempty"`
+	IncludeAllFlows                 bool     `json:"includeAllFlows,omitempty"`
 	Patterns                        []string `json:"patterns"`
 	BuildTags                       []string `json:"buildTags,omitempty"`
 	Tests                           bool     `json:"tests"`

@@ -13,7 +13,7 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/exporter"
 )
 
-var version = "2.2.0"
+var version = "2.2.2"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -38,11 +38,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	flags := flag.NewFlagSet("golem analyze", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dir := flags.String("dir", ".", "Go module/workspace directory to analyze")
+	noRecurse := flags.Bool("no-recurse", false, "disable recursive child go.mod discovery when --dir has no go.mod/go.work")
 	patterns := flags.String("patterns", "./...", "comma-separated go/packages patterns")
 	formatValue := flags.String("format", "json", "output format: json, graphml, or gexf")
 	outFile := flags.String("out", "", "output file path; defaults to stdout")
 	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, or vta")
 	dataflow := flags.String("dataflow", "none", "data-flow mode: none, security, crypto, or all")
+	includeAllFlows := flags.Bool("include-all-flows", false, "retain external-only flows/call stacks fully rooted in Go module cache paths")
 	dataflowPatterns := flags.String("dataflow-patterns", "", "optional JSON file with data-flow sources, sinks, passthroughs, and sanitizers")
 	dataflowPacks := flags.String("dataflow-pattern-packs", "all", "comma-separated data-flow pattern packs: all, base, http, frameworks, data, filesystem, process, crypto, native, config, cloud")
 	dataflowCallgraph := flags.String("dataflow-callgraph", "static", "call graph mode for data-flow dynamic summary replay: none, static, cha, rta, or vta")
@@ -99,7 +101,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
+	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, NoRecurse: *noRecurse, IncludeAllFlows: *includeAllFlows, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
 	if err != nil {
 		return err
 	}
@@ -146,11 +148,13 @@ func printUsage(w io.Writer) {
 
 Options:
   --dir <path>             Go module/workspace directory to analyze (default: .)
+  --no-recurse             Disable recursive child go.mod discovery when root has no go.mod/go.work
   --patterns <patterns>    Comma-separated go/packages patterns (default: ./...)
   --format <format>        json, graphml, or gexf (default: json)
   --out <file>             Output file path (default: stdout)
   --callgraph <mode>       none, static, cha, rta, or vta (default: none)
   --dataflow <mode>        none, security, crypto, or all (default: none)
+  --include-all-flows      Keep external-only flows/call stacks rooted in module cache paths
   --dataflow-patterns <f>  Custom data-flow pattern JSON
   --dataflow-pattern-packs Comma-separated packs: all, base, http, frameworks, data, filesystem, process, crypto, native, config, cloud
   --dataflow-callgraph     none, static, cha, rta, or vta for data-flow dynamic summary replay
