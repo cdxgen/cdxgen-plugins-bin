@@ -23,6 +23,12 @@ type carrier struct {
 	value string
 }
 
+type receiverCarrier struct {
+	value string
+}
+
+type middlewareRouter struct{}
+
 type Runner interface {
 	Run(string)
 }
@@ -54,6 +60,28 @@ func FieldFlow(r *http.Request) {
 	c := &carrier{}
 	c.value = r.PostFormValue("name")
 	_ = os.WriteFile(c.value, []byte("x"), 0o600)
+}
+
+func (c *receiverCarrier) Set(v string) {
+	c.value = v
+}
+
+func (c *receiverCarrier) Value() string {
+	return c.value
+}
+
+func (middlewareRouter) Use(string, func(string)) {}
+
+func ReceiverFieldFlow(r *http.Request) {
+	c := &receiverCarrier{}
+	c.Set(r.PostFormValue("receiver"))
+	_ = os.WriteFile(c.Value(), []byte("x"), 0o600)
+}
+
+func ReceiverObjectLoggingFlow(r *http.Request) {
+	c := &receiverCarrier{}
+	c.Set(r.PostFormValue("receiver"))
+	log.Printf("carrier=%v", c)
 }
 
 func SanitizedPathFlow(r *http.Request) {
@@ -125,11 +153,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, q)
 }
 
+func MiddlewareFlow(value string) {
+	_ = os.WriteFile(value, []byte("x"), 0o600)
+}
+
 func wrap(next http.HandlerFunc) http.HandlerFunc {
 	return next
 }
 
 func RegisterEndpoints() {
+	router := middlewareRouter{}
+	router.Use("/middleware", MiddlewareFlow)
 	http.HandleFunc("/search", Handler)
 	http.HandleFunc("/wrapped", wrap(Handler))
 	mux := http.NewServeMux()

@@ -2,8 +2,13 @@ package analyzer
 
 import (
 	"bytes"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -86,6 +91,28 @@ func TestAnalyzeSimpleProjectAdvancedCallGraphModes(t *testing.T) {
 				t.Fatalf("expected graph nodes and edges for %s, got %#v diagnostics=%#v", mode, report.CallGraph.Stats, report.CallGraph.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestAnalyzeRTASyntheticRoots(t *testing.T) {
+	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "rta"), IncludeLocal: true, CallGraphMode: "rta", ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CallGraph == nil {
+		t.Fatal("expected call graph")
+	}
+	nodes := map[string]bool{}
+	for _, node := range report.CallGraph.Nodes {
+		nodes[node.ID] = true
+	}
+	for _, fn := range []string{"example.com/golem/rta.handler", "example.com/golem/rta.verbHandler", "example.com/golem/rta.nestedHandler", "example.com/golem/rta.worker", "example.com/golem/rta.commandRun"} {
+		if !nodes[fn] {
+			t.Fatalf("expected synthetic RTA root node %s in %#v", fn, report.CallGraph.Nodes)
+		}
+	}
+	if nodes["example.com/golem/rta.deadHandler"] {
+		t.Fatalf("unexpected dead synthetic RTA root in %#v", report.CallGraph.Nodes)
 	}
 }
 
@@ -371,10 +398,22 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if !redirectSanitizerSeen {
 		t.Fatalf("expected category-aware redirect sanitizer evidence in %#v", report.DataFlow.Nodes)
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow"} {
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ReceiverFieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow", "example.com/golem/dataflow.MiddlewareFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
+	}
+	if functions["example.com/golem/dataflow.ReceiverObjectLoggingFlow"] {
+		t.Fatalf("receiver object logging should not produce a sink slice, got sink functions %#v", functions)
+	}
+	var receiverFieldSummary bool
+	for _, summary := range report.DataFlow.Summaries {
+		if summary.Function == "(*example.com/golem/dataflow.receiverCarrier).Set" && strings.Contains(summary.Properties["receiverFieldWrites"], "field0") {
+			receiverFieldSummary = true
+		}
+	}
+	if !receiverFieldSummary {
+		t.Fatalf("expected receiver field summary evidence in %#v", report.DataFlow.Summaries)
 	}
 	paths := map[string]bool{}
 	listeners := map[string]bool{}
@@ -388,7 +427,7 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 			wrappedHandlerSeen = true
 		}
 	}
-	for _, path := range []string{"/search", "/api/exec", "/wrapped"} {
+	for _, path := range []string{"/search", "/api/exec", "/wrapped", "/middleware"} {
 		if !paths[path] {
 			t.Fatalf("expected endpoint path %s in %#v", path, report.APIEndpoints)
 		}
@@ -413,6 +452,15 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	}
 }
 
+func TestSyntheticHTTPVerbRegistration(t *testing.T) {
+	if !isSyntheticHTTPVerbRegistration("Get", "(*example.Router).Get", "*example.Router") {
+		t.Fatal("expected router Get method to be treated as synthetic registration")
+	}
+	if isSyntheticHTTPVerbRegistration("Get", "(*example.Store).Get", "*example.Store") {
+		t.Fatal("did not expect generic Get method to be treated as synthetic registration")
+	}
+}
+
 func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 	report, err := Analyze(Options{Dir: filepath.Join("..", "..", "testdata", "dataflow"), IncludeLocal: true, CallGraphMode: "none", DataFlowMode: "security", DataFlowCallGraphMode: "none", DataFlowMax: 10, DataFlowLargeRepoFunctions: 7, DataFlowMaxFunctionInstructions: 33, DataFlowMaxTraceNodes: 11, DataFlowMaxTraceEdges: 12, DataFlowSkipGenerated: true, DataFlowSkipTests: true, ToolVersion: "test"})
 	if err != nil {
@@ -422,7 +470,7 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		t.Fatalf("expected configured data-flow options in report, got %#v", report.Options)
 	}
 	set := builtinDataFlowPatterns([]string{"all"})
-	var redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink bool
+	var redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink, grpcSource, queueSink, queueSource, customSanitizer, customPassthrough, ginAccessor, connectAccessor, removedFrameworkContext bool
 	for _, sink := range set.Sinks {
 		if sink.Pattern == "http.Redirect" && len(sink.RelevantArguments) == 1 && sink.RelevantArguments[0] == 2 && sink.RuleID == "GOLEM-DATAFLOW-OPEN-REDIRECT" {
 			redirectArgs = true
@@ -439,8 +487,10 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		if sink.Category == "external-service" && strings.Contains(sink.Pattern, "grpc.(*ClientConn).Invoke") {
 			grpcClientSink = true
 		}
+		if sink.Category == "queue-send" && strings.Contains(sink.Pattern, "pubsub.(*Topic).Publish") {
+			queueSink = true
+		}
 	}
-	var grpcSource bool
 	for _, source := range set.Sources {
 		if strings.Contains(source.Pattern, "viper.GetString") && source.Category == "configuration" {
 			viperSource = true
@@ -448,9 +498,31 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		if strings.Contains(source.Pattern, "grpc/metadata.FromIncomingContext") && source.Category == "http-input" {
 			grpcSource = true
 		}
+		if strings.Contains(source.Pattern, "gin-gonic/gin.(*Context).Query") && source.Category == "http-input" {
+			ginAccessor = true
+		}
+		if strings.Contains(source.Pattern, "connectrpc.com/connect.(*Request).Header") && source.Category == "http-input" {
+			connectAccessor = true
+		}
+		if source.Kind == "type" && (source.Pattern == "gin.Context" || source.Pattern == "*gin.Context" || source.Pattern == "echo.Context" || strings.Contains(source.Pattern, "fiber.Ctx")) {
+			removedFrameworkContext = true
+		}
+		if source.Category == "queue-message" && strings.Contains(source.Pattern, "pubsub.(*Message).Data") {
+			queueSource = true
+		}
 	}
-	if !redirectArgs || !httpErrorArgs || !viperSource || !cloudSink || !zapSink || !grpcClientSink || !grpcSource {
-		t.Fatalf("expected enriched pattern metadata redirect=%v httpError=%v viper=%v cloud=%v zap=%v grpcClient=%v grpcSource=%v", redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink, grpcSource)
+	for _, san := range set.Sanitizers {
+		if san.Kind == "name" && strings.Contains(san.Pattern, "sanitize|escape|clean") {
+			customSanitizer = true
+		}
+	}
+	for _, pass := range set.Passthroughs {
+		if pass.Kind == "name" && strings.Contains(pass.Pattern, "identity|passthrough|forward|wrap") {
+			customPassthrough = true
+		}
+	}
+	if !redirectArgs || !httpErrorArgs || !viperSource || !cloudSink || !zapSink || !grpcClientSink || !grpcSource || !queueSink || !queueSource || !customSanitizer || !customPassthrough || !ginAccessor || !connectAccessor || removedFrameworkContext {
+		t.Fatalf("expected enriched pattern metadata redirect=%v httpError=%v viper=%v cloud=%v zap=%v grpcClient=%v grpcSource=%v queueSink=%v queueSource=%v customSanitizer=%v customPass=%v ginAccessor=%v connectAccessor=%v removedFrameworkContext=%v", redirectArgs, httpErrorArgs, viperSource, cloudSink, zapSink, grpcClientSink, grpcSource, queueSink, queueSource, customSanitizer, customPassthrough, ginAccessor, connectAccessor, removedFrameworkContext)
 	}
 	narrow := builtinDataFlowPatterns([]string{"process"})
 	for _, source := range narrow.Sources {
@@ -462,6 +534,110 @@ func TestDataFlowConfigurableBudgetsAndPatternMetadata(t *testing.T) {
 		if sink.Category != "command-execution" && sink.Category != "dynamic-loading" {
 			t.Fatalf("explicit process pack should only include process sinks, got %#v", narrow.Sinks)
 		}
+	}
+}
+
+func TestEndpointFrameworkCoverage(t *testing.T) {
+	tests := map[string]string{
+		"github.com/grpc-ecosystem/grpc-gateway/v2/runtime.RegisterPingHandlerServer": "grpc-gateway",
+		"connectrpc.com/connect.NewPingServiceHandler":                                "connectrpc",
+		"github.com/valyala/fasthttp.ListenAndServe":                                  "fasthttp",
+		"github.com/kataras/iris/v12.Application.Get":                                 "iris",
+		"github.com/beego/beego/v2/server/web.Router":                                 "beego",
+		"github.com/gobuffalo/buffalo.(*App).GET":                                     "buffalo",
+		"github.com/99designs/gqlgen/graphql.GetOperationContext":                     "graphql",
+	}
+	for symbol, want := range tests {
+		if got := endpointFramework(symbol, "Handle"); got != want {
+			t.Fatalf("endpointFramework(%q)=%q want %q", symbol, got, want)
+		}
+	}
+}
+
+func TestClassifyEndpointCallPrefersGRPCGateway(t *testing.T) {
+	classification, ok := classifyEndpointCall("github.com/grpc-ecosystem/grpc-gateway/v2/runtime.RegisterPingHandlerServer", "RegisterPingHandlerServer", "grpc-gateway", 4)
+	if !ok {
+		t.Fatal("expected grpc-gateway registration to classify")
+	}
+	if classification.kind != "http-route" || classification.framework != "grpc-gateway" || classification.method != "ANY" || classification.path != "RegisterPingHandlerServer" || classification.handlerArg != 3 {
+		t.Fatalf("unexpected grpc-gateway classification %#v", classification)
+	}
+}
+
+func TestFieldPatternTargetForTypeMatchesQueueSources(t *testing.T) {
+	pkg := types.NewPackage("cloud.google.com/go/pubsub", "pubsub")
+	msgObj := types.NewTypeName(token.NoPos, pkg, "Message", nil)
+	msgStruct := types.NewStruct([]*types.Var{
+		types.NewField(token.NoPos, pkg, "Data", types.NewSlice(types.Typ[types.Byte]), false),
+	}, nil)
+	msgType := types.NewNamed(msgObj, msgStruct, nil)
+	target, ok := fieldPatternTargetForType(types.NewPointer(msgType), 0)
+	if !ok {
+		t.Fatal("expected field pattern target")
+	}
+	builder := &dataFlowBuilder{patterns: builtinDataFlowPatterns([]string{"queue"}), regexps: map[string]*regexp.Regexp{}}
+	var matched bool
+	for _, pattern := range builder.patterns.Sources {
+		if pattern.Category == "queue-message" && fieldPatternMatches(target, pattern, builder.regexps) {
+			matched = true
+			if pattern.Kind != "field" {
+				t.Fatalf("expected queue field source pattern, got %#v", pattern)
+			}
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("expected queue field pattern match for %#v", target)
+	}
+}
+
+func TestBuiltinDataFlowPatternsClassifyGQLGenAsFrameworkContext(t *testing.T) {
+	patterns := builtinDataFlowPatterns([]string{"frameworks", "queue"})
+	var frameworkMatch bool
+	for _, pattern := range patterns.Sources {
+		if pattern.Pattern == "github.com/99designs/gqlgen/graphql.GetOperationContext" {
+			if pattern.Category != "framework-context" || pattern.Kind != "function" {
+				t.Fatalf("unexpected gqlgen source pattern %#v", pattern)
+			}
+			frameworkMatch = true
+		}
+		if pattern.Category == "queue-message" && strings.Contains(pattern.Pattern, "github.com/99designs/gqlgen/graphql.") {
+			t.Fatalf("gqlgen helper should not be categorized as queue-message: %#v", pattern)
+		}
+	}
+	if !frameworkMatch {
+		t.Fatal("expected gqlgen helper source in framework-context pack")
+	}
+}
+
+func TestGroupPrefixForCallSupportsParty(t *testing.T) {
+	expr, err := parser.ParseExpr(`app.Party("/api")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expression, got %T", expr)
+	}
+	prefix, ok := (&Analyzer{}).groupPrefixForCall(call, map[string]string{})
+	if !ok {
+		t.Fatal("expected Party call to register a route-group prefix")
+	}
+	if prefix != "/api" {
+		t.Fatalf("groupPrefixForCall returned %q want %q", prefix, "/api")
+	}
+	if isFrameworkRouteName("Party") {
+		t.Fatal("Party should not be classified as a concrete route registration")
+	}
+}
+
+func TestClassifyEndpointCallRouterUsesAnyMethod(t *testing.T) {
+	classification, ok := classifyEndpointCall("github.com/beego/beego/v2/server/web.Router", "Router", "beego", 3)
+	if !ok {
+		t.Fatal("expected Router call to classify")
+	}
+	if classification.method != "ANY" {
+		t.Fatalf("expected Router method ANY, got %#v", classification)
 	}
 }
 

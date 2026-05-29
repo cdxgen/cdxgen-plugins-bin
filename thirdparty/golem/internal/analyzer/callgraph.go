@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/types"
 	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
@@ -45,7 +46,7 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 	case "cha":
 		graph = cha.CallGraph(ctx.program)
 	case "rta":
-		result := rta.Analyze(mainAndInitRoots(ctx.packages), true)
+		result := rta.Analyze(rtaRoots(ctx), true)
 		if result != nil {
 			graph = result.CallGraph
 		} else {
@@ -177,4 +178,232 @@ func mainAndInitRoots(pkgs []*ssa.Package) []*ssa.Function {
 		}
 	}
 	return roots
+}
+
+func rtaRoots(ctx *ssaContext) []*ssa.Function {
+	seen := map[*ssa.Function]bool{}
+	var roots []*ssa.Function
+	add := func(fn *ssa.Function) {
+		if fn == nil || seen[fn] {
+			return
+		}
+		seen[fn] = true
+		roots = append(roots, fn)
+	}
+	for _, fn := range mainAndInitRoots(ctx.packages) {
+		add(fn)
+	}
+	for _, fn := range syntheticRTARoots(ctx) {
+		add(fn)
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].String() < roots[j].String() })
+	return roots
+}
+
+func syntheticRTARoots(ctx *ssaContext) []*ssa.Function {
+	if ctx == nil {
+		return nil
+	}
+	reachable := reachableFromRoots(static.CallGraph(ctx.program), mainAndInitRoots(ctx.packages))
+	seen := map[*ssa.Function]bool{}
+	var roots []*ssa.Function
+	add := func(fn *ssa.Function) {
+		if fn == nil || seen[fn] {
+			return
+		}
+		seen[fn] = true
+		roots = append(roots, fn)
+	}
+	for _, fn := range ctx.functions {
+		if fn == nil || !reachable[fn] {
+			continue
+		}
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				switch x := instr.(type) {
+				case *ssa.Call:
+					if isSyntheticRegistration(x.Common()) {
+						for _, arg := range callArgs(x.Common()) {
+							for _, target := range callbackFunctions(arg) {
+								add(target)
+							}
+						}
+					}
+				case *ssa.Go:
+					for _, target := range callbackFunctions(x.Common().Value) {
+						add(target)
+					}
+					if callee := x.Common().StaticCallee(); callee != nil {
+						add(callee)
+					}
+				case *ssa.Defer:
+					if isSyntheticRegistration(x.Common()) {
+						for _, target := range callbackFunctions(x.Common().Value) {
+							add(target)
+						}
+					}
+				case *ssa.Store:
+					if isCallbackFieldStore(x) {
+						for _, target := range callbackFunctions(valueFromStore(x.Val)) {
+							add(target)
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].String() < roots[j].String() })
+	return roots
+}
+
+func reachableFromRoots(graph *callgraph.Graph, roots []*ssa.Function) map[*ssa.Function]bool {
+	reachable := map[*ssa.Function]bool{}
+	if graph == nil {
+		for _, root := range roots {
+			if root != nil {
+				reachable[root] = true
+			}
+		}
+		return reachable
+	}
+	var visit func(*callgraph.Node)
+	visit = func(node *callgraph.Node) {
+		if node == nil || node.Func == nil || reachable[node.Func] {
+			return
+		}
+		reachable[node.Func] = true
+		for _, edge := range node.Out {
+			if edge != nil {
+				visit(edge.Callee)
+			}
+		}
+	}
+	for _, root := range roots {
+		if root == nil {
+			continue
+		}
+		if node := graph.Nodes[root]; node != nil {
+			visit(node)
+			continue
+		}
+		reachable[root] = true
+	}
+	return reachable
+}
+
+func isSyntheticRegistration(common *ssa.CallCommon) bool {
+	if common == nil {
+		return false
+	}
+	if len(callArgs(common)) == 0 {
+		return false
+	}
+	text := strings.ToLower(callName(common) + " " + callSymbol(common))
+	for _, token := range []string{"handle", "handler", "route", "router", "register", "mount", "middleware", "interceptor", "command", "callback", "consumer", "subscribe"} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	if isSyntheticHTTPVerbRegistration(callName(common), callSymbol(common), syntheticRegistrationReceiverType(common)) {
+		return true
+	}
+	return false
+}
+
+func isSyntheticHTTPVerbRegistration(name, symbol, receiverType string) bool {
+	switch strings.ToUpper(name) {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "ANY", "ALL", "USE":
+	default:
+		return false
+	}
+	context := strings.ToLower(symbol + " " + receiverType)
+	for _, token := range []string{"router", "route", "mux", "engine", "group", "app", "fiber", "echo", "gin", "chi"} {
+		if strings.Contains(context, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func syntheticRegistrationReceiverType(common *ssa.CallCommon) string {
+	if common == nil {
+		return ""
+	}
+	if callee := common.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+		return callee.Signature.Recv().Type().String()
+	}
+	if common.Method != nil {
+		if sig, ok := common.Method.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil {
+			return sig.Recv().Type().String()
+		}
+	}
+	if sig := common.Signature(); sig != nil && sig.Recv() != nil {
+		return sig.Recv().Type().String()
+	}
+	return ""
+}
+
+func callbackFunctions(v ssa.Value) []*ssa.Function {
+	switch x := v.(type) {
+	case *ssa.Function:
+		return []*ssa.Function{x}
+	case *ssa.MakeClosure:
+		if fn, ok := x.Fn.(*ssa.Function); ok && fn != nil {
+			return []*ssa.Function{fn}
+		}
+	case *ssa.ChangeType:
+		return callbackFunctions(x.X)
+	case *ssa.MakeInterface:
+		return callbackFunctions(x.X)
+	case *ssa.UnOp:
+		return callbackFunctions(x.X)
+	}
+	return nil
+}
+
+func isCallbackFieldStore(store *ssa.Store) bool {
+	if store == nil {
+		return false
+	}
+	fieldAddr, ok := store.Addr.(*ssa.FieldAddr)
+	if !ok {
+		return false
+	}
+	fieldName := callbackFieldName(fieldAddr)
+	if fieldName == "" {
+		return false
+	}
+	return len(callbackFunctions(valueFromStore(store.Val))) > 0
+}
+
+func callbackFieldName(fieldAddr *ssa.FieldAddr) string {
+	if fieldAddr == nil {
+		return ""
+	}
+	ptr, ok := fieldAddr.X.Type().Underlying().(*types.Pointer)
+	if !ok {
+		return ""
+	}
+	strct, ok := ptr.Elem().Underlying().(*types.Struct)
+	if !ok || fieldAddr.Field < 0 || fieldAddr.Field >= strct.NumFields() {
+		return ""
+	}
+	name := strings.ToLower(strct.Field(fieldAddr.Field).Name())
+	for _, token := range []string{"run", "rune", "prerun", "postrun", "persistentprerun", "persistentpostrun", "handler", "middleware", "interceptor", "callback", "consumer"} {
+		if name == token {
+			return name
+		}
+	}
+	return ""
+}
+
+func valueFromStore(v ssa.Value) ssa.Value {
+	switch x := v.(type) {
+	case *ssa.MakeInterface:
+		return x.X
+	case *ssa.ChangeType:
+		return x.X
+	default:
+		return v
+	}
 }

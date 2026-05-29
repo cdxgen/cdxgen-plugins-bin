@@ -29,6 +29,16 @@ type endpointFacts struct {
 	urls      []model.ExternalURL
 }
 
+type endpointCallClassification struct {
+	kind       string
+	framework  string
+	method     string
+	path       string
+	pathArg    int
+	handlerArg int
+	props      map[string]string
+}
+
 func (a *Analyzer) endpointFactsForPackage(pkg *packages.Package) endpointFacts {
 	var facts endpointFacts
 	for _, file := range pkg.Syntax {
@@ -97,7 +107,10 @@ func (a *Analyzer) recordRouteGroupValues(spec *ast.ValueSpec, groups map[string
 
 func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]string) (string, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel == nil || sel.Sel.Name != "Group" || len(call.Args) == 0 {
+	if !ok || sel.Sel == nil || len(call.Args) == 0 {
+		return "", false
+	}
+	if sel.Sel.Name != "Group" && sel.Sel.Name != "Party" {
 		return "", false
 	}
 	prefix, ok := stringLiteral(call.Args[0])
@@ -118,51 +131,17 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 	}
 	symbol := a.endpointCallSymbol(pkg, call)
 	framework := endpointFramework(symbol, name)
-	method := ""
-	pathArg := 0
-	handlerArg := 1
-	kind := "http-route"
-	path := ""
-	props := map[string]string{}
-
-	switch {
-	case strings.Contains(symbol, "net/http.HandleFunc") || strings.Contains(symbol, "net/http.Handle") || name == "HandleFunc" || name == "Handle":
-		method = ""
-		pathArg = 0
-		handlerArg = 1
-		framework = firstNonEmpty(framework, "net/http")
-	case strings.Contains(symbol, "ListenAndServe") || name == "ListenAndServe" || name == "ListenAndServeTLS":
-		kind = "http-listener"
-		framework = firstNonEmpty(framework, "net/http")
-		if len(call.Args) > 0 {
-			path, _ = stringLiteral(call.Args[0])
-		}
-		method = ""
-		handlerArg = 1
-		props["listener"] = "true"
-		if name == "ListenAndServeTLS" {
-			props["tls"] = "true"
-		}
-	case strings.Contains(symbol, "Register") && strings.Contains(symbol, "Server"):
-		kind = "rpc-service"
-		framework = firstNonEmpty(framework, "grpc")
-		path = name
-		method = "RPC"
-		pathArg = -1
-		handlerArg = 1
-	case isFrameworkRouteName(name):
-		if (framework == "" || framework == "net/http") && isTitleCaseHTTPMethod(name) {
-			return model.APIEndpoint{}, false
-		}
-		method = httpMethodNames[name]
-		if method == "" {
-			method = strings.ToUpper(name)
-		}
-		pathArg = 0
-		handlerArg = 1
-	default:
+	classification, ok := classifyEndpointCall(symbol, name, framework, len(call.Args))
+	if !ok {
 		return model.APIEndpoint{}, false
 	}
+	framework = classification.framework
+	method := classification.method
+	pathArg := classification.pathArg
+	handlerArg := classification.handlerArg
+	kind := classification.kind
+	path := classification.path
+	props := classification.props
 
 	if path == "" && pathArg >= 0 && len(call.Args) > pathArg {
 		path, _ = stringLiteral(call.Args[pathArg])
@@ -183,6 +162,76 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 		path = cleanPath
 	}
 	return model.APIEndpoint{ID: stableID(pkg.ID, "endpoint", kind, method, path, handler, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Kind: kind, Framework: framework, Method: method, Path: path, Host: host, Scheme: scheme, URL: cleanURL, Handler: handler, PackagePath: pkg.PkgPath, UsageScope: fileRole(r.Start.Filename), Range: r, Properties: cleanProperties(props)}, true
+}
+
+func classifyEndpointCall(symbol, name, framework string, argCount int) (endpointCallClassification, bool) {
+	classification := endpointCallClassification{
+		kind:       "http-route",
+		framework:  framework,
+		method:     "",
+		path:       "",
+		pathArg:    0,
+		handlerArg: 1,
+		props:      map[string]string{},
+	}
+	switch {
+	case strings.Contains(symbol, "net/http.HandleFunc") || strings.Contains(symbol, "net/http.Handle") || name == "HandleFunc" || name == "Handle":
+		classification.framework = firstNonEmpty(framework, "net/http")
+	case strings.Contains(symbol, "ListenAndServe") || name == "ListenAndServe" || name == "ListenAndServeTLS":
+		classification.kind = "http-listener"
+		classification.framework = firstNonEmpty(framework, "net/http")
+		classification.handlerArg = 1
+		classification.props["listener"] = "true"
+		if name == "ListenAndServeTLS" {
+			classification.props["tls"] = "true"
+		}
+	case strings.Contains(symbol, "grpc-gateway") && strings.Contains(name, "Register"):
+		classification.framework = firstNonEmpty(framework, "grpc-gateway")
+		classification.method = "ANY"
+		classification.path = name
+		classification.pathArg = -1
+		classification.handlerArg = 0
+		if argCount > 0 {
+			classification.handlerArg = argCount - 1
+		}
+	case strings.Contains(symbol, "Register") && strings.Contains(symbol, "Server"):
+		classification.kind = "rpc-service"
+		classification.framework = firstNonEmpty(framework, "grpc")
+		classification.path = name
+		classification.method = "RPC"
+		classification.pathArg = -1
+		classification.handlerArg = 1
+	case framework == "connectrpc" && strings.Contains(strings.ToLower(name), "handler"):
+		classification.kind = "rpc-service"
+		classification.framework = "connectrpc"
+		classification.path = name
+		classification.method = "RPC"
+		classification.pathArg = -1
+		classification.handlerArg = 0
+		if argCount > 0 {
+			classification.handlerArg = argCount - 1
+		}
+	case framework == "fasthttp" && (strings.Contains(symbol, "ListenAndServe") || name == "ListenAndServeTLS"):
+		classification.kind = "http-listener"
+		classification.framework = "fasthttp"
+		classification.handlerArg = 1
+		classification.props["listener"] = "true"
+	case isFrameworkRouteName(name):
+		if (framework == "" || framework == "net/http") && isTitleCaseHTTPMethod(name) {
+			return endpointCallClassification{}, false
+		}
+		classification.method = httpMethodNames[name]
+		if classification.method == "" {
+			if name == "Router" {
+				classification.method = "ANY"
+			} else {
+				classification.method = strings.ToUpper(name)
+			}
+		}
+	default:
+		return endpointCallClassification{}, false
+	}
+	return classification, true
 }
 
 func isTitleCaseHTTPMethod(name string) bool {
@@ -249,6 +298,20 @@ func endpointFramework(symbol string, name string) string {
 		return "echo"
 	case strings.Contains(lower, "github.com/gofiber/fiber"):
 		return "fiber"
+	case strings.Contains(lower, "github.com/grpc-ecosystem/grpc-gateway"):
+		return "grpc-gateway"
+	case strings.Contains(lower, "connectrpc.com/connect"):
+		return "connectrpc"
+	case strings.Contains(lower, "github.com/valyala/fasthttp"):
+		return "fasthttp"
+	case strings.Contains(lower, "github.com/kataras/iris"):
+		return "iris"
+	case strings.Contains(lower, "github.com/beego/beego"):
+		return "beego"
+	case strings.Contains(lower, "github.com/gobuffalo/buffalo"):
+		return "buffalo"
+	case strings.Contains(lower, "github.com/99designs/gqlgen") || strings.Contains(lower, "graphql"):
+		return "graphql"
 	case strings.Contains(lower, "google.golang.org/grpc") || strings.Contains(name, "Register"):
 		return "grpc"
 	case strings.Contains(lower, "net/http"):
@@ -264,7 +327,7 @@ func isFrameworkRouteName(name string) bool {
 	}
 	upper := strings.ToUpper(name)
 	_, ok := httpMethodNames[upper]
-	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix"
+	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix" || name == "Router"
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {
