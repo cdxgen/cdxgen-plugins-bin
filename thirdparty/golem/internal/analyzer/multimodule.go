@@ -138,6 +138,7 @@ func mergeReports(dst *model.Report, src *model.Report) {
 	dst.Services = append(dst.Services, src.Services...)
 	dst.SecuritySignals = dedupeSignals(append(dst.SecuritySignals, src.SecuritySignals...))
 	dst.Crypto = mergeCryptoEvidence(dst.Crypto, src.Crypto)
+	dst.SupplyChain = mergeSupplyChainEvidence(dst.SupplyChain, src.SupplyChain)
 	dst.Diagnostics = append(dst.Diagnostics, src.Diagnostics...)
 	if src.CallGraph != nil {
 		if dst.CallGraph == nil {
@@ -154,16 +155,132 @@ func mergeReports(dst *model.Report, src *model.Report) {
 		if dst.DataFlow == nil {
 			dst.DataFlow = src.DataFlow
 		} else {
+			mergeDataFlowAggregateStats(&dst.DataFlow.Stats, src.DataFlow.Stats)
 			dst.DataFlow.Nodes = appendUniqueDataFlowNodes(dst.DataFlow.Nodes, src.DataFlow.Nodes)
 			dst.DataFlow.Edges = appendUniqueDataFlowEdges(dst.DataFlow.Edges, src.DataFlow.Edges)
 			dst.DataFlow.Slices = appendUniqueDataFlowSlices(dst.DataFlow.Slices, src.DataFlow.Slices)
 			dst.DataFlow.Summaries = appendUniqueDataFlowSummaries(dst.DataFlow.Summaries, src.DataFlow.Summaries)
+			if dst.DataFlow.Patterns == nil {
+				dst.DataFlow.Patterns = src.DataFlow.Patterns
+			}
 			dst.DataFlow.Diagnostics = append(dst.DataFlow.Diagnostics, src.DataFlow.Diagnostics...)
-			dst.DataFlow.Stats.NodeCount = len(dst.DataFlow.Nodes)
-			dst.DataFlow.Stats.EdgeCount = len(dst.DataFlow.Edges)
-			dst.DataFlow.Stats.SliceCount = len(dst.DataFlow.Slices)
+			recomputeDataFlowStats(dst.DataFlow)
+			dst.DataFlow.Stats.SummaryCount = len(dst.DataFlow.Summaries)
+			dst.DataFlow.Stats.TruncationReasons = dataFlowTruncationReasons(dst.DataFlow.Diagnostics)
+			dst.DataFlow.Stats.Truncated = len(dst.DataFlow.Stats.TruncationReasons) > 0
 		}
 	}
+}
+
+func mergeDataFlowAggregateStats(dst *model.DataFlowStats, src model.DataFlowStats) {
+	if dst == nil {
+		return
+	}
+	dst.CandidateFunctionCount += src.CandidateFunctionCount
+	dst.FunctionCount += src.FunctionCount
+	dst.SkippedFunctionCount += src.SkippedFunctionCount
+	dst.InstructionCount += src.InstructionCount
+	dst.ElapsedMillis += src.ElapsedMillis
+	if src.WorkerCount > dst.WorkerCount {
+		dst.WorkerCount = src.WorkerCount
+	}
+}
+
+func mergeSupplyChainEvidence(dst *model.SupplyChainEvidence, src *model.SupplyChainEvidence) *model.SupplyChainEvidence {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		copied := *src
+		copied.Replaces = append([]model.GoModDirective{}, src.Replaces...)
+		copied.Excludes = append([]model.GoModDirective{}, src.Excludes...)
+		copied.Modules = append([]model.ModuleCompliance{}, src.Modules...)
+		if src.Properties != nil {
+			copied.Properties = map[string]string{}
+			for key, value := range src.Properties {
+				copied.Properties[key] = value
+			}
+		}
+		return &copied
+	}
+	dst.GoDirectiveVersion = firstNonEmpty(dst.GoDirectiveVersion, src.GoDirectiveVersion)
+	dst.ToolchainDirective = firstNonEmpty(dst.ToolchainDirective, src.ToolchainDirective)
+	dst.GoWorkPresent = dst.GoWorkPresent || src.GoWorkPresent
+	dst.VendorDirectoryPresent = dst.VendorDirectoryPresent || src.VendorDirectoryPresent
+	dst.Replaces = appendUniqueGoModDirectives(dst.Replaces, src.Replaces)
+	dst.Excludes = appendUniqueGoModDirectives(dst.Excludes, src.Excludes)
+	dst.Modules = appendUniqueModuleCompliance(dst.Modules, src.Modules)
+	dst.WorkspaceModuleCount = countWorkspaceModules(dst.Modules)
+	dst.VendorModuleCount = countVendoredModules(dst.Modules)
+	if dst.Properties == nil {
+		dst.Properties = map[string]string{}
+	}
+	for key, value := range src.Properties {
+		if _, ok := dst.Properties[key]; !ok {
+			dst.Properties[key] = value
+		}
+	}
+	return dst
+}
+
+func appendUniqueGoModDirectives(dst, src []model.GoModDirective) []model.GoModDirective {
+	seen := map[string]bool{}
+	for _, directive := range dst {
+		seen[goModDirectiveKey(directive)] = true
+	}
+	for _, directive := range src {
+		key := goModDirectiveKey(directive)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		dst = append(dst, directive)
+	}
+	return dst
+}
+
+func goModDirectiveKey(d model.GoModDirective) string {
+	return strings.Join([]string{d.Kind, d.ModulePath, d.Version, d.TargetModulePath, d.TargetVersion, d.Source}, "\x00")
+}
+
+func appendUniqueModuleCompliance(dst, src []model.ModuleCompliance) []model.ModuleCompliance {
+	seen := map[string]bool{}
+	for _, module := range dst {
+		seen[moduleComplianceKey(module)] = true
+	}
+	for _, module := range src {
+		key := moduleComplianceKey(module)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		dst = append(dst, module)
+	}
+	return dst
+}
+
+func moduleComplianceKey(module model.ModuleCompliance) string {
+	return strings.Join([]string{module.Path, module.Version, module.PURL}, "\x00")
+}
+
+func countWorkspaceModules(modules []model.ModuleCompliance) int {
+	count := 0
+	for _, module := range modules {
+		if module.Main {
+			count++
+		}
+	}
+	return count
+}
+
+func countVendoredModules(modules []model.ModuleCompliance) int {
+	count := 0
+	for _, module := range modules {
+		if module.Vendored {
+			count++
+		}
+	}
+	return count
 }
 
 func appendUniqueCallGraphNodes(dst, src []model.CallGraphNode) []model.CallGraphNode {

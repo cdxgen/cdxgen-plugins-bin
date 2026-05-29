@@ -29,9 +29,6 @@ func Analyze(options Options) (*model.Report, error) {
 	if len(options.Patterns) == 0 {
 		options.Patterns = []string{"./..."}
 	}
-	if merged, ok, err := analyzeAcrossChildModules(options, absDir, progress); ok {
-		return merged, err
-	}
 	if options.CallGraphMode == "" {
 		options.CallGraphMode = "none"
 	}
@@ -46,6 +43,9 @@ func Analyze(options Options) (*model.Report, error) {
 	options.DataFlowCallGraphMode = strings.ToLower(strings.TrimSpace(options.DataFlowCallGraphMode))
 	if options.DataFlowMax <= 0 {
 		options.DataFlowMax = 1000
+	}
+	if merged, ok, err := analyzeAcrossChildModules(options, absDir, progress); ok {
+		return merged, err
 	}
 	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 

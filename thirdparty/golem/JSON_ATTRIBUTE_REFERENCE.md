@@ -49,6 +49,8 @@ The top-level `Report` carries metadata plus optional analysis sections.
 | `options.tests`                 | boolean | Test variants included or not.             | Separate runtime evidence from test-only evidence.   |
 | `options.noRecurse`             | boolean | Recursive module discovery disabled flag.  | Multi-module repository behavior auditing.           |
 | `options.includeAllFlows`       | boolean | External-only flow filtering control.      | Keep or suppress third-party-only call/flow paths.   |
+
+`options.noRecurse` and `options.includeAllFlows` are always emitted, including `false`, so downstream tooling can reliably audit effective defaults.
 | `options.callGraphMode`         | string  | Effective call graph mode.                 | Precision versus performance tuning.                 |
 | `options.dataFlowMode`          | string  | Effective data-flow mode.                  | Security-only or broad taint modeling.               |
 | `options.dataFlowCallGraphMode` | string  | Dynamic summary replay mode for data-flow. | Improve interprocedural coverage in large codebases. |

@@ -541,6 +541,55 @@ func TestFilterExternalOnlyModuleCacheFlows(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRecursiveNormalizesModesInMergedOptions(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "svc")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "go.mod"), []byte("module example.com/rec\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Analyze(Options{Dir: root, ToolVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Options.CallGraphMode != "none" || report.Options.DataFlowMode != "none" || report.Options.DataFlowCallGraphMode != "static" {
+		t.Fatalf("expected normalized modes in merged options, got %#v", report.Options)
+	}
+}
+
+func TestMergeReportsMergesSupplyChainAcrossChildren(t *testing.T) {
+	dst := &model.Report{SupplyChain: &model.SupplyChainEvidence{Replaces: []model.GoModDirective{{Kind: "replace", ModulePath: "example.com/a"}}, Excludes: []model.GoModDirective{{Kind: "exclude", ModulePath: "example.com/x"}}, Modules: []model.ModuleCompliance{{Path: "example.com/local", Main: true}}}}
+	src := &model.Report{SupplyChain: &model.SupplyChainEvidence{Replaces: []model.GoModDirective{{Kind: "replace", ModulePath: "example.com/b"}}, Excludes: []model.GoModDirective{{Kind: "exclude", ModulePath: "example.com/y"}}, Modules: []model.ModuleCompliance{{Path: "example.com/vendor", Vendored: true}}}}
+	mergeReports(dst, src)
+	if dst.SupplyChain == nil || len(dst.SupplyChain.Replaces) != 2 || len(dst.SupplyChain.Excludes) != 2 || len(dst.SupplyChain.Modules) != 2 {
+		t.Fatalf("expected merged supply-chain evidence, got %#v", dst.SupplyChain)
+	}
+	if dst.SupplyChain.WorkspaceModuleCount != 1 || dst.SupplyChain.VendorModuleCount != 1 {
+		t.Fatalf("expected recomputed workspace/vendor counts, got %#v", dst.SupplyChain)
+	}
+}
+
+func TestMergeReportsRecomputesMergedDataFlowStats(t *testing.T) {
+	dst := &model.Report{DataFlow: &model.DataFlowEvidence{Nodes: []model.DataFlowNode{{ID: "n1", Source: true}, {ID: "n2", Sink: true}}, Edges: []model.DataFlowEdge{{ID: "e1"}}, Slices: []model.DataFlowSlice{{ID: "s1", SourceID: "n1", SinkID: "n2", NodeIDs: []string{"n1", "n2"}, EdgeIDs: []string{"e1"}, FlowKey: "f1", PathLength: 1}}, Summaries: []model.DataFlowMethodSummary{{FunctionID: "fA"}}, Diagnostics: []model.Diagnostic{{Kind: "dataflow-budget", Message: "limit A"}}, Stats: model.DataFlowStats{CandidateFunctionCount: 3, FunctionCount: 2, InstructionCount: 9, WorkerCount: 2}}}
+	src := &model.Report{DataFlow: &model.DataFlowEvidence{Nodes: []model.DataFlowNode{{ID: "n3", Source: true}, {ID: "n4", Sink: true}}, Edges: []model.DataFlowEdge{{ID: "e2"}}, Slices: []model.DataFlowSlice{{ID: "s2", SourceID: "n3", SinkID: "n4", NodeIDs: []string{"n3", "n4"}, EdgeIDs: []string{"e2"}, FlowKey: "f2", PathLength: 2}}, Summaries: []model.DataFlowMethodSummary{{FunctionID: "fB"}}, Diagnostics: []model.Diagnostic{{Kind: "dataflow-budget", Message: "limit B"}}, Stats: model.DataFlowStats{CandidateFunctionCount: 4, FunctionCount: 3, InstructionCount: 11, WorkerCount: 3}}}
+	mergeReports(dst, src)
+	stats := dst.DataFlow.Stats
+	if stats.NodeCount != 4 || stats.EdgeCount != 2 || stats.SliceCount != 2 || stats.SourceCount != 2 || stats.SinkCount != 2 {
+		t.Fatalf("expected merged core data-flow stats, got %#v", stats)
+	}
+	if stats.SummaryCount != 2 || stats.CandidateFunctionCount != 7 || stats.FunctionCount != 5 || stats.InstructionCount != 20 || stats.WorkerCount != 3 {
+		t.Fatalf("expected merged aggregate/summaries stats, got %#v", stats)
+	}
+	if !stats.Truncated || len(stats.TruncationReasons) != 2 {
+		t.Fatalf("expected merged truncation metadata from diagnostics, got %#v", stats)
+	}
+}
+
 func TestDataFlowTestLikeFunctionPredicate(t *testing.T) {
 	if !dataFlowTestLikeFunction(filepath.Join("pkg", "handler_test.go"), nil) {
 		t.Fatal("expected _test.go file to be treated as test-like")
