@@ -263,7 +263,7 @@ func isSyntheticRegistration(common *ssa.CallCommon) bool {
 		return false
 	}
 	text := strings.ToLower(callName(common) + " " + callSymbol(common))
-	for _, token := range []string{"handle", "handler", "route", "router", "register", "mount", "middleware", "interceptor", "command", "callback", "consumer", "subscribe", "use", "get", "post", "put", "patch", "delete", "any", "all"} {
+	for _, token := range []string{"handle", "handler", "route", "router", "register", "mount", "middleware", "interceptor", "command", "callback", "consumer", "subscribe"} {
 		if strings.Contains(text, token) {
 			return true
 		}
@@ -276,8 +276,8 @@ func callbackFunctions(v ssa.Value) []*ssa.Function {
 	case *ssa.Function:
 		return []*ssa.Function{x}
 	case *ssa.MakeClosure:
-		if x.Fn != nil {
-			return []*ssa.Function{x.Fn}
+		if fn, ok := x.Fn.(*ssa.Function); ok && fn != nil {
+			return []*ssa.Function{fn}
 		}
 	case *ssa.ChangeType:
 		return callbackFunctions(x.X)
@@ -317,8 +317,8 @@ func callbackFieldName(fieldAddr *ssa.FieldAddr) string {
 		return ""
 	}
 	name := strings.ToLower(strct.Field(fieldAddr.Field).Name())
-	for _, token := range []string{"run", "handler", "middleware", "interceptor", "callback", "consumer"} {
-		if strings.Contains(name, token) {
+	for _, token := range []string{"run", "rune", "prerun", "postrun", "persistentprerun", "persistentpostrun", "handler", "middleware", "interceptor", "callback", "consumer"} {
+		if name == token {
 			return name
 		}
 	}

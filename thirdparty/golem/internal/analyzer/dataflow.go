@@ -109,7 +109,7 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	b.analyzeFunctions(analysisFuncs, workers, progress)
 	progress.Memoryf("data-flow function analysis complete")
 	for _, summary := range b.summaries {
-		if len(summary.model.ParamToReturn) > 0 || len(summary.model.ParamToSink) > 0 || len(summary.sourceReturns) > 0 || summary.model.ReceiverToReturn || summary.model.Passthrough {
+		if len(summary.model.ParamToReturn) > 0 || len(summary.model.ParamToSink) > 0 || len(summary.sourceReturns) > 0 || len(summary.fieldWrites) > 0 || summary.model.ReceiverToReturn || summary.model.Passthrough {
 			if len(summary.sourceReturns) > 0 {
 				if summary.model.Properties == nil {
 					summary.model.Properties = map[string]string{}
@@ -408,26 +408,6 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 				}
 			} else if p != "" {
 				selected[p] = true
-			}
-		}
-		recv, hasRecv := summaryCallArgument(common, callee, 0)
-		for field, params := range summary.fieldWrites {
-			if !hasRecv {
-				continue
-			}
-			var traces []dataFlowTrace
-			for idx := range params {
-				arg, ok := summaryCallArgument(common, callee, idx)
-				if !ok {
-					continue
-				}
-				if tr, ok := b.taintOf(state, arg); ok {
-					traces = append(traces, tr)
-				}
-			}
-			if tr, ok := combineTraceList(traces); ok {
-				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
-				state.memory[addrKey(recv)+"."+field] = b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
 			}
 		}
 	}
@@ -1157,6 +1137,28 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 				}
 			}
 		}
+		recv, hasRecv := summaryCallArgument(common, callee, 0)
+		for field, params := range summary.fieldWrites {
+			if !hasRecv {
+				continue
+			}
+			var traces []dataFlowTrace
+			for idx := range params {
+				arg, ok := summaryCallArgument(common, callee, idx)
+				if !ok {
+					continue
+				}
+				if tr, ok := b.taintOf(state, arg); ok {
+					traces = append(traces, tr)
+				}
+			}
+			if tr, ok := combineTraceList(traces); ok {
+				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
+				fieldTrace := b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
+				state.memory[addrKey(recv)+"."+field] = fieldTrace
+				state.values[recv] = combineTraces(state.values[recv], fieldTrace)
+			}
+		}
 	}
 }
 
@@ -1538,7 +1540,6 @@ func (b *dataFlowBuilder) addParamReturn(fn *ssa.Function, idx int) bool {
 	sort.Slice(s.model.ParamToReturn, func(i, j int) bool {
 		return s.model.ParamToReturn[i].ParameterIndex < s.model.ParamToReturn[j].ParameterIndex
 	})
-	s.model.Passthrough = true
 	return true
 }
 
@@ -1714,8 +1715,7 @@ func (b *dataFlowBuilder) matchEndpointHandlerParam(fn *ssa.Function, p *ssa.Par
 		return nil
 	}
 	typeText := p.Type().String()
-	name := strings.ToLower(p.Name())
-	if strings.Contains(typeText, "net/http.Request") || name == "r" || name == "req" || name == "request" {
+	if strings.Contains(typeText, "net/http.Request") {
 		return endpoints
 	}
 	return nil

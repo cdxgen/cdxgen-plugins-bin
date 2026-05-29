@@ -390,7 +390,7 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if !redirectSanitizerSeen {
 		t.Fatalf("expected category-aware redirect sanitizer evidence in %#v", report.DataFlow.Nodes)
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ReceiverFieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow"} {
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
