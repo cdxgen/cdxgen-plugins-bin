@@ -204,6 +204,7 @@ func syntheticRTARoots(ctx *ssaContext) []*ssa.Function {
 	if ctx == nil {
 		return nil
 	}
+	reachable := reachableFromRoots(static.CallGraph(ctx.program), mainAndInitRoots(ctx.packages))
 	seen := map[*ssa.Function]bool{}
 	var roots []*ssa.Function
 	add := func(fn *ssa.Function) {
@@ -214,7 +215,7 @@ func syntheticRTARoots(ctx *ssaContext) []*ssa.Function {
 		roots = append(roots, fn)
 	}
 	for _, fn := range ctx.functions {
-		if fn == nil {
+		if fn == nil || !reachable[fn] {
 			continue
 		}
 		for _, block := range fn.Blocks {
@@ -253,6 +254,38 @@ func syntheticRTARoots(ctx *ssaContext) []*ssa.Function {
 	}
 	sort.Slice(roots, func(i, j int) bool { return roots[i].String() < roots[j].String() })
 	return roots
+}
+
+func reachableFromRoots(graph *callgraph.Graph, roots []*ssa.Function) map[*ssa.Function]bool {
+	reachable := map[*ssa.Function]bool{}
+	if graph == nil {
+		for _, root := range roots {
+			if root != nil {
+				reachable[root] = true
+			}
+		}
+		return reachable
+	}
+	var visit func(*callgraph.Node)
+	visit = func(node *callgraph.Node) {
+		if node == nil || node.Func == nil || reachable[node.Func] {
+			return
+		}
+		reachable[node.Func] = true
+		for _, edge := range node.Out {
+			if edge != nil {
+				visit(edge.Callee)
+			}
+		}
+	}
+	for _, root := range roots {
+		if root == nil {
+			continue
+		}
+		reachable[root] = true
+		visit(graph.Nodes[root])
+	}
+	return reachable
 }
 
 func isSyntheticRegistration(common *ssa.CallCommon) bool {

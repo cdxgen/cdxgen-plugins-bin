@@ -14,6 +14,8 @@ func verbHandler(http.ResponseWriter, *http.Request) {}
 
 func worker() {}
 
+func deadHandler(http.ResponseWriter, *http.Request) {}
+
 func commandRun(*cobra.Command, []string) {
 	worker()
 }
@@ -22,6 +24,10 @@ func (*Router) Get(string, func(http.ResponseWriter, *http.Request)) {}
 
 var rootCmd = &cobra.Command{Run: commandRun}
 var router = &Router{}
+
+func deadRegistration() {
+	http.HandleFunc("/dead", deadHandler)
+}
 
 func init() {
 	http.HandleFunc("/rta", handler)
