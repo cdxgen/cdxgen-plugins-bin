@@ -23,6 +23,10 @@ type carrier struct {
 	value string
 }
 
+type receiverCarrier struct {
+	value string
+}
+
 type Runner interface {
 	Run(string)
 }
@@ -54,6 +58,20 @@ func FieldFlow(r *http.Request) {
 	c := &carrier{}
 	c.value = r.PostFormValue("name")
 	_ = os.WriteFile(c.value, []byte("x"), 0o600)
+}
+
+func (c *receiverCarrier) Set(v string) {
+	c.value = v
+}
+
+func (c *receiverCarrier) Value() string {
+	return c.value
+}
+
+func ReceiverFieldFlow(r *http.Request) {
+	c := &receiverCarrier{}
+	c.Set(r.PostFormValue("receiver"))
+	_ = os.WriteFile(c.Value(), []byte("x"), 0o600)
 }
 
 func SanitizedPathFlow(r *http.Request) {

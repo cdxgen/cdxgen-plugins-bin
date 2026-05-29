@@ -55,6 +55,7 @@ type internalSummary struct {
 	paramReturn   map[int]bool
 	paramSink     map[int]map[string]bool
 	sourceReturns []model.DataFlowPattern
+	fieldWrites   map[string]map[int]bool
 }
 
 type dataFlowBuilder struct {
@@ -395,18 +396,38 @@ func dataFlowPatternKey(p model.DataFlowPattern) string {
 func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	selected := map[string]bool{}
 	if len(packs) == 0 {
-		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud"} {
+		for _, p := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud", "queue"} {
 			selected[p] = true
 		}
 	} else {
 		for _, p := range packs {
 			p = strings.ToLower(strings.TrimSpace(p))
 			if p == "all" {
-				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud"} {
+				for _, name := range []string{"base", "http", "data", "filesystem", "process", "crypto", "native", "frameworks", "config", "cloud", "queue"} {
 					selected[name] = true
 				}
 			} else if p != "" {
 				selected[p] = true
+			}
+		}
+		recv, hasRecv := summaryCallArgument(common, callee, 0)
+		for field, params := range summary.fieldWrites {
+			if !hasRecv {
+				continue
+			}
+			var traces []dataFlowTrace
+			for idx := range params {
+				arg, ok := summaryCallArgument(common, callee, idx)
+				if !ok {
+					continue
+				}
+				if tr, ok := b.taintOf(state, arg); ok {
+					traces = append(traces, tr)
+				}
+			}
+			if tr, ok := combineTraceList(traces); ok {
+				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
+				state.memory[addrKey(recv)+"."+field] = b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
 			}
 		}
 	}
@@ -453,9 +474,27 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "go.uber.org/zap.(*Logger).Info", "go.uber.org/zap.(*Logger).Warn", "go.uber.org/zap.(*Logger).Error", "go.uber.org/zap.(*SugaredLogger).Info", "go.uber.org/zap.(*SugaredLogger).Infof", "go.uber.org/zap.(*SugaredLogger).Error", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"} {
 			addSink("function", name, "logging", "user-input", "secret")
 		}
+		customPass := dfPattern("passthrough", "name", `(?i)(identity|passthrough|forward|wrap|unwrap)$`, "custom-helper")
+		customPass.Match = "regex"
+		set.Passthroughs = append(set.Passthroughs, customPass)
+		customSan := dfPattern("sanitizer", "name", `(?i)(sanitize|escape|clean|normalize|canonicalize|redact|validate)([A-Z_].*)?$`, "custom-sanitizer")
+		customSan.Match = "regex"
+		customSan.SanitizesCategories = []string{"http-response", "formatted-output", "filesystem", "redirect", "data"}
+		set.Sanitizers = append(set.Sanitizers, customSan)
 	}
 	if selected["http"] {
-		for _, name := range []string{"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile", "github.com/gin-gonic/gin", "Param", "PostForm", "DefaultQuery", "GetHeader", "Bind", "BindJSON", "ShouldBind", "ShouldBindJSON", "github.com/labstack/echo", "QueryParam", "Param", "FormValue", "Bind", "github.com/gofiber/fiber", "Params", "Body", "BodyRaw", "BodyParser", "Cookies", "github.com/gorilla/mux.Vars", "github.com/go-chi/chi.URLParam", "github.com/go-chi/chi.URLParamFromCtx", "google.golang.org/grpc/metadata.FromIncomingContext", "google.golang.org/grpc.(*ServerStream).RecvMsg"} {
+		for _, name := range []string{
+			"FormValue", "PostFormValue", "Cookie", "Header.Get", "Header).Get", "Values.Get", "(*net/url.URL).Query", "ParseForm", "MultipartReader", "FormFile",
+			"github.com/gin-gonic/gin.(*Context).Param", "github.com/gin-gonic/gin.(*Context).Query", "github.com/gin-gonic/gin.(*Context).DefaultQuery", "github.com/gin-gonic/gin.(*Context).PostForm", "github.com/gin-gonic/gin.(*Context).GetHeader", "github.com/gin-gonic/gin.(*Context).Cookie", "github.com/gin-gonic/gin.(*Context).Bind", "github.com/gin-gonic/gin.(*Context).BindJSON", "github.com/gin-gonic/gin.(*Context).ShouldBind", "github.com/gin-gonic/gin.(*Context).ShouldBindJSON", "github.com/gin-gonic/gin.(*Context).ShouldBindQuery",
+			"github.com/labstack/echo/v4.Context.QueryParam", "github.com/labstack/echo/v4.Context.Param", "github.com/labstack/echo/v4.Context.FormValue", "github.com/labstack/echo/v4.Context.QueryParams", "github.com/labstack/echo/v4.Context.FormParams", "github.com/labstack/echo/v4.Context.Cookie", "github.com/labstack/echo/v4.Context.Bind",
+			"github.com/gofiber/fiber/v2.(*Ctx).Params", "github.com/gofiber/fiber/v2.(*Ctx).Query", "github.com/gofiber/fiber/v2.(*Ctx).Get", "github.com/gofiber/fiber/v2.(*Ctx).FormValue", "github.com/gofiber/fiber/v2.(*Ctx).Body", "github.com/gofiber/fiber/v2.(*Ctx).BodyRaw", "github.com/gofiber/fiber/v2.(*Ctx).BodyParser", "github.com/gofiber/fiber/v2.(*Ctx).Cookies",
+			"github.com/valyala/fasthttp.(*RequestCtx).FormValue", "github.com/valyala/fasthttp.(*RequestCtx).UserValue", "github.com/valyala/fasthttp.Args.Peek", "github.com/valyala/fasthttp.Args.Get", "github.com/valyala/fasthttp.RequestHeader.Peek", "github.com/valyala/fasthttp.RequestHeader.Cookie",
+			"github.com/kataras/iris/v12.Context.URLParam", "github.com/kataras/iris/v12.Context.FormValue", "github.com/kataras/iris/v12.Context.GetHeader", "github.com/kataras/iris/v12.Context.ReadJSON", "github.com/kataras/iris/v12.Context.ReadBody",
+			"github.com/beego/beego/v2/server/web.(*Controller).GetString", "github.com/beego/beego/v2/server/web.(*Controller).GetStrings", "github.com/beego/beego/v2/server/web.(*Controller).GetInt", "github.com/beego/beego/v2/server/web.(*Controller).GetBool", "github.com/beego/beego/v2/server/web.(*Controller).GetFloat", "github.com/beego/beego/v2/server/web.(*Controller).GetBody", "github.com/beego/beego/v2/server/web/context.(*Input).Param", "github.com/beego/beego/v2/server/web/context.(*Input).Header",
+			"github.com/gobuffalo/buffalo.Context.Param", "github.com/gobuffalo/buffalo.Context.Params", "github.com/gobuffalo/buffalo.Context.Bind",
+			"github.com/grpc-ecosystem/grpc-gateway/v2/runtime.AnnotateIncomingContext", "github.com/grpc-ecosystem/grpc-gateway/v2/runtime.HTTPPathPattern", "connectrpc.com/connect.(*Request).Header", "connectrpc.com/connect.AnyRequest.Header", "connectrpc.com/connect.AnyRequest.Spec", "connectrpc.com/connect.AnyRequest.Peer",
+			"github.com/gorilla/mux.Vars", "github.com/go-chi/chi.URLParam", "github.com/go-chi/chi.URLParamFromCtx", "google.golang.org/grpc/metadata.FromIncomingContext", "google.golang.org/grpc.(*ServerStream).RecvMsg",
+		} {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
@@ -468,16 +507,16 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		addCategorySan("function", "html/template.HTMLEscapeString", "html-escaping", []string{"http-response", "formatted-output"})
 	}
 	if selected["frameworks"] {
-		for _, sourceType := range []string{"gin.Context", "*gin.Context", "echo.Context", "fiber.Ctx", "*fiber.Ctx", "chi.Context", "mux.RouteMatch"} {
+		for _, sourceType := range []string{"chi.Context", "mux.RouteMatch", "connectrpc.com/connect.AnyRequest", "*connectrpc.com/connect.Request"} {
 			addSource("type", sourceType, "framework-context", "user-input")
 		}
-		for _, name := range []string{"gin.Context.JSON", "gin.Context).JSON", "gin.Context.String", "gin.Context).String", "gin.Context.HTML", "gin.Context).HTML", "echo.Context.JSON", "echo.Context.String", "fiber.Ctx.JSON", "fiber.Ctx).JSON", "fiber.Ctx.Send", "fiber.Ctx).Send", "fiber.Ctx.SendString", "fiber.Ctx).SendString"} {
+		for _, name := range []string{"gin.Context.JSON", "gin.Context).JSON", "gin.Context.String", "gin.Context).String", "gin.Context.HTML", "gin.Context).HTML", "echo.Context.JSON", "echo.Context.String", "github.com/gofiber/fiber/v2.(*Ctx).JSON", "github.com/gofiber/fiber/v2.(*Ctx).Send", "github.com/gofiber/fiber/v2.(*Ctx).SendString", "github.com/valyala/fasthttp.RequestCtx.SetBody", "github.com/kataras/iris/v12.Context.JSON", "github.com/kataras/iris/v12.Context.HTML", "github.com/gobuffalo/buffalo.Context.Render"} {
 			addSink("function", name, "http-response", "user-input")
 		}
-		for _, name := range []string{"gin.Context.Redirect", "gin.Context).Redirect", "echo.Context.Redirect", "fiber.Ctx.Redirect", "fiber.Ctx).Redirect"} {
+		for _, name := range []string{"gin.Context.Redirect", "gin.Context).Redirect", "echo.Context.Redirect", "github.com/gofiber/fiber/v2.(*Ctx).Redirect", "github.com/kataras/iris/v12.Context.Redirect", "github.com/beego/beego/v2/server/web.(*Controller).Redirect", "github.com/gobuffalo/buffalo.Context.Redirect"} {
 			addSink("function", name, "redirect", "url")
 		}
-		for _, passthrough := range []string{"github.com/gin-gonic/gin.Context", "github.com/labstack/echo", "github.com/gofiber/fiber", "github.com/go-chi/chi", "github.com/gorilla/mux"} {
+		for _, passthrough := range []string{"github.com/gin-gonic/gin.Context", "github.com/labstack/echo/v4", "github.com/gofiber/fiber/v2", "github.com/go-chi/chi", "github.com/gorilla/mux", "github.com/grpc-ecosystem/grpc-gateway/v2/runtime", "connectrpc.com/connect", "github.com/valyala/fasthttp", "github.com/kataras/iris/v12", "github.com/beego/beego/v2/server/web", "github.com/gobuffalo/buffalo", "github.com/99designs/gqlgen/graphql"} {
 			addPass("function", passthrough, "framework")
 		}
 	}
@@ -528,8 +567,16 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"github.com/aws/aws-sdk-go", "github.com/aws/aws-sdk-go-v2", "cloud.google.com/go", "google.golang.org/api", "github.com/Azure/azure-sdk-for-go"} {
 			addSink("package", name, "external-service", "user-input", "secret")
 		}
-		for _, name := range []string{"net/http.(*Client).Do", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg"} {
+		for _, name := range []string{"net/http.(*Client).Do", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg", "connectrpc.com/connect.Client.CallUnary", "cloud.google.com/go/storage.(*Client).Bucket", "cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage"} {
 			addSink("function", name, "external-service", "user-input", "secret")
+		}
+	}
+	if selected["queue"] {
+		for _, name := range []string{"cloud.google.com/go/pubsub.(*Message).Data", "github.com/aws/aws-sdk-go-v2/service/sqs/types.Message.Body", "github.com/segmentio/kafka-go.Message.Value", "github.com/nats-io/nats.go.Msg.Data", "github.com/hibiken/asynq.Task.Payload", "github.com/99designs/gqlgen/graphql.GetOperationContext", "github.com/99designs/gqlgen/graphql.GetFieldContext"} {
+			addSource("function", name, "queue-message", "user-input")
+		}
+		for _, name := range []string{"cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage", "github.com/segmentio/kafka-go.(*Writer).WriteMessages", "github.com/nats-io/nats.go.(*Conn).Publish", "github.com/hibiken/asynq.Client.Enqueue"} {
+			addSink("function", name, "queue-send", "user-input", "secret")
 		}
 	}
 	set.Sources = normalizePatterns("source", set.Sources)
@@ -627,7 +674,7 @@ func dataFlowRuleForCategory(category string) (id, name, severity string, score 
 
 func (b *dataFlowBuilder) inferSummaries(funcs []*ssa.Function) {
 	for _, fn := range funcs {
-		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}}
+		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}, fieldWrites: map[string]map[int]bool{}}
 	}
 	for i := 0; i < 4; i++ {
 		changed := false
@@ -663,6 +710,7 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 				if tr, ok := b.summaryTaintOf(state, x.Val); ok {
 					state.memory[addrKey(x.Addr)] = tr
 					b.rememberAggregateStore(state, x.Addr, tr)
+					changed = b.recordSummaryFieldWrite(fn, state, x.Addr, tr) || changed
 				}
 			case *ssa.MapUpdate:
 				if tr, ok := b.summaryTaintOf(state, x.Value); ok {
@@ -1424,11 +1472,10 @@ func (b *dataFlowBuilder) summaryCallTaint(state dataFlowState, common *ssa.Call
 	}
 	if callee := common.StaticCallee(); callee != nil {
 		if summary := b.summaries[callee]; summary != nil {
-			args := callArgs(common)
 			var traces []dataFlowTrace
 			for idx := range summary.paramReturn {
-				if idx >= 0 && idx < len(args) {
-					if tr, ok := b.taintOf(state, args[idx]); ok {
+				if arg, ok := summaryCallArgument(common, callee, idx); ok {
+					if tr, ok := b.taintOf(state, arg); ok {
 						traces = append(traces, tr)
 					}
 				}
@@ -1459,10 +1506,9 @@ func (b *dataFlowBuilder) recordSummarySink(fn *ssa.Function, common *ssa.CallCo
 	}
 	if callee := common.StaticCallee(); callee != nil {
 		if summary := b.summaries[callee]; summary != nil {
-			args := callArgs(common)
 			for paramIdx, cats := range summary.paramSink {
-				if paramIdx < len(args) {
-					if tr, ok := b.taintOf(state, args[paramIdx]); ok {
+				if arg, ok := summaryCallArgument(common, callee, paramIdx); ok {
+					if tr, ok := b.taintOf(state, arg); ok {
 						for callerParam := range tr.params {
 							for cat := range cats {
 								if !traceAllowsSink(tr, cat) {
@@ -1485,10 +1531,14 @@ func (b *dataFlowBuilder) addParamReturn(fn *ssa.Function, idx int) bool {
 		return false
 	}
 	s.paramReturn[idx] = true
+	if fn != nil && fn.Signature != nil && fn.Signature.Recv() != nil && idx == 0 {
+		s.model.ReceiverToReturn = true
+	}
 	s.model.ParamToReturn = append(s.model.ParamToReturn, model.DataFlowSummaryFlow{ParameterIndex: idx})
 	sort.Slice(s.model.ParamToReturn, func(i, j int) bool {
 		return s.model.ParamToReturn[i].ParameterIndex < s.model.ParamToReturn[j].ParameterIndex
 	})
+	s.model.Passthrough = true
 	return true
 }
 
@@ -1517,6 +1567,55 @@ func (b *dataFlowBuilder) addSourceReturn(fn *ssa.Function, pat model.DataFlowPa
 	}
 	s.sourceReturns = append(s.sourceReturns, pat)
 	return true
+}
+
+func (b *dataFlowBuilder) recordSummaryFieldWrite(fn *ssa.Function, state dataFlowState, addr ssa.Value, tr dataFlowTrace) bool {
+	if fn == nil || fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	field, ok := summaryReceiverField(addr)
+	if !ok {
+		return false
+	}
+	summary := b.summaries[fn]
+	if summary == nil {
+		return false
+	}
+	changed := false
+	if summary.fieldWrites[field] == nil {
+		summary.fieldWrites[field] = map[int]bool{}
+	}
+	for idx := range tr.params {
+		if summary.fieldWrites[field][idx] {
+			continue
+		}
+		summary.fieldWrites[field][idx] = true
+		changed = true
+	}
+	if changed {
+		fields := make([]string, 0, len(summary.fieldWrites))
+		for name := range summary.fieldWrites {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		if summary.model.Properties == nil {
+			summary.model.Properties = map[string]string{}
+		}
+		summary.model.Properties["receiverFieldWrites"] = strings.Join(fields, ",")
+	}
+	_ = state
+	return changed
+}
+
+func summaryReceiverField(addr ssa.Value) (string, bool) {
+	field, ok := addr.(*ssa.FieldAddr)
+	if !ok {
+		return "", false
+	}
+	if param, ok := field.X.(*ssa.Parameter); ok && param.Parent() != nil && param.Parent().Signature != nil && param.Parent().Signature.Recv() != nil && len(param.Parent().Params) > 0 && param == param.Parent().Params[0] {
+		return fmt.Sprintf("field%d", field.Field), true
+	}
+	return "", false
 }
 
 func (b *dataFlowBuilder) combineCallArgTaints(state dataFlowState, common *ssa.CallCommon) (dataFlowTrace, bool) {
@@ -1616,7 +1715,7 @@ func (b *dataFlowBuilder) matchEndpointHandlerParam(fn *ssa.Function, p *ssa.Par
 	}
 	typeText := p.Type().String()
 	name := strings.ToLower(p.Name())
-	if strings.Contains(typeText, "net/http.Request") || strings.Contains(typeText, "gin.Context") || strings.Contains(typeText, "echo.Context") || strings.Contains(typeText, "fiber.Ctx") || strings.Contains(typeText, "context.Context") || name == "r" || name == "req" || name == "request" || name == "c" || name == "ctx" {
+	if strings.Contains(typeText, "net/http.Request") || name == "r" || name == "req" || name == "request" {
 		return endpoints
 	}
 	return nil

@@ -150,6 +150,35 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 		method = "RPC"
 		pathArg = -1
 		handlerArg = 1
+	case strings.Contains(symbol, "grpc-gateway") && strings.Contains(name, "Register"):
+		kind = "http-route"
+		framework = firstNonEmpty(framework, "grpc-gateway")
+		method = "ANY"
+		path = name
+		pathArg = -1
+		handlerArg = 0
+		if len(call.Args) > 0 {
+			handlerArg = len(call.Args) - 1
+		}
+	case framework == "connectrpc" && strings.Contains(strings.ToLower(name), "handler"):
+		kind = "rpc-service"
+		framework = "connectrpc"
+		path = name
+		method = "RPC"
+		pathArg = -1
+		handlerArg = 0
+		if len(call.Args) > 0 {
+			handlerArg = len(call.Args) - 1
+		}
+	case framework == "fasthttp" && (strings.Contains(symbol, "ListenAndServe") || name == "ListenAndServeTLS"):
+		kind = "http-listener"
+		framework = "fasthttp"
+		if len(call.Args) > 0 {
+			path, _ = stringLiteral(call.Args[0])
+		}
+		method = ""
+		handlerArg = 1
+		props["listener"] = "true"
 	case isFrameworkRouteName(name):
 		if (framework == "" || framework == "net/http") && isTitleCaseHTTPMethod(name) {
 			return model.APIEndpoint{}, false
@@ -249,6 +278,20 @@ func endpointFramework(symbol string, name string) string {
 		return "echo"
 	case strings.Contains(lower, "github.com/gofiber/fiber"):
 		return "fiber"
+	case strings.Contains(lower, "github.com/grpc-ecosystem/grpc-gateway"):
+		return "grpc-gateway"
+	case strings.Contains(lower, "connectrpc.com/connect"):
+		return "connectrpc"
+	case strings.Contains(lower, "github.com/valyala/fasthttp"):
+		return "fasthttp"
+	case strings.Contains(lower, "github.com/kataras/iris"):
+		return "iris"
+	case strings.Contains(lower, "github.com/beego/beego"):
+		return "beego"
+	case strings.Contains(lower, "github.com/gobuffalo/buffalo"):
+		return "buffalo"
+	case strings.Contains(lower, "github.com/99designs/gqlgen") || strings.Contains(lower, "graphql"):
+		return "graphql"
 	case strings.Contains(lower, "google.golang.org/grpc") || strings.Contains(name, "Register"):
 		return "grpc"
 	case strings.Contains(lower, "net/http"):
@@ -264,7 +307,7 @@ func isFrameworkRouteName(name string) bool {
 	}
 	upper := strings.ToUpper(name)
 	_, ok := httpMethodNames[upper]
-	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix"
+	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix" || name == "Router" || name == "Party"
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {

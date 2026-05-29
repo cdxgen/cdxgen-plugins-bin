@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/types"
 	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
@@ -45,7 +46,7 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 	case "cha":
 		graph = cha.CallGraph(ctx.program)
 	case "rta":
-		result := rta.Analyze(mainAndInitRoots(ctx.packages), true)
+		result := rta.Analyze(rtaRoots(ctx), true)
 		if result != nil {
 			graph = result.CallGraph
 		} else {
@@ -177,4 +178,160 @@ func mainAndInitRoots(pkgs []*ssa.Package) []*ssa.Function {
 		}
 	}
 	return roots
+}
+
+func rtaRoots(ctx *ssaContext) []*ssa.Function {
+	seen := map[*ssa.Function]bool{}
+	var roots []*ssa.Function
+	add := func(fn *ssa.Function) {
+		if fn == nil || seen[fn] {
+			return
+		}
+		seen[fn] = true
+		roots = append(roots, fn)
+	}
+	for _, fn := range mainAndInitRoots(ctx.packages) {
+		add(fn)
+	}
+	for _, fn := range syntheticRTARoots(ctx) {
+		add(fn)
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].String() < roots[j].String() })
+	return roots
+}
+
+func syntheticRTARoots(ctx *ssaContext) []*ssa.Function {
+	if ctx == nil {
+		return nil
+	}
+	seen := map[*ssa.Function]bool{}
+	var roots []*ssa.Function
+	add := func(fn *ssa.Function) {
+		if fn == nil || seen[fn] {
+			return
+		}
+		seen[fn] = true
+		roots = append(roots, fn)
+	}
+	for _, fn := range ctx.functions {
+		if fn == nil {
+			continue
+		}
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				switch x := instr.(type) {
+				case *ssa.Call:
+					if isSyntheticRegistration(x.Common()) {
+						for _, arg := range callArgs(x.Common()) {
+							for _, target := range callbackFunctions(arg) {
+								add(target)
+							}
+						}
+					}
+				case *ssa.Go:
+					for _, target := range callbackFunctions(x.Common().Value) {
+						add(target)
+					}
+					if callee := x.Common().StaticCallee(); callee != nil {
+						add(callee)
+					}
+				case *ssa.Defer:
+					if isSyntheticRegistration(x.Common()) {
+						for _, target := range callbackFunctions(x.Common().Value) {
+							add(target)
+						}
+					}
+				case *ssa.Store:
+					if isCallbackFieldStore(x) {
+						for _, target := range callbackFunctions(valueFromStore(x.Val)) {
+							add(target)
+						}
+					}
+				}
+			}
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool { return roots[i].String() < roots[j].String() })
+	return roots
+}
+
+func isSyntheticRegistration(common *ssa.CallCommon) bool {
+	if common == nil {
+		return false
+	}
+	if len(callArgs(common)) == 0 {
+		return false
+	}
+	text := strings.ToLower(callName(common) + " " + callSymbol(common))
+	for _, token := range []string{"handle", "handler", "route", "router", "register", "mount", "middleware", "interceptor", "command", "callback", "consumer", "subscribe", "use", "get", "post", "put", "patch", "delete", "any", "all"} {
+		if strings.Contains(text, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func callbackFunctions(v ssa.Value) []*ssa.Function {
+	switch x := v.(type) {
+	case *ssa.Function:
+		return []*ssa.Function{x}
+	case *ssa.MakeClosure:
+		if x.Fn != nil {
+			return []*ssa.Function{x.Fn}
+		}
+	case *ssa.ChangeType:
+		return callbackFunctions(x.X)
+	case *ssa.MakeInterface:
+		return callbackFunctions(x.X)
+	case *ssa.UnOp:
+		return callbackFunctions(x.X)
+	}
+	return nil
+}
+
+func isCallbackFieldStore(store *ssa.Store) bool {
+	if store == nil {
+		return false
+	}
+	fieldAddr, ok := store.Addr.(*ssa.FieldAddr)
+	if !ok {
+		return false
+	}
+	fieldName := callbackFieldName(fieldAddr)
+	if fieldName == "" {
+		return false
+	}
+	return len(callbackFunctions(valueFromStore(store.Val))) > 0
+}
+
+func callbackFieldName(fieldAddr *ssa.FieldAddr) string {
+	if fieldAddr == nil {
+		return ""
+	}
+	ptr, ok := fieldAddr.X.Type().Underlying().(*types.Pointer)
+	if !ok {
+		return ""
+	}
+	strct, ok := ptr.Elem().Underlying().(*types.Struct)
+	if !ok || fieldAddr.Field < 0 || fieldAddr.Field >= strct.NumFields() {
+		return ""
+	}
+	name := strings.ToLower(strct.Field(fieldAddr.Field).Name())
+	for _, token := range []string{"run", "handler", "middleware", "interceptor", "callback", "consumer"} {
+		if strings.Contains(name, token) {
+			return name
+		}
+	}
+	return ""
+}
+
+func valueFromStore(v ssa.Value) ssa.Value {
+	switch x := v.(type) {
+	case *ssa.MakeInterface:
+		return x.X
+	case *ssa.ChangeType:
+		return x.X
+	default:
+		return v
+	}
 }
