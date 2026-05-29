@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -16,5 +17,20 @@ func TestGraphExportsEscapeXML(t *testing.T) {
 	gexf := GEXF(graph)
 	if strings.Contains(gexf, "a&b") || !strings.Contains(gexf, "a&amp;b") {
 		t.Fatalf("gexf did not escape id: %s", gexf)
+	}
+}
+
+func TestWriteJSONIsMinifiedByDefault(t *testing.T) {
+	var out bytes.Buffer
+	report := &model.Report{SchemaVersion: "test", Tool: model.ToolInfo{Name: "golem", Version: "test"}, Runtime: model.RuntimeInfo{}, Options: model.AnalysisOptions{}, Stats: model.Stats{}}
+	if err := Write(&out, report, FormatJSON); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if strings.Contains(text, "\n  \"") {
+		t.Fatalf("expected compact json output without indentation, got %q", text)
+	}
+	if !strings.HasPrefix(text, "{\"") {
+		t.Fatalf("expected compact json output, got %q", text)
 	}
 }

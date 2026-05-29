@@ -61,7 +61,6 @@ func Write(w io.Writer, report *model.Report, format Format) error {
 	case FormatJSON:
 		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	case FormatGraphML:
 		_, err := io.WriteString(w, GraphML(report.CallGraph))
