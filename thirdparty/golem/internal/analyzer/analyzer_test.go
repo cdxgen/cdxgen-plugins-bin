@@ -2,6 +2,8 @@ package analyzer
 
 import (
 	"bytes"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"os"
@@ -586,6 +588,56 @@ func TestFieldPatternTargetForTypeMatchesQueueSources(t *testing.T) {
 	}
 	if !matched {
 		t.Fatalf("expected queue field pattern match for %#v", target)
+	}
+}
+
+func TestBuiltinDataFlowPatternsClassifyGQLGenAsFrameworkContext(t *testing.T) {
+	patterns := builtinDataFlowPatterns([]string{"frameworks", "queue"})
+	var frameworkMatch bool
+	for _, pattern := range patterns.Sources {
+		if pattern.Pattern == "github.com/99designs/gqlgen/graphql.GetOperationContext" {
+			if pattern.Category != "framework-context" || pattern.Kind != "function" {
+				t.Fatalf("unexpected gqlgen source pattern %#v", pattern)
+			}
+			frameworkMatch = true
+		}
+		if pattern.Category == "queue-message" && strings.Contains(pattern.Pattern, "github.com/99designs/gqlgen/graphql.") {
+			t.Fatalf("gqlgen helper should not be categorized as queue-message: %#v", pattern)
+		}
+	}
+	if !frameworkMatch {
+		t.Fatal("expected gqlgen helper source in framework-context pack")
+	}
+}
+
+func TestGroupPrefixForCallSupportsParty(t *testing.T) {
+	expr, err := parser.ParseExpr(`app.Party("/api")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expression, got %T", expr)
+	}
+	prefix, ok := (&Analyzer{}).groupPrefixForCall(call, map[string]string{})
+	if !ok {
+		t.Fatal("expected Party call to register a route-group prefix")
+	}
+	if prefix != "/api" {
+		t.Fatalf("groupPrefixForCall returned %q want %q", prefix, "/api")
+	}
+	if isFrameworkRouteName("Party") {
+		t.Fatal("Party should not be classified as a concrete route registration")
+	}
+}
+
+func TestClassifyEndpointCallRouterUsesAnyMethod(t *testing.T) {
+	classification, ok := classifyEndpointCall("github.com/beego/beego/v2/server/web.Router", "Router", "beego", 3)
+	if !ok {
+		t.Fatal("expected Router call to classify")
+	}
+	if classification.method != "ANY" {
+		t.Fatalf("expected Router method ANY, got %#v", classification)
 	}
 }
 

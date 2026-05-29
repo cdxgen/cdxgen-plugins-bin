@@ -491,6 +491,9 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, sourceType := range []string{"chi.Context", "mux.RouteMatch", "connectrpc.com/connect.AnyRequest", "*connectrpc.com/connect.Request"} {
 			addSource("type", sourceType, "framework-context", "user-input")
 		}
+		for _, name := range []string{"github.com/99designs/gqlgen/graphql.GetOperationContext", "github.com/99designs/gqlgen/graphql.GetFieldContext"} {
+			addSource("function", name, "framework-context", "user-input")
+		}
 		for _, name := range []string{"gin.Context.JSON", "gin.Context).JSON", "gin.Context.String", "gin.Context).String", "gin.Context.HTML", "gin.Context).HTML", "echo.Context.JSON", "echo.Context.String", "github.com/gofiber/fiber/v2.(*Ctx).JSON", "github.com/gofiber/fiber/v2.(*Ctx).Send", "github.com/gofiber/fiber/v2.(*Ctx).SendString", "github.com/valyala/fasthttp.RequestCtx.SetBody", "github.com/kataras/iris/v12.Context.JSON", "github.com/kataras/iris/v12.Context.HTML", "github.com/gobuffalo/buffalo.Context.Render"} {
 			addSink("function", name, "http-response", "user-input")
 		}
@@ -553,12 +556,8 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		}
 	}
 	if selected["queue"] {
-		for _, name := range []string{"cloud.google.com/go/pubsub.(*Message).Data", "github.com/aws/aws-sdk-go-v2/service/sqs/types.Message.Body", "github.com/segmentio/kafka-go.Message.Value", "github.com/nats-io/nats.go.Msg.Data", "github.com/hibiken/asynq.Task.Payload", "github.com/99designs/gqlgen/graphql.GetOperationContext", "github.com/99designs/gqlgen/graphql.GetFieldContext"} {
-			kind := "field"
-			if strings.Contains(name, "GetOperationContext") || strings.Contains(name, "GetFieldContext") {
-				kind = "function"
-			}
-			addSource(kind, name, "queue-message", "user-input")
+		for _, name := range []string{"cloud.google.com/go/pubsub.(*Message).Data", "github.com/aws/aws-sdk-go-v2/service/sqs/types.Message.Body", "github.com/segmentio/kafka-go.Message.Value", "github.com/nats-io/nats.go.Msg.Data", "github.com/hibiken/asynq.Task.Payload"} {
+			addSource("field", name, "queue-message", "user-input")
 		}
 		for _, name := range []string{"cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage", "github.com/segmentio/kafka-go.(*Writer).WriteMessages", "github.com/nats-io/nats.go.(*Conn).Publish", "github.com/hibiken/asynq.Client.Enqueue"} {
 			addSink("function", name, "queue-send", "user-input", "secret")

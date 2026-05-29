@@ -107,7 +107,10 @@ func (a *Analyzer) recordRouteGroupValues(spec *ast.ValueSpec, groups map[string
 
 func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]string) (string, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel == nil || sel.Sel.Name != "Group" || len(call.Args) == 0 {
+	if !ok || sel.Sel == nil || len(call.Args) == 0 {
+		return "", false
+	}
+	if sel.Sel.Name != "Group" && sel.Sel.Name != "Party" {
 		return "", false
 	}
 	prefix, ok := stringLiteral(call.Args[0])
@@ -219,7 +222,11 @@ func classifyEndpointCall(symbol, name, framework string, argCount int) (endpoin
 		}
 		classification.method = httpMethodNames[name]
 		if classification.method == "" {
-			classification.method = strings.ToUpper(name)
+			if name == "Router" {
+				classification.method = "ANY"
+			} else {
+				classification.method = strings.ToUpper(name)
+			}
 		}
 	default:
 		return endpointCallClassification{}, false
@@ -320,7 +327,7 @@ func isFrameworkRouteName(name string) bool {
 	}
 	upper := strings.ToUpper(name)
 	_, ok := httpMethodNames[upper]
-	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix" || name == "Router" || name == "Party"
+	return ok || name == "HandleFunc" || name == "Handle" || name == "Methods" || name == "Path" || name == "PathPrefix" || name == "Router"
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {
