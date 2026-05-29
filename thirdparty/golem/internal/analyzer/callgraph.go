@@ -282,8 +282,11 @@ func reachableFromRoots(graph *callgraph.Graph, roots []*ssa.Function) map[*ssa.
 		if root == nil {
 			continue
 		}
+		if node := graph.Nodes[root]; node != nil {
+			visit(node)
+			continue
+		}
 		reachable[root] = true
-		visit(graph.Nodes[root])
 	}
 	return reachable
 }

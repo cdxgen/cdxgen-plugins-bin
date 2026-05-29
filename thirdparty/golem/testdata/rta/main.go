@@ -16,6 +16,8 @@ func worker() {}
 
 func deadHandler(http.ResponseWriter, *http.Request) {}
 
+func nestedHandler(http.ResponseWriter, *http.Request) {}
+
 func commandRun(*cobra.Command, []string) {
 	worker()
 }
@@ -29,9 +31,14 @@ func deadRegistration() {
 	http.HandleFunc("/dead", deadHandler)
 }
 
+func nestedRegistration() {
+	http.HandleFunc("/nested", nestedHandler)
+}
+
 func init() {
 	http.HandleFunc("/rta", handler)
 	router.Get("/verb", verbHandler)
+	nestedRegistration()
 }
 
 func main() {

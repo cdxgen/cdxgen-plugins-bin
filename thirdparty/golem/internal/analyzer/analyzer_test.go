@@ -104,7 +104,7 @@ func TestAnalyzeRTASyntheticRoots(t *testing.T) {
 	for _, node := range report.CallGraph.Nodes {
 		nodes[node.ID] = true
 	}
-	for _, fn := range []string{"example.com/golem/rta.handler", "example.com/golem/rta.verbHandler", "example.com/golem/rta.worker", "example.com/golem/rta.commandRun"} {
+	for _, fn := range []string{"example.com/golem/rta.handler", "example.com/golem/rta.verbHandler", "example.com/golem/rta.nestedHandler", "example.com/golem/rta.worker", "example.com/golem/rta.commandRun"} {
 		if !nodes[fn] {
 			t.Fatalf("expected synthetic RTA root node %s in %#v", fn, report.CallGraph.Nodes)
 		}
