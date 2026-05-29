@@ -101,7 +101,7 @@ func TestAnalyzeRTASyntheticRoots(t *testing.T) {
 	for _, node := range report.CallGraph.Nodes {
 		nodes[node.ID] = true
 	}
-	for _, fn := range []string{"example.com/golem/rta.handler", "example.com/golem/rta.worker", "example.com/golem/rta.commandRun"} {
+	for _, fn := range []string{"example.com/golem/rta.handler", "example.com/golem/rta.verbHandler", "example.com/golem/rta.worker", "example.com/golem/rta.commandRun"} {
 		if !nodes[fn] {
 			t.Fatalf("expected synthetic RTA root node %s in %#v", fn, report.CallGraph.Nodes)
 		}
@@ -390,10 +390,13 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	if !redirectSanitizerSeen {
 		t.Fatalf("expected category-aware redirect sanitizer evidence in %#v", report.DataFlow.Nodes)
 	}
-	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow"} {
+	for _, name := range []string{"example.com/golem/dataflow.Interprocedural", "example.com/golem/dataflow.InterfaceFlow", "example.com/golem/dataflow.FieldFlow", "example.com/golem/dataflow.ReceiverFieldFlow", "example.com/golem/dataflow.ChannelFlow", "example.com/golem/dataflow.SelectFlow", "example.com/golem/dataflow.ClosureFlow", "example.com/golem/dataflow.CryptoFlow", "example.com/golem/dataflow.NativeFlow", "example.com/golem/dataflow.ReflectionFlow", "example.com/golem/dataflow.UnsafeFlow", "example.com/golem/dataflow.LoggingFlow", "example.com/golem/dataflow.PanicFlow", "example.com/golem/dataflow.MiddlewareFlow"} {
 		if !functions[name] {
 			t.Fatalf("expected sink slice in %s, got sink functions %#v", name, functions)
 		}
+	}
+	if functions["example.com/golem/dataflow.ReceiverObjectLoggingFlow"] {
+		t.Fatalf("receiver object logging should not produce a sink slice, got sink functions %#v", functions)
 	}
 	var receiverFieldSummary bool
 	for _, summary := range report.DataFlow.Summaries {
@@ -416,7 +419,7 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 			wrappedHandlerSeen = true
 		}
 	}
-	for _, path := range []string{"/search", "/api/exec", "/wrapped"} {
+	for _, path := range []string{"/search", "/api/exec", "/wrapped", "/middleware"} {
 		if !paths[path] {
 			t.Fatalf("expected endpoint path %s in %#v", path, report.APIEndpoints)
 		}
@@ -438,6 +441,15 @@ func TestAnalyzeSemanticDataFlowSlices(t *testing.T) {
 	}
 	if !sanitizedURL {
 		t.Fatalf("expected sanitized external URL evidence in %#v", report.ExternalURLs)
+	}
+}
+
+func TestSyntheticHTTPVerbRegistration(t *testing.T) {
+	if !isSyntheticHTTPVerbRegistration("Get", "(*example.Router).Get", "*example.Router") {
+		t.Fatal("expected router Get method to be treated as synthetic registration")
+	}
+	if isSyntheticHTTPVerbRegistration("Get", "(*example.Store).Get", "*example.Store") {
+		t.Fatal("did not expect generic Get method to be treated as synthetic registration")
 	}
 }
 

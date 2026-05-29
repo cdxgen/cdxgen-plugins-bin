@@ -56,6 +56,7 @@ type internalSummary struct {
 	paramSink     map[int]map[string]bool
 	sourceReturns []model.DataFlowPattern
 	fieldWrites   map[string]map[int]bool
+	returnFields  map[string]bool
 }
 
 type dataFlowBuilder struct {
@@ -654,7 +655,7 @@ func dataFlowRuleForCategory(category string) (id, name, severity string, score 
 
 func (b *dataFlowBuilder) inferSummaries(funcs []*ssa.Function) {
 	for _, fn := range funcs {
-		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}, fieldWrites: map[string]map[int]bool{}}
+		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}, fieldWrites: map[string]map[int]bool{}, returnFields: map[string]bool{}}
 	}
 	for i := 0; i < 4; i++ {
 		changed := false
@@ -720,6 +721,14 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 			case *ssa.Return:
 				for _, result := range x.Results {
 					if tr, ok := b.summaryTaintOf(state, result); ok {
+						if field, ok := summaryReceiverField(result); ok {
+							changed = b.addReturnField(fn, field) || changed
+						}
+						for _, field := range tr.fieldPaths {
+							if strings.HasPrefix(field, "field") {
+								changed = b.addReturnField(fn, field) || changed
+							}
+						}
 						for idx := range tr.params {
 							changed = b.addParamReturn(fn, idx) || changed
 						}
@@ -792,7 +801,7 @@ func (b *dataFlowBuilder) rememberAggregateStore(state dataFlowState, addr ssa.V
 	case *ssa.IndexAddr:
 		state.memory[addrKey(a.X)+"[*]"] = tr.withFieldPath("[*]")
 	case *ssa.FieldAddr:
-		state.memory[addrKey(a.X)+fmt.Sprintf(".field%d", a.Field)] = tr.withFieldPath(fmt.Sprintf("field%d", a.Field))
+		state.memory[fieldMemoryKey(a.X, a.Field)] = tr.withFieldPath(fmt.Sprintf("field%d", a.Field))
 	}
 }
 
@@ -1119,7 +1128,8 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 	}
 	for idx := range summary.paramReturn {
 		if arg, ok := summaryCallArgument(common, callee, idx); ok {
-			if tr, ok := b.taintOf(state, arg); ok {
+			tr, ok := b.summaryReturnTrace(state, arg, idx, summary)
+			if ok {
 				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, map[string]string{"summaryFunction": callee.String(), "parameterIndex": fmt.Sprint(idx), "summaryKind": edgeKind})
 				state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, edgeKind+"-return", call.Pos(), fmt.Sprint(idx)))
 			}
@@ -1137,27 +1147,26 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 				}
 			}
 		}
-		recv, hasRecv := summaryCallArgument(common, callee, 0)
-		for field, params := range summary.fieldWrites {
-			if !hasRecv {
+	}
+	recv, hasRecv := summaryCallArgument(common, callee, 0)
+	for field, params := range summary.fieldWrites {
+		if !hasRecv {
+			continue
+		}
+		var traces []dataFlowTrace
+		for idx := range params {
+			arg, ok := summaryCallArgument(common, callee, idx)
+			if !ok {
 				continue
 			}
-			var traces []dataFlowTrace
-			for idx := range params {
-				arg, ok := summaryCallArgument(common, callee, idx)
-				if !ok {
-					continue
-				}
-				if tr, ok := b.taintOf(state, arg); ok {
-					traces = append(traces, tr)
-				}
+			if tr, ok := b.taintOf(state, arg); ok {
+				traces = append(traces, tr)
 			}
-			if tr, ok := combineTraceList(traces); ok {
-				n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
-				fieldTrace := b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
-				state.memory[addrKey(recv)+"."+field] = fieldTrace
-				state.values[recv] = combineTraces(state.values[recv], fieldTrace)
-			}
+		}
+		if tr, ok := combineTraceList(traces); ok {
+			n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
+			fieldTrace := b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
+			state.memory[addrKey(recv)+"."+field] = fieldTrace
 		}
 	}
 }
@@ -1201,12 +1210,18 @@ func summaryCallArgument(common *ssa.CallCommon, callee *ssa.Function, paramInde
 			if recv := receiverValue(common); recv != nil {
 				return recv, true
 			}
+			if !common.IsInvoke() && len(args) > 0 {
+				return args[0], true
+			}
 			if common.Value != nil && !common.IsInvoke() {
 				return common.Value, true
 			}
 			return nil, false
 		}
 		argIndex := paramIndex - 1
+		if !common.IsInvoke() {
+			argIndex = paramIndex
+		}
 		if argIndex >= 0 && argIndex < len(args) {
 			return args[argIndex], true
 		}
@@ -1388,7 +1403,13 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 		if tr, ok := state.memory[addrKey(x)]; ok {
 			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
 		}
-		return b.taintOf(state, x.X)
+		if tr, ok := state.memory[fieldMemoryKey(x.X, x.Field)]; ok {
+			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+		}
+		if tr, ok := b.taintOf(state, x.X); ok {
+			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+		}
+		return dataFlowTrace{}, false
 	case *ssa.IndexAddr:
 		if tr, ok := state.memory[addrKey(x)]; ok {
 			return tr.withFieldPath("[*]"), true
@@ -1399,7 +1420,13 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 			return tr.withFieldPath("[*]"), true
 		}
 	case *ssa.Field:
-		return b.taintOf(state, x.X)
+		if tr, ok := state.memory[fieldMemoryKey(x.X, x.Field)]; ok {
+			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+		}
+		if tr, ok := b.taintOf(state, x.X); ok {
+			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+		}
+		return dataFlowTrace{}, false
 	case *ssa.Index:
 		if tr, ok := state.memory[addrKey(x.X)+"[*]"]; ok {
 			return tr.withFieldPath("[*]"), true
@@ -1570,6 +1597,15 @@ func (b *dataFlowBuilder) addSourceReturn(fn *ssa.Function, pat model.DataFlowPa
 	return true
 }
 
+func (b *dataFlowBuilder) addReturnField(fn *ssa.Function, field string) bool {
+	s := b.summaries[fn]
+	if s == nil || s.returnFields[field] {
+		return false
+	}
+	s.returnFields[field] = true
+	return true
+}
+
 func (b *dataFlowBuilder) recordSummaryFieldWrite(fn *ssa.Function, state dataFlowState, addr ssa.Value, tr dataFlowTrace) bool {
 	if fn == nil || fn.Signature == nil || fn.Signature.Recv() == nil {
 		return false
@@ -1609,14 +1645,32 @@ func (b *dataFlowBuilder) recordSummaryFieldWrite(fn *ssa.Function, state dataFl
 }
 
 func summaryReceiverField(addr ssa.Value) (string, bool) {
-	field, ok := addr.(*ssa.FieldAddr)
-	if !ok {
-		return "", false
-	}
-	if param, ok := field.X.(*ssa.Parameter); ok && param.Parent() != nil && param.Parent().Signature != nil && param.Parent().Signature.Recv() != nil && len(param.Parent().Params) > 0 && param == param.Parent().Params[0] {
-		return fmt.Sprintf("field%d", field.Field), true
+	switch field := addr.(type) {
+	case *ssa.FieldAddr:
+		if param, ok := field.X.(*ssa.Parameter); ok && param.Parent() != nil && param.Parent().Signature != nil && param.Parent().Signature.Recv() != nil && len(param.Parent().Params) > 0 && param == param.Parent().Params[0] {
+			return fmt.Sprintf("field%d", field.Field), true
+		}
+	case *ssa.Field:
+		if param, ok := field.X.(*ssa.Parameter); ok && param.Parent() != nil && param.Parent().Signature != nil && param.Parent().Signature.Recv() != nil && len(param.Parent().Params) > 0 && param == param.Parent().Params[0] {
+			return fmt.Sprintf("field%d", field.Field), true
+		}
 	}
 	return "", false
+}
+
+func (b *dataFlowBuilder) summaryReturnTrace(state dataFlowState, arg ssa.Value, idx int, summary *internalSummary) (dataFlowTrace, bool) {
+	var traces []dataFlowTrace
+	if tr, ok := b.taintOf(state, arg); ok {
+		traces = append(traces, tr)
+	}
+	if idx == 0 && summary != nil {
+		for field := range summary.returnFields {
+			if tr, ok := state.memory[addrKey(arg)+"."+field]; ok {
+				traces = append(traces, tr)
+			}
+		}
+	}
+	return combineTraceList(traces)
 }
 
 func (b *dataFlowBuilder) combineCallArgTaints(state dataFlowState, common *ssa.CallCommon) (dataFlowTrace, bool) {
@@ -1714,11 +1768,44 @@ func (b *dataFlowBuilder) matchEndpointHandlerParam(fn *ssa.Function, p *ssa.Par
 	if len(endpoints) == 0 {
 		return nil
 	}
-	typeText := p.Type().String()
-	if strings.Contains(typeText, "net/http.Request") {
+	if isEndpointRequestParameter(fn.Signature, fn.Params, p) {
 		return endpoints
 	}
 	return nil
+}
+
+func isEndpointRequestParameter(sig *types.Signature, params []*ssa.Parameter, p *ssa.Parameter) bool {
+	idx := parameterIndex(params, p)
+	if idx < 0 || sig == nil || sig.Params() == nil || idx >= sig.Params().Len() {
+		return false
+	}
+	typeText := sig.Params().At(idx).Type().String()
+	if strings.Contains(typeText, "net/http.Request") {
+		return true
+	}
+	if isHTTPResponseWriterType(typeText) {
+		return false
+	}
+	if sig.Params().Len() == 1 {
+		return true
+	}
+	if idx == 1 {
+		return true
+	}
+	return idx == 0 && sig.Params().Len() == 2 && isHTTPResponseWriterType(sig.Params().At(1).Type().String())
+}
+
+func parameterIndex(params []*ssa.Parameter, target *ssa.Parameter) int {
+	for idx, param := range params {
+		if param == target {
+			return idx
+		}
+	}
+	return -1
+}
+
+func isHTTPResponseWriterType(typeText string) bool {
+	return strings.Contains(typeText, "net/http.ResponseWriter")
 }
 
 func (b *dataFlowBuilder) matchDataFlowPatterns(patterns []model.DataFlowPattern, symbol, name, pkgPath, typ, code string) []model.DataFlowPattern {
@@ -1894,6 +1981,10 @@ func addrKey(v ssa.Value) string {
 	default:
 		return "value:" + x.String()
 	}
+}
+
+func fieldMemoryKey(base ssa.Value, field int) string {
+	return addrKey(base) + fmt.Sprintf(".field%d", field)
 }
 
 func valueName(v ssa.Value) string {

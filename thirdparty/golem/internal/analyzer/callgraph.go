@@ -268,7 +268,43 @@ func isSyntheticRegistration(common *ssa.CallCommon) bool {
 			return true
 		}
 	}
+	if isSyntheticHTTPVerbRegistration(callName(common), callSymbol(common), syntheticRegistrationReceiverType(common)) {
+		return true
+	}
 	return false
+}
+
+func isSyntheticHTTPVerbRegistration(name, symbol, receiverType string) bool {
+	switch strings.ToUpper(name) {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "ANY", "ALL", "USE":
+	default:
+		return false
+	}
+	context := strings.ToLower(symbol + " " + receiverType)
+	for _, token := range []string{"router", "route", "mux", "engine", "group", "app", "fiber", "echo", "gin", "chi"} {
+		if strings.Contains(context, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func syntheticRegistrationReceiverType(common *ssa.CallCommon) string {
+	if common == nil {
+		return ""
+	}
+	if callee := common.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+		return callee.Signature.Recv().Type().String()
+	}
+	if common.Method != nil {
+		if sig, ok := common.Method.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil {
+			return sig.Recv().Type().String()
+		}
+	}
+	if sig := common.Signature(); sig != nil && sig.Recv() != nil {
+		return sig.Recv().Type().String()
+	}
+	return ""
 }
 
 func callbackFunctions(v ssa.Value) []*ssa.Function {
