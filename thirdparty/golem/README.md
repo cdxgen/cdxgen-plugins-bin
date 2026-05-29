@@ -23,6 +23,8 @@ go run ./cmd/golem analyze --dir . --tags prod,linux --tests --out golem-tests.j
 
 The default package pattern is `./...`. Use `--patterns` to narrow the load set and `--tags` or `--tests` to match the build shape you want to inspect.
 
+If `--dir` does not contain `go.mod` or `go.work`, Golem automatically discovers child directories containing `go.mod` and merges results across them. Use `--no-recurse` to disable this behavior.
+
 ## What Golem reads
 
 Golem uses `golang.org/x/tools/go/packages` with syntax, imports, dependencies, types, type information, file lists, module metadata, and type sizes enabled. Package loading is therefore close to what `go list` and the compiler see for the requested patterns, build tags, and test setting.
@@ -30,6 +32,8 @@ Golem uses `golang.org/x/tools/go/packages` with syntax, imports, dependencies, 
 The first analysis pass walks package ASTs and type information. It records imports, declarations, type-resolved library usages, build directives, native sidecar files, service and endpoint clues, security-sensitive API signals, and cryptographic evidence. SSA is built only when a call graph or data-flow mode is requested.
 
 The JSON model is defined in `internal/model/model.go`. The main report contains package-level and file-level evidence, global rollups, diagnostics, optional call graph data, and optional data-flow data.
+
+For a field-by-field JSON reference, see `JSON_ATTRIBUTE_REFERENCE.md`.
 
 ## Output formats
 
@@ -39,13 +43,13 @@ The JSON model is defined in `internal/model/model.go`. The main report contains
 
 Call graphs are built from Go SSA using the implementations in `golang.org/x/tools/go/callgraph`:
 
-| Mode | Implementation | Practical behavior |
-| --- | --- | --- |
-| `none` | No graph | Fastest mode. Reports source evidence only. |
-| `static` | `static.CallGraph` | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited. |
-| `cha` | `cha.CallGraph` | More conservative for interface dispatch. Usually more edges. |
-| `rta` | `rta.Analyze` | Starts from discovered `init` and `main` roots. Useful for executable reachability. |
-| `vta` | `vta.CallGraph` | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by `x/tools`. |
+| Mode     | Implementation     | Practical behavior                                                                                                                              |
+| -------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`   | No graph           | Fastest mode. Reports source evidence only.                                                                                                     |
+| `static` | `static.CallGraph` | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited.                                                                 |
+| `cha`    | `cha.CallGraph`    | More conservative for interface dispatch. Usually more edges.                                                                                   |
+| `rta`    | `rta.Analyze`      | Starts from discovered `init` and `main` roots. Useful for executable reachability.                                                             |
+| `vta`    | `vta.CallGraph`    | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by `x/tools`. |
 
 Golem converts the raw graph into stable node and edge records. A node represents an SSA function with package path, package name, module, package URL when available, receiver, signature, local or external classification, standard library classification, synthetic flag, and source position. An edge records caller, callee, call site location, package URLs for both ends, and whether the call site has a static callee.
 
@@ -82,18 +86,20 @@ Sanitizers can either stop a trace completely or remove selected taint kinds. Th
 
 A slice contains source and sink IDs, node and edge IDs, categories, taint kinds, package paths, package URLs, sink argument information, rule metadata, severity, risk score, confidence, path length, sanitizer nodes, duplicate grouping, and a stable `flowKey`. Data-flow graph sidecars include the nodes and edges used by the slices.
 
+By default, Golem drops call graph edges and data-flow slices that are entirely rooted in external Go module cache paths (for example `/go/pkg/mod/...`) to reduce third-party-only noise in downstream evidence. Use `--include-all-flows` to keep those flows.
+
 Large repositories can be controlled with these limits:
 
-| Option | Default | Purpose |
-| --- | ---: | --- |
-| `--dataflow-max-slices` | `1000` | Stop materializing slices after this count and emit truncation diagnostics. |
-| `--dataflow-workers` | `0` | Number of per-function workers. `0` uses available scheduler parallelism. |
-| `--dataflow-large-repo-functions` | `1000` | Function count where large-repo materialization safeguards start. |
-| `--dataflow-max-function-instructions` | `200` | Skip slice materialization for very large functions in large repositories. Summaries are still inferred. |
-| `--dataflow-max-trace-nodes` | `64` | Maximum node IDs retained in an in-memory trace. |
-| `--dataflow-max-trace-edges` | `128` | Maximum edge IDs retained in an in-memory trace. |
-| `--dataflow-skip-generated` | `false` | Skip generated files during slice materialization. |
-| `--dataflow-skip-tests` | `false` | Skip tests, examples, and benchmarks during slice materialization. |
+| Option                                 | Default | Purpose                                                                                                  |
+| -------------------------------------- | ------: | -------------------------------------------------------------------------------------------------------- |
+| `--dataflow-max-slices`                |  `1000` | Stop materializing slices after this count and emit truncation diagnostics.                              |
+| `--dataflow-workers`                   |     `0` | Number of per-function workers. `0` uses available scheduler parallelism.                                |
+| `--dataflow-large-repo-functions`      |  `1000` | Function count where large-repo materialization safeguards start.                                        |
+| `--dataflow-max-function-instructions` |   `200` | Skip slice materialization for very large functions in large repositories. Summaries are still inferred. |
+| `--dataflow-max-trace-nodes`           |    `64` | Maximum node IDs retained in an in-memory trace.                                                         |
+| `--dataflow-max-trace-edges`           |   `128` | Maximum edge IDs retained in an in-memory trace.                                                         |
+| `--dataflow-skip-generated`            | `false` | Skip generated files during slice materialization.                                                       |
+| `--dataflow-skip-tests`                | `false` | Skip tests, examples, and benchmarks during slice materialization.                                       |
 
 Use `--max-procs` to cap Go scheduler parallelism, `--memory-limit` to set Go's soft memory limit, and `--progress` to print coarse package loading, SSA, call graph, and data-flow progress logs.
 

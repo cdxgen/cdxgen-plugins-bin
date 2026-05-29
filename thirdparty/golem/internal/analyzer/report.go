@@ -44,6 +44,9 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.DataFlowMax <= 0 {
 		options.DataFlowMax = 1000
 	}
+	if merged, ok, err := analyzeAcrossChildModules(options, absDir, progress); ok {
+		return merged, err
+	}
 	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 
 	fset := token.NewFileSet()
@@ -97,6 +100,8 @@ func Analyze(options Options) (*model.Report, error) {
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,
+			NoRecurse:                       options.NoRecurse,
+			IncludeAllFlows:                 options.IncludeAllFlows,
 			Patterns:                        append([]string{}, options.Patterns...),
 			BuildTags:                       append([]string{}, options.BuildTags...),
 			Tests:                           options.Tests,
@@ -156,6 +161,7 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.DataFlowMode != "none" {
 		report.DataFlow = a.buildDataFlow(pkgs, ssaCtx, progress)
 	}
+	filterExternalOnlyModuleCacheFlows(report, options.IncludeAllFlows)
 	a.populateStats(report)
 	sortReport(report)
 	progress.Memoryf("analysis complete")
