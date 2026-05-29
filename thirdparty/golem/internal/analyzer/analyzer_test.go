@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -549,42 +550,42 @@ func TestEndpointFrameworkCoverage(t *testing.T) {
 			t.Fatalf("endpointFramework(%q)=%q want %q", symbol, got, want)
 		}
 	}
+}
 
-	func TestClassifyEndpointCallPrefersGRPCGateway(t *testing.T) {
-		classification, ok := classifyEndpointCall("github.com/grpc-ecosystem/grpc-gateway/v2/runtime.RegisterPingHandlerServer", "RegisterPingHandlerServer", "grpc-gateway", 4)
-		if !ok {
-			t.Fatal("expected grpc-gateway registration to classify")
-		}
-		if classification.kind != "http-route" || classification.framework != "grpc-gateway" || classification.method != "ANY" || classification.path != "RegisterPingHandlerServer" || classification.handlerArg != 3 {
-			t.Fatalf("unexpected grpc-gateway classification %#v", classification)
+func TestClassifyEndpointCallPrefersGRPCGateway(t *testing.T) {
+	classification, ok := classifyEndpointCall("github.com/grpc-ecosystem/grpc-gateway/v2/runtime.RegisterPingHandlerServer", "RegisterPingHandlerServer", "grpc-gateway", 4)
+	if !ok {
+		t.Fatal("expected grpc-gateway registration to classify")
+	}
+	if classification.kind != "http-route" || classification.framework != "grpc-gateway" || classification.method != "ANY" || classification.path != "RegisterPingHandlerServer" || classification.handlerArg != 3 {
+		t.Fatalf("unexpected grpc-gateway classification %#v", classification)
+	}
+}
+
+func TestFieldPatternTargetForTypeMatchesQueueSources(t *testing.T) {
+	pkg := types.NewPackage("cloud.google.com/go/pubsub", "pubsub")
+	msgObj := types.NewTypeName(token.NoPos, pkg, "Message", nil)
+	msgStruct := types.NewStruct([]*types.Var{
+		types.NewField(token.NoPos, pkg, "Data", types.NewSlice(types.Typ[types.Byte]), false),
+	}, nil)
+	msgType := types.NewNamed(msgObj, msgStruct, nil)
+	target, ok := fieldPatternTargetForType(types.NewPointer(msgType), 0)
+	if !ok {
+		t.Fatal("expected field pattern target")
+	}
+	builder := &dataFlowBuilder{patterns: builtinDataFlowPatterns([]string{"queue"}), regexps: map[string]*regexp.Regexp{}}
+	var matched bool
+	for _, pattern := range builder.patterns.Sources {
+		if pattern.Category == "queue-message" && fieldPatternMatches(target, pattern, builder.regexps) {
+			matched = true
+			if pattern.Kind != "field" {
+				t.Fatalf("expected queue field source pattern, got %#v", pattern)
+			}
+			break
 		}
 	}
-
-	func TestFieldPatternTargetForTypeMatchesQueueSources(t *testing.T) {
-		pkg := types.NewPackage("cloud.google.com/go/pubsub", "pubsub")
-		msgObj := types.NewTypeName(token.NoPos, pkg, "Message", nil)
-		msgStruct := types.NewStruct([]*types.Var{
-			types.NewField(token.NoPos, pkg, "Data", types.NewSlice(types.Typ[types.Byte]), false),
-		}, nil)
-		msgType := types.NewNamed(msgObj, msgStruct, nil)
-		target, ok := fieldPatternTargetForType(types.NewPointer(msgType), 0)
-		if !ok {
-			t.Fatal("expected field pattern target")
-		}
-		builder := &dataFlowBuilder{patterns: defaultDataFlowPatternSet("queue"), regexps: map[string]*regexp.Regexp{}}
-		var matched bool
-		for _, pattern := range builder.patterns.Sources {
-			if pattern.Category == "queue-message" && fieldPatternMatches(target, pattern, builder.regexps) {
-				matched = true
-				if pattern.Kind != "field" {
-					t.Fatalf("expected queue field source pattern, got %#v", pattern)
-				}
-				break
-			}
-		}
-		if !matched {
-			t.Fatalf("expected queue field pattern match for %#v", target)
-		}
+	if !matched {
+		t.Fatalf("expected queue field pattern match for %#v", target)
 	}
 }
 

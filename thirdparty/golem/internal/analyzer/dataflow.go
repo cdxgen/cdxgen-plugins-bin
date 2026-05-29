@@ -964,7 +964,7 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 						state.values[v] = combineTraces(state.values[v], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{source.pattern}, taintKinds: taintsForPattern(source.pattern), confidence: source.pattern.Confidence, fieldPaths: uniqueStrings([]string{source.fieldPath}), generated: true})
 					}
 					if tr, ok := b.valueTaint(state, v); ok {
-						state.values[v] = tr
+						state.values[v] = combineTraces(state.values[v], tr)
 					}
 				}
 			}
@@ -1855,116 +1855,116 @@ func (b *dataFlowBuilder) matchDataFlowPatterns(patterns []model.DataFlowPattern
 		case "code":
 			value = code
 		}
-
-		type fieldPatternTarget struct {
-			symbols   []string
-			name      string
-			pkgPath   string
-			typ       string
-			fieldPath string
-		}
-
-		func (t fieldPatternTarget) primarySymbol() string {
-			if len(t.symbols) > 0 {
-				return t.symbols[0]
-			}
-			return t.name
-		}
-
-		func fieldPatternMatches(target fieldPatternTarget, p model.DataFlowPattern, regexps map[string]*regexp.Regexp) bool {
-			switch p.Kind {
-			case "field":
-				if patternMatches(target.name, p, regexps) {
-					return true
-				}
-				for _, symbol := range target.symbols {
-					if patternMatches(symbol, p, regexps) {
-						return true
-					}
-				}
-				return false
-			case "symbol":
-				for _, symbol := range target.symbols {
-					if patternMatches(symbol, p, regexps) {
-						return true
-					}
-				}
-				return false
-			case "package", "namespace":
-				return patternMatches(target.pkgPath, p, regexps)
-			case "type":
-				return patternMatches(target.typ, p, regexps)
-			case "name":
-				return patternMatches(target.name, p, regexps)
-			default:
-				return false
-			}
-		}
-
-		func fieldPatternTargetForValue(v ssa.Value) (fieldPatternTarget, bool) {
-			switch x := v.(type) {
-			case *ssa.FieldAddr:
-				return fieldPatternTargetForType(x.X.Type(), x.Field)
-			case *ssa.Field:
-				return fieldPatternTargetForType(x.X.Type(), x.Field)
-			default:
-				return fieldPatternTarget{}, false
-			}
-		}
-
-		func fieldPatternTargetForType(base types.Type, fieldIndex int) (fieldPatternTarget, bool) {
-			named, structType, ok := namedStructType(base)
-			if !ok || fieldIndex < 0 || fieldIndex >= structType.NumFields() {
-				return fieldPatternTarget{}, false
-			}
-			field := structType.Field(fieldIndex)
-			if field == nil {
-				return fieldPatternTarget{}, false
-			}
-			pkgPath := ""
-			if named.Obj() != nil && named.Obj().Pkg() != nil {
-				pkgPath = named.Obj().Pkg().Path()
-			}
-			if pkgPath == "" && field.Pkg() != nil {
-				pkgPath = field.Pkg().Path()
-			}
-			typeName := ""
-			if named.Obj() != nil {
-				typeName = named.Obj().Name()
-			}
-			symbols := []string{}
-			if pkgPath != "" && typeName != "" {
-				symbols = append(symbols, pkgPath+"."+typeName+"."+field.Name(), pkgPath+".(*"+typeName+")."+field.Name())
-			}
-			return fieldPatternTarget{
-				symbols:   uniqueStrings(symbols),
-				name:      field.Name(),
-				pkgPath:   pkgPath,
-				typ:       field.Type().String(),
-				fieldPath: fmt.Sprintf("field%d", fieldIndex),
-			}, true
-		}
-
-		func namedStructType(base types.Type) (*types.Named, *types.Struct, bool) {
-			original := types.Unalias(base)
-			if ptr, ok := original.(*types.Pointer); ok {
-				original = types.Unalias(ptr.Elem())
-			}
-			named, ok := original.(*types.Named)
-			if !ok {
-				return nil, nil, false
-			}
-			structType, ok := named.Underlying().(*types.Struct)
-			if !ok {
-				return nil, nil, false
-			}
-			return named, structType, true
-		}
 		if patternMatches(value, p, b.regexps) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+type fieldPatternTarget struct {
+	symbols   []string
+	name      string
+	pkgPath   string
+	typ       string
+	fieldPath string
+}
+
+func (t fieldPatternTarget) primarySymbol() string {
+	if len(t.symbols) > 0 {
+		return t.symbols[0]
+	}
+	return t.name
+}
+
+func fieldPatternMatches(target fieldPatternTarget, p model.DataFlowPattern, regexps map[string]*regexp.Regexp) bool {
+	switch p.Kind {
+	case "field":
+		if patternMatches(target.name, p, regexps) {
+			return true
+		}
+		for _, symbol := range target.symbols {
+			if patternMatches(symbol, p, regexps) {
+				return true
+			}
+		}
+		return false
+	case "symbol":
+		for _, symbol := range target.symbols {
+			if patternMatches(symbol, p, regexps) {
+				return true
+			}
+		}
+		return false
+	case "package", "namespace":
+		return patternMatches(target.pkgPath, p, regexps)
+	case "type":
+		return patternMatches(target.typ, p, regexps)
+	case "name":
+		return patternMatches(target.name, p, regexps)
+	default:
+		return false
+	}
+}
+
+func fieldPatternTargetForValue(v ssa.Value) (fieldPatternTarget, bool) {
+	switch x := v.(type) {
+	case *ssa.FieldAddr:
+		return fieldPatternTargetForType(x.X.Type(), x.Field)
+	case *ssa.Field:
+		return fieldPatternTargetForType(x.X.Type(), x.Field)
+	default:
+		return fieldPatternTarget{}, false
+	}
+}
+
+func fieldPatternTargetForType(base types.Type, fieldIndex int) (fieldPatternTarget, bool) {
+	named, structType, ok := namedStructType(base)
+	if !ok || fieldIndex < 0 || fieldIndex >= structType.NumFields() {
+		return fieldPatternTarget{}, false
+	}
+	field := structType.Field(fieldIndex)
+	if field == nil {
+		return fieldPatternTarget{}, false
+	}
+	pkgPath := ""
+	if named.Obj() != nil && named.Obj().Pkg() != nil {
+		pkgPath = named.Obj().Pkg().Path()
+	}
+	if pkgPath == "" && field.Pkg() != nil {
+		pkgPath = field.Pkg().Path()
+	}
+	typeName := ""
+	if named.Obj() != nil {
+		typeName = named.Obj().Name()
+	}
+	symbols := []string{}
+	if pkgPath != "" && typeName != "" {
+		symbols = append(symbols, pkgPath+"."+typeName+"."+field.Name(), pkgPath+".(*"+typeName+")."+field.Name())
+	}
+	return fieldPatternTarget{
+		symbols:   uniqueStrings(symbols),
+		name:      field.Name(),
+		pkgPath:   pkgPath,
+		typ:       field.Type().String(),
+		fieldPath: fmt.Sprintf("field%d", fieldIndex),
+	}, true
+}
+
+func namedStructType(base types.Type) (*types.Named, *types.Struct, bool) {
+	original := types.Unalias(base)
+	if ptr, ok := original.(*types.Pointer); ok {
+		original = types.Unalias(ptr.Elem())
+	}
+	named, ok := original.(*types.Named)
+	if !ok {
+		return nil, nil, false
+	}
+	structType, ok := named.Underlying().(*types.Struct)
+	if !ok {
+		return nil, nil, false
+	}
+	return named, structType, true
 }
 
 func patternMatches(value string, p model.DataFlowPattern, regexps map[string]*regexp.Regexp) bool {
