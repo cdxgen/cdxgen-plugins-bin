@@ -1,0 +1,15 @@
+# Rust build outputs
+**/target/**
+/build/
+
+# Temporary and local OS/editor files
+.DS_Store
+*.swp
+*.swo
+
+# Profiling and coverage artifacts
+*.profraw
+*.profdata
+
+# Local scratch output
+/tmp/

@@ -13,7 +13,7 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/exporter"
 )
 
-var version = "2.2.4"
+var version = "2.3.0"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {

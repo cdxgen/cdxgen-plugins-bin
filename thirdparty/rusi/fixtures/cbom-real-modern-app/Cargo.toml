@@ -1,0 +1,11 @@
+[package]
+name = "cbom-real-modern-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+chacha20poly1305 = "0.10"
+ring = "0.17"
+sha1 = "0.10"

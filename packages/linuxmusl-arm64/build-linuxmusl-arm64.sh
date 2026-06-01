@@ -2,8 +2,8 @@
 set -e  # Exit on error
 
 # Remove old plugin directories to ensure a clean build
-rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem
-mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem
+rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi
+mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins/dosai/dosai
 sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
@@ -12,7 +12,7 @@ oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 
-for plug in trustinspector golem
+for plug in trustinspector golem rusi
 do
   bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linuxmusl-arm64"
 done

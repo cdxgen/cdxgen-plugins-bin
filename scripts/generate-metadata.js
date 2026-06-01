@@ -12,6 +12,7 @@ const trivyVersion = "v0.68.2";
 const dosaiVersion = "v3.0.5";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
+const rusiVersion = pluginsPackageJson.version;
 
 function pluginComponentMetadata() {
   return {
@@ -45,7 +46,7 @@ function pluginComponentMetadata() {
       description:
         "Find vulnerabilities, misconfigurations, secrets, SBOM in containers, Kubernetes, code repositories, clouds and more. This is a custom wrapper maintained by the cdxgen team.",
       purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trivy-cdxgen@${trivyVersion}`,
-      licenses: [{ license: { id: "Apache-2.0" } }],
+      licenses: [{ license: { id: "MIT" } }],
       externalReferences: [
         {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trivy",
@@ -78,10 +79,24 @@ function pluginComponentMetadata() {
       description:
         "Go Library Evidence Mapper (golem) extracts semantic Go source evidence and optional call graphs for cdxgen.",
       purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/golem@${golemVersion}`,
-      licenses: [{ license: { id: "Apache-2.0" } }],
+      licenses: [{ license: { id: "MIT" } }],
       externalReferences: [
         {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/golem",
+          type: "vcs",
+        },
+        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+      ],
+    },
+    rusi: {
+      version: rusiVersion,
+      description:
+        "Rust Source Inspector (rusi) extracts semantic Rust source evidence, call graphs, and optional data-flow findings for cdxgen.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/rusi@${rusiVersion}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/rusi",
           type: "vcs",
         },
         { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
@@ -92,7 +107,7 @@ function pluginComponentMetadata() {
       description:
         "cdxgen trust-material inspection helper for repository keys, certificate stores, macOS code-signing, notarization, and Windows trust policy inventory.",
       purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trustinspector-cdxgen@${trustInspectorVersion}`,
-      licenses: [{ license: { id: "Apache-2.0" } }],
+      licenses: [{ license: { id: "MIT" } }],
       externalReferences: [
         {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trustinspector",
@@ -158,7 +173,7 @@ async function main() {
   const allDependencies = [];
   const toolMetadata = pluginComponentMetadata();
   const manifestPlugins = [];
-  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem'];
+  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem', 'rusi'];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
     if (!fs.existsSync(toolDir)) {

@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-linux-riscv64",
-  "version": "2.2.4",
+  "version": "2.3.0",
   "description": "RISC-V 64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {
@@ -15,8 +15,8 @@
     "dependency",
     "appsec"
   ],
-  "author": "Prabhu Subramanian <prabhu@appthreat.com>",
-  "license": "Apache-2.0",
+  "author": "Team AppThreat <cloud@appthreat.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/cdxgen/cdxgen-plugins-bin/issues"
   },

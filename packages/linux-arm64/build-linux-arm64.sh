@@ -6,8 +6,8 @@ rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
 rm -rf plugins/sourcekitten
-rm -rf plugins/trustinspector plugins/golem
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem
+rm -rf plugins/trustinspector plugins/golem plugins/rusi
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/sourcekitten/
 rm -f plugins/sourcekitten/trivy-cdxgen-*
@@ -20,7 +20,7 @@ sha256sum plugins/osquery/osqueryi-linux-arm64 > plugins/osquery/osqueryi-linux-
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-arm64 plugins/dosai/dosai-linux-arm64
 sha256sum plugins/dosai/dosai-linux-arm64 > plugins/dosai/dosai-linux-arm64.sha256
 
-for plug in trivy trustinspector golem
+for plug in trivy trustinspector golem rusi
 do
     mkdir -p "plugins/$plug"
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-arm64"

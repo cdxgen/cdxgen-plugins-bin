@@ -38,45 +38,43 @@ Each invocation returns a single JSON object. Only the field relevant to the sel
 ```json
 {
   "materials": [
-	{
-	  "kind": "public-key",
-	  "path": "/usr/share/keyrings/debian-archive-keyring.gpg",
-	  "name": "debian-archive-keyring.gpg",
-	  "sha1": "...",
-	  "sha256": "...",
-	  "algorithm": "RSA",
-	  "keyStrength": 4096,
-	  "fingerprint": "...",
-	  "keyId": "...",
-	  "createdAt": "2024-01-01T00:00:00Z",
-	  "expiresAt": "2034-01-01T00:00:00Z",
-	  "trustDomain": "apt",
-	  "fileExtension": "gpg",
-	  "userIds": ["Debian Archive Automatic Signing Key <ftpmaster@debian.org>"],
-	  "properties": [
-		{ "name": "cdx:crypto:keyId", "value": "..." }
-	  ]
-	},
-	{
-	  "kind": "certificate",
-	  "path": "/etc/ssl/certs/ca-certificates.crt",
-	  "name": "demo-root",
-	  "sha1": "...",
-	  "sha256": "...",
-	  "subject": "CN=demo-root,O=Example Org",
-	  "issuer": "CN=demo-root,O=Example Org",
-	  "serial": "42",
-	  "createdAt": "2023-11-14T22:13:20Z",
-	  "expiresAt": "2027-01-15T08:00:00Z",
-	  "trustDomain": "ca-store",
-	  "category": "ca-store",
-	  "format": "X.509",
-	  "fileExtension": "crt",
-	  "fingerprint": "...",
-	  "properties": [
-		{ "name": "cdx:crypto:isCA", "value": "true" }
-	  ]
-	}
+    {
+      "kind": "public-key",
+      "path": "/usr/share/keyrings/debian-archive-keyring.gpg",
+      "name": "debian-archive-keyring.gpg",
+      "sha1": "...",
+      "sha256": "...",
+      "algorithm": "RSA",
+      "keyStrength": 4096,
+      "fingerprint": "...",
+      "keyId": "...",
+      "createdAt": "2024-01-01T00:00:00Z",
+      "expiresAt": "2034-01-01T00:00:00Z",
+      "trustDomain": "apt",
+      "fileExtension": "gpg",
+      "userIds": [
+        "Debian Archive Automatic Signing Key <ftpmaster@debian.org>"
+      ],
+      "properties": [{ "name": "cdx:crypto:keyId", "value": "..." }]
+    },
+    {
+      "kind": "certificate",
+      "path": "/etc/ssl/certs/ca-certificates.crt",
+      "name": "demo-root",
+      "sha1": "...",
+      "sha256": "...",
+      "subject": "CN=demo-root,O=Example Org",
+      "issuer": "CN=demo-root,O=Example Org",
+      "serial": "42",
+      "createdAt": "2023-11-14T22:13:20Z",
+      "expiresAt": "2027-01-15T08:00:00Z",
+      "trustDomain": "ca-store",
+      "category": "ca-store",
+      "format": "X.509",
+      "fileExtension": "crt",
+      "fingerprint": "...",
+      "properties": [{ "name": "cdx:crypto:isCA", "value": "true" }]
+    }
   ]
 }
 ```
@@ -86,13 +84,13 @@ Each invocation returns a single JSON object. Only the field relevant to the sel
 ```json
 {
   "inspections": [
-	{
-	  "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-	  "properties": [
-		{ "name": "cdx:windows:authenticode:status", "value": "Valid" },
-		{ "name": "cdx:windows:authenticode:isOSBinary", "value": "true" }
-	  ]
-	}
+    {
+      "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "properties": [
+        { "name": "cdx:windows:authenticode:status", "value": "Valid" },
+        { "name": "cdx:windows:authenticode:isOSBinary", "value": "true" }
+      ]
+    }
   ]
 }
 ```
@@ -104,15 +102,15 @@ On macOS the `properties` array instead contains keys such as `cdx:darwin:codesi
 ```json
 {
   "hostFindings": [
-	{
-	  "kind": "windows-wdac-status",
-	  "name": "wdac-active-policies",
-	  "version": "0",
-	  "description": "C:\\Windows\\System32\\CodeIntegrity\\CiPolicies\\Active",
-	  "properties": [
-		{ "name": "cdx:windows:wdac:activePolicyCount", "value": "0" }
-	  ]
-	}
+    {
+      "kind": "windows-wdac-status",
+      "name": "wdac-active-policies",
+      "version": "0",
+      "description": "C:\\Windows\\System32\\CodeIntegrity\\CiPolicies\\Active",
+      "properties": [
+        { "name": "cdx:windows:wdac:activePolicyCount", "value": "0" }
+      ]
+    }
   ]
 }
 ```
@@ -131,4 +129,4 @@ On macOS the `properties` array instead contains keys such as `cdx:darwin:codesi
 
 ## CI notes
 
-The repository test workflow now includes a Windows smoke path that builds the helper, validates manifest generation, runs `trustinspector host`, and inspects a signed Windows system binary with `trustinspector paths`.
+The repository test workflow includes a Windows smoke path that builds the helper, validates manifest generation, runs `trustinspector host`, and inspects a signed Windows system binary with `trustinspector paths`.

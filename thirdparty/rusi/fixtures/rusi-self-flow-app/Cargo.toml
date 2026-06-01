@@ -1,0 +1,9 @@
+[package]
+name = "rusi-self-flow-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

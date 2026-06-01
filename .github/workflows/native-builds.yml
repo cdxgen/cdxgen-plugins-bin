@@ -44,12 +44,26 @@ jobs:
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
       if: matrix.os == 'ubuntu-24.04'
+    - name: Install Zig
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zig
+      if: matrix.os == 'ubuntu-24.04'
     - name: setup upx
       run: |
         bash ./scripts/thirdparty-downloads.sh install-upx linux-arm64 ./upx
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
       if: matrix.os == 'ubuntu-24.04-arm'
+    - name: Setup Rust nightly
+      run: |
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
+          . "$HOME/.cargo/env"
+        fi
+        export PATH="$HOME/.cargo/bin:$PATH"
+        rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
+      if: matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15'
     - name: Setup swift
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
       run: |
@@ -90,6 +104,28 @@ jobs:
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/golem/build 'golem-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/trustinspector/build 'trustinspector-cdxgen-*'
       if: matrix.os == 'ubuntu-24.04'
+    - name: Upload Rusi Linux, musl, and Windows helper artifacts
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        pushd thirdparty/rusi
+        make bootstrap-linux
+        npm install -g @cyclonedx/cdxgen
+        make linux linuxmusl windows sbom
+        popd
+
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/rusi/build 'rusi-*'
+      if: matrix.os == 'ubuntu-24.04'
+    - name: Upload Rusi Darwin helper artifacts
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        pushd thirdparty/rusi
+        make bootstrap-darwin
+        npm install -g @cyclonedx/cdxgen
+        make darwin sbom
+        popd
+
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/rusi/build 'rusi-darwin-*'
+      if: matrix.os == 'macos-15'
     - name: Upload linux amd64
       run: |
         pushd thirdparty/trivy

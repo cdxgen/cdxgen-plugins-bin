@@ -1,0 +1,28 @@
+[workspace]
+members = ["crates/rusi-schema", "crates/rusi-core", "crates/rusi-driver", "crates/rusi-cli", "crates/rusi-rustc-wrapper"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+cargo_metadata = "0.23"
+clap = { version = "4", features = ["derive"] }
+indexmap = { version = "2", features = ["serde"] }
+pretty_assertions = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = "thin"
+opt-level = "z"
+strip = "symbols"
