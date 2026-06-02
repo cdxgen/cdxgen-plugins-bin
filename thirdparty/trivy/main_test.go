@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/aquasecurity/trivy/pkg/commands/artifact"
+	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/flag"
 	"github.com/aquasecurity/trivy/pkg/sbom/core"
@@ -242,6 +244,9 @@ func TestParseDPKGPackageTrust(t *testing.T) {
 func TestApplyCDXGenDefaultsAddsSeparateSkipFilePatterns(t *testing.T) {
 	var opts flag.Options
 	applyCDXGenDefaults(&opts)
+	if len(opts.PkgTypes) != 2 || opts.PkgTypes[0] != trivytypes.PkgTypeOS || opts.PkgTypes[1] != trivytypes.PkgTypeLibrary {
+		t.Fatalf("unexpected package types: %#v", opts.PkgTypes)
+	}
 	want := []string{"**/*.jar", "**/*.war", "**/*.par", "**/*.ear"}
 	if len(opts.SkipFiles) != len(want) {
 		t.Fatalf("unexpected skip files: %#v", opts.SkipFiles)
@@ -250,6 +255,25 @@ func TestApplyCDXGenDefaultsAddsSeparateSkipFilePatterns(t *testing.T) {
 		if opts.SkipFiles[i] != pattern {
 			t.Fatalf("unexpected skip file pattern at index %d: %#v", i, opts.SkipFiles)
 		}
+	}
+}
+
+func TestDisabledLanguageAnalyzersRetainsOnlyGoAnalyzers(t *testing.T) {
+	disabled := cdxgenDisabledLanguageAnalyzers()
+	if slices.Contains(disabled, analyzer.TypeGoBinary) {
+		t.Fatalf("expected gobinary analyzer to remain enabled: %#v", disabled)
+	}
+	if slices.Contains(disabled, analyzer.TypeGoMod) {
+		t.Fatalf("expected gomod analyzer to remain enabled: %#v", disabled)
+	}
+	if !slices.Contains(disabled, analyzer.TypeNpmPkgLock) {
+		t.Fatalf("expected non-Go language analyzers to be disabled: %#v", disabled)
+	}
+	if !slices.Contains(disabled, analyzer.TypeJar) {
+		t.Fatalf("expected jar analyzer to stay disabled: %#v", disabled)
+	}
+	if !slices.Contains(disabled, analyzer.TypeSBOM) {
+		t.Fatalf("expected embedded sbom analyzer to stay disabled: %#v", disabled)
 	}
 }
 

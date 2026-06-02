@@ -1,0 +1,89 @@
+name: trivy-cdxgen SBOM E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  rootfs-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: golang-alpine
+            image_ref: docker.io/library/golang:1.25.0-alpine3.22
+          - image_name: caddy-alpine
+            image_ref: docker.io/library/caddy:2.10.2-alpine
+          - image_name: registry
+            image_ref: docker.io/library/registry:3.0.0
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '^1.25.6'
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+      - name: Build local trivy-cdxgen
+        working-directory: thirdparty/trivy
+        run: |
+          mkdir -p build
+          GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+      - name: Export image rootfs
+        env:
+          IMAGE_NAME: ${{ matrix.image_name }}
+          IMAGE_REF: ${{ matrix.image_ref }}
+        run: |
+          set -euo pipefail
+
+          workdir="${RUNNER_TEMP}/trivy-cdxgen/${IMAGE_NAME}"
+          rootfs_dir="$workdir/rootfs"
+          cid="trivy-cdxgen-${IMAGE_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          rm -rf "$workdir"
+          mkdir -p "$rootfs_dir"
+
+          docker pull --platform=linux/amd64 "$IMAGE_REF"
+          docker create --platform=linux/amd64 --name "$cid" "$IMAGE_REF" >/dev/null
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker export "$cid" -o "$workdir/rootfs.tar"
+          tar -xf "$workdir/rootfs.tar" -C "$rootfs_dir"
+      - name: Generate CycloneDX SBOM from rootfs
+        env:
+          IMAGE_NAME: ${{ matrix.image_name }}
+        run: |
+          set -euo pipefail
+
+          workdir="${RUNNER_TEMP}/trivy-cdxgen/${IMAGE_NAME}"
+          thirdparty/trivy/build/trivy-cdxgen-local rootfs \
+            --debug \
+            --output "$workdir/sbom.cdx.json" \
+            "$workdir/rootfs"
+      - name: Assert OS and Go binary coverage
+        env:
+          IMAGE_NAME: ${{ matrix.image_name }}
+          IMAGE_REF: ${{ matrix.image_ref }}
+        run: |
+          set -euo pipefail
+
+          workdir="${RUNNER_TEMP}/trivy-cdxgen/${IMAGE_NAME}"
+          bash ./scripts/assert-trivy-cdxgen-sbom.sh "$workdir/sbom.cdx.json" "$IMAGE_REF"
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-cdxgen-sbom-${{ matrix.image_name }}
+          path: ${{ runner.temp }}/trivy-cdxgen/${{ matrix.image_name }}/sbom.cdx.json
+          if-no-files-found: warn
+          retention-days: 1
