@@ -43,20 +43,35 @@ def property_values(component, property_name):
 
 
 os_components = [component for component in components if component.get("type") == "operating-system"]
+os_package_purl_prefixes = ("pkg:apk/", "pkg:deb/", "pkg:rpm/", "pkg:alpm/")
 
 go_binary_components = []
 golang_components = []
+os_package_components = []
 for component in components:
     purl = str(component.get("purl") or "")
     pkg_types = set(property_values(component, "aquasecurity:trivy:PkgType"))
     pkg_types.update(property_values(component, "PkgType"))
     if purl.startswith("pkg:golang/"):
         golang_components.append(component)
+    if purl.startswith(os_package_purl_prefixes):
+        os_package_components.append(component)
     if "gobinary" in pkg_types:
         go_binary_components.append(component)
 
 if not os_components:
     print(f"SBOM for {label} did not contain any operating-system components", file=sys.stderr)
+    sys.exit(1)
+
+if not os_package_components:
+    os_type_sample = ", ".join(
+        str(component.get("name") or "<unnamed>") for component in os_components[:5]
+    ) or "<none>"
+    print(
+        f"SBOM for {label} did not contain any OS package components. "
+        f"Found {len(os_components)} operating-system components. Samples: {os_type_sample}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 if not go_binary_components:
@@ -71,11 +86,17 @@ if not go_binary_components:
     sys.exit(1)
 
 os_sample = ", ".join(str(component.get("name") or "<unnamed>") for component in os_components[:5])
+os_package_sample = ", ".join(
+    str(component.get("name") or "<unnamed>") for component in os_package_components[:5]
+)
 go_sample = ", ".join(str(component.get("name") or "<unnamed>") for component in go_binary_components[:5])
 print(
     f"Validated SBOM for {label}: "
-    f"os_components={len(os_components)} go_binary_components={len(go_binary_components)}"
+    f"os_distribution_components={len(os_components)} "
+    f"os_package_components={len(os_package_components)} "
+    f"go_binary_components={len(go_binary_components)}"
 )
-print(f"OS component samples: {os_sample}")
+print(f"OS distribution samples: {os_sample}")
+print(f"OS package samples: {os_package_sample}")
 print(f"Go binary samples: {go_sample}")
 PY
