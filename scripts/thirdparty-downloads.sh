@@ -12,11 +12,13 @@ Usage:
   thirdparty-downloads.sh install-osquery <platform> <destination-path>
   thirdparty-downloads.sh install-dosai <platform> <destination-path>
   thirdparty-downloads.sh install-upx <platform> <destination-path>
+  thirdparty-downloads.sh install-zig <platform> <destination-dir> [version|latest]
 
 Supported platforms:
   osquery: linux-amd64 linux-arm64 darwin-arm64 windows-amd64 windows-arm64
   dosai:   linux-amd64 linux-arm linux-arm64 linuxmusl-amd64 linuxmusl-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64
   upx:     linux-amd64 linux-arm64
+  zig:     linux-amd64 linux-arm64
 EOF
 }
 
@@ -228,6 +230,118 @@ install_upx() {
   rm -rf "$tmpdir"
 }
 
+fetch_zig_index() {
+  local output_path="$1"
+  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 \
+    --silent --show-error "https://ziglang.org/download/index.json" -o "$output_path"
+}
+
+resolve_zig_download() {
+  local index_path="$1"
+  local platform="$2"
+  local requested_version="${3:-latest}"
+  local zig_platform=""
+  case "$platform" in
+    linux-amd64)
+      zig_platform="x86_64-linux"
+      ;;
+    linux-arm64)
+      zig_platform="aarch64-linux"
+      ;;
+    *)
+      echo "Unsupported zig platform: $platform" >&2
+      exit 1
+      ;;
+  esac
+
+  local resolved_json
+  resolved_json="$(node - "$index_path" "$zig_platform" "$requested_version" <<'EOF'
+const fs = require('fs');
+
+const [, , indexPath, platform, requestedVersion] = process.argv;
+const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+const stableVersions = Object.keys(index)
+  .filter((key) => /^\d+\.\d+\.\d+$/.test(key))
+  .sort((left, right) => {
+    const leftParts = left.split('.').map(Number);
+    const rightParts = right.split('.').map(Number);
+    for (let i = 0; i < Math.max(leftParts.length, rightParts.length); i += 1) {
+      const diff = (rightParts[i] || 0) - (leftParts[i] || 0);
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    return 0;
+  });
+
+if (stableVersions.length === 0) {
+  throw new Error('No stable Zig versions found in ziglang download index');
+}
+
+const resolvedVersion =
+  requestedVersion && requestedVersion !== 'latest'
+    ? requestedVersion
+    : stableVersions[0];
+const release = index[resolvedVersion];
+if (!release) {
+  throw new Error(`Requested Zig version ${resolvedVersion} not found in ziglang download index`);
+}
+const artifact = release[platform];
+if (!artifact || !artifact.tarball || !artifact.shasum) {
+  throw new Error(`No Zig artifact metadata found for ${platform} in release ${resolvedVersion}`);
+}
+
+process.stdout.write(
+  JSON.stringify({
+    version: resolvedVersion,
+    tarball: artifact.tarball,
+    shasum: artifact.shasum,
+    filename: artifact.tarball.split('/').pop(),
+  }),
+);
+EOF
+)"
+
+  asset_filename="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.filename);' "$resolved_json")"
+  asset_url="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.tarball);' "$resolved_json")"
+  asset_sha256="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.shasum);' "$resolved_json")"
+}
+
+install_zig() {
+  local platform="$1"
+  local destination_dir="$2"
+  local requested_version="${3:-latest}"
+  local tmpdir
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zig-${platform}.XXXXXX")"
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  fetch_zig_index "$tmpdir/index.json"
+  resolve_zig_download "$tmpdir/index.json" "$platform" "$requested_version"
+
+  local archive_path="$tmpdir/$asset_filename"
+  mkdir -p "$(dirname "$destination_dir")"
+  echo "Downloading $asset_filename" >&2
+  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 \
+    --silent --show-error "$asset_url" -o "$archive_path"
+  verify_sha256 "$archive_path" "$asset_sha256"
+
+  tar -xf "$archive_path" -C "$tmpdir"
+  local extracted_dir
+  extracted_dir="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d -name 'zig-*' | head -n 1)"
+  if [[ -z "$extracted_dir" || ! -x "$extracted_dir/zig" ]]; then
+    echo "Unable to find extracted Zig distribution in $tmpdir" >&2
+    exit 1
+  fi
+
+  rm -rf "$destination_dir"
+  mkdir -p "$destination_dir"
+  cp -R "$extracted_dir"/. "$destination_dir"/
+  chmod 0755 "$destination_dir/zig"
+
+  trap - RETURN
+  rm -rf "$tmpdir"
+}
+
 main() {
   if [[ $# -lt 1 ]]; then
     print_usage >&2
@@ -253,6 +367,10 @@ main() {
     install-upx)
       [[ $# -eq 2 ]] || { print_usage >&2; exit 1; }
       install_upx "$1" "$2"
+      ;;
+    install-zig)
+      [[ $# -ge 2 && $# -le 3 ]] || { print_usage >&2; exit 1; }
+      install_zig "$1" "$2" "${3:-latest}"
       ;;
     *)
       print_usage >&2
