@@ -47,7 +47,6 @@ bootstrap-linux:
 	rustup target add --toolchain nightly $(linux_triples) $(linuxmusl_triples) $(windows_triples)
 	$(cargo_nightly) install cargo-zigbuild --locked --force
 	@command -v cargo-zigbuild >/dev/null 2>&1 || { echo "cargo-zigbuild was installed but is not on PATH ($(PATH))" >&2; exit 1; }
-	@$(cargo_nightly) zigbuild --version >/dev/null
 
 bootstrap-darwin:
 	rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
@@ -75,10 +74,6 @@ define ensure_zigbuild
 	fi
 	@if ! command -v cargo-zigbuild >/dev/null 2>&1; then \
 		echo "cargo-zigbuild binary is not on PATH ($(PATH)); run 'make bootstrap-linux' first." >&2; \
-		exit 1; \
-	fi
-	@if ! $(cargo_nightly) zigbuild --version >/dev/null 2>&1; then \
-		echo "cargo-zigbuild is required to cross-build $(1); run 'make bootstrap-linux' first." >&2; \
 		exit 1; \
 	fi
 endef
