@@ -67,3 +67,34 @@ test("generate-metadata writes the computed hash to the manifest when the sideca
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("generate-metadata records Rusi helper metadata", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-rusi-"));
+  try {
+    const toolDir = path.join(tempDir, "rusi");
+    fs.mkdirSync(toolDir, { recursive: true });
+    const binaryName = "rusi-linuxmusl-amd64";
+    const binaryFile = path.join(toolDir, binaryName);
+    fs.writeFileSync(binaryFile, "rusi-binary-payload");
+
+    const result = spawnSync(process.execPath, [scriptPath, tempDir], {
+      encoding: "utf-8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(tempDir, "plugins-manifest.json"), "utf-8"),
+    );
+    const entry = manifest.plugins.find((plugin) => plugin.name === "rusi");
+    assert.ok(entry, "expected rusi manifest entry");
+    assert.equal(entry.binaryPath, `plugins/rusi/${binaryName}`);
+    assert.equal(
+      entry.component.purl,
+      `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/rusi@${manifest.package.version}`,
+    );
+    assert.deepEqual(entry.component.licenses, [{ license: { id: "MIT" } }]);
+    assert.equal(entry.sha256, computeHash(binaryFile));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

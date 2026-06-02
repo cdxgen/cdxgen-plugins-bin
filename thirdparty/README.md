@@ -13,3 +13,7 @@ Sourcekitten binaries are built from this [repo](https://github.com/jpsim/Source
 ## trustinspector
 
 `trustinspector` is a cdxgen-maintained helper that emits trust-focused JSON for repository keyrings, certificate stores, macOS code-signing/notarization state, and Windows Authenticode / WDAC inventory. See [./trustinspector/README.md](./trustinspector/README.md).
+
+## rusi
+
+`rusi` is a cdxgen-maintained Rust source analysis helper that emits semantic source evidence, call graph output, and optional compiler-assisted data-flow findings. See [./rusi/README.md](./rusi/README.md).

@@ -5,14 +5,18 @@ rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
 rm -rf plugins/sourcekitten
-rm -rf plugins/trustinspector plugins/golem
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem
+rm -rf plugins/trustinspector plugins/golem plugins/rusi
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi
 
-for plug in trivy trustinspector golem
+for plug in trivy trustinspector golem rusi
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    make all
+    if [[ "$plug" == "rusi" ]] && find build -maxdepth 1 -type f -name 'rusi-*' ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
+        make sbom
+    else
+        make all
+    fi
     chmod +x build/*
     cp -rf build/* ../../plugins/$plug/
     rm -rf build
@@ -29,3 +33,16 @@ do
     ./build-$flavours.sh
     popd
 done
+
+bash ./scripts/check-package-size.sh \
+    packages/windows-amd64 \
+    packages/linux-amd64 \
+    packages/linux-arm64 \
+    packages/linuxmusl-amd64 \
+    packages/linuxmusl-arm64 \
+    packages/linux-riscv64 \
+    packages/linux-arm \
+    packages/windows-arm64 \
+    packages/darwin-arm64 \
+    packages/darwin-amd64 \
+    packages/ppc64

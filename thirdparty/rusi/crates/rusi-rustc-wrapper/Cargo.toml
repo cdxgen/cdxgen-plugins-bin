@@ -1,0 +1,19 @@
+[package]
+name = "rusi-rustc-wrapper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rusi-rustc-wrapper"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+anyhow.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rusi-schema = { path = "../rusi-schema" }

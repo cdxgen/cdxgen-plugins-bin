@@ -1,0 +1,8 @@
+[package]
+name = "expanded-packs-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
