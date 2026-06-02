@@ -46,7 +46,7 @@ function pluginComponentMetadata() {
       description:
         "Find vulnerabilities, misconfigurations, secrets, SBOM in containers, Kubernetes, code repositories, clouds and more. This is a custom wrapper maintained by the cdxgen team.",
       purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trivy-cdxgen@${trivyVersion}`,
-      licenses: [{ license: { id: "MIT" } }],
+      licenses: [{ license: { id: "Apache-2.0" } }],
       externalReferences: [
         {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trivy",

@@ -414,20 +414,25 @@ fn filter_crypto_call_graph(
     }
 
     let mut queue = VecDeque::new();
+    let crypto_edge_sources = call_graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.properties
+                .get("calleeText")
+                .is_some_and(|callee| looks_crypto_symbol(callee))
+        })
+        .map(|edge| edge.source_id.clone())
+        .collect::<HashSet<_>>();
     for node in &call_graph.nodes {
-        let crypto_seed = seed_names.contains(&node.qualified_name)
+        let edge_seed = crypto_edge_sources.contains(&node.id);
+        if seed_names.contains(&node.qualified_name)
             || seed_files.contains(&node.file_path)
             || looks_crypto_symbol(&node.qualified_name)
             || looks_crypto_symbol(&node.name)
-            || node.external;
-        let edge_seed = call_graph.edges.iter().any(|edge| {
-            edge.source_id == node.id
-                && edge
-                    .properties
-                    .get("calleeText")
-                    .is_some_and(|callee| looks_crypto_symbol(callee))
-        });
-        if crypto_seed && (looks_crypto_symbol(&node.qualified_name) || seed_names.contains(&node.qualified_name) || seed_files.contains(&node.file_path) || edge_seed) {
+            || node.external
+            || edge_seed
+        {
             queue.push_back(node.id.clone());
         }
     }
@@ -539,4 +544,119 @@ fn looks_crypto_symbol(value: &str) -> bool {
     ]
     .iter()
     .any(|token| normalized.contains(token))
+}
+
+#[cfg(test)]
+mod tests {
+    use rusi_schema::{
+        CallGraph, CallGraphEdge, CallGraphNode, CryptoEvidence, DataFlowEvidence, GraphStats,
+        Position,
+    };
+
+    use super::filter_crypto_call_graph;
+
+    fn position(filename: &str) -> Position {
+        Position {
+            filename: filename.to_string(),
+            line: 1,
+            column: 1,
+        }
+    }
+
+    #[test]
+    fn crypto_call_graph_keeps_nodes_seeded_by_crypto_callee_text() {
+        let filtered = filter_crypto_call_graph(
+            CallGraph {
+                mode: "static".to_string(),
+                nodes: vec![
+                    CallGraphNode {
+                        id: "caller".to_string(),
+                        name: "run".to_string(),
+                        qualified_name: "demo::run".to_string(),
+                        kind: "function".to_string(),
+                        package_path: "demo".to_string(),
+                        purl: "pkg:cargo/demo@0.1.0".to_string(),
+                        file_path: "src/main.rs".to_string(),
+                        local: true,
+                        external: false,
+                        receiver: None,
+                        position: position("src/main.rs"),
+                    },
+                    CallGraphNode {
+                        id: "callee".to_string(),
+                        name: "dispatch".to_string(),
+                        qualified_name: "demo::dispatch".to_string(),
+                        kind: "function".to_string(),
+                        package_path: "demo".to_string(),
+                        purl: "pkg:cargo/demo@0.1.0".to_string(),
+                        file_path: "src/main.rs".to_string(),
+                        local: true,
+                        external: false,
+                        receiver: None,
+                        position: position("src/main.rs"),
+                    },
+                ],
+                edges: vec![CallGraphEdge {
+                    id: "edge-1".to_string(),
+                    source_id: "caller".to_string(),
+                    target_id: "callee".to_string(),
+                    source_name: "demo::run".to_string(),
+                    target_name: "demo::dispatch".to_string(),
+                    source_purl: "pkg:cargo/demo@0.1.0".to_string(),
+                    target_purl: "pkg:cargo/demo@0.1.0".to_string(),
+                    purls: vec!["pkg:cargo/demo@0.1.0".to_string()],
+                    call_type: "static".to_string(),
+                    position: position("src/main.rs"),
+                    properties: [("calleeText".to_string(), "openssl::hash::digest".to_string())]
+                        .into_iter()
+                        .collect(),
+                }],
+                diagnostics: Vec::new(),
+                stats: GraphStats {
+                    node_count: 2,
+                    edge_count: 1,
+                },
+            },
+            None::<&CryptoEvidence>,
+            None::<&DataFlowEvidence>,
+        );
+
+        assert_eq!(filtered.nodes.len(), 2);
+        assert_eq!(filtered.edges.len(), 1);
+        assert!(filtered.nodes.iter().any(|node| node.id == "caller"));
+        assert!(filtered.nodes.iter().any(|node| node.id == "callee"));
+    }
+
+    #[test]
+    fn crypto_call_graph_keeps_external_seed_nodes() {
+        let filtered = filter_crypto_call_graph(
+            CallGraph {
+                mode: "static".to_string(),
+                nodes: vec![CallGraphNode {
+                    id: "external-node".to_string(),
+                    name: "foreign_crypto".to_string(),
+                    qualified_name: "foreign::crypto".to_string(),
+                    kind: "function".to_string(),
+                    package_path: "foreign".to_string(),
+                    purl: "pkg:cargo/foreign@1.0.0".to_string(),
+                    file_path: "<external>".to_string(),
+                    local: false,
+                    external: true,
+                    receiver: None,
+                    position: position("<external>"),
+                }],
+                edges: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: GraphStats {
+                    node_count: 1,
+                    edge_count: 0,
+                },
+            },
+            None::<&CryptoEvidence>,
+            None::<&DataFlowEvidence>,
+        );
+
+        assert_eq!(filtered.nodes.len(), 1);
+        assert_eq!(filtered.nodes[0].id, "external-node");
+    }
 }
