@@ -33,6 +33,7 @@ The default `stable` backend:
 - runs `cargo metadata`
 - reads `Cargo.toml` and workspace metadata
 - reads and parses local Rust source files with `syn`
+- skips symlinked source directories/files during Rust file discovery and only analyzes canonicalized files that remain under the package root
 - does **not** intentionally execute the analyzed crate's Rust code, tests, examples, or binaries
 - does **not** intentionally run `build.rs`, procedural macros, or `cargo check`
 
@@ -94,6 +95,11 @@ Mitigations:
 - isolate compiler runs
 - enforce external CPU, wall-clock, and memory limits in CI
 
+Current hardening:
+
+- stable and native source discovery skip symlinked directories/files and reject canonicalized files that escape the package root
+- compiler artifact directories are validated to stay under the canonical analysis root and reject symlinked path components such as a symlinked `target/`
+
 ### 3. Sensitive metadata exposure in reports
 
 Rusi reports include:
@@ -102,6 +108,8 @@ Rusi reports include:
 - package names and package paths
 - symbol names and signatures
 - package URLs when available
+
+Graph exports (GraphML/GEXF) additionally sanitize XML metacharacters and replace invalid XML control characters so hostile filenames or symbol text do not produce malformed export files.
 
 Even when raw secret values are avoided, this metadata may still be sensitive.
 
@@ -138,6 +146,7 @@ Current design goals:
 - do not intentionally emit environment variable values
 - do not intentionally emit raw secret literals as findings
 - report secret-like material by identifier name and source location, not by secret value
+- keep GraphML/GEXF exports well-formed even when input text contains hostile XML characters or invalid control bytes
 
 Still, analysts should assume the following can appear in reports:
 
@@ -163,6 +172,25 @@ Operationally, that means compiler-backend output can vary with:
 - enabled features and targets
 - workspace layout
 - dependency graph state
+
+## Rust edition vs toolchain
+
+Rusi's workspace currently sets:
+
+```toml
+[workspace.package]
+edition = "2024"
+```
+
+That setting controls the Rust _language edition_ used to compile Rusi itself. It does **not** mean Rusi is pinned to an old compiler and it does **not** select the Rust toolchain used for compiler-backed analysis.
+
+In practice:
+
+- `edition = "2024"` enables the Rust 2024 language edition for this codebase
+- the actual compiler version comes from the installed Rust toolchain (`rustc`, `cargo`, or `rustup`-selected toolchain)
+- compiler-backed analysis is additionally governed by `--toolchain` and the locally installed nightly toolchain/components required for `rustc_private`
+
+So using the "latest Rust" generally means updating the toolchain in the environment or in `rust-toolchain.toml`, not changing `edition = "2024"`.
 
 For reproducible review workflows, record the tool/runtime fields from the JSON report.
 
