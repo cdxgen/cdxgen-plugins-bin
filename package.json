@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "Binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {
