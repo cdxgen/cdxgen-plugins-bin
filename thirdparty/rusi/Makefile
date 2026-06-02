@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
 appname := rusi
