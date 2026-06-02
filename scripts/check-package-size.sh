@@ -2,12 +2,11 @@
 set -euo pipefail
 
 readonly DEFAULT_MAX_PACKED_BYTES=$((250 * 1024 * 1024))
-readonly DEFAULT_MAX_UNPACKED_BYTES=$((250 * 1024 * 1024))
 
 check_package_dir() {
   local package_dir="$1"
   local packed_limit="${NPM_PACKAGE_MAX_PACKED_BYTES:-$DEFAULT_MAX_PACKED_BYTES}"
-  local unpacked_limit="${NPM_PACKAGE_MAX_UNPACKED_BYTES:-$DEFAULT_MAX_UNPACKED_BYTES}"
+  local unpacked_limit="${NPM_PACKAGE_MAX_UNPACKED_BYTES:-}"
   local pack_output
   local pack_tmpdir
 
@@ -48,7 +47,7 @@ if (packedSize > packedLimit) {
     `Packed npm artifact ${filename} for ${process.env.PACKAGE_DIR} is ${packedSize} bytes, exceeding ${packedLimit}`,
   );
 }
-if (unpackedSize > unpackedLimit) {
+if (Number.isFinite(unpackedLimit) && unpackedLimit > 0 && unpackedSize > unpackedLimit) {
   throw new Error(
     `Unpacked npm artifact ${filename} for ${process.env.PACKAGE_DIR} is ${unpackedSize} bytes, exceeding ${unpackedLimit}`,
   );

@@ -25,4 +25,11 @@ if NPM_PACKAGE_MAX_PACKED_BYTES=1 bash "$helper_script" "$tmpdir/package" >/dev/
   exit 1
 fi
 
+if ! NPM_PACKAGE_MAX_UNPACKED_BYTES=1 bash "$helper_script" "$tmpdir/package" >/dev/null 2>&1; then
+  :
+else
+  echo "check-package-size.sh unexpectedly passed with an impossibly small unpacked limit" >&2
+  exit 1
+fi
+
 echo "check-package-size helper test passed"
