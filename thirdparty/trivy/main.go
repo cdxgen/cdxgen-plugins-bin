@@ -22,6 +22,7 @@ import (
 	"github.com/aquasecurity/trivy/pkg/commands"
 	"github.com/aquasecurity/trivy/pkg/commands/artifact"
 	"github.com/aquasecurity/trivy/pkg/commands/operation"
+	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/flag"
 	"github.com/aquasecurity/trivy/pkg/log"
@@ -74,9 +75,9 @@ type packageDecoration struct {
 }
 
 func main() {
-	os.Setenv("TRIVY_OFFLINE_SCAN", "true")
-	os.Setenv("TRIVY_DISABLE_TELEMETRY", "true")
-	os.Setenv("TRIVY_SKIP_VERSION_CHECK", "true")
+	_ = os.Setenv("TRIVY_OFFLINE_SCAN", "true")
+	_ = os.Setenv("TRIVY_DISABLE_TELEMETRY", "true")
+	_ = os.Setenv("TRIVY_SKIP_VERSION_CHECK", "true")
 	os.Exit(run())
 }
 
@@ -231,10 +232,11 @@ func applyCDXGenDefaults(opts *flag.Options) {
 	opts.Format = trivytypes.FormatCycloneDX
 	opts.NoProgress = true
 	opts.OfflineScan = true
-	opts.PkgTypes = []string{trivytypes.PkgTypeOS}
+	opts.PkgTypes = []string{trivytypes.PkgTypeOS, trivytypes.PkgTypeLibrary}
 	opts.Quiet = !opts.Debug
 	opts.Scanners = trivytypes.Scanners{trivytypes.SBOMScanner}
 	opts.SkipDBUpdate = true
+	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, cdxgenDisabledLanguageAnalyzers()...)
 	opts.SkipFiles = append(opts.SkipFiles,
 		"**/*.jar",
 		"**/*.war",
@@ -243,6 +245,19 @@ func applyCDXGenDefaults(opts *flag.Options) {
 	)
 	opts.SkipJavaDBUpdate = true
 	opts.SkipVersionCheck = true
+}
+
+func cdxgenDisabledLanguageAnalyzers() []analyzer.Type {
+	disabled := make([]analyzer.Type, 0, len(analyzer.TypeLanguages))
+	for _, analyzerType := range analyzer.TypeLanguages {
+		switch analyzerType {
+		case analyzer.TypeGoBinary, analyzer.TypeGoMod:
+			continue
+		default:
+			disabled = append(disabled, analyzerType)
+		}
+	}
+	return disabled
 }
 
 func runTarget(ctx context.Context, opts flag.Options, target string, targetKind artifact.TargetKind) error {
@@ -376,9 +391,9 @@ func collectPackageDecorations(results trivytypes.Results, target string, target
 				decoration.installedFiles = append(decoration.installedFiles, pkg.InstalledFiles...)
 			}
 			if opts.includeInstalledCmds {
-				paths, commands := extractInstalledCommands(rootfsTarget, pkg.InstalledFiles)
+				paths, installedCommands := extractInstalledCommands(rootfsTarget, pkg.InstalledFiles)
 				decoration.installedCommandPaths = append(decoration.installedCommandPaths, paths...)
-				decoration.installedCommands = append(decoration.installedCommands, commands...)
+				decoration.installedCommands = append(decoration.installedCommands, installedCommands...)
 			}
 			if trustDecoration, ok := trustMetadataByPackage[pkgID]; ok {
 				decoration.architecture = firstNonEmpty(trustDecoration.architecture, decoration.architecture)
@@ -414,7 +429,7 @@ func normalizePkgID(pkg ftypes.Package) string {
 
 func extractInstalledCommands(rootfsTarget string, installedFiles []string) ([]string, []string) {
 	var commandPaths []string
-	var commands []string
+	var commandNames []string
 	for _, installedFile := range uniqueSorted(installedFiles) {
 		if !looksLikeCommandPath(installedFile) {
 			continue
@@ -423,9 +438,9 @@ func extractInstalledCommands(rootfsTarget string, installedFiles []string) ([]s
 			continue
 		}
 		commandPaths = append(commandPaths, installedFile)
-		commands = append(commands, path.Base(installedFile))
+		commandNames = append(commandNames, path.Base(installedFile))
 	}
-	return uniqueSorted(commandPaths), uniqueSorted(commands)
+	return uniqueSorted(commandPaths), uniqueSorted(commandNames)
 }
 
 func looksLikeCommandPath(installedFile string) bool {
