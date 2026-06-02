@@ -120,22 +120,24 @@ fn collect_and_write_artifact(
     emit_dir: &Path,
     debug: bool,
 ) -> Result<()> {
+    let (analysis_root, emit_dir) = prepare_emit_dir(analysis_root, emit_dir)?;
     debug_log(
         debug,
         format_args!("pass=rustc-wrapper crate={}", tcx.crate_name(LOCAL_CRATE)),
     );
-    let artifact = EmbeddedCollector::collect(tcx, analysis_root, debug)?;
+    let artifact = EmbeddedCollector::collect(tcx, &analysis_root, debug)?;
     if artifact.declarations.is_empty() && artifact.files.is_empty() {
         return Ok(());
     }
-    fs::create_dir_all(emit_dir)
+    fs::create_dir_all(&emit_dir)
         .with_context(|| format!("failed to create {}", emit_dir.display()))?;
+    ensure_directory_within_root(&analysis_root, &emit_dir)?;
     let crate_name = tcx.crate_name(LOCAL_CRATE).to_string();
     let crate_root = tcx
         .sess
         .local_crate_source_file()
         .and_then(|path| path.into_local_path())
-        .map(|path| relative_display_path(analysis_root, &path))
+        .map(|path| relative_display_path(&analysis_root, &path))
         .unwrap_or_default();
     let output_path = emit_dir.join(format!(
         "{}.json",
@@ -6539,6 +6541,73 @@ fn path_is_under_root(root: &Path, path: &Path) -> bool {
     let root = canonical_path(root);
     let path = canonical_path(path);
     path.starts_with(root)
+}
+
+fn prepare_emit_dir(analysis_root: &Path, emit_dir: &Path) -> Result<(PathBuf, PathBuf)> {
+    let analysis_root = analysis_root
+        .canonicalize()
+        .with_context(|| format!("failed to resolve analysis root {}", analysis_root.display()))?;
+    let relative = emit_dir.strip_prefix(&analysis_root).with_context(|| {
+        format!(
+            "refusing to write compiler artifacts outside analysis root {}; got {}",
+            analysis_root.display(),
+            emit_dir.display()
+        )
+    })?;
+    let mut scoped_emit_dir = analysis_root.clone();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(part) => scoped_emit_dir.push(part),
+            _ => anyhow::bail!(
+                "refusing to use non-normal compiler artifact path {}",
+                emit_dir.display()
+            ),
+        }
+        ensure_safe_directory_component(&scoped_emit_dir)?;
+    }
+    Ok((analysis_root, scoped_emit_dir))
+}
+
+fn ensure_safe_directory_component(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to use symlinked compiler artifact path {}",
+                    path.display()
+                );
+            }
+            if !metadata.is_dir() {
+                anyhow::bail!(
+                    "compiler artifact path component {} exists and is not a directory",
+                    path.display()
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect compiler artifact path {}", path.display()))
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory_within_root(root: &Path, path: &Path) -> Result<()> {
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("failed to resolve analysis root {}", root.display()))?;
+    let canonical_path = path
+        .canonicalize()
+        .with_context(|| format!("failed to resolve compiler artifact directory {}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        anyhow::bail!(
+            "compiler artifact directory {} escapes analysis root {}",
+            canonical_path.display(),
+            canonical_root.display()
+        );
+    }
+    Ok(())
 }
 
 fn canonical_path(path: &Path) -> PathBuf {

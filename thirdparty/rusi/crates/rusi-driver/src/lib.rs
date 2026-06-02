@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -586,8 +586,8 @@ fn collect_embedded_compiler_evidence(
     capabilities: &DriverCapabilities,
 ) -> Result<CompilerEvidence> {
     let wrapper = ensure_embedded_wrapper_built(capabilities, options.debug)?;
-    let emit_dir = analysis_root.join("target/rusi-embedded");
-    let build_target_dir = analysis_root.join("target/rusi-embedded-build");
+    let emit_dir = scoped_child_dir(analysis_root, &["target", "rusi-embedded"])?;
+    let build_target_dir = scoped_child_dir(analysis_root, &["target", "rusi-embedded-build"])?;
     if emit_dir.exists() {
         fs::remove_dir_all(&emit_dir)
             .with_context(|| format!("failed to clear {}", emit_dir.display()))?;
@@ -600,6 +600,8 @@ fn collect_embedded_compiler_evidence(
         .with_context(|| format!("failed to create {}", emit_dir.display()))?;
     fs::create_dir_all(&build_target_dir)
         .with_context(|| format!("failed to create {}", build_target_dir.display()))?;
+    ensure_directory_within_root(analysis_root, &emit_dir)?;
+    ensure_directory_within_root(analysis_root, &build_target_dir)?;
 
     let mut command = Command::new("cargo");
     command.current_dir(analysis_root);
@@ -1114,7 +1116,12 @@ fn collect_native_interop_evidence(
 }
 
 fn package_context(package: &Package) -> Result<PackageContext> {
-    let manifest_path = PathBuf::from(package.manifest_path.as_std_path());
+    let manifest_path = fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
+        format!(
+            "failed to resolve package manifest {}",
+            package.manifest_path.as_std_path().display()
+        )
+    })?;
     let root_dir = manifest_path
         .parent()
         .map(Path::to_path_buf)
@@ -1129,30 +1136,118 @@ fn package_context(package: &Package) -> Result<PackageContext> {
 
 fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+    let mut visited_dirs = HashSet::new();
+    let allowed_root = canonical_path(&package_ctx.root_dir);
     if package_ctx.src_dir.exists() {
-        walk_rust_files(&package_ctx.src_dir, &mut files)?;
+        walk_rust_files(
+            &package_ctx.src_dir,
+            &allowed_root,
+            &mut visited_dirs,
+            &mut files,
+        )?;
     }
     if include_tests {
         let tests_dir = package_ctx.root_dir.join("tests");
         if tests_dir.exists() {
-            walk_rust_files(&tests_dir, &mut files)?;
+            walk_rust_files(&tests_dir, &allowed_root, &mut visited_dirs, &mut files)?;
         }
     }
     files.sort();
     Ok(files)
 }
 
-fn walk_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+fn walk_rust_files(
+    dir: &Path,
+    allowed_root: &Path,
+    visited_dirs: &mut HashSet<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(dir)
+        .with_context(|| format!("failed to inspect {}", dir.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(());
+    }
+    let canonical_dir = fs::canonicalize(dir)
+        .with_context(|| format!("failed to resolve {}", dir.display()))?;
+    if !canonical_dir.starts_with(allowed_root) || !visited_dirs.insert(canonical_dir.clone()) {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&canonical_dir)
+        .with_context(|| format!("failed to read {}", canonical_dir.display()))?
+    {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
-            walk_rust_files(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            files.push(path);
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            walk_rust_files(&path, allowed_root, visited_dirs, files)?;
+        } else if metadata.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            let canonical_file = fs::canonicalize(&path)
+                .with_context(|| format!("failed to resolve {}", path.display()))?;
+            if canonical_file.starts_with(allowed_root) {
+                files.push(canonical_file);
+            }
         }
     }
     Ok(())
+}
+
+fn scoped_child_dir(root: &Path, components: &[&str]) -> Result<PathBuf> {
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to resolve compiler backend root {}", root.display()))?;
+    let mut path = root.clone();
+    for component in components {
+        path.push(component);
+        ensure_safe_directory_component(&path)?;
+    }
+    Ok(path)
+}
+
+fn ensure_safe_directory_component(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                anyhow::bail!(
+                    "refusing to use symlinked compiler artifact path {}",
+                    path.display()
+                );
+            }
+            if !metadata.is_dir() {
+                anyhow::bail!(
+                    "compiler artifact path component {} exists and is not a directory",
+                    path.display()
+                );
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect compiler artifact path {}", path.display()))
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory_within_root(root: &Path, path: &Path) -> Result<()> {
+    let canonical_root = fs::canonicalize(root)
+        .with_context(|| format!("failed to resolve compiler backend root {}", root.display()))?;
+    let canonical_path = fs::canonicalize(path)
+        .with_context(|| format!("failed to resolve compiler artifact directory {}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        anyhow::bail!(
+            "compiler artifact directory {} escapes analysis root {}",
+            canonical_path.display(),
+            canonical_root.display()
+        );
+    }
+    Ok(())
+}
+
+fn canonical_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn module_path_for_file(package_ctx: &PackageContext, file_path: &Path) -> Vec<String> {
@@ -1495,14 +1590,17 @@ fn stable_id(prefix: &str, components: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use pretty_assertions::assert_eq;
 
     use super::{
         BACKEND_KIND_EMBEDDED, BACKEND_KIND_STUB, DRIVER_PROTOCOL_VERSION, DriverOptions,
-        DriverProtocolEnvelope, cargo_check_target_args, detect_capabilities, run_driver,
+        DriverProtocolEnvelope, PackageContext, cargo_check_target_args, detect_capabilities,
+        discover_rust_files, run_driver, scoped_child_dir,
     };
     use rusi_core::{AnalysisScope, AnalyzeOptionsInput};
 
@@ -1510,6 +1608,21 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures")
             .join(name)
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rusi-driver-{prefix}-{timestamp}"));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[cfg(unix)]
+    fn create_dir_symlink(src: &std::path::Path, dst: &std::path::Path) {
+        std::os::unix::fs::symlink(src, dst).expect("create directory symlink");
     }
 
     fn test_guard() -> MutexGuard<'static, ()> {
@@ -1524,6 +1637,46 @@ mod tests {
     fn cargo_check_skips_test_targets_by_default() {
         assert!(cargo_check_target_args(false).is_empty());
         assert_eq!(cargo_check_target_args(true), &["--all-targets"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn driver_skips_symlinked_source_directories_during_file_discovery() {
+        let _guard = test_guard();
+        let root = temp_dir("symlink-root");
+        let outside = temp_dir("symlink-outside");
+        let outside_src = outside.join("src");
+        fs::create_dir_all(&outside_src).expect("create outside src");
+        fs::write(outside_src.join("main.rs"), "fn main() {}\n").expect("write external main.rs");
+        create_dir_symlink(&outside_src, &root.join("src"));
+
+        let package_ctx = PackageContext {
+            package_name: "symlink-skip".to_string(),
+            crate_name: "symlink_skip".to_string(),
+            root_dir: fs::canonicalize(&root).expect("canonical root"),
+            src_dir: root.join("src"),
+        };
+        let files = discover_rust_files(&package_ctx, false).expect("file discovery succeeds");
+        assert!(files.is_empty());
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compiler_artifact_dirs_reject_symlinked_target_ancestors() {
+        let _guard = test_guard();
+        let root = temp_dir("artifact-root");
+        let outside = temp_dir("artifact-outside");
+        create_dir_symlink(&outside, &root.join("target"));
+
+        let error = scoped_child_dir(&root, &["target", "rusi-embedded"]) 
+            .expect_err("symlinked artifact path must be rejected");
+        assert!(error.to_string().contains("symlinked compiler artifact path"));
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]

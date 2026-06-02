@@ -726,12 +726,22 @@ fn push_gexf_attvalue(xml: &mut String, key: &str, value: &str, indent: usize) {
 }
 
 fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            '\u{9}' | '\u{A}' | '\u{D}' => escaped.push(ch),
+            ch if matches!(ch, '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}') => {
+                escaped.push(ch)
+            }
+            _ => escaped.push('\u{FFFD}'),
+        }
+    }
+    escaped
 }
 
 fn json_text<T: serde::Serialize>(value: &T) -> String {
@@ -745,7 +755,22 @@ mod tests {
         DataFlowPatternSet, DataFlowSlice, DataFlowStats, Diagnostic, GraphStats, Position,
     };
 
-    use super::{render_call_graph_export, render_data_flow_export};
+    use super::{render_call_graph_export, render_data_flow_export, xml_escape};
+
+    #[test]
+    fn xml_escape_replaces_invalid_control_characters() {
+        let escaped = xml_escape("bad\u{1f}&<>'\"\n\t\r");
+        assert!(!escaped.contains('\u{1f}'));
+        assert!(escaped.contains('\u{FFFD}'));
+        assert!(escaped.contains("&amp;"));
+        assert!(escaped.contains("&lt;"));
+        assert!(escaped.contains("&gt;"));
+        assert!(escaped.contains("&apos;"));
+        assert!(escaped.contains("&quot;"));
+        assert!(escaped.contains('\n'));
+        assert!(escaped.contains('\t'));
+        assert!(escaped.contains('\r'));
+    }
 
     #[test]
     fn call_graph_graphml_and_gexf_include_purls() {

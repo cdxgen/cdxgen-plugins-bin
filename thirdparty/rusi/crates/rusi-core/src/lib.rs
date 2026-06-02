@@ -665,7 +665,12 @@ fn workspace_package_contexts(metadata: &Metadata) -> Result<Vec<PackageContext>
 }
 
 fn package_context(package: &Package) -> Result<PackageContext> {
-    let manifest_path = PathBuf::from(package.manifest_path.as_std_path());
+    let manifest_path = fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
+        format!(
+            "failed to resolve package manifest {}",
+            package.manifest_path.as_std_path().display()
+        )
+    })?;
     let root_dir = manifest_path
         .parent()
         .map(Path::to_path_buf)
@@ -688,30 +693,67 @@ fn package_context(package: &Package) -> Result<PackageContext> {
 
 fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+    let mut visited_dirs = HashSet::new();
+    let allowed_root = canonical_path(&package_ctx.root_dir);
     if package_ctx.src_dir.exists() {
-        walk_rust_files(&package_ctx.src_dir, &mut files)?;
+        walk_rust_files(
+            &package_ctx.src_dir,
+            &allowed_root,
+            &mut visited_dirs,
+            &mut files,
+        )?;
     }
     if include_tests {
         let tests_dir = package_ctx.root_dir.join("tests");
         if tests_dir.exists() {
-            walk_rust_files(&tests_dir, &mut files)?;
+            walk_rust_files(&tests_dir, &allowed_root, &mut visited_dirs, &mut files)?;
         }
     }
     files.sort();
     Ok(files)
 }
 
-fn walk_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+fn walk_rust_files(
+    dir: &Path,
+    allowed_root: &Path,
+    visited_dirs: &mut HashSet<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(dir)
+        .with_context(|| format!("failed to inspect {}", dir.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(());
+    }
+    let canonical_dir = fs::canonicalize(dir)
+        .with_context(|| format!("failed to resolve {}", dir.display()))?;
+    if !canonical_dir.starts_with(allowed_root) || !visited_dirs.insert(canonical_dir.clone()) {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&canonical_dir)
+        .with_context(|| format!("failed to read {}", canonical_dir.display()))?
+    {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
-            walk_rust_files(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            files.push(path);
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            walk_rust_files(&path, allowed_root, visited_dirs, files)?;
+        } else if metadata.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            let canonical_file = fs::canonicalize(&path)
+                .with_context(|| format!("failed to resolve {}", path.display()))?;
+            if canonical_file.starts_with(allowed_root) {
+                files.push(canonical_file);
+            }
         }
     }
     Ok(())
+}
+
+fn canonical_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn analyze_file(
@@ -4072,7 +4114,9 @@ fn compute_stats(report: &Report) -> Stats {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use pretty_assertions::assert_eq;
 
@@ -4090,6 +4134,21 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures")
             .join(name)
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rusi-{prefix}-{timestamp}"));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[cfg(unix)]
+    fn create_dir_symlink(src: &std::path::Path, dst: &std::path::Path) {
+        std::os::unix::fs::symlink(src, dst).expect("create directory symlink");
     }
 
     #[test]
@@ -4798,6 +4857,37 @@ mod tests {
                 .iter()
                 .any(|component| component.id == "crypto-component-compiler-test")
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_source_directories_are_skipped_during_file_discovery() {
+        let root = temp_dir("symlink-root");
+        let outside = temp_dir("symlink-outside");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"symlink-skip\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("write Cargo.toml");
+        let outside_src = outside.join("src");
+        fs::create_dir_all(&outside_src).expect("create outside src");
+        fs::write(outside_src.join("main.rs"), "fn main() {}\n").expect("write external main.rs");
+        create_dir_symlink(&outside_src, &root.join("src"));
+
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        assert!(report.files.is_empty());
+        assert!(report.declarations.is_empty());
+        assert!(report.packages.iter().all(|package| package.files.is_empty()));
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
     }
 
     #[test]
