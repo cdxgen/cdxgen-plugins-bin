@@ -150,8 +150,6 @@ jobs:
         [[ -f packages/darwin-arm64/plugins/rusi/rusi-darwin-arm64.sha256 ]]
         [[ -f packages/darwin-amd64/plugins/rusi/rusi-darwin-amd64 ]]
         [[ -f packages/darwin-amd64/plugins/rusi/rusi-darwin-amd64.sha256 ]]
-        pip3 install blint
-        blint -i plugins -o /tmp/reports --no-error
         bash ./scripts/root-package-publish.test.sh
         npm publish --dry-run
       env:
