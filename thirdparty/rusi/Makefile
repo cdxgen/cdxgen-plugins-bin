@@ -1,6 +1,10 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
+CARGO_HOME ?= $(HOME)/.cargo
+export CARGO_HOME
+export PATH := $(CARGO_HOME)/bin:$(PATH)
+
 appname := rusi
 workspace_manifest := Cargo.toml
 build_dir := build
@@ -41,7 +45,9 @@ endif
 bootstrap-linux:
 	rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
 	rustup target add --toolchain nightly $(linux_triples) $(linuxmusl_triples) $(windows_triples)
-	$(cargo_nightly) install cargo-zigbuild --locked
+	$(cargo_nightly) install cargo-zigbuild --locked --force
+	@command -v cargo-zigbuild >/dev/null 2>&1 || { echo "cargo-zigbuild was installed but is not on PATH ($(PATH))" >&2; exit 1; }
+	@$(cargo_nightly) zigbuild --version >/dev/null
 
 bootstrap-darwin:
 	rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
@@ -65,6 +71,10 @@ define ensure_zigbuild
 	fi
 	@if ! command -v zig >/dev/null 2>&1; then \
 		echo "zig is required to cross-build $(1); install zig and rerun make." >&2; \
+		exit 1; \
+	fi
+	@if ! command -v cargo-zigbuild >/dev/null 2>&1; then \
+		echo "cargo-zigbuild binary is not on PATH ($(PATH)); run 'make bootstrap-linux' first." >&2; \
 		exit 1; \
 	fi
 	@if ! $(cargo_nightly) zigbuild --version >/dev/null 2>&1; then \
