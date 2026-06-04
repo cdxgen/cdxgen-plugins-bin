@@ -43,13 +43,13 @@ For a field-by-field JSON reference, see [JSON_ATTRIBUTE_REFERENCE.md](JSON_ATTR
 
 Call graphs are built from Go SSA using the implementations in `golang.org/x/tools/go/callgraph`:
 
-| Mode | Implementation | Practical behavior |
-|------|---------------|-------------------|
-| none | No graph | Fastest mode. Reports source evidence only. |
-| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited. |
-| cha | cha.CallGraph | More conservative for interface dispatch. Usually more edges. |
-| rta | rta.Analyze | Starts from discovered init and main roots. Useful for executable reachability. |
-| vta | vta.CallGraph | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by x/tools. |
+| Mode   | Implementation   | Practical behavior                                                                                                                            |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| none   | No graph         | Fastest mode. Reports source evidence only.                                                                                                   |
+| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited.                                                               |
+| cha    | cha.CallGraph    | More conservative for interface dispatch. Usually more edges.                                                                                 |
+| rta    | rta.Analyze      | Starts from discovered init and main roots. Useful for executable reachability.                                                               |
+| vta    | vta.CallGraph    | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by x/tools. |
 
 Golem converts the raw graph into stable node and edge records. A node represents an SSA function with package path, package name, module, package URL when available, receiver, signature, local or external classification, standard library classification, synthetic flag, and source position. An edge records caller, callee, call site location, package URLs for both ends, and whether the call site has a static callee.
 
@@ -95,16 +95,16 @@ By default, Golem drops call graph edges and data-flow slices that are entirely 
 
 Large repositories can be controlled with these limits:
 
-| Option | Default | Purpose |
-|--------|--------|---------|
-| `--dataflow-max-slices` | 1000 | Stop materializing slices after this count and emit truncation diagnostics. |
-| `--dataflow-workers` | 0 | Number of per-function workers. 0 uses available scheduler parallelism. |
-| `--dataflow-large-repo-functions` | 1000 | Function count where large-repo materialization safeguards start. |
-| `--dataflow-max-function-instructions` | 200 | Skip slice materialization for very large functions in large repositories. Summaries are still inferred. |
-| `--dataflow-max-trace-nodes` | 64 | Maximum node IDs retained in an in-memory trace. |
-| `--dataflow-max-trace-edges` | 128 | Maximum edge IDs retained in an in-memory trace. |
-| `--dataflow-skip-generated` | false | Skip generated files during slice materialization. |
-| `--dataflow-skip-tests` | false | Skip tests, examples, and benchmarks during slice materialization. |
+| Option                                 | Default | Purpose                                                                                                  |
+| -------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `--dataflow-max-slices`                | 1000    | Stop materializing slices after this count and emit truncation diagnostics.                              |
+| `--dataflow-workers`                   | 0       | Number of per-function workers. 0 uses available scheduler parallelism.                                  |
+| `--dataflow-large-repo-functions`      | 1000    | Function count where large-repo materialization safeguards start.                                        |
+| `--dataflow-max-function-instructions` | 200     | Skip slice materialization for very large functions in large repositories. Summaries are still inferred. |
+| `--dataflow-max-trace-nodes`           | 64      | Maximum node IDs retained in an in-memory trace.                                                         |
+| `--dataflow-max-trace-edges`           | 128     | Maximum edge IDs retained in an in-memory trace.                                                         |
+| `--dataflow-skip-generated`            | false   | Skip generated files during slice materialization.                                                       |
+| `--dataflow-skip-tests`                | false   | Skip tests, examples, and benchmarks during slice materialization.                                       |
 
 Use `--max-procs` to cap Go scheduler parallelism, `--memory-limit` to set Go's soft memory limit, and `--progress` to print coarse package loading, SSA, call graph, and data-flow progress logs.
 

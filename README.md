@@ -1,10 +1,10 @@
 # cdxgen-plugins-bin
 
-Binary plugins that extend the capabilities of [cdxgen](https://github.com/cdxgen/cdxgen), the open-source SBOM (Software Bill of Materials) generator. This repository builds, packages, and distributes native helper binaries that cdxgen invokes to perform deep analysis tasks that require language-specific tooling, operating system instrumentation, or cryptographic inspection.
+Binary plugins that extend the capabilities of [cdxgen](https://github.com/cdxgen/cdxgen), the open-source BOM (Bill of Materials) generator. This repository builds, packages, and distributes native helper binaries that cdxgen invokes to perform deep analysis tasks that require language-specific tooling, operating system instrumentation, or cryptographic inspection.
 
 ## Purpose
 
-cdxgen generates SBOMs in CycloneDX format by analyzing project source code, container images, and host environments. However, certain analysis domains require specialized native binaries that go beyond what a pure Node.js application can provide:
+cdxgen generates BOMs in CycloneDX format by analyzing project source code, container images, and host environments. However, certain analysis domains require specialized native binaries that go beyond what a pure Node.js application can provide:
 
 - **Container and OS package inventory** requires native access to package managers (APK, DPKG, RPM) and filesystem structures
 - **Operating system instrumentation** needs live process, file, and network data from the host
@@ -20,24 +20,24 @@ This repository bundles those native binaries into installable npm packages so t
 +------------------------------------------------------------------+
 |                        cdxgen (Node.js)                          |
 |                                                                  |
-|  +-------------+  +-------------+  +-------------+              |
-|  |  SBOM Gen   |  |  Host Scan  |  |  Language   |              |
-|  |  Pipeline   |  |  Pipeline   |  |  Analyzer   |              |
-|  +------+------+  +------+------+  +------+------+              |
+|  +-------------+  +-------------+  +-------------+               |
+|  |  SBOM Gen   |  |  Host Scan  |  |  Language   |               |
+|  |  Pipeline   |  |  Pipeline   |  |  Analyzer   |               |
+|  +------+------+  +------+------+  +------+------+               |
 |         |              |              |        |                 |
 |         |              |              |        |                 |
 |         v              v              v        v                 |
 |  +----------+  +----------+  +----------+  +----------+          |
-|  | trivy-   |  | osqueryi-|  | golem-   |  | rusi-    |          |
-|  | cdxgen   |  | cdxgen   |  | cdxgen   |  | cdxgen   |          |
+|  | trivy    |  | osqueryi |  | golem    |  | rusi     |          |
+|  |          |  |          |  |          |  |          |          |
 |  |          |  |          |  |          |  |          |          |
 |  +----------+  +----------+  +----------+  +----------+          |
 |         |              |              |        |                 |
 |         |              |              |        |                 |
 |         v              v              v        v                 |
 |  +----------+  +----------+  +----------+  +----------+          |
-|  | source-  |  | dosai-   |  | trust-   |  | trust-   |          |
-|  | kitten   |  | cdxgen   |  | inspec-  |  | inspec-  |          |
+|  | source-  |  | dosai    |  | trust-   |  | trust-   |          |
+|  | kitten   |  |          |  | inspec-  |  | inspec-  |          |
 |  |          |  |          |  | tor      |  | tor      |          |
 |  +----------+  +----------+  +----------+  +----------+          |
 +------------------------------------------------------------------+
@@ -74,7 +74,7 @@ A custom wrapper around [Trivy](https://github.com/aquasecurity/trivy) optimized
 
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, darwin-amd64, ppc64
 
-### osqueryi
+### osquery
 
 A wrapper around [osquery](https://github.com/osquery/osquery), the SQL-powered operating system instrumentation platform. osquery exposes the operating system as a high-performance relational database, allowing cdxgen to query live host data for OBOM (Operating System Bill of Materials) collection.
 
@@ -133,7 +133,7 @@ The tool returns a single JSON object with three possible top-level keys:
 
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64, darwin-amd64, windows-amd64, windows-arm64
 
-### golem-cdxgen
+### golem
 
 Go Library Evidence Mapper (Golem) is a static analyzer for Go source trees. It loads a module or workspace with the Go toolchain, resolves types, builds SSA when needed, and writes a compact JSON report about code structure, dependencies, call relationships, cryptographic use, and selected data flows.
 
@@ -146,13 +146,13 @@ Go Library Evidence Mapper (Golem) is a static analyzer for Go source trees. It 
 
 **Call graph modes:**
 
-| Mode | Implementation | Practical behavior |
-|------|---------------|-------------------|
-| none | No graph | Fastest mode. Reports source evidence only. |
-| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited. |
-| cha | cha.CallGraph | More conservative for interface dispatch. Usually more edges. |
-| rta | rta.Analyze | Starts from discovered init and main roots. Useful for executable reachability. |
-| vta | vta.CallGraph | Uses variable type analysis over functions reachable in the static graph. Often more precise. |
+| Mode   | Implementation   | Practical behavior                                                                            |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------- |
+| none   | No graph         | Fastest mode. Reports source evidence only.                                                   |
+| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited.               |
+| cha    | cha.CallGraph    | More conservative for interface dispatch. Usually more edges.                                 |
+| rta    | rta.Analyze      | Starts from discovered init and main roots. Useful for executable reachability.               |
+| vta    | vta.CallGraph    | Uses variable type analysis over functions reachable in the static graph. Often more precise. |
 
 **Data-flow modes:**
 
@@ -162,7 +162,7 @@ Go Library Evidence Mapper (Golem) is a static analyzer for Go source trees. It 
 
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64, darwin-amd64, windows-amd64, windows-arm64
 
-### rusi-cdxgen
+### rusi
 
 Rust Source Inspector (Rusi) is a Rust code analysis engine for evidence collection. It is designed to help downstream tooling and reviewers answer questions about what packages, files, symbols, and imports exist in a Rust repository, which APIs look security-sensitive, and what cryptographic libraries appear relevant for CBOM-style review.
 
@@ -183,7 +183,11 @@ Rusi can merge custom JSON modeling with the built-in stable data-flow pack thro
     { "pattern": "mycrate::config::read_key", "category": "custom-source" }
   ],
   "sinks": [
-    { "pattern": "mycrate::shell::run", "category": "custom-command", "relevant_arguments": [0] }
+    {
+      "pattern": "mycrate::shell::run",
+      "category": "custom-command",
+      "relevant_arguments": [0]
+    }
   ]
 }
 ```
@@ -226,6 +230,7 @@ Raw helper binaries are uploaded alongside their SHA-256 sidecars. For example: 
 ### GHCR / ORAS
 
 Individual helper binaries are published to GitHub Container Registry using ORAS. Each binary has its own tag corresponding to the binary filename. For example:
+
 - `ghcr.io/cdxgen/cdxgen-plugins-bin:golem-linuxmusl-amd64`
 - `ghcr.io/cdxgen/cdxgen-plugins-bin:trustinspector-cdxgen-linuxmusl-arm64`
 

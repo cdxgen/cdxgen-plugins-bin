@@ -4,13 +4,13 @@ This folder contains source code and build scripts for the third-party tools use
 
 ## Tool Overview
 
-| Tool | Origin | Purpose | Maintained By |
-|------|--------|---------|---------------|
-| trivy-cdxgen | [Trivy](https://github.com/aquasecurity/trivy) | Container and rootfs OS package inventory | cdxgen team |
-| sourcekitten | [SourceKitten](https://github.com/jpsim/SourceKitten) | Swift source analysis via SourceKit | cdxgen team |
-| trustinspector-cdxgen | Custom | Trust anchor and code-signing inspection | cdxgen team |
-| golem-cdxgen | Custom | Go source semantic analysis and data-flow | cdxgen team |
-| rusi-cdxgen | Custom | Rust source semantic analysis and data-flow | cdxgen team |
+| Tool                  | Origin                                                | Purpose                                     | Maintained By |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------- | ------------- |
+| trivy-cdxgen          | [Trivy](https://github.com/aquasecurity/trivy)        | Container and rootfs OS package inventory   | cdxgen team   |
+| sourcekitten          | [SourceKitten](https://github.com/jpsim/SourceKitten) | Swift source analysis via SourceKit         | cdxgen team   |
+| trustinspector-cdxgen | Custom                                                | Trust anchor and code-signing inspection    | cdxgen team   |
+| golem                 | Custom                                                | Go source semantic analysis and data-flow   | cdxgen team   |
+| rusi                  | Custom                                                | Rust source semantic analysis and data-flow | cdxgen team   |
 
 ## trivy
 
