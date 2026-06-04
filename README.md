@@ -14,37 +14,6 @@ cdxgen generates BOMs in CycloneDX format by analyzing project source code, cont
 
 This repository bundles those native binaries into installable npm packages so that cdxgen can invoke them transparently when the appropriate analysis mode is triggered.
 
-## Architecture
-
-```
-+------------------------------------------------------------------+
-|                        cdxgen (Node.js)                          |
-|                                                                  |
-|  +-------------+  +-------------+  +-------------+               |
-|  |  SBOM Gen   |  |  Host Scan  |  |  Language   |               |
-|  |  Pipeline   |  |  Pipeline   |  |  Analyzer   |               |
-|  +------+------+  +------+------+  +------+------+               |
-|         |              |              |        |                 |
-|         |              |              |        |                 |
-|         v              v              v        v                 |
-|  +----------+  +----------+  +----------+  +----------+          |
-|  | trivy    |  | osqueryi |  | golem    |  | rusi     |          |
-|  |          |  |          |  |          |  |          |          |
-|  |          |  |          |  |          |  |          |          |
-|  +----------+  +----------+  +----------+  +----------+          |
-|         |              |              |        |                 |
-|         |              |              |        |                 |
-|         v              v              v        v                 |
-|  +----------+  +----------+  +----------+  +----------+          |
-|  | source-  |  | dosai    |  | trust-   |  | trust-   |          |
-|  | kitten   |  |          |  | inspec-  |  | inspec-  |          |
-|  |          |  |          |  | tor      |  | tor      |          |
-|  +----------+  +----------+  +----------+  +----------+          |
-+------------------------------------------------------------------+
-```
-
-cdxgen resolves helper binaries from the installed package and invokes them only for features that need native collection or deeper language analysis. The plugins are **optional dependencies** of cdxgen, meaning they are installed automatically when cdxgen is installed globally or when a project uses a language that requires them.
-
 ## Bundled Helpers
 
 ### trivy-cdxgen
