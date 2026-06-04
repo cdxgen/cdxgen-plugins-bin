@@ -1,40 +1,38 @@
-# cdxgen trustinspector helper
+# TrustInspector
 
-This directory contains the cdxgen-specific trust inspection helper used to build the `trustinspector-cdxgen-*` binaries.
+TrustInspector is a specialized helper for performing trust-oriented inspection of operating system and root filesystem components. It is designed to provide lightweight, structured JSON evidence for security audits and compliance workflows.
 
-## What it does
+## Capabilities
 
-The helper provides lightweight JSON output for trust-oriented OS and rootfs inspection workflows:
+TrustInspector automates the collection of trust metadata across different platforms and inspection targets.
 
-- deep inspection of trusted keyring material and certificate stores in unpacked root filesystems
-- macOS code-signing and notarization metadata for selected application or binary paths
-- Windows Authenticode metadata for selected executable paths
-- Windows WDAC active-policy inventory
-- macOS Gatekeeper posture fallback when direct host inspection is requested
+| Target | Inspection Type | Details |
+| :--- | :--- | :--- |
+| **RootFS** | Keyring/Cert Inspection | Deep inspection of trusted keyring material and CA stores in unpacked root filesystems. |
+| **Paths** | Signing/Notarization | Verification of macOS code-signing/notarization and Windows Authenticode metadata for specific binaries. |
+| **Host** | Posture Assessment | Inspection of host trust posture, such as Windows WDAC active policies or macOS Gatekeeper status. |
 
-The tool is intentionally cdxgen-oriented and emits stable, merge-friendly JSON rather than full CycloneDX documents.
+## Command Modes
 
-## Command modes
+The tool is operated via specific command modes that dictate the inspection logic and JSON output shape.
 
-- `trustinspector-cdxgen rootfs <dir>` — inspect trust anchors inside an unpacked root filesystem
-- `trustinspector-cdxgen paths <path> [path...]` — inspect signing/notarization state for selected binaries or apps
-- `trustinspector-cdxgen host` — inspect host trust posture such as Gatekeeper or WDAC active policies
-
-## JSON output shape
-
-Each invocation returns a single JSON object. Only the field relevant to the selected command is populated.
-
-### Common property object
-
-```json
-{
-  "name": "cdx:windows:authenticode:status",
-  "value": "Valid"
-}
+```mermaid
+graph TD
+    CMD[Command Mode] -->|rootfs| R[Inspect untrusted root filesystem keyrings]
+    CMD -->|paths| P[Inspect signing state of selected files]
+    CMD -->|host| H[Inspect host security policy/posture]
 ```
 
-### `rootfs` response
+* `trustinspector-cdxgen rootfs <dir>`: Inspects trust anchors within an unpacked root filesystem.
+* `trustinspector-cdxgen paths <path> [path...]`: Inspects signing or notarization state for selected application or binary paths.
+* `trustinspector-cdxgen host`: Inspects host trust posture (e.g., WDAC, Gatekeeper).
 
+## JSON Output Structure
+
+The tool emits stable, merge-friendly JSON objects. Each invocation returns a single object containing the relevant findings.
+
+### `rootfs` Response Example
+Returns a list of `materials` found in the filesystem.
 ```json
 {
   "materials": [
@@ -42,91 +40,34 @@ Each invocation returns a single JSON object. Only the field relevant to the sel
       "kind": "public-key",
       "path": "/usr/share/keyrings/debian-archive-keyring.gpg",
       "name": "debian-archive-keyring.gpg",
-      "sha1": "...",
-      "sha256": "...",
       "algorithm": "RSA",
-      "keyStrength": 4096,
-      "fingerprint": "...",
-      "keyId": "...",
-      "createdAt": "2024-01-01T00:00:00Z",
-      "expiresAt": "2034-01-01T00:00:00Z",
-      "trustDomain": "apt",
-      "fileExtension": "gpg",
-      "userIds": [
-        "Debian Archive Automatic Signing Key <ftpmaster@debian.org>"
-      ],
-      "properties": [{ "name": "cdx:crypto:keyId", "value": "..." }]
-    },
-    {
-      "kind": "certificate",
-      "path": "/etc/ssl/certs/ca-certificates.crt",
-      "name": "demo-root",
-      "sha1": "...",
-      "sha256": "...",
-      "subject": "CN=demo-root,O=Example Org",
-      "issuer": "CN=demo-root,O=Example Org",
-      "serial": "42",
-      "createdAt": "2023-11-14T22:13:20Z",
-      "expiresAt": "2027-01-15T08:00:00Z",
-      "trustDomain": "ca-store",
-      "category": "ca-store",
-      "format": "X.509",
-      "fileExtension": "crt",
-      "fingerprint": "...",
-      "properties": [{ "name": "cdx:crypto:isCA", "value": "true" }]
+      "trustDomain": "apt"
     }
   ]
 }
 ```
 
-### `paths` response
-
+### `paths` Response Example
+Returns `inspections` results for the provided paths.
 ```json
 {
   "inspections": [
     {
-      "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "path": "C:\\Windows\\System32\\powershell.exe",
       "properties": [
-        { "name": "cdx:windows:authenticode:status", "value": "Valid" },
-        { "name": "cdx:windows:authenticode:isOSBinary", "value": "true" }
+        { "name": "cdx:windows:authenticode:status", "value": "Valid" }
       ]
     }
   ]
 }
 ```
 
-On macOS the `properties` array instead contains keys such as `cdx:darwin:codesign:*` and `cdx:darwin:notarization:*`.
+## Stability and CI
 
-### `host` response
+* **Stable Schema**: Top-level keys (`materials`, `inspections`, `hostFindings`) and the `properties` array format are stable.
+* **Downstream Consumption**: The tool is optimized for `cdxgen` to ingest findings as metadata.
+* **Testing**: The repository includes a Windows smoke test path that validates manifest generation and host/path inspection.
 
-```json
-{
-  "hostFindings": [
-    {
-      "kind": "windows-wdac-status",
-      "name": "wdac-active-policies",
-      "version": "0",
-      "description": "C:\\Windows\\System32\\CodeIntegrity\\CiPolicies\\Active",
-      "properties": [
-        { "name": "cdx:windows:wdac:activePolicyCount", "value": "0" }
-      ]
-    }
-  ]
-}
-```
+## Implementation Notes
 
-`hostFindings[*]` may also include:
-
-- `path` for file-backed findings such as individual WDAC policy files
-- `sha256` for file-backed findings
-- macOS Gatekeeper posture entries with `cdx:darwin:gatekeeper:*` properties
-
-## Stability notes
-
-- The top-level object keys are stable: `materials`, `inspections`, `hostFindings`
-- `properties` is always an array of `{ name, value }` objects when present
-- unknown future properties may be added, so downstream consumers should ignore keys they do not recognize
-
-## CI notes
-
-The repository test workflow includes a Windows smoke path that builds the helper, validates manifest generation, runs `trustinspector host`, and inspects a signed Windows system binary with `trustinspector paths`.
+TrustInspector is built to be a lightweight, non-interactive tool. It is intentionally cdxgen-oriented and focuses on emitting merge-friendly JSON rather than full CycloneDX documents.

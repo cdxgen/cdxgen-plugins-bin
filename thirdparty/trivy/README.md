@@ -1,35 +1,35 @@
-# cdxgen Trivy wrapper
+# Trivy Wrapper (cdxgen-optimized)
 
-This directory contains the cdxgen-specific Trivy wrapper used to build the `trivy-cdxgen-*` binaries.
+The Trivy Wrapper is a customized version of [Trivy](https://github.com/aquasecurity/trivy) specifically optimized for integration with `cdxgen`. It provides high-density OS package inventory and provenance metadata for container and rootfs scanning.
 
-## What is customized
+Unlike the standard Trivy CLI, this wrapper is designed for automated, non-interactive SBOM enrichment.
 
-Compared to the stock `cmd/trivy/main.go`, this wrapper is intentionally optimized for the way `cdxgen` calls Trivy:
+## Optimizations for SBOM Enrichment
 
-- exposes only the `image`, `rootfs`, and `version` commands
-- defaults `image`/`rootfs` scans to CycloneDX SBOM output
-- forces offline, no-update, no-progress operation
-- limits language package collection to Go modules and Go binaries while still collecting OS packages
-- suppresses noisy output unless `--debug` is passed
-- enriches OS package components with:
-  - package-manager capability/provide metadata
-  - installed command names
-  - installed command paths
-  - installed file counts
-  - installed file paths
-  - package trust-state metadata (`PackageArchitecture`, `PackageOrigin`, `PackageSource`, `PackageStatus`, `PackageVendor`)
-  - native CycloneDX `supplier` population from maintainer metadata when available
-  - OS lifecycle metadata (`OSFamily`, `OSName`, `OSEOL`, `OSExtendedSupport`)
+The wrapper modifies the standard Trivy behavior to better suit the `cdxgen` workflow:
 
-When the wrapper output is consumed by `cdxgen`, maintainer/vendor trust metadata is further promoted into native CycloneDX component fields such as `authors` and `manufacturer` when that can be done without overwriting differing existing values.
+* **Command Limitation**: Exposes only `image`, `rootfs`, and `version` commands to reduce complexity.
+* **Output Focus**: Defaults `image` and `rootfs` scans to CycloneDX SBOM output.
+* **Operational Rigor**: Forces offline, no-update, and no-progress operation, making it suitable for CI/CD pipelines.
+* **Noise Suppression**: Suppresses verbose output unless `--debug` is passed.
+* **Language Filtering**: Limits language package collection to Go modules and Go binaries while maintaining full OS package collection.
+
+### Enrichment Features
+
+The wrapper enriches OS package components with high-fidelity metadata:
+
+| Metadata Type | Examples |
+| :--- | :--- | :--- |
+| **Capability/Provide** | Package capability and provide metadata |
+| **Installation Context** | Command names, command paths, and file counts |
+| **Provenance** | Package architecture, origin, source, and status |
+| **OS Lifecycle** | OS Family, OS Name, OSEOL, and Extended Support status |
+
+When consumed by `cdxgen`, maintainer and vendor trust metadata is automatically promoted into native CycloneDX fields such as `authors` and `manufacturer`.
 
 ## Usage
 
-Build a local test binary from this directory:
-
-```bash
-GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
-```
+### Scanning a Local RootFS
 
 Generate a CycloneDX SBOM from an unpacked root filesystem:
 
@@ -37,44 +37,40 @@ Generate a CycloneDX SBOM from an unpacked root filesystem:
 ./build/trivy-cdxgen-local rootfs --output result.cdx.json /path/to/rootfs
 ```
 
-The exact local command used during regression validation was:
+### Scanning an Exported Image
 
-```bash
-./build/trivy-cdxgen-local rootfs --debug --output "$OUT" "$ROOTFS"
+To scan an image, export it using Docker, unpack it, and run the wrapper against the extracted rootfs:
+
+```mermaid
+graph LR
+    A[Docker Image] -->|docker export| B[Tarball]
+    B -->|tar -xf| C[Extracted RootFS]
+    C -->|trivy-cdxgen| D[CycloneDX SBOM]
 ```
 
-## Examples
-
-### Scan an exported image rootfs
-
-Pull the test image, export it with `docker`, unpack it, and run the local wrapper against the extracted rootfs:
-
 ```bash
+# Example workflow
 docker pull alpine:latest
-CID="trivy-cdxgen-docker-test"
-ROOTFS="$(mktemp -d /tmp/docker-rootfs.XXXXXX)"
-TAR="$(mktemp /tmp/docker-rootfs.XXXXXX.tar)"
-docker create --name "$CID" alpine:latest
-docker export "$CID" > "$TAR"
-tar -xf "$TAR" -C "$ROOTFS"
-./build/trivy-cdxgen-local rootfs --debug --output docker-backend.cdx.json "$ROOTFS"
-docker rm -f "$CID"
+docker create --name "test-container" alpine:latest
+docker export "test-container" > "alpine.tar"
+tar -xf "alpine.tar" -C "/tmp/alpine-rootfs"
+./build/trivy-cdxgen-local rootfs --output alpine-rootfs.cdx.json "/tmp/alpine-rootfs"
+docker rm -f "test-container"
 ```
 
-### Scan a local rootfs directory directly
+## Configuration
+
+The behavior of the wrapper can be tuned via environment variables:
+
+* `TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES`: Controls the emission of `Capability` properties (default: `true`).
+* `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS`: Controls the emission of `InstalledCommand` metadata (default: `true`).
+* `TRIVY_CDXGEN_INCLUDE_OS_FILES`: Controls the emission of `InstalledFile` properties (default: `true`). 
+    * *Note: Enabling this can significantly increase SBOM size on large root filesystems.*
+
+## Build and Test
+
+Build a local test binary from the current directory:
 
 ```bash
-./build/trivy-cdxgen-local rootfs --output rootfs.cdx.json /tmp/rootfs
+GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ```
-
-## Optional enrichment knobs
-
-These environment variables control extra SBOM metadata:
-
-- `TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES` (default: `true`)
-  - emits `Capability` properties for supported APK, DPKG, and RPM rootfs scans
-- `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS` (default: `true`)
-  - emits `InstalledCommand` and `InstalledCommandPath` properties for OS packages
-- `TRIVY_CDXGEN_INCLUDE_OS_FILES` (default: `true`)
-  - emits one `InstalledFile` property per file installed by each OS package
-  - this can significantly increase the intermediate Trivy SBOM size on full root filesystems, but it enables cdxgen to materialize package-owned file child components accurately
