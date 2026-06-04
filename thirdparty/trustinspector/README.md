@@ -6,11 +6,11 @@ TrustInspector is a specialized helper for performing trust-oriented inspection 
 
 TrustInspector automates the collection of trust metadata across different platforms and inspection targets.
 
-| Target | Inspection Type | Details |
-| :--- | :--- | :--- |
-| **RootFS** | Keyring/Cert Inspection | Deep inspection of trusted keyring material and CA stores in unpacked root filesystems. |
-| **Paths** | Signing/Notarization | Verification of macOS code-signing/notarization and Windows Authenticode metadata for specific binaries. |
-| **Host** | Posture Assessment | Inspection of host trust posture, such as Windows WDAC active policies or macOS Gatekeeper status. |
+| Target     | Inspection Type         | Details                                                                                                  |
+| :--------- | :---------------------- | :------------------------------------------------------------------------------------------------------- |
+| **RootFS** | Keyring/Cert Inspection | Deep inspection of trusted keyring material and CA stores in unpacked root filesystems.                  |
+| **Paths**  | Signing/Notarization    | Verification of macOS code-signing/notarization and Windows Authenticode metadata for specific binaries. |
+| **Host**   | Posture Assessment      | Inspection of host trust posture, such as Windows WDAC active policies or macOS Gatekeeper status.       |
 
 ## Command Modes
 
@@ -23,16 +23,18 @@ graph TD
     CMD -->|host| H[Inspect host security policy/posture]
 ```
 
-* `trustinspector-cdxgen rootfs <dir>`: Inspects trust anchors within an unpacked root filesystem.
-* `trustinspector-cdxgen paths <path> [path...]`: Inspects signing or notarization state for selected application or binary paths.
-* `trustinspector-cdxgen host`: Inspects host trust posture (e.g., WDAC, Gatekeeper).
+- `trustinspector-cdxgen rootfs <dir>`: Inspects trust anchors within an unpacked root filesystem.
+- `trustinspector-cdxgen paths <path> [path...]`: Inspects signing or notarization state for selected application or binary paths.
+- `trustinspector-cdxgen host`: Inspects host trust posture (e.g., WDAC, Gatekeeper).
 
 ## JSON Output Structure
 
 The tool emits stable, merge-friendly JSON objects. Each invocation returns a single object containing the relevant findings.
 
 ### `rootfs` Response Example
+
 Returns a list of `materials` found in the filesystem.
+
 ```json
 {
   "materials": [
@@ -48,7 +50,9 @@ Returns a list of `materials` found in the filesystem.
 ```
 
 ### `paths` Response Example
+
 Returns `inspections` results for the provided paths.
+
 ```json
 {
   "inspections": [
@@ -64,9 +68,9 @@ Returns `inspections` results for the provided paths.
 
 ## Stability and CI
 
-* **Stable Schema**: Top-level keys (`materials`, `inspections`, `hostFindings`) and the `properties` array format are stable.
-* **Downstream Consumption**: The tool is optimized for `cdxgen` to ingest findings as metadata.
-* **Testing**: The repository includes a Windows smoke test path that validates manifest generation and host/path inspection.
+- **Stable Schema**: Top-level keys (`materials`, `inspections`, `hostFindings`) and the `properties` array format are stable.
+- **Downstream Consumption**: The tool is optimized for `cdxgen` to ingest findings as metadata.
+- **Testing**: The repository includes a Windows smoke test path that validates manifest generation and host/path inspection.
 
 ## Implementation Notes
 

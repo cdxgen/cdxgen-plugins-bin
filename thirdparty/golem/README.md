@@ -20,56 +20,62 @@ graph TD
 ```
 
 ### Phase 1: Summary Inference
+
 The engine iterates up to four times to stabilize interprocedural relationships. It builds summaries for parameter-to-return flows, parameter-to-sink flows, and calls that return source values.
 
 ### Phase 2: Materialization
+
 When `--dataflow` or `--callgraph` is requested, Golem uses the summaries to perform heavy lifting. It materializes concrete source-to-sink slices and refines graph edges using the SSA representation.
 
 ## Capabilities
 
 ### Cryptographic Evidence
+
 Evidence is collected during the AST and type-information pass. It is not a full cryptographic protocol verifier but makes crypto-relevant code easy to locate.
 
-* Libraries: Maps imports to crypto families (e.g., `crypto/aes`, `golang.org/x/crypto/*`).
-* Symbols: Recognizes security-sensitive API usage (e.g., `crypto/rsa.GenerateKey`, `pbkdf2.Key`).
-* TLS Configuration: Inspects literals for `InsecureSkipVerify: true`.
-* Material Indicators: Identifies assignments to names that look like keys, tokens, or salts without copying the literal values.
+- Libraries: Maps imports to crypto families (e.g., `crypto/aes`, `golang.org/x/crypto/*`).
+- Symbols: Recognizes security-sensitive API usage (e.g., `crypto/rsa.GenerateKey`, `pbkdf2.Key`).
+- TLS Configuration: Inspects literals for `InsecureSkipVerify: true`.
+- Material Indicators: Identifies assignments to names that look like keys, tokens, or salts without copying the literal values.
 
 ### Data-flow Analysis
+
 Implemented as an SSA-based taint slicer. It uses pattern packs to define sources, sinks, passthroughs, and sanitizers.
 
-* Sources: Environment, CLI, file, and HTTP inputs.
-* Sinks: Process execution, filesystem writes, network requests, SQL queries, and HTML responses.
-* Sanitizers: Logic to stop traces or remove specific taint kinds (e.g., HTML escaping).
+- Sources: Environment, CLI, file, and HTTP inputs.
+- Sinks: Process execution, filesystem writes, network requests, SQL queries, and HTML responses.
+- Sanitizers: Logic to stop traces or remove specific taint kinds (e.g., HTML escaping).
 
-| Option | Default | Purpose |
-| :--- | :--- | :--- |
-| `--dataflow-max-slices` | 1000 | Limits materialized slices to prevent resource exhaustion. |
-| `--dataflow-workers` | 0 | Parallelism control (0 uses all available cores). |
-| `--dataflow-skip-generated` | false | Whether to ignore code in generated files. |
+| Option                      | Default | Purpose                                                    |
+| :-------------------------- | :------ | :--------------------------------------------------------- |
+| `--dataflow-max-slices`     | 1000    | Limits materialized slices to prevent resource exhaustion. |
+| `--dataflow-workers`        | 0       | Parallelism control (0 uses all available cores).          |
+| `--dataflow-skip-generated` | false   | Whether to ignore code in generated files.                 |
 
 ## Output Model
 
 The main report is a JSON file.
 
-* `golem-dataflow.json`: Contains the materialized slices and data-flow graphs.
-* `golem.json`: The complete structural and evidence report.
-* `callgraph.graphml`: The exported call graph.
+- `golem-dataflow.json`: Contains the materialized slices and data-flow graphs.
+- `golem.json`: The complete structural and evidence report.
+- `callgraph.graphml`: The exported call graph.
 
 For a field-by-field JSON reference, see `JSON_ATTRIBUTE_REFERENCE.md`.
 
 ## Strengths and Assumptions
 
 ### Strengths
-* High accuracy for package paths, symbols, and signatures via Go's native type checker.
-* Deterministic output suitable for automated comparison and regression testing.
-* Low noise via automatic exclusion of external Go module cache paths.
+
+- High accuracy for package paths, symbols, and signatures via Go's native type checker.
+- Deterministic output suitable for automated comparison and regression testing.
+- Low noise via automatic exclusion of external Go module cache paths.
 
 ### Assumptions and Limitations
-* Static analysis is approximate: absence of evidence is not proof of safety.
-* Path and field insensitivity: long or highly branched flows may be truncated by budget limits.
-* Dependency on local environment: package loading follows the local Go toolchain and module environment.
-* Avoids execution: does not run `go:generate` or evaluate runtime configuration.
+
+- Static analysis is approximate: absence of evidence is not proof of safety.
+- Path and field insensitivity: long or highly branched flows may be truncated by budget limits.
+- Dependency on local environment: package loading follows the local Go toolchain and module environment.
+- Avoids execution: does not run `go:generate` or evaluate runtime configuration.
 
 ## Threat Model
 

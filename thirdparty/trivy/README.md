@@ -8,22 +8,22 @@ Unlike the standard Trivy CLI, this wrapper is designed for automated, non-inter
 
 The wrapper modifies the standard Trivy behavior to better suit the `cdxgen` workflow:
 
-* **Command Limitation**: Exposes only `image`, `rootfs`, and `version` commands to reduce complexity.
-* **Output Focus**: Defaults `image` and `rootfs` scans to CycloneDX SBOM output.
-* **Operational Rigor**: Forces offline, no-update, and no-progress operation, making it suitable for CI/CD pipelines.
-* **Noise Suppression**: Suppresses verbose output unless `--debug` is passed.
-* **Language Filtering**: Limits language package collection to Go modules and Go binaries while maintaining full OS package collection.
+- **Command Limitation**: Exposes only `image`, `rootfs`, and `version` commands to reduce complexity.
+- **Output Focus**: Defaults `image` and `rootfs` scans to CycloneDX SBOM output.
+- **Operational Rigor**: Forces offline, no-update, and no-progress operation, making it suitable for CI/CD pipelines.
+- **Noise Suppression**: Suppresses verbose output unless `--debug` is passed.
+- **Language Filtering**: Limits language package collection to Go modules and Go binaries while maintaining full OS package collection.
 
 ### Enrichment Features
 
 The wrapper enriches OS package components with high-fidelity metadata:
 
-| Metadata Type | Examples |
-| :--- | :--- | :--- |
-| **Capability/Provide** | Package capability and provide metadata |
-| **Installation Context** | Command names, command paths, and file counts |
-| **Provenance** | Package architecture, origin, source, and status |
-| **OS Lifecycle** | OS Family, OS Name, OSEOL, and Extended Support status |
+| Metadata Type            | Examples                                               |
+| :----------------------- | :----------------------------------------------------- |
+| **Capability/Provide**   | Package capability and provide metadata                |
+| **Installation Context** | Command names, command paths, and file counts          |
+| **Provenance**           | Package architecture, origin, source, and status       |
+| **OS Lifecycle**         | OS Family, OS Name, OSEOL, and Extended Support status |
 
 When consumed by `cdxgen`, maintainer and vendor trust metadata is automatically promoted into native CycloneDX fields such as `authors` and `manufacturer`.
 
@@ -62,10 +62,10 @@ docker rm -f "test-container"
 
 The behavior of the wrapper can be tuned via environment variables:
 
-* `TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES`: Controls the emission of `Capability` properties (default: `true`).
-* `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS`: Controls the emission of `InstalledCommand` metadata (default: `true`).
-* `TRIVY_CDXGEN_INCLUDE_OS_FILES`: Controls the emission of `InstalledFile` properties (default: `true`). 
-    * *Note: Enabling this can significantly increase SBOM size on large root filesystems.*
+- `TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES`: Controls the emission of `Capability` properties (default: `true`).
+- `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS`: Controls the emission of `InstalledCommand` metadata (default: `true`).
+- `TRIVY_CDXGEN_INCLUDE_OS_FILES`: Controls the emission of `InstalledFile` properties (default: `true`).
+  - _Note: Enabling this can significantly increase SBOM size on large root filesystems._
 
 ## Build and Test
 
