@@ -265,55 +265,6 @@ osquery enables real-time OS-level inventory that goes beyond package managers. 
 
 The trivy-cdxgen wrapper provides a fast, offline-capable way to generate container OS package inventories without triggering vulnerability scans. This is useful for organizations that need to track OS package composition for compliance purposes without the overhead of full vulnerability scanning.
 
-## Debugging
-
-To enable debug output for the plugin loader, set the `CDXGEN_DEBUG_MODE` environment variable:
-
-```bash
-CDXGEN_DEBUG_MODE=debug cdxgen -t docker ubuntu:24.04
-```
-
-This will print plugin resolution information to stdout.
-
-## Repository Structure
-
-```
-.
-├── README.md                    # This file
-├── package.json                 # npm package definition
-├── index.js                     # Plugin loader entry point
-├── build.sh                     # Local build orchestration script
-├── scripts/
-│   ├── generate-metadata.js     # Plugin manifest and SBOM generation
-│   ├── thirdparty-downloads.sh  # Third-party binary download helper
-│   ├── stage-built-plugins.sh   # Plugin binary staging helper
-│   ├── publish-helper-oras.sh   # ORAS publishing helper
-│   └── check-package-size.sh    # NPM package size validation
-├── packages/
-│   ├── linux-amd64/             # Platform-specific npm packages
-│   ├── linux-arm64/
-│   ├── linuxmusl-amd64/
-│   ├── linuxmusl-arm64/
-│   ├── linux-riscv64/
-│   ├── linux-arm/
-│   ├── windows-amd64/
-│   ├── windows-arm64/
-│   ├── darwin-arm64/
-│   ├── darwin-amd64/
-│   └── ppc64/
-├── plugins/                     # Staged plugin binaries (generated)
-├── thirdparty/
-│   ├── README.md                # Third-party source overview
-│   ├── trivy/                   # Trivy wrapper source
-│   ├── sourcekitten/            # SourceKitten build script
-│   ├── trustinspector/          # trustinspector source
-│   ├── golem/                   # Golem source and analysis
-│   └── rusi/                    # Rusi source and analysis
-└── .github/workflows/
-    ├── release.yml              # Release workflow (npm + ORAS)
-    └── native-builds.yml        # Native binary build workflow
-```
-
 ## License
 
 MIT
