@@ -1,6 +1,6 @@
-# Rusi
+# Rusi (Rust Source Inspector)
 
-Rusi (Rust Source Inspector) is a Rust code analysis engine for evidence collection. It is designed to help downstream tooling and reviewers answer questions such as:
+Rusi is a Rust code analysis engine for evidence collection. It is designed to help downstream tooling and reviewers answer questions such as:
 
 - What packages, files, symbols, and imports exist in this Rust repository?
 - Which APIs look security-sensitive?
@@ -8,11 +8,9 @@ Rusi (Rust Source Inspector) is a Rust code analysis engine for evidence collect
 - What does an approximate call graph look like?
 - Which practical source-to-sink flows are present for common security categories?
 
-Rusi is bundled into the `cdxgen` plugin packaging flow, but it is also a standalone analyzer with its own CLI, schema, fixtures, tests, and evaluation harnesses.
-
 ## Quick start
 
-Run the analyzer from this directory:
+Build or run Rusi from this directory:
 
 ```bash
 cargo run -p rusi-cli -- analyze --dir /path/to/rust/project --out rusi.json
