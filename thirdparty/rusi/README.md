@@ -33,6 +33,53 @@ This mode provides higher fidelity by leveraging the actual Rust compiler. It:
 - Generates MIR-informed data-flow evidence.
 - **Note**: Because it runs `cargo check`, it inherits Cargo's execution semantics (e.g., `build.rs` execution).
 
+## Practical Usage
+
+Rusi is executed via `cargo run` from this directory.
+
+### Standard Analysis
+
+To perform basic workspace discovery and structural evidence collection:
+
+```bash
+cargo run -p rusi-cli -- analyze --dir /path/to/rust/project --out rusi.json
+```
+
+### Security Data-flow Analysis
+
+To enable security-specific taint tracking and identify source-to-sink flows:
+
+```bash
+cargo run -p rusi-cli -- analyze \
+  --dir /path/to/rust/project \
+  --backend stable \
+  --dataflow security \
+  --out rusi-security.json
+```
+
+### Cryptographic (CBOM) Analysis
+
+To focus specifically on cryptographic library usage and material identification:
+
+```bash
+cargo run -p rusi-cli -- cryptos \
+  --dir /path/to/rust/project \
+  --backend stable \
+  --out rusi-cryptos.json
+```
+
+### Call Graph and Reachability
+
+To generate a call graph for dependency mapping or reachability analysis:
+
+```bash
+cargo run -p rusi-cli -- analyze \
+  --dir . \
+  --callgraph static \
+  --callgraph-out callgraph.graphml \
+  --out rusi.json
+```
+
 ## Evidence Collection
 
 ### Cryptographic Bill of Materials (CBOM)
@@ -50,7 +97,7 @@ The data-flow engine is pragmatic and uses pattern-driven logic. It identifies:
 
 - **Sources**: Environment, CLI, file, and HTTP inputs.
 - **Sinks**: Process execution, filesystem writes, network requests, SQL, and HTML responses.
-- **Sanitizers**: Logic that stops traces or removes specific taint kinds (e.g., parameterized SQL APIs).
+- **Sanitizers**: Logic that stops traces or removes specific taint kinds.
 
 ```mermaid
 graph LR
@@ -71,21 +118,6 @@ The primary output is a JSON report containing:
 - Optional call graphs and data-flow traces.
 
 Detailed field descriptions are available in `JSON_ATTRIBUTE_REFERENCE.md`.
-
-## Strengths and Limitations
-
-### Strengths
-
-- Works on stable Rust by default.
-- Produces deterministic, review-friendly JSON.
-- Offers both safe (stable) and high-fidelity (compiler) modes.
-- Ships with integrated evaluation harnesses and regression tests.
-
-### Limitations
-
-- Static analysis is approximate; absence of evidence is not proof of absence.
-- Compiler mode is dependent on nightly toolchain availability.
-- Data-flow is practical and bounded rather than path-perfect.
 
 ## Build and Test
 

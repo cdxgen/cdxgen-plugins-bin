@@ -4,38 +4,9 @@ The Trivy Wrapper is a customized version of [Trivy](https://github.com/aquasecu
 
 Unlike the standard Trivy CLI, this wrapper is designed for automated, non-interactive SBOM enrichment.
 
-## Optimizations for SBOM Enrichment
+## Practical Usage
 
-The wrapper modifies the standard Trivy behavior to better suit the `cdxgen` workflow:
-
-- **Command Limitation**: Exposes only `image`, `rootfs`, and `version` commands to reduce complexity.
-- **Output Focus**: Defaults `image` and `rootfs` scans to CycloneDX SBOM output.
-- **Operational Rigor**: Forces offline, no-update, and no-progress operation, making it suitable for CI/CD pipelines.
-- **Noise Suppression**: Suppresses verbose output unless `--debug` is passed.
-- **Language Filtering**: Limits language package collection to Go modules and Go binaries while maintaining full OS package collection.
-
-### Enrichment Features
-
-The wrapper enriches OS package components with high-fidelity metadata:
-
-| Metadata Type            | Examples                                               |
-| :----------------------- | :----------------------------------------------------- |
-| **Capability/Provide**   | Package capability and provide metadata                |
-| **Installation Context** | Command names, command paths, and file counts          |
-| **Provenance**           | Package architecture, origin, source, and status       |
-| **OS Lifecycle**         | OS Family, OS Name, OSEOL, and Extended Support status |
-
-When consumed by `cdxgen`, maintainer and vendor trust metadata is automatically promoted into native CycloneDX fields such as `authors` and `manufacturer`.
-
-## Usage
-
-### Scanning a Local RootFS
-
-Generate a CycloneDX SBOM from an unpacked root filesystem:
-
-```bash
-./build/trivy-cdxgen-local rootfs --output result.cdx.json /path/to/rootfs
-```
+The wrapper is used to scan images or root filesystems and output CycloneDX JSON.
 
 ### Scanning an Exported Image
 
@@ -57,6 +28,35 @@ tar -xf "alpine.tar" -C "/tmp/alpine-rootfs"
 ./build/trivy-cdxgen-local rootfs --output alpine-rootfs.cdx.json "/tmp/alpine-rootfs"
 docker rm -f "test-container"
 ```
+
+### Scanning a Local RootFS
+
+To scan a local directory directly:
+
+```bash
+./build/trivy-cdxgen-local rootfs --output rootfs.cdx.json /tmp/rootfs
+```
+
+## Optimizations for SBOM Enrichment
+
+The wrapper modifies the standard Trivy behavior to better suit the `cdxgen` workflow:
+
+- **Command Limitation**: Exposes only `image`, `rootfs`, and `version` commands.
+- **Output Focus**: Defaults `image` and `rootfs` scans to CycloneDX SBOM output.
+- **Operational Rigor**: Forces offline, no-update, and no-progress operation.
+- **Noise Suppression**: Suppresses verbose output unless `--debug` is passed.
+- **Language Filtering**: Limits language package collection to Go modules and Go binaries.
+
+### Enrichment Features
+
+The wrapper enriches OS package components with high-fidelity metadata:
+
+| Metadata Type            | Examples                                               |
+| :----------------------- | :----------------------------------------------------- |
+| **Capability/Provide**   | Package capability and provide metadata                |
+| **Installation Context** | Command names, command paths, and file counts          |
+| **Provenance**           | Package architecture, origin, source, and status       |
+| **OS Lifecycle**         | OS Family, OS Name, OSEOL, and Extended Support status |
 
 ## Configuration
 

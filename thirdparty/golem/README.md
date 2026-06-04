@@ -27,24 +27,56 @@ The engine iterates up to four times to stabilize interprocedural relationships.
 
 When `--dataflow` or `--callgraph` is requested, Golem uses the summaries to perform heavy lifting. It materializes concrete source-to-sink slices and refines graph edges using the SSA representation.
 
+## Practical Usage
+
+Golem is typically executed via `go run` from this directory.
+
+### Standard Analysis
+
+To perform basic workspace discovery and evidence collection:
+
+```bash
+go run ./cmd/golem analyze --dir /path/to/go/project --out report.json
+```
+
+### Security Data-flow Analysis
+
+To enable security-specific taint tracking (targeting sources, sinks, and sanitizers):
+
+```bash
+go run ./cmd/golem analyze \
+  --dir /path/to/go/project \
+  --dataflow security \
+  --out security-report.json
+```
+
+### Call Graph and Reachability
+
+To generate a call graph for dependency mapping or reachability analysis:
+
+```bash
+go run ./cmd/golem analyze \
+  --dir . \
+  --callgraph static \
+  --callgraph-out callgraph.graphml \
+  --callgraph-export-format graphml \
+  --out report.json
+```
+
 ## Capabilities
 
 ### Cryptographic Evidence
 
-Evidence is collected during the AST and type-information pass. It is not a full cryptographic protocol verifier but makes crypto-relevant code easy to locate.
+Evidence is collected during the AST and type-information pass.
 
 - Libraries: Maps imports to crypto families (e.g., `crypto/aes`, `golang.org/x/crypto/*`).
 - Symbols: Recognizes security-sensitive API usage (e.g., `crypto/rsa.GenerateKey`, `pbkdf2.Key`).
 - TLS Configuration: Inspects literals for `InsecureSkipVerify: true`.
-- Material Indicators: Identifies assignments to names that look like keys, tokens, or salts without copying the literal values.
+- Material Indicators: Identifies assignments to names that look like keys, tokens, or salts.
 
 ### Data-flow Analysis
 
-Implemented as an SSA-based taint slicer. It uses pattern packs to define sources, sinks, passthroughs, and sanitizers.
-
-- Sources: Environment, CLI, file, and HTTP inputs.
-- Sinks: Process execution, filesystem writes, network requests, SQL queries, and HTML responses.
-- Sanitizers: Logic to stop traces or remove specific taint kinds (e.g., HTML escaping).
+Implemented as an SSA-based taint slicer.
 
 | Option                      | Default | Purpose                                                    |
 | :-------------------------- | :------ | :--------------------------------------------------------- |
@@ -62,34 +94,9 @@ The main report is a JSON file.
 
 For a field-by-field JSON reference, see `JSON_ATTRIBUTE_REFERENCE.md`.
 
-## Strengths and Assumptions
-
-### Strengths
-
-- High accuracy for package paths, symbols, and signatures via Go's native type checker.
-- Deterministic output suitable for automated comparison and regression testing.
-- Low noise via automatic exclusion of external Go module cache paths.
-
-### Assumptions and Limitations
-
-- Static analysis is approximate: absence of evidence is not proof of safety.
-- Path and field insensitivity: long or highly branched flows may be truncated by budget limits.
-- Dependency on local environment: package loading follows the local Go toolchain and module environment.
-- Avoids execution: does not run `go:generate` or evaluate runtime configuration.
-
-## Threat Model
-
-Threat model notes live in `THREAT_MODEL.md`. In short, Golem treats the analyzed repository as untrusted input and avoids copying raw secret values into the report.
-
 ## Build and Test
 
 ```bash
 go test ./...
 go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
-```
-
-Cross-platform release builds are handled via the Makefile:
-
-```bash
-make all
 ```

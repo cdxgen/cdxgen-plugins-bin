@@ -6,15 +6,44 @@ TrustInspector is a specialized helper for performing trust-oriented inspection 
 
 TrustInspector automates the collection of trust metadata across different platforms and inspection targets.
 
-| Target     | Inspection Type         | Details                                                                                                  |
-| :--------- | :---------------------- | :------------------------------------------------------------------------------------------------------- |
-| **RootFS** | Keyring/Cert Inspection | Deep inspection of trusted keyring material and CA stores in unpacked root filesystems.                  |
-| **Paths**  | Signing/Notarization    | Verification of macOS code-signing/notarization and Windows Authenticode metadata for specific binaries. |
-| **Host**   | Posture Assessment      | Inspection of host trust posture, such as Windows WDAC active policies or macOS Gatekeeper status.       |
+| Target      | Inspection Type         | Details                                                                                                  |
+| :---------- | :---------------------- | :------------------------------------------------------------------------------------------------------- |
+| **RootFS**  | Keyring/Cert Inspection | Deep inspection of trusted keyring material and CA stores in unpacked root filesystems.                  |
+| **Paths**   | Signing/Notarization    | Verification of macOS code-signing/notarization and Windows Authenticode metadata for specific binaries. |
+| **Host**    | Posture Assessment      | Inspection of host trust posture, such as Windows WDAC active policies or macOS Gatekeeper status.       |
+| **Windows** | Policy Inventory        | Inspection of active Windows Defender Application Control (WDAC) policies.                               |
 
-## Command Modes
+## Practical Usage
 
-The tool is operated via specific command modes that dictate the inspection logic and JSON output shape.
+TrustInspector is operated via specific command modes that dictate the inspection logic and JSON output shape.
+
+### RootFS Inspection
+
+To inspect trust anchors (keyrings, CA stores) within an unpacked root filesystem:
+
+```bash
+trustinspector-cdxgen rootfs /path/to/unpacked/rootfs
+```
+
+### Path Inspection
+
+To inspect the signing or notarization state of specific files or directories:
+
+```bash
+trustinspector-cdxgen paths /path/to/binary /another/path
+```
+
+### Host Posture Assessment
+
+To inspect the security posture of the host machine (e.g., WDAC or Gatekeeper):
+
+```bash
+trustinspector-cdxgen host
+```
+
+## Command Modes and Workflow
+
+The tool branches its logic based on the selected command mode.
 
 ```mermaid
 graph TD
@@ -22,10 +51,6 @@ graph TD
     CMD -->|paths| P[Inspect signing state of selected files]
     CMD -->|host| H[Inspect host security policy/posture]
 ```
-
-- `trustinspector-cdxgen rootfs <dir>`: Inspects trust anchors within an unpacked root filesystem.
-- `trustinspector-cdxgen paths <path> [path...]`: Inspects signing or notarization state for selected application or binary paths.
-- `trustinspector-cdxgen host`: Inspects host trust posture (e.g., WDAC, Gatekeeper).
 
 ## JSON Output Structure
 
@@ -71,7 +96,3 @@ Returns `inspections` results for the provided paths.
 - **Stable Schema**: Top-level keys (`materials`, `inspections`, `hostFindings`) and the `properties` array format are stable.
 - **Downstream Consumption**: The tool is optimized for `cdxgen` to ingest findings as metadata.
 - **Testing**: The repository includes a Windows smoke test path that validates manifest generation and host/path inspection.
-
-## Implementation Notes
-
-TrustInspector is built to be a lightweight, non-interactive tool. It is intentionally cdxgen-oriented and focuses on emitting merge-friendly JSON rather than full CycloneDX documents.
