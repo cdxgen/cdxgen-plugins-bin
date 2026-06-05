@@ -134,6 +134,18 @@ pub(crate) fn discover_api_endpoints(
 
     let mut builders: BTreeMap<String, RouterBuilder> = BTreeMap::new();
     let mut functions: BTreeMap<String, CapturedFunction> = BTreeMap::new();
+    // Pre-build package_path → purl map so each emitted endpoint can
+    // carry a `pkg:cargo/<name>@<version>` reference back to its source
+    // package. Downstream consumers (atom-tools, cdxgen, etc.) rely on
+    // purls for cross-tool matching.
+    let mut package_purls: BTreeMap<String, String> = BTreeMap::new();
+    for package_ctx in package_contexts {
+        let purl = format!(
+            "pkg:cargo/{}@{}",
+            package_ctx.module_ref.name, package_ctx.module_ref.version
+        );
+        package_purls.insert(package_ctx.crate_name.clone(), purl);
+    }
 
     for package_ctx in package_contexts {
         let files = match crate::discover_rust_files(package_ctx, false) {
@@ -169,7 +181,7 @@ pub(crate) fn discover_api_endpoints(
         }
     }
 
-    resolve_endpoints(&builders, &functions)
+    resolve_endpoints(&builders, &functions, &package_purls)
 }
 
 fn detect_frameworks(imports: &[ImportUsage]) -> BTreeSet<String> {
@@ -1200,6 +1212,7 @@ fn ok_arm_of_result(inner: &str) -> String {
 fn resolve_endpoints(
     builders: &BTreeMap<String, RouterBuilder>,
     functions: &BTreeMap<String, CapturedFunction>,
+    package_purls: &BTreeMap<String, String>,
 ) -> Vec<ApiEndpoint> {
     let mut referenced: BTreeSet<String> = BTreeSet::new();
     for builder in builders.values() {
@@ -1228,6 +1241,7 @@ fn resolve_endpoints(
         resolve_from_builder(
             builders,
             functions,
+            package_purls,
             root,
             "",
             &mut visited,
@@ -1241,6 +1255,7 @@ fn resolve_endpoints(
 fn resolve_from_builder(
     builders: &BTreeMap<String, RouterBuilder>,
     functions: &BTreeMap<String, CapturedFunction>,
+    package_purls: &BTreeMap<String, String>,
     builder: &RouterBuilder,
     prefix: &str,
     visited: &mut BTreeSet<String>,
@@ -1302,7 +1317,10 @@ fn resolve_from_builder(
                     framework: builder.framework.clone(),
                     handler: qualified_handler,
                     package_path: builder.package_path.clone(),
-                    purl: String::new(),
+                    purl: package_purls
+                        .get(&builder.package_path)
+                        .cloned()
+                        .unwrap_or_default(),
                     file_path: builder.file_path.clone(),
                     position: position.clone(),
                     parameters: params,
@@ -1323,6 +1341,7 @@ fn resolve_from_builder(
                     resolve_from_builder(
                         builders,
                         functions,
+                        package_purls,
                         sub,
                         &new_prefix,
                         visited,

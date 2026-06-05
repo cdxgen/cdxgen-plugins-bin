@@ -417,11 +417,15 @@ pub fn analyze_with_optional_compiler(
     report.diagnostics = diagnostics;
     if options.analysis_scope == AnalysisScope::Cryptos {
         retain_crypto_focus(&mut report);
-    } else {
-        debug_log(options.debug, format_args!("pass=api-discovery"));
-        report.api_endpoints =
-            discover_api_endpoints(&package_contexts, &analysis_root, &report.imports);
     }
+    // API endpoints are discovered for all scopes. Running this in the
+    // cryptos scope as well lets downstream consumers correlate which
+    // crypto operations participate in which API endpoint flow (e.g.
+    // "this /auth/login endpoint touches sha2::Sha256::digest and
+    // jsonwebtoken::EncodingKey::from_secret").
+    debug_log(options.debug, format_args!("pass=api-discovery"));
+    report.api_endpoints =
+        discover_api_endpoints(&package_contexts, &analysis_root, &report.imports);
     debug_log(options.debug, format_args!("pass=normalize-report"));
     normalize_report(&mut report);
     debug_log(options.debug, format_args!("pass=stats"));
@@ -5100,5 +5104,118 @@ mod tests {
             report.api_endpoints
         );
         assert_eq!(report.stats.api_endpoint_count, 0);
+    }
+
+    #[test]
+    fn api_discovery_populates_purl_from_cargo_package() {
+        // Each endpoint should carry its package's purl
+        // (`pkg:cargo/<name>@<version>`) so downstream consumers can
+        // match endpoints back to their source package.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly");
+        assert!(!report.api_endpoints.is_empty(), "fixture emits endpoints");
+        for endpoint in &report.api_endpoints {
+            assert_eq!(
+                endpoint.purl, "pkg:cargo/api-discovery-app@0.1.0",
+                "endpoint {} {} should carry the fixture's purl",
+                endpoint.method, endpoint.path
+            );
+        }
+    }
+
+    #[test]
+    fn api_discovery_runs_in_cryptos_scope() {
+        // The api-discovery pass runs for all scopes, including Cryptos.
+        // Without this, downstream tooling can't correlate crypto
+        // operations (sha2 hashing, JWT signing, etc.) with the API
+        // endpoint they participate in. The fixture imports no crypto
+        // libraries so the crypto filter retains nothing, but the
+        // endpoint set should still be populated.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            analysis_scope: AnalysisScope::Cryptos,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly in cryptos scope");
+        assert!(
+            !report.api_endpoints.is_empty(),
+            "expected api_endpoints to be populated even in cryptos scope, got {:?}",
+            report.api_endpoints
+        );
+        assert!(report.stats.api_endpoint_count > 0);
+    }
+
+    #[test]
+    fn api_discovery_runs_under_compiler_backend() {
+        // The api-discovery pass parses source via `syn` and does not
+        // depend on the compiler backend; both `--backend stable` and
+        // `--backend compiler` should produce the same endpoint set on
+        // the same fixture. We exercise the compiler-backend code path
+        // here via a synthetic payload (the real compiler driver needs
+        // nightly toolchain components and is exercised by the
+        // rusi-cli smoke tests).
+        let compiler_payload = CompilerBackendPayload {
+            diagnostics: Vec::new(),
+            files: Vec::new(),
+            imports: Vec::new(),
+            declarations: Vec::new(),
+            usages: Vec::new(),
+            security_signals: Vec::new(),
+            crypto: None,
+            call_graph: Some(CallGraph::default()),
+            data_flow: None,
+        };
+
+        let stable_report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("stable backend analyzes cleanly");
+
+        let compiler_report = analyze_with_optional_compiler(
+            AnalyzeOptionsInput {
+                dir: fixture_path("api-discovery-app"),
+                backend: BACKEND_COMPILER.to_string(),
+                analysis_scope: AnalysisScope::Default,
+                call_graph_mode: "static".to_string(),
+                data_flow_mode: "security".to_string(),
+                custom_data_flow_patterns: None,
+                include_tests: false,
+                debug: false,
+            },
+            Some(compiler_payload),
+        )
+        .expect("compiler backend analyzes cleanly");
+
+        assert_eq!(compiler_report.options.backend, BACKEND_COMPILER);
+        assert_eq!(
+            compiler_report.stats.api_endpoint_count,
+            stable_report.stats.api_endpoint_count,
+            "compiler-backend endpoint count should match stable-backend"
+        );
+        let stable_keys: Vec<_> = stable_report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} {}",
+                    endpoint.framework, endpoint.method, endpoint.path, endpoint.handler
+                )
+            })
+            .collect();
+        let compiler_keys: Vec<_> = compiler_report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} {}",
+                    endpoint.framework, endpoint.method, endpoint.path, endpoint.handler
+                )
+            })
+            .collect();
+        assert_eq!(stable_keys, compiler_keys);
     }
 }
