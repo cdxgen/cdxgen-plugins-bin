@@ -20,6 +20,7 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `crypto`           | `CryptoEvidence \| null`   | Aggregated cryptographic evidence used for CBOM-oriented review. |
 | `call_graph`       | `CallGraph \| null`        | Call graph output when enabled.                                  |
 | `data_flow`        | `DataFlowEvidence \| null` | Data-flow output when enabled.                                   |
+| `api_endpoints`    | array of `ApiEndpoint`     | HTTP endpoints discovered in the source code. Empty when the workspace doesn't import a supported web framework. |
 | `diagnostics`      | array of `Diagnostic`      | Analysis warnings, backend notes, and completeness clues.        |
 | `stats`            | object                     | Precomputed counters for high-level report contents.             |
 
@@ -386,6 +387,47 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `diagnostics` | `Diagnostic[]`            | Data-flow-specific diagnostics.     |
 | `stats`       | `DataFlowStats`           | Data-flow counters.                 |
 
+## API endpoints
+
+The `api_endpoints` array carries one entry per HTTP endpoint that the
+api-discovery pass was able to resolve. The pass runs automatically when
+the workspace imports a supported framework crate; supported frameworks
+today are **axum**, **actix-web**, and **rocket**. Warp is planned but
+not yet implemented. Workspaces with no HTTP framework imports get an
+empty array and zero overhead.
+
+Path prefixes from `Router::nest("/api/v1", …)` (axum),
+`web::scope("/api/v1").service(…)` (actix-web), and
+`.mount("/api", routes![…])` (rocket) are composed into the final path
+before emission, so each entry contains the fully-qualified URL a client
+would call.
+
+### `ApiEndpoint`
+
+| Field               | Type                  | Meaning                                                                                                                                                                          |
+| ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | `string`              | Stable deterministic identifier.                                                                                                                                                 |
+| `method`            | `string`              | HTTP method in uppercase: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `TRACE`.                                                                                   |
+| `path`              | `string`              | Fully-resolved URL path including any prefixes from nested routers/scopes/mounts. Placeholders use the framework's native syntax (axum `:id`, actix `{id}`, rocket `<id>`).      |
+| `framework`         | `string`              | The framework that owns this endpoint: `axum`, `actix-web`, or `rocket`.                                                                                                         |
+| `handler`           | `string`              | Fully-qualified path to the handler function.                                                                                                                                    |
+| `package_path`      | `string`              | Crate (package) path.                                                                                                                                                            |
+| `purl`              | `string`              | Package URL when derivable; empty otherwise.                                                                                                                                     |
+| `file_path`         | `string`              | Source file the registration call lives in (not necessarily the handler's file).                                                                                                 |
+| `position`          | `Position`            | Source position of the registration call.                                                                                                                                        |
+| `parameters`        | `EndpointParameter[]` | Path and query parameters parsed from the handler's signature. Path parameters synthesize one entry per placeholder in the route; query parameters carry the extractor type.     |
+| `request_body_type` | `string \| null`      | Type of the deserialized request body when the handler uses a body extractor (axum `Json<T>`, actix `web::Json<T>` / `web::Form<T>`, rocket `Json<T>` / `Form<T>`).              |
+| `response_type`     | `string \| null`      | The application-level response type. Wrappers like `Result<…, _>` and `Json<…>` are unwrapped so the type names the data the handler returns.                                    |
+| `properties`        | `Map<string,string>`  | Extension map for future enrichments; empty today.                                                                                                                               |
+
+### `EndpointParameter`
+
+| Field       | Type     | Meaning                                                                                                                              |
+| ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`      | `string` | Parameter name as it appears in the route path or in the handler's parameter pattern.                                                |
+| `location`  | `string` | Either `path` or `query`.                                                                                                            |
+| `type_name` | `string` | Rust type spelled as written, e.g. `i32`, `String`, `Option<bool>`. For path parameters, this is the type inside the path extractor. |
+
 ## Diagnostics and stats
 
 ### `Diagnostic`
@@ -417,6 +459,7 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `data_flow_node_count`   | `number` | Data-flow node count.                       |
 | `data_flow_edge_count`   | `number` | Data-flow edge count.                       |
 | `data_flow_slice_count`  | `number` | Data-flow slice count.                      |
+| `api_endpoint_count`     | `number` | Number of `ApiEndpoint` records emitted.    |
 
 ## Notes
 

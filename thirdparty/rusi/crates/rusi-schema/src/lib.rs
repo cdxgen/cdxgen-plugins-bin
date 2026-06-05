@@ -154,6 +154,46 @@ pub struct SecuritySignal {
     pub position: Position,
 }
 
+/// One parameter to an HTTP endpoint, extracted from the handler's
+/// signature. `location` is `path` or `query`; `type_name` is the Rust
+/// type spelled as written (e.g. `i32`, `String`, `Option<bool>`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct EndpointParameter {
+    pub name: String,
+    pub location: String,
+    pub type_name: String,
+}
+
+/// Structured HTTP API endpoint discovered in source code.
+///
+/// Populated by the api-discovery pass when an HTTP framework (axum,
+/// actix-web, rocket; warp planned) is detected. Each entry represents one
+/// fully-resolved route registration: HTTP method, path with any prefixes
+/// from nested routers already composed in, the handler function it
+/// dispatches to, and — when the handler's signature can be resolved —
+/// the request/response shape pulled from the handler's parameter and
+/// return types.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ApiEndpoint {
+    pub id: String,
+    pub method: String,
+    pub path: String,
+    pub framework: String,
+    pub handler: String,
+    pub package_path: String,
+    pub purl: String,
+    pub file_path: String,
+    pub position: Position,
+    #[serde(default)]
+    pub parameters: Vec<EndpointParameter>,
+    #[serde(default)]
+    pub request_body_type: Option<String>,
+    #[serde(default)]
+    pub response_type: Option<String>,
+    #[serde(default)]
+    pub properties: IndexMap<String, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct FileEvidence {
     pub path: String,
@@ -375,6 +415,8 @@ pub struct Stats {
     pub data_flow_node_count: usize,
     pub data_flow_edge_count: usize,
     pub data_flow_slice_count: usize,
+    #[serde(default)]
+    pub api_endpoint_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -393,6 +435,8 @@ pub struct Report {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
+    #[serde(default)]
+    pub api_endpoints: Vec<ApiEndpoint>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

@@ -27,9 +27,11 @@ use syn::{
     Token, UseRename, UseTree,
 };
 
+mod api_discovery;
 mod modeling;
 
 pub use modeling::{AnalysisScope, load_custom_pattern_set};
+use api_discovery::discover_api_endpoints;
 use modeling::{crypto_only_pattern_set, merge_pattern_sets, retain_crypto_focus};
 
 const SCHEMA_VERSION: &str = "https://appthreat.github.io/rusi/schema/report-0.1";
@@ -111,13 +113,13 @@ struct RuntimeVersions {
 }
 
 #[derive(Debug, Clone)]
-struct PackageContext {
-    package_name: String,
-    crate_name: String,
-    manifest_path: PathBuf,
-    root_dir: PathBuf,
-    src_dir: PathBuf,
-    module_ref: ModuleRef,
+pub(crate) struct PackageContext {
+    pub(crate) package_name: String,
+    pub(crate) crate_name: String,
+    pub(crate) manifest_path: PathBuf,
+    pub(crate) root_dir: PathBuf,
+    pub(crate) src_dir: PathBuf,
+    pub(crate) module_ref: ModuleRef,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +417,10 @@ pub fn analyze_with_optional_compiler(
     report.diagnostics = diagnostics;
     if options.analysis_scope == AnalysisScope::Cryptos {
         retain_crypto_focus(&mut report);
+    } else {
+        debug_log(options.debug, format_args!("pass=api-discovery"));
+        report.api_endpoints =
+            discover_api_endpoints(&package_contexts, &analysis_root, &report.imports);
     }
     debug_log(options.debug, format_args!("pass=normalize-report"));
     normalize_report(&mut report);
@@ -691,7 +697,7 @@ fn package_context(package: &Package) -> Result<PackageContext> {
     })
 }
 
-fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
+pub(crate) fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut visited_dirs = HashSet::new();
     let allowed_root = canonical_path(&package_ctx.root_dir);
@@ -799,7 +805,7 @@ fn analyze_file(
     })
 }
 
-fn module_path_for_file(package_ctx: &PackageContext, file_path: &Path) -> Vec<String> {
+pub(crate) fn module_path_for_file(package_ctx: &PackageContext, file_path: &Path) -> Vec<String> {
     let relative = file_path
         .strip_prefix(&package_ctx.root_dir)
         .unwrap_or(file_path)
@@ -2108,7 +2114,7 @@ fn qualify_name(file_ctx: &FileContext, receiver: Option<&str>, name: &str) -> S
     segments.join("::")
 }
 
-fn position_from_span(file_path: &str, span: Span) -> Position {
+pub(crate) fn position_from_span(file_path: &str, span: Span) -> Position {
     let start = span.start();
     Position {
         filename: file_path.to_string(),
@@ -3806,14 +3812,14 @@ fn normalize_pattern_text(value: &str) -> String {
     value.replace(' ', "")
 }
 
-fn relative_display_path(root: &Path, path: &Path) -> String {
+pub(crate) fn relative_display_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
 }
 
-fn stable_id(prefix: &str, components: &[&str]) -> String {
+pub(crate) fn stable_id(prefix: &str, components: &[&str]) -> String {
     let mut hasher = Sha256::new();
     for component in components {
         hasher.update(component.as_bytes());
@@ -4000,6 +4006,9 @@ fn normalize_report(report: &mut Report) {
     report
         .security_signals
         .sort_by(|left, right| left.id.cmp(&right.id));
+    report
+        .api_endpoints
+        .sort_by(|left, right| left.id.cmp(&right.id));
     if let Some(crypto) = &mut report.crypto {
         crypto
             .libraries
@@ -4109,6 +4118,7 @@ fn compute_stats(report: &Report) -> Stats {
             .as_ref()
             .map(|flow| flow.slices.len())
             .unwrap_or(0),
+        api_endpoint_count: report.api_endpoints.len(),
     }
 }
 
@@ -4958,5 +4968,137 @@ mod tests {
         assert!(graph.nodes.iter().any(|node| {
             node.qualified_name.contains("encryptor") || node.qualified_name.contains("main")
         }));
+    }
+
+    #[test]
+    fn api_discovery_fixture_emits_endpoints_across_frameworks() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly");
+
+        // The fixture is constructed to land exactly these endpoints, one
+        // per (method, path, framework). If the assertion fires, look at
+        // the diff to decide whether the fixture grew or the discovery
+        // pass regressed.
+        let mut summary: Vec<String> = report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} :: {}",
+                    endpoint.framework,
+                    endpoint.method,
+                    endpoint.path,
+                    endpoint
+                        .handler
+                        .rsplit("::")
+                        .next()
+                        .unwrap_or(&endpoint.handler)
+                )
+            })
+            .collect();
+        summary.sort();
+        let expected: Vec<String> = [
+            "actix-web GET /actix/{name} :: attribute_handler",
+            "actix-web GET /api/v1/users :: list_users",
+            "actix-web POST /actix/echo :: echo",
+            "actix-web POST /api/v1/users :: create_user",
+            "axum GET /api/v1/users :: list_users",
+            "axum GET /api/v1/users/:id :: get_user",
+            "axum GET /health :: health",
+            "axum POST /api/v1/users :: create_user",
+            "rocket GET /rocket/users/<id> :: get_user",
+            "rocket POST /rocket/users :: create_user",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(summary, expected);
+        assert_eq!(report.stats.api_endpoint_count, expected.len());
+
+        // Spot-check signature extraction: axum's get_user takes
+        // Path<i32> and returns Result<Json<User>, _>, so we should see
+        // one path parameter named `id` of type `i32` and a response of
+        // `User`.
+        let axum_get_user = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "axum"
+                    && endpoint.method == "GET"
+                    && endpoint.path == "/api/v1/users/:id"
+            })
+            .expect("axum get_user endpoint present");
+        assert_eq!(axum_get_user.parameters.len(), 1);
+        assert_eq!(axum_get_user.parameters[0].name, "id");
+        assert_eq!(axum_get_user.parameters[0].location, "path");
+        assert_eq!(axum_get_user.parameters[0].type_name, "i32");
+        assert_eq!(axum_get_user.response_type.as_deref(), Some("User"));
+
+        // Spot-check actix's POST /api/v1/users body extraction.
+        let actix_create = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "actix-web"
+                    && endpoint.method == "POST"
+                    && endpoint.path == "/api/v1/users"
+            })
+            .expect("actix create_user endpoint present");
+        assert_eq!(
+            actix_create.request_body_type.as_deref(),
+            Some("CreateUserRequest")
+        );
+
+        // Spot-check rocket: <id> placeholder is picked up as a path
+        // parameter via the bare-name convention; body comes from the
+        // `data = "<payload>"` binding on the handler attribute.
+        let rocket_get = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "rocket"
+                    && endpoint.method == "GET"
+                    && endpoint.path == "/rocket/users/<id>"
+            })
+            .expect("rocket get_user endpoint present");
+        assert_eq!(rocket_get.parameters.len(), 1);
+        assert_eq!(rocket_get.parameters[0].name, "id");
+        assert_eq!(rocket_get.parameters[0].location, "path");
+        assert_eq!(rocket_get.parameters[0].type_name, "i32");
+
+        let rocket_post = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "rocket"
+                    && endpoint.method == "POST"
+                    && endpoint.path == "/rocket/users"
+            })
+            .expect("rocket create_user endpoint present");
+        assert_eq!(
+            rocket_post.request_body_type.as_deref(),
+            Some("CreateUserRequest")
+        );
+    }
+
+    #[test]
+    fn api_discovery_emits_no_endpoints_without_http_framework_imports() {
+        // basic-app has no HTTP framework imports, so the discovery pass
+        // should emit an empty endpoint list — proving the pass is a
+        // strict no-op for non-web crates.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("basic-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("basic-app analyzes cleanly");
+        assert!(
+            report.api_endpoints.is_empty(),
+            "expected zero endpoints for non-HTTP fixture, got {:?}",
+            report.api_endpoints
+        );
+        assert_eq!(report.stats.api_endpoint_count, 0);
     }
 }
