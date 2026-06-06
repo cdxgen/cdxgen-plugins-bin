@@ -10,6 +10,7 @@ workspace_manifest := Cargo.toml
 build_dir := build
 package_name := rusi-cli
 cargo_nightly := cargo +nightly
+cargo_stable := cargo +stable
 host_os := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 
 linux_triples := \
@@ -43,14 +44,14 @@ all-supported:
 endif
 
 bootstrap-linux:
-	rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
-	rustup target add --toolchain nightly $(linux_triples) $(linuxmusl_triples) $(windows_triples)
-	$(cargo_nightly) install cargo-zigbuild --locked --force
+	rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
+	rustup target add --toolchain stable $(linux_triples) $(linuxmusl_triples) $(windows_triples)
+	$(cargo_stable) install cargo-zigbuild --locked --force
 	@command -v cargo-zigbuild >/dev/null 2>&1 || { echo "cargo-zigbuild was installed but is not on PATH ($(PATH))" >&2; exit 1; }
 
 bootstrap-darwin:
-	rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
-	rustup target add --toolchain nightly $(darwin_triples)
+	rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
+	rustup target add --toolchain stable $(darwin_triples)
 
 linux: $(build_dir)/$(appname)-linux-amd64 $(build_dir)/$(appname)-linux-arm64 $(build_dir)/$(appname)-linux-arm $(build_dir)/$(appname)-linux-ppc64le $(build_dir)/$(appname)-linux-riscv64
 
@@ -104,7 +105,7 @@ endef
 define zigbuild_binary
 	$(call ensure_zigbuild,$(3))
 	mkdir -p "$(build_dir)"
-	$(cargo_nightly) zigbuild --manifest-path "$(workspace_manifest)" --release --locked -p "$(package_name)" --target "$(1)"
+	$(cargo_stable) zigbuild --manifest-path "$(workspace_manifest)" --release --locked -p "$(package_name)" --target "$(1)"
 	cp "target/$(1)/release/$(appname)$(4)" "$(build_dir)/$(2)$(4)"
 	$(call strip_binary,$(build_dir)/$(2)$(4))
 	$(call write_sha,$(build_dir)/$(2)$(4))
@@ -113,7 +114,7 @@ endef
 define darwin_build_binary
 	$(call ensure_darwin_host,$(3))
 	mkdir -p "$(build_dir)"
-	$(cargo_nightly) build --manifest-path "$(workspace_manifest)" --release --locked -p "$(package_name)" --target "$(1)"
+	$(cargo_stable) build --manifest-path "$(workspace_manifest)" --release --locked -p "$(package_name)" --target "$(1)"
 	cp "target/$(1)/release/$(appname)" "$(build_dir)/$(2)"
 	$(call strip_binary,$(build_dir)/$(2))
 	$(call write_sha,$(build_dir)/$(2))

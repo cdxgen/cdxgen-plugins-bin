@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True, help="Output directory")
     parser.add_argument("--join-existing", action="store_true", help="Join existing package reports under --out without running analysis")
     parser.add_argument("--rusi-bin", type=Path, default=None, help="Path to rusi binary")
-    parser.add_argument("--toolchain", default="nightly", help="Rust toolchain for compiler backend")
+    parser.add_argument("--toolchain", default="stable", help="Rust toolchain for compiler backend")
     parser.add_argument("--dataflow", default="security", help="Rusi data-flow mode")
     parser.add_argument("--callgraph", default="static", help="Rusi call graph mode")
     parser.add_argument("--jobs", type=int, default=max(1, min((os.cpu_count() or 2) // 2, 4)))
