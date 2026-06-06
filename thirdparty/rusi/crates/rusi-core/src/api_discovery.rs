@@ -60,6 +60,22 @@ pub(crate) const FRAMEWORK_AXUM: &str = "axum";
 pub(crate) const FRAMEWORK_ACTIX: &str = "actix-web";
 pub(crate) const FRAMEWORK_ROCKET: &str = "rocket";
 
+/// Map of internal framework identifier (as returned by
+/// [`detect_frameworks`]) to the crate name as published on crates.io.
+/// Used to look up the resolved purl from the workspace's dependency
+/// graph. For axum and rocket the two are identical; actix's crate name
+/// (`actix-web`) matches our identifier directly. Kept as a function
+/// rather than a const map so framework identifiers can evolve
+/// independently of crate names if a future framework needs that.
+fn framework_to_crate_name(framework: &str) -> &str {
+    match framework {
+        FRAMEWORK_AXUM => "axum",
+        FRAMEWORK_ACTIX => "actix-web",
+        FRAMEWORK_ROCKET => "rocket",
+        other => other,
+    }
+}
+
 const HTTP_METHOD_NAMES: &[&str] = &[
     "get", "post", "put", "patch", "delete", "head", "options", "trace",
 ];
@@ -122,10 +138,20 @@ struct CapturedParameter {
 
 /// Public entry point. Returns the fully resolved endpoint list for the
 /// workspace.
+///
+/// `framework_purls` maps a framework crate name (axum / actix-web /
+/// rocket) to the purl resolved from cargo metadata. Each emitted
+/// [`ApiEndpoint`] carries the purl of the framework crate that owns
+/// the routing rather than the user's own package — downstream
+/// consumers care which dependency exposes the endpoint so they can
+/// match it against vulnerability data for that crate. The user's
+/// package is still identifiable via the [`ApiEndpoint::package_path`]
+/// field.
 pub(crate) fn discover_api_endpoints(
     package_contexts: &[PackageContext],
     analysis_root: &Path,
     imports: &[ImportUsage],
+    framework_purls: &BTreeMap<String, String>,
 ) -> Vec<ApiEndpoint> {
     let frameworks = detect_frameworks(imports);
     if frameworks.is_empty() {
@@ -134,18 +160,6 @@ pub(crate) fn discover_api_endpoints(
 
     let mut builders: BTreeMap<String, RouterBuilder> = BTreeMap::new();
     let mut functions: BTreeMap<String, CapturedFunction> = BTreeMap::new();
-    // Pre-build package_path → purl map so each emitted endpoint can
-    // carry a `pkg:cargo/<name>@<version>` reference back to its source
-    // package. Downstream consumers (atom-tools, cdxgen, etc.) rely on
-    // purls for cross-tool matching.
-    let mut package_purls: BTreeMap<String, String> = BTreeMap::new();
-    for package_ctx in package_contexts {
-        let purl = format!(
-            "pkg:cargo/{}@{}",
-            package_ctx.module_ref.name, package_ctx.module_ref.version
-        );
-        package_purls.insert(package_ctx.crate_name.clone(), purl);
-    }
 
     for package_ctx in package_contexts {
         let files = match crate::discover_rust_files(package_ctx, false) {
@@ -181,7 +195,7 @@ pub(crate) fn discover_api_endpoints(
         }
     }
 
-    resolve_endpoints(&builders, &functions, &package_purls)
+    resolve_endpoints(&builders, &functions, framework_purls)
 }
 
 fn detect_frameworks(imports: &[ImportUsage]) -> BTreeSet<String> {
@@ -1212,7 +1226,7 @@ fn ok_arm_of_result(inner: &str) -> String {
 fn resolve_endpoints(
     builders: &BTreeMap<String, RouterBuilder>,
     functions: &BTreeMap<String, CapturedFunction>,
-    package_purls: &BTreeMap<String, String>,
+    framework_purls: &BTreeMap<String, String>,
 ) -> Vec<ApiEndpoint> {
     let mut referenced: BTreeSet<String> = BTreeSet::new();
     for builder in builders.values() {
@@ -1241,7 +1255,7 @@ fn resolve_endpoints(
         resolve_from_builder(
             builders,
             functions,
-            package_purls,
+            framework_purls,
             root,
             "",
             &mut visited,
@@ -1255,7 +1269,7 @@ fn resolve_endpoints(
 fn resolve_from_builder(
     builders: &BTreeMap<String, RouterBuilder>,
     functions: &BTreeMap<String, CapturedFunction>,
-    package_purls: &BTreeMap<String, String>,
+    framework_purls: &BTreeMap<String, String>,
     builder: &RouterBuilder,
     prefix: &str,
     visited: &mut BTreeSet<String>,
@@ -1310,6 +1324,7 @@ fn resolve_from_builder(
                     None => (Vec::new(), None, None),
                 };
 
+                let framework_crate = framework_to_crate_name(&builder.framework);
                 out.push(ApiEndpoint {
                     id,
                     method: method.clone(),
@@ -1317,10 +1332,14 @@ fn resolve_from_builder(
                     framework: builder.framework.clone(),
                     handler: qualified_handler,
                     package_path: builder.package_path.clone(),
-                    purl: package_purls
-                        .get(&builder.package_path)
+                    // purl identifies the dependency crate that exposes
+                    // this endpoint (axum, actix-web, rocket). The
+                    // user's own package is still recoverable via
+                    // package_path above.
+                    purl: framework_purls
+                        .get(framework_crate)
                         .cloned()
-                        .unwrap_or_default(),
+                        .unwrap_or_else(|| format!("pkg:cargo/{}", framework_crate)),
                     file_path: builder.file_path.clone(),
                     position: position.clone(),
                     parameters: params,
@@ -1341,7 +1360,7 @@ fn resolve_from_builder(
                     resolve_from_builder(
                         builders,
                         functions,
-                        package_purls,
+                        framework_purls,
                         sub,
                         &new_prefix,
                         visited,

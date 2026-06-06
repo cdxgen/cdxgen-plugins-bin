@@ -424,8 +424,13 @@ pub fn analyze_with_optional_compiler(
     // "this /auth/login endpoint touches sha2::Sha256::digest and
     // jsonwebtoken::EncodingKey::from_secret").
     debug_log(options.debug, format_args!("pass=api-discovery"));
-    report.api_endpoints =
-        discover_api_endpoints(&package_contexts, &analysis_root, &report.imports);
+    let framework_purls = build_framework_purls(&metadata);
+    report.api_endpoints = discover_api_endpoints(
+        &package_contexts,
+        &analysis_root,
+        &report.imports,
+        &framework_purls,
+    );
     debug_log(options.debug, format_args!("pass=normalize-report"));
     normalize_report(&mut report);
     debug_log(options.debug, format_args!("pass=stats"));
@@ -600,6 +605,35 @@ fn load_metadata(dir: &Path) -> Result<Metadata> {
     let mut command = MetadataCommand::new();
     command.current_dir(dir);
     command.exec().context("cargo metadata failed")
+}
+
+/// Build a map of HTTP framework crate name → purl, looking up resolved
+/// versions from cargo metadata. Used by the api-discovery pass so each
+/// emitted `ApiEndpoint` can identify the dependency crate that actually
+/// owns the routing (axum, actix-web, rocket) rather than the user's
+/// own package. When a supported framework is referenced in source but
+/// not present in the resolved dependency graph (test fixtures, etc.)
+/// the entry falls back to an unversioned `pkg:cargo/<name>` purl so the
+/// field is never blank.
+fn build_framework_purls(metadata: &Metadata) -> BTreeMap<String, String> {
+    const SUPPORTED_FRAMEWORK_CRATES: &[&str] = &["axum", "actix-web", "rocket"];
+    let mut purls = BTreeMap::new();
+    for crate_name in SUPPORTED_FRAMEWORK_CRATES {
+        purls.insert(
+            crate_name.to_string(),
+            format!("pkg:cargo/{}", crate_name),
+        );
+    }
+    for package in &metadata.packages {
+        let name = package.name.as_str();
+        if SUPPORTED_FRAMEWORK_CRATES.contains(&name) {
+            purls.insert(
+                name.to_string(),
+                format!("pkg:cargo/{}@{}", name, package.version),
+            );
+        }
+    }
+    purls
 }
 
 fn collect_runtime_versions() -> RuntimeVersions {
@@ -5107,10 +5141,13 @@ mod tests {
     }
 
     #[test]
-    fn api_discovery_populates_purl_from_cargo_package() {
-        // Each endpoint should carry its package's purl
-        // (`pkg:cargo/<name>@<version>`) so downstream consumers can
-        // match endpoints back to their source package.
+    fn api_discovery_populates_framework_purl_on_each_endpoint() {
+        // Each endpoint carries the purl of the framework dependency
+        // (axum / actix-web / rocket), NOT of the user's own package.
+        // The user's package is still identifiable via the
+        // `package_path` field. The fixture declares no real cargo
+        // dependencies, so the resolved purl falls back to an
+        // unversioned `pkg:cargo/<framework>` form.
         let report = analyze(AnalyzeOptionsInput {
             dir: fixture_path("api-discovery-app"),
             ..AnalyzeOptionsInput::default()
@@ -5118,11 +5155,26 @@ mod tests {
         .expect("api-discovery fixture analyzes cleanly");
         assert!(!report.api_endpoints.is_empty(), "fixture emits endpoints");
         for endpoint in &report.api_endpoints {
-            assert_eq!(
-                endpoint.purl, "pkg:cargo/api-discovery-app@0.1.0",
-                "endpoint {} {} should carry the fixture's purl",
-                endpoint.method, endpoint.path
+            let expected_prefix = match endpoint.framework.as_str() {
+                "axum" => "pkg:cargo/axum",
+                "actix-web" => "pkg:cargo/actix-web",
+                "rocket" => "pkg:cargo/rocket",
+                other => panic!("unexpected framework {} on endpoint {} {}", other, endpoint.method, endpoint.path),
+            };
+            assert!(
+                endpoint.purl == expected_prefix
+                    || endpoint
+                        .purl
+                        .starts_with(&format!("{}@", expected_prefix)),
+                "endpoint {} {} purl {} should match {} or {}@<version>",
+                endpoint.method,
+                endpoint.path,
+                endpoint.purl,
+                expected_prefix,
+                expected_prefix
             );
+            // The user's package is still identifiable via package_path.
+            assert_eq!(endpoint.package_path, "api_discovery_app");
         }
     }
 
