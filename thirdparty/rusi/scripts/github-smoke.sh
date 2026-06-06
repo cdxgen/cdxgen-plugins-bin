@@ -24,7 +24,7 @@ trap cleanup EXIT
 mkdir -p "$WORK_DIR"
 
 if [[ ! -x "$RUSI_BIN" ]]; then
-  cargo +nightly build -p rusi-cli --manifest-path "$ROOT_DIR/Cargo.toml"
+  cargo +stable build -p rusi-cli --manifest-path "$ROOT_DIR/Cargo.toml"
 fi
 
 printf 'Running GitHub smoke analyses in %s\n' "$WORK_DIR"

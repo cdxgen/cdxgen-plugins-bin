@@ -56,14 +56,14 @@ jobs:
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
       if: matrix.os == 'ubuntu-24.04-arm'
-    - name: Setup Rust nightly
+    - name: Setup Rust stable
       run: |
         if ! command -v rustup >/dev/null 2>&1; then
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           . "$HOME/.cargo/env"
         fi
         export PATH="$HOME/.cargo/bin:$PATH"
-        rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
+        rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15'
     - name: Setup swift
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'

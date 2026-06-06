@@ -121,7 +121,7 @@ fn cli_supports_compiler_backend_capabilities_and_source_evidence() -> Result<()
             || (diagnostic.kind == "backend"
                 && diagnostic
                     .message
-                    .contains("embedded nightly rustc support is unavailable"))
+                    .contains("embedded rustc support is unavailable"))
     }));
     assert!(report.call_graph.is_some());
     assert!(report.data_flow.is_some());

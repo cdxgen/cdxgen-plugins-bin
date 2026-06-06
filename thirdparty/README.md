@@ -32,4 +32,4 @@ Golem (Go Library Evidence Mapper) is a cdxgen-maintained static analyzer for Go
 
 ## rusi
 
-Rusi (Rust Source Inspector) is a cdxgen-maintained Rust source analysis helper that emits semantic source evidence, call graph output, and optional compiler-assisted data-flow findings. It operates in two modes: a stable mode using the `syn` parser, and a compiler mode using an embedded nightly rustc wrapper for MIR/HIR-derived evidence. See [./rusi/README.md](./rusi/README.md).
+Rusi (Rust Source Inspector) is a cdxgen-maintained Rust source analysis helper that emits semantic source evidence, call graph output, and optional compiler-assisted data-flow findings. It operates in two modes: a stable mode using the `syn` parser, and a compiler mode using an embedded rustc wrapper for MIR/HIR-derived evidence. See [./rusi/README.md](./rusi/README.md).
