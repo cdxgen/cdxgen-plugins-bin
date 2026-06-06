@@ -59,7 +59,7 @@ jobs:
     - name: Setup Rust nightly
       run: |
         if ! command -v rustup >/dev/null 2>&1; then
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           . "$HOME/.cargo/env"
         fi
         export PATH="$HOME/.cargo/bin:$PATH"
