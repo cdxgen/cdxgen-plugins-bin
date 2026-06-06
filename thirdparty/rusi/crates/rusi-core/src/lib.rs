@@ -27,9 +27,11 @@ use syn::{
     Token, UseRename, UseTree,
 };
 
+mod api_discovery;
 mod modeling;
 
 pub use modeling::{AnalysisScope, load_custom_pattern_set};
+use api_discovery::discover_api_endpoints;
 use modeling::{crypto_only_pattern_set, merge_pattern_sets, retain_crypto_focus};
 
 const SCHEMA_VERSION: &str = "https://appthreat.github.io/rusi/schema/report-0.1";
@@ -111,13 +113,13 @@ struct RuntimeVersions {
 }
 
 #[derive(Debug, Clone)]
-struct PackageContext {
-    package_name: String,
-    crate_name: String,
-    manifest_path: PathBuf,
-    root_dir: PathBuf,
-    src_dir: PathBuf,
-    module_ref: ModuleRef,
+pub(crate) struct PackageContext {
+    pub(crate) package_name: String,
+    pub(crate) crate_name: String,
+    pub(crate) manifest_path: PathBuf,
+    pub(crate) root_dir: PathBuf,
+    pub(crate) src_dir: PathBuf,
+    pub(crate) module_ref: ModuleRef,
 }
 
 #[derive(Debug, Clone)]
@@ -416,6 +418,19 @@ pub fn analyze_with_optional_compiler(
     if options.analysis_scope == AnalysisScope::Cryptos {
         retain_crypto_focus(&mut report);
     }
+    // API endpoints are discovered for all scopes. Running this in the
+    // cryptos scope as well lets downstream consumers correlate which
+    // crypto operations participate in which API endpoint flow (e.g.
+    // "this /auth/login endpoint touches sha2::Sha256::digest and
+    // jsonwebtoken::EncodingKey::from_secret").
+    debug_log(options.debug, format_args!("pass=api-discovery"));
+    let framework_purls = build_framework_purls(&metadata);
+    report.api_endpoints = discover_api_endpoints(
+        &package_contexts,
+        &analysis_root,
+        &report.imports,
+        &framework_purls,
+    );
     debug_log(options.debug, format_args!("pass=normalize-report"));
     normalize_report(&mut report);
     debug_log(options.debug, format_args!("pass=stats"));
@@ -592,6 +607,35 @@ fn load_metadata(dir: &Path) -> Result<Metadata> {
     command.exec().context("cargo metadata failed")
 }
 
+/// Build a map of HTTP framework crate name → purl, looking up resolved
+/// versions from cargo metadata. Used by the api-discovery pass so each
+/// emitted `ApiEndpoint` can identify the dependency crate that actually
+/// owns the routing (axum, actix-web, rocket) rather than the user's
+/// own package. When a supported framework is referenced in source but
+/// not present in the resolved dependency graph (test fixtures, etc.)
+/// the entry falls back to an unversioned `pkg:cargo/<name>` purl so the
+/// field is never blank.
+fn build_framework_purls(metadata: &Metadata) -> BTreeMap<String, String> {
+    const SUPPORTED_FRAMEWORK_CRATES: &[&str] = &["axum", "actix-web", "rocket"];
+    let mut purls = BTreeMap::new();
+    for crate_name in SUPPORTED_FRAMEWORK_CRATES {
+        purls.insert(
+            crate_name.to_string(),
+            format!("pkg:cargo/{}", crate_name),
+        );
+    }
+    for package in &metadata.packages {
+        let name = package.name.as_str();
+        if SUPPORTED_FRAMEWORK_CRATES.contains(&name) {
+            purls.insert(
+                name.to_string(),
+                format!("pkg:cargo/{}@{}", name, package.version),
+            );
+        }
+    }
+    purls
+}
+
 fn collect_runtime_versions() -> RuntimeVersions {
     let rustc_version = capture_command_output("rustc", &["--version"]);
     let cargo_version = capture_command_output("cargo", &["--version"]);
@@ -691,7 +735,7 @@ fn package_context(package: &Package) -> Result<PackageContext> {
     })
 }
 
-fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
+pub(crate) fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut visited_dirs = HashSet::new();
     let allowed_root = canonical_path(&package_ctx.root_dir);
@@ -799,7 +843,7 @@ fn analyze_file(
     })
 }
 
-fn module_path_for_file(package_ctx: &PackageContext, file_path: &Path) -> Vec<String> {
+pub(crate) fn module_path_for_file(package_ctx: &PackageContext, file_path: &Path) -> Vec<String> {
     let relative = file_path
         .strip_prefix(&package_ctx.root_dir)
         .unwrap_or(file_path)
@@ -2108,7 +2152,7 @@ fn qualify_name(file_ctx: &FileContext, receiver: Option<&str>, name: &str) -> S
     segments.join("::")
 }
 
-fn position_from_span(file_path: &str, span: Span) -> Position {
+pub(crate) fn position_from_span(file_path: &str, span: Span) -> Position {
     let start = span.start();
     Position {
         filename: file_path.to_string(),
@@ -3806,14 +3850,14 @@ fn normalize_pattern_text(value: &str) -> String {
     value.replace(' ', "")
 }
 
-fn relative_display_path(root: &Path, path: &Path) -> String {
+pub(crate) fn relative_display_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
 }
 
-fn stable_id(prefix: &str, components: &[&str]) -> String {
+pub(crate) fn stable_id(prefix: &str, components: &[&str]) -> String {
     let mut hasher = Sha256::new();
     for component in components {
         hasher.update(component.as_bytes());
@@ -4000,6 +4044,9 @@ fn normalize_report(report: &mut Report) {
     report
         .security_signals
         .sort_by(|left, right| left.id.cmp(&right.id));
+    report
+        .api_endpoints
+        .sort_by(|left, right| left.id.cmp(&right.id));
     if let Some(crypto) = &mut report.crypto {
         crypto
             .libraries
@@ -4109,6 +4156,7 @@ fn compute_stats(report: &Report) -> Stats {
             .as_ref()
             .map(|flow| flow.slices.len())
             .unwrap_or(0),
+        api_endpoint_count: report.api_endpoints.len(),
     }
 }
 
@@ -4958,5 +5006,268 @@ mod tests {
         assert!(graph.nodes.iter().any(|node| {
             node.qualified_name.contains("encryptor") || node.qualified_name.contains("main")
         }));
+    }
+
+    #[test]
+    fn api_discovery_fixture_emits_endpoints_across_frameworks() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly");
+
+        // The fixture is constructed to land exactly these endpoints, one
+        // per (method, path, framework). If the assertion fires, look at
+        // the diff to decide whether the fixture grew or the discovery
+        // pass regressed.
+        let mut summary: Vec<String> = report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} :: {}",
+                    endpoint.framework,
+                    endpoint.method,
+                    endpoint.path,
+                    endpoint
+                        .handler
+                        .rsplit("::")
+                        .next()
+                        .unwrap_or(&endpoint.handler)
+                )
+            })
+            .collect();
+        summary.sort();
+        let expected: Vec<String> = [
+            "actix-web GET /actix/{name} :: attribute_handler",
+            "actix-web GET /api/v1/users :: list_users",
+            "actix-web POST /actix/echo :: echo",
+            "actix-web POST /api/v1/users :: create_user",
+            "axum GET /api/v1/users :: list_users",
+            "axum GET /api/v1/users/:id :: get_user",
+            "axum GET /health :: health",
+            "axum POST /api/v1/users :: create_user",
+            "rocket GET /rocket/users/<id> :: get_user",
+            "rocket POST /rocket/users :: create_user",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(summary, expected);
+        assert_eq!(report.stats.api_endpoint_count, expected.len());
+
+        // Spot-check signature extraction: axum's get_user takes
+        // Path<i32> and returns Result<Json<User>, _>, so we should see
+        // one path parameter named `id` of type `i32` and a response of
+        // `User`.
+        let axum_get_user = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "axum"
+                    && endpoint.method == "GET"
+                    && endpoint.path == "/api/v1/users/:id"
+            })
+            .expect("axum get_user endpoint present");
+        assert_eq!(axum_get_user.parameters.len(), 1);
+        assert_eq!(axum_get_user.parameters[0].name, "id");
+        assert_eq!(axum_get_user.parameters[0].location, "path");
+        assert_eq!(axum_get_user.parameters[0].type_name, "i32");
+        assert_eq!(axum_get_user.response_type.as_deref(), Some("User"));
+
+        // Spot-check actix's POST /api/v1/users body extraction.
+        let actix_create = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "actix-web"
+                    && endpoint.method == "POST"
+                    && endpoint.path == "/api/v1/users"
+            })
+            .expect("actix create_user endpoint present");
+        assert_eq!(
+            actix_create.request_body_type.as_deref(),
+            Some("CreateUserRequest")
+        );
+
+        // Spot-check rocket: <id> placeholder is picked up as a path
+        // parameter via the bare-name convention; body comes from the
+        // `data = "<payload>"` binding on the handler attribute.
+        let rocket_get = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "rocket"
+                    && endpoint.method == "GET"
+                    && endpoint.path == "/rocket/users/<id>"
+            })
+            .expect("rocket get_user endpoint present");
+        assert_eq!(rocket_get.parameters.len(), 1);
+        assert_eq!(rocket_get.parameters[0].name, "id");
+        assert_eq!(rocket_get.parameters[0].location, "path");
+        assert_eq!(rocket_get.parameters[0].type_name, "i32");
+
+        let rocket_post = report
+            .api_endpoints
+            .iter()
+            .find(|endpoint| {
+                endpoint.framework == "rocket"
+                    && endpoint.method == "POST"
+                    && endpoint.path == "/rocket/users"
+            })
+            .expect("rocket create_user endpoint present");
+        assert_eq!(
+            rocket_post.request_body_type.as_deref(),
+            Some("CreateUserRequest")
+        );
+    }
+
+    #[test]
+    fn api_discovery_emits_no_endpoints_without_http_framework_imports() {
+        // basic-app has no HTTP framework imports, so the discovery pass
+        // should emit an empty endpoint list — proving the pass is a
+        // strict no-op for non-web crates.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("basic-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("basic-app analyzes cleanly");
+        assert!(
+            report.api_endpoints.is_empty(),
+            "expected zero endpoints for non-HTTP fixture, got {:?}",
+            report.api_endpoints
+        );
+        assert_eq!(report.stats.api_endpoint_count, 0);
+    }
+
+    #[test]
+    fn api_discovery_populates_framework_purl_on_each_endpoint() {
+        // Each endpoint carries the purl of the framework dependency
+        // (axum / actix-web / rocket), NOT of the user's own package.
+        // The user's package is still identifiable via the
+        // `package_path` field. The fixture declares no real cargo
+        // dependencies, so the resolved purl falls back to an
+        // unversioned `pkg:cargo/<framework>` form.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly");
+        assert!(!report.api_endpoints.is_empty(), "fixture emits endpoints");
+        for endpoint in &report.api_endpoints {
+            let expected_prefix = match endpoint.framework.as_str() {
+                "axum" => "pkg:cargo/axum",
+                "actix-web" => "pkg:cargo/actix-web",
+                "rocket" => "pkg:cargo/rocket",
+                other => panic!("unexpected framework {} on endpoint {} {}", other, endpoint.method, endpoint.path),
+            };
+            assert!(
+                endpoint.purl == expected_prefix
+                    || endpoint
+                        .purl
+                        .starts_with(&format!("{}@", expected_prefix)),
+                "endpoint {} {} purl {} should match {} or {}@<version>",
+                endpoint.method,
+                endpoint.path,
+                endpoint.purl,
+                expected_prefix,
+                expected_prefix
+            );
+            // The user's package is still identifiable via package_path.
+            assert_eq!(endpoint.package_path, "api_discovery_app");
+        }
+    }
+
+    #[test]
+    fn api_discovery_runs_in_cryptos_scope() {
+        // The api-discovery pass runs for all scopes, including Cryptos.
+        // Without this, downstream tooling can't correlate crypto
+        // operations (sha2 hashing, JWT signing, etc.) with the API
+        // endpoint they participate in. The fixture imports no crypto
+        // libraries so the crypto filter retains nothing, but the
+        // endpoint set should still be populated.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            analysis_scope: AnalysisScope::Cryptos,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("api-discovery fixture analyzes cleanly in cryptos scope");
+        assert!(
+            !report.api_endpoints.is_empty(),
+            "expected api_endpoints to be populated even in cryptos scope, got {:?}",
+            report.api_endpoints
+        );
+        assert!(report.stats.api_endpoint_count > 0);
+    }
+
+    #[test]
+    fn api_discovery_runs_under_compiler_backend() {
+        // The api-discovery pass parses source via `syn` and does not
+        // depend on the compiler backend; both `--backend stable` and
+        // `--backend compiler` should produce the same endpoint set on
+        // the same fixture. We exercise the compiler-backend code path
+        // here via a synthetic payload (the real compiler driver needs
+        // nightly toolchain components and is exercised by the
+        // rusi-cli smoke tests).
+        let compiler_payload = CompilerBackendPayload {
+            diagnostics: Vec::new(),
+            files: Vec::new(),
+            imports: Vec::new(),
+            declarations: Vec::new(),
+            usages: Vec::new(),
+            security_signals: Vec::new(),
+            crypto: None,
+            call_graph: Some(CallGraph::default()),
+            data_flow: None,
+        };
+
+        let stable_report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("api-discovery-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("stable backend analyzes cleanly");
+
+        let compiler_report = analyze_with_optional_compiler(
+            AnalyzeOptionsInput {
+                dir: fixture_path("api-discovery-app"),
+                backend: BACKEND_COMPILER.to_string(),
+                analysis_scope: AnalysisScope::Default,
+                call_graph_mode: "static".to_string(),
+                data_flow_mode: "security".to_string(),
+                custom_data_flow_patterns: None,
+                include_tests: false,
+                debug: false,
+            },
+            Some(compiler_payload),
+        )
+        .expect("compiler backend analyzes cleanly");
+
+        assert_eq!(compiler_report.options.backend, BACKEND_COMPILER);
+        assert_eq!(
+            compiler_report.stats.api_endpoint_count,
+            stable_report.stats.api_endpoint_count,
+            "compiler-backend endpoint count should match stable-backend"
+        );
+        let stable_keys: Vec<_> = stable_report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} {}",
+                    endpoint.framework, endpoint.method, endpoint.path, endpoint.handler
+                )
+            })
+            .collect();
+        let compiler_keys: Vec<_> = compiler_report
+            .api_endpoints
+            .iter()
+            .map(|endpoint| {
+                format!(
+                    "{} {} {} {}",
+                    endpoint.framework, endpoint.method, endpoint.path, endpoint.handler
+                )
+            })
+            .collect();
+        assert_eq!(stable_keys, compiler_keys);
     }
 }
