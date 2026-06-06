@@ -63,7 +63,7 @@ jobs:
           . "$HOME/.cargo/env"
         fi
         export PATH="$HOME/.cargo/bin:$PATH"
-        rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools --component rustc-dev
+        rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15'
     - name: Setup swift
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
