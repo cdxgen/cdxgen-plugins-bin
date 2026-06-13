@@ -15,7 +15,7 @@ use ratatui::{
 const COMPONENT_COLUMNS: [&str; 5] = ["Type", "Name", "Version", "Purl", "License"];
 const SERVICE_COLUMNS: [&str; 5] = ["Name", "Endpoints", "Auth", "Description", "BOM Ref"];
 
-pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme) {
+pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, trace_state: &crate::trace::TraceState, theme: &Theme) {
     let area = frame.area();
 
     let main_layout = Layout::default()
@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStor
         render_main_content(frame, app, log_store, theme, content_area);
     }
 
-    render_status_bar(frame, app, theme, status_area);
+    render_status_bar(frame, app, trace_state, theme, status_area);
 }
 
 fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -326,7 +326,7 @@ fn render_license_chart(frame: &mut Frame, app: &App, theme: &Theme, area: Rect)
         }
     }
     let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let top = sorted.iter().take(8).collect::<Vec<_>>();
     let max = top.first().map(|(_, c)| *c).unwrap_or(1).max(1);
 
@@ -1051,78 +1051,33 @@ fn build_dep_list(
     }
 }
 
-fn render_status_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let tab_info = format!(
-        "Tab {}/{} {}",
-        Tab::ALL
-            .iter()
-            .position(|t| *t == app.current_tab)
-            .map(|i| i + 1)
-            .unwrap_or(1),
-        Tab::ALL.len(),
-        app.current_tab.label()
-    );
+fn render_status_bar(frame: &mut Frame, app: &App, trace_state: &crate::trace::TraceState, theme: &Theme, area: Rect) {
+    let mut spans = Vec::new();
 
-    let mut spans = vec![
-        Span::styled(tab_info, Style::default().fg(theme.status_fg)),
-        Span::raw(" | "),
-        Span::styled(
-            format!("↑↓:nav"),
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "/:search",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "s:sort",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "f:filter",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "Enter:detail",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "Tab:next",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            "q:quit",
-            Style::default()
-                .fg(theme.status_fg)
-                .add_modifier(Modifier::DIM),
-        ),
-    ];
-
-    if app.show_help {
-        spans.push(Span::raw(" | "));
-        spans.push(Span::styled(
-            "h:toggle help",
-            Style::default().fg(theme.accent),
-        ));
+    if app.generating {
+        let icon = trace_state.status_icon();
+        let activity = &trace_state.activity_label;
+        let spinner_style = Style::default().fg(theme.accent);
+        spans.push(Span::styled(format!(" {} ", icon), spinner_style));
+        if !activity.is_empty() {
+            spans.push(Span::styled(
+                format!(" {} ", activity),
+                Style::default().fg(theme.crypto_accent),
+            ));
+            spans.push(Span::raw("│ "));
+        } else {
+            spans.push(Span::styled(
+                format!(" {} ", trace_state.spinner()),
+                Style::default().fg(theme.accent),
+            ));
+            spans.push(Span::raw("│ "));
+        }
     }
+
+    let tab_info = format!("Tab {}/{} {}", Tab::ALL.iter().position(|t| *t == app.current_tab).map(|i| i + 1).unwrap_or(1), Tab::ALL.len(), app.current_tab.label());
+    spans.push(Span::styled(tab_info, Style::default().fg(theme.status_fg)));
+    spans.push(Span::raw(" │ "));
+    spans.push(Span::styled("↑↓:nav /:search s:sort f:filter Enter:detail Tab:next q:quit".to_string(), Style::default().fg(theme.status_fg).add_modifier(Modifier::DIM)));
 
     let status = Paragraph::new(Line::from(spans))
         .style(Style::default().bg(theme.status_bg))

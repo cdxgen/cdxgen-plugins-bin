@@ -147,8 +147,10 @@ impl App {
             Tab::Components => format!("{} ({})", base, self.store.filtered_components_count()),
             Tab::Crypto => format!("{} ({})", base, self.store.total_crypto),
             Tab::Services => format!("{} ({})", base, self.store.filtered_services_count()),
-            Tab::Formulation => format!("{} ({})", base,
-                if self.last_item_count > 0 { self.last_item_count } else { self.store.formula_count() }),
+            Tab::Formulation => {
+                let count = self.store.formula_count();
+                format!("{} ({})", base, count)
+            }
             Tab::Dependencies => format!("{} ({})", base,
                 if self.last_item_count > 0 { self.last_item_count } else { self.store.total_dependencies }),
             Tab::Logs => format!("{} ({})", base, self.last_item_count),
@@ -234,20 +236,24 @@ impl App {
     }
 
     pub fn switch_tab(&mut self, tab: Tab) {
+        if self.current_tab != tab {
+            self.detail_open = false;
+        }
         self.current_tab = tab;
         self.scroll_offset = 0;
         self.table_selected = 0;
         self.detail_scroll = 0;
+        self.last_item_count = 0;
     }
 
     pub fn toggle_dep_expand(&mut self) {
-        let store = &self.store;
-        let all = store.all_dependencies();
-        let ref_field = if let Some(d) = all.get(self.table_selected) {
-            d.ref_field.clone()
-        } else {
+        let ref_field = self.dep_tree_refs
+            .get(self.table_selected)
+            .cloned()
+            .unwrap_or_default();
+        if ref_field.is_empty() {
             return;
-        };
+        }
         if self.dep_expanded.contains(&ref_field) {
             self.dep_expanded.remove(&ref_field);
         } else {

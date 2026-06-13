@@ -3,9 +3,9 @@
 set -e
 
 rm -rf plugins/trivy
-rm -rf plugins/trustinspector plugins/golem plugins/rusi
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui
 
-for plug in trivy trustinspector golem rusi
+for plug in trivy trustinspector golem rusi cdxui
 do
     mkdir -p plugins/$plug
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-riscv64"

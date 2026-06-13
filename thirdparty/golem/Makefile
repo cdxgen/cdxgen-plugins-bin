@@ -1,6 +1,6 @@
 PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := golem
-version ?= 2.5.0
+version ?= $(shell node -p "require('../../package.json').version")
 sources := $(shell find cmd internal -type f -name '*.go')
 ldflags := -s -w -X main.version=$(version)
 

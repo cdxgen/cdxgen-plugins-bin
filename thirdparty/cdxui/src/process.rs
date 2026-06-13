@@ -11,11 +11,13 @@ pub struct ProcessHandle {
     child: Option<Child>,
     pub log_rx: mpsc::Receiver<LogEntry>,
     pub thought_rx: mpsc::Receiver<String>,
+    pub trace_rx: mpsc::Receiver<String>,
     pub thought_log_path: Option<PathBuf>,
+    pub trace_log_path: Option<PathBuf>,
 }
 
 impl ProcessHandle {
-    pub fn spawn(cmd: &str, args: &[String], thought_log: &str) -> Result<Self, String> {
+    pub fn spawn(cmd: &str, args: &[String], thought_log: &str, trace_log: &str) -> Result<Self, String> {
         let mut command = Command::new(cmd);
         command
             .args(args)
@@ -23,7 +25,10 @@ impl ProcessHandle {
             .stderr(Stdio::piped())
             .env("CDXGEN_THINK_MODE", "true")
             .env("CDXGEN_THOUGHT_LOG", thought_log)
-            .env("CDXGEN_DEBUG_MODE", "verbose");
+            .env("CDXGEN_TRACE_MODE", "true")
+            .env("CDXGEN_TRACE_LOG", trace_log)
+            .env("CDXGEN_DEBUG_MODE", "verbose")
+            .env("FETCH_LICENSE", std::env::var("FETCH_LICENSE").unwrap_or_default());
 
         let mut child = command.spawn().map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
 
@@ -32,6 +37,7 @@ impl ProcessHandle {
 
         let (log_tx, log_rx) = mpsc::channel::<LogEntry>();
         let (thought_tx, thought_rx) = mpsc::channel::<String>();
+        let (trace_tx, trace_rx) = mpsc::channel::<String>();
 
         // stdout reader thread
         let tx1 = log_tx.clone();
@@ -90,11 +96,39 @@ impl ProcessHandle {
             }
         });
 
+        // trace log file reader thread
+        let trace_path = PathBuf::from(trace_log.to_string());
+        let trace_path_clone = trace_path.clone();
+        thread::spawn(move || {
+            let mut last_size = 0u64;
+            loop {
+                thread::sleep(Duration::from_millis(250));
+                if let Ok(meta) = std::fs::metadata(&trace_path_clone) {
+                    let current_size = meta.len();
+                    if current_size > last_size {
+                        if let Ok(content) = std::fs::read_to_string(&trace_path_clone) {
+                            let new_content = &content[last_size as usize..];
+                            if !new_content.is_empty() {
+                                if trace_tx.send(new_content.to_string()).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        last_size = current_size;
+                    } else if current_size < last_size {
+                        last_size = 0;
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             child: Some(child),
             log_rx,
             thought_rx,
+            trace_rx,
             thought_log_path: Some(thought_path),
+            trace_log_path: Some(trace_path),
         })
     }
 

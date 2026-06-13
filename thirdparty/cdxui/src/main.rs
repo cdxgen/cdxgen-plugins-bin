@@ -3,6 +3,7 @@ mod args;
 mod bom;
 mod logs;
 mod process;
+mod trace;
 mod ui;
 
 use crate::app::{App, InputMode, Tab};
@@ -10,10 +11,11 @@ use crate::args::{Args, parse_cdxgen_args};
 use crate::bom::store::BomStore;
 use crate::logs::LogStore;
 use crate::process::ProcessHandle;
+use crate::trace::TraceState;
 use crate::ui::theme::Theme;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -31,9 +33,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut store = BomStore::new();
     let mut log_store = LogStore::new(50000);
     let mut process: Option<ProcessHandle> = None;
+    let mut saved_output_path: Option<std::path::PathBuf> = None;
     let mut app;
     let mut start_tab = Tab::Summary;
     let thought_log_path = format!("/tmp/cdxui-thought-{}.log", std::process::id());
+    let trace_log_path = format!("/tmp/cdxui-trace-{}.jsonl", std::process::id());
 
     if args.generate {
         let cdxgen_cmd = std::env::var("CDXGEN_CMD").unwrap_or_else(|_| "cdxgen".to_string());
@@ -43,15 +47,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut cdxgen_args: Vec<String> = pre_args.iter().map(|s| s.to_string()).collect();
         cdxgen_args.extend(parse_cdxgen_args());
 
-        let output_path = extract_output_path(&cdxgen_args).unwrap_or_else(|| args.output.to_string_lossy().to_string());
+        let bom_output = extract_output_path(&cdxgen_args).unwrap_or_else(|| args.output.to_string_lossy().to_string());
 
         if !cdxgen_args.iter().any(|a| a == "-o" || a == "--output") {
             cdxgen_args.push("-o".to_string());
-            cdxgen_args.push(output_path.clone());
+            cdxgen_args.push(bom_output.clone());
         }
 
         eprintln!("Spawning: {} {}", cmd, cdxgen_args.join(" "));
-        match ProcessHandle::spawn(cmd, &cdxgen_args, &thought_log_path) {
+        match ProcessHandle::spawn(cmd, &cdxgen_args, &thought_log_path, &trace_log_path) {
             Ok(ph) => {
                 process = Some(ph);
                 start_tab = Tab::Logs;
@@ -60,6 +64,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Failed to spawn cdxgen: {}", e);
             }
         }
+
+        // Store the output path for post-generation BOM loading
+        let pb = std::path::PathBuf::from(&bom_output);
+        saved_output_path = Some(pb);
     } else if let Some(ref path) = args.path {
         if !path.exists() {
             eprintln!("Error: path '{}' does not exist", path.display());
@@ -76,9 +84,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let mut trace_state = TraceState::new();
     app = App::new(store, args.path.clone().into_iter().collect());
     app.generating = process.is_some();
     app.current_tab = start_tab;
+    if let Some(out_path) = saved_output_path {
+        app.output_path = Some(out_path);
+    }
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -87,12 +99,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, &mut app, &mut log_store, &mut process, &theme);
+    let result = run_app(&mut terminal, &mut app, &mut log_store, &mut process, &mut trace_state, &theme);
 
     if let Some(mut proc) = process {
         proc.kill();
     }
     let _ = std::fs::remove_file(&thought_log_path);
+    let _ = std::fs::remove_file(&trace_log_path);
 
     disable_raw_mode()?;
     execute!(
@@ -110,13 +123,16 @@ fn run_app<B: Backend>(
     app: &mut App,
     log_store: &mut LogStore,
     process: &mut Option<ProcessHandle>,
+    trace_state: &mut TraceState,
     theme: &Theme,
 ) -> io::Result<()> {
     let page_size = 20usize;
     loop {
         drain_logs(app, log_store, process);
+        drain_traces(trace_state, process);
+        trace_state.tick();
         check_auto_switch(app, log_store);
-        terminal.draw(|frame| ui::render(frame, app, log_store, theme))?;
+        terminal.draw(|frame| ui::render(frame, app, log_store, trace_state, theme))?;
 
         if app.should_quit {
             return Ok(());
@@ -128,7 +144,22 @@ fn run_app<B: Backend>(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                handle_key_event(app, key.code, page_size);
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if app.scroll_offset > 0 { app.scroll_offset -= 1; }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.scroll_offset = app.scroll_offset.saturating_add(1);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    handle_key_event(app, key.code, page_size);
+                }
+            }
+            Event::Mouse(mouse) => {
+                handle_mouse_event(app, mouse);
             }
             Event::Resize(_, _) => {}
             _ => {}
@@ -153,13 +184,11 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
             app.generation_done = true;
             app.switch_timer = Some(std::time::Instant::now());
 
-            let output_path = extract_output_path_from_app(app);
-            if let Some(ref out) = output_path {
-                let pb = std::path::PathBuf::from(out);
-                if pb.exists() {
-                    match app.store.load_path(&pb) {
+            if let Some(ref out_path) = app.output_path {
+                if out_path.exists() {
+                    match app.store.load_path(out_path) {
                         Ok(count) => {
-                            let msg = format!("Loaded {} BOM file(s) from {}", count, pb.display());
+                            let msg = format!("Loaded {} BOM file(s) from {}", count, out_path.display());
                             log_store.push_line(&msg);
                         }
                         Err(e) => {
@@ -174,6 +203,16 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
     app.last_item_count = log_store.len();
 }
 
+fn drain_traces(trace_state: &mut TraceState, process: &mut Option<ProcessHandle>) {
+    if let Some(ref mut proc) = process {
+        while let Ok(delta) = proc.trace_rx.try_recv() {
+            for line in delta.lines() {
+                trace_state.process_line(line);
+            }
+        }
+    }
+}
+
 fn check_auto_switch(app: &mut App, _log_store: &LogStore) {
     if let Some(timer) = app.switch_timer {
         if timer.elapsed().as_secs() >= 2 {
@@ -181,13 +220,6 @@ fn check_auto_switch(app: &mut App, _log_store: &LogStore) {
             app.switch_timer = None;
         }
     }
-}
-
-fn extract_output_path_from_app(app: &App) -> Option<String> {
-    if let Some(ref out) = app.output_path {
-        return Some(out.to_string_lossy().to_string());
-    }
-    None
 }
 
 fn extract_output_path(args: &[String]) -> Option<String> {
@@ -235,9 +267,16 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             }
 
             KeyCode::Enter => {
-                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) {
-                    app.toggle_dep_expand(); app.last_item_count = 0;
-                } else { app.toggle_detail(); app.detail_scroll = 0; }
+                if app.current_tab == Tab::Dependencies {
+                    app.toggle_detail();
+                    app.detail_scroll = 0;
+                } else if app.current_tab == Tab::Summary {
+                    app.toggle_dep_expand();
+                    app.last_item_count = 0;
+                } else {
+                    app.toggle_detail();
+                    app.detail_scroll = 0;
+                }
             }
             KeyCode::Right => {
                 if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) {
@@ -284,6 +323,20 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             }
             _ => {}
         },
+    }
+}
+
+fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            if app.scroll_offset > 0 {
+                app.scroll_offset = app.scroll_offset.saturating_sub(3);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            app.scroll_offset = app.scroll_offset.saturating_add(3);
+        }
+        _ => {}
     }
 }
 
