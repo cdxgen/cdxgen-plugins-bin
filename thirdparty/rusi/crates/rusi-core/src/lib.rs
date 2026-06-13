@@ -147,13 +147,17 @@ struct FunctionRecord {
     return_type: String,
     operations: Vec<Operation>,
     direct_calls: Vec<SimplifiedCall>,
+    receiver_type: Option<String>,
+    is_loop_body: bool,
 }
 
 #[derive(Debug, Clone)]
 enum Operation {
     Assign { target: String, value: SimpleExpr },
+    AssignField { target: String, field: String, value: SimpleExpr },
     Expr(SimpleExpr),
     Return(SimpleExpr),
+    LoopBody(Vec<Operation>),
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +172,13 @@ enum SimpleExpr {
     Literal,
     Field {
         base: Box<SimpleExpr>,
+        field: String,
+    },
+    MethodCall {
+        receiver: Box<SimpleExpr>,
+        method: String,
+        args: Vec<SimpleExpr>,
+        position: Position,
     },
     Unknown,
 }
@@ -177,6 +188,8 @@ struct FunctionSummary {
     returns_source_categories: BTreeSet<String>,
     param_to_return: BTreeSet<usize>,
     param_to_sink: BTreeMap<String, BTreeSet<usize>>,
+    param_to_field_sink: BTreeMap<(usize, String), BTreeSet<String>>,
+    field_to_return: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +210,96 @@ struct ConcreteTaint {
     paths: Vec<TaintPath>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct TraitImplIndex {
+    trait_to_impl_methods: HashMap<String, Vec<String>>,
+    method_to_impls: HashMap<String, Vec<String>>,
+}
+
+fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPattern> {
+    let mut method_counts: HashMap<String, usize> = HashMap::new();
+    let mut proven_passthrough: HashSet<String> = HashSet::new();
+
+    let known_passthrough_names: HashSet<&str> = [
+        "as_ref", "as_mut", "as_str", "as_bytes", "as_os_str", "as_path",
+        "to_string", "to_owned", "to_os_string", "to_string_lossy",
+        "into_owned", "into_inner", "clone", "clone_from",
+        "try_into", "deref", "deref_mut", "borrow", "borrow_mut",
+        "read", "write", "get_mut", "get", "get_or_insert", "get_or_insert_with",
+        "iter", "iter_mut", "into_iter", "keys", "values", "values_mut",
+        "is_empty", "is_none", "is_some", "is_ok", "is_err",
+        "contains", "starts_with", "ends_with", "find", "rfind",
+        "split", "split_at", "split_whitespace", "strip_prefix", "strip_suffix",
+        "trim", "trim_start", "trim_end", "to_lowercase", "to_uppercase",
+        "to_ascii_lowercase", "to_ascii_uppercase", "chars", "bytes",
+        "lines", "replace", "replacen", "repeat",
+    ].iter().copied().collect::<HashSet<_>>();
+
+    for function in functions {
+        if let Some(receiver_type) = &function.receiver_type {
+            let has_self_receiver = receiver_type.contains("Self")
+                || receiver_type.contains("&Self")
+                || receiver_type.contains("&mut Self")
+                || !receiver_type.is_empty();
+            if has_self_receiver {
+                let name = function.declaration.name.clone();
+                let fqn = function.declaration.qualified_name.clone();
+                if known_passthrough_names.contains(name.as_str()) {
+                    proven_passthrough.insert(name.clone());
+                    proven_passthrough.insert(fqn);
+                }
+            }
+        }
+    }
+
+    for function in functions {
+        for operation in &function.operations {
+            let callee = match operation {
+                Operation::Expr(SimpleExpr::Call { callee, .. }) |
+                Operation::Return(SimpleExpr::Call { callee, .. }) => Some(callee.as_str()),
+                Operation::Expr(SimpleExpr::MethodCall { method, .. }) |
+                Operation::Return(SimpleExpr::MethodCall { method, .. }) => Some(method.as_str()),
+                _ => None,
+            };
+            if let Some(callee) = callee {
+                let last_seg = last_segment(callee);
+                *method_counts.entry(last_seg.to_string()).or_default() += 1;
+            }
+        }
+    }
+
+    for function in functions {
+        if function.return_type.contains("Self") || function.return_type.contains("Option<Self") || function.return_type.contains("Result<Self") {
+            let name = function.declaration.name.clone();
+            let fqn = function.declaration.qualified_name.clone();
+            proven_passthrough.insert(name.clone());
+            proven_passthrough.insert(fqn);
+        }
+    }
+
+    let mut patterns = Vec::new();
+    for (method_name, count) in &method_counts {
+        if proven_passthrough.contains(method_name) && *count >= 1 {
+            let short_name = last_segment(method_name);
+            patterns.push(DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: short_name.to_string(),
+                category: "auto-discovered-passthrough".to_string(),
+                relevant_arguments: vec![],
+            });
+            if short_name != *method_name {
+                patterns.push(DataFlowPattern {
+                    target: "passthrough".to_string(),
+                    pattern: method_name.clone(),
+                    category: "auto-discovered-passthrough".to_string(),
+                    relevant_arguments: vec![],
+                });
+            }
+        }
+    }
+    patterns
+}
+
 /// Parsed evidence collected from a single Rust source file.
 ///
 /// The bootstrap engine extracts structural facts here first and then reuses
@@ -209,6 +312,7 @@ struct AnalyzedFile {
     imports: Vec<ImportUsage>,
     security_signals: Vec<SecuritySignal>,
     functions: Vec<FunctionRecord>,
+    trait_impl_records: Vec<TraitImplRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -368,7 +472,8 @@ pub fn analyze_with_optional_compiler(
             options.debug,
             format_args!("pass=stable-callgraph functions={}", all_functions.len()),
         );
-        Some(build_call_graph(&all_functions))
+        let trait_index = build_trait_impl_index(&analyzed_files);
+        Some(build_call_graph(&all_functions, &trait_index))
     } else {
         None
     };
@@ -378,6 +483,17 @@ pub fn analyze_with_optional_compiler(
     }
     if let Some(custom_patterns) = options.custom_data_flow_patterns.clone() {
         merge_pattern_sets(&mut dataflow_patterns, custom_patterns);
+    }
+    let auto_passthroughs = discover_auto_passthroughs(&all_functions);
+    if !auto_passthroughs.is_empty() {
+        merge_pattern_sets(
+            &mut dataflow_patterns,
+            DataFlowPatternSet {
+                sources: Vec::new(),
+                sinks: Vec::new(),
+                passthroughs: auto_passthroughs,
+            },
+        );
     }
     let fallback_data_flow = if options.data_flow_mode != "none" {
         debug_log(
@@ -843,6 +959,7 @@ fn analyze_file(
         imports: collector.imports,
         security_signals: collector.security_signals,
         functions: collector.functions,
+        trait_impl_records: collector.trait_impl_records,
     })
 }
 
@@ -878,6 +995,17 @@ struct SourceCollector {
     crypto: CryptoEvidence,
     functions: Vec<FunctionRecord>,
     current_function: Option<FunctionFrame>,
+    trait_impl_records: Vec<TraitImplRecord>,
+    struct_field_names: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct TraitImplRecord {
+    trait_name: String,
+    impl_type: String,
+    method_ids: Vec<String>,
+    method_names: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -885,6 +1013,8 @@ struct FunctionFrame {
     declaration_id: String,
     operations: Vec<Operation>,
     direct_calls: Vec<SimplifiedCall>,
+    receiver_type: Option<String>,
+    is_loop_body: bool,
 }
 
 impl SourceCollector {
@@ -898,6 +1028,8 @@ impl SourceCollector {
             crypto: CryptoEvidence::default(),
             functions: Vec::new(),
             current_function: None,
+            trait_impl_records: Vec::new(),
+            struct_field_names: HashMap::new(),
         }
     }
 
@@ -1071,6 +1203,8 @@ impl SourceCollector {
             declaration_id: declaration.id.clone(),
             operations: Vec::new(),
             direct_calls: Vec::new(),
+            receiver_type: None,
+            is_loop_body: false,
         });
         visit_callable_body(self, &closure.body);
         let mut finished = self.current_function.take().expect("closure frame exists");
@@ -1092,6 +1226,8 @@ impl SourceCollector {
             return_type: closure_return_type(closure),
             operations: finished.operations.clone(),
             direct_calls: finished.direct_calls,
+            receiver_type: None,
+            is_loop_body: false,
         });
         self.current_function = previous;
     }
@@ -1150,6 +1286,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
             declaration_id: declaration.id.clone(),
             operations: Vec::new(),
             direct_calls: Vec::new(),
+            receiver_type: None,
+            is_loop_body: false,
         });
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
@@ -1170,12 +1308,17 @@ impl<'ast> Visit<'ast> for SourceCollector {
             return_type: function_return_type(&node.sig),
             operations: finished.operations.clone(),
             direct_calls: finished.direct_calls,
+            receiver_type: None,
+            is_loop_body: false,
         });
         self.current_function = previous;
     }
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
         let receiver = node.self_ty.to_token_stream().to_string().replace(' ', "");
+        let trait_name = node.trait_.as_ref().map(|(_, path, _)| path_to_string(path));
+        let mut method_ids = Vec::new();
+        let mut method_names = Vec::new();
         for item in &node.items {
             if let ImplItem::Fn(method) = item {
                 let declaration = self.push_declaration(
@@ -1189,10 +1332,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     Some(receiver.clone()),
                     method.sig.ident.span(),
                 );
+                method_ids.push(declaration.id.clone());
+                method_names.push(declaration.qualified_name.clone());
                 let previous = self.current_function.replace(FunctionFrame {
                     declaration_id: declaration.id.clone(),
                     operations: Vec::new(),
                     direct_calls: Vec::new(),
+                    receiver_type: Some(receiver.clone()),
+                    is_loop_body: false,
                 });
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
@@ -1213,9 +1360,19 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     return_type: function_return_type(&method.sig),
                     operations: finished.operations.clone(),
                     direct_calls: finished.direct_calls,
+                    receiver_type: Some(receiver.clone()),
+                    is_loop_body: false,
                 });
                 self.current_function = previous;
             }
+        }
+        if let Some(trait_name) = trait_name {
+            self.trait_impl_records.push(TraitImplRecord {
+                trait_name,
+                impl_type: receiver,
+                method_ids,
+                method_names,
+            });
         }
         syn::visit::visit_item_impl(self, node);
     }
@@ -1241,6 +1398,15 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     None,
                     item.ident.span(),
                 );
+                let field_names: Vec<String> = item
+                    .fields
+                    .iter()
+                    .filter_map(|field| field.ident.as_ref().map(|ident| ident.to_string()))
+                    .collect();
+                if !field_names.is_empty() {
+                    let key = qualify_name(&self.file_ctx, None, &item.ident.to_string());
+                    self.struct_field_names.insert(key, field_names);
+                }
             }
             Item::Enum(item) => {
                 self.push_declaration(
@@ -1259,6 +1425,21 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     None,
                     item.ident.span(),
                 );
+                let trait_name = qualify_name(&self.file_ctx, None, &item.ident.to_string());
+                let method_names: Vec<String> = item
+                    .items
+                    .iter()
+                    .filter_map(|trait_item| match trait_item {
+                        syn::TraitItem::Fn(method) => {
+                            Some(method.sig.ident.to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !method_names.is_empty() {
+                    let key = format!("trait:{}", trait_name);
+                    self.struct_field_names.insert(key, method_names);
+                }
             }
             _ => {}
         }
@@ -1419,10 +1600,21 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     if let Pat::Ident(PatIdent { ident, .. }) = &local.pat
                         && let Some(init) = &local.init
                     {
-                        frame.operations.push(Operation::Assign {
-                            target: ident.to_string(),
-                            value: simple_expr(&init.expr),
-                        });
+                        if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
+                            && let Some(target_var) = extract_path_name(base)
+                        {
+                            let target_name = qualified_target_name(&self.struct_field_names, &target_var, &member_from_expr(member));
+                            frame.operations.push(Operation::AssignField {
+                                target: ident.to_string(),
+                                field: target_name,
+                                value: simple_expr(&init.expr),
+                            });
+                        } else {
+                            frame.operations.push(Operation::Assign {
+                                target: ident.to_string(),
+                                value: simple_expr(&init.expr),
+                            });
+                        }
                     }
                 }
                 Stmt::Expr(expr, _) => {
@@ -1431,6 +1623,21 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     }) = expr
                     {
                         frame.operations.push(Operation::Return(simple_expr(value)));
+                    } else if let Expr::Assign(assign) = expr {
+                        if let Expr::Field(field_expr) = &*assign.left
+                            && let Some(target_var) = extract_path_name(&field_expr.base)
+                        {
+                            let field_name = member_from_expr(&field_expr.member);
+                            let qualified_field = qualified_target_name(
+                                &self.struct_field_names, &target_var, &field_name);
+                            frame.operations.push(Operation::AssignField {
+                                target: target_var,
+                                field: qualified_field,
+                                value: simple_expr(&assign.right),
+                            });
+                        } else {
+                            frame.operations.push(Operation::Expr(simple_expr(expr)));
+                        }
                     } else {
                         frame.operations.push(Operation::Expr(simple_expr(expr)));
                     }
@@ -2191,12 +2398,13 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
             args,
             ..
         }) => {
-            let mut all_args = vec![simple_expr(receiver)];
-            all_args.extend(args.iter().map(simple_expr));
             let span = method.span();
             let start = span.start();
-            SimpleExpr::Call {
-                callee: method_call_callee(receiver, &method.to_string()),
+            let callee_name = method_call_callee(receiver, &method.to_string());
+            let all_args = args.iter().map(simple_expr).collect::<Vec<_>>();
+            SimpleExpr::MethodCall {
+                receiver: Box::new(simple_expr(receiver)),
+                method: callee_name.clone(),
                 args: all_args,
                 position: Position {
                     filename: String::new(),
@@ -2208,9 +2416,10 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         Expr::Reference(ExprReference { expr, .. }) => simple_expr(expr),
         Expr::Paren(ExprParen { expr, .. }) => simple_expr(expr),
         Expr::Field(ExprField {
-            base, member: _, ..
+            base, member, ..
         }) => SimpleExpr::Field {
             base: Box::new(simple_expr(base)),
+            field: member_from_expr(member),
         },
         Expr::Return(ExprReturn {
             expr: Some(expr), ..
@@ -2250,9 +2459,27 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         Expr::Unary(syn::ExprUnary { op: syn::UnOp::Deref(_), expr, .. }) => simple_expr(expr),
         Expr::Unary(syn::ExprUnary { expr, .. }) => simple_expr(expr),
         Expr::Assign(syn::ExprAssign { left, right, .. }) => {
-            SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
+            if let Expr::Field(field_expr) = &**left
+                && let Some(_base) = extract_path_name(&field_expr.base)
+            {
+                let _result = simple_expr(right);
+                SimpleExpr::Compose(vec![SimpleExpr::Field {
+                    base: Box::new(simple_expr(&field_expr.base)),
+                    field: member_from_expr(&field_expr.member),
+                }, simple_expr(right)])
+            } else {
+                SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
+            }
         }
         Expr::Group(syn::ExprGroup { expr, .. }) => simple_expr(expr),
+        Expr::Struct(syn::ExprStruct { fields, .. }) => {
+            let items: Vec<SimpleExpr> = fields.iter().map(|field| simple_expr(&field.expr)).collect();
+            if items.len() == 1 {
+                items.into_iter().next().unwrap_or(SimpleExpr::Unknown)
+            } else {
+                SimpleExpr::Compose(items)
+            }
+        }
         _ => SimpleExpr::Unknown,
     }
 }
@@ -2286,7 +2513,69 @@ fn path_to_string(path: &syn::Path) -> String {
         .join("::")
 }
 
-fn build_call_graph(functions: &[FunctionRecord]) -> CallGraph {
+fn extract_path_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(ExprPath { path, .. }) => path.get_ident().map(|ident| ident.to_string()),
+        Expr::Field(ExprField { base, .. }) => extract_path_name(base),
+        _ => None,
+    }
+}
+
+fn qualified_target_name(
+    struct_field_names: &HashMap<String, Vec<String>>,
+    target_var: &str,
+    field: &str,
+) -> String {
+    for (key, fields) in struct_field_names {
+        if key.ends_with(&format!("::{}", target_var))
+            || key == target_var
+        {
+            if fields.iter().any(|f| f == field) {
+                return format!("{}:{}", target_var, field);
+            }
+        }
+    }
+    format!("{}:{}", target_var, field)
+}
+
+fn member_from_expr(member: &syn::Member) -> String {
+    match member {
+        syn::Member::Named(ident) => ident.to_string(),
+        syn::Member::Unnamed(index) => format!("field_{}", index.index),
+    }
+}
+
+fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
+    let mut trait_to_impl_methods: HashMap<String, Vec<String>> = HashMap::new();
+    let mut method_to_impls: HashMap<String, Vec<String>> = HashMap::new();
+
+    for file in analyzed_files {
+        for record in &file.trait_impl_records {
+            let trait_key = record.trait_name.clone();
+            for (method_id, method_name) in record.method_ids.iter().zip(record.method_names.iter()) {
+                trait_to_impl_methods
+                    .entry(trait_key.clone())
+                    .or_default()
+                    .push(method_id.clone());
+                method_to_impls
+                    .entry(last_segment(method_name).to_string())
+                    .or_default()
+                    .push(method_id.clone());
+                method_to_impls
+                    .entry(method_name.clone())
+                    .or_default()
+                    .push(method_id.clone());
+            }
+        }
+    }
+
+    TraitImplIndex {
+        trait_to_impl_methods,
+        method_to_impls,
+    }
+}
+
+fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) -> CallGraph {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut diagnostics = Vec::new();
@@ -2312,7 +2601,7 @@ fn build_call_graph(functions: &[FunctionRecord]) -> CallGraph {
 
         for call in &function.direct_calls {
             let resolved =
-                resolve_call_target(&call.callee_text, &function.package_path, &local_index);
+                resolve_call_target(&call.callee_text, &function.package_path, &local_index, Some(trait_index));
             let target_node = match resolved {
                 Some(resolved) => resolved,
                 None => {
@@ -2415,6 +2704,7 @@ fn resolve_call_target(
     callee: &str,
     package_path: &str,
     local_index: &HashMap<String, Vec<String>>,
+    trait_index: Option<&TraitImplIndex>,
 ) -> Option<String> {
     let normalized = normalize_local_path(callee, package_path);
     if let Some(ids) = local_index.get(&normalized)
@@ -2431,6 +2721,19 @@ fn resolve_call_target(
         && ids.len() == 1
     {
         return ids.first().cloned();
+    }
+    if let Some(trait_index) = trait_index {
+        let last = last_segment(callee);
+        if let Some(impl_ids) = trait_index.method_to_impls.get(last)
+            && impl_ids.len() == 1
+        {
+            return impl_ids.first().cloned();
+        }
+        if let Some(impl_ids) = trait_index.method_to_impls.get(callee)
+            && impl_ids.len() == 1
+        {
+            return impl_ids.first().cloned();
+        }
     }
     None
 }
@@ -3279,6 +3582,90 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 category: "channel-io".to_string(),
                 relevant_arguments: vec![0],
             },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_bytes".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_os_str".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_string_lossy".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "encode_b64".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "url".to_string(),
+                category: "http-request-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_token_stream".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "collect".to_string(),
+                category: "iterator-adapter".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "filter".to_string(),
+                category: "iterator-adapter".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "fold".to_string(),
+                category: "iterator-adapter".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "flat_map".to_string(),
+                category: "iterator-adapter".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_lowercase".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_uppercase".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_ascii_lowercase".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_ascii_uppercase".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
         ],
     }
 }
@@ -3293,23 +3680,46 @@ fn infer_summaries(
         summaries.insert(function.declaration.id.clone(), FunctionSummary::default());
     }
 
+    let mut dirty: HashSet<String> = functions.iter().map(|f| f.declaration.id.clone()).collect();
+    let mut callee_map: HashMap<String, Vec<String>> = HashMap::new();
+    for function in functions {
+        for call in &function.direct_calls {
+            if let Some(resolved) =
+                resolve_call_target(&call.callee_text, &function.package_path, local_index, None)
+            {
+                callee_map
+                    .entry(resolved.clone())
+                    .or_default()
+                    .push(function.declaration.id.clone());
+            }
+        }
+    }
+
     for _ in 0..6 {
-        let next_entries = parallel_map_collect(functions, |function| {
+        if dirty.is_empty() {
+            break;
+        }
+        let current_dirty: Vec<String> = dirty.drain().collect();
+        let funcs_to_update: Vec<&FunctionRecord> = functions
+            .iter()
+            .filter(|f| current_dirty.contains(&f.declaration.id))
+            .collect();
+        let next_entries = parallel_map_collect(&funcs_to_update, |function| {
             (
                 function.declaration.id.clone(),
                 summarize_function(function, &summaries, local_index, patterns),
             )
         });
-        let mut changed = false;
         for (function_id, next) in next_entries {
-            let entry = summaries.entry(function_id).or_default();
-            if entry != &next {
+            let entry = summaries.entry(function_id.clone()).or_default();
+            if *entry != next {
                 *entry = next;
-                changed = true;
+                if let Some(callers) = callee_map.get(&function_id) {
+                    for caller in callers {
+                        dirty.insert(caller.clone());
+                    }
+                }
             }
-        }
-        if !changed {
-            break;
         }
     }
     summaries
@@ -3349,6 +3759,53 @@ fn summarize_function(
                     patterns,
                 );
                 env.insert(target.clone(), value_taint);
+            }
+            Operation::AssignField { target, field, value } => {
+                let value_taint = eval_abstract_expr(
+                    value,
+                    &env,
+                    summaries,
+                    &function.package_path,
+                    local_index,
+                    patterns,
+                );
+                let key = format!("{}.{}", target, field);
+                env.insert(key, value_taint);
+            }
+            Operation::LoopBody(loop_ops) => {
+                let mut loop_env = env.clone();
+                for _iter in 0..3 {
+                    let mut changed = false;
+                    for op in loop_ops {
+                        match op {
+                            Operation::Assign { target, value } => {
+                                let value_taint = eval_abstract_expr(
+                                    value, &loop_env, summaries, &function.package_path, local_index, patterns,
+                                );
+                                if loop_env.get(target) != Some(&value_taint) {
+                                    changed = true;
+                                }
+                                loop_env.insert(target.clone(), value_taint);
+                            }
+                            Operation::AssignField { target, field, value } => {
+                                let value_taint = eval_abstract_expr(
+                                    value, &loop_env, summaries, &function.package_path, local_index, patterns,
+                                );
+                                let key = format!("{}.{}", target, field);
+                                loop_env.insert(key, value_taint);
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !changed {
+                        break;
+                    }
+                }
+                for (key, taint) in loop_env {
+                    if key.starts_with(&format!("{}.", "")) || !key.contains('.') {
+                        env.entry(key).or_insert(taint);
+                    }
+                }
             }
             Operation::Expr(expr) | Operation::Return(expr) => {
                 let value_taint = eval_abstract_expr(
@@ -3397,7 +3854,7 @@ fn summarize_function(
                     }
 
                     if let Some(resolved) =
-                        resolve_call_target(callee, &function.package_path, local_index)
+                        resolve_call_target(callee, &function.package_path, local_index, None)
                         && let Some(callee_summary) = summaries.get(&resolved).cloned()
                     {
                         for (sink_category, parameter_indexes) in callee_summary.param_to_sink {
@@ -3464,7 +3921,7 @@ fn eval_abstract_expr(
             }
 
             let mut taint = BTreeSet::new();
-            if let Some(resolved) = resolve_call_target(callee, package_path, local_index)
+            if let Some(resolved) = resolve_call_target(callee, package_path, local_index, None)
                 && let Some(summary) = summaries.get(&resolved).cloned()
             {
                 for category in summary.returns_source_categories {
@@ -3502,6 +3959,37 @@ fn eval_abstract_expr(
         SimpleExpr::Field { base, .. } => {
             eval_abstract_expr(base, env, summaries, package_path, local_index, patterns)
         }
+        SimpleExpr::MethodCall { method, receiver, args, .. } => {
+            let callee = method.clone();
+            let all_args = std::iter::once(receiver.as_ref()).chain(args.iter()).cloned().collect::<Vec<_>>();
+            if let Some(source_match) = find_source_pattern(&callee, &patterns.sources) {
+                return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
+            }
+            if is_sanitizer_call(&callee) {
+                return BTreeSet::new();
+            }
+            if has_passthrough_pattern(&callee, &patterns.passthroughs) {
+                let mut taint = BTreeSet::new();
+                for arg in &all_args {
+                    taint.extend(eval_abstract_expr(arg, env, summaries, package_path, local_index, patterns));
+                }
+                return taint;
+            }
+            let mut taint = BTreeSet::new();
+            if let Some(resolved) = resolve_call_target(&callee, package_path, local_index, None)
+                && let Some(summary) = summaries.get(&resolved).cloned()
+            {
+                for category in summary.returns_source_categories {
+                    taint.insert(AbstractOrigin::Source(category.clone()));
+                }
+                for param_index in summary.param_to_return {
+                    if let Some(arg) = all_args.get(param_index) {
+                        taint.extend(eval_abstract_expr(arg, env, summaries, package_path, local_index, patterns));
+                    }
+                }
+            }
+            taint
+        }
         SimpleExpr::Literal | SimpleExpr::Unknown => BTreeSet::new(),
     }
 }
@@ -3515,6 +4003,7 @@ struct DataFlowBuilder<'a> {
     nodes: IndexMap<String, DataFlowNode>,
     edges: IndexMap<String, DataFlowEdge>,
     slices: IndexMap<String, DataFlowSlice>,
+    missing_passthrough_call_counts: HashMap<String, usize>,
 }
 
 impl<'a> DataFlowBuilder<'a> {
@@ -3534,6 +4023,7 @@ impl<'a> DataFlowBuilder<'a> {
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
             slices: IndexMap::new(),
+            missing_passthrough_call_counts: HashMap::new(),
         }
     }
 
@@ -3619,12 +4109,63 @@ impl<'a> DataFlowBuilder<'a> {
                         env.insert(target.clone(), taint);
                     }
                 }
+                Operation::AssignField { target, field, value } => {
+                    let taint = self.eval_concrete_expr(function, value, &env);
+                    if !taint.paths.is_empty() {
+                        let key = format!("{}.{}", target, field);
+                        env.insert(key, taint);
+                    }
+                }
+                Operation::LoopBody(loop_ops) => {
+                    let mut loop_env = env.clone();
+                    for _iter in 0..4 {
+                        let mut changed = false;
+                        for op in loop_ops {
+                            match op {
+                                Operation::Assign { target, value } => {
+                                    let taint = self.eval_concrete_expr(function, value, &loop_env);
+                                    if !taint.paths.is_empty() {
+                                        if loop_env.get(target).is_none_or(|prev| prev.paths.len() != taint.paths.len()) {
+                                            changed = true;
+                                        }
+                                        loop_env.insert(target.clone(), taint);
+                                    }
+                                }
+                                Operation::AssignField { target, field, value } => {
+                                    let taint = self.eval_concrete_expr(function, value, &loop_env);
+                                    if !taint.paths.is_empty() {
+                                        let key = format!("{}.{}", target, field);
+                                        loop_env.insert(key, taint);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !changed { break; }
+                    }
+                    for (key, taint) in loop_env {
+                        if !env.contains_key(&key) {
+                            env.insert(key, taint);
+                        }
+                    }
+                }
                 Operation::Expr(expr) | Operation::Return(expr) => {
-                    if let SimpleExpr::Call {
-                        callee,
-                        args,
-                        position,
-                    } = expr
+                    let (callee, args, position) = match expr {
+                        SimpleExpr::Call { callee, args, position } => {
+                            (callee.clone(), args.clone(), position.clone())
+                        }
+                        SimpleExpr::MethodCall { method, receiver, args, position } => {
+                            let all_args = std::iter::once(receiver.as_ref())
+                                .chain(args.iter())
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            (method.clone(), all_args, position.clone())
+                        }
+                        _ => continue,
+                    };
+                    let callee = &callee;
+                    let args = &args;
+                    let position = &position;
                     {
                         if let Some(sink_match) =
                             find_sink_pattern(callee, args, &self.patterns.sinks)
@@ -3679,7 +4220,7 @@ impl<'a> DataFlowBuilder<'a> {
                          }
 
                         if let Some(resolved) =
-                            resolve_call_target(callee, &function.package_path, self.local_index)
+                            resolve_call_target(callee, &function.package_path, self.local_index, None)
                             && let Some(summary) = self.summaries.get(&resolved).cloned()
                         {
                             for (sink_category, parameter_indexes) in summary.param_to_sink {
@@ -3795,7 +4336,7 @@ impl<'a> DataFlowBuilder<'a> {
                     return ConcreteTaint { paths };
                 }
                 if let Some(resolved) =
-                    resolve_call_target(callee, &function.package_path, self.local_index)
+                    resolve_call_target(callee, &function.package_path, self.local_index, None)
                     && let Some(summary) = self.summaries.get(&resolved).cloned()
                 {
                     let mut paths = Vec::new();
@@ -3872,6 +4413,71 @@ impl<'a> DataFlowBuilder<'a> {
                         }
                     }
                     return ConcreteTaint { paths };
+                }
+                // Record missing passthrough if args have taint
+                let mut arg_taint_count = 0usize;
+                for arg in args {
+                    let arg_paths = self.eval_concrete_expr(function, arg, env).paths;
+                    arg_taint_count += arg_paths.len();
+                }
+                if arg_taint_count > 0 {
+                    let entry = self.missing_passthrough_call_counts
+                        .entry(callee.clone())
+                        .or_default();
+                    *entry += 1;
+                }
+                ConcreteTaint { paths: vec![] }
+            }
+            SimpleExpr::MethodCall { method, receiver, args, position } => {
+                if method.ends_with("recv") {
+                    if let Some(taint) = env.get("__channel_taint") {
+                        return taint.clone();
+                    }
+                }
+                if let Some(source_match) = find_source_pattern(method, &self.patterns.sources) {
+                    let path = self.new_source_path(function, method, &source_match.category, position.clone(), None);
+                    return ConcreteTaint { paths: vec![path] };
+                }
+                if is_sanitizer_call(method) {
+                    return ConcreteTaint { paths: vec![] };
+                }
+                let all_args = std::iter::once(receiver.as_ref()).chain(args.iter()).cloned().collect::<Vec<_>>();
+                if has_passthrough_pattern(method, &self.patterns.passthroughs) {
+                    let mut paths = Vec::new();
+                    for arg in &all_args {
+                        let arg_taint = self.eval_concrete_expr(function, arg, env);
+                        paths.extend(arg_taint.paths);
+                    }
+                    return ConcreteTaint { paths };
+                }
+                if let Some(resolved) = resolve_call_target(method, &function.package_path, self.local_index, None)
+                    && let Some(summary) = self.summaries.get(&resolved).cloned()
+                {
+                    let mut paths = Vec::new();
+                    for category in &summary.returns_source_categories {
+                        let callee_name = self.function_map.get(&resolved)
+                            .map(|f| f.declaration.qualified_name.clone())
+                            .unwrap_or_else(|| method.to_string());
+                        paths.push(self.new_source_path(function, &callee_name, category, position.clone(), None));
+                    }
+                    for param_index in &summary.param_to_return {
+                        if let Some(arg) = all_args.get(*param_index) {
+                            let arg_taint = self.eval_concrete_expr(function, arg, env);
+                            paths.extend(arg_taint.paths);
+                        }
+                    }
+                    return ConcreteTaint { paths };
+                }
+                let mut arg_taint_count = 0usize;
+                for arg in &all_args {
+                    let arg_paths = self.eval_concrete_expr(function, arg, env).paths;
+                    arg_taint_count += arg_paths.len();
+                }
+                if arg_taint_count > 0 {
+                    let entry = self.missing_passthrough_call_counts
+                        .entry(method.clone())
+                        .or_default();
+                    *entry += 1;
                 }
                 ConcreteTaint { paths: vec![] }
             }
@@ -4093,7 +4699,7 @@ impl<'a> DataFlowBuilder<'a> {
         let nodes = self.nodes.into_values().collect::<Vec<_>>();
         let edges = self.edges.into_values().collect::<Vec<_>>();
         let slices = self.slices.into_values().collect::<Vec<_>>();
-        DataFlowEvidence {
+        let mut result = DataFlowEvidence {
             mode: self.mode.to_string(),
             patterns: self.patterns,
             stats: DataFlowStats {
@@ -4109,7 +4715,24 @@ impl<'a> DataFlowBuilder<'a> {
             slices,
             summaries,
             diagnostics: Vec::new(),
+        };
+        if !self.missing_passthrough_call_counts.is_empty() {
+            let mut entries: Vec<_> = self.missing_passthrough_call_counts.iter().collect();
+            entries.sort_by(|(_, a), (_, b)| b.cmp(a));
+            for (callee, count) in entries.iter().take(20) {
+                result.diagnostics.push(Diagnostic {
+                    kind: "missing-passthrough".to_string(),
+                    message: format!(
+                        "taint may be lost at '{}' (observed {} times); consider adding it as a passthrough pattern",
+                        callee, count
+                    ),
+                    package_path: None,
+                    file_path: None,
+                    position: None,
+                });
+            }
         }
+        result
     }
 
     fn merge_materialized(&mut self, other: DataFlowBuilder<'a>) {
@@ -4121,6 +4744,9 @@ impl<'a> DataFlowBuilder<'a> {
         }
         for (key, value) in other.slices {
             self.slices.entry(key).or_insert(value);
+        }
+        for (callee, count) in other.missing_passthrough_call_counts {
+            *self.missing_passthrough_call_counts.entry(callee).or_default() += count;
         }
     }
 }
@@ -4218,7 +4844,11 @@ fn simple_expr_looks_sqlish(expr: &SimpleExpr) -> bool {
                 || args.iter().any(simple_expr_looks_sqlish)
         }
         SimpleExpr::Compose(items) => items.iter().any(simple_expr_looks_sqlish),
-        SimpleExpr::Field { base } => simple_expr_looks_sqlish(base),
+        SimpleExpr::Field { base, .. } => simple_expr_looks_sqlish(base),
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            simple_expr_looks_sqlish(receiver)
+                || args.iter().any(simple_expr_looks_sqlish)
+        }
         SimpleExpr::Literal | SimpleExpr::Unknown => false,
     }
 }
@@ -5697,5 +6327,235 @@ mod tests {
             "Expected path length to be at least 4, got: {}",
             matching_slice.path_length
         );
+    }
+
+    #[test]
+    fn crypto_flow_fixture_emits_env_to_digest_slices_with_method_chains() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("crypto-flow-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            analysis_scope: AnalysisScope::Cryptos,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let matching_slices: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| {
+                slice.source_category == "env"
+                    && slice.sink_category.starts_with("crypto")
+            })
+            .collect();
+        assert!(
+            matching_slices.len() >= 2,
+            "Expected at least 2 crypto slices from env source through method chains, got: {}",
+            matching_slices.len()
+        );
+        for slice in &matching_slices {
+            assert!(
+                slice.path_length >= 2,
+                "Expected path_length >= 2 for slice {:?}, got: {}",
+                slice.rule_name,
+                slice.path_length
+            );
+        }
+    }
+
+    #[test]
+    fn field_taint_app_emits_env_slices_through_struct_fields() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("field-taint-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "process-exec"),
+            "Expected env-to-process-exec flow through struct field"
+        );
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "network-connect"),
+            "Expected env-to-network-connect flow through struct field"
+        );
+        assert!(
+            data_flow.summaries.iter().any(|summary| {
+                summary.function.ends_with("build_config")
+                    && summary
+                        .source_returns
+                        .iter()
+                        .any(|category| category == "env")
+            }),
+            "Expected build_config summary to return env source category"
+        );
+    }
+
+    #[test]
+    fn chain_flow_app_emits_flow_through_method_chain() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("chain-flow-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "process-exec"),
+            "Expected env-to-process-exec flow through trim().to_lowercase().to_owned() chain"
+        );
+    }
+
+    #[test]
+    fn dyn_dispatch_app_emits_trait_impl_methods_in_callgraph() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-dispatch-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.expect("callgraph emitted");
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.properties.get("calleeText") == Some(&"persist".to_string())),
+            "Expected persist call in callgraph for dyn-dispatch"
+        );
+        assert!(graph.nodes.iter().any(|node| {
+            node.qualified_name.ends_with("FileStore::persist")
+                || node.qualified_name.ends_with("NetStore::persist")
+        }));
+    }
+
+    #[test]
+    fn dataflow_diagnostics_include_missing_passthrough_info() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("crypto-flow-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            analysis_scope: AnalysisScope::Cryptos,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let missing = data_flow
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == "missing-passthrough");
+        assert!(
+            missing.count() <= 30,
+            "Should emit missing-passthrough diagnostics (got some, bounded)"
+        );
+    }
+
+    #[test]
+    fn projection_flow_app_emits_env_to_process_and_network() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("projection-flow-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "process-exec"),
+            "Expected env-to-process-exec flow through projection"
+        );
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "network-connect"),
+            "Expected env-to-network-connect flow through projection"
+        );
+    }
+
+    #[test]
+    fn auto_discovered_passthroughs_are_present_in_patterns() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("auto-passthrough-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let auto_passthroughs: Vec<_> = data_flow
+            .patterns
+            .passthroughs
+            .iter()
+            .filter(|p| p.category == "auto-discovered-passthrough")
+            .collect();
+        assert!(
+            !auto_passthroughs.is_empty(),
+            "Expected auto-discovered passthroughs in auto-passthrough-app patterns"
+        );
+        assert!(
+            auto_passthroughs.iter().any(|p| p.pattern == "get"),
+            "Expected 'get' to be auto-discovered as passthrough"
+        );
+    }
+
+    #[test]
+    fn crypto_flow_with_as_bytes_produces_slices() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("cbom-real-crates-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            analysis_scope: AnalysisScope::Cryptos,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let crypto_slices: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category.starts_with("crypto"))
+            .collect();
+        assert!(
+            crypto_slices.len() >= 4,
+            "Expected at least 4 crypto slices in cbom-real-crates-app with cryptos scope, got: {}",
+            crypto_slices.len()
+        );
+
+        for slice in &crypto_slices {
+            assert!(
+                slice.path_length >= 2,
+                "Expected path_length >= 2 for crypto slice {:?}, got: {}",
+                slice.rule_name,
+                slice.path_length
+            );
+        }
     }
 }
