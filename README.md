@@ -163,6 +163,20 @@ Rusi can merge custom JSON modeling with the built-in stable data-flow pack thro
 
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64, windows-amd64
 
+### cdxui
+
+A Rust-based terminal user interface (TUI) for exploring CycloneDX Bill of Materials (BOM) files interactively. cdxui provides a fast, keyboard-driven environment to navigate complex BOM data, and can even spawn cdxgen to perform live generation while observing its internal reasoning traces.
+
+**What it does:**
+
+- Loads pre-generated CycloneDX JSON BOM files (versions 1.4 through 2.0) for interactive exploration
+- Provides tabbed views for Summary, Components, Cryptographic assets, Services, Formulation workflows, and Dependency Trees
+- Supports live BOM generation by invoking cdxgen with real-time log streaming, thought panel visualization, and activity tracing
+- Allows full-text search, column sorting, and type filtering across all BOM components
+- Renders detailed properties, evidence, external references, and hashes
+
+**Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64, darwin-amd64, windows-amd64, windows-arm64
+
 ## Installation
 
 The package is consumed indirectly by cdxgen. Install cdxgen, which installs this plugin as an optional dependency:
