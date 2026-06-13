@@ -173,11 +173,17 @@ fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogSto
     };
 
     let panels = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+    app.panel_areas.retain(|(p, _)| *p != crate::app::PanelFocus::Main);
 
     if has_thoughts {
+        app.panel_areas.push((crate::app::PanelFocus::Thoughts, panels[0]));
+        app.panel_areas.push((crate::app::PanelFocus::Stdout, panels[1]));
         render_thoughts_panel(frame, app, theme, panels[0]);
+        render_stdout_panel(frame, app, log_store, theme, if has_thoughts { panels[1] } else { panels[0] });
+    } else {
+        app.panel_areas.push((crate::app::PanelFocus::Stdout, panels[0]));
+        render_stdout_panel(frame, app, log_store, theme, panels[0]);
     }
-    render_stdout_panel(frame, app, log_store, theme, if has_thoughts { panels[1] } else { panels[0] });
 }
 
 fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {

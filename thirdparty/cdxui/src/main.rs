@@ -338,6 +338,13 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
             *offset = offset.saturating_add(3);
         }
         MouseEventKind::Down(_) => {
+            // Check if clicking a tab
+            for (tab, start, end) in &app.tab_positions {
+                if mouse.column >= *start && mouse.column < *end && mouse.row == 0 {
+                    app.switch_tab(*tab);
+                    return;
+                }
+            }
             if let Some(p) = panel {
                 app.focused_panel = p;
             }
