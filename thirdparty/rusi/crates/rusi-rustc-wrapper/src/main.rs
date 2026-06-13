@@ -1695,19 +1695,22 @@ enum AbstractOrigin {
 }
 
 #[derive(Debug, Clone)]
-struct ConcreteOrigin {
-    key: String,
-    node_id: String,
-    name: String,
-    function: String,
-    package_path: String,
+struct TaintStep {
+    node: DataFlowNode,
+    edge: Option<DataFlowEdge>,
+}
+
+#[derive(Debug, Clone)]
+struct TaintPath {
+    origin_key: String,
     category: String,
+    steps: Vec<TaintStep>,
     type_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct ConcreteTaint {
-    origins: Vec<ConcreteOrigin>,
+    paths: Vec<TaintPath>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -2772,17 +2775,18 @@ impl<'a> DataFlowBuilder<'a> {
     ) -> ConcreteState {
         for op in &block.ops {
             match op {
-                MirOp::Assign(assign) => apply_assign_concrete(assign, &mut state),
+                MirOp::Assign(assign) => apply_assign_concrete(function, assign, &mut state),
                 MirOp::Kill(place) => kill_concrete(&mut state, place),
                 MirOp::Call(call) => {
-                    let direct_source_origin = if let Some(category) = source_category(call) {
-                        let origin = self.source_origin(
+                    let direct_source_path = if let Some(category) = source_category(call) {
+                        let path = self.new_source_path(
                             function,
                             &call.callee_display,
                             &category,
                             call.dest_type.clone(),
+                            None,
                         );
-                        Some(origin)
+                        Some(path)
                     } else {
                         None
                     };
@@ -2806,11 +2810,11 @@ impl<'a> DataFlowBuilder<'a> {
                             }
                         }
                     }
-                    let mut origins = direct_source_origin.into_iter().collect::<Vec<_>>();
+                    let mut paths = direct_source_path.into_iter().collect::<Vec<_>>();
                     if passthrough(call) || semantic_passthrough(call) {
                         for arg in &call.args {
                             if let Some(place) = &arg.place {
-                                origins.extend(read_concrete(&state, place).origins);
+                                paths.extend(read_concrete(&state, place).paths);
                             }
                         }
                     }
@@ -2818,23 +2822,23 @@ impl<'a> DataFlowBuilder<'a> {
                         if let Some(receiver_place) =
                             call.args.first().and_then(|arg| arg.place.as_ref())
                         {
-                            origins.extend(read_concrete(&state, receiver_place).origins);
+                            paths.extend(read_concrete(&state, receiver_place).paths);
                         }
                         for arg in call.args.iter().skip(1) {
                             if let Some(place) = &arg.place {
-                                origins.extend(read_concrete(&state, place).origins);
+                                paths.extend(read_concrete(&state, place).paths);
                             }
                         }
                         if let Some(receiver_place) =
                             call.args.first().and_then(|arg| arg.place.as_ref())
                         {
                             let mut builder_taint = ConcreteTaint {
-                                origins: origins.clone(),
+                                paths: paths.clone(),
                             };
                             builder_taint
-                                .origins
-                                .sort_by(|left, right| left.key.cmp(&right.key));
-                            builder_taint.origins.dedup_by(|left, right| left.key == right.key);
+                                .paths
+                                .sort_by(|left, right| left.origin_key.cmp(&right.origin_key));
+                            builder_taint.paths.dedup_by(|left, right| left.origin_key == right.origin_key);
                             write_concrete(&mut state, receiver_place, builder_taint, true);
                         }
                     }
@@ -2847,7 +2851,7 @@ impl<'a> DataFlowBuilder<'a> {
                             }
                         }
                         if is_channel_recv(call) {
-                            origins.extend(read_concrete(&state, &slot).origins);
+                            paths.extend(read_concrete(&state, &slot).paths);
                         }
                     }
                     for target in
@@ -2864,26 +2868,28 @@ impl<'a> DataFlowBuilder<'a> {
                                 .unwrap_or_else(|| call.callee_display.clone());
                             if should_propagate_candidate_source_returns(call) {
                                 for category in summary.returns_source_categories {
-                                    origins.push(self.source_origin(
+                                    paths.push(self.new_source_path(
                                         function,
                                         &callee_name,
                                         &category,
                                         call.dest_type.clone(),
+                                        None,
                                     ));
                                 }
                             }
                             for (sink_category, source_categories) in summary.source_to_sink {
                                 for source_category in source_categories {
-                                    let origin = self.source_origin(
+                                    let path = self.new_source_path(
                                         function,
                                         &callee_name,
                                         &source_category,
                                         call.dest_type.clone(),
+                                        None,
                                     );
                                     self.emit_sink(
                                         function,
                                         &ConcreteTaint {
-                                            origins: vec![origin],
+                                            paths: vec![path],
                                         },
                                         &callee_name,
                                         &sink_category,
@@ -2896,7 +2902,49 @@ impl<'a> DataFlowBuilder<'a> {
                                 if let Some(place) =
                                     call.args.get(idx).and_then(|a| a.place.as_ref())
                                 {
-                                    origins.extend(read_concrete(&state, place).origins);
+                                    let arg_taint = read_concrete(&state, place);
+                                    for mut path in arg_taint.paths {
+                                        let node_id = stable_id(
+                                            "df-node",
+                                            &[
+                                                &function.id,
+                                                &callee_name,
+                                                &format!("param-to-return-{}", idx),
+                                                &function.position.line.to_string(),
+                                                &function.position.column.to_string(),
+                                            ],
+                                        );
+                                        let call_node = DataFlowNode {
+                                            id: node_id.clone(),
+                                            kind: "call_return".to_string(),
+                                            name: callee_name.clone(),
+                                            package_path: function.package_path.clone(),
+                                            purl: String::new(),
+                                            function: function.qualified_name.clone(),
+                                            position: function.position.clone(),
+                                            source: false,
+                                            sink: false,
+                                            category: String::new(),
+                                            parameter_index: Some(idx),
+                                            type_name: None,
+                                            properties: IndexMap::new(),
+                                        };
+                                        if let Some(last_step) = path.steps.last() {
+                                            let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "call_return"]);
+                                            let edge = DataFlowEdge {
+                                                id: edge_id,
+                                                source_id: last_step.node.id.clone(),
+                                                target_id: node_id.clone(),
+                                                kind: "call_return".to_string(),
+                                                properties: IndexMap::new(),
+                                            };
+                                            path.steps.push(TaintStep {
+                                                node: call_node,
+                                                edge: Some(edge),
+                                            });
+                                        }
+                                        paths.push(path);
+                                    }
                                 }
                             }
                             for field in &summary.field_to_return {
@@ -2908,7 +2956,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         Some(&state.aliases),
                                     )
                                 }) {
-                                    origins.extend(read_concrete(&state, &rebased).origins);
+                                    paths.extend(read_concrete(&state, &rebased).paths);
                                 }
                             }
                             for (sink_category, parameter_indexes) in summary.param_to_sink {
@@ -2943,24 +2991,24 @@ impl<'a> DataFlowBuilder<'a> {
                                 }) else {
                                     continue;
                                 };
-                                let mut field_origins = Vec::new();
+                                let mut field_paths = Vec::new();
                                 for parameter_index in parameter_indexes {
                                     if let Some(place) = call
                                         .args
                                         .get(parameter_index)
                                         .and_then(|a| a.place.as_ref())
                                     {
-                                        field_origins.extend(read_concrete(&state, place).origins);
+                                        field_paths.extend(read_concrete(&state, place).paths);
                                     }
                                 }
-                                if !field_origins.is_empty() {
-                                    field_origins.sort_by(|left, right| left.key.cmp(&right.key));
-                                    field_origins.dedup_by(|left, right| left.key == right.key);
+                                if !field_paths.is_empty() {
+                                    field_paths.sort_by(|left, right| left.origin_key.cmp(&right.origin_key));
+                                    field_paths.dedup_by(|left, right| left.origin_key == right.origin_key);
                                     write_concrete(
                                         &mut state,
                                         &rebased_field,
                                         ConcreteTaint {
-                                            origins: field_origins,
+                                            paths: field_paths,
                                         },
                                         rebased_field.is_indirect(),
                                     );
@@ -2982,20 +3030,21 @@ impl<'a> DataFlowBuilder<'a> {
                             position: Some(function.position.clone()),
                         });
                     }
-                    overwrite_concrete(&mut state, &call.dest, ConcreteTaint { origins });
+                    overwrite_concrete(&mut state, &call.dest, ConcreteTaint { paths });
                 }
             }
         }
         state
     }
 
-    fn source_origin(
+    fn new_source_path(
         &mut self,
         function: &MirFunction,
         name: &str,
         category: &str,
         type_name: Option<String>,
-    ) -> ConcreteOrigin {
+        parameter_index: Option<usize>,
+    ) -> TaintPath {
         let node_id = stable_id(
             "df-node",
             &[
@@ -3005,7 +3054,7 @@ impl<'a> DataFlowBuilder<'a> {
                 type_name.as_deref().unwrap_or("_"),
             ],
         );
-        self.nodes.entry(node_id.clone()).or_insert_with(|| {
+        let node = self.nodes.entry(node_id.clone()).or_insert_with(|| {
             let mut properties = IndexMap::from([
                 (
                     "specializationKey".to_string(),
@@ -3029,18 +3078,15 @@ impl<'a> DataFlowBuilder<'a> {
                 source: true,
                 sink: false,
                 category: category.to_string(),
-                parameter_index: None,
+                parameter_index,
                 type_name: type_name.clone(),
                 properties,
             }
         });
-        ConcreteOrigin {
-            key: format!("{}:{}:{}", function.id, name, category),
-            node_id,
-            name: name.to_string(),
-            function: function.qualified_name.clone(),
-            package_path: function.package_path.clone(),
+        TaintPath {
+            origin_key: format!("{}:{}:{}", function.id, name, category),
             category: category.to_string(),
+            steps: vec![TaintStep { node: node.clone(), edge: None }],
             type_name,
         }
     }
@@ -3054,18 +3100,19 @@ impl<'a> DataFlowBuilder<'a> {
         for (category, arg_indexes) in source_argument_matches(call) {
             for arg_index in arg_indexes {
                 if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
-                    let origin = self.source_origin(
+                    let path = self.new_source_path(
                         function,
                         &call.callee_display,
                         &category,
                         call.args.get(arg_index).and_then(|arg| arg.type_name.clone()),
+                        Some(arg_index),
                     );
                     let place = resolve_aliases(&state.aliases, place);
                     write_concrete(
                         state,
                         &place,
                         ConcreteTaint {
-                            origins: vec![origin],
+                            paths: vec![path],
                         },
                         true,
                     );
@@ -3083,7 +3130,7 @@ impl<'a> DataFlowBuilder<'a> {
         parameter_index: usize,
         sink_type: Option<String>,
     ) {
-        if taint.origins.is_empty() {
+        if taint.paths.is_empty() {
             return;
         }
         let sink_node_id = stable_id(
@@ -3096,52 +3143,70 @@ impl<'a> DataFlowBuilder<'a> {
                 sink_type.as_deref().unwrap_or("_"),
             ],
         );
-        self.nodes.entry(sink_node_id.clone()).or_insert_with(|| {
-            let mut properties = IndexMap::from([
-                (
-                    "specializationKey".to_string(),
-                    specialization_key_for_function(function),
-                ),
-                (
-                    "dispatchConfidence".to_string(),
-                    taint_dispatch_confidence(taint),
-                ),
-                ("analysisBackend".to_string(), "embedded-mir".to_string()),
-            ]);
-            add_model_properties(&mut properties, sink_name);
-            DataFlowNode {
-                id: sink_node_id.clone(),
-                kind: "sink".to_string(),
-                name: sink_name.to_string(),
-                package_path: function.package_path.clone(),
-                purl: String::new(),
-                function: function.qualified_name.clone(),
-                position: function.position.clone(),
-                source: false,
-                sink: true,
-                category: sink_category.to_string(),
-                parameter_index: Some(parameter_index),
-                type_name: sink_type.clone(),
-                properties,
-            }
-        });
-        for origin in &taint.origins {
-            let edge_id = stable_id("df-edge", &[&origin.node_id, &sink_node_id, sink_category]);
-            let mut edge_properties = IndexMap::new();
-            edge_properties.insert(
+        let mut properties = IndexMap::from([
+            (
+                "specializationKey".to_string(),
+                specialization_key_for_function(function),
+            ),
+            (
                 "dispatchConfidence".to_string(),
                 taint_dispatch_confidence(taint),
-            );
-            self.edges
-                .entry(edge_id.clone())
-                .or_insert_with(|| DataFlowEdge {
+            ),
+            ("analysisBackend".to_string(), "embedded-mir".to_string()),
+        ]);
+        add_model_properties(&mut properties, sink_name);
+        let sink_node = DataFlowNode {
+            id: sink_node_id.clone(),
+            kind: "sink".to_string(),
+            name: sink_name.to_string(),
+            package_path: function.package_path.clone(),
+            purl: String::new(),
+            function: function.qualified_name.clone(),
+            position: function.position.clone(),
+            source: false,
+            sink: true,
+            category: sink_category.to_string(),
+            parameter_index: Some(parameter_index),
+            type_name: sink_type.clone(),
+            properties,
+        };
+
+        for path in &taint.paths {
+            let mut final_path = path.clone();
+            if let Some(last_step) = final_path.steps.last() {
+                let edge_id = stable_id("df-edge", &[&last_step.node.id, &sink_node_id, sink_category]);
+                let mut edge_properties = IndexMap::new();
+                edge_properties.insert(
+                    "dispatchConfidence".to_string(),
+                    taint_dispatch_confidence(taint),
+                );
+                let edge = DataFlowEdge {
                     id: edge_id.clone(),
-                    source_id: origin.node_id.clone(),
+                    source_id: last_step.node.id.clone(),
                     target_id: sink_node_id.clone(),
                     kind: "taint".to_string(),
-                    properties: edge_properties.clone(),
+                    properties: edge_properties,
+                };
+                final_path.steps.push(TaintStep {
+                    node: sink_node.clone(),
+                    edge: Some(edge),
                 });
-            let slice_id = stable_id("df-slice", &[&origin.key, &sink_node_id, sink_category]);
+            } else {
+                final_path.steps.push(TaintStep {
+                    node: sink_node.clone(),
+                    edge: None,
+                });
+            }
+
+            // Register all nodes and edges in the final path
+            for step in &final_path.steps {
+                self.nodes.insert(step.node.id.clone(), step.node.clone());
+                if let Some(edge) = &step.edge {
+                    self.edges.insert(edge.id.clone(), edge.clone());
+                }
+            }
+
+            let slice_id = stable_id("df-slice", &[&final_path.origin_key, &sink_node_id, sink_category]);
             let mut slice_properties = IndexMap::new();
             slice_properties.insert(
                 "specializationKey".to_string(),
@@ -3153,37 +3218,43 @@ impl<'a> DataFlowBuilder<'a> {
             );
             slice_properties.insert("analysisBackend".to_string(), "embedded-mir".to_string());
             add_model_properties(&mut slice_properties, sink_name);
-            if modeled_native_boundary(sink_name) || modeled_native_boundary(&origin.name) {
+            if modeled_native_boundary(sink_name) || modeled_native_boundary(&final_path.steps[0].node.name) {
                 slice_properties.insert("nativeBoundary".to_string(), "true".to_string());
             }
+
+            let first_node = &final_path.steps[0].node;
+            let node_ids = final_path.steps.iter().map(|s| s.node.id.clone()).collect::<Vec<_>>();
+            let edge_ids = final_path.steps.iter().filter_map(|s| s.edge.as_ref().map(|e| e.id.clone())).collect::<Vec<_>>();
+            let path_length = edge_ids.len();
+
             self.slices
                 .entry(slice_id.clone())
                 .or_insert_with(|| DataFlowSlice {
                     id: slice_id,
-                    source_id: origin.node_id.clone(),
+                    source_id: first_node.id.clone(),
                     sink_id: sink_node_id.clone(),
-                    source_name: origin.name.clone(),
+                    source_name: first_node.name.clone(),
                     sink_name: sink_name.to_string(),
-                    source_function: origin.function.clone(),
+                    source_function: first_node.function.clone(),
                     sink_function: function.qualified_name.clone(),
-                    source_package_path: origin.package_path.clone(),
+                    source_package_path: first_node.package_path.clone(),
                     sink_package_path: function.package_path.clone(),
                     source_purl: String::new(),
                     target_purl: String::new(),
                     purls: Vec::new(),
-                    source_category: origin.category.clone(),
+                    source_category: final_path.category.clone(),
                     sink_category: sink_category.to_string(),
-                    node_ids: vec![origin.node_id.clone(), sink_node_id.clone()],
-                    edge_ids: vec![edge_id],
-                    path_length: 1,
-                    source_parameter_index: None,
+                    node_ids,
+                    edge_ids,
+                    path_length,
+                    source_parameter_index: first_node.parameter_index,
                     sink_parameter_index: Some(parameter_index),
-                    source_type_name: origin.type_name.clone(),
+                    source_type_name: first_node.type_name.clone(),
                     sink_type_name: sink_type.clone(),
-                    rule_name: format!("{}-to-{}", origin.category, sink_category),
+                    rule_name: format!("{}-to-{}", final_path.category, sink_category),
                     description: format!(
                         "{} data can flow from {} to {} parameter {}",
-                        origin.category, origin.name, sink_name, parameter_index
+                        final_path.category, first_node.name, sink_name, parameter_index
                     ),
                     properties: slice_properties,
                 });
@@ -3335,10 +3406,58 @@ impl<'a> DataFlowBuilder<'a> {
     }
 }
 
-fn apply_assign_concrete(assign: &AssignAction, state: &mut ConcreteState) {
+fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &mut ConcreteState) {
     let mut taint = ConcreteTaint::default();
     for source in &assign.sources {
-        taint.origins.extend(read_concrete(state, source).origins);
+        taint.paths.extend(read_concrete(state, source).paths);
+    }
+    if !taint.paths.is_empty() {
+        let node_id = stable_id(
+            "df-node",
+            &[
+                &function.id,
+                &assign.dest.render(),
+                "local",
+                &function.position.line.to_string(),
+                &function.position.column.to_string(),
+            ],
+        );
+        let target_node = DataFlowNode {
+            id: node_id.clone(),
+            kind: "local".to_string(),
+            name: assign.dest.render(),
+            package_path: function.package_path.clone(),
+            purl: String::new(),
+            function: function.qualified_name.clone(),
+            position: function.position.clone(),
+            source: false,
+            sink: false,
+            category: String::new(),
+            parameter_index: None,
+            type_name: None,
+            properties: IndexMap::new(),
+        };
+        for path in &mut taint.paths {
+            if let Some(last_step) = path.steps.last() {
+                let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
+                let edge = DataFlowEdge {
+                    id: edge_id,
+                    source_id: last_step.node.id.clone(),
+                    target_id: node_id.clone(),
+                    kind: "assign".to_string(),
+                    properties: IndexMap::new(),
+                };
+                path.steps.push(TaintStep {
+                    node: target_node.clone(),
+                    edge: Some(edge),
+                });
+            } else {
+                path.steps.push(TaintStep {
+                    node: target_node.clone(),
+                    edge: None,
+                });
+            }
+        }
     }
     write_concrete(
         state,
@@ -3355,8 +3474,56 @@ fn apply_assign_concrete(assign: &AssignAction, state: &mut ConcreteState) {
         let mut field_taint = ConcreteTaint::default();
         for source in sources {
             field_taint
-                .origins
-                .extend(read_concrete(state, source).origins);
+                .paths
+                .extend(read_concrete(state, source).paths);
+        }
+        if !field_taint.paths.is_empty() {
+            let node_id = stable_id(
+                "df-node",
+                &[
+                    &function.id,
+                    &field.render(),
+                    "field-assign",
+                    &function.position.line.to_string(),
+                    &function.position.column.to_string(),
+                ],
+            );
+            let target_node = DataFlowNode {
+                id: node_id.clone(),
+                kind: "local".to_string(),
+                name: field.render(),
+                package_path: function.package_path.clone(),
+                purl: String::new(),
+                function: function.qualified_name.clone(),
+                position: function.position.clone(),
+                source: false,
+                sink: false,
+                category: String::new(),
+                parameter_index: None,
+                type_name: None,
+                properties: IndexMap::new(),
+            };
+            for path in &mut field_taint.paths {
+                if let Some(last_step) = path.steps.last() {
+                    let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
+                    let edge = DataFlowEdge {
+                        id: edge_id,
+                        source_id: last_step.node.id.clone(),
+                        target_id: node_id.clone(),
+                        kind: "assign".to_string(),
+                        properties: IndexMap::new(),
+                    };
+                    path.steps.push(TaintStep {
+                        node: target_node.clone(),
+                        edge: Some(edge),
+                    });
+                } else {
+                    path.steps.push(TaintStep {
+                        node: target_node.clone(),
+                        edge: None,
+                    });
+                }
+            }
         }
         write_concrete(state, field, field_taint, field.is_indirect());
     }
@@ -3371,13 +3538,13 @@ fn overwrite_concrete(state: &mut ConcreteState, place: &PlacePath, value: Concr
 
 fn weak_update_concrete(state: &mut ConcreteState, place: &PlacePath, value: ConcreteTaint) {
     let entry = state.taints.entry(place.clone()).or_default();
-    for origin in value.origins {
+    for path in value.paths {
         if !entry
-            .origins
+            .paths
             .iter()
-            .any(|existing| existing.key == origin.key)
+            .any(|existing| existing.origin_key == path.origin_key)
         {
-            entry.origins.push(origin);
+            entry.paths.push(path);
         }
     }
 }
@@ -3774,7 +3941,7 @@ fn should_emit_unresolved_dataflow_diagnostic(symbol: &str) -> bool {
 }
 
 fn taint_dispatch_confidence(taint: &ConcreteTaint) -> String {
-    match taint.origins.len() {
+    match taint.paths.len() {
         0 => "low".to_string(),
         1 => "high".to_string(),
         2..=4 => "medium".to_string(),
@@ -3793,35 +3960,35 @@ fn kill_concrete(state: &mut ConcreteState, place: &PlacePath) {
 
 fn read_concrete(state: &ConcreteState, place: &PlacePath) -> ConcreteTaint {
     let resolved = resolve_aliases(&state.aliases, place);
-    let mut origins = Vec::new();
+    let mut paths = Vec::new();
     if let Some(values) = state.taints.get(&resolved) {
-        origins.extend(values.origins.clone());
+        paths.extend(values.paths.clone());
     }
     for (existing, values) in &state.taints {
         if same_or_descendant(&resolved, existing) || same_or_descendant(existing, &resolved) {
-            origins.extend(values.origins.clone());
+            paths.extend(values.paths.clone());
         }
     }
-    origins.sort_by(|l, r| l.key.cmp(&r.key));
-    origins.dedup_by(|l, r| l.key == r.key);
-    ConcreteTaint { origins }
+    paths.sort_by(|l, r| l.origin_key.cmp(&r.origin_key));
+    paths.dedup_by(|l, r| l.origin_key == r.origin_key);
+    ConcreteTaint { paths }
 }
 
 fn merge_concrete(target: &mut ConcreteState, incoming: &ConcreteState) -> bool {
     let mut changed = false;
     for (place, taint) in &incoming.taints {
         let entry = target.taints.entry(place.clone()).or_default();
-        let before = entry.origins.len();
-        for origin in &taint.origins {
+        let before = entry.paths.len();
+        for path in &taint.paths {
             if !entry
-                .origins
+                .paths
                 .iter()
-                .any(|existing| existing.key == origin.key)
+                .any(|existing| existing.origin_key == path.origin_key)
             {
-                entry.origins.push(origin.clone());
+                entry.paths.push(path.clone());
             }
         }
-        if entry.origins.len() != before {
+        if entry.paths.len() != before {
             changed = true;
         }
     }

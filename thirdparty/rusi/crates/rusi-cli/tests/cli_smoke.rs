@@ -418,27 +418,36 @@ fn compiler_backend_models_rusi_driver_command_builder_flow() -> Result<()> {
     }
 
     let data_flow = report.data_flow.expect("compiler dataflow present");
+    let fs_slice = data_flow
+        .slices
+        .iter()
+        .find(|slice| slice.source_category == "env" && slice.sink_category == "filesystem-write")
+        .expect("expected env -> filesystem-write slice");
     assert!(
-        data_flow.slices.iter().any(|slice| {
-            slice.source_category == "env" && slice.sink_category == "filesystem-write"
-        }),
-        "expected env -> filesystem-write through PathBuf/create_dir_all, got {:?}",
-        data_flow
-            .slices
-            .iter()
-            .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
-            .collect::<Vec<_>>()
+        fs_slice.node_ids.len() >= 3,
+        "expected multi-node flow path, got {:?}",
+        fs_slice.node_ids
     );
     assert!(
-        data_flow.slices.iter().any(|slice| {
-            slice.source_category == "env" && slice.sink_category == "process-exec"
-        }),
-        "expected env -> process-exec through Command builder execution, got {:?}",
-        data_flow
-            .slices
-            .iter()
-            .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
-            .collect::<Vec<_>>()
+        fs_slice.path_length >= 2,
+        "expected path_length >= 2, got {}",
+        fs_slice.path_length
+    );
+
+    let exec_slice = data_flow
+        .slices
+        .iter()
+        .find(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+        .expect("expected env -> process-exec slice");
+    assert!(
+        exec_slice.node_ids.len() >= 3,
+        "expected multi-node flow path, got {:?}",
+        exec_slice.node_ids
+    );
+    assert!(
+        exec_slice.path_length >= 2,
+        "expected path_length >= 2, got {}",
+        exec_slice.path_length
     );
     Ok(())
 }

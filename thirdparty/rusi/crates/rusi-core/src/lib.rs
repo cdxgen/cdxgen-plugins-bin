@@ -180,18 +180,21 @@ struct FunctionSummary {
 }
 
 #[derive(Debug, Clone)]
-struct SourceOrigin {
-    key: String,
-    node_id: String,
-    name: String,
-    function: String,
-    package_path: String,
-    category: String,
+struct TaintStep {
+    node: DataFlowNode,
+    edge: Option<DataFlowEdge>,
 }
 
 #[derive(Debug, Clone)]
+struct TaintPath {
+    origin_key: String,
+    category: String,
+    steps: Vec<TaintStep>,
+}
+
+#[derive(Debug, Clone, Default)]
 struct ConcreteTaint {
-    origins: Vec<SourceOrigin>,
+    paths: Vec<TaintPath>,
 }
 
 /// Parsed evidence collected from a single Rust source file.
@@ -2169,11 +2172,19 @@ fn span_key(span: Span) -> String {
 fn simple_expr(expr: &Expr) -> SimpleExpr {
     match expr {
         Expr::Path(ExprPath { path, .. }) => SimpleExpr::Var(path_to_string(path)),
-        Expr::Call(ExprCall { func, args, .. }) => SimpleExpr::Call {
-            callee: callee_text_from_expr(func),
-            args: args.iter().map(simple_expr).collect(),
-            position: Position::default(),
-        },
+        Expr::Call(ExprCall { func, args, .. }) => {
+            let span = func.span();
+            let start = span.start();
+            SimpleExpr::Call {
+                callee: callee_text_from_expr(func),
+                args: args.iter().map(simple_expr).collect(),
+                position: Position {
+                    filename: String::new(),
+                    line: start.line,
+                    column: start.column + 1,
+                },
+            }
+        }
         Expr::MethodCall(ExprMethodCall {
             receiver,
             method,
@@ -2182,10 +2193,16 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         }) => {
             let mut all_args = vec![simple_expr(receiver)];
             all_args.extend(args.iter().map(simple_expr));
+            let span = method.span();
+            let start = span.start();
             SimpleExpr::Call {
                 callee: method_call_callee(receiver, &method.to_string()),
                 args: all_args,
-                position: Position::default(),
+                position: Position {
+                    filename: String::new(),
+                    line: start.line,
+                    column: start.column + 1,
+                },
             }
         }
         Expr::Reference(ExprReference { expr, .. }) => simple_expr(expr),
@@ -2209,6 +2226,32 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         }
         Expr::Macro(expr_macro) => parse_macro_like_call(expr_macro).unwrap_or(SimpleExpr::Unknown),
         Expr::Lit(_) => SimpleExpr::Literal,
+        Expr::If(syn::ExprIf { cond, then_branch, else_branch, .. }) => {
+            let mut items = vec![
+                simple_expr(cond),
+                then_branch.stmts.last().map(stmt_tail_expr).unwrap_or(SimpleExpr::Unknown)
+            ];
+            if let Some((_, else_expr)) = else_branch {
+                items.push(simple_expr(else_expr));
+            }
+            SimpleExpr::Compose(items)
+        }
+        Expr::Match(syn::ExprMatch { expr, arms, .. }) => {
+            let mut items = vec![simple_expr(expr)];
+            items.extend(arms.iter().map(|arm| simple_expr(&arm.body)));
+            SimpleExpr::Compose(items)
+        }
+        Expr::Try(syn::ExprTry { expr, .. }) => simple_expr(expr),
+        Expr::Binary(syn::ExprBinary { left, right, .. }) => {
+            SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
+        }
+        Expr::Cast(syn::ExprCast { expr, .. }) => simple_expr(expr),
+        Expr::Index(syn::ExprIndex { expr, .. }) => simple_expr(expr),
+        Expr::Unary(syn::ExprUnary { expr, .. }) => simple_expr(expr),
+        Expr::Assign(syn::ExprAssign { left, right, .. }) => {
+            SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
+        }
+        Expr::Group(syn::ExprGroup { expr, .. }) => simple_expr(expr),
         _ => SimpleExpr::Unknown,
     }
 }
@@ -2895,6 +2938,18 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
         passthroughs: vec![
             DataFlowPattern {
                 target: "passthrough".to_string(),
+                pattern: "Ok".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "Some".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
                 pattern: "unwrap_or_else".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
@@ -3382,26 +3437,82 @@ impl<'a> DataFlowBuilder<'a> {
     fn materialize_function(&mut self, function: &FunctionRecord) {
         let mut env: HashMap<String, ConcreteTaint> = HashMap::new();
         for (idx, param) in function.params.iter().enumerate() {
-            if let Some(category) = function.param_source_categories.get(&idx) {
-                let origin = self.source_origin(
-                    function,
-                    param,
-                    category,
-                    function.declaration.position.clone(),
-                );
-                env.insert(
-                    param.clone(),
-                    ConcreteTaint {
-                        origins: vec![origin],
-                    },
-                );
-            }
+            let category = function
+                .param_source_categories
+                .get(&idx)
+                .cloned()
+                .unwrap_or_else(|| format!("param-{}", idx));
+            let path = self.new_source_path(
+                function,
+                param,
+                &category,
+                function.declaration.position.clone(),
+                Some(idx),
+            );
+            env.insert(
+                param.clone(),
+                ConcreteTaint {
+                    paths: vec![path],
+                },
+            );
         }
         for operation in &function.operations {
             match operation {
                 Operation::Assign { target, value } => {
-                    let taint = self.eval_concrete_expr(function, value, &env);
-                    if !taint.origins.is_empty() {
+                    let mut taint = self.eval_concrete_expr(function, value, &env);
+                    if !taint.paths.is_empty() {
+                        let mut pos = function.declaration.position.clone();
+                        if pos.filename.is_empty() {
+                            pos.filename = function.file_path.clone();
+                        }
+                        let node_id = stable_id(
+                            "df-node",
+                            &[
+                                &function.declaration.id,
+                                target,
+                                "local",
+                                &pos.line.to_string(),
+                                &pos.column.to_string(),
+                            ],
+                        );
+                        let target_node = DataFlowNode {
+                            id: node_id.clone(),
+                            kind: "local".to_string(),
+                            name: target.clone(),
+                            package_path: function.package_path.clone(),
+                            purl: String::new(),
+                            function: function.declaration.qualified_name.clone(),
+                            position: pos.clone(),
+                            source: false,
+                            sink: false,
+                            category: String::new(),
+                            parameter_index: None,
+                            type_name: None,
+                            properties: IndexMap::new(),
+                        };
+                        self.nodes.insert(node_id.clone(), target_node.clone());
+                        for path in &mut taint.paths {
+                            if let Some(last_step) = path.steps.last() {
+                                let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
+                                let edge = DataFlowEdge {
+                                    id: edge_id.clone(),
+                                    source_id: last_step.node.id.clone(),
+                                    target_id: node_id.clone(),
+                                    kind: "assign".to_string(),
+                                    properties: IndexMap::new(),
+                                };
+                                self.edges.insert(edge_id.clone(), edge.clone());
+                                path.steps.push(TaintStep {
+                                    node: target_node.clone(),
+                                    edge: Some(edge),
+                                });
+                            } else {
+                                path.steps.push(TaintStep {
+                                    node: target_node.clone(),
+                                    edge: None,
+                                });
+                            }
+                        }
                         env.insert(target.clone(), taint);
                     }
                 }
@@ -3464,113 +3575,217 @@ impl<'a> DataFlowBuilder<'a> {
             SimpleExpr::Var(name) => env
                 .get(name)
                 .cloned()
-                .unwrap_or(ConcreteTaint { origins: vec![] }),
+                .unwrap_or(ConcreteTaint { paths: vec![] }),
             SimpleExpr::Call {
                 callee,
                 args,
                 position,
             } => {
                 if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources) {
-                    let origin = self.source_origin(
+                    let path = self.new_source_path(
                         function,
                         callee,
                         &source_match.category,
                         position.clone(),
+                        None,
                     );
                     return ConcreteTaint {
-                        origins: vec![origin],
+                        paths: vec![path],
                     };
                 }
                 if is_sanitizer_call(callee) {
-                    return ConcreteTaint { origins: vec![] };
+                    return ConcreteTaint { paths: vec![] };
                 }
                 if has_passthrough_pattern(callee, &self.patterns.passthroughs) {
-                    let mut origins = Vec::new();
+                    let mut paths = Vec::new();
                     for arg in args {
-                        origins.extend(self.eval_concrete_expr(function, arg, env).origins);
+                        let arg_taint = self.eval_concrete_expr(function, arg, env);
+                        for mut path in arg_taint.paths {
+                            let mut pos = position.clone();
+                            if pos.filename.is_empty() {
+                                pos.filename = function.file_path.clone();
+                            }
+                            let node_id = stable_id(
+                                "df-node",
+                                &[
+                                    &function.declaration.id,
+                                    callee,
+                                    "passthrough",
+                                    &pos.line.to_string(),
+                                    &pos.column.to_string(),
+                                ],
+                            );
+                            let passthrough_node = DataFlowNode {
+                                id: node_id.clone(),
+                                kind: "passthrough".to_string(),
+                                name: callee.to_string(),
+                                package_path: function.package_path.clone(),
+                                purl: String::new(),
+                                function: function.declaration.qualified_name.clone(),
+                                position: pos.clone(),
+                                source: false,
+                                sink: false,
+                                category: String::new(),
+                                parameter_index: None,
+                                type_name: None,
+                                properties: IndexMap::new(),
+                            };
+                            self.nodes.insert(node_id.clone(), passthrough_node.clone());
+                            if let Some(last_step) = path.steps.last() {
+                                let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "passthrough"]);
+                                let edge = DataFlowEdge {
+                                    id: edge_id.clone(),
+                                    source_id: last_step.node.id.clone(),
+                                    target_id: node_id.clone(),
+                                    kind: "passthrough".to_string(),
+                                    properties: IndexMap::new(),
+                                };
+                                self.edges.insert(edge_id, edge.clone());
+                                path.steps.push(TaintStep {
+                                    node: passthrough_node,
+                                    edge: Some(edge),
+                                });
+                            }
+                            paths.push(path);
+                        }
                     }
-                    return ConcreteTaint { origins };
+                    return ConcreteTaint { paths };
                 }
                 if let Some(resolved) =
                     resolve_call_target(callee, &function.package_path, self.local_index)
                     && let Some(summary) = self.summaries.get(&resolved).cloned()
                 {
-                    let mut origins = Vec::new();
+                    let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
                         let callee_name = self
                             .function_map
                             .get(&resolved)
                             .map(|f| f.declaration.qualified_name.clone())
                             .unwrap_or_else(|| callee.to_string());
-                        origins.push(self.source_origin(
+                        paths.push(self.new_source_path(
                             function,
                             &callee_name,
                             category,
                             position.clone(),
+                            None,
                         ));
                     }
                     for param_index in &summary.param_to_return {
                         if let Some(arg) = args.get(*param_index) {
-                            origins.extend(self.eval_concrete_expr(function, arg, env).origins);
+                            let arg_taint = self.eval_concrete_expr(function, arg, env);
+                            for mut path in arg_taint.paths {
+                                let callee_name = self
+                                    .function_map
+                                    .get(&resolved)
+                                    .map(|f| f.declaration.qualified_name.clone())
+                                    .unwrap_or_else(|| callee.to_string());
+                                let mut pos = position.clone();
+                                if pos.filename.is_empty() {
+                                    pos.filename = function.file_path.clone();
+                                }
+                                let node_id = stable_id(
+                                    "df-node",
+                                    &[
+                                        &function.declaration.id,
+                                        &callee_name,
+                                        &format!("param-to-return-{}", param_index),
+                                        &pos.line.to_string(),
+                                        &pos.column.to_string(),
+                                    ],
+                                );
+                                let call_node = DataFlowNode {
+                                    id: node_id.clone(),
+                                    kind: "call_return".to_string(),
+                                    name: callee_name.clone(),
+                                    package_path: function.package_path.clone(),
+                                    purl: String::new(),
+                                    function: function.declaration.qualified_name.clone(),
+                                    position: pos.clone(),
+                                    source: false,
+                                    sink: false,
+                                    category: String::new(),
+                                    parameter_index: Some(*param_index),
+                                    type_name: None,
+                                    properties: IndexMap::new(),
+                                };
+                                self.nodes.insert(node_id.clone(), call_node.clone());
+                                if let Some(last_step) = path.steps.last() {
+                                    let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "call_return"]);
+                                    let edge = DataFlowEdge {
+                                        id: edge_id.clone(),
+                                        source_id: last_step.node.id.clone(),
+                                        target_id: node_id.clone(),
+                                        kind: "call_return".to_string(),
+                                        properties: IndexMap::new(),
+                                    };
+                                    self.edges.insert(edge_id, edge.clone());
+                                    path.steps.push(TaintStep {
+                                        node: call_node,
+                                        edge: Some(edge),
+                                    });
+                                }
+                                paths.push(path);
+                            }
                         }
                     }
-                    return ConcreteTaint { origins };
+                    return ConcreteTaint { paths };
                 }
-                ConcreteTaint { origins: vec![] }
+                ConcreteTaint { paths: vec![] }
             }
             SimpleExpr::Compose(items) => {
-                let mut origins = Vec::new();
+                let mut paths = Vec::new();
                 for item in items {
-                    origins.extend(self.eval_concrete_expr(function, item, env).origins);
+                    paths.extend(self.eval_concrete_expr(function, item, env).paths);
                 }
-                ConcreteTaint { origins }
+                ConcreteTaint { paths }
             }
             SimpleExpr::Field { base, .. } => self.eval_concrete_expr(function, base, env),
-            SimpleExpr::Literal | SimpleExpr::Unknown => ConcreteTaint { origins: vec![] },
+            SimpleExpr::Literal | SimpleExpr::Unknown => ConcreteTaint { paths: vec![] },
         }
     }
 
-    fn source_origin(
+    fn new_source_path(
         &mut self,
         function: &FunctionRecord,
         name: &str,
         category: &str,
         position: Position,
-    ) -> SourceOrigin {
+        parameter_index: Option<usize>,
+    ) -> TaintPath {
+        let mut pos = position.clone();
+        if pos.filename.is_empty() {
+            pos.filename = function.file_path.clone();
+        }
         let node_id = stable_id(
             "df-node",
             &[
                 &function.declaration.id,
                 name,
                 category,
-                &position.line.to_string(),
-                &position.column.to_string(),
+                &pos.line.to_string(),
+                &pos.column.to_string(),
             ],
         );
-        self.nodes
-            .entry(node_id.clone())
-            .or_insert_with(|| DataFlowNode {
-                id: node_id.clone(),
-                kind: "source".to_string(),
-                name: name.to_string(),
-                package_path: function.package_path.clone(),
-                purl: String::new(),
-                function: function.declaration.qualified_name.clone(),
-                position: position.clone(),
-                source: true,
-                sink: false,
-                category: category.to_string(),
-                parameter_index: None,
-                type_name: None,
-                properties: IndexMap::new(),
-            });
-        SourceOrigin {
-            key: format!("{}:{}:{}", function.declaration.id, name, category),
-            node_id,
+        let node = DataFlowNode {
+            id: node_id.clone(),
+            kind: "source".to_string(),
             name: name.to_string(),
-            function: function.declaration.qualified_name.clone(),
             package_path: function.package_path.clone(),
+            purl: String::new(),
+            function: function.declaration.qualified_name.clone(),
+            position: pos.clone(),
+            source: true,
+            sink: false,
             category: category.to_string(),
+            parameter_index,
+            type_name: None,
+            properties: IndexMap::new(),
+        };
+        self.nodes.insert(node_id.clone(), node.clone());
+        TaintPath {
+            origin_key: format!("{}:{}:{}", function.declaration.id, name, category),
+            category: category.to_string(),
+            steps: vec![TaintStep { node, edge: None }],
         }
     }
 
@@ -3582,8 +3797,12 @@ impl<'a> DataFlowBuilder<'a> {
         sink_category: &str,
         position: &Position,
     ) {
-        if taint.origins.is_empty() {
+        if taint.paths.is_empty() {
             return;
+        }
+        let mut pos = position.clone();
+        if pos.filename.is_empty() {
+            pos.filename = function.file_path.clone();
         }
         let sink_node_id = stable_id(
             "df-node",
@@ -3591,74 +3810,97 @@ impl<'a> DataFlowBuilder<'a> {
                 &function.declaration.id,
                 sink_name,
                 sink_category,
-                &position.line.to_string(),
-                &position.column.to_string(),
+                &pos.line.to_string(),
+                &pos.column.to_string(),
             ],
         );
-        self.nodes
-            .entry(sink_node_id.clone())
-            .or_insert_with(|| DataFlowNode {
-                id: sink_node_id.clone(),
-                kind: "sink".to_string(),
-                name: sink_name.to_string(),
-                package_path: function.package_path.clone(),
-                purl: String::new(),
-                function: function.declaration.qualified_name.clone(),
-                position: position.clone(),
-                source: false,
-                sink: true,
-                category: sink_category.to_string(),
-                parameter_index: None,
-                type_name: None,
-                properties: IndexMap::new(),
-            });
+        let sink_node = DataFlowNode {
+            id: sink_node_id.clone(),
+            kind: "sink".to_string(),
+            name: sink_name.to_string(),
+            package_path: function.package_path.clone(),
+            purl: String::new(),
+            function: function.declaration.qualified_name.clone(),
+            position: pos.clone(),
+            source: false,
+            sink: true,
+            category: sink_category.to_string(),
+            parameter_index: None,
+            type_name: None,
+            properties: IndexMap::new(),
+        };
+        self.nodes.insert(sink_node_id.clone(), sink_node.clone());
 
-        for origin in &taint.origins {
-            let edge_id = stable_id("df-edge", &[&origin.node_id, &sink_node_id, sink_category]);
-            self.edges
-                .entry(edge_id.clone())
-                .or_insert_with(|| DataFlowEdge {
+        for path in &taint.paths {
+            let mut final_path = path.clone();
+            if let Some(last_step) = final_path.steps.last() {
+                let edge_id = stable_id("df-edge", &[&last_step.node.id, &sink_node_id, sink_category]);
+                let edge = DataFlowEdge {
                     id: edge_id.clone(),
-                    source_id: origin.node_id.clone(),
+                    source_id: last_step.node.id.clone(),
                     target_id: sink_node_id.clone(),
                     kind: "taint".to_string(),
                     properties: IndexMap::new(),
+                };
+                final_path.steps.push(TaintStep {
+                    node: sink_node.clone(),
+                    edge: Some(edge),
                 });
+            } else {
+                final_path.steps.push(TaintStep {
+                    node: sink_node.clone(),
+                    edge: None,
+                });
+            }
 
-            let slice_id = stable_id("df-slice", &[&origin.key, &sink_node_id, sink_category]);
+            // Register all nodes and edges in the final path to self.nodes and self.edges
+            for step in &final_path.steps {
+                self.nodes.insert(step.node.id.clone(), step.node.clone());
+                if let Some(edge) = &step.edge {
+                    self.edges.insert(edge.id.clone(), edge.clone());
+                }
+            }
+
+            let slice_id = stable_id("df-slice", &[&final_path.origin_key, &sink_node_id, sink_category]);
+            let first_node = &final_path.steps[0].node;
+            let node_ids = final_path.steps.iter().map(|s| s.node.id.clone()).collect::<Vec<_>>();
+            let edge_ids = final_path.steps.iter().filter_map(|s| s.edge.as_ref().map(|e| e.id.clone())).collect::<Vec<_>>();
+            let path_length = edge_ids.len();
+
             self.slices
                 .entry(slice_id.clone())
                 .or_insert_with(|| DataFlowSlice {
                     id: slice_id,
-                    source_id: origin.node_id.clone(),
+                    source_id: first_node.id.clone(),
                     sink_id: sink_node_id.clone(),
-                    source_name: origin.name.clone(),
+                    source_name: first_node.name.clone(),
                     sink_name: sink_name.to_string(),
-                    source_function: origin.function.clone(),
+                    source_function: first_node.function.clone(),
                     sink_function: function.declaration.qualified_name.clone(),
-                    source_package_path: origin.package_path.clone(),
+                    source_package_path: first_node.package_path.clone(),
                     sink_package_path: function.package_path.clone(),
                     source_purl: String::new(),
                     target_purl: String::new(),
                     purls: Vec::new(),
-                    source_category: origin.category.clone(),
+                    source_category: final_path.category.clone(),
                     sink_category: sink_category.to_string(),
-                    node_ids: vec![origin.node_id.clone(), sink_node_id.clone()],
-                    edge_ids: vec![edge_id],
-                    path_length: 1,
-                    source_parameter_index: None,
+                    node_ids,
+                    edge_ids,
+                    path_length,
+                    source_parameter_index: first_node.parameter_index,
                     sink_parameter_index: None,
                     source_type_name: None,
                     sink_type_name: None,
-                    rule_name: format!("{}-to-{}", origin.category, sink_category),
+                    rule_name: format!("{}-to-{}", final_path.category, sink_category),
                     description: format!(
                         "{} data can flow from {} to {}",
-                        origin.category, origin.name, sink_name
+                        final_path.category, first_node.name, sink_name
                     ),
                     properties: IndexMap::new(),
                 });
         }
     }
+
 
     fn finish(self) -> DataFlowEvidence {
         let mut summaries = Vec::new();
@@ -4256,11 +4498,18 @@ mod tests {
         );
 
         let data_flow = report.data_flow.expect("dataflow emitted");
+        let matching_slice = data_flow
+            .slices
+            .iter()
+            .find(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .expect("matching slice exists");
+
         assert!(
-            data_flow.slices.iter().any(
-                |slice| slice.source_category == "env" && slice.sink_category == "process-exec"
-            )
+            matching_slice.node_ids.len() >= 3,
+            "Expected path to have at least 3 nodes, got: {:?}",
+            matching_slice.node_ids
         );
+        assert_eq!(matching_slice.path_length, 2);
     }
 
     #[test]
@@ -5269,5 +5518,41 @@ mod tests {
             })
             .collect();
         assert_eq!(stable_keys, compiler_keys);
+    }
+
+    #[test]
+    fn full_taint_fixture_reconstructs_multi_hop_path() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("full-taint-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            debug: true,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        println!("Declarations: {:?}", report.declarations);
+        println!("All slices: {:?}", data_flow.slices);
+        for f in &report.files {
+            println!("File parsed: {:?}", f.path);
+        }
+        let matching_slice = data_flow
+            .slices
+            .iter()
+            .find(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .expect("matching slice exists");
+
+        println!("Full-taint node ids: {:?}", matching_slice.node_ids);
+        assert!(
+            matching_slice.node_ids.len() >= 5,
+            "Expected at least 5 nodes in the path, got: {:?}",
+            matching_slice.node_ids
+        );
+        assert!(
+            matching_slice.path_length >= 4,
+            "Expected path length to be at least 4, got: {}",
+            matching_slice.path_length
+        );
     }
 }
