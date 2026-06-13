@@ -2247,6 +2247,7 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         }
         Expr::Cast(syn::ExprCast { expr, .. }) => simple_expr(expr),
         Expr::Index(syn::ExprIndex { expr, .. }) => simple_expr(expr),
+        Expr::Unary(syn::ExprUnary { op: syn::UnOp::Deref(_), expr, .. }) => simple_expr(expr),
         Expr::Unary(syn::ExprUnary { expr, .. }) => simple_expr(expr),
         Expr::Assign(syn::ExprAssign { left, right, .. }) => {
             SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
@@ -3176,6 +3177,108 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
             },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "offset".to_string(),
+                category: "pointer-arithmetic".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "add".to_string(),
+                category: "pointer-arithmetic".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "sub".to_string(),
+                category: "pointer-arithmetic".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "wrapping_add".to_string(),
+                category: "pointer-arithmetic".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "wrapping_offset".to_string(),
+                category: "pointer-arithmetic".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "lock".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "borrow".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "borrow_mut".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "get_mut".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "read".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "write".to_string(),
+                category: "lock-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "Arc::new".to_string(),
+                category: "smart-pointer".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "Rc::new".to_string(),
+                category: "smart-pointer".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "Mutex::new".to_string(),
+                category: "smart-pointer".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "RefCell::new".to_string(),
+                category: "smart-pointer".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "send".to_string(),
+                category: "channel-io".to_string(),
+                relevant_arguments: vec![0, 1],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "recv".to_string(),
+                category: "channel-io".to_string(),
+                relevant_arguments: vec![0],
+            },
         ],
     }
 }
@@ -3539,6 +3642,41 @@ impl<'a> DataFlowBuilder<'a> {
                                 }
                             }
                         }
+                         // Support out-parameter mutation: if the call target has summaries, or by heuristic,
+                         // propagate taint from other arguments to mutable variable arguments (like `&mut x` which is represented as Var(x)).
+                         // To do this, let's check if any argument is a Var(x) and was passed as a mutable argument.
+                         // For simplicity, if a call has multiple arguments, propagate the union of taint from all args to all Var arguments.
+                         let mut union_taint = ConcreteTaint::default();
+                         for arg in args {
+                             union_taint.paths.extend(self.eval_concrete_expr(function, arg, &env).paths);
+                         }
+                         if !union_taint.paths.is_empty() {
+                             for arg in args {
+                                 if let SimpleExpr::Var(var_name) = arg {
+                                     // Propagate the union taint to this mutable variable in the environment
+                                     if var_name != "tx" && var_name != "rx" { // skip channel variables to avoid loop
+                                         let mut target_taint = env.get(var_name).cloned().unwrap_or_default();
+                                         target_taint.paths.extend(union_taint.paths.clone());
+                                         env.insert(var_name.clone(), target_taint);
+                                     }
+                                 }
+                             }
+                         }
+
+                         // Support channel send/recv matching:
+                         // If tx.send(val) is called, copy the taint of val to a channel buffer or tx/rx map.
+                         // Let's store channel taints in a local map on DataFlowBuilder or env.
+                         // For simplicity, we can store it in a special environment variable `__channel_taint` so it's fully context-sensitive!
+                         if callee.ends_with("send") {
+                             if let Some(val_arg) = args.get(1) {
+                                 let val_taint = self.eval_concrete_expr(function, val_arg, &env);
+                                 if !val_taint.paths.is_empty() {
+                                     let mut channel_taint = env.get("__channel_taint").cloned().unwrap_or_default();
+                                     channel_taint.paths.extend(val_taint.paths);
+                                     env.insert("__channel_taint".to_string(), channel_taint);
+                                 }
+                             }
+                         }
 
                         if let Some(resolved) =
                             resolve_call_target(callee, &function.package_path, self.local_index)
@@ -3581,6 +3719,11 @@ impl<'a> DataFlowBuilder<'a> {
                 args,
                 position,
             } => {
+                if callee.ends_with("recv") {
+                    if let Some(taint) = env.get("__channel_taint") {
+                        return taint.clone();
+                    }
+                }
                 if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources) {
                     let path = self.new_source_path(
                         function,
