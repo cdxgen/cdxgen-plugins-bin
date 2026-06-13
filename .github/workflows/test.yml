@@ -226,6 +226,14 @@ jobs:
         [[ -f packages/darwin-arm64/plugins/rusi/rusi-darwin-arm64.sha256 ]]
         [[ -f packages/darwin-amd64/plugins/rusi/rusi-darwin-amd64 ]]
         [[ -f packages/darwin-amd64/plugins/rusi/rusi-darwin-amd64.sha256 ]]
+        [[ -f packages/darwin-arm64/plugins/cdxui/cdxui-darwin-arm64 ]]
+        [[ -f packages/darwin-arm64/plugins/cdxui/cdxui-darwin-arm64.sha256 ]]
+        [[ -f packages/darwin-amd64/plugins/cdxui/cdxui-darwin-amd64 ]]
+        [[ -f packages/darwin-amd64/plugins/cdxui/cdxui-darwin-amd64.sha256 ]]
+        [[ -f packages/windows-amd64/plugins/rusi/rusi-windows-amd64.exe ]]
+        [[ -f packages/windows-amd64/plugins/rusi/rusi-windows-amd64.exe.sha256 ]]
+        [[ -f packages/windows-amd64/plugins/cdxui/cdxui-windows-amd64.exe ]]
+        [[ -f packages/windows-amd64/plugins/cdxui/cdxui-windows-amd64.exe.sha256 ]]
         bash ./scripts/root-package-publish.test.sh
         npm publish --dry-run
       env:
