@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut trace_state = TraceState::new();
-    app = App::new(store, args.path.clone().into_iter().collect());
+    app = App::new(store);
     app.generating = process.is_some();
     app.current_tab = start_tab;
     if let Some(out_path) = saved_output_path {
@@ -168,7 +168,7 @@ fn run_app<B: Backend>(
 }
 
 fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<ProcessHandle>) {
-    if let Some(ref mut proc) = process {
+    if let Some(proc) = process {
         while let Ok(entry) = proc.log_rx.try_recv() {
             log_store.push_line(&entry.text);
         }
@@ -182,6 +182,7 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
             }
             app.generating = false;
             app.generation_done = true;
+            app.thoughts_collapsed = true;
             app.switch_timer = Some(std::time::Instant::now());
 
             if let Some(ref out_path) = app.output_path {
@@ -204,7 +205,7 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
 }
 
 fn drain_traces(trace_state: &mut TraceState, process: &mut Option<ProcessHandle>) {
-    if let Some(ref mut proc) = process {
+    if let Some(proc) = process {
         while let Ok(delta) = proc.trace_rx.try_recv() {
             for line in delta.lines() {
                 trace_state.process_line(line);
@@ -236,7 +237,7 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
         InputMode::Normal => match code {
             KeyCode::Char('q') | KeyCode::Char('Q') => app.should_quit = true,
 
-            KeyCode::Esc => app.clear_search(),
+            KeyCode::Esc => { app.clear_selection(); app.clear_search(); }
             KeyCode::Char('/') => app.set_search(),
 
             KeyCode::Tab => { let next = app.current_tab.next(); app.switch_tab(next); }
@@ -245,10 +246,10 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             KeyCode::Char('0') => app.switch_tab(Tab::Logs),
             KeyCode::Char('1') => app.switch_tab(Tab::Summary),
             KeyCode::Char('2') => app.switch_tab(Tab::Components),
-            KeyCode::Char('3') => app.switch_tab(Tab::Crypto),
-            KeyCode::Char('4') => app.switch_tab(Tab::Services),
-            KeyCode::Char('5') => app.switch_tab(Tab::Formulation),
-            KeyCode::Char('6') => app.switch_tab(Tab::Dependencies),
+            KeyCode::Char('3') => app.switch_tab(Tab::Dependencies),
+            KeyCode::Char('4') => app.switch_tab(Tab::Crypto),
+            KeyCode::Char('5') => app.switch_tab(Tab::Services),
+            KeyCode::Char('6') => app.switch_tab(Tab::Formulation),
 
             KeyCode::Up | KeyCode::Char('k') => { app.move_selection_up(); scroll_to_selection(app, 15); }
             KeyCode::Down | KeyCode::Char('j') => { app.move_selection_down(); scroll_to_selection(app, 15); }
@@ -289,7 +290,7 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
                 }
             }
             KeyCode::Char('s') => app.cycle_sort(),
-            KeyCode::Char('h') => app.show_help = !app.show_help,
+            KeyCode::Char('y') => yank_selection(app),
             KeyCode::Char('f') => app.enter_type_filter(),
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.expand_all_deps(); app.last_item_count = 0; }
@@ -338,15 +339,98 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
             *offset = offset.saturating_add(3);
         }
         MouseEventKind::Down(_) => {
-            // Check if clicking a tab
             for (tab, start, end) in &app.tab_positions {
                 if mouse.column >= *start && mouse.column < *end && mouse.row == 0 {
                     app.switch_tab(*tab);
                     return;
                 }
             }
+            if app.component_header_y > 0
+                && mouse.row == app.component_header_y
+                && matches!(app.current_tab, Tab::Components | Tab::Crypto)
+            {
+                for (field, x_start, x_end) in &app.component_header_positions {
+                    if mouse.column >= *x_start && mouse.column < *x_end {
+                        app.store.set_sort(*field);
+                        app.table_selected = 0;
+                        app.scroll_offset = 0;
+                        return;
+                    }
+                }
+            }
+
+            if let Some(area) = app.dep_tree_area {
+                if mouse.column >= area.x && mouse.column < area.x + area.width
+                    && mouse.row > area.y && mouse.row < area.y + area.height
+                    && matches!(app.current_tab, Tab::Dependencies | Tab::Summary)
+                {
+                    let row = (mouse.row - area.y - 1) as usize + app.scroll_offset as usize;
+                    let ref_field = app.dep_tree_refs.get(row).cloned().unwrap_or_default();
+                    if !ref_field.is_empty() {
+                        let now = std::time::Instant::now();
+                        let is_double = app.last_click_time
+                            .map(|t| now.duration_since(t).as_millis() < 400 && row == app.last_click_row)
+                            .unwrap_or(false);
+                        app.table_selected = row;
+                        if is_double {
+                            let is_leaf = app.store.dependency_children(&ref_field).is_empty();
+                            if is_leaf {
+                                app.toggle_detail();
+                                app.detail_scroll = 0;
+                            }
+                        } else {
+                            if app.dep_expanded.contains(&ref_field) {
+                                app.dep_expanded.remove(&ref_field);
+                            } else {
+                                app.dep_expanded.insert(ref_field);
+                            }
+                        }
+                        app.last_item_count = 0;
+                        app.last_click_time = Some(now);
+                        app.last_click_row = row;
+                        return;
+                    }
+                }
+            }
+
+            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r) {
+                if mouse.column >= area.x && mouse.column < area.x + area.width
+                    && mouse.row > area.y && mouse.row < area.y + area.height
+                {
+                    let row = (mouse.row - area.y - 2) as usize + app.scroll_offset as usize;
+                    if matches!(app.current_tab, Tab::Components | Tab::Crypto | Tab::Services) {
+                        let now = std::time::Instant::now();
+                        let is_double = app.last_click_time
+                            .map(|t| now.duration_since(t).as_millis() < 400 && row == app.last_click_row)
+                            .unwrap_or(false);
+                        app.table_selected = row;
+                        app.last_click_time = Some(now);
+                        app.last_click_row = row;
+                        if is_double {
+                            app.toggle_detail();
+                            app.detail_scroll = 0;
+                            return;
+                        }
+                    }
+                    app.selection_start_row = Some(row);
+                    app.selection_end_row = None;
+                }
+            }
             if let Some(p) = panel {
+                if p == PanelFocus::Thoughts && app.generation_done {
+                    app.toggle_thoughts_collapse();
+                }
                 app.focused_panel = p;
+            }
+        }
+        MouseEventKind::Drag(_) => {
+            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r) {
+                if mouse.column >= area.x && mouse.column < area.x + area.width
+                    && mouse.row > area.y && mouse.row < area.y + area.height
+                {
+                    let row = (mouse.row - area.y - 2) as usize + app.scroll_offset as usize;
+                    app.selection_end_row = Some(row);
+                }
             }
         }
         _ => {}
@@ -357,7 +441,6 @@ fn scroll_offset_for_panel(app: &mut App, panel: Option<PanelFocus>) -> &mut u16
     match panel {
         Some(PanelFocus::Thoughts) => &mut app.thought_scroll,
         Some(PanelFocus::Stdout) => &mut app.stdout_scroll,
-        Some(PanelFocus::Detail) => &mut app.detail_scroll,
         _ => &mut app.scroll_offset,
     }
 }
@@ -382,4 +465,39 @@ fn scroll_to_selection(app: &mut App, visible: u16) {
 
 fn get_selected_ref(app: &App) -> String {
     app.dep_tree_refs.get(app.table_selected).cloned().unwrap_or_default()
+}
+
+fn yank_selection(app: &App) {
+    if let Some((start, end)) = app.selected_rows() {
+        let count = end - start + 1;
+        let text = match app.current_tab {
+            Tab::Components | Tab::Crypto => {
+                let indices = if app.current_tab == Tab::Crypto {
+                    &app.store.crypto_assets
+                } else {
+                    &app.store.filtered_component_indices
+                };
+                indices.iter().skip(start).take(count)
+                    .filter_map(|&i| app.store.components.get(i))
+                    .map(|r| format!("{}\t{}\t{}\t{}\t{}",
+                        r.type_display(), r.name_display(), r.version_display(),
+                        r.purl_display(), &r.license_display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            Tab::Services => {
+                app.store.filtered_service_indices.iter().skip(start).take(count)
+                    .filter_map(|&i| app.store.services.get(i))
+                    .map(|r| format!("{}\t{}\t{}\t{}",
+                        r.name_display(), &r.endpoints_display(),
+                        r.authenticated_display(), r.description_display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            _ => String::new(),
+        };
+        if !text.is_empty() {
+            eprintln!("\n── yanked {} row(s) ──\n{}\n── end ──", count, text);
+        }
+    }
 }

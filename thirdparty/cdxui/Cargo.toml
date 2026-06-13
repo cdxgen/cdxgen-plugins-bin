@@ -1,7 +1,7 @@
 [package]
 name = "cdxui"
-version = "0.1.0"
-edition = "2021"
+version = "2.5.0"
+edition = "2024"
 description = "Interactive terminal UI for CycloneDX BOM exploration"
 license = "MIT"
 repository = "https://github.com/CycloneDX/cdxgen-plugins-bin"

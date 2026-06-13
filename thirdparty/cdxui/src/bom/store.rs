@@ -1,5 +1,4 @@
 use crate::bom::schema::*;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -7,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct BomFile {
-    pub path: PathBuf,
     pub bom: Bom,
 }
 
@@ -39,7 +37,6 @@ impl SortOrder {
 pub struct FilterState {
     pub query: String,
     pub component_type: Option<String>,
-    pub crypto_asset_type: Option<String>,
 }
 
 impl Default for FilterState {
@@ -47,15 +44,12 @@ impl Default for FilterState {
         Self {
             query: String::new(),
             component_type: None,
-            crypto_asset_type: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ComponentRow {
-    pub index: usize,
-    pub bom_file: usize,
     pub component: Component,
 }
 
@@ -110,13 +104,6 @@ impl ComponentRow {
             })
     }
 
-    pub fn crypto_asset_type(&self) -> Option<String> {
-        self.component
-            .crypto_properties
-            .as_ref()
-            .and_then(|cp| cp.asset_type.clone())
-    }
-
     pub fn matches_query(&self, query: &str) -> bool {
         if query.is_empty() {
             return true;
@@ -136,16 +123,10 @@ impl ComponentRow {
                 .to_lowercase()
                 .contains(&q)
     }
-
-    pub fn raw_json(&self) -> Value {
-        serde_json::to_value(&self.component).unwrap_or_default()
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ServiceRow {
-    pub index: usize,
-    pub bom_file: usize,
     pub service: Service,
 }
 
@@ -187,10 +168,6 @@ impl ServiceRow {
             || self.endpoints_display().to_lowercase().contains(&q)
             || self.description_display().to_lowercase().contains(&q)
             || self.bom_ref_display().to_lowercase().contains(&q)
-    }
-
-    pub fn raw_json(&self) -> Value {
-        serde_json::to_value(&self.service).unwrap_or_default()
     }
 }
 
@@ -261,12 +238,10 @@ impl BomStore {
             source: e,
         })?;
 
-        let bom_file_idx = self.bom_files.len();
         let bom_ref = BomFile {
-            path: path.to_path_buf(),
             bom,
         };
-        self.index_bom(bom_file_idx, &bom_ref);
+        self.index_bom(&bom_ref);
         self.bom_files.push(bom_ref);
         self.rebuild_filtered_indices();
         self.loaded = true;
@@ -358,14 +333,12 @@ impl BomStore {
         self.rebuild_filtered_indices();
     }
 
-    fn index_bom(&mut self, bom_file_idx: usize, bom_file: &BomFile) {
+    fn index_bom(&mut self, bom_file: &BomFile) {
         let bom = &bom_file.bom;
 
         if let Some(ref components) = bom.components {
-            for (i, component) in components.iter().enumerate() {
+            for component in components.iter() {
                 let row = ComponentRow {
-                    index: i,
-                    bom_file: bom_file_idx,
                     component: component.clone(),
                 };
                 if component.component_type == "cryptographic-asset" {
@@ -376,10 +349,8 @@ impl BomStore {
         }
 
         if let Some(ref services) = bom.services {
-            for (i, service) in services.iter().enumerate() {
+            for service in services.iter() {
                 let row = ServiceRow {
-                    index: i,
-                    bom_file: bom_file_idx,
                     service: service.clone(),
                 };
                 self.services.push(row);
@@ -396,11 +367,6 @@ impl BomStore {
 
     pub fn search_components(&mut self, query: &str) {
         self.current_filter.query = query.to_string();
-        self.rebuild_filtered_indices();
-    }
-
-    pub fn filter_by_type(&mut self, component_type: Option<String>) {
-        self.current_filter.component_type = component_type;
         self.rebuild_filtered_indices();
     }
 
@@ -512,6 +478,16 @@ impl BomStore {
         self.sort_filtered();
     }
 
+    pub fn set_sort(&mut self, field: SortField) {
+        if self.sort_field == field {
+            self.sort_order = self.sort_order.toggle();
+        } else {
+            self.sort_field = field;
+            self.sort_order = SortOrder::Ascending;
+        }
+        self.sort_filtered();
+    }
+
     pub fn filtered_component(&self, idx: usize) -> Option<&ComponentRow> {
         self.filtered_component_indices
             .get(idx)
@@ -538,18 +514,6 @@ impl BomStore {
             .flat_map(|bf| bf.bom.formulation.as_ref())
             .map(|f| f.len())
             .sum()
-    }
-
-    pub fn component_types(&self) -> Vec<String> {
-        let mut types: HashMap<String, usize> = HashMap::new();
-        for row in &self.components {
-            *types
-                .entry(row.component.component_type.clone())
-                .or_insert(0) += 1;
-        }
-        let mut result: Vec<String> = types.keys().cloned().collect();
-        result.sort();
-        result
     }
 
     pub fn component_type_counts(&self) -> Vec<(String, usize)> {
@@ -633,36 +597,12 @@ impl BomStore {
             .collect()
     }
 
-    pub fn spec_version(&self) -> Option<&str> {
-        self.bom_files
-            .first()
-            .and_then(|bf| bf.bom.spec_version.as_deref())
-    }
-
     pub fn get_component_by_ref(&self, ref_field: &str) -> Option<(usize, &ComponentRow)> {
         self.components
             .iter()
             .enumerate()
             .find(|(_, row)| row.component.bom_ref.as_deref() == Some(ref_field))
             .map(|(i, row)| (i, row))
-    }
-
-    pub fn find_filtered_index(&self, global_idx: usize) -> Option<usize> {
-        self.filtered_component_indices
-            .iter()
-            .position(|&i| i == global_idx)
-    }
-
-    pub fn bom_format(&self) -> Option<&str> {
-        self.bom_files
-            .first()
-            .and_then(|bf| bf.bom.bom_format.as_deref())
-    }
-
-    pub fn serial_number(&self) -> Option<&str> {
-        self.bom_files
-            .first()
-            .and_then(|bf| bf.bom.serial_number.as_deref())
     }
 
     pub fn file_count(&self) -> usize {
@@ -947,13 +887,13 @@ mod tests {
         let mut store = BomStore::new();
         store.load_path(tmp.path()).unwrap();
 
-        store.filter_by_type(Some("library".to_string()));
+        store.set_type_filter(Some("library".to_string()));
         assert_eq!(store.filtered_components_count(), 1);
 
-        store.filter_by_type(Some("cryptographic-asset".to_string()));
+        store.set_type_filter(Some("cryptographic-asset".to_string()));
         assert_eq!(store.filtered_components_count(), 1);
 
-        store.filter_by_type(None);
+        store.set_type_filter(None);
         assert_eq!(store.filtered_components_count(), 3);
     }
 
@@ -1011,7 +951,10 @@ mod tests {
         assert_eq!(store.crypto_assets.len(), 1);
 
         let crypto_row = &store.components[store.crypto_assets[0]];
-        assert_eq!(crypto_row.crypto_asset_type().unwrap(), "algorithm");
+        assert_eq!(
+            crypto_row.component.crypto_properties.as_ref().and_then(|cp| cp.asset_type.clone()),
+            Some("algorithm".to_string())
+        );
         assert_eq!(crypto_row.crypto_algorithm().unwrap(), "AES");
     }
 
@@ -1127,7 +1070,7 @@ mod tests {
         let mut store = BomStore::new();
         store.load_path(tmp.path()).unwrap();
 
-        let (idx, row) = store.get_component_by_ref("pkg:npm/express@4.18.0").unwrap();
+        let (_idx, row) = store.get_component_by_ref("pkg:npm/express@4.18.0").unwrap();
         assert_eq!(row.name_display(), "express");
 
         assert!(store.get_component_by_ref("nonexistent").is_none());

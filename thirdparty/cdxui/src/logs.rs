@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogLevel {
@@ -8,12 +7,10 @@ pub enum LogLevel {
     Error,
     Debug,
     Thought,
-    ProcessExit(i32),
 }
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
-    pub timestamp: Instant,
     pub level: LogLevel,
     pub text: String,
     pub thought_id: Option<usize>,
@@ -22,8 +19,6 @@ pub struct LogEntry {
 #[derive(Debug, Clone)]
 pub struct ThoughtBlock {
     pub id: usize,
-    pub title: String,
-    pub collapsed: bool,
     pub entry_count: usize,
 }
 
@@ -33,7 +28,6 @@ pub struct LogStore {
     thought_blocks: Vec<ThoughtBlock>,
     next_thought_id: usize,
     open_thought: Option<usize>,
-    pub auto_scroll: bool,
 }
 
 impl LogStore {
@@ -44,7 +38,6 @@ impl LogStore {
             thought_blocks: Vec::new(),
             next_thought_id: 0,
             open_thought: None,
-            auto_scroll: true,
         }
     }
 
@@ -69,8 +62,6 @@ impl LogStore {
             }
             self.thought_blocks.push(ThoughtBlock {
                 id,
-                title: text.clone(),
-                collapsed: false,
                 entry_count: 1,
             });
             Some(id)
@@ -87,7 +78,6 @@ impl LogStore {
         };
 
         self.entries.push_back(LogEntry {
-            timestamp: Instant::now(),
             level,
             text,
             thought_id,
@@ -107,16 +97,6 @@ impl LogStore {
 
     pub fn entries(&self) -> &VecDeque<LogEntry> {
         &self.entries
-    }
-
-    pub fn thought_blocks(&self) -> &[ThoughtBlock] {
-        &self.thought_blocks
-    }
-
-    pub fn toggle_thought(&mut self, id: usize) {
-        if let Some(block) = self.thought_blocks.iter_mut().find(|b| b.id == id) {
-            block.collapsed = !block.collapsed;
-        }
     }
 
     pub fn len(&self) -> usize {
@@ -192,29 +172,5 @@ mod tests {
     fn test_classify_info() {
         let (level, _text) = classify_line("Collecting packages...");
         assert_eq!(level, LogLevel::Info);
-    }
-
-    #[test]
-    fn test_thought_block_tracking() {
-        let mut store = LogStore::new(1000);
-        store.push_line("<think>Analyzing project");
-        assert_eq!(store.thought_blocks().len(), 1);
-        assert_eq!(store.thought_blocks()[0].entry_count, 1);
-
-        store.push_line("Found 42 components");
-        assert_eq!(store.thought_blocks()[0].entry_count, 2);
-
-        store.push_line("Done</think>");
-        assert!(store.open_thought.is_none());
-    }
-
-    #[test]
-    fn test_toggle_thought() {
-        let mut store = LogStore::new(1000);
-        store.push_line("<think>Test thought");
-        store.push_line("Line 2</think>");
-        assert!(!store.thought_blocks()[0].collapsed);
-        store.toggle_thought(0);
-        assert!(store.thought_blocks()[0].collapsed);
     }
 }

@@ -3,6 +3,7 @@ pub mod theme;
 
 use crate::app::{App, InputMode, Tab};
 use crate::bom::store::SortOrder;
+use crate::bom::store::SortField;
 use crate::ui::theme::Theme;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -151,6 +152,9 @@ impl App {
 }
 
 fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+    if !matches!(app.current_tab, Tab::Logs) {
+        app.panel_areas.push((crate::app::PanelFocus::Main, area));
+    }
     match app.current_tab {
         Tab::Logs => render_logs(frame, app, log_store, theme, area, tab_bg),
         Tab::Summary => render_summary(frame, app, theme, area, tab_bg),
@@ -162,12 +166,16 @@ fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs
     }
 }
 
-fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let in_gen = app.generating || app.generation_done;
     let has_thoughts = in_gen && !app.thought_text.is_empty();
+    let expanded = has_thoughts && !app.thoughts_collapsed;
+    let collapsed = has_thoughts && app.thoughts_collapsed;
 
-    let constraints: Vec<Constraint> = if has_thoughts {
+    let constraints: Vec<Constraint> = if expanded {
         vec![Constraint::Percentage(40), Constraint::Percentage(60)]
+    } else if collapsed {
+        vec![Constraint::Length(3), Constraint::Min(3)]
     } else {
         vec![Constraint::Percentage(100)]
     };
@@ -175,11 +183,15 @@ fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogSto
     let panels = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
     app.panel_areas.retain(|(p, _)| *p != crate::app::PanelFocus::Main);
 
-    if has_thoughts {
+    if expanded || collapsed {
         app.panel_areas.push((crate::app::PanelFocus::Thoughts, panels[0]));
         app.panel_areas.push((crate::app::PanelFocus::Stdout, panels[1]));
-        render_thoughts_panel(frame, app, theme, panels[0]);
-        render_stdout_panel(frame, app, log_store, theme, if has_thoughts { panels[1] } else { panels[0] });
+        if collapsed {
+            render_thoughts_collapsed(frame, app, theme, panels[0]);
+        } else {
+            render_thoughts_panel(frame, app, theme, panels[0]);
+        }
+        render_stdout_panel(frame, app, log_store, theme, panels[1]);
     } else {
         app.panel_areas.push((crate::app::PanelFocus::Stdout, panels[0]));
         render_stdout_panel(frame, app, log_store, theme, panels[0]);
@@ -218,6 +230,19 @@ fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
     frame.render_widget(p, area);
 }
 
+fn render_thoughts_collapsed(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let line_count = app.thought_text.lines().count();
+    let title = format!(" 💭 Thoughts ({} lines, collapsed) ", line_count);
+    let hint = if area.width > 40 { " [click to expand] " } else { "" };
+    let content = format!("{}{}", title, hint);
+    let p = Paragraph::new(Line::from(vec![Span::styled(
+        content,
+        Style::default().fg(theme.crypto_accent).add_modifier(Modifier::DIM),
+    )]))
+    .block(Block::default().borders(Borders::ALL).style(Style::default().bg(theme.bg)));
+    frame.render_widget(p, area);
+}
+
 fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
     let entries = log_store.entries();
 
@@ -226,16 +251,14 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
         let level_style = match entry.level {
             crate::logs::LogLevel::Error => Style::default().fg(theme.error),
             crate::logs::LogLevel::Warn => Style::default().fg(theme.warn),
-            crate::logs::LogLevel::ProcessExit(_) => Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             _ => Style::default().fg(theme.fg),
         };
         let icon = match entry.level {
             crate::logs::LogLevel::Error => "✗",
             crate::logs::LogLevel::Warn => "⚠",
-            crate::logs::LogLevel::ProcessExit(_) => "✓",
             _ => " ",
         };
-        let text = truncate_str(&entry.text, area.width.saturating_sub(6) as usize);
+            let text = entry.text.clone();
         items.push(ListItem::new(Line::from(vec![Span::styled(
             format!(" {} {}", icon, text),
             level_style,
@@ -264,7 +287,7 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let store = &app.store;
 
     let annotations: Vec<&crate::bom::schema::Annotation> = store.bom_files.iter()
@@ -298,7 +321,7 @@ fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, t
     let mid = vert[idx];
     idx += 1;
     let mid_split = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(mid);
     render_license_chart(frame, app, theme, mid_split[0]);
     render_type_breakdown(frame, app, theme, mid_split[1]);
@@ -312,9 +335,6 @@ fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, t
 fn render_annotation_text(frame: &mut Frame, annotations: &[&crate::bom::schema::Annotation], theme: &Theme, area: Rect) {
     let text = annotations.first()
         .and_then(|a| a.text.as_deref())
-        .map(|t| {
-            if t.len() > 200 { format!("{}…", &t[..197]) } else { t.to_string() }
-        })
         .unwrap_or_default();
     let p = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL)
@@ -349,13 +369,13 @@ fn render_license_chart(frame: &mut Frame, app: &App, theme: &Theme, area: Rect)
         let s = if is_alt { Style::default().fg(theme.table_row_fg).bg(theme.table_alt_bg) }
                 else { Style::default().fg(theme.table_row_fg).bg(theme.bg) };
         Row::new(vec![
-            Cell::from(Span::styled(if lic.len() > 18 { format!("{}…", &lic[..15]) } else { lic.clone() }, s)),
+            Cell::from(Span::styled(lic.clone(), s)),
             Cell::from(Span::styled(format!("{}", count), s)),
             Cell::from(Span::styled(format!("{} {}", bar, count), s.fg(theme.accent))),
         ])
     }).collect();
 
-    let table = Table::new(rows, [Constraint::Percentage(40), Constraint::Percentage(10), Constraint::Percentage(50)])
+    let table = Table::new(rows, [Constraint::Percentage(55), Constraint::Percentage(12), Constraint::Percentage(33)])
         .header(header)
         .block(Block::default().borders(Borders::ALL)
             .title(format!(" License Distribution ({} unique) ", sorted.len()))
@@ -365,6 +385,7 @@ fn render_license_chart(frame: &mut Frame, app: &App, theme: &Theme, area: Rect)
 }
 
 fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    app.dep_tree_area = Some(area);
     let store = &app.store;
     let roots = store.dependency_roots();
     let mut items: Vec<ListItem> = Vec::new();
@@ -573,7 +594,7 @@ fn render_metadata_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
                 for p in props.iter().take(10) {
                     let n = p.name.as_deref().unwrap_or("-");
                     let v = p.value.as_deref().unwrap_or("-");
-                    let vd = split_newlines_display(v, 100);
+                    let vd = split_newlines_display(v);
                     rows.push(Row::new(vec![
                         Cell::from(Span::styled(n.to_string(), Style::default().fg(theme.crypto_accent))),
                         Cell::from(Span::raw(vd)),
@@ -600,11 +621,11 @@ fn render_metadata_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
 
 fn render_component_table(
     frame: &mut Frame,
-    app: &App,
+    app: &mut App,
     theme: &Theme,
     area: Rect,
     crypto_only: bool,
-    tab_bg: ratatui::style::Color,
+    _tab_bg: ratatui::style::Color,
 ) {
     let store = &app.store;
 
@@ -656,6 +677,18 @@ fn render_component_table(
         Constraint::Percentage(20),
     ];
 
+    app.component_header_y = area.y + 1;
+    app.component_header_positions.clear();
+    let header_fields = [SortField::Type, SortField::Name, SortField::Version, SortField::Purl, SortField::License];
+    let header_pcts: [u16; 5] = [15, 25, 12, 28, 20];
+    let inner_width = area.width.saturating_sub(2);
+    let mut x = area.x + 1;
+    for (field, pct) in header_fields.iter().zip(header_pcts.iter()) {
+        let col_width = (inner_width as u32 * *pct as u32 / 100) as u16;
+        app.component_header_positions.push((*field, x, x + col_width));
+        x += col_width + 1;
+    }
+
     let total_items = indices.len();
     if total_items == 0 {
         let empty = Paragraph::new("No components found matching the current filter.")
@@ -679,9 +712,12 @@ fn render_component_table(
             let global_idx = scroll_start + i;
             let is_selected = global_idx == app.table_selected;
             let is_alt = global_idx % 2 == 1;
+            let in_selection = app.selected_rows().map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
 
             let base_style = if is_selected {
                 theme.selected_style()
+            } else if in_selection {
+                theme.range_selected_style()
             } else if is_alt {
                 Style::default().fg(theme.table_row_fg).bg(theme.table_alt_bg)
             } else {
@@ -696,23 +732,23 @@ fn render_component_table(
 
             let cells = vec![
                 Cell::from(Span::styled(
-                    truncate_str(row.type_display(), 18),
+                    row.type_display().to_string(),
                     type_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(row.name_display(), 30),
+                    row.name_display().to_string(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(row.version_display(), 15),
+                    row.version_display().to_string(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(row.purl_display(), 40),
+                    row.purl_display().to_string(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(&row.license_display(), 25),
+                    row.license_display(),
                     base_style,
                 )),
             ];
@@ -740,7 +776,7 @@ fn render_component_table(
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let store = &app.store;
 
     let header_cells: Vec<Cell> = SERVICE_COLUMNS
@@ -781,9 +817,12 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect,
             let global_idx = scroll_start + i;
             let is_selected = global_idx == app.table_selected;
             let is_alt = global_idx % 2 == 1;
+            let in_selection = app.selected_rows().map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
 
             let base_style = if is_selected {
                 theme.selected_style()
+            } else if in_selection {
+                theme.range_selected_style()
             } else if is_alt {
                 Style::default().fg(theme.table_row_fg).bg(theme.table_alt_bg)
             } else {
@@ -792,11 +831,11 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect,
 
             let cells = vec![
                 Cell::from(Span::styled(
-                    truncate_str(row.name_display(), 25),
+                    row.name_display().to_string(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(&row.endpoints_display(), 40),
+                    row.endpoints_display(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
@@ -804,11 +843,11 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect,
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(row.description_display(), 40),
+                    row.description_display().to_string(),
                     base_style,
                 )),
                 Cell::from(Span::styled(
-                    truncate_str(row.bom_ref_display(), 40),
+                    row.bom_ref_display().to_string(),
                     base_style,
                 )),
             ];
@@ -844,7 +883,7 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect,
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let store = &app.store;
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -892,8 +931,7 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
                                         if let Some(ref commands) = step.commands {
                                             for cmd in commands.iter().take(3) {
                                                 let ex = cmd.executed.as_deref().unwrap_or("-");
-                                                let ed = if ex.len() > 90 { format!("{}…", &ex[..87]) } else { ex.to_string() };
-                                                items.push(ListItem::new(format!("        $ {}", ed)));
+                                                items.push(ListItem::new(format!("        $ {}", ex)));
                                             }
                                         }
                                     }
@@ -944,7 +982,8 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
+    app.dep_tree_area = Some(area);
     let store = &app.store;
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -1095,26 +1134,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, trace_state: &crate::trace::T
     frame.render_widget(status, area);
 }
 
-fn truncate_str(s: &str, max_len: usize) -> String {
-    let s = s.trim();
-    if s.len() > max_len {
-        format!("{}…", &s[..max_len.saturating_sub(1)])
-    } else {
-        s.to_string()
-    }
-}
-
-fn split_newlines_display(value: &str, max_len: usize) -> String {
+fn split_newlines_display(value: &str) -> String {
     if value.contains("\\n") {
         let parts: Vec<&str> = value.split("\\n").map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
-        let joined = parts.join(", ");
-        if joined.len() > max_len {
-            format!("{}…", &joined[..max_len.saturating_sub(1)])
-        } else {
-            joined
-        }
-    } else if value.len() > max_len {
-        format!("{}…", &value[..max_len.saturating_sub(1)])
+        parts.join(", ")
     } else {
         value.to_string()
     }
@@ -1128,9 +1151,9 @@ mod tests {
 
     #[test]
     fn test_split_newlines_display() {
-        assert_eq!(split_newlines_display("composer\\ngem\\nnpm", 100), "composer, gem, npm");
-        assert_eq!(split_newlines_display("single", 100), "single");
-        assert_eq!(split_newlines_display("a\\nb\\nc", 6), "a, b,…");
-        assert_eq!(split_newlines_display("", 100), "");
+        assert_eq!(split_newlines_display("composer\\ngem\\nnpm"), "composer, gem, npm");
+        assert_eq!(split_newlines_display("single"), "single");
+        assert_eq!(split_newlines_display("a\\nb\\nc"), "a, b, c");
+        assert_eq!(split_newlines_display(""), "");
     }
 }

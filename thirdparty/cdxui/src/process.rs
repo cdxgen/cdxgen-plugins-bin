@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -13,7 +13,6 @@ pub struct ProcessHandle {
     pub thought_rx: mpsc::Receiver<String>,
     pub trace_rx: mpsc::Receiver<String>,
     pub thought_log_path: Option<PathBuf>,
-    pub trace_log_path: Option<PathBuf>,
 }
 
 impl ProcessHandle {
@@ -27,7 +26,6 @@ impl ProcessHandle {
             .env("CDXGEN_THOUGHT_LOG", thought_log)
             .env("CDXGEN_TRACE_MODE", "true")
             .env("CDXGEN_TRACE_LOG", trace_log)
-            .env("CDXGEN_DEBUG_MODE", "verbose")
             .env("FETCH_LICENSE", std::env::var("FETCH_LICENSE").unwrap_or_default());
 
         let mut child = command.spawn().map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
@@ -128,7 +126,6 @@ impl ProcessHandle {
             thought_rx,
             trace_rx,
             thought_log_path: Some(thought_path),
-            trace_log_path: Some(trace_path),
         })
     }
 
@@ -192,7 +189,6 @@ fn parse_line(line: &str, is_stderr: bool) -> LogEntry {
     };
 
     LogEntry {
-        timestamp: std::time::Instant::now(),
         level,
         text: ansi_stripped,
         thought_id: None,

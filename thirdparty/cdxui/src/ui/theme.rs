@@ -20,8 +20,6 @@ pub struct Theme {
     pub detail_fg: Color,
     pub status_bg: Color,
     pub status_fg: Color,
-    pub help_bg: Color,
-    pub help_fg: Color,
     pub accent: Color,
     pub warn: Color,
     pub error: Color,
@@ -51,8 +49,6 @@ impl Theme {
             detail_fg: Color::Rgb(200, 200, 220),
             status_bg: Color::Rgb(40, 40, 60),
             status_fg: Color::Rgb(180, 180, 200),
-            help_bg: Color::Rgb(30, 30, 50),
-            help_fg: Color::Rgb(180, 180, 200),
             accent,
             warn: Color::Rgb(255, 200, 100),
             error: Color::Rgb(255, 100, 100),
@@ -61,10 +57,10 @@ impl Theme {
                 Color::Rgb(20, 22, 18), // Logs - dark green tint
                 Color::Rgb(18, 18, 18), // Summary - neutral
                 Color::Rgb(18, 18, 24), // Components - blue tint
+                Color::Rgb(20, 20, 22), // Dependencies - cool tint
                 Color::Rgb(22, 18, 24), // Crypto - purple tint
                 Color::Rgb(18, 24, 20), // Services - green tint
                 Color::Rgb(24, 20, 18), // Formulation - warm tint
-                Color::Rgb(20, 20, 22), // Dependencies - cool tint
             ],
         }
     }
@@ -90,8 +86,6 @@ impl Theme {
             detail_fg: Color::Rgb(30, 30, 50),
             status_bg: Color::Rgb(220, 220, 240),
             status_fg: Color::Rgb(60, 60, 80),
-            help_bg: Color::Rgb(230, 230, 245),
-            help_fg: Color::Rgb(60, 60, 80),
             accent,
             warn: Color::Rgb(200, 140, 0),
             error: Color::Rgb(200, 50, 50),
@@ -100,10 +94,10 @@ impl Theme {
                 Color::Rgb(240, 248, 240), // Logs
                 Color::Rgb(245, 245, 245), // Summary
                 Color::Rgb(240, 240, 250), // Components
+                Color::Rgb(242, 242, 248), // Dependencies
                 Color::Rgb(248, 240, 248), // Crypto
                 Color::Rgb(240, 250, 242), // Services
                 Color::Rgb(250, 245, 240), // Formulation
-                Color::Rgb(242, 242, 248), // Dependencies
             ],
         }
     }
@@ -114,10 +108,10 @@ impl Theme {
             Tab::Logs => 0,
             Tab::Summary => 1,
             Tab::Components => 2,
-            Tab::Crypto => 3,
-            Tab::Services => 4,
-            Tab::Formulation => 5,
-            Tab::Dependencies => 6,
+            Tab::Dependencies => 3,
+            Tab::Crypto => 4,
+            Tab::Services => 5,
+            Tab::Formulation => 6,
         }
     }
 
@@ -147,12 +141,10 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
-    pub fn accent_style(&self) -> Style {
-        Style::default().fg(self.accent)
-    }
-
-    pub fn crypto_style(&self) -> Style {
-        Style::default().fg(self.crypto_accent)
+    pub fn range_selected_style(&self) -> Style {
+        Style::default()
+            .fg(self.table_row_fg)
+            .bg(self.table_selected_bg)
     }
 }
 

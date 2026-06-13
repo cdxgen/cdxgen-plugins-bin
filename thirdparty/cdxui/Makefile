@@ -32,7 +32,7 @@ windows:
 
 sbom:
 	@echo "Generating SBOM for $(appname)..."
-	-cdxgen -t rust -o $(build_dir)/sbom-$(appname)-postbuild.cdx.json
+	cdxgen -t rust -o $(build_dir)/sbom-$(appname)-postbuild.cdx.json
 
 all-supported: linux linuxmusl windows sbom
 

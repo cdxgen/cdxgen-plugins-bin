@@ -6,13 +6,7 @@ pub struct TraceEvent {
     pub event_type: Option<String>,
 
     pub cmd: Option<String>,
-    pub host: Option<String>,
     pub url: Option<String>,
-    pub method: Option<String>,
-    pub path: Option<String>,
-    pub operation: Option<String>,
-    pub status: Option<String>,
-    pub duration: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

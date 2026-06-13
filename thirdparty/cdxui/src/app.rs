@@ -1,5 +1,5 @@
 use crate::bom::store::BomStore;
-use std::path::PathBuf;
+use crate::bom::store::SortField;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -17,10 +17,10 @@ impl Tab {
         Tab::Logs,
         Tab::Summary,
         Tab::Components,
+        Tab::Dependencies,
         Tab::Crypto,
         Tab::Services,
         Tab::Formulation,
-        Tab::Dependencies,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -56,15 +56,8 @@ pub enum InputMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelFocus {
     Main,
-    Detail,
     Thoughts,
     Stdout,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TreeNav {
-    Normal,
-    Tree,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +65,6 @@ pub struct App {
     pub store: BomStore,
     pub current_tab: Tab,
     pub input_mode: InputMode,
-    pub tree_mode: TreeNav,
     pub search_input: String,
     pub should_quit: bool,
     pub detail_open: bool,
@@ -81,35 +73,35 @@ pub struct App {
     pub detail_scroll: u16,
     pub component_type_filter: Option<String>,
     pub type_filter_selected: usize,
-    pub tree_selected: usize,
-    pub tree_expanded: std::collections::HashSet<usize>,
-    pub show_help: bool,
-    pub message: Option<String>,
-    pub paths: Vec<PathBuf>,
     pub last_item_count: usize,
     pub dep_expanded: std::collections::HashSet<String>,
-    pub summary_dep_selected: usize,
-    pub summary_dep_scroll: u16,
     pub dep_tree_refs: Vec<String>,
     pub generating: bool,
     pub generation_done: bool,
     pub output_path: Option<std::path::PathBuf>,
     pub thought_text: String,
+    pub thoughts_collapsed: bool,
     pub switch_timer: Option<std::time::Instant>,
     pub focused_panel: PanelFocus,
     pub thought_scroll: u16,
     pub stdout_scroll: u16,
     pub panel_areas: std::vec::Vec<(PanelFocus, ratatui::layout::Rect)>,
     pub tab_positions: std::vec::Vec<(Tab, u16, u16)>,
+    pub component_header_y: u16,
+    pub component_header_positions: std::vec::Vec<(SortField, u16, u16)>,
+    pub dep_tree_area: Option<ratatui::layout::Rect>,
+    pub selection_start_row: Option<usize>,
+    pub selection_end_row: Option<usize>,
+    pub last_click_time: Option<std::time::Instant>,
+    pub last_click_row: usize,
 }
 
 impl App {
-    pub fn new(store: BomStore, paths: Vec<PathBuf>) -> Self {
+    pub fn new(store: BomStore) -> Self {
         Self {
             store,
             current_tab: Tab::Summary,
             input_mode: InputMode::Normal,
-            tree_mode: TreeNav::Normal,
             search_input: String::new(),
             should_quit: false,
             detail_open: false,
@@ -118,26 +110,27 @@ impl App {
             detail_scroll: 0,
             component_type_filter: None,
             type_filter_selected: 0,
-            tree_selected: 0,
-            tree_expanded: std::collections::HashSet::new(),
-            show_help: false,
-            message: None,
-            paths,
             last_item_count: 0,
             dep_expanded: std::collections::HashSet::new(),
-            summary_dep_selected: 0,
-            summary_dep_scroll: 0,
             dep_tree_refs: Vec::new(),
             generating: false,
             generation_done: false,
             output_path: None,
             thought_text: String::new(),
+            thoughts_collapsed: false,
             switch_timer: None,
             focused_panel: PanelFocus::Main,
             thought_scroll: 0,
             stdout_scroll: 0,
             panel_areas: Vec::new(),
             tab_positions: Vec::new(),
+            component_header_y: 0,
+            component_header_positions: Vec::new(),
+            dep_tree_area: None,
+            selection_start_row: None,
+            selection_end_row: None,
+            last_click_time: None,
+            last_click_row: 0,
         }
     }
 
@@ -238,21 +231,6 @@ impl App {
         self.table_selected = 0;
     }
 
-    pub fn clear_type_filter(&mut self) {
-        self.component_type_filter = None;
-        self.store.set_type_filter(None);
-        self.scroll_offset = 0;
-        self.table_selected = 0;
-    }
-
-    pub fn toggle_tree_node(&mut self) {
-        if self.tree_expanded.contains(&self.tree_selected) {
-            self.tree_expanded.remove(&self.tree_selected);
-        } else {
-            self.tree_expanded.insert(self.tree_selected);
-        }
-    }
-
     pub fn switch_tab(&mut self, tab: Tab) {
         if self.current_tab != tab {
             self.detail_open = false;
@@ -293,6 +271,23 @@ impl App {
         self.store.cycle_sort();
         self.table_selected = 0;
         self.scroll_offset = 0;
+    }
+
+    pub fn toggle_thoughts_collapse(&mut self) {
+        self.thoughts_collapsed = !self.thoughts_collapsed;
+    }
+
+    pub fn selected_rows(&self) -> Option<(usize, usize)> {
+        match (self.selection_start_row, self.selection_end_row) {
+            (Some(start), Some(end)) if start <= end => Some((start, end)),
+            (Some(start), Some(end)) => Some((end, start)),
+            _ => None,
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection_start_row = None;
+        self.selection_end_row = None;
     }
 }
 

@@ -34,7 +34,7 @@ pub fn section_header(text: &str, theme: &Theme) -> Line<'static> {
     )])
 }
 
-fn dim(s: &str, theme: &Theme) -> Style {
+fn dim(_s: &str, theme: &Theme) -> Style {
     Style::default().fg(theme.detail_fg).add_modifier(Modifier::DIM)
 }
 
