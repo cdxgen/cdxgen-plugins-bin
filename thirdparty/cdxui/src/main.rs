@@ -237,7 +237,10 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
         InputMode::Normal => match code {
             KeyCode::Char('q') | KeyCode::Char('Q') => app.should_quit = true,
 
-            KeyCode::Esc => { app.clear_selection(); app.clear_search(); }
+            KeyCode::Esc => {
+                if app.current_filter_active() { app.clear_search(); }
+                app.clear_selection();
+            }
             KeyCode::Char('/') => app.set_search(),
 
             KeyCode::Tab => { let next = app.current_tab.next(); app.switch_tab(next); }
@@ -506,7 +509,25 @@ fn yank_selection(app: &App) {
             _ => String::new(),
         };
         if !text.is_empty() {
-            eprintln!("\n── yanked {} row(s) ──\n{}\n── end ──", count, text);
+            let result = if cfg!(target_os = "macos") {
+                std::process::Command::new("pbcopy")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .and_then(|mut c| { use std::io::Write; c.stdin.take().unwrap().write_all(text.as_bytes()) })
+            } else if cfg!(target_os = "linux") {
+                std::process::Command::new("xclip")
+                    .args(["-selection", "clipboard"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .and_then(|mut c| { use std::io::Write; c.stdin.take().unwrap().write_all(text.as_bytes()) })
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "unsupported"))
+            };
+            if result.is_ok() {
+                eprintln!("── yanked {} row(s) to clipboard ──", count);
+            } else {
+                eprintln!("── yanked {} row(s) ──\n{}\n── end ──", count, text);
+            }
         }
     }
 }

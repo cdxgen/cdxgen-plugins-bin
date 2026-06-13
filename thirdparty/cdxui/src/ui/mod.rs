@@ -118,7 +118,7 @@ fn render_search_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     format!(
                         "search: \"{}\"{} ({} matches, / search, f type, Esc clear)",
                         app.search_input, type_info,
-                        app.current_match_count()
+                        app.current_list_len()
                     ),
                     Style::default()
                         .fg(theme.search_fg)
@@ -139,16 +139,6 @@ fn render_search_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .block(Block::default().style(Style::default().bg(style.bg.unwrap_or(theme.bg))))
         .style(style);
     frame.render_widget(paragraph, area);
-}
-
-impl App {
-    fn current_filter_active(&self) -> bool {
-        !self.search_input.is_empty() || self.component_type_filter.is_some()
-    }
-
-    fn current_match_count(&self) -> usize {
-        self.current_list_len()
-    }
 }
 
 fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
@@ -693,6 +683,7 @@ fn render_component_table(
 
     let total_items = indices.len();
     if total_items == 0 {
+        app.visible_rows = area.height.saturating_sub(4);
         let empty = Paragraph::new("No components found matching the current filter.")
             .style(Style::default().fg(theme.warn))
             .alignment(Alignment::Center)
@@ -799,6 +790,7 @@ fn render_service_table(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
     );
 
     if total_items == 0 {
+        app.visible_rows = area.height.saturating_sub(4);
         let empty = Paragraph::new("No services found matching the current filter.")
             .style(Style::default().fg(theme.warn))
             .alignment(Alignment::Center)

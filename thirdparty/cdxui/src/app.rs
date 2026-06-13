@@ -138,11 +138,13 @@ impl App {
 
     pub fn set_search(&mut self) {
         self.input_mode = InputMode::Search;
+        self.clear_selection();
     }
 
     pub fn clear_search(&mut self) {
         self.input_mode = InputMode::Normal;
         self.search_input.clear();
+        self.last_item_count = 0;
         self.store.search_components("");
         self.scroll_offset = 0;
         self.table_selected = 0;
@@ -151,6 +153,7 @@ impl App {
 
     pub fn apply_search(&mut self) {
         self.store.search_components(&self.search_input);
+        self.last_item_count = 0;
         self.scroll_offset = 0;
         self.table_selected = 0;
         self.clamp_scroll();
@@ -282,6 +285,10 @@ impl App {
 
     pub fn toggle_thoughts_collapse(&mut self) {
         self.thoughts_collapsed = !self.thoughts_collapsed;
+    }
+
+    pub fn current_filter_active(&self) -> bool {
+        !self.search_input.is_empty() || self.component_type_filter.is_some()
     }
 
     pub fn clamp_scroll(&mut self) {
