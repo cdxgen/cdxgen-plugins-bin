@@ -6,7 +6,7 @@ mod process;
 mod trace;
 mod ui;
 
-use crate::app::{App, InputMode, Tab};
+use crate::app::{App, InputMode, PanelFocus, Tab};
 use crate::args::{Args, parse_cdxgen_args};
 use crate::bom::store::BomStore;
 use crate::logs::LogStore;
@@ -254,7 +254,7 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             KeyCode::Down | KeyCode::Char('j') => { app.move_selection_down(); scroll_to_selection(app, 15); }
 
             KeyCode::Char(' ') | KeyCode::PageDown => {
-                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) {
+                if app.current_tab == Tab::Dependencies {
                     app.toggle_dep_expand(); app.last_item_count = 0;
                 } else { for _ in 0..page_size { app.move_selection_down(); } scroll_to_selection(app, 15); }
             }
@@ -327,17 +327,43 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
 }
 
 fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
+    let panel = find_panel(app, mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::ScrollUp => {
-            if app.scroll_offset > 0 {
-                app.scroll_offset = app.scroll_offset.saturating_sub(3);
-            }
+            let offset = scroll_offset_for_panel(app, panel);
+            if *offset > 0 { *offset = offset.saturating_sub(3); }
         }
         MouseEventKind::ScrollDown => {
-            app.scroll_offset = app.scroll_offset.saturating_add(3);
+            let offset = scroll_offset_for_panel(app, panel);
+            *offset = offset.saturating_add(3);
+        }
+        MouseEventKind::Down(_) => {
+            if let Some(p) = panel {
+                app.focused_panel = p;
+            }
         }
         _ => {}
     }
+}
+
+fn scroll_offset_for_panel(app: &mut App, panel: Option<PanelFocus>) -> &mut u16 {
+    match panel {
+        Some(PanelFocus::Thoughts) => &mut app.thought_scroll,
+        Some(PanelFocus::Stdout) => &mut app.stdout_scroll,
+        Some(PanelFocus::Detail) => &mut app.detail_scroll,
+        _ => &mut app.scroll_offset,
+    }
+}
+
+fn find_panel(app: &App, col: u16, row: u16) -> Option<PanelFocus> {
+    for (focus, rect) in &app.panel_areas {
+        if col >= rect.x && col < rect.x + rect.width
+            && row >= rect.y && row < rect.y + rect.height
+        {
+            return Some(*focus);
+        }
+    }
+    None
 }
 
 fn scroll_to_selection(app: &mut App, visible: u16) {

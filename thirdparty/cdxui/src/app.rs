@@ -54,6 +54,14 @@ pub enum InputMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelFocus {
+    Main,
+    Detail,
+    Thoughts,
+    Stdout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeNav {
     Normal,
     Tree,
@@ -88,6 +96,11 @@ pub struct App {
     pub output_path: Option<std::path::PathBuf>,
     pub thought_text: String,
     pub switch_timer: Option<std::time::Instant>,
+    pub focused_panel: PanelFocus,
+    pub thought_scroll: u16,
+    pub stdout_scroll: u16,
+    pub panel_areas: std::vec::Vec<(PanelFocus, ratatui::layout::Rect)>,
+    pub tab_positions: std::vec::Vec<(Tab, u16, u16)>,
 }
 
 impl App {
@@ -120,6 +133,11 @@ impl App {
             output_path: None,
             thought_text: String::new(),
             switch_timer: None,
+            focused_panel: PanelFocus::Main,
+            thought_scroll: 0,
+            stdout_scroll: 0,
+            panel_areas: Vec::new(),
+            tab_positions: Vec::new(),
         }
     }
 

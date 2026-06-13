@@ -17,6 +17,8 @@ const SERVICE_COLUMNS: [&str; 5] = ["Name", "Endpoints", "Auth", "Description", 
 
 pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, trace_state: &crate::trace::TraceState, theme: &Theme) {
     let area = frame.area();
+    app.panel_areas.clear();
+    let tab_bg = theme.tab_bg[Theme::tab_index(app.current_tab)];
 
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
@@ -41,33 +43,33 @@ pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStor
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(content_area);
-        render_main_content(frame, app, log_store, theme, split[0]);
+        render_main_content(frame, app, log_store, theme, split[0], tab_bg);
         detail::render_detail_panel(frame, app, theme, split[1]);
     } else {
-        render_main_content(frame, app, log_store, theme, content_area);
+        render_main_content(frame, app, log_store, theme, content_area, tab_bg);
     }
 
     render_status_bar(frame, app, trace_state, theme, status_area);
 }
 
-fn render_tabs(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let titles: Vec<Line> = Tab::ALL
-        .iter()
-        .map(|tab| {
-            let label = app.tab_label(*tab);
-            if *tab == app.current_tab {
-                Line::from(vec![Span::styled(
-                    format!(" {} ", label),
-                    theme.tab_active_style(),
-                )])
-            } else {
-                Line::from(vec![Span::styled(
-                    format!(" {} ", label),
-                    theme.tab_inactive_style(),
-                )])
-            }
-        })
-        .collect();
+fn render_tabs(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let mut titles: Vec<Line> = Vec::new();
+    let mut x = area.x + 1;
+    app.tab_positions.clear();
+
+    for tab in &Tab::ALL {
+        let label = app.tab_label(*tab);
+        let display = format!(" {} ", label);
+        let width = display.len() as u16;
+        app.tab_positions.push((*tab, x, x + width));
+        x += width;
+
+        if *tab == app.current_tab {
+            titles.push(Line::from(vec![Span::styled(display, theme.tab_active_style())]));
+        } else {
+            titles.push(Line::from(vec![Span::styled(display, theme.tab_inactive_style())]));
+        }
+    }
 
     let tabs = Tabs::new(titles)
         .block(Block::default().style(Style::default().bg(theme.bg)))
@@ -148,19 +150,19 @@ impl App {
     }
 }
 
-fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
+fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     match app.current_tab {
-        Tab::Logs => render_logs(frame, app, log_store, theme, area),
-        Tab::Summary => render_summary(frame, app, theme, area),
-        Tab::Components => render_component_table(frame, app, theme, area, false),
-        Tab::Crypto => render_component_table(frame, app, theme, area, true),
-        Tab::Services => render_service_table(frame, app, theme, area),
-        Tab::Formulation => render_formulation(frame, app, theme, area),
-        Tab::Dependencies => render_dependencies(frame, app, theme, area),
+        Tab::Logs => render_logs(frame, app, log_store, theme, area, tab_bg),
+        Tab::Summary => render_summary(frame, app, theme, area, tab_bg),
+        Tab::Components => render_component_table(frame, app, theme, area, false, tab_bg),
+        Tab::Crypto => render_component_table(frame, app, theme, area, true, tab_bg),
+        Tab::Services => render_service_table(frame, app, theme, area, tab_bg),
+        Tab::Formulation => render_formulation(frame, app, theme, area, tab_bg),
+        Tab::Dependencies => render_dependencies(frame, app, theme, area, tab_bg),
     }
 }
 
-fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
+fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     let in_gen = app.generating || app.generation_done;
     let has_thoughts = in_gen && !app.thought_text.is_empty();
 
@@ -206,7 +208,7 @@ fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
     let title = if app.generating { " 💭 Thoughts (live) " } else { " 💭 Thoughts " };
     let p = Paragraph::new(Text::from(lines))
         .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)))
-        .scroll((app.scroll_offset, 0));
+        .scroll((app.thought_scroll, 0));
     frame.render_widget(p, area);
 }
 
@@ -240,7 +242,7 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
                 else { format!(" Stdout ({} lines) ", total) };
 
     let visible = area.height.saturating_sub(3) as usize;
-    let start = (app.scroll_offset as usize).min(total.saturating_sub(1));
+    let start = (app.stdout_scroll as usize).min(total.saturating_sub(1));
     let end = (start + visible).min(total);
     let visible_items: Vec<ListItem> = items[start..end].to_vec();
 
@@ -256,7 +258,7 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     let store = &app.store;
 
     let annotations: Vec<&crate::bom::schema::Annotation> = store.bom_files.iter()
@@ -596,6 +598,7 @@ fn render_component_table(
     theme: &Theme,
     area: Rect,
     crypto_only: bool,
+    tab_bg: ratatui::style::Color,
 ) {
     let store = &app.store;
 
@@ -731,7 +734,7 @@ fn render_component_table(
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     let store = &app.store;
 
     let header_cells: Vec<Cell> = SERVICE_COLUMNS
@@ -835,7 +838,7 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect)
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     let store = &app.store;
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -935,7 +938,7 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     let store = &app.store;
     let mut items: Vec<ListItem> = Vec::new();
 

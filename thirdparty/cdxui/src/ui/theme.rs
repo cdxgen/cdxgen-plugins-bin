@@ -26,10 +26,12 @@ pub struct Theme {
     pub warn: Color,
     pub error: Color,
     pub crypto_accent: Color,
+    pub tab_bg: [Color; 7],
 }
 
 impl Theme {
     pub fn dark() -> Self {
+        let accent = Color::Rgb(100, 180, 255);
         Self {
             bg: Color::Rgb(18, 18, 18),
             fg: Color::Rgb(220, 220, 220),
@@ -51,14 +53,24 @@ impl Theme {
             status_fg: Color::Rgb(180, 180, 200),
             help_bg: Color::Rgb(30, 30, 50),
             help_fg: Color::Rgb(180, 180, 200),
-            accent: Color::Rgb(100, 180, 255),
+            accent,
             warn: Color::Rgb(255, 200, 100),
             error: Color::Rgb(255, 100, 100),
             crypto_accent: Color::Rgb(180, 140, 255),
+            tab_bg: [
+                Color::Rgb(20, 22, 18), // Logs - dark green tint
+                Color::Rgb(18, 18, 18), // Summary - neutral
+                Color::Rgb(18, 18, 24), // Components - blue tint
+                Color::Rgb(22, 18, 24), // Crypto - purple tint
+                Color::Rgb(18, 24, 20), // Services - green tint
+                Color::Rgb(24, 20, 18), // Formulation - warm tint
+                Color::Rgb(20, 20, 22), // Dependencies - cool tint
+            ],
         }
     }
 
     pub fn light() -> Self {
+        let accent = Color::Rgb(50, 120, 220);
         Self {
             bg: Color::Rgb(245, 245, 245),
             fg: Color::Rgb(30, 30, 30),
@@ -80,10 +92,32 @@ impl Theme {
             status_fg: Color::Rgb(60, 60, 80),
             help_bg: Color::Rgb(230, 230, 245),
             help_fg: Color::Rgb(60, 60, 80),
-            accent: Color::Rgb(50, 120, 220),
+            accent,
             warn: Color::Rgb(200, 140, 0),
             error: Color::Rgb(200, 50, 50),
             crypto_accent: Color::Rgb(130, 80, 200),
+            tab_bg: [
+                Color::Rgb(240, 248, 240), // Logs
+                Color::Rgb(245, 245, 245), // Summary
+                Color::Rgb(240, 240, 250), // Components
+                Color::Rgb(248, 240, 248), // Crypto
+                Color::Rgb(240, 250, 242), // Services
+                Color::Rgb(250, 245, 240), // Formulation
+                Color::Rgb(242, 242, 248), // Dependencies
+            ],
+        }
+    }
+
+    pub fn tab_index(tab: crate::app::Tab) -> usize {
+        use crate::app::Tab;
+        match tab {
+            Tab::Logs => 0,
+            Tab::Summary => 1,
+            Tab::Components => 2,
+            Tab::Crypto => 3,
+            Tab::Services => 4,
+            Tab::Formulation => 5,
+            Tab::Dependencies => 6,
         }
     }
 
