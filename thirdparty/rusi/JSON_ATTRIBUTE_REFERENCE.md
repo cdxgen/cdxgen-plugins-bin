@@ -4,25 +4,25 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ## Top-level report
 
-| Field              | Type                       | Meaning                                                          |
-| ------------------ | -------------------------- | ---------------------------------------------------------------- |
-| `schema_version`   | `string`                   | Schema identifier for the report format.                         |
-| `tool`             | object                     | Information about the analyzer binary that produced the report.  |
-| `runtime`          | object                     | Toolchain/runtime metadata for the analysis environment.         |
-| `options`          | object                     | Effective analysis options used for the run.                     |
-| `modules`          | array of `ModuleRef`       | Workspace/module inventory derived from Cargo metadata.          |
-| `packages`         | array of `PackageEvidence` | Package-level summary records.                                   |
-| `files`            | array of `FileEvidence`    | Per-file evidence.                                               |
-| `imports`          | array of `ImportUsage`     | Flattened import list across all files.                          |
-| `declarations`     | array of `Declaration`     | Flattened declarations across all files.                         |
-| `usages`           | array of `LibraryUsage`    | Flattened API/library usage evidence across all files.           |
-| `security_signals` | array of `SecuritySignal`  | Non-flow security-relevant signals.                              |
-| `crypto`           | `CryptoEvidence \| null`   | Aggregated cryptographic evidence used for CBOM-oriented review. |
-| `call_graph`       | `CallGraph \| null`        | Call graph output when enabled.                                  |
-| `data_flow`        | `DataFlowEvidence \| null` | Data-flow output when enabled.                                   |
+| Field              | Type                       | Meaning                                                                                                          |
+| ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `schema_version`   | `string`                   | Schema identifier for the report format.                                                                         |
+| `tool`             | object                     | Information about the analyzer binary that produced the report.                                                  |
+| `runtime`          | object                     | Toolchain/runtime metadata for the analysis environment.                                                         |
+| `options`          | object                     | Effective analysis options used for the run.                                                                     |
+| `modules`          | array of `ModuleRef`       | Workspace/module inventory derived from Cargo metadata.                                                          |
+| `packages`         | array of `PackageEvidence` | Package-level summary records.                                                                                   |
+| `files`            | array of `FileEvidence`    | Per-file evidence.                                                                                               |
+| `imports`          | array of `ImportUsage`     | Flattened import list across all files.                                                                          |
+| `declarations`     | array of `Declaration`     | Flattened declarations across all files.                                                                         |
+| `usages`           | array of `LibraryUsage`    | Flattened API/library usage evidence across all files.                                                           |
+| `security_signals` | array of `SecuritySignal`  | Non-flow security-relevant signals.                                                                              |
+| `crypto`           | `CryptoEvidence \| null`   | Aggregated cryptographic evidence used for CBOM-oriented review.                                                 |
+| `call_graph`       | `CallGraph \| null`        | Call graph output when enabled.                                                                                  |
+| `data_flow`        | `DataFlowEvidence \| null` | Data-flow output when enabled.                                                                                   |
 | `api_endpoints`    | array of `ApiEndpoint`     | HTTP endpoints discovered in the source code. Empty when the workspace doesn't import a supported web framework. |
-| `diagnostics`      | array of `Diagnostic`      | Analysis warnings, backend notes, and completeness clues.        |
-| `stats`            | object                     | Precomputed counters for high-level report contents.             |
+| `diagnostics`      | array of `Diagnostic`      | Analysis warnings, backend notes, and completeness clues.                                                        |
+| `stats`            | object                     | Precomputed counters for high-level report contents.                                                             |
 
 ## Common utility objects
 
@@ -275,20 +275,20 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ### `DataFlowPattern`
 
-| Field                | Type       | Meaning                                                                                                                              |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `target`             | `string`   | Pattern role: `source`, `sink`, or `passthrough`. When reading custom JSON it may be omitted and inferred from the containing array. |
-| `pattern`            | `string`   | Pattern text used for matching.                                                                                                      |
-| `category`           | `string`   | Category assigned when the pattern matches.                                                                                          |
-| `relevant_arguments` | `number[]` | Argument indexes used by the rule. Defaults to `[]` for custom JSON.                                                                 |
+| Field                | Type       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`             | `string`   | Pattern role: `source`, `sink`, or `passthrough`. When reading custom JSON it may be omitted and inferred from the containing array.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `pattern`            | `string`   | Pattern text used for matching.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `category`           | `string`   | Category assigned when the pattern matches. Common categories for sources: `env`, `cli`, `file`, `http-request`, `secret`, `crypto-material`. For sinks: `process-exec`, `filesystem-write`, `filesystem-delete`, `network-connect`, `network-request`, `sql-query`, `html-response`. For passthroughs: `value-wrapper`, `smart-pointer`, `lock-accessor`, `iterator-adapter`, `channel-io`, `linker-accessor`, `string-format`, `ffi-wrapper`, `sql-builder`, `pointer-arithmetic`, `auto-discovered-passthrough`. Crypto-specific: `crypto-digest`, `crypto-key`, `crypto-keygen`, `tls`, `jwt`. |
+| `relevant_arguments` | `number[]` | Argument indexes used by the rule. Defaults to `[]` for custom JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ### `DataFlowPatternSet`
 
-| Field          | Type                | Meaning                                                             |
-| -------------- | ------------------- | ------------------------------------------------------------------- |
-| `sources`      | `DataFlowPattern[]` | Source patterns. Defaults to `[]` when omitted in custom JSON.      |
-| `sinks`        | `DataFlowPattern[]` | Sink patterns. Defaults to `[]` when omitted in custom JSON.        |
-| `passthroughs` | `DataFlowPattern[]` | Passthrough patterns. Defaults to `[]` when omitted in custom JSON. |
+| Field          | Type                | Meaning                                                                                                                                                                                                                   |
+| -------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sources`      | `DataFlowPattern[]` | Source patterns. Defaults to `[]` when omitted in custom JSON.                                                                                                                                                            |
+| `sinks`        | `DataFlowPattern[]` | Sink patterns. Defaults to `[]` when omitted in custom JSON.                                                                                                                                                              |
+| `passthroughs` | `DataFlowPattern[]` | Passthrough patterns. Defaults to `[]` when omitted in custom JSON. Patterns with category `auto-discovered-passthrough` were inferred from workspace methods with accessor-like signatures rather than being hard-coded. |
 
 ### `DataFlowNode`
 
@@ -404,21 +404,21 @@ would call.
 
 ### `ApiEndpoint`
 
-| Field               | Type                  | Meaning                                                                                                                                                                          |
-| ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                | `string`              | Stable deterministic identifier.                                                                                                                                                 |
-| `method`            | `string`              | HTTP method in uppercase: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `TRACE`.                                                                                   |
-| `path`              | `string`              | Fully-resolved URL path including any prefixes from nested routers/scopes/mounts. Placeholders use the framework's native syntax (axum `:id`, actix `{id}`, rocket `<id>`).      |
-| `framework`         | `string`              | The framework that owns this endpoint: `axum`, `actix-web`, or `rocket`.                                                                                                         |
-| `handler`           | `string`              | Fully-qualified path to the handler function.                                                                                                                                    |
-| `package_path`      | `string`              | Crate (package) path.                                                                                                                                                            |
-| `purl`              | `string`              | Package URL when derivable; empty otherwise.                                                                                                                                     |
-| `file_path`         | `string`              | Source file the registration call lives in (not necessarily the handler's file).                                                                                                 |
-| `position`          | `Position`            | Source position of the registration call.                                                                                                                                        |
-| `parameters`        | `EndpointParameter[]` | Path and query parameters parsed from the handler's signature. Path parameters synthesize one entry per placeholder in the route; query parameters carry the extractor type.     |
-| `request_body_type` | `string \| null`      | Type of the deserialized request body when the handler uses a body extractor (axum `Json<T>`, actix `web::Json<T>` / `web::Form<T>`, rocket `Json<T>` / `Form<T>`).              |
-| `response_type`     | `string \| null`      | The application-level response type. Wrappers like `Result<…, _>` and `Json<…>` are unwrapped so the type names the data the handler returns.                                    |
-| `properties`        | `Map<string,string>`  | Extension map for future enrichments; empty today.                                                                                                                               |
+| Field               | Type                  | Meaning                                                                                                                                                                      |
+| ------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | `string`              | Stable deterministic identifier.                                                                                                                                             |
+| `method`            | `string`              | HTTP method in uppercase: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `TRACE`.                                                                               |
+| `path`              | `string`              | Fully-resolved URL path including any prefixes from nested routers/scopes/mounts. Placeholders use the framework's native syntax (axum `:id`, actix `{id}`, rocket `<id>`).  |
+| `framework`         | `string`              | The framework that owns this endpoint: `axum`, `actix-web`, or `rocket`.                                                                                                     |
+| `handler`           | `string`              | Fully-qualified path to the handler function.                                                                                                                                |
+| `package_path`      | `string`              | Crate (package) path.                                                                                                                                                        |
+| `purl`              | `string`              | Package URL when derivable; empty otherwise.                                                                                                                                 |
+| `file_path`         | `string`              | Source file the registration call lives in (not necessarily the handler's file).                                                                                             |
+| `position`          | `Position`            | Source position of the registration call.                                                                                                                                    |
+| `parameters`        | `EndpointParameter[]` | Path and query parameters parsed from the handler's signature. Path parameters synthesize one entry per placeholder in the route; query parameters carry the extractor type. |
+| `request_body_type` | `string \| null`      | Type of the deserialized request body when the handler uses a body extractor (axum `Json<T>`, actix `web::Json<T>` / `web::Form<T>`, rocket `Json<T>` / `Form<T>`).          |
+| `response_type`     | `string \| null`      | The application-level response type. Wrappers like `Result<…, _>` and `Json<…>` are unwrapped so the type names the data the handler returns.                                |
+| `properties`        | `Map<string,string>`  | Extension map for future enrichments; empty today.                                                                                                                           |
 
 ### `EndpointParameter`
 
@@ -432,13 +432,13 @@ would call.
 
 ### `Diagnostic`
 
-| Field          | Type               | Meaning                                           |
-| -------------- | ------------------ | ------------------------------------------------- |
-| `kind`         | `string`           | Diagnostic class.                                 |
-| `message`      | `string`           | Human-readable diagnostic text.                   |
-| `package_path` | `string \| null`   | Package path if the diagnostic is package-scoped. |
-| `file_path`    | `string \| null`   | File path if file-scoped.                         |
-| `position`     | `Position \| null` | Position when available.                          |
+| Field          | Type               | Meaning                                                                                                                                                                                                                                           |
+| -------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`         | `string`           | Diagnostic class. Common values: `parse`, `resolution`, `backend`, `missing-passthrough`. `missing-passthrough` diagnostics indicate method calls where taint tracking was lost; the message suggests adding the method as a passthrough pattern. |
+| `message`      | `string`           | Human-readable diagnostic text.                                                                                                                                                                                                                   |
+| `package_path` | `string \| null`   | Package path if the diagnostic is package-scoped.                                                                                                                                                                                                 |
+| `file_path`    | `string \| null`   | File path if file-scoped.                                                                                                                                                                                                                         |
+| `position`     | `Position \| null` | Position when available.                                                                                                                                                                                                                          |
 
 ### `Stats`
 

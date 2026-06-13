@@ -179,9 +179,13 @@ Rusi's data-flow engine is intentionally pragmatic.
 The stable engine uses:
 
 - syntax-level source/sink/passthrough pattern packs
-- per-function summaries
+- per-function summaries computed via fixpoint interprocedural analysis
 - simple interprocedural replay
 - concrete slice materialization for reviewable source-to-sink traces
+- **automatic passthrough discovery** from workspace methods with accessor-like signatures (e.g. `fn get(&self) -> &T`)
+- **struct field-level taint tracking** through struct construction, field assignment, and field access
+- **trait method resolution** for `impl Trait for Type` blocks, enabling call-graph edges to concrete trait implementations
+- **missing-passthrough diagnostics** that flag method calls where taint was lost, suggesting patterns to add
 
 Current built-in security modeling includes, among other areas:
 
@@ -303,6 +307,8 @@ Rusi is not yet a full cryptographic protocol analyzer. In particular, it is wea
 - distinguishing all security-relevant uses of weak hashes from non-security checksum contexts
 - following custom wrapper layers or macro-generated crypto abstractions exhaustively
 
+The stable engine also tracks crypto source-to-sink flows through common method chains (`.as_bytes()`, `.trim()`, `.to_lowercase()`, etc.) via built-in and auto-discovered passthrough patterns. Crypto data-flow slices are emitted in `cryptos` scope when an environment or file source flows into a classified crypto sink.
+
 ### Reproducible CBOM sample evaluation
 
 Curated real-crate sample apps live under `fixtures/cbom-real-*` and can be evaluated with:
@@ -373,11 +379,15 @@ Modeled request/response ecosystems include:
 - Includes package URLs where derivable.
 - Offers both safe/faster (`stable`) and richer/higher-risk (`compiler`) backends.
 - Ships with fixtures, regression tests, and evaluation scripts.
+- Trait method resolution for `impl Trait for Type` blocks in the stable backend.
+- Auto-discovered passthrough patterns reduce manual pattern curation.
+- Struct field-level taint tracking for projection and builder patterns.
+- Missing-passthrough diagnostics guide pattern refinement.
 
 ## Weaknesses and assumptions
 
 - Static analysis is approximate; absence of evidence is not proof of absence.
-- Stable call resolution is text/syntax driven.
+- Stable call resolution is text/syntax driven; trait dispatch is limited to known `impl` blocks.
 - Compiler mode is dependent on nightly toolchain availability and Cargo build behavior.
 - Crypto evidence is classification-oriented, not a proof of secure protocol design.
 - Data flow is practical and bounded rather than path-perfect.
