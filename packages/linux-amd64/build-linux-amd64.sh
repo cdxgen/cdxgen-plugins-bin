@@ -18,7 +18,7 @@ sha256sum plugins/osquery/osqueryi-linux-amd64 > plugins/osquery/osqueryi-linux-
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-amd64 plugins/dosai/dosai-linux-amd64
 sha256sum plugins/dosai/dosai-linux-amd64 > plugins/dosai/dosai-linux-amd64.sha256
 
-for plug in trivy trustinspector golem rusi
+for plug in trivy trustinspector golem rusi cdxui
 do
     mkdir -p "plugins/$plug"
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-amd64"

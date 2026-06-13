@@ -68,6 +68,18 @@ copy build\* ..\..\plugins\trustinspector\
 Remove-Item build -Recurse -Force
 cd ..\..
 
+New-Item -ItemType Directory -Path plugins\rusi -Force
+cd thirdparty\rusi
+cargo build -p rusi-cli --release --locked
+copy target\release\rusi.exe ..\..\plugins\rusi\rusi-windows-amd64.exe
+cd ..\..
+
+New-Item -ItemType Directory -Path plugins\cdxui -Force
+cd thirdparty\cdxui
+cargo build --release --locked
+copy target\release\cdxui.exe ..\..\plugins\cdxui\cdxui-windows-amd64.exe
+cd ..\..
+
 node .\scripts\generate-metadata.js .\plugins
 
 Remove-Item "osquery-$osqueryVersion.windows_x86_64" -Recurse -Force
