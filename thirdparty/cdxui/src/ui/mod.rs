@@ -54,15 +54,15 @@ pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStor
 
 fn render_tabs(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let mut titles: Vec<Line> = Vec::new();
-    let mut x = area.x + 1;
+    let mut x = area.x + 2; // border offset
     app.tab_positions.clear();
 
     for tab in &Tab::ALL {
         let label = app.tab_label(*tab);
         let display = format!(" {} ", label);
-        let width = display.len() as u16;
+        let width = unicode_width::UnicodeWidthStr::width(display.as_str()) as u16;
         app.tab_positions.push((*tab, x, x + width));
-        x += width;
+        x += width + 1; // gap between tabs
 
         if *tab == app.current_tab {
             titles.push(Line::from(vec![Span::styled(display, theme.tab_active_style())]));
