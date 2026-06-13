@@ -7,7 +7,7 @@ use crate::ui::theme::Theme;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, ListItem, Paragraph, Row, Table, TableState, Tabs},
     Frame,
 };
@@ -15,7 +15,7 @@ use ratatui::{
 const COMPONENT_COLUMNS: [&str; 5] = ["Type", "Name", "Version", "Purl", "License"];
 const SERVICE_COLUMNS: [&str; 5] = ["Name", "Endpoints", "Auth", "Description", "BOM Ref"];
 
-pub fn render(frame: &mut Frame, app: &mut App, theme: &Theme) {
+pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme) {
     let area = frame.area();
 
     let main_layout = Layout::default()
@@ -36,15 +36,15 @@ pub fn render(frame: &mut Frame, app: &mut App, theme: &Theme) {
     render_tabs(frame, app, theme, tabs_area);
     render_search_bar(frame, app, theme, search_area);
 
-    if app.detail_open && !matches!(app.current_tab, Tab::Summary | Tab::Formulation) {
+    if app.detail_open && !matches!(app.current_tab, Tab::Summary | Tab::Formulation | Tab::Logs) {
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(content_area);
-        render_main_content(frame, app, theme, split[0]);
+        render_main_content(frame, app, log_store, theme, split[0]);
         detail::render_detail_panel(frame, app, theme, split[1]);
     } else {
-        render_main_content(frame, app, theme, content_area);
+        render_main_content(frame, app, log_store, theme, content_area);
     }
 
     render_status_bar(frame, app, theme, status_area);
@@ -148,8 +148,9 @@ impl App {
     }
 }
 
-fn render_main_content(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
     match app.current_tab {
+        Tab::Logs => render_logs(frame, app, log_store, theme, area),
         Tab::Summary => render_summary(frame, app, theme, area),
         Tab::Components => render_component_table(frame, app, theme, area, false),
         Tab::Crypto => render_component_table(frame, app, theme, area, true),
@@ -157,6 +158,102 @@ fn render_main_content(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
         Tab::Formulation => render_formulation(frame, app, theme, area),
         Tab::Dependencies => render_dependencies(frame, app, theme, area),
     }
+}
+
+fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
+    let in_gen = app.generating || app.generation_done;
+    let has_thoughts = in_gen && !app.thought_text.is_empty();
+
+    let constraints: Vec<Constraint> = if has_thoughts {
+        vec![Constraint::Percentage(40), Constraint::Percentage(60)]
+    } else {
+        vec![Constraint::Percentage(100)]
+    };
+
+    let panels = Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+
+    if has_thoughts {
+        render_thoughts_panel(frame, app, theme, panels[0]);
+    }
+    render_stdout_panel(frame, app, log_store, theme, if has_thoughts { panels[1] } else { panels[0] });
+}
+
+fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let text = &app.thought_text;
+
+    let lines: Vec<Line> = text.lines().map(|line| {
+        let trimmed = line.trim();
+        let stripped = trimmed
+            .replace("<think>", "").replace("</think>", "")
+            .replace("<think", "").trim().to_string();
+        if stripped.is_empty() {
+            Line::from("")
+        } else {
+            let style = if trimmed.starts_with("<think") || trimmed.ends_with("</think>") {
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.crypto_accent)
+            };
+            Line::from(vec![Span::styled(
+                if stripped.len() > area.width.saturating_sub(4) as usize {
+                    format!("{}…", &stripped[..area.width.saturating_sub(7) as usize])
+                } else { stripped },
+                style,
+            )])
+        }
+    }).collect();
+
+    let title = if app.generating { " 💭 Thoughts (live) " } else { " 💭 Thoughts " };
+    let p = Paragraph::new(Text::from(lines))
+        .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)))
+        .scroll((app.scroll_offset, 0));
+    frame.render_widget(p, area);
+}
+
+fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect) {
+    let entries = log_store.entries();
+
+    let mut items: Vec<ListItem> = Vec::new();
+    for entry in entries.iter() {
+        let level_style = match entry.level {
+            crate::logs::LogLevel::Error => Style::default().fg(theme.error),
+            crate::logs::LogLevel::Warn => Style::default().fg(theme.warn),
+            crate::logs::LogLevel::ProcessExit(_) => Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            _ => Style::default().fg(theme.fg),
+        };
+        let icon = match entry.level {
+            crate::logs::LogLevel::Error => "✗",
+            crate::logs::LogLevel::Warn => "⚠",
+            crate::logs::LogLevel::ProcessExit(_) => "✓",
+            _ => " ",
+        };
+        let text = truncate_str(&entry.text, area.width.saturating_sub(6) as usize);
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            format!(" {} {}", icon, text),
+            level_style,
+        )])));
+    }
+
+    app.last_item_count = items.len();
+    let total = items.len();
+    let title = if app.generating { format!(" Stdout ({} lines, generating…) ", total) }
+                else { format!(" Stdout ({} lines) ", total) };
+
+    let visible = area.height.saturating_sub(3) as usize;
+    let start = (app.scroll_offset as usize).min(total.saturating_sub(1));
+    let end = (start + visible).min(total);
+    let visible_items: Vec<ListItem> = items[start..end].to_vec();
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    if total > 0 {
+        let rel = app.table_selected.saturating_sub(start);
+        list_state.select(Some(rel.min(visible_items.len().saturating_sub(1))));
+    }
+
+    let list = ratatui::widgets::List::new(visible_items)
+        .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)))
+        .highlight_style(theme.selected_style());
+    frame.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
@@ -171,11 +268,11 @@ fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 
     let constraints: Vec<Constraint> = {
         let mut c = vec![];
-        if has_annotations { c.push(Constraint::Length(2)); }
+        if has_annotations { c.push(Constraint::Length(5)); }
         c.push(Constraint::Length(3)); // stats bar
-        c.push(Constraint::Length(7)); // types + licenses (capped)
-        c.push(Constraint::Min(12));  // dep tree - gets remaining space
-        c.push(Constraint::Length(3)); // metadata (compact)
+        c.push(Constraint::Length(10)); // types + licenses
+        c.push(Constraint::Min(10));  // dep tree
+        c.push(Constraint::Min(6));   // metadata
         c
     };
 
@@ -263,11 +360,13 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
     let store = &app.store;
     let roots = store.dependency_roots();
     let mut items: Vec<ListItem> = Vec::new();
+    app.dep_tree_refs.clear();
 
     if roots.is_empty() {
         let all = store.all_dependencies();
         if all.is_empty() {
             items.push(ListItem::new(Line::from(vec![Span::styled("No dependencies", Style::default().fg(theme.warn))])));
+            app.dep_tree_refs.push(String::new());
         } else {
             for d in all.iter().take(15) {
                 let name = store.resolve_bom_ref(&d.ref_field);
@@ -278,11 +377,13 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
                     format!("{} {}", icon, name),
                     Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
                 )])));
+                app.dep_tree_refs.push(d.ref_field.clone());
                 if is_expanded {
                     if let Some(ref children) = d.depends_on {
                         for child in children {
                             let cname = store.resolve_bom_ref(child);
                             items.push(ListItem::new(format!("  └── {}", cname)));
+                            app.dep_tree_refs.push(child.clone());
                         }
                     }
                 }
@@ -291,7 +392,7 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
     } else {
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         for root in &roots {
-            build_dep_list(&mut items, store, theme, root, "", &app.dep_expanded, &mut visited);
+            build_dep_list(&mut items, &mut app.dep_tree_refs, store, theme, root, "", &app.dep_expanded, &mut visited);
         }
     }
 
@@ -841,10 +942,11 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
     let roots = store.dependency_roots();
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     let expanded = &app.dep_expanded;
+    app.dep_tree_refs.clear();
 
     if !roots.is_empty() {
         for root in &roots {
-            build_dep_list(&mut items, store, theme, root, "", expanded, &mut visited);
+            build_dep_list(&mut items, &mut app.dep_tree_refs, store, theme, root, "", expanded, &mut visited);
         }
     } else {
         let all_deps = store.all_dependencies();
@@ -857,12 +959,14 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
                 format!("{}{}", icon, name),
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             )])));
+            app.dep_tree_refs.push(d.ref_field.clone());
             if is_expanded {
                 if let Some(ref depends_on) = d.depends_on {
                     for (i, child) in depends_on.iter().enumerate() {
                         let prefix = if i == depends_on.len() - 1 { "  └── " } else { "  ├── " };
                         let cname = store.resolve_bom_ref(child);
                         items.push(ListItem::new(format!("{}{}", prefix, cname)));
+                        app.dep_tree_refs.push(child.clone());
                     }
                 }
             }
@@ -903,6 +1007,7 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
 
 fn build_dep_list(
     items: &mut Vec<ListItem>,
+    refs: &mut Vec<String>,
     store: &BomStore,
     theme: &Theme,
     ref_field: &str,
@@ -916,6 +1021,7 @@ fn build_dep_list(
             Span::raw(format!("{}{}", prefix, name)),
             Span::styled(" (cycle)", Style::default().fg(theme.warn)),
         ])));
+        refs.push(ref_field.to_string());
         return;
     }
     visited.insert(ref_field.to_string());
@@ -930,6 +1036,7 @@ fn build_dep_list(
         format!("{}{}{}", prefix, icon, name),
         Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
     )])));
+    refs.push(ref_field.to_string());
 
     if is_expanded {
         for (i, child) in children.iter().enumerate() {
@@ -939,7 +1046,7 @@ fn build_dep_list(
             } else {
                 format!("{}  ├── ", prefix)
             };
-            build_dep_list(items, store, theme, child, &child_prefix, expanded, visited);
+            build_dep_list(items, refs, store, theme, child, &child_prefix, expanded, visited);
         }
     }
 }

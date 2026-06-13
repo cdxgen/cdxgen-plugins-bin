@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Logs,
     Summary,
     Components,
     Crypto,
@@ -12,7 +13,8 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [
+    pub const ALL: [Tab; 7] = [
+        Tab::Logs,
         Tab::Summary,
         Tab::Components,
         Tab::Crypto,
@@ -23,6 +25,7 @@ impl Tab {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Tab::Logs => "Logs",
             Tab::Summary => "Summary",
             Tab::Components => "Components",
             Tab::Crypto => "Crypto",
@@ -79,6 +82,12 @@ pub struct App {
     pub dep_expanded: std::collections::HashSet<String>,
     pub summary_dep_selected: usize,
     pub summary_dep_scroll: u16,
+    pub dep_tree_refs: Vec<String>,
+    pub generating: bool,
+    pub generation_done: bool,
+    pub output_path: Option<std::path::PathBuf>,
+    pub thought_text: String,
+    pub switch_timer: Option<std::time::Instant>,
 }
 
 impl App {
@@ -105,6 +114,12 @@ impl App {
             dep_expanded: std::collections::HashSet::new(),
             summary_dep_selected: 0,
             summary_dep_scroll: 0,
+            dep_tree_refs: Vec::new(),
+            generating: false,
+            generation_done: false,
+            output_path: None,
+            thought_text: String::new(),
+            switch_timer: None,
         }
     }
 
@@ -136,6 +151,7 @@ impl App {
                 if self.last_item_count > 0 { self.last_item_count } else { self.store.formula_count() }),
             Tab::Dependencies => format!("{} ({})", base,
                 if self.last_item_count > 0 { self.last_item_count } else { self.store.total_dependencies }),
+            Tab::Logs => format!("{} ({})", base, self.last_item_count),
             Tab::Summary => format!("{} ({} files)", base, self.store.file_count()),
         }
     }
@@ -145,6 +161,7 @@ impl App {
             self.last_item_count
         } else {
             match self.current_tab {
+                Tab::Logs => self.last_item_count,
                 Tab::Components | Tab::Crypto => self.store.filtered_components_count(),
                 Tab::Services => self.store.filtered_services_count(),
                 Tab::Formulation => self.store.formula_count(),

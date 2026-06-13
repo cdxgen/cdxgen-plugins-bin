@@ -10,22 +10,24 @@ mod tests {
 
     #[test]
     fn test_tab_navigation_next() {
+        assert_eq!(Tab::Logs.next(), Tab::Summary);
         assert_eq!(Tab::Summary.next(), Tab::Components);
         assert_eq!(Tab::Components.next(), Tab::Crypto);
         assert_eq!(Tab::Crypto.next(), Tab::Services);
         assert_eq!(Tab::Services.next(), Tab::Formulation);
         assert_eq!(Tab::Formulation.next(), Tab::Dependencies);
-        assert_eq!(Tab::Dependencies.next(), Tab::Summary);
+        assert_eq!(Tab::Dependencies.next(), Tab::Logs);
     }
 
     #[test]
     fn test_tab_navigation_prev() {
-        assert_eq!(Tab::Summary.prev(), Tab::Dependencies);
+        assert_eq!(Tab::Logs.prev(), Tab::Dependencies);
         assert_eq!(Tab::Dependencies.prev(), Tab::Formulation);
         assert_eq!(Tab::Formulation.prev(), Tab::Services);
         assert_eq!(Tab::Services.prev(), Tab::Crypto);
         assert_eq!(Tab::Crypto.prev(), Tab::Components);
         assert_eq!(Tab::Components.prev(), Tab::Summary);
+        assert_eq!(Tab::Summary.prev(), Tab::Logs);
     }
 
     #[test]
