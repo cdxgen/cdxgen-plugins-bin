@@ -5,6 +5,7 @@ build_dir := build
 
 define build
 	@echo "Building $(appname) for $(1)-$(2)..."
+	rustup target add $(3) 2>/dev/null || true
 	cargo build --release --target $(3)
 	mkdir -p $(build_dir)
 	cp target/$(3)/release/$(appname)$(4) $(build_dir)/$(appname)-$(1)$(4)
