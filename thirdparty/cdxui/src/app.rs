@@ -73,7 +73,9 @@ pub struct App {
     pub detail_scroll: u16,
     pub component_type_filter: Option<String>,
     pub type_filter_selected: usize,
-    pub last_item_count: usize,
+    pub log_item_count: usize,
+    pub mini_dep_tree_count: usize,
+    pub dep_tree_count: usize,
     pub dep_expanded: std::collections::HashSet<String>,
     pub dep_tree_refs: Vec<String>,
     pub generating: bool,
@@ -111,7 +113,9 @@ impl App {
             detail_scroll: 0,
             component_type_filter: None,
             type_filter_selected: 0,
-            last_item_count: 0,
+            log_item_count: 0,
+            mini_dep_tree_count: 0,
+            dep_tree_count: 0,
             dep_expanded: std::collections::HashSet::new(),
             dep_tree_refs: Vec::new(),
             generating: false,
@@ -144,7 +148,6 @@ impl App {
     pub fn clear_search(&mut self) {
         self.input_mode = InputMode::Normal;
         self.search_input.clear();
-        self.last_item_count = 0;
         self.store.search_components("");
         self.scroll_offset = 0;
         self.table_selected = 0;
@@ -153,7 +156,6 @@ impl App {
 
     pub fn apply_search(&mut self) {
         self.store.search_components(&self.search_input);
-        self.last_item_count = 0;
         self.scroll_offset = 0;
         self.table_selected = 0;
         self.clamp_scroll();
@@ -170,7 +172,7 @@ impl App {
                 format!("{} ({})", base, count)
             }
             Tab::Dependencies => format!("{} ({})", base, self.store.total_dependencies),
-            Tab::Logs => format!("{} ({})", base, self.last_item_count),
+            Tab::Logs => format!("{} ({})", base, self.log_item_count),
             Tab::Summary => format!("{} ({} files)", base, self.store.file_count()),
         }
     }
@@ -179,18 +181,10 @@ impl App {
         match self.current_tab {
             Tab::Components | Tab::Crypto => self.store.filtered_components_count(),
             Tab::Services => self.store.filtered_services_count(),
-            _ => {
-                if self.last_item_count > 0 {
-                    self.last_item_count
-                } else {
-                    match self.current_tab {
-                        Tab::Formulation => self.store.formula_count(),
-                        Tab::Dependencies => self.store.total_dependencies,
-                        Tab::Summary => 1,
-                        _ => 0,
-                    }
-                }
-            }
+            Tab::Logs => self.log_item_count,
+            Tab::Formulation => self.store.formula_count(),
+            Tab::Dependencies => self.dep_tree_count,
+            Tab::Summary => self.mini_dep_tree_count,
         }
     }
 
@@ -249,7 +243,6 @@ impl App {
         self.scroll_offset = 0;
         self.table_selected = 0;
         self.detail_scroll = 0;
-        self.last_item_count = 0;
     }
 
     pub fn toggle_dep_expand(&mut self) {

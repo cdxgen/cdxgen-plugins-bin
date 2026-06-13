@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-linux-ppc64",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "ppc64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {

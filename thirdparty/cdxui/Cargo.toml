@@ -1,6 +1,6 @@
 [package]
 name = "cdxui"
-version = "2.5.0"
+version = "2.5.1"
 edition = "2024"
 description = "Interactive terminal UI for CycloneDX BOM exploration"
 license = "MIT"
