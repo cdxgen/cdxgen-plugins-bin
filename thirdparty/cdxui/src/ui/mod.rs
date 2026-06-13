@@ -271,6 +271,7 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
                 else { format!(" Stdout ({} lines) ", total) };
 
     let visible = area.height.saturating_sub(3) as usize;
+    app.visible_rows = area.height.saturating_sub(3);
     let start = (app.stdout_scroll as usize).min(total.saturating_sub(1));
     let end = (start + visible).min(total);
     let visible_items: Vec<ListItem> = items[start..end].to_vec();
@@ -430,6 +431,7 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
     let title = format!(" Dependency Roots ({}, {} visible) ", roots.len(), total);
 
     let visible = area.height.saturating_sub(3) as usize;
+    app.visible_rows = area.height.saturating_sub(3);
     let start = (app.scroll_offset as usize).min(total.saturating_sub(1));
     let end = (start + visible).min(total);
     let visible_items: Vec<ListItem> = items[start..end].to_vec();
@@ -700,6 +702,7 @@ fn render_component_table(
     }
 
     let visible_rows = area.height.saturating_sub(4) as usize;
+    app.visible_rows = area.height.saturating_sub(4);
     let scroll_start = (app.scroll_offset as usize).min(total_items.saturating_sub(1));
     let scroll_end = (scroll_start + visible_rows).min(total_items);
     let visible_indices = &indices[scroll_start..scroll_end];
@@ -776,7 +779,7 @@ fn render_component_table(
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
+fn render_service_table(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let store = &app.store;
 
     let header_cells: Vec<Cell> = SERVICE_COLUMNS
@@ -805,6 +808,7 @@ fn render_service_table(frame: &mut Frame, app: &App, theme: &Theme, area: Rect,
     }
 
     let visible_rows = area.height.saturating_sub(4) as usize;
+    app.visible_rows = area.height.saturating_sub(4);
     let scroll_start = (app.scroll_offset as usize).min(total_items.saturating_sub(1));
     let scroll_end = (scroll_start + visible_rows).min(total_items);
     let visible_indices = &indices[scroll_start..scroll_end];
@@ -963,6 +967,7 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
         if total > 0 { app.table_selected + 1 } else { 0 });
 
     let visible = area.height.saturating_sub(3) as usize;
+    app.visible_rows = area.height.saturating_sub(3);
     let start = (app.scroll_offset as usize).min(total.saturating_sub(1));
     let end = (start + visible).min(total);
     let visible_items: Vec<ListItem> = items[start..end].to_vec();
@@ -1034,6 +1039,7 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
     };
 
     let visible = area.height.saturating_sub(3) as usize;
+    app.visible_rows = area.height.saturating_sub(3);
     let start = (app.scroll_offset as usize).min(total.saturating_sub(1));
     let end = (start + visible).min(total);
     let visible_items: Vec<ListItem> = items[start..end].to_vec();

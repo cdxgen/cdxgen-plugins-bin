@@ -150,7 +150,8 @@ fn run_app<B: Backend>(
                             if app.scroll_offset > 0 { app.scroll_offset -= 1; }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
-                            app.scroll_offset = app.scroll_offset.saturating_add(1);
+                            let m = max_scroll(app);
+                            app.scroll_offset = app.scroll_offset.saturating_add(1).min(m);
                         }
                         _ => {}
                     }
@@ -201,7 +202,6 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
             process.take();
         }
     }
-    app.last_item_count = log_store.len();
 }
 
 fn drain_traces(trace_state: &mut TraceState, process: &mut Option<ProcessHandle>) {
@@ -251,20 +251,20 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             KeyCode::Char('5') => app.switch_tab(Tab::Services),
             KeyCode::Char('6') => app.switch_tab(Tab::Formulation),
 
-            KeyCode::Up | KeyCode::Char('k') => { app.move_selection_up(); scroll_to_selection(app, 15); }
-            KeyCode::Down | KeyCode::Char('j') => { app.move_selection_down(); scroll_to_selection(app, 15); }
+            KeyCode::Up | KeyCode::Char('k') => { app.move_selection_up(); scroll_to_selection(app); }
+            KeyCode::Down | KeyCode::Char('j') => { app.move_selection_down(); scroll_to_selection(app); }
 
             KeyCode::Char(' ') | KeyCode::PageDown => {
                 if app.current_tab == Tab::Dependencies {
-                    app.toggle_dep_expand(); app.last_item_count = 0;
-                } else { for _ in 0..page_size { app.move_selection_down(); } scroll_to_selection(app, 15); }
+                    app.toggle_dep_expand();
+                } else { for _ in 0..page_size { app.move_selection_down(); } scroll_to_selection(app); }
             }
-            KeyCode::Char('b') | KeyCode::PageUp => { for _ in 0..page_size { app.move_selection_up(); } scroll_to_selection(app, 15); }
+            KeyCode::Char('b') | KeyCode::PageUp => { for _ in 0..page_size { app.move_selection_up(); } scroll_to_selection(app); }
 
             KeyCode::Home | KeyCode::Char('g') => { app.table_selected = 0; app.scroll_offset = 0; }
             KeyCode::End | KeyCode::Char('G') => {
                 let len = app.current_list_len();
-                if len > 0 { app.table_selected = len.saturating_sub(1); app.scroll_offset = app.table_selected.saturating_sub(14) as u16; }
+                if len > 0 { app.table_selected = len.saturating_sub(1); app.scroll_offset = max_scroll(app); }
             }
 
             KeyCode::Enter => {
@@ -273,7 +273,7 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
                     app.detail_scroll = 0;
                 } else if app.current_tab == Tab::Summary {
                     app.toggle_dep_expand();
-                    app.last_item_count = 0;
+                    app.clamp_scroll();
                 } else {
                     app.toggle_detail();
                     app.detail_scroll = 0;
@@ -281,22 +281,22 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             }
             KeyCode::Right => {
                 if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) {
-                    let r = get_selected_ref(app); if !app.dep_expanded.contains(&r) { app.dep_expanded.insert(r); app.last_item_count = 0; }
+                    let r = get_selected_ref(app); if !app.dep_expanded.contains(&r) { app.dep_expanded.insert(r); app.clamp_scroll(); }
                 }
             }
             KeyCode::Left => {
                 if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) {
-                    let r = get_selected_ref(app); app.dep_expanded.remove(&r); app.last_item_count = 0;
+                    let r = get_selected_ref(app); app.dep_expanded.remove(&r); app.clamp_scroll();
                 }
             }
             KeyCode::Char('s') => app.cycle_sort(),
             KeyCode::Char('y') => yank_selection(app),
             KeyCode::Char('f') => app.enter_type_filter(),
             KeyCode::Char('+') | KeyCode::Char('=') => {
-                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.expand_all_deps(); app.last_item_count = 0; }
+                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.expand_all_deps(); app.clamp_scroll(); }
             }
             KeyCode::Char('-') | KeyCode::Char('_') => {
-                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.collapse_all_deps(); app.last_item_count = 0; }
+                if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.collapse_all_deps(); app.clamp_scroll(); }
             }
             _ => {}
         },
@@ -333,10 +333,12 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
         MouseEventKind::ScrollUp => {
             let offset = scroll_offset_for_panel(app, panel);
             if *offset > 0 { *offset = offset.saturating_sub(3); }
+            app.scroll_offset = app.scroll_offset.min(max_scroll(app));
         }
         MouseEventKind::ScrollDown => {
             let offset = scroll_offset_for_panel(app, panel);
             *offset = offset.saturating_add(3);
+            app.scroll_offset = app.scroll_offset.min(max_scroll(app));
         }
         MouseEventKind::Down(_) => {
             for (tab, start, end) in &app.tab_positions {
@@ -384,8 +386,8 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                             } else {
                                 app.dep_expanded.insert(ref_field);
                             }
+                            app.clamp_scroll();
                         }
-                        app.last_item_count = 0;
                         app.last_click_time = Some(now);
                         app.last_click_row = row;
                         return;
@@ -437,6 +439,12 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
     }
 }
 
+fn max_scroll(app: &App) -> u16 {
+    let total = app.current_list_len() as u16;
+    let v = app.visible_rows.max(1);
+    if total > v { total - v } else { 0 }
+}
+
 fn scroll_offset_for_panel(app: &mut App, panel: Option<PanelFocus>) -> &mut u16 {
     match panel {
         Some(PanelFocus::Thoughts) => &mut app.thought_scroll,
@@ -456,11 +464,12 @@ fn find_panel(app: &App, col: u16, row: u16) -> Option<PanelFocus> {
     None
 }
 
-fn scroll_to_selection(app: &mut App, visible: u16) {
+fn scroll_to_selection(app: &mut App) {
     let sel = app.table_selected as u16;
-    let v = visible.max(1);
-    if sel < app.scroll_offset { app.scroll_offset = sel; }
-    else if sel >= app.scroll_offset.saturating_add(v) { app.scroll_offset = sel.saturating_sub(v.saturating_sub(1)); }
+    let v = app.visible_rows.max(4);
+    let m = max_scroll(app);
+    if sel < app.scroll_offset { app.scroll_offset = sel.min(m); }
+    else if sel >= app.scroll_offset.saturating_add(v) { app.scroll_offset = sel.saturating_sub(v.saturating_sub(1)).min(m); }
 }
 
 fn get_selected_ref(app: &App) -> String {

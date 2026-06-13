@@ -98,10 +98,6 @@ impl LogStore {
     pub fn entries(&self) -> &VecDeque<LogEntry> {
         &self.entries
     }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
 }
 
 fn classify_line(line: &str) -> (LogLevel, String) {

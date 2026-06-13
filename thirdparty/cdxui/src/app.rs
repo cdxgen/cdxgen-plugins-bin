@@ -90,6 +90,7 @@ pub struct App {
     pub component_header_y: u16,
     pub component_header_positions: std::vec::Vec<(SortField, u16, u16)>,
     pub dep_tree_area: Option<ratatui::layout::Rect>,
+    pub visible_rows: u16,
     pub selection_start_row: Option<usize>,
     pub selection_end_row: Option<usize>,
     pub last_click_time: Option<std::time::Instant>,
@@ -127,6 +128,7 @@ impl App {
             component_header_y: 0,
             component_header_positions: Vec::new(),
             dep_tree_area: None,
+            visible_rows: 15,
             selection_start_row: None,
             selection_end_row: None,
             last_click_time: None,
@@ -144,12 +146,14 @@ impl App {
         self.store.search_components("");
         self.scroll_offset = 0;
         self.table_selected = 0;
+        self.clamp_scroll();
     }
 
     pub fn apply_search(&mut self) {
         self.store.search_components(&self.search_input);
         self.scroll_offset = 0;
         self.table_selected = 0;
+        self.clamp_scroll();
     }
 
     pub fn tab_label(&self, tab: Tab) -> String {
@@ -162,24 +166,27 @@ impl App {
                 let count = self.store.formula_count();
                 format!("{} ({})", base, count)
             }
-            Tab::Dependencies => format!("{} ({})", base,
-                if self.last_item_count > 0 { self.last_item_count } else { self.store.total_dependencies }),
+            Tab::Dependencies => format!("{} ({})", base, self.store.total_dependencies),
             Tab::Logs => format!("{} ({})", base, self.last_item_count),
             Tab::Summary => format!("{} ({} files)", base, self.store.file_count()),
         }
     }
 
     pub fn current_list_len(&self) -> usize {
-        if self.last_item_count > 0 {
-            self.last_item_count
-        } else {
-            match self.current_tab {
-                Tab::Logs => self.last_item_count,
-                Tab::Components | Tab::Crypto => self.store.filtered_components_count(),
-                Tab::Services => self.store.filtered_services_count(),
-                Tab::Formulation => self.store.formula_count(),
-                Tab::Dependencies => self.store.total_dependencies,
-                Tab::Summary => 1,
+        match self.current_tab {
+            Tab::Components | Tab::Crypto => self.store.filtered_components_count(),
+            Tab::Services => self.store.filtered_services_count(),
+            _ => {
+                if self.last_item_count > 0 {
+                    self.last_item_count
+                } else {
+                    match self.current_tab {
+                        Tab::Formulation => self.store.formula_count(),
+                        Tab::Dependencies => self.store.total_dependencies,
+                        Tab::Summary => 1,
+                        _ => 0,
+                    }
+                }
             }
         }
     }
@@ -275,6 +282,13 @@ impl App {
 
     pub fn toggle_thoughts_collapse(&mut self) {
         self.thoughts_collapsed = !self.thoughts_collapsed;
+    }
+
+    pub fn clamp_scroll(&mut self) {
+        let total = self.current_list_len() as u16;
+        let v = self.visible_rows.max(1);
+        let max = if total > v { total - v } else { 0 };
+        self.scroll_offset = self.scroll_offset.min(max);
     }
 
     pub fn selected_rows(&self) -> Option<(usize, usize)> {
