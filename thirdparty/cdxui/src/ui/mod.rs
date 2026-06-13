@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, ListItem, Paragraph, Row, Table, TableState, Tabs},
+    widgets::{Block, Borders, Cell, ListItem, Paragraph, Row, Table, TableState, Tabs, Wrap},
     Frame,
 };
 
@@ -255,7 +255,7 @@ fn render_stdout_panel(frame: &mut Frame, app: &mut App, log_store: &crate::logs
         )])));
     }
 
-    app.last_item_count = items.len();
+    app.log_item_count = items.len();
     let total = items.len();
     let title = if app.generating { format!(" Stdout ({} lines, generating…) ", total) }
                 else { format!(" Stdout ({} lines) ", total) };
@@ -331,7 +331,8 @@ fn render_annotation_text(frame: &mut Frame, annotations: &[&crate::bom::schema:
         .block(Block::default().borders(Borders::ALL)
             .title(format!(" Annotations ({}) ", annotations.len()))
             .style(Style::default().bg(theme.bg)))
-        .style(Style::default().fg(theme.warn));
+        .style(Style::default().fg(theme.warn))
+        .wrap(Wrap { trim: false });
     frame.render_widget(p, area);
 }
 
@@ -416,8 +417,8 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
         }
     }
 
-    app.last_item_count = items.len();
     let total = items.len();
+    app.mini_dep_tree_count = total;
     let title = format!(" Dependency Roots ({}, {} visible) ", roots.len(), total);
 
     let visible = area.height.saturating_sub(3) as usize;
@@ -954,7 +955,6 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
     }
 
     let total = items.len();
-    app.last_item_count = total;
     let title = format!(" Formulation ({} items, #{} selected) ", total,
         if total > 0 { app.table_selected + 1 } else { 0 });
 
@@ -1019,7 +1019,7 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
     }
 
     let total = items.len();
-    app.last_item_count = total;
+    app.dep_tree_count = total;
 
     let all_node_count = store.all_dependencies().len();
     let expanded_count = expanded.len();
