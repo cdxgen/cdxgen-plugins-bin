@@ -146,6 +146,7 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `id`             | `string`         | Stable declaration ID.                                                         |
 | `name`           | `string`         | Short declaration name.                                                        |
 | `qualified_name` | `string`         | Fully qualified symbol name.                                                   |
+| `canonical_name` | `string`         | Normalized, generic-free, hash-free join key (`crate::module::Type::method`).  |
 | `kind`           | `string`         | Declaration kind such as `function`, `method`, `module`, `struct`, or `trait`. |
 | `package_path`   | `string`         | Owning package path.                                                           |
 | `purl`           | `string`         | Package URL of the owning package.                                             |
@@ -267,6 +268,7 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `id`             | `string`         | Stable node ID.                                                 |
 | `name`           | `string`         | Short function/method name.                                     |
 | `qualified_name` | `string`         | Fully qualified symbol name.                                    |
+| `canonical_name` | `string`         | Normalized, generic-free, hash-free join key.                   |
 | `kind`           | `string`         | Node kind.                                                      |
 | `package_path`   | `string`         | Package path associated with the node.                          |
 | `purl`           | `string`         | PURL for the node package when derivable.                       |

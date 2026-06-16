@@ -1,5 +1,15 @@
 [workspace]
 members = ["crates/rusi-schema", "crates/rusi-core", "crates/rusi-driver", "crates/rusi-cli", "crates/rusi-rustc-wrapper"]
+# The rustc-wrapper links rustc internals via `#![feature(rustc_private)]`, which
+# only builds on a nightly toolchain with the rustc-dev component. It is kept out
+# of the default set so plain `cargo build`/`cargo test` work on stable; the
+# driver builds it explicitly with the resolved nightly toolchain at runtime.
+default-members = [
+    "crates/rusi-schema",
+    "crates/rusi-core",
+    "crates/rusi-driver",
+    "crates/rusi-cli",
+]
 resolver = "2"
 
 [workspace.package]
