@@ -1,7 +1,9 @@
 use std::fs;
-use std::path::PathBuf;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use rusi_schema::Report;
 use clap::{Args, Parser, Subcommand};
 use rusi_core::{
     AnalysisScope, AnalyzeOptionsInput, BACKEND_COMPILER, BACKEND_STABLE, analyze,
@@ -68,6 +70,12 @@ struct AnalysisArgs {
         help = "Print analysis progress to stderr"
     )]
     debug: bool,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Pretty-print JSON output (report and exports). Off by default: output is minified to reduce file size"
+    )]
+    pretty: bool,
     #[command(flatten)]
     modeling: ModelingArgs,
 }
@@ -120,23 +128,59 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
             .call_graph
             .as_ref()
             .context("callgraph export requested but no call graph was produced")?;
-        write_call_graph_export(call_graph, &args.callgraph_export_format, path)?;
+        write_call_graph_export(call_graph, &args.callgraph_export_format, path, args.pretty)?;
     }
     if let Some(path) = args.dataflow_out.as_ref() {
         let data_flow = report
             .data_flow
             .as_ref()
             .context("dataflow export requested but no data flow was produced")?;
-        write_data_flow_export(data_flow, &args.dataflow_export_format, path)?;
+        write_data_flow_export(data_flow, &args.dataflow_export_format, path, args.pretty)?;
     }
 
-    let json = serde_json::to_string_pretty(&report)?;
-    if let Some(path) = args.out {
-        fs::write(path, json)?;
-    } else {
-        println!("{json}");
+    write_report_json(&report, args.out.as_deref(), args.pretty)
+}
+
+/// Serialize the report straight into the destination writer instead of
+/// building the entire JSON document as an in-memory `String` first. For large
+/// targets (whole-program graphs with millions of nodes) the intermediate
+/// `String` was a full second copy of the output and a major contributor to
+/// peak memory; streaming through a `BufWriter` removes it.
+///
+/// Output is minified by default; `pretty` selects indented output.
+fn write_report_json(report: &Report, out: Option<&Path>, pretty: bool) -> Result<()> {
+    match out {
+        Some(path) => {
+            let file = fs::File::create(path)
+                .with_context(|| format!("failed to create {}", path.display()))?;
+            let mut writer = BufWriter::new(file);
+            write_json(&mut writer, report, pretty)
+                .with_context(|| format!("failed to write report to {}", path.display()))?;
+            writer
+                .flush()
+                .with_context(|| format!("failed to flush report to {}", path.display()))?;
+        }
+        None => {
+            let stdout = std::io::stdout();
+            let mut writer = BufWriter::new(stdout.lock());
+            write_json(&mut writer, report, pretty)?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+        }
     }
     Ok(())
+}
+
+fn write_json<W: Write, T: serde::Serialize>(
+    writer: &mut W,
+    value: &T,
+    pretty: bool,
+) -> serde_json::Result<()> {
+    if pretty {
+        serde_json::to_writer_pretty(writer, value)
+    } else {
+        serde_json::to_writer(writer, value)
+    }
 }
 
 #[cfg(test)]
@@ -146,7 +190,47 @@ mod tests {
 
     use rusi_schema::Report;
 
-    use super::{AnalysisArgs, AnalysisScope, ModelingArgs, run_analysis_command};
+    use super::{
+        AnalysisArgs, AnalysisScope, ModelingArgs, run_analysis_command, write_report_json,
+    };
+
+    #[test]
+    fn write_report_json_defaults_to_minified_and_round_trips() {
+        let mut report = Report::default();
+        report.schema_version = "rusi.report/test".to_string();
+        report.options.backend = "stable".to_string();
+
+        let path = temp_report_path("stream-writer");
+        write_report_json(&report, Some(path.as_path()), false).expect("streamed write succeeds");
+
+        let written = std::fs::read_to_string(&path).expect("read streamed report");
+        let _ = std::fs::remove_file(&path);
+
+        // Default output is minified (compact), byte-identical to `to_string`.
+        let expected = serde_json::to_string(&report).expect("reference serialization");
+        assert_eq!(written, expected);
+        // Minified output has no pretty-print indentation.
+        assert!(!written.contains("\n  "));
+
+        let parsed: Report = serde_json::from_str(&written).expect("round-trips back to Report");
+        assert_eq!(parsed, report);
+    }
+
+    #[test]
+    fn write_report_json_pretty_flag_indents() {
+        let mut report = Report::default();
+        report.schema_version = "rusi.report/test".to_string();
+
+        let path = temp_report_path("stream-writer-pretty");
+        write_report_json(&report, Some(path.as_path()), true).expect("streamed write succeeds");
+
+        let written = std::fs::read_to_string(&path).expect("read streamed report");
+        let _ = std::fs::remove_file(&path);
+
+        let expected = serde_json::to_string_pretty(&report).expect("reference serialization");
+        assert_eq!(written, expected);
+        assert!(written.contains("\n  "));
+    }
 
     fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -179,6 +263,7 @@ mod tests {
             dataflow: "security".to_string(),
             tests: false,
             debug: false,
+            pretty: false,
             modeling: ModelingArgs::default(),
         }, AnalysisScope::Default)
         .expect("compiler backend analyze succeeds");
@@ -223,6 +308,7 @@ mod tests {
             dataflow: "security".to_string(),
             tests: false,
             debug: false,
+            pretty: false,
             modeling: ModelingArgs::default(),
         }, AnalysisScope::Default)
         .expect("analysis with exports succeeds");

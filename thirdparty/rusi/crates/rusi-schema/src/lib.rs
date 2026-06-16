@@ -200,9 +200,20 @@ pub struct FileEvidence {
     pub package_name: String,
     pub package_path: String,
     pub purl: String,
+    // These per-file collections duplicate the flattened, canonical top-level
+    // `Report.imports/declarations/usages/security_signals` (every item carries
+    // `file_path`/`position.filename` for file association). The producers
+    // populate both, but the report finalizer clears these to avoid emitting the
+    // same data twice (~38 MB on large targets). They remain in the type so the
+    // compiler backend and merger can accumulate per-file evidence internally;
+    // `skip_serializing_if` keeps them out of the serialized report when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<ImportUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub usages: Vec<LibraryUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub security_signals: Vec<SecuritySignal>,
     pub crypto: Option<CryptoEvidence>,
 }
