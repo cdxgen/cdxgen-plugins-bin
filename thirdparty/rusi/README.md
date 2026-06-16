@@ -26,6 +26,7 @@ cargo run -p rusi-cli -- analyze --dir . --callgraph static --callgraph-out call
 cargo run -p rusi-cli -- analyze --dir . --dataflow security --dataflow-out dataflow.gexf --dataflow-export-format gexf --out rusi.json
 cargo run -p rusi-cli -- cryptos --dir . --callgraph static --dataflow security --out rusi-cryptos.json
 cargo run -p rusi-cli -- analyze --dir . --callgraph none --dataflow none --out rusi-structure.json
+cargo run -p rusi-cli -- analyze --dir . --pretty --out rusi-pretty.json   # indented JSON (default is minified)
 ```
 
 ## What Rusi reads
@@ -145,12 +146,21 @@ The main report format is JSON. At a high level, a report contains:
 
 - tool/runtime/options metadata
 - workspace modules and packages
-- file-level evidence
+- file-level evidence (`path`/`package`/`purl`/`crypto`)
 - flattened imports, declarations, usages, and security signals
 - optional aggregated crypto evidence
 - optional call graph
 - optional data-flow evidence
 - diagnostics and summary counts
+
+Import/declaration/usage/security-signal evidence is emitted **once**, in the
+canonical top-level arrays. Each item carries `position.filename`/`file_path`,
+so a per-file view is recovered by grouping on that path — the matching arrays
+inside each `FileEvidence` are omitted to avoid duplicating the same data.
+
+JSON output is **minified by default**; pass `--pretty` for indented output.
+The report is **deterministic** — re-running on unchanged input produces
+byte-identical output.
 
 The complete field reference is in [`JSON_ATTRIBUTE_REFERENCE.md`](./JSON_ATTRIBUTE_REFERENCE.md).
 

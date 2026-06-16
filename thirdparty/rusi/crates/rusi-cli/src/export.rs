@@ -1,25 +1,47 @@
 use std::fmt::Write as _;
 use std::fs;
+use std::io::{BufWriter, Write as _};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use rusi_schema::{CallGraph, CallGraphNode, DataFlowEvidence, DataFlowNode, DataFlowSlice};
+use serde::Serialize;
 
 pub const EXPORT_FORMATS: [&str; 3] = ["json", "graphml", "gexf"];
 
-pub fn write_call_graph_export(call_graph: &CallGraph, format: &str, path: &Path) -> Result<()> {
-    write_export(path, &render_call_graph_export(call_graph, format)?)
+pub fn write_call_graph_export(
+    call_graph: &CallGraph,
+    format: &str,
+    path: &Path,
+    pretty: bool,
+) -> Result<()> {
+    match format {
+        "json" => write_json_export(path, call_graph, pretty),
+        "graphml" => write_text_export(path, &render_call_graph_graphml(call_graph)),
+        "gexf" => write_text_export(path, &render_call_graph_gexf(call_graph)),
+        other => {
+            anyhow::bail!("unsupported export format {other}; expected one of json, graphml, gexf")
+        }
+    }
 }
 
 pub fn write_data_flow_export(
     data_flow: &DataFlowEvidence,
     format: &str,
     path: &Path,
+    pretty: bool,
 ) -> Result<()> {
-    write_export(path, &render_data_flow_export(data_flow, format)?)
+    match format {
+        "json" => write_json_export(path, data_flow, pretty),
+        "graphml" => write_text_export(path, &render_data_flow_graphml(data_flow)),
+        "gexf" => write_text_export(path, &render_data_flow_gexf(data_flow)),
+        other => {
+            anyhow::bail!("unsupported export format {other}; expected one of json, graphml, gexf")
+        }
+    }
 }
 
-fn write_export(path: &Path, content: &str) -> Result<()> {
+fn ensure_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -27,29 +49,32 @@ fn write_export(path: &Path, content: &str) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create export directory {}", parent.display()))?;
     }
+    Ok(())
+}
+
+/// Stream a graph straight into the destination file rather than allocating the
+/// whole document as a `String` first. Graph exports for large targets can be
+/// hundreds of MB; the intermediate `String` doubled peak memory. Output is
+/// minified by default; `pretty` selects indented output.
+fn write_json_export<T: Serialize>(path: &Path, value: &T, pretty: bool) -> Result<()> {
+    ensure_parent(path)?;
+    let file = fs::File::create(path)
+        .with_context(|| format!("failed to create export {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    let result = if pretty {
+        serde_json::to_writer_pretty(&mut writer, value)
+    } else {
+        serde_json::to_writer(&mut writer, value)
+    };
+    result.with_context(|| format!("failed to write export {}", path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush export {}", path.display()))
+}
+
+fn write_text_export(path: &Path, content: &str) -> Result<()> {
+    ensure_parent(path)?;
     fs::write(path, content).with_context(|| format!("failed to write export {}", path.display()))
-}
-
-fn render_call_graph_export(call_graph: &CallGraph, format: &str) -> Result<String> {
-    match format {
-        "json" => Ok(serde_json::to_string_pretty(call_graph)?),
-        "graphml" => Ok(render_call_graph_graphml(call_graph)),
-        "gexf" => Ok(render_call_graph_gexf(call_graph)),
-        other => {
-            anyhow::bail!("unsupported export format {other}; expected one of json, graphml, gexf")
-        }
-    }
-}
-
-fn render_data_flow_export(data_flow: &DataFlowEvidence, format: &str) -> Result<String> {
-    match format {
-        "json" => Ok(serde_json::to_string_pretty(data_flow)?),
-        "graphml" => Ok(render_data_flow_graphml(data_flow)),
-        "gexf" => Ok(render_data_flow_gexf(data_flow)),
-        other => {
-            anyhow::bail!("unsupported export format {other}; expected one of json, graphml, gexf")
-        }
-    }
 }
 
 fn render_call_graph_graphml(call_graph: &CallGraph) -> String {
@@ -755,7 +780,12 @@ mod tests {
         DataFlowPatternSet, DataFlowSlice, DataFlowStats, Diagnostic, GraphStats, Position,
     };
 
-    use super::{render_call_graph_export, render_data_flow_export, xml_escape};
+    use std::path::Path;
+
+    use super::{
+        render_call_graph_gexf, render_call_graph_graphml, render_data_flow_gexf,
+        render_data_flow_graphml, write_call_graph_export, write_data_flow_export, xml_escape,
+    };
 
     #[test]
     fn xml_escape_replaces_invalid_control_characters() {
@@ -842,13 +872,12 @@ mod tests {
             },
         };
 
-        let graphml =
-            render_call_graph_export(&call_graph, "graphml").expect("graphml export succeeds");
+        let graphml = render_call_graph_graphml(&call_graph);
         assert!(graphml.contains("sourcePurl"));
         assert!(graphml.contains("<data key=\"node_purl\">pkg:cargo/demo@0.1.0</data>"));
         assert!(graphml.contains("pkg:cargo/demo@0.1.0"));
 
-        let gexf = render_call_graph_export(&call_graph, "gexf").expect("gexf export succeeds");
+        let gexf = render_call_graph_gexf(&call_graph);
         assert!(gexf.contains("targetPurl"));
         assert!(gexf.contains("title=\"purl\""));
         assert!(gexf.contains("pkg:cargo/demo@0.1.0"));
@@ -931,15 +960,58 @@ mod tests {
             stats: DataFlowStats::default(),
         };
 
-        let graphml =
-            render_data_flow_export(&data_flow, "graphml").expect("graphml export succeeds");
+        let graphml = render_data_flow_graphml(&data_flow);
         assert!(graphml.contains("targetPurl"));
         assert!(graphml.contains("<data key=\"node_purl\">pkg:cargo/demo@0.1.0</data>"));
         assert!(graphml.contains("env-to-process-exec"));
 
-        let gexf = render_data_flow_export(&data_flow, "gexf").expect("gexf export succeeds");
+        let gexf = render_data_flow_gexf(&data_flow);
         assert!(gexf.contains("sourcePurl"));
         assert!(gexf.contains("title=\"purl\""));
         assert!(gexf.contains("pkg:cargo/demo@0.1.0"));
+
+        // The JSON format streams straight to disk; verify it round-trips.
+        let dir = std::env::temp_dir().join(format!(
+            "rusi-export-json-{}",
+            data_flow.slices.len() as u64 + data_flow.nodes.len() as u64
+        ));
+        let path = dir.join("data_flow.json");
+        write_data_flow_export(&data_flow, "json", &path, false).expect("json export succeeds");
+        let written = std::fs::read_to_string(&path).expect("read json export");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+        let parsed: DataFlowEvidence =
+            serde_json::from_str(&written).expect("json export round-trips");
+        assert_eq!(parsed, data_flow);
+    }
+
+    #[test]
+    fn json_export_creates_parent_directories_and_round_trips() {
+        let call_graph = CallGraph {
+            mode: "static".to_string(),
+            nodes: vec![CallGraphNode {
+                id: "src".to_string(),
+                ..CallGraphNode::default()
+            }],
+            edges: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: GraphStats {
+                node_count: 1,
+                edge_count: 0,
+            },
+        };
+
+        let dir = std::env::temp_dir().join("rusi-export-json-nested/inner");
+        let path = dir.join("call_graph.json");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or_else(|| Path::new(".")));
+
+        write_call_graph_export(&call_graph, "json", &path, false).expect("json export creates parents");
+        let written = std::fs::read_to_string(&path).expect("read json export");
+        let parsed: CallGraph = serde_json::from_str(&written).expect("json export round-trips");
+        assert_eq!(parsed, call_graph);
+
+        let _ = std::fs::remove_dir_all(
+            dir.parent().unwrap_or_else(|| Path::new(".")),
+        );
     }
 }

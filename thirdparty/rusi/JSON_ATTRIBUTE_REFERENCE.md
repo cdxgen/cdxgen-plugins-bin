@@ -2,6 +2,18 @@
 
 This document describes the report emitted by `rusi`. Field names map directly to the schema in `crates/rusi-schema/src/lib.rs`.
 
+## Output format
+
+- **Minified by default.** The report (`--out`) and the graph exports
+  (`--callgraph-out`/`--dataflow-out` with `--callgraph-export-format json` /
+  `--dataflow-export-format json`) are written as compact, single-line JSON.
+  Pass `--pretty` to get indented, human-readable output instead.
+- **Deterministic.** Collections are emitted in a stable, sorted order, so
+  re-running the analyzer on unchanged input produces byte-identical output.
+- **No duplicated evidence.** Import/declaration/usage/security-signal evidence
+  is emitted once, in the canonical top-level arrays; the matching per-file
+  arrays inside `FileEvidence` are omitted (see [`FileEvidence`](#fileevidence)).
+
 ## Top-level report
 
 | Field              | Type                       | Meaning                                                                                                          |
@@ -12,11 +24,11 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `options`          | object                     | Effective analysis options used for the run.                                                                     |
 | `modules`          | array of `ModuleRef`       | Workspace/module inventory derived from Cargo metadata.                                                          |
 | `packages`         | array of `PackageEvidence` | Package-level summary records.                                                                                   |
-| `files`            | array of `FileEvidence`    | Per-file evidence.                                                                                               |
-| `imports`          | array of `ImportUsage`     | Flattened import list across all files.                                                                          |
-| `declarations`     | array of `Declaration`     | Flattened declarations across all files.                                                                         |
-| `usages`           | array of `LibraryUsage`    | Flattened API/library usage evidence across all files.                                                           |
-| `security_signals` | array of `SecuritySignal`  | Non-flow security-relevant signals.                                                                              |
+| `files`            | array of `FileEvidence`    | Per-file evidence (path/package/purl/crypto). See the note below on the per-file collection fields.              |
+| `imports`          | array of `ImportUsage`     | **Canonical** flattened import list across all files.                                                            |
+| `declarations`     | array of `Declaration`     | **Canonical** flattened declarations across all files.                                                           |
+| `usages`           | array of `LibraryUsage`    | **Canonical** flattened API/library usage evidence across all files.                                             |
+| `security_signals` | array of `SecuritySignal`  | **Canonical** flattened non-flow security-relevant signals across all files.                                     |
 | `crypto`           | `CryptoEvidence \| null`   | Aggregated cryptographic evidence used for CBOM-oriented review.                                                 |
 | `call_graph`       | `CallGraph \| null`        | Call graph output when enabled.                                                                                  |
 | `data_flow`        | `DataFlowEvidence \| null` | Data-flow output when enabled.                                                                                   |
@@ -93,11 +105,27 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `package_name`     | `string`                 | Cargo package name.                             |
 | `package_path`     | `string`                 | Rust crate/package path.                        |
 | `purl`             | `string`                 | Package URL associated with the file's package. |
-| `imports`          | `ImportUsage[]`          | Imports declared in the file.                   |
-| `declarations`     | `Declaration[]`          | Declarations defined in the file.               |
-| `usages`           | `LibraryUsage[]`         | Usage evidence found in the file.               |
-| `security_signals` | `SecuritySignal[]`       | Security signals scoped to the file.            |
+| `imports`          | `ImportUsage[]`          | Omitted in the report (see note below).         |
+| `declarations`     | `Declaration[]`          | Omitted in the report (see note below).         |
+| `usages`           | `LibraryUsage[]`         | Omitted in the report (see note below).         |
+| `security_signals` | `SecuritySignal[]`       | Omitted in the report (see note below).         |
 | `crypto`           | `CryptoEvidence \| null` | File-scoped crypto evidence, if any.            |
+
+> **Per-file collections are not serialized.** Earlier report versions repeated
+> each file's `imports`/`declarations`/`usages`/`security_signals` both inside
+> `FileEvidence` and in the canonical top-level `imports`/`declarations`/
+> `usages`/`security_signals` arrays — duplicating the same data (tens of MB on
+> large workspaces). These four fields are now cleared before serialization and
+> omitted from the JSON (`skip_serializing_if`), so a `FileEvidence` object
+> typically contains only `path`, `package_name`, `package_path`, `purl`, and
+> `crypto`.
+>
+> **Consume the top-level arrays instead.** To reconstruct a per-file view,
+> read the canonical top-level collections and group by each item's
+> `position.filename` (and `file_path` on `Declaration`), which match
+> `FileEvidence.path`. The fields remain in the schema type so they may carry
+> data in intermediate, pre-finalized artifacts (e.g. the compiler backend's
+> per-crate evidence), but the finalized report always omits them.
 
 ## Structural evidence
 
@@ -347,6 +375,16 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `description`            | `string`                | Short slice description.                          |
 | `properties`             | `object<string,string>` | Extra slice metadata.                             |
 
+> **Witness paths are bounded.** A slice records one representative
+> source-to-sink witness (`node_ids`/`edge_ids`), not every possible route.
+> Interprocedural taint propagation can otherwise produce a combinatorial number
+> of paths; to keep memory bounded the analyzer caps the witness set per value
+> (default 32), deduplicates witnesses sharing an origin and node sequence, and
+> drops pathologically long chains (default >64 steps). A slice still proves the
+> flow exists — `source_id`/`sink_id` and the categories are exact — but
+> `node_ids`/`edge_ids`/`path_length` reflect the retained witness rather than an
+> exhaustive enumeration.
+
 ### `DataFlowMethodSummary`
 
 | Field             | Type                      | Meaning                                                                 |
@@ -386,6 +424,9 @@ This document describes the report emitted by `rusi`. Field names map directly t
 | `summaries`   | `DataFlowMethodSummary[]` | Per-function summaries.             |
 | `diagnostics` | `Diagnostic[]`            | Data-flow-specific diagnostics.     |
 | `stats`       | `DataFlowStats`           | Data-flow counters.                 |
+
+> The `patterns` sets and `diagnostics` are emitted in a stable, sorted order so
+> the field is byte-reproducible across runs (see _Output format_ below).
 
 ## API endpoints
 

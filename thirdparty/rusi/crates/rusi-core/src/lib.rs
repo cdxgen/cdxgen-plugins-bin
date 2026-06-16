@@ -210,6 +210,58 @@ struct ConcreteTaint {
     paths: Vec<TaintPath>,
 }
 
+/// Maximum number of distinct taint witnesses retained for a single value.
+///
+/// Interprocedural propagation unions argument taint at every call, copy, and
+/// channel hop, so the number of source→value paths grows combinatorially with
+/// branching. Because every [`TaintStep`] carries a fully cloned
+/// [`DataFlowNode`], an unbounded path set was the dominant whole-program OOM
+/// contributor (RC-1). One witness is enough to prove a flow; this cap keeps
+/// memory linear in program size while preserving every distinct source.
+const MAX_TAINT_PATHS: usize = 32;
+
+/// Maximum number of steps in a retained taint witness. Pathologically deep
+/// chains (long passthrough/assignment cascades) are dropped rather than stored;
+/// real findings are short.
+const MAX_TAINT_PATH_STEPS: usize = 64;
+
+impl ConcreteTaint {
+    /// Bound the in-flight path set (RC-1): drop pathologically long witnesses,
+    /// deduplicate witnesses that share an origin and node sequence, and cap the
+    /// number retained. Cheap no-op for the common single-path case.
+    fn bounded(mut self) -> Self {
+        let within_step_limit = self
+            .paths
+            .first()
+            .is_none_or(|path| path.steps.len() <= MAX_TAINT_PATH_STEPS);
+        if self.paths.len() <= 1 && within_step_limit {
+            return self;
+        }
+        let mut seen = HashSet::with_capacity(self.paths.len());
+        let mut kept = Vec::with_capacity(self.paths.len().min(MAX_TAINT_PATHS));
+        for path in self.paths.drain(..) {
+            if path.steps.len() > MAX_TAINT_PATH_STEPS {
+                continue;
+            }
+            let mut signature =
+                String::with_capacity(path.origin_key.len() + path.steps.len() * 8);
+            signature.push_str(&path.origin_key);
+            for step in &path.steps {
+                signature.push('\u{1}');
+                signature.push_str(&step.node.id);
+            }
+            if seen.insert(signature) {
+                kept.push(path);
+                if kept.len() >= MAX_TAINT_PATHS {
+                    break;
+                }
+            }
+        }
+        self.paths = kept;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct TraitImplIndex {
     trait_to_impl_methods: HashMap<String, Vec<String>>,
@@ -2778,8 +2830,8 @@ fn build_data_flow(
     let partials = parallel_map_collect(functions, |function| {
         let mut builder = DataFlowBuilder::new(
             mode,
-            patterns.clone(),
-            summaries.clone(),
+            &patterns,
+            &summaries,
             &local_index,
             &function_map,
         );
@@ -2788,8 +2840,8 @@ fn build_data_flow(
     });
     let mut builder = DataFlowBuilder::new(
         mode,
-        patterns.clone(),
-        summaries.clone(),
+        &patterns,
+        &summaries,
         &local_index,
         &function_map,
     );
@@ -3996,8 +4048,13 @@ fn eval_abstract_expr(
 
 struct DataFlowBuilder<'a> {
     mode: &'a str,
-    patterns: DataFlowPatternSet,
-    summaries: BTreeMap<String, FunctionSummary>,
+    // Borrowed rather than owned: the parallel data-flow pass constructs one
+    // builder per function, and cloning the whole pattern set + per-function
+    // summary map into every builder was an O(n²) allocation that dominated
+    // peak memory on large whole-program targets (RC-4/RC-5). Sharing immutable
+    // references keeps a single copy across all workers.
+    patterns: &'a DataFlowPatternSet,
+    summaries: &'a BTreeMap<String, FunctionSummary>,
     local_index: &'a HashMap<String, Vec<String>>,
     function_map: &'a HashMap<String, &'a FunctionRecord>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -4009,8 +4066,8 @@ struct DataFlowBuilder<'a> {
 impl<'a> DataFlowBuilder<'a> {
     fn new(
         mode: &'a str,
-        patterns: DataFlowPatternSet,
-        summaries: BTreeMap<String, FunctionSummary>,
+        patterns: &'a DataFlowPatternSet,
+        summaries: &'a BTreeMap<String, FunctionSummary>,
         local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
     ) -> Self {
@@ -4191,6 +4248,7 @@ impl<'a> DataFlowBuilder<'a> {
                          for arg in args {
                              union_taint.paths.extend(self.eval_concrete_expr(function, arg, &env).paths);
                          }
+                         let union_taint = union_taint.bounded();
                          if !union_taint.paths.is_empty() {
                              for arg in args {
                                  if let SimpleExpr::Var(var_name) = arg {
@@ -4198,7 +4256,7 @@ impl<'a> DataFlowBuilder<'a> {
                                      if var_name != "tx" && var_name != "rx" { // skip channel variables to avoid loop
                                          let mut target_taint = env.get(var_name).cloned().unwrap_or_default();
                                          target_taint.paths.extend(union_taint.paths.clone());
-                                         env.insert(var_name.clone(), target_taint);
+                                         env.insert(var_name.clone(), target_taint.bounded());
                                      }
                                  }
                              }
@@ -4214,7 +4272,7 @@ impl<'a> DataFlowBuilder<'a> {
                                  if !val_taint.paths.is_empty() {
                                      let mut channel_taint = env.get("__channel_taint").cloned().unwrap_or_default();
                                      channel_taint.paths.extend(val_taint.paths);
-                                     env.insert("__channel_taint".to_string(), channel_taint);
+                                     env.insert("__channel_taint".to_string(), channel_taint.bounded());
                                  }
                              }
                          }
@@ -4244,7 +4302,19 @@ impl<'a> DataFlowBuilder<'a> {
         }
     }
 
+    /// Evaluate `expr`'s taint and bound the resulting witness set (RC-1).
+    /// Every recursive sub-evaluation flows through here, so each intermediate
+    /// taint set stays capped and propagation never blows up combinatorially.
     fn eval_concrete_expr(
+        &mut self,
+        function: &FunctionRecord,
+        expr: &SimpleExpr,
+        env: &HashMap<String, ConcreteTaint>,
+    ) -> ConcreteTaint {
+        self.eval_concrete_expr_inner(function, expr, env).bounded()
+    }
+
+    fn eval_concrete_expr_inner(
         &mut self,
         function: &FunctionRecord,
         expr: &SimpleExpr,
@@ -4656,12 +4726,12 @@ impl<'a> DataFlowBuilder<'a> {
         for (function_id, summary) in self.summaries {
             let function = self
                 .function_map
-                .get(&function_id)
+                .get(function_id)
                 .map(|record| record.declaration.qualified_name.clone())
                 .unwrap_or_default();
             let package_path = self
                 .function_map
-                .get(&function_id)
+                .get(function_id)
                 .map(|record| record.package_path.clone())
                 .unwrap_or_default();
             summaries.push(DataFlowMethodSummary {
@@ -4671,26 +4741,26 @@ impl<'a> DataFlowBuilder<'a> {
                 purl: String::new(),
                 parameter_names: self
                     .function_map
-                    .get(&function_id)
+                    .get(function_id)
                     .map(|record| record.params.clone())
                     .unwrap_or_default(),
                 parameter_types: self
                     .function_map
-                    .get(&function_id)
+                    .get(function_id)
                     .map(|record| record.param_types.clone())
                     .unwrap_or_default(),
                 return_type: self
                     .function_map
-                    .get(&function_id)
+                    .get(function_id)
                     .map(|record| record.return_type.clone())
                     .unwrap_or_else(|| "()".to_string()),
-                param_to_return: summary.param_to_return.into_iter().collect(),
+                param_to_return: summary.param_to_return.iter().copied().collect(),
                 param_to_sink: summary
                     .param_to_sink
-                    .into_iter()
-                    .map(|(key, value)| (key, value.into_iter().collect()))
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.iter().copied().collect()))
                     .collect(),
-                source_returns: summary.returns_source_categories.into_iter().collect(),
+                source_returns: summary.returns_source_categories.iter().cloned().collect(),
                 properties: IndexMap::new(),
             });
         }
@@ -4701,7 +4771,7 @@ impl<'a> DataFlowBuilder<'a> {
         let slices = self.slices.into_values().collect::<Vec<_>>();
         let mut result = DataFlowEvidence {
             mode: self.mode.to_string(),
-            patterns: self.patterns,
+            patterns: self.patterns.clone(),
             stats: DataFlowStats {
                 source_count: nodes.iter().filter(|node| node.source).count(),
                 sink_count: nodes.iter().filter(|node| node.sink).count(),
@@ -4718,7 +4788,12 @@ impl<'a> DataFlowBuilder<'a> {
         };
         if !self.missing_passthrough_call_counts.is_empty() {
             let mut entries: Vec<_> = self.missing_passthrough_call_counts.iter().collect();
-            entries.sort_by(|(_, a), (_, b)| b.cmp(a));
+            // Sort by count descending, breaking ties by callee name so both the
+            // selected top-20 and their order are deterministic across runs
+            // (the source map is a HashMap with non-deterministic iteration).
+            entries.sort_by(|(callee_a, count_a), (callee_b, count_b)| {
+                count_b.cmp(count_a).then_with(|| callee_a.cmp(callee_b))
+            });
             for (callee, count) in entries.iter().take(20) {
                 result.diagnostics.push(Diagnostic {
                     kind: "missing-passthrough".to_string(),
@@ -4894,18 +4969,14 @@ fn enrich_graph_component_purls(report: &mut Report) {
     }
     for file in &mut report.files {
         file.purl = resolve_package_purl(&file.package_path, &package_purls);
-        for import in &mut file.imports {
-            import.purl = resolve_package_purl(&import.package_path, &package_purls);
-        }
-        for declaration in &mut file.declarations {
-            declaration.purl = resolve_package_purl(&declaration.package_path, &package_purls);
-        }
-        for usage in &mut file.usages {
-            usage.purl = resolve_package_purl(&usage.package_path, &package_purls);
-        }
-        for signal in &mut file.security_signals {
-            signal.purl = resolve_package_purl(&signal.package_path, &package_purls);
-        }
+        // The flattened top-level collections below are the canonical, enriched
+        // copies; drop the per-file duplicates so the report carries each item
+        // exactly once (file association is preserved via each item's
+        // `file_path`/`position.filename`).
+        file.imports.clear();
+        file.declarations.clear();
+        file.usages.clear();
+        file.security_signals.clear();
     }
     for import in &mut report.imports {
         import.purl = resolve_package_purl(&import.package_path, &package_purls);
@@ -5107,6 +5178,12 @@ fn normalize_report(report: &mut Report) {
         data_flow
             .summaries
             .sort_by(|left, right| left.function_id.cmp(&right.function_id));
+        data_flow
+            .diagnostics
+            .sort_by(|left, right| left.message.cmp(&right.message));
+        // Patterns (especially auto-discovered passthroughs) are collected via
+        // hash-based sets; sort them so report output is byte-reproducible.
+        sort_data_flow_patterns(&mut data_flow.patterns);
         data_flow.stats = DataFlowStats {
             source_count: data_flow.nodes.iter().filter(|node| node.source).count(),
             sink_count: data_flow.nodes.iter().filter(|node| node.sink).count(),
@@ -5116,6 +5193,23 @@ fn normalize_report(report: &mut Report) {
             summary_count: data_flow.summaries.len(),
         };
     }
+}
+
+/// Deterministically order a pattern set by (category, target, pattern,
+/// relevant_arguments). Pattern collections include hash-derived,
+/// auto-discovered entries whose insertion order varies between runs.
+fn sort_data_flow_patterns(patterns: &mut DataFlowPatternSet) {
+    let key = |pattern: &DataFlowPattern| {
+        (
+            pattern.category.clone(),
+            pattern.target.clone(),
+            pattern.pattern.clone(),
+            pattern.relevant_arguments.clone(),
+        )
+    };
+    patterns.sources.sort_by_key(&key);
+    patterns.sinks.sort_by_key(&key);
+    patterns.passthroughs.sort_by_key(&key);
 }
 
 fn compute_stats(report: &Report) -> Stats {
@@ -5241,6 +5335,82 @@ mod tests {
                 .iter()
                 .any(|usage| usage.name.contains("Command::new"))
         );
+    }
+
+    #[test]
+    fn report_does_not_duplicate_collections_in_files() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("basic-app"),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // The flattened top-level collections carry the data...
+        assert!(!report.usages.is_empty());
+        assert!(!report.declarations.is_empty());
+        // ...and the per-file copies are cleared to avoid duplicating it.
+        for file in &report.files {
+            assert!(file.imports.is_empty(), "file imports should be cleared");
+            assert!(
+                file.declarations.is_empty(),
+                "file declarations should be cleared"
+            );
+            assert!(file.usages.is_empty(), "file usages should be cleared");
+            assert!(
+                file.security_signals.is_empty(),
+                "file security signals should be cleared"
+            );
+        }
+        // File association is still recoverable from each item's file_path.
+        assert!(
+            report
+                .usages
+                .iter()
+                .all(|usage| !usage.position.filename.is_empty())
+        );
+    }
+
+    #[test]
+    fn report_output_is_deterministic_across_runs() {
+        let run = || {
+            let report = analyze(AnalyzeOptionsInput {
+                dir: fixture_path("vulnerable-web-app"),
+                call_graph_mode: "static".to_string(),
+                data_flow_mode: "security".to_string(),
+                ..AnalyzeOptionsInput::default()
+            })
+            .expect("analysis succeeds");
+            serde_json::to_string(&report).expect("serialize report")
+        };
+        // The previously non-deterministic fields (auto-discovered passthrough
+        // ordering, missing-passthrough diagnostics) are now sorted, so two runs
+        // must produce byte-identical output.
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn data_flow_patterns_are_sorted() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("vulnerable-web-app"),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let patterns = report.data_flow.expect("data flow emitted").patterns;
+        let key = |p: &DataFlowPattern| {
+            (
+                p.category.clone(),
+                p.target.clone(),
+                p.pattern.clone(),
+                p.relevant_arguments.clone(),
+            )
+        };
+        for set in [&patterns.sources, &patterns.sinks, &patterns.passthroughs] {
+            assert!(
+                set.windows(2).all(|w| key(&w[0]) <= key(&w[1])),
+                "pattern set must be sorted"
+            );
+        }
     }
 
     #[test]
@@ -6557,5 +6727,90 @@ mod tests {
                 slice.path_length
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod taint_bound_tests {
+    use rusi_schema::DataFlowNode;
+
+    use super::{ConcreteTaint, MAX_TAINT_PATHS, MAX_TAINT_PATH_STEPS, TaintPath, TaintStep};
+
+    fn step(node_id: &str) -> TaintStep {
+        TaintStep {
+            node: DataFlowNode {
+                id: node_id.to_string(),
+                ..DataFlowNode::default()
+            },
+            edge: None,
+        }
+    }
+
+    fn path(origin: &str, node_ids: &[&str]) -> TaintPath {
+        TaintPath {
+            origin_key: origin.to_string(),
+            category: "test".to_string(),
+            steps: node_ids.iter().map(|id| step(id)).collect(),
+        }
+    }
+
+    #[test]
+    fn single_short_path_is_untouched() {
+        let taint = ConcreteTaint {
+            paths: vec![path("env:a", &["n1", "n2"])],
+        }
+        .bounded();
+        assert_eq!(taint.paths.len(), 1);
+    }
+
+    #[test]
+    fn deduplicates_witnesses_with_same_origin_and_nodes() {
+        let taint = ConcreteTaint {
+            paths: vec![
+                path("env:a", &["n1", "n2"]),
+                path("env:a", &["n1", "n2"]),
+                path("env:a", &["n1", "n3"]),
+            ],
+        }
+        .bounded();
+        // The two identical witnesses collapse; the distinct one survives.
+        assert_eq!(taint.paths.len(), 2);
+    }
+
+    #[test]
+    fn keeps_distinct_sources_separate() {
+        let taint = ConcreteTaint {
+            paths: vec![
+                path("env:a", &["n1"]),
+                path("cli:b", &["n1"]),
+            ],
+        }
+        .bounded();
+        // Same node sequence but different origins must not be merged.
+        assert_eq!(taint.paths.len(), 2);
+    }
+
+    #[test]
+    fn caps_total_number_of_witnesses() {
+        let paths = (0..(MAX_TAINT_PATHS * 4))
+            .map(|i| path(&format!("env:{i}"), &["n1"]))
+            .collect::<Vec<_>>();
+        let taint = ConcreteTaint { paths }.bounded();
+        assert_eq!(taint.paths.len(), MAX_TAINT_PATHS);
+    }
+
+    #[test]
+    fn drops_pathologically_long_witnesses() {
+        let long_nodes: Vec<String> = (0..(MAX_TAINT_PATH_STEPS + 5))
+            .map(|i| format!("n{i}"))
+            .collect();
+        let long_refs: Vec<&str> = long_nodes.iter().map(String::as_str).collect();
+        let taint = ConcreteTaint {
+            paths: vec![path("env:a", &["short"]), path("env:b", &long_refs)],
+        }
+        .bounded();
+        // The over-length witness is dropped; the short one is retained.
+        assert_eq!(taint.paths.len(), 1);
+        assert_eq!(taint.paths[0].origin_key, "env:a");
     }
 }

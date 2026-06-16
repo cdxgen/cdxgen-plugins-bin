@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -135,9 +136,16 @@ impl DriverProtocolEnvelope {
     }
 
     pub fn write_to_path(&self, output_path: &Path) -> Result<()> {
-        let json = serde_json::to_string_pretty(self)?;
-        fs::write(output_path, json)
-            .with_context(|| format!("failed to write {}", output_path.display()))
+        let file = fs::File::create(output_path)
+            .with_context(|| format!("failed to create {}", output_path.display()))?;
+        let mut writer = std::io::BufWriter::new(file);
+        // Intermediate driver-protocol artifact: minified to keep the temp file
+        // small and fast to (de)serialize.
+        serde_json::to_writer(&mut writer, self)
+            .with_context(|| format!("failed to write {}", output_path.display()))?;
+        writer
+            .flush()
+            .with_context(|| format!("failed to flush {}", output_path.display()))
     }
 
     pub fn read_from_path(path: &Path) -> Result<Self> {
@@ -664,7 +672,7 @@ fn collect_embedded_compiler_evidence(
         }
     }
 
-    let mut merged = CompilerEvidence::default();
+    let mut merger = CompilerEvidenceMerger::default();
     let mut found = false;
     for entry in
         fs::read_dir(&emit_dir).with_context(|| format!("failed to read {}", emit_dir.display()))?
@@ -677,15 +685,7 @@ fn collect_embedded_compiler_evidence(
             let artifact: CompilerEvidence = serde_json::from_str(&content)
                 .with_context(|| format!("failed to parse compiler artifact {}", path.display()))?;
             found = true;
-            merge_file_evidence(&mut merged.files, artifact.files);
-            extend_unique_imports(&mut merged.imports, artifact.imports);
-            extend_unique_declarations(&mut merged.declarations, artifact.declarations);
-            extend_unique_usages(&mut merged.usages, artifact.usages);
-            extend_unique_security_signals(&mut merged.security_signals, artifact.security_signals);
-            merge_crypto_evidence(&mut merged.crypto, artifact.crypto);
-            merged.diagnostics.extend(artifact.diagnostics);
-            merge_call_graph_evidence(&mut merged.call_graph, artifact.call_graph);
-            merge_data_flow_evidence(&mut merged.data_flow, artifact.data_flow);
+            merger.merge(artifact);
         }
     }
     if !found {
@@ -694,7 +694,365 @@ fn collect_embedded_compiler_evidence(
             emit_dir.display()
         ));
     }
-    Ok(merged)
+    Ok(merger.finish())
+}
+
+/// Accumulates per-crate [`CompilerEvidence`] artifacts into a single merged
+/// result in O(total items) time.
+///
+/// The previous implementation deduplicated every incoming item with a linear
+/// `Vec::iter().any(|e| e.id == ...)` scan against the growing accumulator,
+/// making whole-program merging O(n²) over the hundreds of per-crate artifacts
+/// a large workspace emits. This struct keeps a hash index per collection so
+/// each membership test is amortized O(1), and computes stats once at the end
+/// instead of after every artifact.
+#[derive(Default)]
+struct CompilerEvidenceMerger {
+    evidence: CompilerEvidence,
+    import_keys: HashSet<String>,
+    declaration_ids: HashSet<String>,
+    usage_ids: HashSet<String>,
+    signal_ids: HashSet<String>,
+    crypto: CryptoDedup,
+    file_index: HashMap<String, usize>,
+    file_dedup: Vec<FileDedup>,
+    call_graph_node_ids: HashSet<String>,
+    call_graph_edge_ids: HashSet<String>,
+    call_graph_diagnostic_keys: HashSet<String>,
+    data_flow_node_ids: HashSet<String>,
+    data_flow_edge_ids: HashSet<String>,
+    data_flow_slice_ids: HashSet<String>,
+    data_flow_summary_ids: HashSet<String>,
+    data_flow_diagnostic_keys: HashSet<String>,
+}
+
+/// Per-file dedup indices, kept parallel to `CompilerEvidenceMerger::evidence.files`.
+#[derive(Default)]
+struct FileDedup {
+    import_keys: HashSet<String>,
+    declaration_ids: HashSet<String>,
+    usage_ids: HashSet<String>,
+    signal_ids: HashSet<String>,
+    crypto: CryptoDedup,
+}
+
+#[derive(Default)]
+struct CryptoDedup {
+    library_ids: HashSet<String>,
+    component_ids: HashSet<String>,
+    material_ids: HashSet<String>,
+    finding_ids: HashSet<String>,
+}
+
+impl CompilerEvidenceMerger {
+    fn merge(&mut self, artifact: CompilerEvidence) {
+        let CompilerEvidence {
+            diagnostics,
+            files,
+            imports,
+            declarations,
+            usages,
+            security_signals,
+            crypto,
+            call_graph,
+            data_flow,
+        } = artifact;
+
+        // Top-level diagnostics were never deduplicated by the original merge;
+        // preserve that so repeated backend diagnostics are still reported.
+        self.evidence.diagnostics.extend(diagnostics);
+        for file in files {
+            self.merge_file(file);
+        }
+        insert_unique_by(
+            &mut self.evidence.imports,
+            &mut self.import_keys,
+            imports,
+            import_key,
+        );
+        insert_unique_by(
+            &mut self.evidence.declarations,
+            &mut self.declaration_ids,
+            declarations,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut self.evidence.usages,
+            &mut self.usage_ids,
+            usages,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut self.evidence.security_signals,
+            &mut self.signal_ids,
+            security_signals,
+            |item| item.id.clone(),
+        );
+        merge_crypto_indexed(&mut self.evidence.crypto, crypto, &mut self.crypto);
+        self.merge_call_graph(call_graph);
+        self.merge_data_flow(data_flow);
+    }
+
+    fn merge_file(&mut self, file: FileEvidence) {
+        if let Some(&index) = self.file_index.get(&file.path) {
+            let existing = &mut self.evidence.files[index];
+            let dedup = &mut self.file_dedup[index];
+            insert_unique_by(
+                &mut existing.imports,
+                &mut dedup.import_keys,
+                file.imports,
+                import_key,
+            );
+            insert_unique_by(
+                &mut existing.declarations,
+                &mut dedup.declaration_ids,
+                file.declarations,
+                |item| item.id.clone(),
+            );
+            insert_unique_by(
+                &mut existing.usages,
+                &mut dedup.usage_ids,
+                file.usages,
+                |item| item.id.clone(),
+            );
+            insert_unique_by(
+                &mut existing.security_signals,
+                &mut dedup.signal_ids,
+                file.security_signals,
+                |item| item.id.clone(),
+            );
+            merge_crypto_indexed(&mut existing.crypto, file.crypto, &mut dedup.crypto);
+        } else {
+            // Seed the dedup indices from the freshly inserted file so later
+            // artifacts touching the same path merge against its contents.
+            let mut dedup = FileDedup::default();
+            dedup
+                .import_keys
+                .extend(file.imports.iter().map(import_key));
+            dedup
+                .declaration_ids
+                .extend(file.declarations.iter().map(|item| item.id.clone()));
+            dedup
+                .usage_ids
+                .extend(file.usages.iter().map(|item| item.id.clone()));
+            dedup
+                .signal_ids
+                .extend(file.security_signals.iter().map(|item| item.id.clone()));
+            if let Some(crypto) = &file.crypto {
+                seed_crypto_dedup(&mut dedup.crypto, crypto);
+            }
+            self.file_index.insert(file.path.clone(), self.evidence.files.len());
+            self.evidence.files.push(file);
+            self.file_dedup.push(dedup);
+        }
+    }
+
+    fn merge_call_graph(&mut self, incoming: Option<CallGraph>) {
+        let Some(incoming) = incoming else {
+            return;
+        };
+        let existing = self.evidence.call_graph.get_or_insert_with(|| CallGraph {
+            mode: incoming.mode.clone(),
+            ..CallGraph::default()
+        });
+        merge_mode(&mut existing.mode, &incoming.mode);
+        insert_unique_by(
+            &mut existing.nodes,
+            &mut self.call_graph_node_ids,
+            incoming.nodes,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.edges,
+            &mut self.call_graph_edge_ids,
+            incoming.edges,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.diagnostics,
+            &mut self.call_graph_diagnostic_keys,
+            incoming.diagnostics,
+            diagnostic_key,
+        );
+    }
+
+    fn merge_data_flow(&mut self, incoming: Option<DataFlowEvidence>) {
+        let Some(incoming) = incoming else {
+            return;
+        };
+        let existing = self.evidence.data_flow.get_or_insert_with(|| DataFlowEvidence {
+            mode: incoming.mode.clone(),
+            patterns: incoming.patterns.clone(),
+            ..DataFlowEvidence::default()
+        });
+        merge_mode(&mut existing.mode, &incoming.mode);
+        if existing.patterns.sources.is_empty()
+            && existing.patterns.sinks.is_empty()
+            && existing.patterns.passthroughs.is_empty()
+        {
+            existing.patterns = incoming.patterns.clone();
+        }
+        insert_unique_by(
+            &mut existing.nodes,
+            &mut self.data_flow_node_ids,
+            incoming.nodes,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.edges,
+            &mut self.data_flow_edge_ids,
+            incoming.edges,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.slices,
+            &mut self.data_flow_slice_ids,
+            incoming.slices,
+            |item| item.id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.summaries,
+            &mut self.data_flow_summary_ids,
+            incoming.summaries,
+            |item| item.function_id.clone(),
+        );
+        insert_unique_by(
+            &mut existing.diagnostics,
+            &mut self.data_flow_diagnostic_keys,
+            incoming.diagnostics,
+            diagnostic_key,
+        );
+    }
+
+    /// Finalize the merged evidence, computing graph/data-flow stats once over
+    /// the fully merged collections rather than recomputing after each artifact.
+    fn finish(mut self) -> CompilerEvidence {
+        if let Some(call_graph) = &mut self.evidence.call_graph {
+            call_graph.stats = GraphStats {
+                node_count: call_graph.nodes.len(),
+                edge_count: call_graph.edges.len(),
+            };
+        }
+        if let Some(data_flow) = &mut self.evidence.data_flow {
+            data_flow.stats = DataFlowStats {
+                source_count: data_flow.nodes.iter().filter(|node| node.source).count(),
+                sink_count: data_flow.nodes.iter().filter(|node| node.sink).count(),
+                slice_count: data_flow.slices.len(),
+                node_count: data_flow.nodes.len(),
+                edge_count: data_flow.edges.len(),
+                summary_count: data_flow.summaries.len(),
+            };
+        }
+        self.evidence
+    }
+}
+
+/// Append every item from `incoming` to `target` whose key has not been seen
+/// before, recording the key in `seen`. Amortized O(1) per item.
+fn insert_unique_by<T, K, F>(target: &mut Vec<T>, seen: &mut HashSet<K>, incoming: Vec<T>, key: F)
+where
+    K: Eq + std::hash::Hash,
+    F: Fn(&T) -> K,
+{
+    target.reserve(incoming.len());
+    for item in incoming {
+        if seen.insert(key(&item)) {
+            target.push(item);
+        }
+    }
+}
+
+fn merge_crypto_indexed(
+    target: &mut Option<CryptoEvidence>,
+    incoming: Option<CryptoEvidence>,
+    dedup: &mut CryptoDedup,
+) {
+    let Some(incoming) = incoming else {
+        return;
+    };
+    let existing = target.get_or_insert_with(CryptoEvidence::default);
+    insert_unique_by(
+        &mut existing.libraries,
+        &mut dedup.library_ids,
+        incoming.libraries,
+        |item| item.id.clone(),
+    );
+    insert_unique_by(
+        &mut existing.components,
+        &mut dedup.component_ids,
+        incoming.components,
+        |item| item.id.clone(),
+    );
+    insert_unique_by(
+        &mut existing.materials,
+        &mut dedup.material_ids,
+        incoming.materials,
+        |item| item.id.clone(),
+    );
+    insert_unique_by(
+        &mut existing.findings,
+        &mut dedup.finding_ids,
+        incoming.findings,
+        |item| item.id.clone(),
+    );
+    for (key, value) in incoming.properties {
+        existing.properties.entry(key).or_insert(value);
+    }
+}
+
+fn seed_crypto_dedup(dedup: &mut CryptoDedup, crypto: &CryptoEvidence) {
+    dedup
+        .library_ids
+        .extend(crypto.libraries.iter().map(|item| item.id.clone()));
+    dedup
+        .component_ids
+        .extend(crypto.components.iter().map(|item| item.id.clone()));
+    dedup
+        .material_ids
+        .extend(crypto.materials.iter().map(|item| item.id.clone()));
+    dedup
+        .finding_ids
+        .extend(crypto.findings.iter().map(|item| item.id.clone()));
+}
+
+fn merge_mode(existing: &mut String, incoming: &str) {
+    if existing.is_empty() {
+        *existing = incoming.to_string();
+    } else if existing != incoming && !existing.contains(incoming) {
+        *existing = format!("{existing},{incoming}");
+    }
+}
+
+/// Stable dedup key for an [`ImportUsage`], matching the original tuple equality
+/// over `(path, alias, package_path, position)`.
+fn import_key(import_usage: &ImportUsage) -> String {
+    format!(
+        "{}\u{1}{:?}\u{1}{}\u{1}{}:{}:{}",
+        import_usage.path,
+        import_usage.alias,
+        import_usage.package_path,
+        import_usage.position.filename,
+        import_usage.position.line,
+        import_usage.position.column,
+    )
+}
+
+/// Stable dedup key for a [`Diagnostic`], matching the original full-struct
+/// equality used by `extend_unique_diagnostics`.
+fn diagnostic_key(diagnostic: &Diagnostic) -> String {
+    let position = diagnostic
+        .position
+        .as_ref()
+        .map(|position| format!("{}:{}:{}", position.filename, position.line, position.column))
+        .unwrap_or_default();
+    format!(
+        "{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
+        diagnostic.kind,
+        diagnostic.message,
+        diagnostic.package_path.as_deref().unwrap_or(""),
+        diagnostic.file_path.as_deref().unwrap_or(""),
+        position,
+    )
 }
 
 fn merge_file_evidence(target: &mut Vec<FileEvidence>, incoming: Vec<FileEvidence>) {
@@ -735,94 +1093,6 @@ fn merge_crypto_evidence(target: &mut Option<CryptoEvidence>, incoming: Option<C
     for (key, value) in incoming.properties {
         existing.properties.entry(key).or_insert(value);
     }
-}
-
-fn merge_call_graph_evidence(target: &mut Option<CallGraph>, incoming: Option<CallGraph>) {
-    let Some(mut incoming) = incoming else {
-        return;
-    };
-    let existing = target.get_or_insert_with(|| CallGraph {
-        mode: incoming.mode.clone(),
-        ..CallGraph::default()
-    });
-    if existing.mode.is_empty() {
-        existing.mode = incoming.mode.clone();
-    } else if existing.mode != incoming.mode && !existing.mode.contains(&incoming.mode) {
-        existing.mode = format!("{},{}", existing.mode, incoming.mode);
-    }
-    for node in std::mem::take(&mut incoming.nodes) {
-        if !existing.nodes.iter().any(|entry| entry.id == node.id) {
-            existing.nodes.push(node);
-        }
-    }
-    for edge in std::mem::take(&mut incoming.edges) {
-        if !existing.edges.iter().any(|entry| entry.id == edge.id) {
-            existing.edges.push(edge);
-        }
-    }
-    extend_unique_diagnostics(&mut existing.diagnostics, incoming.diagnostics);
-    existing.stats = GraphStats {
-        node_count: existing.nodes.len(),
-        edge_count: existing.edges.len(),
-    };
-}
-
-fn merge_data_flow_evidence(
-    target: &mut Option<DataFlowEvidence>,
-    incoming: Option<DataFlowEvidence>,
-) {
-    let Some(mut incoming) = incoming else {
-        return;
-    };
-    let existing = target.get_or_insert_with(|| DataFlowEvidence {
-        mode: incoming.mode.clone(),
-        patterns: incoming.patterns.clone(),
-        ..DataFlowEvidence::default()
-    });
-    if existing.mode.is_empty() {
-        existing.mode = incoming.mode.clone();
-    } else if existing.mode != incoming.mode && !existing.mode.contains(&incoming.mode) {
-        existing.mode = format!("{},{}", existing.mode, incoming.mode);
-    }
-    if existing.patterns.sources.is_empty()
-        && existing.patterns.sinks.is_empty()
-        && existing.patterns.passthroughs.is_empty()
-    {
-        existing.patterns = incoming.patterns.clone();
-    }
-    for node in std::mem::take(&mut incoming.nodes) {
-        if !existing.nodes.iter().any(|entry| entry.id == node.id) {
-            existing.nodes.push(node);
-        }
-    }
-    for edge in std::mem::take(&mut incoming.edges) {
-        if !existing.edges.iter().any(|entry| entry.id == edge.id) {
-            existing.edges.push(edge);
-        }
-    }
-    for slice in std::mem::take(&mut incoming.slices) {
-        if !existing.slices.iter().any(|entry| entry.id == slice.id) {
-            existing.slices.push(slice);
-        }
-    }
-    for summary in std::mem::take(&mut incoming.summaries) {
-        if !existing
-            .summaries
-            .iter()
-            .any(|entry| entry.function_id == summary.function_id)
-        {
-            existing.summaries.push(summary);
-        }
-    }
-    extend_unique_diagnostics(&mut existing.diagnostics, incoming.diagnostics);
-    existing.stats = DataFlowStats {
-        source_count: existing.nodes.iter().filter(|node| node.source).count(),
-        sink_count: existing.nodes.iter().filter(|node| node.sink).count(),
-        slice_count: existing.slices.len(),
-        node_count: existing.nodes.len(),
-        edge_count: existing.edges.len(),
-        summary_count: existing.summaries.len(),
-    };
 }
 
 fn enrich_payload_purls(metadata: &Metadata, payload: &mut DriverProtocolPayload) {
@@ -1029,14 +1299,6 @@ fn extend_unique_security_signals(target: &mut Vec<SecuritySignal>, incoming: Ve
     for signal in incoming {
         if !target.iter().any(|existing| existing.id == signal.id) {
             target.push(signal);
-        }
-    }
-}
-
-fn extend_unique_diagnostics(target: &mut Vec<Diagnostic>, incoming: Vec<Diagnostic>) {
-    for diagnostic in incoming {
-        if !target.iter().any(|existing| existing == &diagnostic) {
-            target.push(diagnostic);
         }
     }
 }
@@ -2455,5 +2717,286 @@ mod tests {
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
         }
+    }
+}
+
+#[cfg(test)]
+mod merger_tests {
+    use super::{CompilerEvidenceMerger, diagnostic_key, import_key, merge_mode};
+    use rusi_schema::{
+        CallGraph, CallGraphEdge, CallGraphNode, CompilerEvidence, CryptoEvidence, CryptoLibrary,
+        DataFlowEdge, DataFlowEvidence, DataFlowNode, DataFlowSlice, Declaration, Diagnostic,
+        FileEvidence, ImportUsage, Position,
+    };
+
+    fn node(id: &str, source: bool, sink: bool) -> DataFlowNode {
+        DataFlowNode {
+            id: id.to_string(),
+            source,
+            sink,
+            ..DataFlowNode::default()
+        }
+    }
+
+    fn cg_node(id: &str) -> CallGraphNode {
+        CallGraphNode {
+            id: id.to_string(),
+            ..CallGraphNode::default()
+        }
+    }
+
+    fn cg_edge(id: &str) -> CallGraphEdge {
+        CallGraphEdge {
+            id: id.to_string(),
+            ..CallGraphEdge::default()
+        }
+    }
+
+    fn diagnostic(kind: &str, message: &str) -> Diagnostic {
+        Diagnostic {
+            kind: kind.to_string(),
+            message: message.to_string(),
+            ..Diagnostic::default()
+        }
+    }
+
+    fn merge_all(artifacts: Vec<CompilerEvidence>) -> CompilerEvidence {
+        let mut merger = CompilerEvidenceMerger::default();
+        for artifact in artifacts {
+            merger.merge(artifact);
+        }
+        merger.finish()
+    }
+
+    #[test]
+    fn deduplicates_call_graph_nodes_and_edges_across_artifacts() {
+        let artifact_a = CompilerEvidence {
+            call_graph: Some(CallGraph {
+                mode: "static".to_string(),
+                nodes: vec![cg_node("a"), cg_node("b")],
+                edges: vec![cg_edge("a->b")],
+                ..CallGraph::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+        let artifact_b = CompilerEvidence {
+            call_graph: Some(CallGraph {
+                mode: "static".to_string(),
+                // "b" overlaps with artifact_a and must not be duplicated.
+                nodes: vec![cg_node("b"), cg_node("c")],
+                edges: vec![cg_edge("a->b"), cg_edge("b->c")],
+                ..CallGraph::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+
+        let merged = merge_all(vec![artifact_a, artifact_b]);
+        let call_graph = merged.call_graph.expect("call graph present");
+
+        let node_ids: Vec<_> = call_graph.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(node_ids, vec!["a", "b", "c"]);
+        let edge_ids: Vec<_> = call_graph.edges.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(edge_ids, vec!["a->b", "b->c"]);
+        // Stats are computed once over the merged result.
+        assert_eq!(call_graph.stats.node_count, 3);
+        assert_eq!(call_graph.stats.edge_count, 2);
+    }
+
+    #[test]
+    fn deduplicates_data_flow_and_recomputes_stats() {
+        let artifact_a = CompilerEvidence {
+            data_flow: Some(DataFlowEvidence {
+                mode: "security".to_string(),
+                nodes: vec![node("src", true, false), node("sink", false, true)],
+                edges: vec![DataFlowEdge {
+                    id: "src->sink".to_string(),
+                    ..DataFlowEdge::default()
+                }],
+                slices: vec![DataFlowSlice {
+                    id: "slice-1".to_string(),
+                    ..DataFlowSlice::default()
+                }],
+                ..DataFlowEvidence::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+        let artifact_b = CompilerEvidence {
+            data_flow: Some(DataFlowEvidence {
+                mode: "security".to_string(),
+                // "sink" overlaps; "mid" is a new pure-passthrough node.
+                nodes: vec![node("sink", false, true), node("mid", false, false)],
+                edges: vec![DataFlowEdge {
+                    id: "src->sink".to_string(),
+                    ..DataFlowEdge::default()
+                }],
+                slices: vec![DataFlowSlice {
+                    id: "slice-1".to_string(),
+                    ..DataFlowSlice::default()
+                }],
+                ..DataFlowEvidence::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+
+        let merged = merge_all(vec![artifact_a, artifact_b]);
+        let data_flow = merged.data_flow.expect("data flow present");
+
+        assert_eq!(data_flow.stats.node_count, 3);
+        assert_eq!(data_flow.stats.edge_count, 1);
+        assert_eq!(data_flow.stats.slice_count, 1);
+        assert_eq!(data_flow.stats.source_count, 1);
+        assert_eq!(data_flow.stats.sink_count, 1);
+    }
+
+    #[test]
+    fn merges_files_by_path_and_dedups_their_contents() {
+        let import = ImportUsage {
+            path: "std::fs".to_string(),
+            ..ImportUsage::default()
+        };
+        let decl = Declaration {
+            id: "decl-1".to_string(),
+            ..Declaration::default()
+        };
+        let file_first = FileEvidence {
+            path: "src/main.rs".to_string(),
+            imports: vec![import.clone()],
+            declarations: vec![decl.clone()],
+            ..FileEvidence::default()
+        };
+        let file_second = FileEvidence {
+            path: "src/main.rs".to_string(),
+            // Same import + declaration must not duplicate; the new declaration must land.
+            imports: vec![import.clone()],
+            declarations: vec![
+                decl.clone(),
+                Declaration {
+                    id: "decl-2".to_string(),
+                    ..Declaration::default()
+                },
+            ],
+            ..FileEvidence::default()
+        };
+
+        let merged = merge_all(vec![
+            CompilerEvidence {
+                files: vec![file_first],
+                ..CompilerEvidence::default()
+            },
+            CompilerEvidence {
+                files: vec![file_second],
+                ..CompilerEvidence::default()
+            },
+        ]);
+
+        assert_eq!(merged.files.len(), 1);
+        let file = &merged.files[0];
+        assert_eq!(file.imports.len(), 1);
+        let decl_ids: Vec<_> = file.declarations.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(decl_ids, vec!["decl-1", "decl-2"]);
+    }
+
+    #[test]
+    fn merges_top_level_collections_and_crypto() {
+        let library = CryptoLibrary {
+            id: "lib-1".to_string(),
+            ..CryptoLibrary::default()
+        };
+        let artifact_a = CompilerEvidence {
+            declarations: vec![Declaration {
+                id: "d1".to_string(),
+                ..Declaration::default()
+            }],
+            crypto: Some(CryptoEvidence {
+                libraries: vec![library.clone()],
+                ..CryptoEvidence::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+        let artifact_b = CompilerEvidence {
+            declarations: vec![
+                Declaration {
+                    id: "d1".to_string(),
+                    ..Declaration::default()
+                },
+                Declaration {
+                    id: "d2".to_string(),
+                    ..Declaration::default()
+                },
+            ],
+            crypto: Some(CryptoEvidence {
+                libraries: vec![library.clone()],
+                ..CryptoEvidence::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+
+        let merged = merge_all(vec![artifact_a, artifact_b]);
+        let decl_ids: Vec<_> = merged.declarations.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(decl_ids, vec!["d1", "d2"]);
+        let crypto = merged.crypto.expect("crypto present");
+        assert_eq!(crypto.libraries.len(), 1);
+    }
+
+    #[test]
+    fn merges_modes_without_duplicating() {
+        let mut mode = String::new();
+        merge_mode(&mut mode, "static");
+        assert_eq!(mode, "static");
+        // Identical mode is a no-op.
+        merge_mode(&mut mode, "static");
+        assert_eq!(mode, "static");
+        // Substring already present is a no-op.
+        merge_mode(&mut mode, "static");
+        assert_eq!(mode, "static");
+        // Distinct mode is appended.
+        merge_mode(&mut mode, "dynamic");
+        assert_eq!(mode, "static,dynamic");
+    }
+
+    #[test]
+    fn import_and_diagnostic_keys_distinguish_relevant_fields() {
+        let base = ImportUsage {
+            path: "std::fs".to_string(),
+            alias: None,
+            package_path: "app".to_string(),
+            position: Position {
+                filename: "a.rs".to_string(),
+                line: 1,
+                column: 0,
+            },
+            ..ImportUsage::default()
+        };
+        let aliased = ImportUsage {
+            alias: Some(String::new()),
+            ..base.clone()
+        };
+        // None vs Some("") must not collide.
+        assert_ne!(import_key(&base), import_key(&aliased));
+
+        let d1 = diagnostic("backend", "ok");
+        let d2 = diagnostic("backend", "different");
+        assert_ne!(diagnostic_key(&d1), diagnostic_key(&d2));
+        assert_eq!(diagnostic_key(&d1), diagnostic_key(&diagnostic("backend", "ok")));
+    }
+
+    #[test]
+    fn deduplicates_call_graph_diagnostics_but_keeps_top_level() {
+        let artifact = |kind: &str| CompilerEvidence {
+            diagnostics: vec![diagnostic(kind, "top")],
+            call_graph: Some(CallGraph {
+                mode: "static".to_string(),
+                diagnostics: vec![diagnostic("backend-capability", "cap")],
+                ..CallGraph::default()
+            }),
+            ..CompilerEvidence::default()
+        };
+
+        let merged = merge_all(vec![artifact("a"), artifact("a")]);
+        // Top-level diagnostics are intentionally not deduplicated.
+        assert_eq!(merged.diagnostics.len(), 2);
+        // Call-graph diagnostics are deduplicated.
+        let call_graph = merged.call_graph.expect("call graph present");
+        assert_eq!(call_graph.diagnostics.len(), 1);
     }
 }
