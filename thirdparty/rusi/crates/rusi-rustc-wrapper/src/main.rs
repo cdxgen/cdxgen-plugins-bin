@@ -615,6 +615,7 @@ impl EmbeddedCollector {
         let declaration = Declaration {
             id: stable_id("decl", &[&self.crate_name, &qualified_name]),
             name,
+            canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
             kind: kind.to_string(),
             package_path: self.crate_name.clone(),
@@ -1787,6 +1788,7 @@ fn build_call_graph(
                 id: function.id.clone(),
                 name: function.name.clone(),
                 qualified_name: function.qualified_name.clone(),
+                canonical_name: rusi_schema::canonical_name(&function.qualified_name),
                 kind: function.kind.clone(),
                 package_path: function.package_path.clone(),
                 purl: String::new(),
@@ -1834,6 +1836,7 @@ fn build_call_graph(
                                 id: target_id.clone(),
                                 name: last_segment(&target_name).to_string(),
                                 qualified_name: target_name.clone(),
+                                canonical_name: rusi_schema::canonical_name(&target_name),
                                 kind: if call.call_type == "native" {
                                     "foreign-function".to_string()
                                 } else {
@@ -1952,6 +1955,7 @@ fn build_call_graph(
                         id: target_id.clone(),
                         name: last_segment(&target_name).to_string(),
                         qualified_name: target_name.clone(),
+                        canonical_name: rusi_schema::canonical_name(&target_name),
                         kind: if call.resolved.call_type == "native" {
                             "foreign-function".to_string()
                         } else {

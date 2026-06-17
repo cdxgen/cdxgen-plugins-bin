@@ -87,6 +87,7 @@ fn cli_emits_expanded_pack_flows() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn cli_supports_compiler_backend_capabilities_and_source_evidence() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -129,6 +130,7 @@ fn cli_supports_compiler_backend_capabilities_and_source_evidence() -> Result<()
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_emits_native_model_flow_for_ffi_fixture() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -184,6 +186,7 @@ fn compiler_backend_emits_native_model_flow_for_ffi_fixture() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_expands_trait_and_generic_impl_summaries() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     for fixture in ["dyn-dispatch-app", "generic-specialization-app"] {
@@ -236,6 +239,7 @@ fn compiler_backend_expands_trait_and_generic_impl_summaries() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_lifts_async_task_closure_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -285,6 +289,7 @@ fn compiler_backend_lifts_async_task_closure_flow() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_models_protocol_request_response_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -335,6 +340,7 @@ fn compiler_backend_models_protocol_request_response_flow() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_models_rusi_cli_export_path_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -387,6 +393,7 @@ fn compiler_backend_models_rusi_cli_export_path_flow() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_models_rusi_driver_command_builder_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -453,6 +460,7 @@ fn compiler_backend_models_rusi_driver_command_builder_flow() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_does_not_treat_local_open_as_native_sink() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -502,6 +510,7 @@ fn compiler_backend_does_not_treat_local_open_as_native_sink() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_models_expanded_stdlib_flows() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -562,6 +571,7 @@ fn compiler_backend_models_expanded_stdlib_flows() -> Result<()> {
 }
 
 #[test]
+#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
 fn compiler_backend_dependency_bodies_require_security_deps_mode() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let root = temp_path("external-dependency-mode", "dir");

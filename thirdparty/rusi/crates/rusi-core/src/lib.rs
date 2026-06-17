@@ -148,6 +148,8 @@ struct FunctionRecord {
     operations: Vec<Operation>,
     direct_calls: Vec<SimplifiedCall>,
     receiver_type: Option<String>,
+    // Reserved for loop-aware analysis; populated but not yet consumed.
+    #[allow(dead_code)]
     is_loop_body: bool,
 }
 
@@ -157,6 +159,9 @@ enum Operation {
     AssignField { target: String, field: String, value: SimpleExpr },
     Expr(SimpleExpr),
     Return(SimpleExpr),
+    // Matched where loop operations are walked, but not yet emitted by the
+    // source collector.
+    #[allow(dead_code)]
     LoopBody(Vec<Operation>),
 }
 
@@ -172,6 +177,8 @@ enum SimpleExpr {
     Literal,
     Field {
         base: Box<SimpleExpr>,
+        // Field name is captured for future field-sensitive analysis.
+        #[allow(dead_code)]
         field: String,
     },
     MethodCall {
@@ -264,6 +271,9 @@ impl ConcreteTaint {
 
 #[derive(Debug, Clone, Default)]
 struct TraitImplIndex {
+    // Built for future trait-to-impl resolution; method_to_impls is the index
+    // currently consumed by call resolution.
+    #[allow(dead_code)]
     trait_to_impl_methods: HashMap<String, Vec<String>>,
     method_to_impls: HashMap<String, Vec<String>>,
 }
@@ -604,6 +614,8 @@ pub fn analyze_with_optional_compiler(
     );
     debug_log(options.debug, format_args!("pass=normalize-report"));
     normalize_report(&mut report);
+    debug_log(options.debug, format_args!("pass=canonical-names"));
+    report.fill_canonical_names();
     debug_log(options.debug, format_args!("pass=stats"));
     report.stats = compute_stats(&report);
     debug_log(options.debug, format_args!("pass=done"));
@@ -1065,7 +1077,11 @@ struct FunctionFrame {
     declaration_id: String,
     operations: Vec<Operation>,
     direct_calls: Vec<SimplifiedCall>,
+    // Carried on the frame for future use; the emitted record derives these
+    // separately, so they are not read back off the frame yet.
+    #[allow(dead_code)]
     receiver_type: Option<String>,
+    #[allow(dead_code)]
     is_loop_body: bool,
 }
 
@@ -1097,6 +1113,7 @@ impl SourceCollector {
         let declaration = Declaration {
             id: stable_id("decl", &[&self.file_ctx.package_path, &qualified_name]),
             name: name.to_string(),
+            canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
             kind: kind.to_string(),
             package_path: self.file_ctx.package_path.clone(),
@@ -2640,6 +2657,7 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                 id: function.declaration.id.clone(),
                 name: function.declaration.name.clone(),
                 qualified_name: function.declaration.qualified_name.clone(),
+                canonical_name: rusi_schema::canonical_name(&function.declaration.qualified_name),
                 kind: function.declaration.kind.clone(),
                 package_path: function.package_path.clone(),
                 purl: String::new(),
@@ -2663,6 +2681,7 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                             id: synthetic_id.clone(),
                             name: last_segment(&call.callee_text).to_string(),
                             qualified_name: call.callee_text.clone(),
+                            canonical_name: rusi_schema::canonical_name(&call.callee_text),
                             kind: "external-function".to_string(),
                             package_path: inferred_package_path(&call.callee_text),
                             purl: String::new(),
@@ -6012,6 +6031,7 @@ mod tests {
                 id: "decl-compiler-test".to_string(),
                 name: "read_secret".to_string(),
                 qualified_name: "basic_app::helper::read_secret".to_string(),
+                canonical_name: "basic_app::helper::read_secret".to_string(),
                 kind: "function".to_string(),
                 package_path: "basic_app".to_string(),
                 purl: String::new(),

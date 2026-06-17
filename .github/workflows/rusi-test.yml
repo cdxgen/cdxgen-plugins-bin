@@ -1,0 +1,74 @@
+name: rusi test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "thirdparty/rusi/**"
+      - ".github/workflows/rusi-test.yml"
+  pull_request:
+    paths:
+      - "thirdparty/rusi/**"
+      - ".github/workflows/rusi-test.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: thirdparty/rusi
+
+jobs:
+  # Default test suite on stable. The rustc-wrapper crate is excluded from the
+  # workspace default-members, so the whole default set builds and tests on
+  # stable like any other project. Compiler-backend integration tests are
+  # marked #[ignore] and are exercised in the nightly job below.
+  test:
+    name: cargo test (stable)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+      - name: cargo test
+        run: cargo test
+
+  # Compiler-backend integration tests. These require a nightly toolchain with
+  # the rustc-dev and rust-src components (the embedded backend links rustc
+  # internals via #![feature(rustc_private)]), and they shell out to a nested
+  # cargo at runtime, so they are run single-threaded to avoid cargo lock
+  # contention.
+  test-nightly:
+    name: cargo +nightly test -- --ignored (compiler backend)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install nightly toolchain with rustc-dev and rust-src
+        # Pin a specific nightly here (for example nightly-2025-06-01) if a
+        # future rustc-internal API change breaks the wrapper build.
+        run: |
+          rustup toolchain install nightly --profile minimal \
+            --component rustc-dev --component rust-src --component llvm-tools \
+            --no-self-update
+          rustup run nightly rustc --version
+      - name: cargo +nightly test -- --ignored --test-threads=1
+        run: cargo +nightly test -- --ignored --test-threads=1

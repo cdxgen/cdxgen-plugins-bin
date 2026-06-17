@@ -1600,6 +1600,7 @@ impl NativeInteropCollector {
         let declaration = Declaration {
             id: stable_id("decl", &[&self.file_ctx.package_path, &qualified_name]),
             name: name.to_string(),
+            canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
             kind: kind.to_string(),
             package_path: self.file_ctx.package_path.clone(),
@@ -2030,6 +2031,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
     fn driver_collects_real_compiler_evidence_when_embedded_backend_is_available() {
         let _guard = test_guard();
         let options = DriverOptions {

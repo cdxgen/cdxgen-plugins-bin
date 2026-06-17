@@ -1,6 +1,188 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+/// Reduce a qualified Rust function name to a stable canonical form.
+///
+/// The canonical form is generic-free, lifetime-free, and hash-free, of the
+/// shape `crate::module::Type::method`. It is the join key used to match a
+/// source callgraph against a binary callgraph: emitting it here means
+/// consumers do not have to re-implement Rust naming normalization, and the
+/// match key stays authoritative and stable across tool versions.
+///
+/// The transformation is deliberately lossy:
+/// * trailing compiler disambiguation hashes (`::h1a2b..`) and LLVM thunk
+///   suffixes (`.llvm.123..`) are removed,
+/// * a leading trait/impl qualifier is reduced to the implementing type
+///   (`<Type as Trait>::m` -> `Type::m`, `<impl Trait for Type>` -> `Type`),
+/// * generic argument groups, lifetimes, reference and mutability markers, and
+///   whitespace are stripped, collapsing every monomorphized instance onto the
+///   single source definition it came from.
+pub fn canonical_name(qualified_name: &str) -> String {
+    let mut work = qualified_name.trim().to_string();
+    if work.is_empty() {
+        return String::new();
+    }
+    work = strip_hash_suffix(&work);
+    work = strip_llvm_suffix(&work);
+    work = reduce_qualified_self(&work);
+    work = strip_generics(&work);
+    work = strip_lifetimes(&work);
+    work = work
+        .replace("&mut ", "")
+        .replace('&', "")
+        .replace('(', "")
+        .replace(')', "")
+        .replace(' ', "");
+    collapse_separators(&work)
+}
+
+/// Remove a trailing `::h<hex>` Rust symbol-hash segment.
+fn strip_hash_suffix(name: &str) -> String {
+    if let Some(idx) = name.rfind("::h") {
+        let suffix = &name[idx + 3..];
+        if suffix.len() >= 8 && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return name[..idx].to_string();
+        }
+    }
+    name.to_string()
+}
+
+/// Remove a trailing `.llvm.<digits>` thunk suffix.
+fn strip_llvm_suffix(name: &str) -> String {
+    if let Some(idx) = name.rfind(".llvm.") {
+        let suffix = &name[idx + 6..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return name[..idx].to_string();
+        }
+    }
+    name.to_string()
+}
+
+/// Find a needle outside any `<...>` group, returning its byte index.
+fn find_top_level(name: &str, needle: &str) -> Option<usize> {
+    let bytes = name.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut depth: i32 = 0;
+    let mut idx = 0usize;
+    while idx + needle_bytes.len() <= bytes.len() {
+        match bytes[idx] {
+            b'<' => depth += 1,
+            b'>' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ if depth == 0 && name[idx..].starts_with(needle) => return Some(idx),
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
+}
+
+/// Split a leading balanced `<...>` group into (inner, rest).
+fn split_balanced_angle(name: &str) -> Option<(String, String)> {
+    if !name.starts_with('<') {
+        return None;
+    }
+    let bytes = name.as_bytes();
+    let mut depth = 0i32;
+    for (idx, &ch) in bytes.iter().enumerate() {
+        match ch {
+            b'<' => depth += 1,
+            b'>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((name[1..idx].to_string(), name[idx + 1..].to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Reduce `<Type as Trait>::m` / `<impl Trait for Type>::m` to the implementing type.
+fn reduce_qualified_self(name: &str) -> String {
+    match split_balanced_angle(name) {
+        None => name.to_string(),
+        Some((inner, rest)) => {
+            let mut implementing = inner.trim().to_string();
+            if let Some(body) = implementing.strip_prefix("impl ") {
+                if let Some(for_idx) = find_top_level(body, " for ") {
+                    implementing = body[for_idx + 5..].to_string();
+                } else {
+                    implementing = body.to_string();
+                }
+            } else if let Some(as_idx) = find_top_level(&implementing, " as ") {
+                implementing = implementing[..as_idx].to_string();
+            }
+            format!("{}{}", reduce_qualified_self(implementing.trim()), rest)
+        }
+    }
+}
+
+/// Remove balanced `<...>` generic argument groups.
+fn strip_generics(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut depth = 0i32;
+    for ch in name.chars() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Remove lifetime tokens such as `'a` and `'_`.
+fn strip_lifetimes(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut chars = name.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' {
+            // Drop the lifetime identifier that follows the quote.
+            while let Some(&next) = chars.peek() {
+                if next == '_' || next.is_alphanumeric() {
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Collapse runs of three or more `:` to `::` and trim leading/trailing colons.
+fn collapse_separators(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut colon_run = 0usize;
+    for ch in name.chars() {
+        if ch == ':' {
+            colon_run += 1;
+        } else {
+            if colon_run > 0 {
+                out.push_str("::");
+                colon_run = 0;
+            }
+            out.push(ch);
+        }
+    }
+    if colon_run > 0 {
+        out.push_str("::");
+    }
+    out.trim_matches(':').to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Position {
     pub filename: String,
@@ -60,6 +242,8 @@ pub struct Declaration {
     pub id: String,
     pub name: String,
     pub qualified_name: String,
+    #[serde(default)]
+    pub canonical_name: String,
     pub kind: String,
     pub package_path: String,
     pub purl: String,
@@ -243,6 +427,8 @@ pub struct CallGraphNode {
     pub id: String,
     pub name: String,
     pub qualified_name: String,
+    #[serde(default)]
+    pub canonical_name: String,
     pub kind: String,
     pub package_path: String,
     pub purl: String,
@@ -450,4 +636,64 @@ pub struct Report {
     pub api_endpoints: Vec<ApiEndpoint>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+impl Report {
+    /// Populate `canonical_name` for every declaration and callgraph node from
+    /// its `qualified_name`. Call this once the report is fully assembled, just
+    /// before serialization, so the canonical match key is always present and
+    /// consistent regardless of where the nodes were constructed.
+    pub fn fill_canonical_names(&mut self) {
+        for declaration in &mut self.declarations {
+            declaration.canonical_name = canonical_name(&declaration.qualified_name);
+        }
+        if let Some(call_graph) = self.call_graph.as_mut() {
+            for node in &mut call_graph.nodes {
+                node.canonical_name = canonical_name(&node.qualified_name);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod canonical_name_tests {
+    use super::canonical_name;
+
+    #[test]
+    fn reduces_trait_qualified_self() {
+        assert_eq!(
+            canonical_name("<wasm_tools::dump::Dump as core::fmt::Debug>::fmt"),
+            "wasm_tools::dump::Dump::fmt"
+        );
+    }
+
+    #[test]
+    fn strips_generics_and_hash() {
+        assert_eq!(
+            canonical_name("alloc::vec::Vec<u8>::push::h1a2b3c4d5e6f7a8b"),
+            "alloc::vec::Vec::push"
+        );
+    }
+
+    #[test]
+    fn reduces_impl_for_block_and_lifetimes() {
+        assert_eq!(
+            canonical_name("<impl core::fmt::Debug for myapp::Widget<'a>>::fmt"),
+            "myapp::Widget::fmt"
+        );
+    }
+
+    #[test]
+    fn collapses_monomorphized_instances() {
+        assert_eq!(
+            canonical_name("alloc::vec::Vec<myapp::Token>::push"),
+            canonical_name("alloc::vec::Vec<u8>::push")
+        );
+    }
+
+    #[test]
+    fn passes_through_plain_names() {
+        assert_eq!(canonical_name("wasm_tools::main"), "wasm_tools::main");
+        assert_eq!(canonical_name(""), "");
+    }
 }
