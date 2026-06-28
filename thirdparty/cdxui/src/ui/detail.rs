@@ -157,7 +157,7 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
             lines.push(section_header("Evidence", theme));
             if let Some(ref ids) = evidence.identity {
                 for (i, ident) in ids.iter().enumerate() {
-                    let label = ident.name.as_deref().unwrap_or("-");
+                    let label = ident.field.as_deref().unwrap_or("-");
                     lines.push(Line::from(vec![
                         Span::styled(format!("  [{}] ", i + 1), dim("", theme)),
                         Span::raw(label.to_string()),
