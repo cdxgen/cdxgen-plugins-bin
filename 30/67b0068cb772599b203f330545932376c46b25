@@ -1,0 +1,116 @@
+thirdparty/cdxui/test/data/sbom-java.vex.json
+  s_6f3fa97a105bdc::t_5db31a068204d1 1
+thirdparty/cdxui/test/data/crapi/crapi-sbom-universal.vex.json
+  s_6f3fa97a105bdc::t_5db31a068204d1 1
+thirdparty/cdxui/src/bom/store.rs
+  s_6f3fa97a105bdc::t_90ba399ade632e 1225-1247
+  s_6f3fa97a105bdc::t_0efc3143bb972d 1493-1494
+  s_6f3fa97a105bdc::t_40b197c9a5ab5a 546-562
+  s_6f3fa97a105bdc::t_ca2438f4cb2010 1878-2032
+  s_6f3fa97a105bdc::t_bc611dd1c440f1 1376-1377
+  s_6f3fa97a105bdc::t_3d9596a19f3858 1087-1089
+  s_6f3fa97a105bdc::t_e531a5d0981c82 736-738
+  s_6f3fa97a105bdc::t_97c1201e69da7c 176-452,454-531,533-545
+  s_6f3fa97a105bdc::t_8c88dca932da10 1030-1077
+  s_6f3fa97a105bdc::t_7ed5f8e31eb415 1763-1766
+  s_6f3fa97a105bdc::t_526348dc85670c 1191
+  s_6f3fa97a105bdc::t_fee9f5c85be482 771-912
+  s_6f3fa97a105bdc::t_f1d3c5d6c92724 1107-1190,1192-1224
+  s_6f3fa97a105bdc::t_95de72a986b5e6 453
+  s_6f3fa97a105bdc::t_f35328ab131aa5 608-614
+  s_6f3fa97a105bdc::t_3dad8f59fdd47c 19-20
+  s_439faa11bbc496::t_fb8367edddaeb4 532
+  s_6f3fa97a105bdc::t_c10abc05d97ffb 946-963,965
+  s_6f3fa97a105bdc::t_040f335b0c0236 580-586
+thirdparty/cdxui/src/ui/mod.rs
+  s_6f3fa97a105bdc::t_7b0c44a9c886e4 336-342
+  s_6f3fa97a105bdc::t_a570cefbcd8ac3 166
+  s_6f3fa97a105bdc::t_70ac079238504b 7
+  s_6f3fa97a105bdc::t_40b90016a08f59 1659-1689,1691-1693,1695-1698
+  s_6f3fa97a105bdc::t_eeb04aef52a9b6 1016,1027-1061,1066
+  s_6f3fa97a105bdc::t_c1317ff111b740 18-27
+  s_6f3fa97a105bdc::t_acd10e16a8a5aa 1293-1345,1348,1358,1362-1461
+  s_6f3fa97a105bdc::t_ed4fc4e1e60284 1690,1694
+  s_6f3fa97a105bdc::t_1eccf76d932a71 1699-1723
+  s_6f3fa97a105bdc::t_0a44f9c15500d7 894-915,917,919-921,926-930,956-959,969-970
+  s_6f3fa97a105bdc::t_fc5a6a01c96e99 584-591
+  s_6f3fa97a105bdc::t_3691e184316614 1483,1486-1488
+  s_439faa11bbc496::t_4cd720e7b332b9 1346-1347,1349-1357,1359-1361
+  s_6f3fa97a105bdc::t_80ad23071d9f4d 1536-1553,1581,1584-1586
+  s_6f3fa97a105bdc::t_fea3372cb22a84 965-968
+  s_6f3fa97a105bdc::t_fa6833070c921a 11
+  s_6f3fa97a105bdc::t_44cfeef0524de1 506-583,592-627,630-633,635-752
+  s_439faa11bbc496::t_724943d66057ea 628-629,634
+  s_6f3fa97a105bdc::t_162ffa1c20bd54 301,308-311
+thirdparty/cdxui/test/data/jinja-report.vdr.json
+  s_6f3fa97a105bdc::t_5db31a068204d1 1-13700
+thirdparty/cdxui/README.md
+  s_6f3fa97a105bdc::t_141acc62dfff7f 11,19
+  s_6f3fa97a105bdc::t_4199f25b2ea8bc 102-111
+  s_6f3fa97a105bdc::t_b353bad247a50f 85,94
+  s_6f3fa97a105bdc::t_1a63f46a7c2450 40
+thirdparty/cdxui/src/bom/schema.rs
+  s_6f3fa97a105bdc::t_db17661b15c72c 600-651
+  s_6f3fa97a105bdc::t_5127baeb387fc2 33
+  s_6f3fa97a105bdc::t_23a1d388335795 396-399,405-406,409-448
+thirdparty/cdxui/src/app.rs
+  s_6f3fa97a105bdc::t_8804eaa332bc7e 139-140
+  s_6f3fa97a105bdc::t_10e5cba1743295 8,17,20,32
+  s_6f3fa97a105bdc::t_cf461f7b208a9f 285-295
+  s_6f3fa97a105bdc::t_96b2261d649c26 97-98
+  s_6f3fa97a105bdc::t_bc0ab5d1a498e7 182-184,198
+thirdparty/cdxui/src/ui/detail.rs
+  s_439faa11bbc496::t_fe6eda5c4029cc 68-74
+  s_6f3fa97a105bdc::t_c19867db551f20 88-95
+  s_6f3fa97a105bdc::t_85ceb4a7bf4ba0 285
+  s_6f3fa97a105bdc::t_6c2d7ca8910a90 54,64,75-77
+  s_6f3fa97a105bdc::t_ecf52257bb92b0 612-667
+  s_6f3fa97a105bdc::t_14207217a4a5bd 339-611
+thirdparty/cdxui/src/app_tests.rs
+  s_6f3fa97a105bdc::t_6de2777f09f2c5 14-15,30-31,38,46-49
+  s_6f3fa97a105bdc::t_6743c1be578c90 50-51
+thirdparty/cdxui/src/bom/schema_tests.rs
+  s_6f3fa97a105bdc::t_7f70dbd34b243d 327-344,346-384
+  s_6f3fa97a105bdc::t_7b34e6c81e069d 345
+thirdparty/cdxui/Cargo.toml
+  s_6f3fa97a105bdc::t_3d3da1a72fbe1f 3
+thirdparty/cdxui/src/main.rs
+  s_6f3fa97a105bdc::t_c40305961ff9ba 251-256
+  s_6f3fa97a105bdc::t_8813afadd3b9f1 298-304
+  s_6f3fa97a105bdc::t_4d195441e3954e 427
+  s_6f3fa97a105bdc::t_64c303a21902e0 374-387
+thirdparty/cdxui/src/ui/theme.rs
+  s_6f3fa97a105bdc::t_a2495f7d43184b 27
+  s_6f3fa97a105bdc::t_83ae682a445928 59
+  s_6f3fa97a105bdc::t_e6af4172bbbd5b 97
+  s_6f3fa97a105bdc::t_a51aeaacf51ec1 112-117,121-140
+  s_6f3fa97a105bdc::t_cd8811bb5188dd 141
+thirdparty/cdxui/test/data/sbom-universal.vex.json
+  s_6f3fa97a105bdc::t_5db31a068204d1 1
+thirdparty/cdxui/Cargo.lock
+  s_6f3fa97a105bdc::t_6018e624508b09 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3067b0068cb772599b203f330545932376c46b25",
+  "prompts": {},
+  "sessions": {
+    "s_439faa11bbc496": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48d3112f-5279-4b66-add4-8678a0825a42",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_6f3fa97a105bdc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06e342492ffejSKez042xmfdMG",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
