@@ -308,7 +308,7 @@ impl App {
     pub fn clamp_scroll(&mut self) {
         let total = self.current_list_len() as u16;
         let v = self.visible_rows.max(1);
-        let max = if total > v { total - v } else { 0 };
+        let max = total.saturating_sub(v);
         self.scroll_offset = self.scroll_offset.min(max);
     }
 

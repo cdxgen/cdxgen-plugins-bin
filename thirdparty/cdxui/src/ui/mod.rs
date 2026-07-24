@@ -414,7 +414,7 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
         } else {
             for d in all.iter().take(15) {
                 let name = store.resolve_bom_ref(&d.ref_field);
-                let has_children = d.depends_on.as_ref().map_or(false, |c| !c.is_empty());
+                let has_children = d.depends_on.as_ref().is_some_and(|c| !c.is_empty());
                 let is_expanded = app.dep_expanded.contains(&d.ref_field);
                 let icon = if has_children { if is_expanded { "▾" } else { "▸" } } else { " " };
                 items.push(ListItem::new(Line::from(vec![Span::styled(
@@ -422,21 +422,21 @@ fn render_mini_dep_tree(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
                     Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
                 )])));
                 app.dep_tree_refs.push(d.ref_field.clone());
-                if is_expanded {
-                    if let Some(ref children) = d.depends_on {
+                if is_expanded
+                    && let Some(ref children) = d.depends_on {
                         for child in children {
                             let cname = store.resolve_bom_ref(child);
                             items.push(ListItem::new(format!("  └── {}", cname)));
                             app.dep_tree_refs.push(child.clone());
                         }
                     }
-                }
             }
         }
     } else {
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let ctx = DepCtx { store, theme, expanded: &app.dep_expanded };
         for root in &roots {
-            build_dep_list(&mut items, &mut app.dep_tree_refs, store, theme, root, "", &app.dep_expanded, &mut visited);
+            build_dep_list(&mut items, &mut app.dep_tree_refs, &ctx, root, "", &mut visited);
         }
     }
 
@@ -509,11 +509,9 @@ fn render_type_breakdown(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
 
 fn render_security_callout(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let s = &app.store.security_summary;
-    let pct = if s.total_components > 0 {
-        s.vulnerable_components * 100 / s.total_components
-    } else {
-        0
-    };
+    let pct = (s.vulnerable_components * 100)
+        .checked_div(s.total_components)
+        .unwrap_or(0);
     let spans = vec![
         Span::styled(
             format!(" ⚑ {} prioritized ", s.prioritized_vulns),
@@ -625,13 +623,12 @@ fn render_exposure_gauge(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
 
 fn render_severity_distribution(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let s = &app.store.security_summary;
-    // severity_counts is indexed by rank (0=none .. 4=critical); display
-    // highest-severity first, so read index `4 - i`.
-    let labels = ["critical", "high", "medium", "low", "none"];
-    let rows_data: Vec<(String, usize, Color)> = labels
+    // Ordered, label-paired counts (highest severity first) come from the
+    // store so the mapping is testable and cannot invert.
+    let rows_data: Vec<(String, usize, Color)> = s
+        .severity_display()
         .iter()
-        .enumerate()
-        .map(|(i, l)| (l.to_string(), s.severity_counts[4 - i], theme.severity_color(l)))
+        .map(|(l, c)| (l.to_string(), *c, theme.severity_color(l)))
         .collect();
     render_bar_list(frame, " Severity Distribution ", &rows_data, area, theme, true);
 }
@@ -720,7 +717,7 @@ fn render_bar_list(
         };
         Row::new(vec![
             Cell::from(Span::styled(truncate_str(label, 28), s)),
-            Cell::from(Span::styled(format!("{}", bar), s.fg(*color))),
+            Cell::from(Span::styled(bar.to_string(), s.fg(*color))),
             Cell::from(Span::styled(format!("{}", count), s.fg(*color).add_modifier(Modifier::BOLD))),
         ])
     }).collect();
@@ -752,13 +749,11 @@ fn truncate_str(s: &str, max: usize) -> String {
 
 fn render_stats_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let store = &app.store;
-    let items = vec![
-        ("Components", store.total_components, theme.accent),
+    let items = [("Components", store.total_components, theme.accent),
         ("Services", store.total_services, theme.accent),
         ("Crypto", store.total_crypto, theme.crypto_accent),
         ("Formulas", store.total_formulas, theme.accent),
-        ("Deps", store.total_dependencies, theme.accent),
-    ];
+        ("Deps", store.total_dependencies, theme.accent)];
 
     let spans: Vec<Span> = items.iter().flat_map(|(label, count, color)| {
         vec![
@@ -843,8 +838,8 @@ fn render_metadata_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
                     ]));
                 }
             }
-            if let Some(ref tools) = meta.tools {
-                if let Some(ref tc) = tools.components {
+            if let Some(ref tools) = meta.tools
+                && let Some(ref tc) = tools.components {
                     for t in tc {
                         rows.push(Row::new(vec![
                             Cell::from(Span::styled("Tool", Style::default().fg(theme.detail_fg))),
@@ -852,7 +847,6 @@ fn render_metadata_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
                         ]));
                     }
                 }
-            }
             if let Some(ref props) = meta.properties {
                 for p in props.iter().take(10) {
                     let n = p.name.as_deref().unwrap_or("-");
@@ -995,7 +989,7 @@ fn render_component_table(
             let global_idx = scroll_start + i;
             let is_selected = global_idx == app.table_selected;
             let is_alt = global_idx % 2 == 1;
-            let in_selection = app.selected_rows().map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
+            let in_selection = app.selected_rows().is_some_and(|(s, e)| global_idx >= s && global_idx <= e);
 
             let base_style = if is_selected {
                 theme.selected_style()
@@ -1026,7 +1020,7 @@ fn render_component_table(
 
             if has_vulns {
                 let purl_key = row.component.purl.as_deref()
-                    .or_else(|| row.component.bom_ref.as_deref())
+                    .or(row.component.bom_ref.as_deref())
                     .unwrap_or("");
                 let cve_cell = match store.vuln_summary_for(purl_key) {
                     None => Cell::from(Span::styled(
@@ -1125,7 +1119,7 @@ fn render_service_table(frame: &mut Frame, app: &mut App, theme: &Theme, area: R
             let global_idx = scroll_start + i;
             let is_selected = global_idx == app.table_selected;
             let is_alt = global_idx % 2 == 1;
-            let in_selection = app.selected_rows().map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
+            let in_selection = app.selected_rows().is_some_and(|(s, e)| global_idx >= s && global_idx <= e);
 
             let base_style = if is_selected {
                 theme.selected_style()
@@ -1246,12 +1240,11 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
                                 }
                             }
                         }
-                        if let Some(ref task_deps) = wf.task_dependencies {
-                            if !task_deps.is_empty() {
+                        if let Some(ref task_deps) = wf.task_dependencies
+                            && !task_deps.is_empty() {
                                 let deps_str: Vec<&str> = task_deps.iter().filter_map(|td| td.ref_field.as_deref()).collect();
                                 items.push(ListItem::new(format!("    Task deps: {}", deps_str.join(", "))));
                             }
-                        }
                     }
                 }
             }
@@ -1387,7 +1380,7 @@ fn render_vulnerabilities(
             let is_alt = global_idx % 2 == 1;
             let in_selection = app
                 .selected_rows()
-                .map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
+                .is_some_and(|(s, e)| global_idx >= s && global_idx <= e);
 
             let base_style = if is_selected {
                 theme.selected_style()
@@ -1412,14 +1405,16 @@ fn render_vulnerabilities(
                 Cell::from(Span::styled(" ", base_style))
             };
 
-            // reach label
+            // reach label (with call-site count when available)
+            let locs = row.used_in_locations();
+            let loc_suffix = locs.map(|n| format!(" ({})", n)).unwrap_or_default();
             let (reach_text, reach_style) = if row.is_endpoint_reachable() {
                 (
-                    "→ Endpoint".to_string(),
+                    format!("→ Endpoint{}", loc_suffix),
                     Style::default().fg(theme.crypto_accent),
                 )
             } else if row.is_reachable() {
-                ("⚡ Reachable".to_string(), Style::default().fg(theme.warn))
+                (format!("⚡ Reachable{}", loc_suffix), Style::default().fg(theme.warn))
             } else {
                 ("—".to_string(), Style::default().fg(theme.table_row_fg).add_modifier(Modifier::DIM))
             };
@@ -1470,14 +1465,15 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
     app.dep_tree_refs.clear();
 
     if !roots.is_empty() {
+        let ctx = DepCtx { store, theme, expanded };
         for root in &roots {
-            build_dep_list(&mut items, &mut app.dep_tree_refs, store, theme, root, "", expanded, &mut visited);
+            build_dep_list(&mut items, &mut app.dep_tree_refs, &ctx, root, "", &mut visited);
         }
     } else {
         let all_deps = store.all_dependencies();
         for d in all_deps {
             let name = store.resolve_bom_ref(&d.ref_field);
-            let has_children = d.depends_on.as_ref().map_or(false, |c| !c.is_empty());
+            let has_children = d.depends_on.as_ref().is_some_and(|c| !c.is_empty());
             let is_expanded = expanded.contains(&d.ref_field);
             let icon = if has_children { if is_expanded { "▾ " } else { "▸ " } } else { "  " };
             let mut spans: Vec<Span<'static>> = vec![Span::styled(
@@ -1487,8 +1483,8 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
             spans.extend(vuln_badge_spans(store, theme, &d.ref_field));
             items.push(ListItem::new(Line::from(spans)));
             app.dep_tree_refs.push(d.ref_field.clone());
-            if is_expanded {
-                if let Some(ref depends_on) = d.depends_on {
+            if is_expanded
+                && let Some(ref depends_on) = d.depends_on {
                     for (i, child) in depends_on.iter().enumerate() {
                         let prefix = if i == depends_on.len() - 1 { "  └── " } else { "  ├── " };
                         let cname = store.resolve_bom_ref(child);
@@ -1496,7 +1492,6 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
                         app.dep_tree_refs.push(child.clone());
                     }
                 }
-            }
         }
     }
 
@@ -1551,16 +1546,22 @@ fn vuln_badge_spans(store: &BomStore, theme: &Theme, ref_field: &str) -> Vec<Spa
     }
 }
 
+/// Read-only context shared across the recursive dependency-tree walk.
+struct DepCtx<'a> {
+    store: &'a BomStore,
+    theme: &'a Theme,
+    expanded: &'a std::collections::HashSet<String>,
+}
+
 fn build_dep_list(
     items: &mut Vec<ListItem>,
     refs: &mut Vec<String>,
-    store: &BomStore,
-    theme: &Theme,
+    ctx: &DepCtx,
     ref_field: &str,
     prefix: &str,
-    expanded: &std::collections::HashSet<String>,
     visited: &mut std::collections::HashSet<String>,
 ) {
+    let DepCtx { store, theme, expanded } = *ctx;
     if visited.contains(ref_field) {
         let name = store.resolve_bom_ref(ref_field);
         items.push(ListItem::new(Line::from(vec![
@@ -1594,7 +1595,7 @@ fn build_dep_list(
             } else {
                 format!("{}  ├── ", prefix)
             };
-            build_dep_list(items, refs, store, theme, child, &child_prefix, expanded, visited);
+            build_dep_list(items, refs, ctx, child, &child_prefix, visited);
         }
     }
 }
@@ -1657,44 +1658,76 @@ mod tests {
         assert_eq!(split_newlines_display(""), "");
     }
 
-    #[test]
-    fn test_render_all_tabs_no_panic_crapi() {
-        // Headless render of every tab against the 796-vuln crapi fixture —
-        // guards against widget/layout panics (e.g. bar overflow) in CI.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("test/data/crapi/crapi-sbom-universal.vex.json");
+    fn render_every_tab_for_fixture(rel_path: &str) {
+        // Headless render of every tab against a real VDR fixture — guards
+        // against widget/layout panics (e.g. bar overflow) at wide + narrow
+        // widths, in both themes.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel_path);
         if !path.exists() {
-            return; // fixture optional in stripped checkouts
+            return; // fixtures optional in stripped checkouts
         }
         let mut store = BomStore::new();
         store.load_path(&path).unwrap();
-        assert!(store.total_vulnerabilities > 0);
+        assert!(store.total_vulnerabilities > 0, "{} has no vulns", rel_path);
 
-        let theme = crate::ui::theme::Theme::dark();
         let log_store = crate::logs::LogStore::new(100);
         let mut trace_state = crate::trace::TraceState::new();
 
-        for &tab in Tab::ALL.iter() {
-            let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
-            app.store = store.clone();
-            app.current_tab = tab;
-            // exercise the vuln quick filter + detail paths too
-            if tab == Tab::Vulnerabilities {
-                app.store.set_vuln_filter(crate::bom::store::VulnFilter::Exploitable);
-                app.detail_open = true;
-                app.table_selected = 0;
+        for theme in [crate::ui::theme::Theme::dark(), crate::ui::theme::Theme::light()] {
+            for &tab in Tab::ALL.iter() {
+                // exercise every vuln quick filter too
+                for filter in [
+                    crate::bom::store::VulnFilter::All,
+                    crate::bom::store::VulnFilter::Prioritized,
+                    crate::bom::store::VulnFilter::Reachable,
+                    crate::bom::store::VulnFilter::Exploitable,
+                    crate::bom::store::VulnFilter::CriticalHigh,
+                ] {
+                    let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
+                    app.store = store.clone();
+                    app.current_tab = tab;
+                    if tab == Tab::Vulnerabilities {
+                        app.store.set_vuln_filter(filter);
+                        app.detail_open = true;
+                        app.table_selected = 0;
+                    } else if filter != crate::bom::store::VulnFilter::All {
+                        continue; // filter only matters on the vuln tab
+                    }
+                    if matches!(tab, Tab::Components | Tab::Dependencies) {
+                        app.detail_open = true;
+                    }
+                    for (w, h) in [(120u16, 40u16), (40, 12)] {
+                        let backend = ratatui::backend::TestBackend::new(w, h);
+                        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+                        terminal
+                            .draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme))
+                            .unwrap();
+                    }
+                }
             }
-            if matches!(tab, Tab::Components | Tab::Dependencies) {
-                app.detail_open = true;
-            }
-            let backend = ratatui::backend::TestBackend::new(120, 40);
-            let mut terminal = ratatui::Terminal::new(backend).unwrap();
-            // narrow width too, to stress the dashboard layout
-            terminal.draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme)).unwrap();
-            let narrow_backend = ratatui::backend::TestBackend::new(40, 12);
-            let mut narrow = ratatui::Terminal::new(narrow_backend).unwrap();
-            narrow.draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme)).unwrap();
         }
+    }
+
+    #[test]
+    fn test_render_all_tabs_no_panic_crapi() {
+        render_every_tab_for_fixture("test/data/crapi/crapi-sbom-universal.vex.json");
+    }
+
+    #[test]
+    fn test_render_all_tabs_no_panic_java() {
+        render_every_tab_for_fixture("test/data/sbom-java.vex.json");
+    }
+
+    #[test]
+    fn test_render_all_tabs_no_panic_universal() {
+        render_every_tab_for_fixture("test/data/sbom-universal.vex.json");
+    }
+
+    #[test]
+    fn test_render_all_tabs_no_panic_reachable() {
+        // Reachability-rich fixture (juice-shop) exercises the "Used in N
+        // locations" provenance parsing + reachability dashboard widgets.
+        render_every_tab_for_fixture("test/data/juice-shop.vdr.json");
     }
 
     #[test]

@@ -186,8 +186,8 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
             app.thoughts_collapsed = true;
             app.switch_timer = Some(std::time::Instant::now());
 
-            if let Some(ref out_path) = app.output_path {
-                if out_path.exists() {
+            if let Some(ref out_path) = app.output_path
+                && out_path.exists() {
                     match app.store.load_path(out_path) {
                         Ok(count) => {
                             let msg = format!("Loaded {} BOM file(s) from {}", count, out_path.display());
@@ -198,7 +198,6 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
                         }
                     }
                 }
-            }
             process.take();
         }
     }
@@ -215,12 +214,11 @@ fn drain_traces(trace_state: &mut TraceState, process: &mut Option<ProcessHandle
 }
 
 fn check_auto_switch(app: &mut App, _log_store: &LogStore) {
-    if let Some(timer) = app.switch_timer {
-        if timer.elapsed().as_secs() >= 2 {
+    if let Some(timer) = app.switch_timer
+        && timer.elapsed().as_secs() >= 2 {
             app.current_tab = Tab::Summary;
             app.switch_timer = None;
         }
-    }
 }
 
 fn extract_output_path(args: &[String]) -> Option<String> {
@@ -385,8 +383,8 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 }
             }
 
-            if let Some(area) = app.dep_tree_area {
-                if mouse.column >= area.x && mouse.column < area.x + area.width
+            if let Some(area) = app.dep_tree_area
+                && mouse.column >= area.x && mouse.column < area.x + area.width
                     && mouse.row > area.y && mouse.row < area.y + area.height
                     && matches!(app.current_tab, Tab::Dependencies | Tab::Summary)
                 {
@@ -417,10 +415,9 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                         return;
                     }
                 }
-            }
 
-            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r) {
-                if mouse.column >= area.x && mouse.column < area.x + area.width
+            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r)
+                && mouse.column >= area.x && mouse.column < area.x + area.width
                     && mouse.row > area.y && mouse.row < area.y + area.height
                 {
                     let row = (mouse.row - area.y - 2) as usize + app.scroll_offset as usize;
@@ -441,7 +438,6 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                     app.selection_start_row = Some(row);
                     app.selection_end_row = None;
                 }
-            }
             if let Some(p) = panel {
                 if p == PanelFocus::Thoughts && app.generation_done {
                     app.toggle_thoughts_collapse();
@@ -450,14 +446,13 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
             }
         }
         MouseEventKind::Drag(_) => {
-            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r) {
-                if mouse.column >= area.x && mouse.column < area.x + area.width
+            if let Some(area) = app.panel_areas.iter().find(|(p, _)| *p == PanelFocus::Main).map(|(_, r)| *r)
+                && mouse.column >= area.x && mouse.column < area.x + area.width
                     && mouse.row > area.y && mouse.row < area.y + area.height
                 {
                     let row = (mouse.row - area.y - 2) as usize + app.scroll_offset as usize;
                     app.selection_end_row = Some(row);
                 }
-            }
         }
         _ => {}
     }
@@ -466,7 +461,7 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
 fn max_scroll(app: &App) -> u16 {
     let total = app.current_list_len() as u16;
     let v = app.visible_rows.max(1);
-    if total > v { total - v } else { 0 }
+    total.saturating_sub(v)
 }
 
 fn scroll_offset_for_panel(app: &mut App, panel: Option<PanelFocus>) -> &mut u16 {
@@ -542,7 +537,7 @@ fn yank_selection(app: &App) {
                     .spawn()
                     .and_then(|mut c| { use std::io::Write; c.stdin.take().unwrap().write_all(text.as_bytes()) })
             } else {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "unsupported"))
+                Err(std::io::Error::other("unsupported"))
             };
             if result.is_ok() {
                 eprintln!("── yanked {} row(s) to clipboard ──", count);

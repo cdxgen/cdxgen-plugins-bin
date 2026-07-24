@@ -86,7 +86,7 @@ impl TraceState {
 
     pub fn tick(&mut self) {
         self.frame += 1;
-        if self.frame % 120 == 0 {
+        if self.frame.is_multiple_of(120) {
             self.current_activity = Activity::Idle;
             self.activity_label.clear();
         }

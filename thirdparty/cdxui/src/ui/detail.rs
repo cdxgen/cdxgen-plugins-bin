@@ -125,14 +125,13 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
                 format!("  • {}", parts.join(" ")),
                 accent(theme),
             )]));
-            if let Some(ref lic) = lc.license {
-                if let Some(ref url) = lic.url {
+            if let Some(ref lic) = lc.license
+                && let Some(ref url) = lic.url {
                     lines.push(Line::from(vec![Span::styled(
                         format!("    {}", url),
                         Style::default().fg(theme.crypto_accent),
                     )]));
                 }
-            }
         }
         lines.push(Line::from(""));
     }
@@ -170,8 +169,8 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
     }
 
     if let Some(ref evidence) = c.evidence {
-        let has_data = evidence.identity.as_ref().map_or(false, |v| !v.is_empty())
-            || evidence.occurrences.as_ref().map_or(false, |v| !v.is_empty());
+        let has_data = evidence.identity.as_ref().is_some_and(|v| !v.is_empty())
+            || evidence.occurrences.as_ref().is_some_and(|v| !v.is_empty());
         if has_data {
             lines.push(section_header("Evidence", theme));
             if let Some(ref ids) = evidence.identity {
@@ -362,6 +361,18 @@ fn render_vulnerability_detail(
     table_row(lines, theme, "Package", &row.package_name());
     if let Some(p) = row.affects_purl() { table_row(lines, theme, "Affected Purl", p); }
     table_row(lines, theme, "Fix", &row.fix_version());
+    let reach = if row.is_endpoint_reachable() {
+        "Endpoint-reachable"
+    } else if row.is_reachable() {
+        "Reachable"
+    } else {
+        "Not reachable"
+    };
+    let reach_val = match row.used_in_locations() {
+        Some(n) => format!("{} (used in {} location{})", reach, n, if n == 1 { "" } else { "s" }),
+        None => reach.to_string(),
+    };
+    table_row(lines, theme, "Reachability", &reach_val);
     let _ = sev_color;
     lines.push(Line::from(""));
 
@@ -437,8 +448,8 @@ fn render_vulnerability_detail(
     }
 
     // Ratings
-    if let Some(ratings) = &v.ratings {
-        if !ratings.is_empty() {
+    if let Some(ratings) = &v.ratings
+        && !ratings.is_empty() {
             lines.push(section_header(&format!("Ratings ({})", ratings.len()), theme));
             for r in ratings {
                 let method = r.method.as_deref().unwrap_or("-");
@@ -459,7 +470,6 @@ fn render_vulnerability_detail(
             }
             lines.push(Line::from(""));
         }
-    }
 
     // VEX analysis
     if let Some(analysis) = &v.analysis {
@@ -479,11 +489,10 @@ fn render_vulnerability_detail(
             if let Some(j) = &analysis.justification {
                 table_row(lines, theme, "Justification", j);
             }
-            if let Some(resp) = &analysis.response {
-                if !resp.is_empty() {
+            if let Some(resp) = &analysis.response
+                && !resp.is_empty() {
                     table_row(lines, theme, "Response", &resp.join(", "));
                 }
-            }
             lines.push(Line::from(""));
         }
     }
@@ -505,8 +514,8 @@ fn render_vulnerability_detail(
     }
 
     // Advisories
-    if let Some(advs) = &v.advisories {
-        if !advs.is_empty() {
+    if let Some(advs) = &v.advisories
+        && !advs.is_empty() {
             lines.push(section_header(&format!("Advisories ({})", advs.len()), theme));
             for adv in advs {
                 let t = adv.title.as_deref().unwrap_or("-");
@@ -521,11 +530,10 @@ fn render_vulnerability_detail(
             }
             lines.push(Line::from(""));
         }
-    }
 
     // References
-    if let Some(refs) = &v.references {
-        if !refs.is_empty() {
+    if let Some(refs) = &v.references
+        && !refs.is_empty() {
             lines.push(section_header(&format!("References ({})", refs.len()), theme));
             for rf in refs {
                 let rid = rf.id.as_deref().unwrap_or("-");
@@ -544,7 +552,6 @@ fn render_vulnerability_detail(
             }
             lines.push(Line::from(""));
         }
-    }
 
     // Source / timestamps
     let src_name = v.source.as_ref().and_then(|s| s.name.as_deref()).unwrap_or("");
@@ -621,7 +628,7 @@ fn render_component_vulns(
     if store.total_vulnerabilities == 0 {
         return;
     }
-    let key = c.purl.as_deref().or_else(|| c.bom_ref.as_deref()).unwrap_or("");
+    let key = c.purl.as_deref().or(c.bom_ref.as_deref()).unwrap_or("");
     let vulns = store.vulns_for_component(key);
     if vulns.is_empty() {
         return;

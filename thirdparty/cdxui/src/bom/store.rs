@@ -36,19 +36,12 @@ impl SortOrder {
 }
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct FilterState {
     pub query: String,
     pub component_type: Option<String>,
 }
 
-impl Default for FilterState {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            component_type: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ComponentRow {
@@ -190,7 +183,7 @@ fn strip_rich(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '[' {
             // skip until matching ]
-            while let Some(ic) = chars.next() {
+            for ic in chars.by_ref() {
                 if ic == ']' { break; }
             }
         } else if c == ':' {
@@ -227,7 +220,9 @@ fn purl_display_name(purl: &str) -> String {
     }
 }
 
-/// All normalized key forms of a purl for tolerant matching.
+/// Candidate lookup keys for a component purl, most specific first: full,
+/// then without `?qualifiers`, then without `@version`. Used when *querying*
+/// the vuln index for a component.
 fn purl_keys(purl: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     let full = purl.to_string();
@@ -244,6 +239,23 @@ fn purl_keys(purl: &str) -> Vec<String> {
         keys.push(no_ver);
     }
     keys
+}
+
+/// Keys under which a *vulnerability's* affected purl is indexed. dep-scan
+/// already scopes each VDR entry to an installed component, so the affected
+/// ref is a real purl. We index at the granularity the ref actually carries:
+/// a versioned ref only under its exact (full + no-qualifier) forms, so it can
+/// never leak onto a *different* version of the same package via a shared
+/// name-only key; a version-less ref collapses to its name form, which still
+/// matches the installed versioned component on lookup.
+fn purl_index_keys(purl: &str) -> Vec<String> {
+    let full = purl.to_string();
+    let no_qual = purl.split('?').next().unwrap_or(purl).to_string();
+    if no_qual != full {
+        vec![full, no_qual]
+    } else {
+        vec![full]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -328,11 +340,10 @@ impl VulnerabilityRow {
             for a in affects {
                 if let Some(versions) = &a.versions {
                     for v in versions {
-                        if v.status.as_deref() == Some("unaffected") {
-                            if let Some(ver) = &v.version {
+                        if v.status.as_deref() == Some("unaffected")
+                            && let Some(ver) = &v.version {
                                 return ver.clone();
                             }
-                        }
                     }
                 }
             }
@@ -396,6 +407,19 @@ impl VulnerabilityRow {
 
     pub fn any_reachability(&self) -> bool {
         self.is_reachable() || self.is_endpoint_reachable()
+    }
+
+    /// Number of call sites the reachability engine attributed to this vuln,
+    /// parsed from a `"Used in N locations"` insight label. `None` when absent.
+    pub fn used_in_locations(&self) -> Option<u32> {
+        self.insight_labels().iter().find_map(|l| {
+            let low = l.to_lowercase();
+            if !low.contains("used in") || !low.contains("location") {
+                return None;
+            }
+            l.split_whitespace()
+                .find_map(|tok| tok.parse::<u32>().ok())
+        })
     }
 
     pub fn is_exploitable(&self) -> bool {
@@ -465,7 +489,9 @@ impl VulnSortField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum VulnFilter {
+    #[default]
     All,
     Prioritized,
     Reachable,
@@ -495,11 +521,6 @@ impl VulnFilter {
     }
 }
 
-impl Default for VulnFilter {
-    fn default() -> Self {
-        VulnFilter::All
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct PurlVulnSummary {
@@ -540,7 +561,21 @@ pub struct SecuritySummary {
     pub total_components: usize,
     pub top_by_count: Vec<(String, PurlVulnSummary)>,
     pub top_by_reach_exploit: Vec<(String, PurlVulnSummary)>,
-    pub top_reachable_services: Vec<(String, usize)>,
+}
+
+impl SecuritySummary {
+    /// Severity counts paired with their label, ordered highest-severity first.
+    /// Single source of truth for the dashboard so the label↔count mapping
+    /// cannot silently invert (regression guard for the rank-indexing bug).
+    pub fn severity_display(&self) -> [(&'static str, usize); 5] {
+        [
+            ("critical", self.severity_counts[4]),
+            ("high", self.severity_counts[3]),
+            ("medium", self.severity_counts[2]),
+            ("low", self.severity_counts[1]),
+            ("none", self.severity_counts[0]),
+        ]
+    }
 }
 
 /// Tolerant purl/bom-ref lookup against a vuln aggregation map (free fn so it
@@ -664,16 +699,14 @@ impl BomStore {
                 source: e,
             })?;
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "json" || ext == "cdx" {
+            if path.is_file()
+                && let Some(ext) = path.extension()
+                    && (ext == "json" || ext == "cdx") {
                         match self.load_file(&path) {
                             Ok(n) => count += n,
                             Err(e) => eprintln!("Warning: skipping {}: {}", path.display(), e),
                         }
                     }
-                }
-            }
         }
 
         if count == 0 {
@@ -722,11 +755,10 @@ impl BomStore {
 
         let old_crypto: Vec<usize> = self.crypto_assets.clone();
         for &old_idx in &old_crypto {
-            if let Some(&new_idx) = old_to_new.get(&old_idx) {
-                if !crypto_merged.contains(&new_idx) {
+            if let Some(&new_idx) = old_to_new.get(&old_idx)
+                && !crypto_merged.contains(&new_idx) {
                     crypto_merged.push(new_idx);
                 }
-            }
         }
 
         self.components = merged;
@@ -802,8 +834,10 @@ impl BomStore {
     /// per row or per frame.
     fn compute_vuln_aggregates(&mut self) {
         self.vuln_by_purl.clear();
-        let mut summary = SecuritySummary::default();
-        summary.total_vulns = self.vulnerabilities.len();
+        let mut summary = SecuritySummary {
+            total_vulns: self.vulnerabilities.len(),
+            ..Default::default()
+        };
 
         for row in &self.vulnerabilities {
             let rank = row.severity_rank();
@@ -828,11 +862,11 @@ impl BomStore {
 
             if let Some(purl) = row.affects_purl() {
                 let display = purl_display_name(purl);
-                for key in purl_keys(purl) {
+                for key in purl_index_keys(purl) {
                     let entry = self
                         .vuln_by_purl
                         .entry(key)
-                        .or_insert_with(PurlVulnSummary::default);
+                        .or_default();
                     entry.count += 1;
                     if rank > entry.max_severity_rank {
                         entry.max_severity_rank = rank;
@@ -854,14 +888,31 @@ impl BomStore {
         summary.total_components = self.total_components;
         summary.vulnerable_components = self.count_vulnerable_components();
 
-        // Top packages by CVE count.
-        let mut by_count: Vec<&PurlVulnSummary> = self.vuln_by_purl.values().collect();
-        by_count.sort_by(|a, b| {
-            b.count
-                .cmp(&a.count)
-                .then_with(|| b.max_severity_rank.cmp(&a.max_severity_rank))
+        // Deduplicate by package display name (a package is indexed under
+        // multiple key forms, so `vuln_by_purl.values()` repeats it).
+        let mut by_name: HashMap<&str, &PurlVulnSummary> = HashMap::new();
+        for s in self.vuln_by_purl.values() {
+            by_name
+                .entry(s.display_name.as_str())
+                .and_modify(|cur| {
+                    if s.count > cur.count {
+                        *cur = s;
+                    }
+                })
+                .or_insert(s);
+        }
+        let unique: Vec<&PurlVulnSummary> = by_name.into_values().collect();
+
+        let sev_score_cmp = |a: &PurlVulnSummary, b: &PurlVulnSummary| {
+            b.max_severity_rank
+                .cmp(&a.max_severity_rank)
                 .then_with(|| b.max_score.partial_cmp(&a.max_score).unwrap_or(std::cmp::Ordering::Equal))
-        });
+                .then_with(|| a.display_name.cmp(&b.display_name))
+        };
+
+        // Top packages by CVE count.
+        let mut by_count = unique.clone();
+        by_count.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| sev_score_cmp(a, b)));
         summary.top_by_count = by_count
             .iter()
             .take(8)
@@ -869,28 +920,18 @@ impl BomStore {
             .collect();
 
         // Top packages by reachable/exploitable vulns.
-        let mut by_reach: Vec<&PurlVulnSummary> = self
-            .vuln_by_purl
-            .values()
-            .filter(|s| s.reachable || s.exploitable)
-            .collect();
+        let mut by_reach: Vec<&PurlVulnSummary> =
+            unique.into_iter().filter(|s| s.reachable || s.exploitable).collect();
         by_reach.sort_by(|a, b| {
             let a_flags = (a.reachable as u8) + (a.exploitable as u8);
             let b_flags = (b.reachable as u8) + (b.exploitable as u8);
-            b_flags
-                .cmp(&a_flags)
-                .then_with(|| b.max_severity_rank.cmp(&a.max_severity_rank))
-                .then_with(|| b.max_score.partial_cmp(&a.max_score).unwrap_or(std::cmp::Ordering::Equal))
+            b_flags.cmp(&a_flags).then_with(|| sev_score_cmp(a, b))
         });
         summary.top_by_reach_exploit = by_reach
             .iter()
             .take(8)
             .map(|s| (s.display_name.clone(), (*s).clone()))
             .collect();
-
-        // Top reachable services: only populated when service↔vuln linkage exists.
-        // dep-scan insights carry no service ref today, so this stays empty.
-        summary.top_reachable_services = Vec::new();
 
         self.security_summary = summary;
     }
@@ -1139,7 +1180,8 @@ impl BomStore {
                     .cmp(&rb.package_name().to_lowercase()),
                 VulnSortField::Fix => ra.fix_version().cmp(&rb.fix_version()),
             };
-            let cmp = match field {
+            
+            match field {
                 // For the columns that already encode "higher is riskier",
                 // ascending vs descending flips naturally.
                 VulnSortField::Priority
@@ -1159,8 +1201,7 @@ impl BomStore {
                         primary.reverse().then(base)
                     }
                 }
-            };
-            cmp
+            }
         });
     }
 
@@ -1234,7 +1275,7 @@ impl BomStore {
             .iter()
             .filter(|row| {
                 row.affects_purl()
-                    .map_or(false, |p| purl_keys(p).iter().any(|k| keys.contains(k)))
+                    .is_some_and(|p| purl_keys(p).iter().any(|k| keys.contains(k)))
             })
             .collect();
         found.sort_by(|a, b| {
@@ -1281,7 +1322,7 @@ impl BomStore {
                 .or_insert(0) += 1;
         }
         let mut result: Vec<(String, usize)> = counts.into_iter().collect();
-        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         result
     }
 
@@ -1359,7 +1400,6 @@ impl BomStore {
             .iter()
             .enumerate()
             .find(|(_, row)| row.component.bom_ref.as_deref() == Some(ref_field))
-            .map(|(i, row)| (i, row))
     }
 
     pub fn file_count(&self) -> usize {
@@ -1455,10 +1495,10 @@ fn merge_component_properties(existing: &mut Component, duplicate: &Component) {
 }
 
 fn is_evidence_empty(ev: &ComponentEvidence) -> bool {
-    ev.identity.as_ref().map_or(true, |v| v.is_empty())
-        && ev.occurrences.as_ref().map_or(true, |v| v.is_empty())
-        && ev.licenses.as_ref().map_or(true, |v| v.is_empty())
-        && ev.copyright.as_ref().map_or(true, |v| v.is_empty())
+    ev.identity.as_ref().is_none_or(|v| v.is_empty())
+        && ev.occurrences.as_ref().is_none_or(|v| v.is_empty())
+        && ev.licenses.as_ref().is_none_or(|v| v.is_empty())
+        && ev.copyright.as_ref().is_none_or(|v| v.is_empty())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1953,6 +1993,25 @@ mod tests {
 
         // clean package has no vulns
         assert!(store.vuln_summary_for("pkg:npm/clean@1.0.0").is_none());
+
+        // hardening: a *different* version of a vulnerable package must NOT
+        // inherit its CVEs via a version-stripped key (no false positive).
+        assert!(
+            store.vuln_summary_for("pkg:npm/express@9.9.9").is_none(),
+            "unaffected version must not match a versioned vuln ref"
+        );
+
+        // top lists are deduplicated by package name (indexed under >1 key).
+        let names: Vec<&str> = store
+            .security_summary
+            .top_by_count
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(names.len(), sorted.len(), "top_by_count has duplicate packages");
     }
 
     #[test]
@@ -1978,6 +2037,27 @@ mod tests {
         assert!(cve_c.is_exploitable()); // analysis.state == exploitable
         assert_eq!(cve_c.severity(), "critical");
         assert_eq!(cve_c.max_score(), 9.8);
+
+        // call-site provenance parsed from "Used in N locations"
+        assert_eq!(cve_a.used_in_locations(), Some(3));
+        assert_eq!(cve_c.used_in_locations(), None);
+    }
+
+    #[test]
+    fn test_severity_display_mapping() {
+        // Guards against the label↔count inversion: severity_display() must
+        // pair "critical" with the rank-4 slot, not the rank-0 slot.
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(sample_vdr_json().as_bytes()).unwrap();
+        let mut store = BomStore::new();
+        store.load_path(tmp.path()).unwrap();
+
+        let disp = store.security_summary.severity_display();
+        assert_eq!(disp[0], ("critical", 1));
+        assert_eq!(disp[1], ("high", 1));
+        assert_eq!(disp[2], ("medium", 1));
+        assert_eq!(disp[3], ("low", 0));
+        assert_eq!(disp[4], ("none", 0));
     }
 
     #[test]
