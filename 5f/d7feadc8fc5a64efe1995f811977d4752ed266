@@ -1,0 +1,40 @@
+package.json
+  h_0926447d100ad2 3
+packages/windows-arm64/package.json
+  h_0926447d100ad2 3
+packages/windows-amd64/package.json
+  h_0926447d100ad2 3
+packages/darwin-arm64/package.json
+  h_0926447d100ad2 3
+packages/linux-arm64/package.json
+  h_0926447d100ad2 3
+packages/ppc64/package.json
+  h_0926447d100ad2 3
+packages/darwin-amd64/package.json
+  h_0926447d100ad2 3
+packages/linux-amd64/package.json
+  h_0926447d100ad2 3
+thirdparty/golem/cmd/golem/main.go
+  h_0926447d100ad2 16
+thirdparty/rusi/Cargo.toml
+  h_0926447d100ad2 16
+packages/linuxmusl-amd64/package.json
+  h_0926447d100ad2 3
+packages/linux-arm/package.json
+  h_0926447d100ad2 3
+packages/linuxmusl-arm64/package.json
+  h_0926447d100ad2 3
+packages/linux-riscv64/package.json
+  h_0926447d100ad2 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5fd7feadc8fc5a64efe1995f811977d4752ed266",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
