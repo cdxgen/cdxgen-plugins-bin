@@ -1,0 +1,53 @@
+thirdparty/cdxui/src/logs.rs
+  s_439faa11bbc496::t_d1ebf5d69c564e 88
+  s_439faa11bbc496::t_ff70e957bb04c9 89-92
+thirdparty/cdxui/test/data/juice-shop.vdr.json
+  s_439faa11bbc496::t_ae10beb2ade9d1 1
+thirdparty/cdxui/src/ui/mod.rs
+  s_439faa11bbc496::t_66a8c326b018c3 1598
+  s_439faa11bbc496::t_b412c10264f26d 437,439
+  s_439faa11bbc496::t_92e59000b75c1d 1408-1410,1413,1417
+  s_439faa11bbc496::t_3cc12609a76546 1468,1470
+  s_439faa11bbc496::t_96d829b13a3099 1549-1555,1559,1564
+  s_439faa11bbc496::t_3e190d28419c32 1661-1665,1667,1671,1676-1706,1711-1731
+  s_439faa11bbc496::t_fb7f02bf2f3492 512-514
+  s_439faa11bbc496::t_d1ebf5d69c564e 417,425-426,720,752,756,841-842,992,1023,1122,1243-1244,1383,1476,1486-1487
+  s_439faa11bbc496::t_8b3c00a2fac87d 626-629,631
+  s_439faa11bbc496::t_f9b47fef595f96 1732
+thirdparty/cdxui/src/app.rs
+  s_439faa11bbc496::t_d1ebf5d69c564e 311
+thirdparty/cdxui/src/ui/detail.rs
+  s_439faa11bbc496::t_d1ebf5d69c564e 128-129,172-173,451-452,492-493,517-518,535-536,631
+  s_439faa11bbc496::t_c4f63b71b6fd2b 364-375
+thirdparty/cdxui/src/bom/store.rs
+  s_439faa11bbc496::t_c570409cb28a5e 393-405
+  s_439faa11bbc496::t_8878d1ab4443d2 1996-2016
+  s_439faa11bbc496::t_d8960fd5a0a743 1300
+  s_439faa11bbc496::t_d1ebf5d69c564e 39,186,324-325,473,475,684-686,740-741,851,1158-1159,1179,1253,1473-1476
+  s_439faa11bbc496::t_9f1a6d83648736 819-822
+  s_439faa11bbc496::t_359f928b1371c1 548-562
+thirdparty/cdxui/src/process.rs
+  s_439faa11bbc496::t_9bf2f2b6d19768 180
+  s_439faa11bbc496::t_a6a3438fbd91e4 177-179,181,183
+  s_439faa11bbc496::t_d1ebf5d69c564e 83-84,108-109
+thirdparty/cdxui/src/trace.rs
+  s_439faa11bbc496::t_d1ebf5d69c564e 89
+thirdparty/cdxui/src/main.rs
+  s_439faa11bbc496::t_d1ebf5d69c564e 189-190,217-218,386-387,419-420,449-450,464,540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fc18d1f1cb4454a73ac81a51ee3c2cd561fec71c",
+  "prompts": {},
+  "sessions": {
+    "s_439faa11bbc496": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48d3112f-5279-4b66-add4-8678a0825a42",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
