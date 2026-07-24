@@ -24,7 +24,7 @@ pub struct Theme {
     pub warn: Color,
     pub error: Color,
     pub crypto_accent: Color,
-    pub tab_bg: [Color; 7],
+    pub tab_bg: [Color; 8],
 }
 
 impl Theme {
@@ -56,6 +56,7 @@ impl Theme {
             tab_bg: [
                 Color::Rgb(20, 22, 18), // Logs - dark green tint
                 Color::Rgb(18, 18, 18), // Summary - neutral
+                Color::Rgb(28, 16, 16), // Vulnerabilities - red tint
                 Color::Rgb(18, 18, 24), // Components - blue tint
                 Color::Rgb(20, 20, 22), // Dependencies - cool tint
                 Color::Rgb(22, 18, 24), // Crypto - purple tint
@@ -93,6 +94,7 @@ impl Theme {
             tab_bg: [
                 Color::Rgb(240, 248, 240), // Logs
                 Color::Rgb(245, 245, 245), // Summary
+                Color::Rgb(252, 240, 240), // Vulnerabilities
                 Color::Rgb(240, 240, 250), // Components
                 Color::Rgb(242, 242, 248), // Dependencies
                 Color::Rgb(248, 240, 248), // Crypto
@@ -107,12 +109,34 @@ impl Theme {
         match tab {
             Tab::Logs => 0,
             Tab::Summary => 1,
-            Tab::Components => 2,
-            Tab::Dependencies => 3,
-            Tab::Crypto => 4,
-            Tab::Services => 5,
-            Tab::Formulation => 6,
+            Tab::Vulnerabilities => 2,
+            Tab::Components => 3,
+            Tab::Dependencies => 4,
+            Tab::Crypto => 5,
+            Tab::Services => 6,
+            Tab::Formulation => 7,
         }
+    }
+
+    /// Severity → color, used consistently across the Vulns tab and inline badges.
+    pub fn severity_color(&self, severity: &str) -> Color {
+        match severity.to_lowercase().as_str() {
+            "critical" => Color::Rgb(220, 60, 60),
+            "high" => self.error,
+            "medium" => self.warn,
+            "low" => Color::Rgb(120, 170, 220),
+            _ => Color::Rgb(120, 120, 120),
+        }
+    }
+
+    pub fn severity_color_for_rank(&self, rank: u8) -> Color {
+        self.severity_color(match rank {
+            4 => "critical",
+            3 => "high",
+            2 => "medium",
+            1 => "low",
+            _ => "none",
+        })
     }
 
     pub fn tab_active_style(&self) -> Style {

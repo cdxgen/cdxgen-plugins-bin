@@ -4,17 +4,27 @@ pub mod theme;
 use crate::app::{App, InputMode, Tab};
 use crate::bom::store::SortOrder;
 use crate::bom::store::SortField;
+use crate::bom::store::VulnSortField;
 use crate::ui::theme::Theme;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, ListItem, Paragraph, Row, Table, TableState, Tabs, Wrap},
     Frame,
 };
 
-const COMPONENT_COLUMNS: [&str; 5] = ["Type", "Name", "Version", "Purl", "License"];
 const SERVICE_COLUMNS: [&str; 5] = ["Name", "Endpoints", "Auth", "Description", "BOM Ref"];
+const VULN_COLUMNS: [&str; 7] = ["⚑", "ID", "Severity", "CVSS", "Reach", "Package", "Fix"];
+const VULN_HEADER_FIELDS: [VulnSortField; 7] = [
+    VulnSortField::Priority,
+    VulnSortField::Id,
+    VulnSortField::Severity,
+    VulnSortField::Score,
+    VulnSortField::Reach,
+    VulnSortField::Package,
+    VulnSortField::Fix,
+];
 
 pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, trace_state: &crate::trace::TraceState, theme: &Theme) {
     let area = frame.area();
@@ -153,6 +163,7 @@ fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs
         Tab::Services => render_service_table(frame, app, theme, area, tab_bg),
         Tab::Formulation => render_formulation(frame, app, theme, area, tab_bg),
         Tab::Dependencies => render_dependencies(frame, app, theme, area, tab_bg),
+        Tab::Vulnerabilities => render_vulnerabilities(frame, app, theme, area, tab_bg),
     }
 }
 
@@ -287,12 +298,17 @@ fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _
         .collect();
 
     let has_annotations = !annotations.is_empty();
+    let has_vulns = store.total_vulnerabilities > 0;
 
     let constraints: Vec<Constraint> = {
         let mut c = vec![];
         if has_annotations { c.push(Constraint::Length(5)); }
         c.push(Constraint::Length(3)); // stats bar
         c.push(Constraint::Length(10)); // types + licenses
+        if has_vulns {
+            c.push(Constraint::Length(3)); // prioritized callout
+            c.push(Constraint::Min(16));  // security dashboard grid
+        }
         c.push(Constraint::Min(10));  // dep tree
         c.push(Constraint::Min(6));   // metadata
         c
@@ -316,6 +332,13 @@ fn render_summary(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _
         .split(mid);
     render_license_chart(frame, app, theme, mid_split[0]);
     render_type_breakdown(frame, app, theme, mid_split[1]);
+
+    if has_vulns {
+        render_security_callout(frame, app, theme, vert[idx]);
+        idx += 1;
+        render_security_dashboard(frame, app, theme, vert[idx]);
+        idx += 1;
+    }
 
     render_mini_dep_tree(frame, app, theme, vert[idx]);
     idx += 1;
@@ -480,6 +503,253 @@ fn render_type_breakdown(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
     frame.render_widget(table, area);
 }
 
+// ---------------------------------------------------------------------------
+// Security dashboard (Summary tab) — reads ONLY from store.security_summary.
+// ---------------------------------------------------------------------------
+
+fn render_security_callout(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    let pct = if s.total_components > 0 {
+        s.vulnerable_components * 100 / s.total_components
+    } else {
+        0
+    };
+    let spans = vec![
+        Span::styled(
+            format!(" ⚑ {} prioritized ", s.prioritized_vulns),
+            Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("·", Style::default().fg(theme.detail_fg).add_modifier(Modifier::DIM)),
+        Span::styled(
+            format!(" ⚡ {} reachable ", s.reachable_vulns),
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("·", Style::default().fg(theme.detail_fg).add_modifier(Modifier::DIM)),
+        Span::styled(
+            format!(" 🔥 {} exploitable ", s.exploitable_vulns),
+            Style::default().fg(Color::Rgb(255, 120, 80)).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("·", Style::default().fg(theme.detail_fg).add_modifier(Modifier::DIM)),
+        Span::styled(
+            format!(" {} vulns across {} of {} components ({}%) ",
+                s.total_vulns, s.vulnerable_components, s.total_components, pct),
+            Style::default().fg(theme.accent),
+        ),
+    ];
+    let p = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::ALL)
+            .title(" Security Posture ")
+            .style(Style::default().bg(theme.bg)));
+    frame.render_widget(p, area);
+}
+
+fn render_security_dashboard(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),  // exposure gauge
+            Constraint::Length(8),  // severity distribution
+            Constraint::Min(7),     // reachability breakdown
+        ])
+        .split(cols[0]);
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(9),  // top by count
+            Constraint::Min(8),  // top by reach/exploit
+        ])
+        .split(cols[1]);
+
+    render_exposure_gauge(frame, app, theme, left[0]);
+    render_severity_distribution(frame, app, theme, left[1]);
+    render_reachability_breakdown(frame, app, theme, left[2]);
+    render_top_packages_by_count(frame, app, theme, right[0]);
+    render_top_packages_by_reach(frame, app, theme, right[1]);
+}
+
+fn render_exposure_gauge(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    let total = s.total_components.max(1);
+    let vuln = s.vulnerable_components.min(total);
+    let safe = total - vuln;
+    let pct = vuln * 100 / total;
+
+    let bar_width = area.width.saturating_sub(4) as usize;
+    let mut vuln_len = vuln * bar_width / total;
+    if vuln > 0 && vuln_len == 0 {
+        vuln_len = 1;
+    }
+    if vuln_len > bar_width {
+        vuln_len = bar_width;
+    }
+    let safe_len = bar_width.saturating_sub(vuln_len);
+
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(" ", Style::default().bg(theme.bg)));
+    if vuln_len > 0 {
+        spans.push(Span::styled(
+            "█".repeat(vuln_len),
+            Style::default().fg(theme.error).bg(theme.bg),
+        ));
+    }
+    if safe_len > 0 {
+        spans.push(Span::styled(
+            "█".repeat(safe_len),
+            Style::default().fg(Color::Rgb(90, 160, 90)).bg(theme.bg),
+        ));
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(spans));
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {} vulnerable", vuln), Style::default().fg(theme.error).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("   {} unaffected", safe),
+            Style::default().fg(Color::Rgb(90, 160, 90)),
+        ),
+        Span::styled(format!("   {}% affected", pct), Style::default().fg(theme.accent)),
+    ]));
+
+    let p = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL)
+            .title(" Component Exposure ")
+            .style(Style::default().bg(theme.bg)));
+    frame.render_widget(p, area);
+}
+
+fn render_severity_distribution(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    // severity_counts is indexed by rank (0=none .. 4=critical); display
+    // highest-severity first, so read index `4 - i`.
+    let labels = ["critical", "high", "medium", "low", "none"];
+    let rows_data: Vec<(String, usize, Color)> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (l.to_string(), s.severity_counts[4 - i], theme.severity_color(l)))
+        .collect();
+    render_bar_list(frame, " Severity Distribution ", &rows_data, area, theme, true);
+}
+
+fn render_reachability_breakdown(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    let any_reach = s.reachable_vulns;
+    let not_reachable = s.total_vulns.saturating_sub(any_reach);
+    let rows_data: Vec<(String, usize, Color)> = vec![
+        ("⚡ Reachable".to_string(), s.reachable_vulns.saturating_sub(s.endpoint_reachable_vulns), theme.warn),
+        ("→ Endpoint".to_string(), s.endpoint_reachable_vulns, theme.crypto_accent),
+        ("🔥 Reach+Exploit".to_string(), s.reachable_exploitable_vulns, theme.error),
+        ("○ Not reachable".to_string(), not_reachable, Color::Rgb(120, 120, 120)),
+    ];
+    render_bar_list(frame, " Reachability Breakdown ", &rows_data, area, theme, true);
+}
+
+fn render_top_packages_by_count(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    let rows_data: Vec<(String, usize, Color)> = s
+        .top_by_count
+        .iter()
+        .map(|(name, sum)| {
+            let col = theme.severity_color_for_rank(sum.max_severity_rank);
+            (name.clone(), sum.count, col)
+        })
+        .collect();
+    let title = format!(" Top Packages by CVE Count ({}) ", s.top_by_count.len());
+    render_bar_list(frame, &title, &rows_data, area, theme, true);
+}
+
+fn render_top_packages_by_reach(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let s = &app.store.security_summary;
+    let rows_data: Vec<(String, usize, Color)> = s
+        .top_by_reach_exploit
+        .iter()
+        .map(|(name, sum)| {
+            let col = if sum.exploitable {
+                theme.error
+            } else {
+                theme.warn
+            };
+            (name.clone(), sum.count, col)
+        })
+        .collect();
+    let title = if s.top_by_reach_exploit.is_empty() {
+        " Top Reachable/Exploitable Packages ".to_string()
+    } else {
+        " ⚡ Fix These First (reachable/exploitable) ".to_string()
+    };
+    if rows_data.is_empty() {
+        let p = Paragraph::new("No reachable/exploitable vulnerabilities")
+            .style(Style::default().fg(theme.warn).add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)));
+        frame.render_widget(p, area);
+        return;
+    }
+    render_bar_list(frame, &title, &rows_data, area, theme, true);
+}
+
+/// Generic horizontal bar list: label | proportional bar | count.
+fn render_bar_list(
+    frame: &mut Frame,
+    title: &str,
+    rows_data: &[(String, usize, Color)],
+    area: Rect,
+    theme: &Theme,
+    _show_bar: bool,
+) {
+    let max = rows_data.iter().map(|(_, c, _)| *c).max().unwrap_or(1).max(1);
+    let header = Row::new(
+        ["Package", "Bar", "Count"]
+            .iter()
+            .map(|c| Cell::from(Span::styled(*c, theme.header_style()))),
+    );
+
+    let rows: Vec<Row> = rows_data.iter().enumerate().map(|(i, (label, count, color))| {
+        let bar_len = (*count * 16 / max).max(if *count > 0 { 1 } else { 0 });
+        let bar = "█".repeat(bar_len);
+        let is_alt = i % 2 == 1;
+        let s = if is_alt {
+            Style::default().fg(theme.table_row_fg).bg(theme.table_alt_bg)
+        } else {
+            Style::default().fg(theme.table_row_fg).bg(theme.bg)
+        };
+        Row::new(vec![
+            Cell::from(Span::styled(truncate_str(label, 28), s)),
+            Cell::from(Span::styled(format!("{}", bar), s.fg(*color))),
+            Cell::from(Span::styled(format!("{}", count), s.fg(*color).add_modifier(Modifier::BOLD))),
+        ])
+    }).collect();
+
+    if rows.is_empty() {
+        let p = Paragraph::new("No data")
+            .style(Style::default().fg(theme.warn).add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)));
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let table = Table::new(rows, [Constraint::Percentage(50), Constraint::Percentage(30), Constraint::Percentage(20)])
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title(title).style(Style::default().bg(theme.bg)))
+        .column_spacing(1);
+    frame.render_widget(table, area);
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let end = s.char_indices().take(max.saturating_sub(1)).last().map(|(i, _)| i).unwrap_or(s.len());
+        format!("{}…", &s[..end])
+    }
+}
+
 fn render_stats_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let store = &app.store;
     let items = vec![
@@ -621,22 +891,43 @@ fn render_component_table(
     _tab_bg: ratatui::style::Color,
 ) {
     let store = &app.store;
+    let has_vulns = store.total_vulnerabilities > 0;
 
-    let header_cells: Vec<Cell> = COMPONENT_COLUMNS
+    // Build columns dynamically so a plain SBOM (no vulns) renders exactly as
+    // before, while a VDR adds a compact CVE column after Name.
+    let columns: Vec<(&str, Option<SortField>, u16)> = if has_vulns {
+        vec![
+            ("Type", Some(SortField::Type), 15),
+            ("Name", Some(SortField::Name), 22),
+            ("CVE", Some(SortField::VulnCount), 7),
+            ("Version", Some(SortField::Version), 11),
+            ("Purl", Some(SortField::Purl), 25),
+            ("License", Some(SortField::License), 20),
+        ]
+    } else {
+        vec![
+            ("Type", Some(SortField::Type), 15),
+            ("Name", Some(SortField::Name), 25),
+            ("Version", Some(SortField::Version), 12),
+            ("Purl", Some(SortField::Purl), 28),
+            ("License", Some(SortField::License), 20),
+        ]
+    };
+
+    let header_cells: Vec<Cell> = columns
         .iter()
-        .map(|c| {
-            Cell::from(Span::styled(
-                if Some(*c) == store.sort_field_to_str() {
+        .map(|(label, field, _)| {
+            let text = match field {
+                Some(f) if Some(*label) == store.sort_field_to_str() => {
                     let arrow = match store.sort_order {
                         SortOrder::Ascending => " ▲",
                         SortOrder::Descending => " ▼",
                     };
-                    format!("{}{}", c, arrow)
-                } else {
-                    c.to_string()
-                },
-                theme.header_style(),
-            ))
+                    format!("{}{}", label, arrow)
+                }
+                _ => label.to_string(),
+            };
+            Cell::from(Span::styled(text, theme.header_style()))
         })
         .collect();
 
@@ -662,24 +953,21 @@ fn render_component_table(
         )
     };
 
-    let widths = [
-        Constraint::Percentage(15),
-        Constraint::Percentage(25),
-        Constraint::Percentage(12),
-        Constraint::Percentage(28),
-        Constraint::Percentage(20),
-    ];
+    let widths: Vec<Constraint> = columns
+        .iter()
+        .map(|(_, _, pct)| Constraint::Percentage(*pct))
+        .collect();
 
     app.component_header_y = area.y + 1;
     app.component_header_positions.clear();
-    let header_fields = [SortField::Type, SortField::Name, SortField::Version, SortField::Purl, SortField::License];
-    let header_pcts: [u16; 5] = [15, 25, 12, 28, 20];
     let inner_width = area.width.saturating_sub(2);
     let mut x = area.x + 1;
-    for (field, pct) in header_fields.iter().zip(header_pcts.iter()) {
-        let col_width = (inner_width as u32 * *pct as u32 / 100) as u16;
-        app.component_header_positions.push((*field, x, x + col_width));
-        x += col_width + 1;
+    for col in &columns {
+        if let Some(f) = col.1 {
+            let col_width = (inner_width as u32 * col.2 as u32 / 100) as u16;
+            app.component_header_positions.push((f, x, x + col_width));
+            x += col_width + 1;
+        }
     }
 
     let total_items = indices.len();
@@ -725,7 +1013,7 @@ fn render_component_table(
                 base_style
             };
 
-            let cells = vec![
+            let mut cells: Vec<Cell> = vec![
                 Cell::from(Span::styled(
                     row.type_display().to_string(),
                     type_style,
@@ -734,25 +1022,48 @@ fn render_component_table(
                     row.name_display().to_string(),
                     base_style,
                 )),
-                Cell::from(Span::styled(
-                    row.version_display().to_string(),
-                    base_style,
-                )),
-                Cell::from(Span::styled(
-                    row.purl_display().to_string(),
-                    base_style,
-                )),
-                Cell::from(Span::styled(
-                    row.license_display(),
-                    base_style,
-                )),
             ];
+
+            if has_vulns {
+                let purl_key = row.component.purl.as_deref()
+                    .or_else(|| row.component.bom_ref.as_deref())
+                    .unwrap_or("");
+                let cve_cell = match store.vuln_summary_for(purl_key) {
+                    None => Cell::from(Span::styled(
+                        "—",
+                        Style::default().fg(theme.table_row_fg).add_modifier(Modifier::DIM),
+                    )),
+                    Some(sum) => {
+                        let col = theme.severity_color_for_rank(sum.max_severity_rank);
+                        let mut marker = String::new();
+                        if sum.prioritized { marker.push('⚑'); }
+                        if sum.reachable { marker.push('⚡'); }
+                        if !marker.is_empty() { marker.push(' '); }
+                        let text = format!("{}{}", marker, sum.count);
+                        Cell::from(Span::styled(text, base_style.fg(col).add_modifier(Modifier::BOLD)))
+                    }
+                };
+                cells.push(cve_cell);
+            }
+
+            cells.push(Cell::from(Span::styled(
+                row.version_display().to_string(),
+                base_style,
+            )));
+            cells.push(Cell::from(Span::styled(
+                row.purl_display().to_string(),
+                base_style,
+            )));
+            cells.push(Cell::from(Span::styled(
+                row.license_display(),
+                base_style,
+            )));
 
             Row::new(cells)
         })
         .collect();
 
-    let table = Table::new(rows, widths)
+    let table = Table::new(rows, &widths)
         .header(header)
         .block(
             Block::default()
@@ -979,6 +1290,175 @@ fn render_formulation(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rec
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn render_vulnerabilities(
+    frame: &mut Frame,
+    app: &mut App,
+    theme: &Theme,
+    area: Rect,
+    _tab_bg: ratatui::style::Color,
+) {
+    let store = &app.store;
+
+    let header_cells: Vec<Cell> = VULN_COLUMNS
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let field = VULN_HEADER_FIELDS[i];
+            let arrow = if store.vuln_sort_field == field {
+                match store.vuln_sort_order {
+                    SortOrder::Ascending => " ▲",
+                    SortOrder::Descending => " ▼",
+                }
+            } else {
+                ""
+            };
+            Cell::from(Span::styled(
+                format!("{}{}", c, arrow),
+                theme.header_style(),
+            ))
+        })
+        .collect();
+    let header = Row::new(header_cells).height(1);
+
+    let indices = store.filtered_vulnerability_indices.clone();
+    let total_items = indices.len();
+
+    let title = format!(
+        " Vulnerabilities ({}/{}) · filter: {} · s:sort f:filter ",
+        total_items,
+        store.total_vulnerabilities,
+        store.vuln_filter.label(),
+    );
+
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Percentage(18),
+        Constraint::Percentage(10),
+        Constraint::Percentage(8),
+        Constraint::Percentage(14),
+        Constraint::Percentage(28),
+        Constraint::Percentage(20),
+    ];
+
+    app.vuln_header_y = area.y + 1;
+    app.vuln_header_positions.clear();
+    // Mirror the actual `widths` above: the flag column is a fixed Length(2),
+    // the rest are percentages of the inner width. Column spacing is 1.
+    let inner_width = area.width.saturating_sub(2);
+    let col_widths: [u16; 7] = [
+        2,
+        (inner_width as u32 * 18 / 100) as u16,
+        (inner_width as u32 * 10 / 100) as u16,
+        (inner_width as u32 * 8 / 100) as u16,
+        (inner_width as u32 * 14 / 100) as u16,
+        (inner_width as u32 * 28 / 100) as u16,
+        (inner_width as u32 * 20 / 100) as u16,
+    ];
+    let mut x = area.x + 1;
+    for (field, w) in VULN_HEADER_FIELDS.iter().zip(col_widths.iter()) {
+        app.vuln_header_positions.push((*field, x, x + w));
+        x += w + 1;
+    }
+
+    if total_items == 0 {
+        app.visible_rows = area.height.saturating_sub(4);
+        let empty = Paragraph::new("No vulnerabilities match the current filter.")
+            .style(Style::default().fg(theme.warn))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title(title));
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    let visible_rows = area.height.saturating_sub(4) as usize;
+    app.visible_rows = area.height.saturating_sub(4);
+    let scroll_start = (app.scroll_offset as usize).min(total_items.saturating_sub(1));
+    let scroll_end = (scroll_start + visible_rows).min(total_items);
+    let visible_indices = &indices[scroll_start..scroll_end];
+
+    let rows: Vec<Row> = visible_indices
+        .iter()
+        .enumerate()
+        .map(|(i, &vuln_idx)| {
+            let row = &store.vulnerabilities[vuln_idx];
+            let global_idx = scroll_start + i;
+            let is_selected = global_idx == app.table_selected;
+            let is_alt = global_idx % 2 == 1;
+            let in_selection = app
+                .selected_rows()
+                .map_or(false, |(s, e)| global_idx >= s && global_idx <= e);
+
+            let base_style = if is_selected {
+                theme.selected_style()
+            } else if in_selection {
+                theme.range_selected_style()
+            } else if is_alt {
+                Style::default().fg(theme.table_row_fg).bg(theme.table_alt_bg)
+            } else {
+                Style::default().fg(theme.table_row_fg).bg(theme.bg)
+            };
+
+            let sev = row.severity();
+            let sev_color = theme.severity_color(sev);
+
+            // ⚑ prioritized marker
+            let prio_cell = if row.is_prioritized() {
+                Cell::from(Span::styled(
+                    "⚑",
+                    Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Cell::from(Span::styled(" ", base_style))
+            };
+
+            // reach label
+            let (reach_text, reach_style) = if row.is_endpoint_reachable() {
+                (
+                    "→ Endpoint".to_string(),
+                    Style::default().fg(theme.crypto_accent),
+                )
+            } else if row.is_reachable() {
+                ("⚡ Reachable".to_string(), Style::default().fg(theme.warn))
+            } else {
+                ("—".to_string(), Style::default().fg(theme.table_row_fg).add_modifier(Modifier::DIM))
+            };
+
+            let cells = vec![
+                prio_cell,
+                Cell::from(Span::styled(row.id_display().to_string(), base_style)),
+                Cell::from(Span::styled(
+                    sev.to_string(),
+                    base_style.fg(sev_color).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(format!("{:.1}", row.max_score()), base_style.fg(sev_color))),
+                Cell::from(Span::styled(reach_text, reach_style)),
+                Cell::from(Span::styled(row.package_name(), base_style)),
+                Cell::from(Span::styled(row.fix_version(), base_style.fg(theme.accent))),
+            ];
+            Row::new(cells)
+        })
+        .collect();
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .style(Style::default().bg(theme.bg)),
+        )
+        .column_spacing(1);
+
+    let mut table_state = TableState::default();
+    if total_items > 0 {
+        let relative_selected = app.table_selected.saturating_sub(scroll_start);
+        table_state.select(Some(relative_selected.min(visible_rows.saturating_sub(1))));
+    }
+
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
 fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     app.dep_tree_area = Some(area);
     let store = &app.store;
@@ -1000,10 +1480,12 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
             let has_children = d.depends_on.as_ref().map_or(false, |c| !c.is_empty());
             let is_expanded = expanded.contains(&d.ref_field);
             let icon = if has_children { if is_expanded { "▾ " } else { "▸ " } } else { "  " };
-            items.push(ListItem::new(Line::from(vec![Span::styled(
+            let mut spans: Vec<Span<'static>> = vec![Span::styled(
                 format!("{}{}", icon, name),
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-            )])));
+            )];
+            spans.extend(vuln_badge_spans(store, theme, &d.ref_field));
+            items.push(ListItem::new(Line::from(spans)));
             app.dep_tree_refs.push(d.ref_field.clone());
             if is_expanded {
                 if let Some(ref depends_on) = d.depends_on {
@@ -1051,6 +1533,24 @@ fn render_dependencies(frame: &mut Frame, app: &mut App, theme: &Theme, area: Re
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
+/// Inline risk badge `[!N]` (severity-colored, ⚡ if reachable) for a dep node,
+/// read from the prebuilt vuln map. Empty when the node has no vulns.
+fn vuln_badge_spans(store: &BomStore, theme: &Theme, ref_field: &str) -> Vec<Span<'static>> {
+    match store.vuln_summary_for(ref_field) {
+        Some(sum) if sum.count > 0 => {
+            let col = theme.severity_color_for_rank(sum.max_severity_rank);
+            let mut text = String::from(" [!");
+            if sum.reachable {
+                text.push('⚡');
+            }
+            text.push_str(&sum.count.to_string());
+            text.push(']');
+            vec![Span::styled(text, Style::default().fg(col).add_modifier(Modifier::BOLD))]
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn build_dep_list(
     items: &mut Vec<ListItem>,
     refs: &mut Vec<String>,
@@ -1078,10 +1578,12 @@ fn build_dep_list(
     let is_expanded = expanded.contains(ref_field);
 
     let icon = if has_children { if is_expanded { "▾ " } else { "▸ " } } else { "  " };
-    items.push(ListItem::new(Line::from(vec![Span::styled(
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(
         format!("{}{}{}", prefix, icon, name),
         Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-    )])));
+    )];
+    spans.extend(vuln_badge_spans(store, theme, ref_field));
+    items.push(ListItem::new(Line::from(spans)));
     refs.push(ref_field.to_string());
 
     if is_expanded {
@@ -1153,5 +1655,70 @@ mod tests {
         assert_eq!(split_newlines_display("single"), "single");
         assert_eq!(split_newlines_display("a\\nb\\nc"), "a, b, c");
         assert_eq!(split_newlines_display(""), "");
+    }
+
+    #[test]
+    fn test_render_all_tabs_no_panic_crapi() {
+        // Headless render of every tab against the 796-vuln crapi fixture —
+        // guards against widget/layout panics (e.g. bar overflow) in CI.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test/data/crapi/crapi-sbom-universal.vex.json");
+        if !path.exists() {
+            return; // fixture optional in stripped checkouts
+        }
+        let mut store = BomStore::new();
+        store.load_path(&path).unwrap();
+        assert!(store.total_vulnerabilities > 0);
+
+        let theme = crate::ui::theme::Theme::dark();
+        let log_store = crate::logs::LogStore::new(100);
+        let mut trace_state = crate::trace::TraceState::new();
+
+        for &tab in Tab::ALL.iter() {
+            let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
+            app.store = store.clone();
+            app.current_tab = tab;
+            // exercise the vuln quick filter + detail paths too
+            if tab == Tab::Vulnerabilities {
+                app.store.set_vuln_filter(crate::bom::store::VulnFilter::Exploitable);
+                app.detail_open = true;
+                app.table_selected = 0;
+            }
+            if matches!(tab, Tab::Components | Tab::Dependencies) {
+                app.detail_open = true;
+            }
+            let backend = ratatui::backend::TestBackend::new(120, 40);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            // narrow width too, to stress the dashboard layout
+            terminal.draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme)).unwrap();
+            let narrow_backend = ratatui::backend::TestBackend::new(40, 12);
+            let mut narrow = ratatui::Terminal::new(narrow_backend).unwrap();
+            narrow.draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme)).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_render_all_tabs_plain_sbom_no_vulns() {
+        // Degraded path: a plain SBOM (no vulnerabilities[]) must render every
+        // tab without panicking and with no CVE column / dashboard.
+        let mut store = crate::bom::store::BomStore::new();
+        let tmp = std::env::temp_dir().join("cdxui_plain_test_bom.json");
+        std::fs::write(&tmp, r#"{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[{"type":"library","name":"a","version":"1.0","purl":"pkg:npm/a@1.0"}]}"#).unwrap();
+        store.load_path(&tmp).unwrap();
+        assert_eq!(store.total_vulnerabilities, 0);
+        let _ = std::fs::remove_file(&tmp);
+
+        let theme = crate::ui::theme::Theme::dark();
+        let log_store = crate::logs::LogStore::new(100);
+        let mut trace_state = crate::trace::TraceState::new();
+
+        for &tab in Tab::ALL.iter() {
+            let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
+            app.store = store.clone();
+            app.current_tab = tab;
+            let backend = ratatui::backend::TestBackend::new(100, 30);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme)).unwrap();
+        }
     }
 }

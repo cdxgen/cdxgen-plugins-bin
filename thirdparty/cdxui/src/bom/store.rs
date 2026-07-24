@@ -16,6 +16,8 @@ pub enum SortField {
     Version,
     Purl,
     License,
+    VulnCount,
+    MaxSeverity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +173,393 @@ impl ServiceRow {
     }
 }
 
+fn severity_rank(s: &str) -> u8 {
+    match s.to_lowercase().as_str() {
+        "critical" => 4,
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+/// Strip Rich markup `[...]` and `:emoji:` tokens from an insight label.
+fn strip_rich(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '[' {
+            // skip until matching ]
+            while let Some(ic) = chars.next() {
+                if ic == ']' { break; }
+            }
+        } else if c == ':' {
+            // skip a :token: if it looks like an emoji token
+            let rest: String = chars.clone().collect();
+            if let Some(end) = rest.find(':') {
+                let token = &rest[..end];
+                let is_emoji = !token.is_empty()
+                    && token.chars().all(|t| t.is_alphanumeric() || t == '_' || t == '+' || t == '-');
+                if is_emoji {
+                for _ in 0..end { chars.next(); }
+                    chars.next(); // consume trailing ':'
+                    continue;
+                }
+            }
+            out.push(c);
+        } else {
+            out.push(c);
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Derive a short display name (namespace/name) from a purl.
+fn purl_display_name(purl: &str) -> String {
+    let no_qual = purl.split('?').next().unwrap_or(purl);
+    let no_ver = match no_qual.find('@') {
+        Some(i) => &no_qual[..i],
+        None => no_qual,
+    };
+    match no_ver.find('/') {
+        Some(slash) => no_ver[slash + 1..].to_string(),
+        None => no_ver.to_string(),
+    }
+}
+
+/// All normalized key forms of a purl for tolerant matching.
+fn purl_keys(purl: &str) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let full = purl.to_string();
+    keys.push(full.clone());
+    let no_qual = purl.split('?').next().unwrap_or(purl).to_string();
+    if no_qual != full {
+        keys.push(no_qual.clone());
+    }
+    let no_ver = match no_qual.find('@') {
+        Some(i) => no_qual[..i].to_string(),
+        None => no_qual.clone(),
+    };
+    if no_ver != no_qual {
+        keys.push(no_ver);
+    }
+    keys
+}
+
+#[derive(Debug, Clone)]
+pub struct VulnerabilityRow {
+    pub vuln: Vulnerability,
+}
+
+impl VulnerabilityRow {
+    pub fn id_display(&self) -> &str {
+        self.vuln.id.as_deref().unwrap_or("-")
+    }
+
+    pub fn bom_ref_display(&self) -> &str {
+        self.vuln.bom_ref.as_deref().unwrap_or("-")
+    }
+
+    /// Highest-severity rating across all ratings (by rank, then score).
+    pub fn severity(&self) -> &str {
+        let mut best_rank = 0u8;
+        let mut best: &str = "none";
+        if let Some(ratings) = &self.vuln.ratings {
+            for r in ratings {
+                if let Some(sev) = &r.severity {
+                    let rank = severity_rank(sev);
+                    if rank >= best_rank {
+                        best_rank = rank;
+                        best = sev.as_str();
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    pub fn severity_rank(&self) -> u8 {
+        severity_rank(self.severity())
+    }
+
+    pub fn max_score(&self) -> f64 {
+        self.vuln
+            .ratings
+            .as_ref()
+            .and_then(|rs| {
+                rs.iter().filter_map(|r| r.score).fold(None::<f64>, |acc, s| {
+                    Some(acc.map_or(s, |a: f64| a.max(s)))
+                })
+            })
+            .unwrap_or(0.0)
+    }
+
+    pub fn method(&self) -> &str {
+        self.vuln
+            .ratings
+            .as_ref()
+            .and_then(|rs| rs.first())
+            .and_then(|r| r.method.as_deref())
+            .unwrap_or("-")
+    }
+
+    pub fn affects_purl(&self) -> Option<&str> {
+        self.vuln
+            .affects
+            .as_ref()
+            .and_then(|affects| affects.first())
+            .map(|a| a.ref_field.as_str())
+    }
+
+    pub fn package_name(&self) -> String {
+        match self.affects_purl() {
+            Some(p) => purl_display_name(p),
+            None => self
+                .vuln
+                .id
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        }
+    }
+
+    /// The `unaffected` (fix) version from affects, if present.
+    pub fn fix_version(&self) -> String {
+        if let Some(affects) = &self.vuln.affects {
+            for a in affects {
+                if let Some(versions) = &a.versions {
+                    for v in versions {
+                        if v.status.as_deref() == Some("unaffected") {
+                            if let Some(ver) = &v.version {
+                                return ver.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "-".to_string()
+    }
+
+    /// Parsed, cleaned labels from the `depscan:insights` property.
+    pub fn insight_labels(&self) -> Vec<String> {
+        let raw = self
+            .vuln
+            .properties
+            .as_ref()
+            .and_then(|props| {
+                props
+                    .iter()
+                    .find(|p| p.name.as_deref() == Some("depscan:insights"))
+            })
+            .and_then(|p| p.value.clone())
+            .unwrap_or_default();
+        if raw.is_empty() {
+            return Vec::new();
+        }
+        // dep-scan emits a literal "\n" (backslash-n) separator; also accept real newlines.
+        let normalized = raw.replace("\\n", "\n");
+        normalized
+            .split('\n')
+            .map(|s| strip_rich(s.trim()))
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    pub fn is_prioritized(&self) -> bool {
+        self.vuln
+            .properties
+            .as_ref()
+            .and_then(|props| {
+                props
+                    .iter()
+                    .find(|p| p.name.as_deref() == Some("depscan:prioritized"))
+            })
+            .and_then(|p| p.value.as_deref())
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    }
+
+    pub fn is_endpoint_reachable(&self) -> bool {
+        self.insight_labels()
+            .iter()
+            .any(|l| l.to_lowercase().contains("endpoint"))
+    }
+
+    pub fn is_reachable(&self) -> bool {
+        self.insight_labels()
+            .iter()
+            .any(|l| {
+                let l = l.to_lowercase();
+                l.contains("reachable") && !l.contains("endpoint")
+            })
+    }
+
+    pub fn any_reachability(&self) -> bool {
+        self.is_reachable() || self.is_endpoint_reachable()
+    }
+
+    pub fn is_exploitable(&self) -> bool {
+        if self
+            .vuln
+            .analysis
+            .as_ref()
+            .and_then(|a| a.state.as_deref())
+            .map(|s| s.eq_ignore_ascii_case("exploitable"))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        self.insight_labels().iter().any(|l| {
+            let l = l.to_lowercase();
+            l.contains("exploit") || l == "exploitable"
+        })
+    }
+
+    pub fn matches_query(&self, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let q = query.to_lowercase();
+        self.id_display().to_lowercase().contains(&q)
+            || self.package_name().to_lowercase().contains(&q)
+            || self.severity().to_lowercase().contains(&q)
+            || self.bom_ref_display().to_lowercase().contains(&q)
+            || self
+                .insight_labels()
+                .iter()
+                .any(|l| l.to_lowercase().contains(&q))
+            || self
+                .vuln
+                .description
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(&q)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VulnSortField {
+    Priority,
+    Id,
+    Severity,
+    Score,
+    Reach,
+    Package,
+    Fix,
+}
+
+impl VulnSortField {
+    #[allow(dead_code)]
+    pub fn label(self) -> &'static str {
+        match self {
+            VulnSortField::Priority => "Priority",
+            VulnSortField::Id => "Id",
+            VulnSortField::Severity => "Severity",
+            VulnSortField::Score => "CVSS",
+            VulnSortField::Reach => "Reach",
+            VulnSortField::Package => "Package",
+            VulnSortField::Fix => "Fix",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VulnFilter {
+    All,
+    Prioritized,
+    Reachable,
+    Exploitable,
+    CriticalHigh,
+}
+
+impl VulnFilter {
+    pub fn next(self) -> Self {
+        match self {
+            VulnFilter::All => VulnFilter::Prioritized,
+            VulnFilter::Prioritized => VulnFilter::Reachable,
+            VulnFilter::Reachable => VulnFilter::Exploitable,
+            VulnFilter::Exploitable => VulnFilter::CriticalHigh,
+            VulnFilter::CriticalHigh => VulnFilter::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            VulnFilter::All => "All",
+            VulnFilter::Prioritized => "Prioritized",
+            VulnFilter::Reachable => "Reachable",
+            VulnFilter::Exploitable => "Exploitable",
+            VulnFilter::CriticalHigh => "Critical/High",
+        }
+    }
+}
+
+impl Default for VulnFilter {
+    fn default() -> Self {
+        VulnFilter::All
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PurlVulnSummary {
+    pub count: usize,
+    pub max_severity_rank: u8,
+    pub max_score: f64,
+    pub prioritized: bool,
+    pub reachable: bool,
+    pub exploitable: bool,
+    pub display_name: String,
+}
+
+impl Default for PurlVulnSummary {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            max_severity_rank: 0,
+            max_score: 0.0,
+            prioritized: false,
+            reachable: false,
+            exploitable: false,
+            display_name: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SecuritySummary {
+    pub total_vulns: usize,
+    /// Indexed by severity rank: [0]=none, [1]=low, [2]=medium, [3]=high, [4]=critical
+    pub severity_counts: [usize; 5],
+    pub prioritized_vulns: usize,
+    pub reachable_vulns: usize,
+    pub endpoint_reachable_vulns: usize,
+    pub exploitable_vulns: usize,
+    pub reachable_exploitable_vulns: usize,
+    pub vulnerable_components: usize,
+    pub total_components: usize,
+    pub top_by_count: Vec<(String, PurlVulnSummary)>,
+    pub top_by_reach_exploit: Vec<(String, PurlVulnSummary)>,
+    pub top_reachable_services: Vec<(String, usize)>,
+}
+
+/// Tolerant purl/bom-ref lookup against a vuln aggregation map (free fn so it
+/// can be borrowed disjointly inside a sort closure).
+fn summary_for_purl<'a>(
+    map: &'a HashMap<String, PurlVulnSummary>,
+    purl_or_ref: &str,
+) -> Option<&'a PurlVulnSummary> {
+    if purl_or_ref.is_empty() {
+        return None;
+    }
+    for key in purl_keys(purl_or_ref) {
+        if let Some(s) = map.get(&key) {
+            return Some(s);
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone)]
 pub struct BomStore {
     pub bom_files: Vec<BomFile>,
@@ -188,6 +577,13 @@ pub struct BomStore {
     pub total_formulas: usize,
     pub total_dependencies: usize,
     pub total_vulnerabilities: usize,
+    pub vulnerabilities: Vec<VulnerabilityRow>,
+    pub filtered_vulnerability_indices: Vec<usize>,
+    pub vuln_sort_field: VulnSortField,
+    pub vuln_sort_order: SortOrder,
+    pub vuln_filter: VulnFilter,
+    pub vuln_by_purl: HashMap<String, PurlVulnSummary>,
+    pub security_summary: SecuritySummary,
     pub loaded: bool,
 }
 
@@ -209,6 +605,13 @@ impl BomStore {
             total_formulas: 0,
             total_dependencies: 0,
             total_vulnerabilities: 0,
+            vulnerabilities: Vec::new(),
+            filtered_vulnerability_indices: Vec::new(),
+            vuln_sort_field: VulnSortField::Priority,
+            vuln_sort_order: SortOrder::Descending,
+            vuln_filter: VulnFilter::All,
+            vuln_by_purl: HashMap::new(),
+            security_summary: SecuritySummary::default(),
             loaded: false,
         }
     }
@@ -330,6 +733,9 @@ impl BomStore {
         self.crypto_assets = crypto_merged;
         self.total_components = self.components.len();
         self.total_crypto = self.crypto_assets.len();
+        // Components changed by dedup; refresh the vuln aggregates (vulnerable
+        // component count depends on the merged component list).
+        self.compute_vuln_aggregates();
         self.rebuild_filtered_indices();
     }
 
@@ -362,7 +768,148 @@ impl BomStore {
         self.total_crypto = self.crypto_assets.len();
         self.total_formulas = bom.formulation.as_ref().map(|f| f.len()).unwrap_or(0);
         self.total_dependencies = bom.dependencies.as_ref().map(|d| d.len()).unwrap_or(0);
-        self.total_vulnerabilities = bom.vulnerabilities.as_ref().map(|v| v.len()).unwrap_or(0);
+
+        if let Some(ref vulns) = bom.vulnerabilities {
+            let existing: std::collections::HashSet<String> = self
+                .vulnerabilities
+                .iter()
+                .filter_map(|r| r.vuln.bom_ref.clone())
+                .collect();
+            for v in vulns.iter() {
+                let key = v.bom_ref.clone().unwrap_or_else(|| {
+                    format!(
+                        "{}/{}",
+                        v.id.as_deref().unwrap_or("?"),
+                        v.affects
+                            .as_ref()
+                            .and_then(|a| a.first())
+                            .map(|a| a.ref_field.as_str())
+                            .unwrap_or("?")
+                    )
+                });
+                if existing.contains(&key) {
+                    continue;
+                }
+                self.vulnerabilities.push(VulnerabilityRow { vuln: v.clone() });
+            }
+        }
+        self.total_vulnerabilities = self.vulnerabilities.len();
+        self.compute_vuln_aggregates();
+    }
+
+    /// Build the `vuln_by_purl` aggregation map and the `SecuritySummary`
+    /// from the indexed vulnerabilities. Called once per load/index — never
+    /// per row or per frame.
+    fn compute_vuln_aggregates(&mut self) {
+        self.vuln_by_purl.clear();
+        let mut summary = SecuritySummary::default();
+        summary.total_vulns = self.vulnerabilities.len();
+
+        for row in &self.vulnerabilities {
+            let rank = row.severity_rank();
+            let sev_idx = (rank as usize).min(4);
+            summary.severity_counts[sev_idx] += 1;
+            if row.is_prioritized() {
+                summary.prioritized_vulns += 1;
+            }
+            let reach = row.any_reachability();
+            if reach {
+                summary.reachable_vulns += 1;
+            }
+            if row.is_endpoint_reachable() {
+                summary.endpoint_reachable_vulns += 1;
+            }
+            if row.is_exploitable() {
+                summary.exploitable_vulns += 1;
+            }
+            if reach && row.is_exploitable() {
+                summary.reachable_exploitable_vulns += 1;
+            }
+
+            if let Some(purl) = row.affects_purl() {
+                let display = purl_display_name(purl);
+                for key in purl_keys(purl) {
+                    let entry = self
+                        .vuln_by_purl
+                        .entry(key)
+                        .or_insert_with(PurlVulnSummary::default);
+                    entry.count += 1;
+                    if rank > entry.max_severity_rank {
+                        entry.max_severity_rank = rank;
+                    }
+                    let score = row.max_score();
+                    if score > entry.max_score {
+                        entry.max_score = score;
+                    }
+                    entry.prioritized |= row.is_prioritized();
+                    entry.reachable |= reach;
+                    entry.exploitable |= row.is_exploitable();
+                    if entry.display_name.is_empty() {
+                        entry.display_name = display.clone();
+                    }
+                }
+            }
+        }
+
+        summary.total_components = self.total_components;
+        summary.vulnerable_components = self.count_vulnerable_components();
+
+        // Top packages by CVE count.
+        let mut by_count: Vec<&PurlVulnSummary> = self.vuln_by_purl.values().collect();
+        by_count.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| b.max_severity_rank.cmp(&a.max_severity_rank))
+                .then_with(|| b.max_score.partial_cmp(&a.max_score).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        summary.top_by_count = by_count
+            .iter()
+            .take(8)
+            .map(|s| (s.display_name.clone(), (*s).clone()))
+            .collect();
+
+        // Top packages by reachable/exploitable vulns.
+        let mut by_reach: Vec<&PurlVulnSummary> = self
+            .vuln_by_purl
+            .values()
+            .filter(|s| s.reachable || s.exploitable)
+            .collect();
+        by_reach.sort_by(|a, b| {
+            let a_flags = (a.reachable as u8) + (a.exploitable as u8);
+            let b_flags = (b.reachable as u8) + (b.exploitable as u8);
+            b_flags
+                .cmp(&a_flags)
+                .then_with(|| b.max_severity_rank.cmp(&a.max_severity_rank))
+                .then_with(|| b.max_score.partial_cmp(&a.max_score).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        summary.top_by_reach_exploit = by_reach
+            .iter()
+            .take(8)
+            .map(|s| (s.display_name.clone(), (*s).clone()))
+            .collect();
+
+        // Top reachable services: only populated when service↔vuln linkage exists.
+        // dep-scan insights carry no service ref today, so this stays empty.
+        summary.top_reachable_services = Vec::new();
+
+        self.security_summary = summary;
+    }
+
+    fn count_vulnerable_components(&self) -> usize {
+        let mut count = 0usize;
+        for row in &self.components {
+            let key = row.component.purl.as_deref().unwrap_or("");
+            if !key.is_empty() && self.vuln_summary_for(key).is_some() {
+                count += 1;
+                continue;
+            }
+            // fall back to bom-ref
+            let bref = row.component.bom_ref.as_deref().unwrap_or("");
+            if !bref.is_empty() && self.vuln_summary_for(bref).is_some() {
+                count += 1;
+            }
+        }
+        count
     }
 
     pub fn search_components(&mut self, query: &str) {
@@ -396,7 +943,26 @@ impl BomStore {
             .map(|(i, _)| i)
             .collect();
 
+        self.filtered_vulnerability_indices = self
+            .vulnerabilities
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                let query_match = row.matches_query(&self.current_filter.query);
+                let filter_match = match self.vuln_filter {
+                    VulnFilter::All => true,
+                    VulnFilter::Prioritized => row.is_prioritized(),
+                    VulnFilter::Reachable => row.any_reachability(),
+                    VulnFilter::Exploitable => row.is_exploitable(),
+                    VulnFilter::CriticalHigh => row.severity_rank() >= 3,
+                };
+                query_match && filter_match
+            })
+            .map(|(i, _)| i)
+            .collect();
+
         self.sort_filtered();
+        self.sort_vulnerabilities();
     }
 
     pub fn sort_filtered(&mut self) {
@@ -461,6 +1027,54 @@ impl BomStore {
                     }
                 });
             }
+            SortField::VulnCount => {
+                let map = &self.vuln_by_purl;
+                self.filtered_component_indices.sort_by(|a, b| {
+                    let ca = self.components[*a]
+                        .component
+                        .purl
+                        .as_deref()
+                        .or_else(|| self.components[*a].component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0usize, |s| s.count);
+                    let cb = self.components[*b]
+                        .component
+                        .purl
+                        .as_deref()
+                        .or_else(|| self.components[*b].component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0usize, |s| s.count);
+                    let cmp = cb.cmp(&ca);
+                    match self.sort_order {
+                        SortOrder::Ascending => cmp,
+                        SortOrder::Descending => cmp.reverse(),
+                    }
+                });
+            }
+            SortField::MaxSeverity => {
+                let map = &self.vuln_by_purl;
+                self.filtered_component_indices.sort_by(|a, b| {
+                    let ra = self.components[*a]
+                        .component
+                        .purl
+                        .as_deref()
+                        .or_else(|| self.components[*a].component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0u8, |s| s.max_severity_rank);
+                    let rb = self.components[*b]
+                        .component
+                        .purl
+                        .as_deref()
+                        .or_else(|| self.components[*b].component.bom_ref.as_deref())
+                        .and_then(|p| summary_for_purl(map, p))
+                        .map_or(0u8, |s| s.max_severity_rank);
+                    let cmp = rb.cmp(&ra);
+                    match self.sort_order {
+                        SortOrder::Ascending => cmp,
+                        SortOrder::Descending => cmp.reverse(),
+                    }
+                });
+            }
         }
     }
 
@@ -470,7 +1084,9 @@ impl BomStore {
             SortField::Name => SortField::Version,
             SortField::Version => SortField::Purl,
             SortField::Purl => SortField::License,
-            SortField::License => SortField::Type,
+            SortField::License => SortField::VulnCount,
+            SortField::VulnCount => SortField::MaxSeverity,
+            SortField::MaxSeverity => SortField::Type,
         };
         if matches!(self.sort_field, SortField::Type) {
             self.sort_order = self.sort_order.toggle();
@@ -486,6 +1102,147 @@ impl BomStore {
             self.sort_order = SortOrder::Ascending;
         }
         self.sort_filtered();
+    }
+
+    pub fn sort_vulnerabilities(&mut self) {
+        let order = self.vuln_sort_order;
+        let field = self.vuln_sort_field;
+        self.filtered_vulnerability_indices.sort_by(|a, b| {
+            let ra = &self.vulnerabilities[*a];
+            let rb = &self.vulnerabilities[*b];
+            // Default tie-breakers always applied in this order.
+            let base = ra
+                .is_prioritized()
+                .cmp(&rb.is_prioritized())
+                .then_with(|| rb.severity_rank().cmp(&ra.severity_rank()))
+                .then_with(|| {
+                    rb.max_score()
+                        .partial_cmp(&ra.max_score())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            let primary = match field {
+                VulnSortField::Priority => ra.is_prioritized().cmp(&rb.is_prioritized()),
+                VulnSortField::Id => ra.id_display().to_lowercase().cmp(&rb.id_display().to_lowercase()),
+                VulnSortField::Severity => rb.severity_rank().cmp(&ra.severity_rank()),
+                VulnSortField::Score => rb
+                    .max_score()
+                    .partial_cmp(&ra.max_score())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                VulnSortField::Reach => {
+                    let av = ra.any_reachability() as u8 + (ra.is_endpoint_reachable() as u8);
+                    let bv = rb.any_reachability() as u8 + (rb.is_endpoint_reachable() as u8);
+                    bv.cmp(&av)
+                }
+                VulnSortField::Package => ra
+                    .package_name()
+                    .to_lowercase()
+                    .cmp(&rb.package_name().to_lowercase()),
+                VulnSortField::Fix => ra.fix_version().cmp(&rb.fix_version()),
+            };
+            let cmp = match field {
+                // For the columns that already encode "higher is riskier",
+                // ascending vs descending flips naturally.
+                VulnSortField::Priority
+                | VulnSortField::Severity
+                | VulnSortField::Score
+                | VulnSortField::Reach => {
+                    if order == SortOrder::Ascending {
+                        primary.reverse().then(base)
+                    } else {
+                        primary.then(base)
+                    }
+                }
+                _ => {
+                    if order == SortOrder::Ascending {
+                        primary.then(base)
+                    } else {
+                        primary.reverse().then(base)
+                    }
+                }
+            };
+            cmp
+        });
+    }
+
+    pub fn cycle_vuln_sort(&mut self) {
+        self.vuln_sort_field = match self.vuln_sort_field {
+            VulnSortField::Priority => VulnSortField::Id,
+            VulnSortField::Id => VulnSortField::Severity,
+            VulnSortField::Severity => VulnSortField::Score,
+            VulnSortField::Score => VulnSortField::Reach,
+            VulnSortField::Reach => VulnSortField::Package,
+            VulnSortField::Package => VulnSortField::Fix,
+            VulnSortField::Fix => VulnSortField::Priority,
+        };
+        self.vuln_sort_order = self.vuln_sort_order.toggle();
+        self.sort_vulnerabilities();
+    }
+
+    pub fn set_vuln_sort(&mut self, field: VulnSortField) {
+        if self.vuln_sort_field == field {
+            self.vuln_sort_order = self.vuln_sort_order.toggle();
+        } else {
+            self.vuln_sort_field = field;
+            self.vuln_sort_order = SortOrder::Descending;
+        }
+        self.sort_vulnerabilities();
+    }
+
+    #[allow(dead_code)]
+    pub fn set_vuln_filter(&mut self, filter: VulnFilter) {
+        self.vuln_filter = filter;
+        self.rebuild_filtered_indices();
+    }
+
+    pub fn cycle_vuln_filter(&mut self) {
+        self.vuln_filter = self.vuln_filter.next();
+        self.rebuild_filtered_indices();
+    }
+
+    pub fn filtered_vulnerability(&self, idx: usize) -> Option<&VulnerabilityRow> {
+        self.filtered_vulnerability_indices
+            .get(idx)
+            .and_then(|&i| self.vulnerabilities.get(i))
+    }
+
+    pub fn filtered_vulnerabilities_count(&self) -> usize {
+        self.filtered_vulnerability_indices.len()
+    }
+
+    /// Tolerant purl/bom-ref lookup against the prebuilt vuln aggregation map.
+    pub fn vuln_summary_for(&self, purl_or_ref: &str) -> Option<&PurlVulnSummary> {
+        if purl_or_ref.is_empty() {
+            return None;
+        }
+        for key in purl_keys(purl_or_ref) {
+            if let Some(s) = self.vuln_by_purl.get(&key) {
+                return Some(s);
+            }
+        }
+        None
+    }
+
+    /// Individual vulnerabilities affecting a component (purl/bom-ref).
+    /// Used only by the detail panel for the *selected* component — not per row.
+    pub fn vulns_for_component(&self, purl_or_ref: &str) -> Vec<&VulnerabilityRow> {
+        if purl_or_ref.is_empty() {
+            return Vec::new();
+        }
+        let keys: std::collections::HashSet<String> = purl_keys(purl_or_ref).into_iter().collect();
+        let mut found: Vec<&VulnerabilityRow> = self
+            .vulnerabilities
+            .iter()
+            .filter(|row| {
+                row.affects_purl()
+                    .map_or(false, |p| purl_keys(p).iter().any(|k| keys.contains(k)))
+            })
+            .collect();
+        found.sort_by(|a, b| {
+            b.severity_rank()
+                .cmp(&a.severity_rank())
+                .then_with(|| b.max_score().partial_cmp(&a.max_score()).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        found
     }
 
     pub fn filtered_component(&self, idx: usize) -> Option<&ComponentRow> {
@@ -616,6 +1373,8 @@ impl BomStore {
             SortField::Version => Some("Version"),
             SortField::Purl => Some("Purl"),
             SortField::License => Some("License"),
+            SortField::VulnCount => Some("CVE"),
+            SortField::MaxSeverity => Some("Risk"),
         }
     }
 }
@@ -731,6 +1490,8 @@ impl fmt::Display for SortField {
             SortField::Version => write!(f, "Version"),
             SortField::Purl => write!(f, "Purl"),
             SortField::License => write!(f, "License"),
+            SortField::VulnCount => write!(f, "CVE"),
+            SortField::MaxSeverity => write!(f, "Risk"),
         }
     }
 }
@@ -999,6 +1760,10 @@ mod tests {
         store.cycle_sort();
         assert_eq!(store.sort_field, SortField::License);
         store.cycle_sort();
+        assert_eq!(store.sort_field, SortField::VulnCount);
+        store.cycle_sort();
+        assert_eq!(store.sort_field, SortField::MaxSeverity);
+        store.cycle_sort();
         assert_eq!(store.sort_field, SortField::Type);
         store.cycle_sort();
         assert_eq!(store.sort_field, SortField::Name);
@@ -1109,5 +1874,160 @@ mod tests {
         assert_eq!(lic.len(), 2, "2 licenses after merge");
         let hashes = express.component.hashes.as_ref().unwrap();
         assert_eq!(hashes.len(), 1, "hashes merged");
+    }
+
+    fn sample_vdr_json() -> &'static str {
+        r#"{
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.7",
+            "version": 1,
+            "components": [
+                {"type": "library", "bom-ref": "pkg:npm/express@4.18.0", "name": "express", "version": "4.18.0", "purl": "pkg:npm/express@4.18.0"},
+                {"type": "library", "bom-ref": "pkg:npm/socket.io@3.1.2", "name": "socket.io", "version": "3.1.2", "purl": "pkg:npm/socket.io@3.1.2"},
+                {"type": "library", "bom-ref": "pkg:npm/clean@1.0.0", "name": "clean", "version": "1.0.0", "purl": "pkg:npm/clean@1.0.0"}
+            ],
+            "vulnerabilities": [
+                {
+                    "bom-ref": "CVE-A/pkg:npm/express@4.18.0",
+                    "id": "CVE-A",
+                    "ratings": [{"severity": "high", "score": 7.5, "method": "CVSSv31"}],
+                    "affects": [{"ref": "pkg:npm/express@4.18.0", "versions": [{"version": "4.18.1", "status": "unaffected"}]}],
+                    "properties": [{"name": "depscan:prioritized", "value": "true"}, {"name": "depscan:insights", "value": "Reachable\\nUsed in 3 locations"}]
+                },
+                {
+                    "bom-ref": "CVE-B/pkg:npm/express@4.18.0",
+                    "id": "CVE-B",
+                    "ratings": [{"severity": "medium", "score": 5.0}],
+                    "affects": [{"ref": "pkg:npm/express@4.18.0"}],
+                    "properties": [{"name": "depscan:prioritized", "value": "false"}, {"name": "depscan:insights", "value": "Indirect dependency"}]
+                },
+                {
+                    "bom-ref": "CVE-C/pkg:npm/socket.io@3.1.2",
+                    "id": "CVE-C",
+                    "ratings": [{"severity": "critical", "score": 9.8}],
+                    "affects": [{"ref": "pkg:npm/socket.io@3.1.2"}],
+                    "analysis": {"state": "exploitable"},
+                    "properties": [{"name": "depscan:prioritized", "value": "true"}, {"name": "depscan:insights", "value": "Endpoint-Reachable\\nKnown Exploits"}]
+                }
+            ]
+        }"#
+    }
+
+    #[test]
+    fn test_vdr_index_and_aggregates() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(sample_vdr_json().as_bytes()).unwrap();
+
+        let mut store = BomStore::new();
+        store.load_path(tmp.path()).unwrap();
+
+        assert_eq!(store.total_vulnerabilities, 3);
+        assert_eq!(store.vulnerabilities.len(), 3);
+        assert_eq!(store.filtered_vulnerabilities_count(), 3);
+
+        // Security summary
+        let s = &store.security_summary;
+        assert_eq!(s.total_vulns, 3);
+        assert_eq!(s.severity_counts[4], 1, "critical"); // idx 4 = critical
+        assert_eq!(s.severity_counts[3], 1, "high");     // idx 3 = high
+        assert_eq!(s.severity_counts[2], 1, "medium");   // idx 2 = medium
+        assert_eq!(s.prioritized_vulns, 2);
+        assert_eq!(s.reachable_vulns, 2);      // CVE-A + CVE-C
+        assert_eq!(s.endpoint_reachable_vulns, 1); // CVE-C
+        assert_eq!(s.exploitable_vulns, 1);    // CVE-C
+        assert_eq!(s.vulnerable_components, 2); // express + socket.io
+        assert_eq!(s.total_components, 3);
+        assert!(!s.top_by_count.is_empty());
+
+        // vuln_by_purl aggregation: express has 2 vulns, max severity high.
+        let express = store.vuln_summary_for("pkg:npm/express@4.18.0").unwrap();
+        assert_eq!(express.count, 2);
+        assert_eq!(express.max_severity_rank, 3); // high
+        assert!(express.prioritized);
+        assert!(express.reachable);
+        assert!(!express.exploitable);
+
+        // tolerant matching: qualifiers stripped
+        let with_qual = store.vuln_summary_for("pkg:npm/express@4.18.0?foo=bar").unwrap();
+        assert_eq!(with_qual.count, 2);
+
+        // clean package has no vulns
+        assert!(store.vuln_summary_for("pkg:npm/clean@1.0.0").is_none());
+    }
+
+    #[test]
+    fn test_vdr_insight_and_reachability_parsing() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(sample_vdr_json().as_bytes()).unwrap();
+
+        let mut store = BomStore::new();
+        store.load_path(tmp.path()).unwrap();
+
+        let cve_a = store.vulnerabilities.iter().find(|r| r.id_display() == "CVE-A").unwrap();
+        // literal backslash-n must split into two labels
+        assert_eq!(cve_a.insight_labels(), vec!["Reachable".to_string(), "Used in 3 locations".to_string()]);
+        assert!(cve_a.is_reachable());
+        assert!(!cve_a.is_endpoint_reachable());
+        assert!(!cve_a.is_exploitable());
+        assert!(cve_a.is_prioritized());
+        assert_eq!(cve_a.fix_version(), "4.18.1");
+        assert_eq!(cve_a.package_name(), "express");
+
+        let cve_c = store.vulnerabilities.iter().find(|r| r.id_display() == "CVE-C").unwrap();
+        assert!(cve_c.is_endpoint_reachable());
+        assert!(cve_c.is_exploitable()); // analysis.state == exploitable
+        assert_eq!(cve_c.severity(), "critical");
+        assert_eq!(cve_c.max_score(), 9.8);
+    }
+
+    #[test]
+    fn test_vuln_quick_filter() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(sample_vdr_json().as_bytes()).unwrap();
+
+        let mut store = BomStore::new();
+        store.load_path(tmp.path()).unwrap();
+
+        store.set_vuln_filter(VulnFilter::Prioritized);
+        assert_eq!(store.filtered_vulnerabilities_count(), 2);
+
+        store.set_vuln_filter(VulnFilter::Reachable);
+        assert_eq!(store.filtered_vulnerabilities_count(), 2);
+
+        store.set_vuln_filter(VulnFilter::Exploitable);
+        assert_eq!(store.filtered_vulnerabilities_count(), 1);
+
+        store.set_vuln_filter(VulnFilter::CriticalHigh);
+        assert_eq!(store.filtered_vulnerabilities_count(), 2);
+
+        store.set_vuln_filter(VulnFilter::All);
+        assert_eq!(store.filtered_vulnerabilities_count(), 3);
+    }
+
+    #[test]
+    fn test_plain_sbom_has_no_vuln_state() {
+        // A BOM with no vulnerabilities[] must leave all vuln state empty.
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(sample_bom_json().as_bytes()).unwrap();
+
+        let mut store = BomStore::new();
+        store.load_path(tmp.path()).unwrap();
+
+        assert_eq!(store.total_vulnerabilities, 0);
+        assert!(store.vulnerabilities.is_empty());
+        assert!(store.vuln_by_purl.is_empty());
+        assert_eq!(store.security_summary.total_vulns, 0);
+        assert_eq!(store.security_summary.vulnerable_components, 0);
+        assert_eq!(store.filtered_vulnerabilities_count(), 0);
+        // lookup returns None, no panic
+        assert!(store.vuln_summary_for("pkg:npm/express@4.18.0").is_none());
+    }
+
+    #[test]
+    fn test_strip_rich_markup() {
+        assert_eq!(strip_rich("[green]Reachable[/green]"), "Reachable");
+        assert_eq!(strip_rich(":fire: Known Exploits"), "Known Exploits");
+        assert_eq!(strip_rich("clean text"), "clean text");
+        assert_eq!(strip_rich("Endpoint-Reachable"), "Endpoint-Reachable");
     }
 }

@@ -11,7 +11,8 @@ mod tests {
     #[test]
     fn test_tab_navigation_next() {
         assert_eq!(Tab::Logs.next(), Tab::Summary);
-        assert_eq!(Tab::Summary.next(), Tab::Components);
+        assert_eq!(Tab::Summary.next(), Tab::Vulnerabilities);
+        assert_eq!(Tab::Vulnerabilities.next(), Tab::Components);
         assert_eq!(Tab::Components.next(), Tab::Dependencies);
         assert_eq!(Tab::Dependencies.next(), Tab::Crypto);
         assert_eq!(Tab::Crypto.next(), Tab::Services);
@@ -26,18 +27,26 @@ mod tests {
         assert_eq!(Tab::Services.prev(), Tab::Crypto);
         assert_eq!(Tab::Crypto.prev(), Tab::Dependencies);
         assert_eq!(Tab::Dependencies.prev(), Tab::Components);
-        assert_eq!(Tab::Components.prev(), Tab::Summary);
+        assert_eq!(Tab::Components.prev(), Tab::Vulnerabilities);
+        assert_eq!(Tab::Vulnerabilities.prev(), Tab::Summary);
         assert_eq!(Tab::Summary.prev(), Tab::Logs);
     }
 
     #[test]
     fn test_tab_labels() {
         assert_eq!(Tab::Summary.label(), "Summary");
+        assert_eq!(Tab::Vulnerabilities.label(), "Vulns");
         assert_eq!(Tab::Components.label(), "Components");
         assert_eq!(Tab::Crypto.label(), "Crypto");
         assert_eq!(Tab::Services.label(), "Services");
         assert_eq!(Tab::Formulation.label(), "Formulation");
         assert_eq!(Tab::Dependencies.label(), "Dependencies");
+    }
+
+    #[test]
+    fn test_tab_all_arity() {
+        assert_eq!(Tab::ALL.len(), 8);
+        assert_eq!(Tab::ALL[2], Tab::Vulnerabilities);
     }
 
     #[test]

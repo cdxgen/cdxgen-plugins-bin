@@ -30,6 +30,7 @@ pub struct Bom {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
     pub timestamp: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_tools")]
     pub tools: Option<Tools>,
     pub authors: Option<Vec<OrganizationalContact>>,
     pub component: Option<Component>,
@@ -392,13 +393,59 @@ pub struct Vulnerability {
     pub bom_ref: Option<String>,
 
     pub id: Option<String>,
+    #[serde(default)]
+    pub source: Option<VulnSource>,
+    #[serde(default)]
+    pub references: Option<Vec<VulnReference>>,
     pub description: Option<String>,
     pub detail: Option<String>,
     pub recommendation: Option<String>,
     pub advisories: Option<Vec<Advisory>>,
     pub ratings: Option<Vec<Rating>>,
+    #[serde(default)]
+    pub cwes: Option<Vec<u32>>,
     pub affects: Option<Vec<Affect>>,
     pub properties: Option<Vec<Property>>,
+    #[serde(default)]
+    pub analysis: Option<Analysis>,
+    #[serde(default)]
+    pub published: Option<String>,
+    #[serde(default)]
+    pub updated: Option<String>,
+
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnSource {
+    pub name: Option<String>,
+    pub url: Option<String>,
+
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnReference {
+    pub id: Option<String>,
+    #[serde(default)]
+    pub source: Option<VulnSource>,
+
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Analysis {
+    #[serde(default, rename = "state")]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub justification: Option<String>,
+    #[serde(default)]
+    pub response: Option<Vec<String>>,
 
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -547,6 +594,58 @@ where
                 .map_err(D::Error::custom)?;
             Ok(Some(vec![id]))
         }
+    }
+}
+
+/// `metadata.tools` is an object `{components, services}` in CycloneDX >=1.5,
+/// but a plain array of tool objects `{vendor,name,version}` in 1.4. Accept
+/// both so older dep-scan/cdxgen VDR fixtures parse without error.
+fn deserialize_tools<'de, D>(deserializer: D) -> Result<Option<Tools>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match v {
+        None => Ok(None),
+        Some(serde_json::Value::Object(_)) => {
+            let tools: Tools = serde_json::from_value(v.unwrap()).map_err(D::Error::custom)?;
+            Ok(Some(tools))
+        }
+        Some(serde_json::Value::Array(arr)) => {
+            let mut components: Vec<Component> = Vec::new();
+            for item in arr {
+                if let serde_json::Value::Object(map) = item {
+                    let name = map
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string());
+                    let version = map
+                        .get("version")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string());
+                    let mut extra: HashMap<String, serde_json::Value> = HashMap::new();
+                    for (k, val) in map {
+                        if k != "name" && k != "version" {
+                            extra.insert(k, val);
+                        }
+                    }
+                    components.push(Component {
+                        component_type: "application".to_string(),
+                        name,
+                        version,
+                        extra,
+                        ..Default::default()
+                    });
+                }
+            }
+            Ok(Some(Tools {
+                components: Some(components),
+                services: None,
+                extra: HashMap::new(),
+            }))
+        }
+        Some(_) => Ok(None),
     }
 }
 

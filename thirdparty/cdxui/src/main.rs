@@ -248,11 +248,12 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
 
             KeyCode::Char('0') => app.switch_tab(Tab::Logs),
             KeyCode::Char('1') => app.switch_tab(Tab::Summary),
-            KeyCode::Char('2') => app.switch_tab(Tab::Components),
-            KeyCode::Char('3') => app.switch_tab(Tab::Dependencies),
-            KeyCode::Char('4') => app.switch_tab(Tab::Crypto),
-            KeyCode::Char('5') => app.switch_tab(Tab::Services),
-            KeyCode::Char('6') => app.switch_tab(Tab::Formulation),
+            KeyCode::Char('2') => app.switch_tab(Tab::Vulnerabilities),
+            KeyCode::Char('3') => app.switch_tab(Tab::Components),
+            KeyCode::Char('4') => app.switch_tab(Tab::Dependencies),
+            KeyCode::Char('5') => app.switch_tab(Tab::Crypto),
+            KeyCode::Char('6') => app.switch_tab(Tab::Services),
+            KeyCode::Char('7') => app.switch_tab(Tab::Formulation),
 
             KeyCode::Up | KeyCode::Char('k') => { app.move_selection_up(); scroll_to_selection(app); }
             KeyCode::Down | KeyCode::Char('j') => { app.move_selection_down(); scroll_to_selection(app); }
@@ -294,7 +295,13 @@ fn handle_key_event(app: &mut App, code: KeyCode, page_size: usize) {
             }
             KeyCode::Char('s') => app.cycle_sort(),
             KeyCode::Char('y') => yank_selection(app),
-            KeyCode::Char('f') => app.enter_type_filter(),
+            KeyCode::Char('f') => {
+                if app.current_tab == Tab::Vulnerabilities {
+                    app.cycle_vuln_filter();
+                } else {
+                    app.enter_type_filter();
+                }
+            }
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 if matches!(app.current_tab, Tab::Dependencies | Tab::Summary) { app.expand_all_deps(); app.clamp_scroll(); }
             }
@@ -364,6 +371,20 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 }
             }
 
+            if app.vuln_header_y > 0
+                && mouse.row == app.vuln_header_y
+                && app.current_tab == Tab::Vulnerabilities
+            {
+                for (field, x_start, x_end) in &app.vuln_header_positions {
+                    if mouse.column >= *x_start && mouse.column < *x_end {
+                        app.store.set_vuln_sort(*field);
+                        app.table_selected = 0;
+                        app.scroll_offset = 0;
+                        return;
+                    }
+                }
+            }
+
             if let Some(area) = app.dep_tree_area {
                 if mouse.column >= area.x && mouse.column < area.x + area.width
                     && mouse.row > area.y && mouse.row < area.y + area.height
@@ -403,7 +424,7 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                     && mouse.row > area.y && mouse.row < area.y + area.height
                 {
                     let row = (mouse.row - area.y - 2) as usize + app.scroll_offset as usize;
-                    if matches!(app.current_tab, Tab::Components | Tab::Crypto | Tab::Services) {
+                    if matches!(app.current_tab, Tab::Components | Tab::Crypto | Tab::Services | Tab::Vulnerabilities) {
                         let now = std::time::Instant::now();
                         let is_double = app.last_click_time
                             .map(|t| now.duration_since(t).as_millis() < 400 && row == app.last_click_row)
