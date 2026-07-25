@@ -1,0 +1,30 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_09b61529582a01::t_0e0b438fc24c28 4565-4585
+  s_09b61529582a01::t_22785710dbf3c7 192
+  s_09b61529582a01::t_bc2d814d550f16 4491-4506
+  s_09b61529582a01::t_f9cef609fa63c1 5145-5163
+  s_09b61529582a01::t_acc2b6f67db4ba 7180-7223
+  s_09b61529582a01::t_23a3217335b8e6 1701-1720
+  s_09b61529582a01::t_5f7701fadde83b 4897-4911
+  s_09b61529582a01::t_95920e82de19d4 7179
+thirdparty/rusi/scripts/eval/golden/field-taint-app.stable.digest.json
+  s_09b61529582a01::t_e21e0d19485232 2-5
+thirdparty/rusi/fixtures/field-taint-app/src/main.rs
+  s_09b61529582a01::t_49889bfbd0a61e 20-29,34-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3ec93b36851f54da6500f9c6efd08801f33b0c6",
+  "prompts": {},
+  "sessions": {
+    "s_09b61529582a01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066cb54d9ffe3kz6NTiWxPoaru",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
