@@ -1,0 +1,27 @@
+thirdparty/rusi/Cargo.toml
+  s_09b61529582a01::t_2f7c8bf74b5934 13-19
+thirdparty/rusi/scripts/eval/golden/log.stable.digest.json
+  s_09b61529582a01::t_22fee57134d483 1-6
+thirdparty/rusi/scripts/eval/golden/anyhow.stable.digest.json
+  s_09b61529582a01::t_22fee57134d483 1-6
+thirdparty/rusi/scripts/eval/golden/mini-redis.stable.digest.json
+  s_09b61529582a01::t_22fee57134d483 1-6
+thirdparty/rusi/scripts/eval/golden/baseline.small.json
+  s_09b61529582a01::t_f578ef1909ded2 1-485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "840d4bdef64927cd30035888cf81d5bd24a8a3d1",
+  "prompts": {},
+  "sessions": {
+    "s_09b61529582a01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066cb54d9ffe3kz6NTiWxPoaru",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
