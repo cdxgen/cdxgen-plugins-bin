@@ -1,0 +1,47 @@
+thirdparty/rusi/.gitignore
+  s_09b61529582a01::t_c24340b121b10a 20-21
+  s_09b61529582a01::t_0ae5d04ce0e070 17-19
+thirdparty/rusi/scripts/eval/golden/async-semantic-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/scripts/eval/run.py
+  s_09b61529582a01::t_e86927b390dbfe 219-220
+  s_09b61529582a01::t_2897fbd00072bb 153-160,165-166,168,170,172,174-180
+  s_09b61529582a01::t_e1fa9defec3df4 1-105,107-152,161-164,167,171,173,181-218,221-750
+  s_09b61529582a01::t_4836851c4bb074 106
+  s_09b61529582a01::t_d76887e8ffaf38 169
+thirdparty/rusi/scripts/eval/golden/ffi-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/scripts/eval/golden/sql-zoo-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/scripts/eval/golden/vulnerable-web-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/scripts/eval/golden/full-taint-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/corpus.toml
+  s_09b61529582a01::t_a732bfb33706c6 1-136
+thirdparty/rusi/scripts/eval/golden/field-taint-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+thirdparty/rusi/scripts/corpus/fetch.py
+  s_09b61529582a01::t_b51bf1290fec85 1-162
+thirdparty/rusi/fixtures/vulnerable-web-app/expected.jsonl
+  s_09b61529582a01::t_3d2093df75d9bb 1-11,15
+  s_09b61529582a01::t_3aa41c170f0542 12-14,16-18
+thirdparty/rusi/scripts/eval/golden/basic-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "57a00cbfa8b63f37dafc36456828b5cfa448a5e7",
+  "prompts": {},
+  "sessions": {
+    "s_09b61529582a01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066cb54d9ffe3kz6NTiWxPoaru",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
