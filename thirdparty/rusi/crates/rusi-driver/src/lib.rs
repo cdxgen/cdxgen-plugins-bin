@@ -320,7 +320,7 @@ pub fn run_driver(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
         payload.diagnostics.push(Diagnostic {
             kind: "backend".to_string(),
             message: format!(
-                "compiler backend selected for {}; embedded nightly rustc support is unavailable for resolved toolchain {}",
+                "compiler backend selected for {}; embedded rustc support is unavailable for resolved toolchain {}",
                 analysis_root.display(),
                 capabilities.resolved_toolchain
             ),
