@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_c37d8576664afe::t_a8cd01628fda7b 323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "35e8e8d847747a77e38f970218370cef5f51855d",
+  "prompts": {},
+  "sessions": {
+    "s_c37d8576664afe": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0697056f9ffexViV1V0eolmMC3",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
