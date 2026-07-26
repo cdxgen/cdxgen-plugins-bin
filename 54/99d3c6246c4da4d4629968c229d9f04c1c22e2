@@ -1,0 +1,152 @@
+thirdparty/golem/internal/corpus/annotations.go
+  s_cdb2fa2bd51788::t_fd6334c407efdc 1-300,310-311,318-384
+  s_cdb2fa2bd51788::t_5bbf1f03533a81 301-309,312-317
+thirdparty/golem/internal/bench/manifest.go
+  s_cdb2fa2bd51788::t_e3aa477e870903 35-37
+  s_cdb2fa2bd51788::t_8c91aea56d587a 1-34,38-254
+thirdparty/golem/testdata/corpus/const-only-negative/main.go
+  s_cdb2fa2bd51788::t_12e48e9212be46 8
+  s_cdb2fa2bd51788::t_3dc3cd847bae3c 1-7,9-12
+thirdparty/golem/cmd/golem/bench.go
+  s_cdb2fa2bd51788::t_797e4c9284c475 1-69,73-129
+  s_cdb2fa2bd51788::t_a78da915a95c68 70-72
+thirdparty/golem/testdata/corpus/sqli-concatenated/go.mod
+  s_cdb2fa2bd51788::t_12e48e9212be46 1-3
+thirdparty/golem/internal/bench/baseline.go
+  s_cdb2fa2bd51788::t_7182df9ead44e9 77-79
+  s_cdb2fa2bd51788::t_ed90b16bae77b4 135-136,140-141
+  s_cdb2fa2bd51788::t_cb148efa1b0246 161-163
+  s_cdb2fa2bd51788::t_3cf58259541a60 231-234,238-242
+  s_cdb2fa2bd51788::t_4e269eadd5a5bc 216
+  s_cdb2fa2bd51788::t_55c96fc4a77f30 87-92
+  s_cdb2fa2bd51788::t_aac6c53a658c1c 1-76,80-86,93-131,142-160,164-194,196-215,217-230,235-237,243-244
+  s_cdb2fa2bd51788::t_fa5556decc020e 195
+  s_cdb2fa2bd51788::t_df2328edba16fb 132-134,137-139
+thirdparty/golem/internal/bench/bench_test.go
+  s_cdb2fa2bd51788::t_f30d1d1062344e 1-6,8-80,82-150,152-299,302-305,307,324-331
+  s_cdb2fa2bd51788::t_1d93591f7909c8 81
+  s_cdb2fa2bd51788::t_25c3c18352db88 151,300-301,306,308-323
+  s_cdb2fa2bd51788::t_5ca137fb1b13a1 7
+thirdparty/golem/testdata/corpus/logging-secret-negative/go.mod
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-3
+thirdparty/golem/internal/bench/rss_other.go
+  s_cdb2fa2bd51788::t_891ebe913cd795 1-7
+thirdparty/golem/internal/bench/rss_linux.go
+  s_cdb2fa2bd51788::t_891ebe913cd795 1-6
+thirdparty/golem/internal/corpus/evaluate.go
+  s_cdb2fa2bd51788::t_75370a532ddfbf 353-367
+  s_cdb2fa2bd51788::t_b3ffda05efc0fb 1-352,368-405
+thirdparty/golem/testdata/corpus/dep-only-flow/main.go
+  s_cdb2fa2bd51788::t_85c58ecfaebbf1 11-14
+  s_cdb2fa2bd51788::t_86233f9263b10d 1-10,15-18
+thirdparty/golem/testdata/corpus/json-roundtrip/main.go
+  s_cdb2fa2bd51788::t_85c58ecfaebbf1 11
+  s_cdb2fa2bd51788::t_6b1f4ef63dafa5 1-10,12-22
+thirdparty/golem/testdata/corpus/field-discrimination-negative/go.mod
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-3
+thirdparty/golem/testdata/corpus/dep-drops-taint-negative/main.go
+  s_cdb2fa2bd51788::t_cf335e463dbf1c 15-19
+  s_cdb2fa2bd51788::t_b71cc700d29ea7 1-14,20-24
+thirdparty/golem/testdata/corpusdep/lib/lib.go
+  s_cdb2fa2bd51788::t_b71cc700d29ea7 13,18,24-32
+  s_cdb2fa2bd51788::t_3eb1732b0f7fc9 1-12,14-17,19-23
+thirdparty/golem/testdata/corpus/sqli-concatenated/main.go
+  s_cdb2fa2bd51788::t_12e48e9212be46 1-17
+thirdparty/golem/testdata/corpus/logging-secret-negative/main.go
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-16
+thirdparty/golem/testdata/golden/gorilla-mux-security.digest.json
+  s_cdb2fa2bd51788::t_17f3fa09db7e9c 1-176
+thirdparty/golem/testdata/corpus/dep-drops-taint-negative/go.mod
+  s_cdb2fa2bd51788::t_b71cc700d29ea7 1-7
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_cdb2fa2bd51788::t_18b6391bf3fcf8 147,149
+  s_cdb2fa2bd51788::t_f8789b69dfe54c 1-146,148,150-345
+thirdparty/golem/internal/bench/rss_unix.go
+  s_cdb2fa2bd51788::t_b015b5e2f20ae1 1-19
+thirdparty/golem/internal/analyzer/corpus_test.go
+  s_cdb2fa2bd51788::t_e885ee23eb4153 11-263
+  s_cdb2fa2bd51788::t_3304441106e59c 8-10
+  s_cdb2fa2bd51788::t_21af940b37b423 1-7
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_cdb2fa2bd51788::t_f8789b69dfe54c 1-266
+thirdparty/golem/internal/bench/bench.go
+  s_cdb2fa2bd51788::t_43d79980788278 1-34,39-184,194-326
+  s_cdb2fa2bd51788::t_403ca6a0b7604b 35-38
+  s_cdb2fa2bd51788::t_6c0065a82ed0ab 185-193
+thirdparty/golem/cmd/golem/golden.go
+  s_cdb2fa2bd51788::t_4542f2ec89bfa4 1-88
+thirdparty/golem/testdata/corpus/cgo-string-roundtrip/main.go
+  s_cdb2fa2bd51788::t_12e48e9212be46 14
+  s_cdb2fa2bd51788::t_94dc92081399e1 1-13,15-23
+thirdparty/golem/testdata/bench/manifest.json
+  s_cdb2fa2bd51788::t_7d789ea0e92be1 170-174
+  s_cdb2fa2bd51788::t_d6fd636ebdcc92 2-39,45-69,75-110,116-154,160-169,175-190,196-585
+  s_cdb2fa2bd51788::t_1eab4fd657dc01 40-44
+  s_cdb2fa2bd51788::t_1092ccb0784da2 70-74,111-115,155-159,191-195
+  s_cdb2fa2bd51788::t_b0239ff10c650b 1,586-588
+thirdparty/golem/testdata/corpus/unrelated-value-negative/go.mod
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-3
+thirdparty/golem/testdata/golden/shiftleft-go-demo-security.digest.json
+  s_cdb2fa2bd51788::t_f8789b69dfe54c 1-211
+thirdparty/golem/internal/exporter/sarif.go
+  s_cdb2fa2bd51788::t_192c05501bcba6 1-83,85-233
+  s_cdb2fa2bd51788::t_766c3d5c5b1806 84
+thirdparty/golem/internal/bench/rss_bsd.go
+  s_cdb2fa2bd51788::t_891ebe913cd795 1-6
+thirdparty/golem/testdata/bench/baseline.json
+  s_cdb2fa2bd51788::t_7d789ea0e92be1 2-7,9-29,32-35,37-57,60-63,65-85,88-91,93-113,116-119,121-141,144-147,149-169,172-175,177-197,200-203,205-225,228-231,233-253,256-259,261-281,284-287,289-309,312-315,317-337,340-343,345-365,368-371,373-393,396-399,401-421,424-427,429-449,452-455,457-477,480-483,485-492,495-505,508-511,513-533,536-539,541-561,564-567,569-589,592-595,597-617,620-623,625-645,648-651,653-673,676-679,681-701,704-707,709-729,788-791,793-813,816-819,821-841,844-847,849-869,872-875,877-897,900-903,905-925,928-931,933-953,956-959,961-981,984-987,989-1009,1012-1015,1017-1037,1040-1043,1045-1065,1068-1071,1073-1093,1096-1099,1101-1121,1124-1127,1132,1135,1137-1149,1152-1155,1160,1163,1165-1177,1180-1183,1185-1205,1208-1211,1213-1230,1287-1289,1292-1295,1297-1317,1320-1323,1325-1345,1348-1351,1353-1373,1376-1379,1381-1401,1404-1407,1409-1429,1432-1435,1437-1457,1460-1463,1465-1485,1488-1491,1493-1513,1516-1519,1521-1541,1544-1547,1549-1569,1572-1575,1577-1597,1600-1603,1605-1625,1628-1631,1633-1653,1656-1659,1661-1678,1735-1737,1740-1743,1745-1765,1768-1771,1773-1793,1796-1799,1801-1821,1824-1827,1829-1849,1852-1855,1857-1877,1880-1883,1885-1905,1908-1911,1913-1933,1936-1939,1941-1961,1964-1967,1969-1989,1992-1995,1997-2017,2020-2023,2025-2045,2048-2051,2053-2073,2076-2079,2081-2101,2104-2107,2109-2124,2181-2185,2188-2191,2193-2213,2216-2219,2221-2241,2244-2247,2249-2269,2272-2275,2277-2297
+  s_cdb2fa2bd51788::t_18b6391bf3fcf8 8,30-31,36,58-59,64,86-87,92,114-115,120,142-143,148,170-171,176,198-199,204,226-227,232,254-255,260,282-283,288,310-311,316,338-339,344,366-367,372,394-395,400,422-423,428,450-451,456,478-479,484,506-507,512,534-535,540,562-563,568,590-591,596,618-619,624,646-647,652,674-675,680,702-703,708,730-731,736,758-759,764,786-787,792,814-815,820,842-843,848,870-871,876,898-899,904,926-927,932,954-955,960,982-983,988,1010-1011,1016,1038-1039,1044,1066-1067,1072,1094-1095,1100,1122-1123,1128,1150-1151,1156,1179,1184,1206-1207,1212,1234-1235,1240,1262-1263,1268,1290-1291,1296,1318-1319,1324,1346-1347,1352,1374-1375,1380,1402-1403,1408,1430-1431,1436,1458-1459,1464,1486-1487,1492,1514-1515,1520,1542-1543,1548,1570-1571,1576,1598-1599,1604,1626-1627,1632,1654-1655,1660,1682-1683,1688,1710-1711,1716,1738-1739,1744,1766-1767,1772,1794-1795,1800,1822-1823,1828,1850-1851,1856,1878-1879,1884,1906-1907,1912,1934-1935,1940,1962-1963,1968,1990-1991,1996,2018-2019,2024,2046-2047,2052,2074-2075,2080,2102-2103,2108,2130-2131,2136,2158-2159,2164,2186-2187,2192,2214-2215,2220,2242-2243,2248,2270-2271,2276,2298-2299
+  s_cdb2fa2bd51788::t_24b5ec0d2b7dfb 493-494,732-735,737-757,760-763,765-785,1129-1131,1133-1134,1136,1157-1159,1161-1162,1164,1178,1231-1233,1236-1239,1241-1261,1264-1267,1269-1286,1679-1681,1684-1687,1689-1709,1712-1715,1717-1734,2125-2129,2132-2135,2137-2157,2160-2163,2165-2180
+  s_cdb2fa2bd51788::t_d988956cdbec21 1,2300-2302
+thirdparty/golem/testdata/corpus/field-discrimination-negative/main.go
+  s_cdb2fa2bd51788::t_7d9def165f97ec 10-13
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-9,14-23
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_cdb2fa2bd51788::t_17f3fa09db7e9c 1-156
+thirdparty/golem/internal/bench/digest.go
+  s_cdb2fa2bd51788::t_481a153017b3e3 1-33,35-42,53-75,85-145,147-167,169-320
+  s_cdb2fa2bd51788::t_58648e310f1b38 146
+  s_cdb2fa2bd51788::t_ddbd64db9e9977 168
+  s_cdb2fa2bd51788::t_766c3d5c5b1806 34,43-52,76-84
+thirdparty/golem/internal/corpus/corpus_test.go
+  s_cdb2fa2bd51788::t_8a2dc19040b922 1-247
+thirdparty/golem/cmd/golem/main.go
+  s_cdb2fa2bd51788::t_081a7e5b100ee0 189-207
+  s_cdb2fa2bd51788::t_50fb2f02dc54f2 152,155-158
+  s_cdb2fa2bd51788::t_32a600ff4bc51a 151
+  s_cdb2fa2bd51788::t_6bac4ca0440eea 159-160
+  s_cdb2fa2bd51788::t_5517c24e7dc9ec 34-37
+thirdparty/golem/README.md
+  s_cdb2fa2bd51788::t_e760332c59afbb 125-134
+  s_cdb2fa2bd51788::t_10a4d8bc2cb9b6 143-198
+thirdparty/golem/testdata/corpus/sanitizer-on-path-negative/go.mod
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-3
+thirdparty/golem/testdata/corpus/unrelated-value-negative/main.go
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-17
+thirdparty/golem/testdata/corpus/sqli-parameterized-negative/main.go
+  s_cdb2fa2bd51788::t_12e48e9212be46 8-12
+  s_cdb2fa2bd51788::t_42325b0667e82b 1-7,13-17
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_cdb2fa2bd51788::t_f8789b69dfe54c 1-129,131,133-339
+  s_cdb2fa2bd51788::t_18b6391bf3fcf8 130,132
+thirdparty/golem/testdata/corpus/sanitizer-on-path-negative/main.go
+  s_cdb2fa2bd51788::t_08af3cbe766158 1-17
+thirdparty/golem/internal/bench/rss_darwin.go
+  s_cdb2fa2bd51788::t_891ebe913cd795 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5499d3c6246c4da4d4629968c229d9f04c1c22e2",
+  "prompts": {},
+  "sessions": {
+    "s_cdb2fa2bd51788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2cc4c8d-c3f6-40c3-a016-c7a9d7be5d04",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
