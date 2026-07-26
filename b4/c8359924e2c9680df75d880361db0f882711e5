@@ -1,0 +1,58 @@
+thirdparty/rusi/fixtures/channel-alias-app/Cargo.toml
+  s_09b61529582a01::t_51c4673e161d39 1-8
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_09b61529582a01::t_7b876f90c32413 1722-1729,1732-1734,1742-1743
+  s_09b61529582a01::t_eedc17f4c141b3 1342,1426
+  s_09b61529582a01::t_59dce7308f21b5 1480
+  s_09b61529582a01::t_b69834e4b8bf5d 5663-5699
+  s_09b61529582a01::t_b291756859e2d3 359-371,376-379
+  s_09b61529582a01::t_49104067be54c5 5295
+  s_09b61529582a01::t_db2e93f25681a3 5567,5582
+  s_09b61529582a01::t_be4890b3233e82 5209-5218
+  s_09b61529582a01::t_5b8d57542e009d 4709-4715
+  s_09b61529582a01::t_783f02c67c4f02 2486-2488
+  s_09b61529582a01::t_dc3b83dcd2a242 4914-4922,4930-4935,4944,4959,4966-4968,4970
+  s_09b61529582a01::t_f0c0ff51b72ba5 1754-1776
+  s_09b61529582a01::t_79b3f08df9a303 2613-2616
+  s_09b61529582a01::t_7879ec36b2f329 1121-1123
+  s_09b61529582a01::t_3e0edb88269996 7621-7682
+  s_09b61529582a01::t_f419eb4680ea3b 163-168
+  s_09b61529582a01::t_211133d5cd2477 207-214
+  s_09b61529582a01::t_e8e6e3b7e38bf7 1457
+  s_09b61529582a01::t_882851a1bcfe88 1744-1753,1777
+  s_09b61529582a01::t_79bef02b49a62a 5657
+  s_09b61529582a01::t_aff348019e2069 2508-2530,2534-2543
+  s_09b61529582a01::t_cd0ec7da96e21e 4945-4950,4955-4958,4960-4965
+  s_09b61529582a01::t_f16ef5156f1b6a 2531-2533
+  s_09b61529582a01::t_5011e518bbf350 1731,1735,1739
+  s_09b61529582a01::t_a20ba73e04da4f 1318,1403
+  s_09b61529582a01::t_8bccbf31896f00 1778
+thirdparty/rusi/fixtures/channel-alias-app/src/main.rs
+  s_09b61529582a01::t_dbb4336d71bdf3 1-3,6-10,13-16,20-23,26
+  s_09b61529582a01::t_a828ff8810d89a 4-5,11-12,17-19,24-25
+thirdparty/rusi/fixtures/sanitizer-scope-app/Cargo.toml
+  s_09b61529582a01::t_22645486a0c64b 1-8
+thirdparty/rusi/fixtures/sanitizer-scope-app/src/main.rs
+  s_09b61529582a01::t_e31e8985a4d81a 1-9,13-14,16-22
+  s_09b61529582a01::t_cc3bc93fbaa646 10-12,15,23
+thirdparty/rusi/fixtures/channel-alias-app/Cargo.lock
+  s_09b61529582a01::t_9a2cfb9b826554 1-7
+thirdparty/rusi/fixtures/sanitizer-scope-app/Cargo.lock
+  s_09b61529582a01::t_5bd1d75a3453e3 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4c8359924e2c9680df75d880361db0f882711e5",
+  "prompts": {},
+  "sessions": {
+    "s_09b61529582a01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066cb54d9ffe3kz6NTiWxPoaru",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
