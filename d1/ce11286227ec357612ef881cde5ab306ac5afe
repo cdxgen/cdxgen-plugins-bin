@@ -1,0 +1,19 @@
+thirdparty/rusi/docs/ANALYSIS_ARCHITECTURE.md
+  s_4fd5704d8a0804::t_01efa951d3fb04 1-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1ce11286227ec357612ef881cde5ab306ac5afe",
+  "prompts": {},
+  "sessions": {
+    "s_4fd5704d8a0804": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14f176c8-f9aa-4f9c-a47d-42c9684ca4e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
