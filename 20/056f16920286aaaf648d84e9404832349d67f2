@@ -1,0 +1,49 @@
+thirdparty/rusi/scripts/eval/golden/full-taint-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/log.stable.digest.json
+  s_4fd5704d8a0804::t_421920159bab98 3-5
+thirdparty/rusi/scripts/eval/golden/dyn-dispatch-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3-5
+thirdparty/rusi/scripts/eval/run.py
+  s_4fd5704d8a0804::t_d30f2b183eeca3 620-628
+  s_4fd5704d8a0804::t_9f51cde6bd8e41 668-682
+  s_4fd5704d8a0804::t_3e68e545adc0ec 619
+thirdparty/rusi/scripts/eval/golden/vulnerable-web-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_4fd5704d8a0804::t_9b82810ef87199 2936-2939
+  s_4fd5704d8a0804::t_430bf32035dd48 2787-2797
+  s_4fd5704d8a0804::t_122fffab883200 7475-7487
+thirdparty/rusi/scripts/eval/golden/ffi-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/field-taint-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/async-semantic-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/name-collision-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/higher-order-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/mini-redis.stable.digest.json
+  s_4fd5704d8a0804::t_421920159bab98 3
+thirdparty/rusi/scripts/eval/golden/anyhow.stable.digest.json
+  s_4fd5704d8a0804::t_421920159bab98 3
+thirdparty/rusi/scripts/eval/golden/basic-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "20056f16920286aaaf648d84e9404832349d67f2",
+  "prompts": {},
+  "sessions": {
+    "s_4fd5704d8a0804": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14f176c8-f9aa-4f9c-a47d-42c9684ca4e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
