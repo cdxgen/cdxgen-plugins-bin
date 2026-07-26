@@ -1,0 +1,174 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_09b61529582a01::t_aff348019e2069 2508-2530,2534-2543
+  s_09b61529582a01::t_e8e6e3b7e38bf7 1457
+  s_09b61529582a01::t_882851a1bcfe88 1744-1753,1777
+  s_09b61529582a01::t_dd4966da5d775a 7431-7438,7440,7443-7474,7488-7582,7589,7591,7593-7594
+  s_09b61529582a01::t_79bef02b49a62a 5671
+  s_09b61529582a01::t_a8f216591cc18d 1633
+  s_09b61529582a01::t_22785710dbf3c7 198
+  s_09b61529582a01::t_cd0ec7da96e21e 4959-4964,4969-4972,4974-4979
+  s_09b61529582a01::t_783f02c67c4f02 2486-2488
+  s_09b61529582a01::t_b4538844cbdf5e 1306-1307
+  s_09b61529582a01::t_18b9bb8e3c8e65 144-148
+  s_09b61529582a01::t_bd7b1d3cb88125 3050,3096-3109,3144-3146,3150-3153,3155-3160,3163-3166,3171,3177-3193,3195,3205-3211,3213-3214,3216-3240
+  s_09b61529582a01::t_3e0edb88269996 7648-7709
+  s_09b61529582a01::t_211133d5cd2477 207-214
+  s_09b61529582a01::t_ae161da0d77446 2784-2786,2799,2818-2821,2823-2848,2851-2935,2940-2947
+  s_09b61529582a01::t_d0e2bf4ca451ba 3260-3265,3275-3278,3281
+  s_09b61529582a01::t_f16ef5156f1b6a 2531-2533
+  s_09b61529582a01::t_8bccbf31896f00 1778
+  s_09b61529582a01::t_5f7701fadde83b 5033-5047
+  s_09b61529582a01::t_59dce7308f21b5 1480
+  s_09b61529582a01::t_1b5f6b53d7552b 1308
+  s_09b61529582a01::t_0a40b07f12fbee 137-143
+  s_09b61529582a01::t_b291756859e2d3 359-371,376-379
+  s_09b61529582a01::t_d35d3d29caab2a 1657-1658
+  s_09b61529582a01::t_be4890b3233e82 5223-5232
+  s_09b61529582a01::t_db2e93f25681a3 5581,5596
+  s_09b61529582a01::t_dc3b83dcd2a242 4928-4936,4944-4949,4958,4973,4980-4982,4984
+  s_09b61529582a01::t_a57c45218a5714 3028-3049,3051-3095,3110-3119,3147-3149,3154,3161-3162,3167-3170,3172-3176,3194,3196-3204,3212,3215,3241-3259,3266-3274,3279-3280,3282-3436
+  s_09b61529582a01::t_4239bf24217899 1602
+  s_09b61529582a01::t_0e0b438fc24c28 4670-4690
+  s_09b61529582a01::t_95920e82de19d4 7354
+  s_09b61529582a01::t_7879ec36b2f329 1121-1123
+  s_09b61529582a01::t_acc2b6f67db4ba 7355-7398
+  s_09b61529582a01::t_bc2d814d550f16 4596-4611
+  s_09b61529582a01::t_79b3f08df9a303 2613-2616
+  s_09b61529582a01::t_48e88f40dcc391 3120-3143
+  s_09b61529582a01::t_f419eb4680ea3b 163-168
+  s_09b61529582a01::t_49104067be54c5 5309
+  s_09b61529582a01::t_f0c0ff51b72ba5 1754-1776
+  s_09b61529582a01::t_ded6455bc17dda 1659
+  s_09b61529582a01::t_f9cef609fa63c1 5290-5308
+  s_4fd5704d8a0804::t_9b82810ef87199 2936-2939
+  s_09b61529582a01::t_5b8d57542e009d 4723-4729
+  s_09b61529582a01::t_1bd64170673ef2 1600-1601
+  s_09b61529582a01::t_b69834e4b8bf5d 5677-5713
+  s_4fd5704d8a0804::t_430bf32035dd48 2787-2797
+  s_09b61529582a01::t_aea303eb16d491 7583-7588,7590,7592
+  s_4fd5704d8a0804::t_122fffab883200 7475-7487
+  s_09b61529582a01::t_5011e518bbf350 1731,1735,1739
+  s_09b61529582a01::t_eedc17f4c141b3 1342,1426
+  s_09b61529582a01::t_a20ba73e04da4f 1318,1403
+  s_09b61529582a01::t_7b876f90c32413 1722-1729,1732-1734,1742-1743
+thirdparty/rusi/corpus.toml
+  s_09b61529582a01::t_a732bfb33706c6 1-71,90-154
+  s_09b61529582a01::t_b7849b4a37727f 72-89
+thirdparty/rusi/scripts/eval/golden/mini-redis.stable.digest.json
+  s_09b61529582a01::t_8883d88403ae01 2
+  s_09b61529582a01::t_22fee57134d483 1,4-6
+  s_4fd5704d8a0804::t_421920159bab98 3
+thirdparty/rusi/fixtures/sanitizer-scope-app/Cargo.toml
+  s_09b61529582a01::t_22645486a0c64b 1-8
+thirdparty/rusi/.gitignore
+  s_09b61529582a01::t_c24340b121b10a 20-21
+  s_09b61529582a01::t_0ae5d04ce0e070 17-19
+thirdparty/rusi/scripts/eval/golden/vulnerable-web-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/name-collision-app.stable.digest.json
+  s_09b61529582a01::t_8883d88403ae01 1-2,4-6
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/scripts/eval/golden/baseline.small.json
+  s_09b61529582a01::t_b8240827df85ec 2,17,20,31,43,70-71,73,84,96,117-118,120,131,143,164-165,167,178,190,211-212,214,225,237,261,272,284,305,308,319,343-483,493-494,496,499-500,507,509,519,540-541,543,546-547,554,556,566,587-588,590,593-594,601,603,613
+  s_09b61529582a01::t_f578ef1909ded2 1,3-16,18-19,21-30,32-42,44-69,72,74-83,85-95,97-116,119,121-130,132-142,144-163,166,168-177,179-189,191-210,213,215-224,226-236,238-260,262-271,273-283,285-304,306-307,309-318,320-342,484-492,495,497-498,501-506,508,510-518,520-539,542,544-545,548-553,555,557-565,567-586,589,591-592,595-600,602,604-612,614-626
+thirdparty/rusi/fixtures/name-collision-app/Cargo.lock
+  s_09b61529582a01::t_e1a7e9dbf63b81 1-7
+thirdparty/rusi/fixtures/higher-order-app/src/main.rs
+  s_09b61529582a01::t_40e7429423b06d 1-18
+thirdparty/rusi/scripts/eval/golden/field-taint-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1,6
+  s_09b61529582a01::t_e21e0d19485232 2,4-5
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/fixtures/name-collision-app/src/main.rs
+  s_09b61529582a01::t_d9ddad5728db3b 1-47
+thirdparty/rusi/fixtures/channel-alias-app/src/main.rs
+  s_09b61529582a01::t_a828ff8810d89a 4-5,11-12,17-19,24-25
+  s_09b61529582a01::t_dbb4336d71bdf3 1-3,6-10,13-16,20-23,26
+thirdparty/rusi/scripts/eval/golden/log.stable.digest.json
+  s_09b61529582a01::t_22fee57134d483 1,6
+  s_09b61529582a01::t_8883d88403ae01 2
+  s_4fd5704d8a0804::t_421920159bab98 3-5
+thirdparty/rusi/fixtures/vulnerable-web-app/expected.jsonl
+  s_09b61529582a01::t_3d2093df75d9bb 1-11,15
+  s_09b61529582a01::t_3aa41c170f0542 12-14,16-18
+thirdparty/rusi/fixtures/higher-order-app/Cargo.lock
+  s_09b61529582a01::t_eafea193edc305 1-7
+thirdparty/rusi/scripts/eval/golden/anyhow.stable.digest.json
+  s_4fd5704d8a0804::t_421920159bab98 3
+  s_09b61529582a01::t_8883d88403ae01 2
+  s_09b61529582a01::t_22fee57134d483 1,4-6
+thirdparty/rusi/scripts/eval/golden/async-semantic-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/fixtures/sanitizer-scope-app/src/main.rs
+  s_09b61529582a01::t_cc3bc93fbaa646 10-12,15,23
+  s_09b61529582a01::t_e31e8985a4d81a 1-9,13-14,16-22
+thirdparty/rusi/Cargo.toml
+  s_09b61529582a01::t_2f7c8bf74b5934 13-19
+thirdparty/rusi/scripts/eval/golden/sql-zoo-app.stable.digest.json
+  s_09b61529582a01::t_8883d88403ae01 3
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+thirdparty/rusi/scripts/eval/golden/ffi-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+thirdparty/rusi/fixtures/channel-alias-app/Cargo.toml
+  s_09b61529582a01::t_51c4673e161d39 1-8
+thirdparty/rusi/scripts/eval/golden/basic-app.stable.digest.json
+  s_4fd5704d8a0804::t_c887715398a54c 3
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+thirdparty/rusi/fixtures/name-collision-app/Cargo.toml
+  s_09b61529582a01::t_3ee43d0bad3bc1 1-8
+thirdparty/rusi/scripts/eval/golden/higher-order-app.stable.digest.json
+  s_09b61529582a01::t_8883d88403ae01 1-2,4-6
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/fixtures/sanitizer-scope-app/Cargo.lock
+  s_09b61529582a01::t_5bd1d75a3453e3 1-7
+thirdparty/rusi/fixtures/higher-order-app/Cargo.toml
+  s_09b61529582a01::t_e5d9bddcaa0715 1-8
+thirdparty/rusi/scripts/eval/golden/dyn-dispatch-app.stable.digest.json
+  s_09b61529582a01::t_8883d88403ae01 1-2,6
+  s_4fd5704d8a0804::t_c887715398a54c 3-5
+thirdparty/rusi/scripts/corpus/fetch.py
+  s_09b61529582a01::t_b51bf1290fec85 1-162
+thirdparty/rusi/scripts/eval/run.py
+  s_09b61529582a01::t_e86927b390dbfe 219-220
+  s_09b61529582a01::t_e1fa9defec3df4 1-105,107-152,161-164,167,171,173,181-218,221-618,629-667,683-775
+  s_4fd5704d8a0804::t_3e68e545adc0ec 619
+  s_09b61529582a01::t_2897fbd00072bb 153-160,165-166,168,170,172,174-180
+  s_09b61529582a01::t_d76887e8ffaf38 169
+  s_4fd5704d8a0804::t_d30f2b183eeca3 620-628
+  s_09b61529582a01::t_4836851c4bb074 106
+  s_4fd5704d8a0804::t_9f51cde6bd8e41 668-682
+thirdparty/rusi/scripts/eval/golden/full-taint-app.stable.digest.json
+  s_09b61529582a01::t_d197431f84d340 1-2,4-6
+  s_4fd5704d8a0804::t_c887715398a54c 3
+thirdparty/rusi/fixtures/field-taint-app/src/main.rs
+  s_09b61529582a01::t_49889bfbd0a61e 20-29,34-44
+thirdparty/rusi/fixtures/channel-alias-app/Cargo.lock
+  s_09b61529582a01::t_9a2cfb9b826554 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a068755e8eed9f3249cdf3d1b62328cf3a9551ac",
+  "prompts": {},
+  "sessions": {
+    "s_09b61529582a01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_066cb54d9ffe3kz6NTiWxPoaru",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_4fd5704d8a0804": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14f176c8-f9aa-4f9c-a47d-42c9684ca4e8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
