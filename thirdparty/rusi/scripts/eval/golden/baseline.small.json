@@ -1,0 +1,626 @@
+{
+  "stamp": "20260725-133743",
+  "tier": "small",
+  "backends": [
+    "stable"
+  ],
+  "summaries": [
+    {
+      "slug": "vulnerable-web-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/vulnerable-web-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.075,
+            "peak_rss_kb": 26880,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/vulnerable-web-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 12,
+            "cg_edges": 10,
+            "df_nodes": 13,
+            "df_edges": 10,
+            "df_slices": 3,
+            "df_summaries": 3
+          },
+          "digest": {
+            "edges_sha": "f0a6d12756ea335b3a33d0a1dd80dde870bf0b1e7964c16d729460e97b6a3cd0",
+            "slices_sha": "be83e0a78e59592735c6fb006c31b5df1d959a98ce7247eff55d0fae488b805a",
+            "edges_count": 10,
+            "slices_count": 3
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.075
+          },
+          "precision_recall": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "expected": 3,
+            "actual": 3,
+            "true_positives": 3,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision_fine": 0.0,
+            "recall_fine": 0.0,
+            "f1_fine": 0.0
+          }
+        }
+      }
+    },
+    {
+      "slug": "basic-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/basic-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.074,
+            "peak_rss_kb": 26880,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/basic-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 11,
+            "cg_edges": 9,
+            "df_nodes": 8,
+            "df_edges": 3,
+            "df_slices": 2,
+            "df_summaries": 5
+          },
+          "digest": {
+            "edges_sha": "e4aae27e72152ee61f5ff78211f74e3c4932e1419ef559846f9d969dd86a062c",
+            "slices_sha": "aeb62f547a69b83eead0e589302f3de0bc71dc00843e0dd2b75b8174bff5e413",
+            "edges_count": 9,
+            "slices_count": 2
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.073
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "full-taint-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/full-taint-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.108,
+            "peak_rss_kb": 37488,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/full-taint-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 24,
+            "cg_edges": 29,
+            "df_nodes": 25,
+            "df_edges": 19,
+            "df_slices": 2,
+            "df_summaries": 5
+          },
+          "digest": {
+            "edges_sha": "c671f0ba0a0efbfcd8dfc74447eaaca51d5fe70ba5c4aebf94c8067958255137",
+            "slices_sha": "39e399c8762167c73b5b77b82dead207d51c8c39cd541829895c3f2bba320468",
+            "edges_count": 29,
+            "slices_count": 2
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.108
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "field-taint-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/field-taint-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.112,
+            "peak_rss_kb": 37472,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/field-taint-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 12,
+            "cg_edges": 14,
+            "df_nodes": 14,
+            "df_edges": 7,
+            "df_slices": 4,
+            "df_summaries": 6
+          },
+          "digest": {
+            "edges_sha": "dd2f879b73b2a1a94d83030072feaba94da509fdea51a5b5d5b24013752c451d",
+            "slices_sha": "c25a149dce1ac8ef57369a66081ba4af103cbb3f68250f216b9aa138ccfa2f7f",
+            "edges_count": 14,
+            "slices_count": 4
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.11
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "sql-zoo-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/sql-zoo-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.115,
+            "peak_rss_kb": 37488,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/sql-zoo-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 23,
+            "cg_edges": 29,
+            "df_nodes": 29,
+            "df_edges": 20,
+            "df_slices": 9,
+            "df_summaries": 10
+          },
+          "digest": {
+            "edges_sha": "96d5d06a783d55afe3c28b4e6203b5a1f6b5dbcfda6da266e81e50d85474b430",
+            "slices_sha": "a52cc4c3da8a4a634d49818e8aeac5477593db3300e18967d4c3a73441834b55",
+            "edges_count": 29,
+            "slices_count": 9
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.114
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "async-semantic-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/async-semantic-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.078,
+            "peak_rss_kb": 26880,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/async-semantic-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 46,
+            "cg_edges": 49,
+            "df_nodes": 16,
+            "df_edges": 6,
+            "df_slices": 1,
+            "df_summaries": 15
+          },
+          "digest": {
+            "edges_sha": "41a2011e8fc984a67e0bf6e2b37f53d8a020ff2974def9a8d004591003f0e211",
+            "slices_sha": "61d381bbbb61105b82657bcbb716f2c397f42ea9f3eb74802fdeb86620d95e18",
+            "edges_count": 49,
+            "slices_count": 1
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.075
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "ffi-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/ffi-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.075,
+            "peak_rss_kb": 26880,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/ffi-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 9,
+            "cg_edges": 8,
+            "df_nodes": 5,
+            "df_edges": 3,
+            "df_slices": 0,
+            "df_summaries": 2
+          },
+          "digest": {
+            "edges_sha": "0776110b380ab001a48032d6e80dbfaf94f84e36b45fbf80b7ce13c9708344b1",
+            "slices_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "edges_count": 8,
+            "slices_count": 0
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.074
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "name-collision-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/name-collision-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.109,
+            "peak_rss_kb": 37472,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/name-collision-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 8,
+            "cg_edges": 12,
+            "df_nodes": 8,
+            "df_edges": 3,
+            "df_slices": 1,
+            "df_summaries": 5
+          },
+          "digest": {
+            "edges_sha": "26b496ceb36c9585500e03d70058c32d90391e24f717258d00d09ad5cdc1451b",
+            "slices_sha": "6e3e2c7e75ba29c0fa26e2b335ee45a3856442dbca952de5493f2c67075e0357",
+            "edges_count": 12,
+            "slices_count": 1
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.106
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "higher-order-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/higher-order-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.108,
+            "peak_rss_kb": 37472,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/higher-order-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 9,
+            "cg_edges": 9,
+            "df_nodes": 4,
+            "df_edges": 0,
+            "df_slices": 0,
+            "df_summaries": 5
+          },
+          "digest": {
+            "edges_sha": "3805d595ff7c430a78c3f74ec2a2d99063ae1c88c780c9e58b4ad5b5ea31ab37",
+            "slices_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "edges_count": 9,
+            "slices_count": 0
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.107
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "dyn-dispatch-app",
+      "tier": "fixtures",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/fixtures/dyn-dispatch-app",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.079,
+            "peak_rss_kb": 26880,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/dyn-dispatch-app/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 11,
+            "cg_edges": 12,
+            "df_nodes": 14,
+            "df_edges": 5,
+            "df_slices": 4,
+            "df_summaries": 5
+          },
+          "digest": {
+            "edges_sha": "897956b69933afd02ce4fce8e4fd9e964aec4812c8c506711f4498e32dbc42c1",
+            "slices_sha": "d6632cb630c1dbe8b4ac47f205e46d5bb2c04bfa5aeebe1d4ae05b6251feb5cf",
+            "edges_count": 12,
+            "slices_count": 4
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.077
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "mini-redis",
+      "tier": "small",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/.corpus-cache/mini-redis",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.15,
+            "peak_rss_kb": 54464,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/mini-redis/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 247,
+            "cg_edges": 1317,
+            "df_nodes": 233,
+            "df_edges": 30,
+            "df_slices": 8,
+            "df_summaries": 136
+          },
+          "digest": {
+            "edges_sha": "76504ab21da17712770090a7bd4dfaa9e69c8db501c14b01fb2017fbecef6a8d",
+            "slices_sha": "fb66f2e12f98132f2efb57e81f27f16d4e16deabc8d30812cc9dfb86a9a2c0dd",
+            "edges_count": 1317,
+            "slices_count": 8
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.142
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "anyhow",
+      "tier": "small",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/.corpus-cache/anyhow",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.123,
+            "peak_rss_kb": 39072,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/anyhow/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 185,
+            "cg_edges": 781,
+            "df_nodes": 197,
+            "df_edges": 13,
+            "df_slices": 0,
+            "df_summaries": 126
+          },
+          "digest": {
+            "edges_sha": "e089ae85470e8db771bdebb8647a3f00c51e3996983715fea6ff93a6232a7c8a",
+            "slices_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "edges_count": 781,
+            "slices_count": 0
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.121
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    },
+    {
+      "slug": "log",
+      "tier": "small",
+      "target": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/.corpus-cache/log",
+      "missing": false,
+      "backends": {
+        "stable": {
+          "run1": {
+            "status": "ok",
+            "seconds": 0.141,
+            "peak_rss_kb": 37472,
+            "error": null,
+            "report_path": "/Users/prabhu/work/cdxgen/cdxgen-plugins-bin/thirdparty/rusi/scripts/eval/runs/20260725-133743/log/stable/run1.json"
+          },
+          "counts": {
+            "cg_nodes": 438,
+            "cg_edges": 2864,
+            "df_nodes": 465,
+            "df_edges": 37,
+            "df_slices": 19,
+            "df_summaries": 358
+          },
+          "digest": {
+            "edges_sha": "7c920d3b639b4d85b6d0e47e6ca8ef180801d6d54b3dadaae1aba4590f1cb415",
+            "slices_sha": "e570a160af79f547fa03d29e3b75d805df35c632d93e7cf235208bcbca6c81d4",
+            "edges_count": 2864,
+            "slices_count": 19
+          },
+          "golden": {
+            "status": "match"
+          },
+          "determinism": {
+            "status": "match",
+            "bytes_match": true,
+            "digest_match": true,
+            "run2_seconds": 0.138
+          },
+          "precision_recall": {
+            "precision": null,
+            "recall": null,
+            "f1": null,
+            "expected": 0,
+            "actual": 0
+          }
+        }
+      }
+    }
+  ]
+}

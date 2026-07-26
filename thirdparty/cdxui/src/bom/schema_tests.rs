@@ -324,4 +324,62 @@ mod tests {
         let bom: Bom = serde_json::from_str(json).unwrap();
         assert_eq!(bom.spec_version.as_deref(), Some("2.0"));
     }
+
+    #[test]
+    fn test_deserialize_depscan_vdr_vuln() {
+        // Mirrors the shape dep-scan emits: source, cwes, analysis, references,
+        // published/updated, and the depscan:* properties.
+        let json = r#"{
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.7",
+            "version": 1,
+            "vulnerabilities": [
+                {
+                    "bom-ref": "CVE-2024-38355/pkg:npm/socket.io@3.1.2",
+                    "id": "CVE-2024-38355",
+                    "source": {"name": "NVD", "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-38355"},
+                    "references": [
+                        {"id": "GHSA-25hc-qcg6-38wj", "source": {"name": "GitHub Advisory"}}
+                    ],
+                    "description": "socket.io has an unhandled error event",
+                    "detail": "Impact: A crafted packet can trigger an unhandled error event.",
+                    "recommendation": "Update to version 4.6.2.",
+                    "ratings": [{"method": "CVSSv4", "severity": "medium", "score": 6.9, "vector": "CVSS:4.0/AV:N"}],
+                    "cwes": [20, 754],
+                    "affects": [
+                        {"ref": "pkg:npm/socket.io@3.1.2", "versions": [
+                            {"range": "vers:npm/>=3.0.0|<4.6.2", "status": "affected"},
+                            {"version": "4.6.2", "status": "unaffected"}
+                        ]}
+                    ],
+                    "advisories": [{"title": "GHSA", "url": "https://example.com"}],
+                    "analysis": {"state": "exploitable", "detail": "See exploit"},
+                    "published": "2024-06-19T15:04:41",
+                    "updated": "2024-11-18T16:26:46",
+                    "properties": [
+                        {"name": "depscan:prioritized", "value": "false"},
+                        {"name": "depscan:insights", "value": "Reachable\\nUsed in 3 locations"}
+                    ]
+                }
+            ]
+        }"#;
+
+        let bom: Bom = serde_json::from_str(json).unwrap();
+        let vulns = bom.vulnerabilities.unwrap();
+        assert_eq!(vulns.len(), 1);
+        let v = &vulns[0];
+        assert_eq!(v.id.as_deref(), Some("CVE-2024-38355"));
+        assert_eq!(v.source.as_ref().unwrap().name.as_deref(), Some("NVD"));
+        assert_eq!(v.references.as_ref().unwrap()[0].id.as_deref(), Some("GHSA-25hc-qcg6-38wj"));
+        assert_eq!(v.cwes.as_ref().unwrap(), &vec![20, 754]);
+        let analysis = v.analysis.as_ref().unwrap();
+        assert_eq!(analysis.state.as_deref(), Some("exploitable"));
+        assert_eq!(analysis.detail.as_deref(), Some("See exploit"));
+        assert_eq!(v.published.as_deref(), Some("2024-06-19T15:04:41"));
+        assert_eq!(v.updated.as_deref(), Some("2024-11-18T16:26:46"));
+        // fix (unaffected) version
+        let versions = &v.affects.as_ref().unwrap()[0].versions.as_ref().unwrap();
+        assert_eq!(versions[1].version.as_deref(), Some("4.6.2"));
+        assert_eq!(versions[1].status.as_deref(), Some("unaffected"));
+    }
 }

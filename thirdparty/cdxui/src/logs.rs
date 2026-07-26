@@ -85,12 +85,11 @@ impl LogStore {
 
         while self.entries.len() > self.max_entries {
             self.entries.pop_front();
-            if let Some(first) = self.entries.front() {
-                if let Some(tid) = first.thought_id {
-                    self.thought_blocks.iter_mut().find(|b| b.id == tid).map(|b| {
-                        b.entry_count = b.entry_count.saturating_sub(1);
-                    });
-                }
+            if let Some(first) = self.entries.front()
+                && let Some(tid) = first.thought_id
+                && let Some(b) = self.thought_blocks.iter_mut().find(|b| b.id == tid)
+            {
+                b.entry_count = b.entry_count.saturating_sub(1);
             }
         }
     }

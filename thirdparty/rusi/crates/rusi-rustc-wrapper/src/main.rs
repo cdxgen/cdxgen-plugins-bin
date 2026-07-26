@@ -30,6 +30,7 @@ use rustc_hir::{
 };
 use rustc_interface::interface;
 use rustc_middle::hir::nested_filter::OnlyBodies;
+use rustc_middle::mono::MonoItem;
 use rustc_middle::mir::{
     self, BasicBlock, Body as MirBody, Local, Operand, Place, ProjectionElem, Rvalue,
     StatementKind, TerminatorKind, UnwindAction,
@@ -420,6 +421,10 @@ impl EmbeddedCollector {
     }
 
     fn collect_mir(&mut self, tcx: TyCtxt<'_>) -> Result<()> {
+        // P2.2: monomorphization-collector-driven devirtualization. Runs first
+        // so a generic function's callsites carry the union of concrete targets
+        // discovered across every instantiation (context-insensitive, sound).
+        self.collect_mono_devirtualization(tcx);
         let local_resolutions = self.local_resolution_index();
         let closure_candidates = self.closure_candidate_index(tcx)?;
         for owner in tcx.mir_keys(()) {
@@ -459,6 +464,131 @@ impl EmbeddedCollector {
             ));
         }
         Ok(())
+    }
+
+    /// P2.2: walk every monomorphized function instance the crate actually
+    /// generates and resolve each of its call terminators with the instance's
+    /// concrete substitutions applied. This devirtualizes calls that depend on
+    /// the *caller's* generic parameters (e.g. `fn run<S: Sink>(s: &S)` calling
+    /// `s.submit()`), which per-body resolution cannot see. Results are keyed by
+    /// `(owner, canonical trait-method symbol)` and unioned across every
+    /// instantiation into one multi-candidate resolution (context-insensitive
+    /// over-approximation), then used to sharpen the matching HIR/MIR callsite
+    /// records so the concrete impls survive precision arbitration.
+    fn collect_mono_devirtualization<'tcx>(&mut self, tcx: TyCtxt<'tcx>) {
+        use rustc_middle::ty::EarlyBinder;
+        // (owner def, canonical original-callee symbol) -> concrete callee
+        // DefIds. Neither LocalDefId nor DefId is Ord, so use hashed containers
+        // and sort by path string at emit time for deterministic output.
+        let mut resolved: HashMap<(LocalDefId, String), Vec<DefId>> = HashMap::new();
+
+        for cgu in tcx.collect_and_partition_mono_items(()).codegen_units {
+            for mono_item in cgu.items().keys() {
+                let MonoItem::Fn(instance) = mono_item else {
+                    continue;
+                };
+                let instance = *instance;
+                let ty::InstanceKind::Item(def) = instance.def else {
+                    continue;
+                };
+                let Some(owner) = def.as_local() else {
+                    continue;
+                };
+                if !tcx.is_mir_available(def) {
+                    continue;
+                }
+                let body = tcx.instance_mir(instance.def);
+                let typing_env = ty::TypingEnv::fully_monomorphized();
+                for block in body.basic_blocks.iter() {
+                    let Some(terminator) = &block.terminator else {
+                        continue;
+                    };
+                    let TerminatorKind::Call { func, .. } = &terminator.kind else {
+                        continue;
+                    };
+                    let generic_ty = func.ty(&body.local_decls, tcx);
+                    // Apply the instance's substitutions so callee generics are
+                    // concrete, then resolve.
+                    let concrete_ty = instance.instantiate_mir_and_normalize_erasing_regions(
+                        tcx,
+                        typing_env,
+                        EarlyBinder::bind(generic_ty),
+                    );
+                    let ty::TyKind::FnDef(callee_def, callee_args) = concrete_ty.kind() else {
+                        continue;
+                    };
+                    // Only trait-method calls are devirtualization candidates;
+                    // the per-body pass already handles concrete-receiver calls.
+                    if tcx
+                        .opt_associated_item(*callee_def)
+                        .and_then(|item| item.trait_container(tcx))
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    let Ok(Some(callee_instance)) =
+                        ty::Instance::try_resolve(tcx, typing_env, *callee_def, callee_args)
+                    else {
+                        continue;
+                    };
+                    let callee_def_id = callee_instance.def_id();
+                    if callee_def_id == *callee_def {
+                        continue;
+                    }
+                    let symbol = canonical_call_symbol(&tcx.def_path_str(*callee_def));
+                    let bucket = resolved.entry((owner, symbol)).or_default();
+                    if !bucket.contains(&callee_def_id) {
+                        bucket.push(callee_def_id);
+                    }
+                }
+            }
+        }
+
+        for ((owner, symbol), mut def_ids) in resolved {
+            def_ids.sort_by_key(|def_id| tcx.def_path_str(*def_id));
+            let mut target_ids = Vec::new();
+            let mut target_names = Vec::new();
+            for def_id in &def_ids {
+                let (ids, names) = target_for_def_id(tcx, *def_id, &self.function_ids);
+                target_ids.extend(ids);
+                target_names.extend(names);
+            }
+            if target_ids.is_empty() {
+                continue;
+            }
+            let Some(source_id) = self.function_ids.get(&owner).cloned() else {
+                continue;
+            };
+            let specialization_key = target_names.join("|");
+            // Rewrite the matching HIR record(s): a trait-dispatch call in this
+            // owner whose callee canonicalizes to `symbol`. HIR edges are
+            // authoritative (sourceLevel), so sharpening them here makes the
+            // devirtualized concrete impls the emitted targets; any duplicate or
+            // superseded MIR-side edge is then dropped by `reconcile_edges`. The
+            // MIR-side `callsites` map is deliberately NOT rewritten: it drives
+            // the interprocedural dataflow summaries, and forcing concrete
+            // targets onto ubiquitous trait methods (`clone`, `borrow`) there
+            // would disturb passthrough/summary matching.
+            for record in &mut self.hir_calls {
+                if record.source_id != source_id {
+                    continue;
+                }
+                if !hir_symbols(&record.resolved).iter().any(|s| *s == symbol) {
+                    continue;
+                }
+                // Preserve intentionally-modeled async/task boundary calls
+                // (`Future::poll`, `spawn`, `block_on`) as logical edges; do not
+                // devirtualize them to a concrete poll impl.
+                if record.resolved.async_boundary || record.resolved.task_boundary {
+                    continue;
+                }
+                record.resolved.call_type = "trait-static".to_string();
+                record.resolved.dispatch_confidence = "high".to_string();
+                record.resolved.target_ids = target_ids.clone();
+                record.resolved.target_names = target_names.clone();
+                record.resolved.specialization_key = specialization_key.clone();
+            }
+        }
     }
 
     fn local_resolution_index(&self) -> HashMap<String, ResolvedCall> {
@@ -714,6 +844,9 @@ struct HirCallRecord {
     source_name: String,
     file_path: String,
     position: Position,
+    /// `span_key_simple` of the call expression, so the P2 monomorphization
+    /// pass can match and sharpen this record's resolved target.
+    span_key: String,
     resolved: ResolvedCall,
 }
 
@@ -887,6 +1020,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             source_name: self.caller_decl.qualified_name.clone(),
             file_path: file_path.clone(),
             position: position.clone(),
+            span_key: span_key_simple(span),
             resolved: resolved.clone(),
         });
         if let Some(rule) = classify_crypto_symbol(&resolved.callee_display) {
@@ -2055,7 +2189,7 @@ fn build_call_graph(
         }
     }
     let nodes = nodes.into_values().collect::<Vec<_>>();
-    let edges = edges.into_values().collect::<Vec<_>>();
+    let edges = reconcile_edges(edges.into_values().collect::<Vec<_>>());
     CallGraph {
         mode: "embedded-hir-mir".to_string(),
         stats: GraphStats {
@@ -2066,6 +2200,88 @@ fn build_call_graph(
         edges,
         diagnostics: Vec::new(),
     }
+}
+
+/// Reconcile the union of HIR- and MIR-derived edges (P2/P10). The two passes
+/// can emit the same logical caller -> callee edge, and — after P2
+/// devirtualization — a stale edge to an abstract trait item can coexist with
+/// the concrete impl edges that supersede it. This collapses both:
+///
+///   1. Duplicate edges with the same `(source_id, target_id)` are merged,
+///      keeping the one whose `call_type` carries the most resolution.
+///   2. An edge whose target is an abstract trait item (`Trait::method`, emitted
+///      as an external node) is dropped when the same source already has a
+///      concrete edge to an impl of that same method (`<Type as Trait>::method`),
+///      i.e. the P2 devirtualization result.
+fn reconcile_edges(edges: Vec<CallGraphEdge>) -> Vec<CallGraphEdge> {
+    // Pass 1: collapse (source_id, target_id) duplicates.
+    let mut collapsed: IndexMap<(String, String), CallGraphEdge> = IndexMap::new();
+    for edge in edges {
+        let key = (edge.source_id.clone(), edge.target_id.clone());
+        match collapsed.get_mut(&key) {
+            Some(existing) => {
+                if call_type_resolution_rank(&edge.call_type)
+                    > call_type_resolution_rank(&existing.call_type)
+                {
+                    *existing = edge;
+                }
+            }
+            None => {
+                collapsed.insert(key, edge);
+            }
+        }
+    }
+
+    // Pass 2: drop abstract trait-item edges superseded by a concrete impl edge
+    // to the same method from the same source.
+    let concrete: HashSet<(String, String)> = collapsed
+        .values()
+        .filter(|edge| target_is_concrete_impl(&edge.target_name))
+        .map(|edge| (edge.source_id.clone(), method_suffix(&edge.target_name)))
+        .collect();
+    collapsed
+        .into_values()
+        .filter(|edge| {
+            if target_is_concrete_impl(&edge.target_name) {
+                return true;
+            }
+            !concrete.contains(&(edge.source_id.clone(), method_suffix(&edge.target_name)))
+        })
+        .collect()
+}
+
+/// Higher means the call was resolved more precisely; used to pick a winner when
+/// collapsing duplicate edges. A type-resolved dispatch kind (dyn or a
+/// devirtualized trait call) outranks a plain `static` edge, because the latter
+/// may be a MIR string-match fallback guess; within a kind, an exact single
+/// target outranks a bounded candidate set, which outranks an unknown target.
+fn call_type_resolution_rank(call_type: &str) -> usize {
+    let kind_bonus =
+        if call_type.starts_with("dyn-dispatch") || call_type.starts_with("trait-static") {
+            10
+        } else {
+            0
+        };
+    let detail = if call_type.ends_with("-unknown") {
+        0
+    } else if call_type.ends_with("-bounded") {
+        2
+    } else if call_type.ends_with("-exact") {
+        3
+    } else {
+        1
+    };
+    kind_bonus + detail
+}
+
+/// A concrete impl target is spelled `<Type as Trait>::method`; an abstract
+/// trait-item target is spelled `Trait::method`.
+fn target_is_concrete_impl(target_name: &str) -> bool {
+    target_name.starts_with('<') && target_name.contains(" as ")
+}
+
+fn method_suffix(target_name: &str) -> String {
+    last_segment(&canonical_call_symbol(target_name)).to_string()
 }
 
 fn build_data_flow(

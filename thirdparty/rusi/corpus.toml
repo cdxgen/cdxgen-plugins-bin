@@ -1,0 +1,154 @@
+# Rusi real-world + fixture corpus.
+#
+# Each entry pins an EXACT upstream SHA so analysis is reproducible. The
+# fetcher (scripts/corpus/fetch.py) clones+checks out the SHA into
+# .corpus-cache/<slug>/ and the runner (scripts/eval/run.py) points rusi
+# at that directory.
+#
+# tiers:
+#   fixtures  - bundled under ./fixtures/, always present (no network)
+#   small     - small real projects, run every change
+#   medium    - larger projects, run per phase / nightly
+#   large     - run on demand
+#   hybrid    - Rust+C FFI projects (P7)
+#   vuln      - intentionally vulnerable / ground-truth (P0.4)
+#
+# `capabilities` is a free-form list of the engine features the project
+# exercises; it is recorded in the eval report but not enforced.
+#
+# `features` (optional) is passed to the rusi CLI via `--features` once
+# P9.2 lands; currently unused by the stable backend.
+#
+# `expected_flows` (optional) is a relative path (inside the repo) to a
+# JSONL file of hand-annotated ground-truth flows used to compute
+# precision/recall (see scripts/eval/run.py --metrics).
+
+# ---------------------------------------------------------------------------
+# Bundled fixtures tier (always present; no network needed).
+# ---------------------------------------------------------------------------
+[[fixtures]]
+slug = "vulnerable-web-app"
+tier = "fixtures"
+path = "fixtures/vulnerable-web-app"
+capabilities = ["sqli", "ssrf", "xss", "redirect"]
+expected_flows = "expected.jsonl"
+
+[[fixtures]]
+slug = "basic-app"
+tier = "fixtures"
+path = "fixtures/basic-app"
+capabilities = ["baseline"]
+
+[[fixtures]]
+slug = "full-taint-app"
+tier = "fixtures"
+path = "fixtures/full-taint-app"
+capabilities = ["taint-chain"]
+
+[[fixtures]]
+slug = "field-taint-app"
+tier = "fixtures"
+path = "fixtures/field-taint-app"
+capabilities = ["field-taint"]
+
+[[fixtures]]
+slug = "sql-zoo-app"
+tier = "fixtures"
+path = "fixtures/sql-zoo-app"
+capabilities = ["sqli"]
+
+[[fixtures]]
+slug = "async-semantic-app"
+tier = "fixtures"
+path = "fixtures/async-semantic-app"
+capabilities = ["async"]
+
+[[fixtures]]
+slug = "ffi-app"
+tier = "fixtures"
+path = "fixtures/ffi-app"
+capabilities = ["ffi"]
+
+[[fixtures]]
+slug = "name-collision-app"
+tier = "fixtures"
+path = "fixtures/name-collision-app"
+capabilities = ["name-collision", "receiver-type"]
+
+[[fixtures]]
+slug = "higher-order-app"
+tier = "fixtures"
+path = "fixtures/higher-order-app"
+capabilities = ["closures", "higher-order", "combinators"]
+
+[[fixtures]]
+slug = "dyn-dispatch-app"
+tier = "fixtures"
+path = "fixtures/dyn-dispatch-app"
+capabilities = ["traits", "dyn-dispatch", "over-approx"]
+
+# ---------------------------------------------------------------------------
+# Small tier - cloned once, cached, run on every change.
+# ---------------------------------------------------------------------------
+[[fixtures]]
+slug = "mini-redis"
+tier = "small"
+repo = "https://github.com/tokio-rs/mini-redis"
+sha = "3d93b42bc363220f85af4fc9e1bebd35b588a4a3"
+capabilities = ["async", "tokio", "network", "command"]
+# Single-crate async server; ~300 nodes / ~700 edges on stable.
+
+[[fixtures]]
+slug = "anyhow"
+tier = "small"
+repo = "https://github.com/dtolnay/anyhow"
+sha = "1dbe1862aae650423e3361fbd20b7d17c5109cc3"
+capabilities = ["traits", "generics", "error-propagation"]
+
+[[fixtures]]
+slug = "log"
+tier = "small"
+repo = "https://github.com/rust-lang/log"
+sha = "037d7a58f6ad184abb3afc4db81d37c43a5696ec"
+capabilities = ["traits", "macros", "facade"]
+
+# ---------------------------------------------------------------------------
+# Medium tier (opt-in via --tier medium)
+# ---------------------------------------------------------------------------
+[[fixtures]]
+slug = "serde-json"
+tier = "medium"
+repo = "https://github.com/serde-rs/json"
+sha = "de8500740cdcabffb9734f503e4889def823cf10"
+capabilities = ["generics", "traits", "deserialization", "no-std"]
+
+[[fixtures]]
+slug = "axum"
+tier = "medium"
+repo = "https://github.com/tokio-rs/axum"
+sha = "14e353d0bde85816bf7d1836cbd2d10bed7ff3d9"
+capabilities = ["async", "extractors", "http-framework", "macros"]
+
+[[fixtures]]
+slug = "hyper"
+tier = "medium"
+repo = "https://github.com/hyperium/hyper"
+sha = "67ace6484db5d4a15367013847768f5f94f4b97d"
+capabilities = ["async", "http", "traits"]
+
+# ---------------------------------------------------------------------------
+# Hybrid Rust+C tier (P7)
+# ---------------------------------------------------------------------------
+[[fixtures]]
+slug = "rusqlite"
+tier = "hybrid"
+repo = "https://github.com/rusqlite/rusqlite"
+sha = "9ae9ba91ff99c74149c45380960382ef812e3d15"
+capabilities = ["ffi", "cc", "sql", "bindgen"]
+
+[[fixtures]]
+slug = "rust-rocksdb"
+tier = "hybrid"
+repo = "https://github.com/rust-rocksdb/rust-rocksdb"
+sha = "50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
+capabilities = ["ffi", "cc", "bindgen"]

@@ -80,11 +80,10 @@ impl ProcessHandle {
                     if current_size > last_size {
                         if let Ok(content) = std::fs::read_to_string(&thought_path_clone) {
                             let new_content = &content[last_size as usize..];
-                            if !new_content.is_empty() {
-                                if thought_tx.send(new_content.to_string()).is_err() {
+                            if !new_content.is_empty()
+                                && thought_tx.send(new_content.to_string()).is_err() {
                                     break;
                                 }
-                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {
@@ -106,11 +105,10 @@ impl ProcessHandle {
                     if current_size > last_size {
                         if let Ok(content) = std::fs::read_to_string(&trace_path_clone) {
                             let new_content = &content[last_size as usize..];
-                            if !new_content.is_empty() {
-                                if trace_tx.send(new_content.to_string()).is_err() {
+                            if !new_content.is_empty()
+                                && trace_tx.send(new_content.to_string()).is_err() {
                                     break;
                                 }
-                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {
@@ -176,16 +174,13 @@ fn parse_line(line: &str, is_stderr: bool) -> LogEntry {
         String::from_utf8_lossy(&bytes).into_owned()
     };
 
-    let level = if is_stderr {
-        let l = ansi_stripped.to_lowercase();
-        if l.contains("error") || l.contains("fail") { LogLevel::Error }
-        else if l.contains("warn") { LogLevel::Warn }
-        else { LogLevel::Info }
+    let l = ansi_stripped.to_lowercase();
+    let level = if l.contains("error") || l.contains("fail") {
+        LogLevel::Error
+    } else if l.contains("warn") || is_stderr {
+        LogLevel::Warn
     } else {
-        let l = ansi_stripped.to_lowercase();
-        if l.contains("error") || l.contains("fail") { LogLevel::Error }
-        else if l.contains("warn") { LogLevel::Warn }
-        else { LogLevel::Info }
+        LogLevel::Info
     };
 
     LogEntry {

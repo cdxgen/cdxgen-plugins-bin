@@ -5,6 +5,7 @@ use crate::bom::store::SortField;
 pub enum Tab {
     Logs,
     Summary,
+    Vulnerabilities,
     Components,
     Crypto,
     Services,
@@ -13,9 +14,10 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [
+    pub const ALL: [Tab; 8] = [
         Tab::Logs,
         Tab::Summary,
+        Tab::Vulnerabilities,
         Tab::Components,
         Tab::Dependencies,
         Tab::Crypto,
@@ -27,6 +29,7 @@ impl Tab {
         match self {
             Tab::Logs => "Logs",
             Tab::Summary => "Summary",
+            Tab::Vulnerabilities => "Vulns",
             Tab::Components => "Components",
             Tab::Crypto => "Crypto",
             Tab::Services => "Services",
@@ -91,6 +94,8 @@ pub struct App {
     pub tab_positions: std::vec::Vec<(Tab, u16, u16)>,
     pub component_header_y: u16,
     pub component_header_positions: std::vec::Vec<(SortField, u16, u16)>,
+    pub vuln_header_y: u16,
+    pub vuln_header_positions: std::vec::Vec<(crate::bom::store::VulnSortField, u16, u16)>,
     pub dep_tree_area: Option<ratatui::layout::Rect>,
     pub visible_rows: u16,
     pub selection_start_row: Option<usize>,
@@ -131,6 +136,8 @@ impl App {
             tab_positions: Vec::new(),
             component_header_y: 0,
             component_header_positions: Vec::new(),
+            vuln_header_y: 0,
+            vuln_header_positions: Vec::new(),
             dep_tree_area: None,
             visible_rows: 15,
             selection_start_row: None,
@@ -172,6 +179,9 @@ impl App {
                 format!("{} ({})", base, count)
             }
             Tab::Dependencies => format!("{} ({})", base, self.store.total_dependencies),
+            Tab::Vulnerabilities => {
+                format!("{} ({})", base, self.store.filtered_vulnerabilities_count())
+            }
             Tab::Logs => format!("{} ({})", base, self.log_item_count),
             Tab::Summary => format!("{} ({} files)", base, self.store.file_count()),
         }
@@ -185,6 +195,7 @@ impl App {
             Tab::Formulation => self.store.formula_count(),
             Tab::Dependencies => self.dep_tree_count,
             Tab::Summary => self.mini_dep_tree_count,
+            Tab::Vulnerabilities => self.store.filtered_vulnerabilities_count(),
         }
     }
 
@@ -271,7 +282,17 @@ impl App {
     }
 
     pub fn cycle_sort(&mut self) {
-        self.store.cycle_sort();
+        if self.current_tab == Tab::Vulnerabilities {
+            self.store.cycle_vuln_sort();
+        } else {
+            self.store.cycle_sort();
+        }
+        self.table_selected = 0;
+        self.scroll_offset = 0;
+    }
+
+    pub fn cycle_vuln_filter(&mut self) {
+        self.store.cycle_vuln_filter();
         self.table_selected = 0;
         self.scroll_offset = 0;
     }
@@ -287,7 +308,7 @@ impl App {
     pub fn clamp_scroll(&mut self) {
         let total = self.current_list_len() as u16;
         let v = self.visible_rows.max(1);
-        let max = if total > v { total - v } else { 0 };
+        let max = total.saturating_sub(v);
         self.scroll_offset = self.scroll_offset.min(max);
     }
 

@@ -14,3 +14,8 @@
 # Local scratch output
 /tmp/
 /target/
+.corpus-cache/
+scripts/eval/golden/*.actual.json
+scripts/eval/runs/
+__pycache__/
+*.pyc

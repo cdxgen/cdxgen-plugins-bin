@@ -10,10 +10,17 @@ default-members = [
     "crates/rusi-driver",
     "crates/rusi-cli",
 ]
+# Bundled fixtures + cached real-world corpus are independent Cargo projects
+# that must NOT be absorbed into this workspace (cargo metadata would otherwise
+# refuse to load them). Each carries its own `[workspace]` table where needed.
+exclude = [
+    "fixtures",
+    ".corpus-cache",
+]
 resolver = "2"
 
 [workspace.package]
-version = "2.5.2"
+version = "2.6.0"
 edition = "2024"
 license = "MIT"
 

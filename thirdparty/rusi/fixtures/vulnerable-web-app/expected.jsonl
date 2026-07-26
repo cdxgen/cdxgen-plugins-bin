@@ -1,0 +1,18 @@
+# Expected source->sink flows in vulnerable-web-app.
+#
+# One JSON object per line. `source_category`/`sink_category` match the
+# category strings emitted by rusi's built-in dataflow patterns
+# (crates/rusi-core/src/modeling.rs and rusi-cli/src/modeling.rs).
+#
+# Coarse key (source_category, sink_category) is what the runner's
+# precision/recall uses; `source_function`/`sink_function` give the
+# fine-grained key.
+#
+# Flows present in fixtures/vulnerable-web-app/src/main.rs:
+#   - fs::read_to_string -> sqlx::query                      (file -> sql-query)
+#   - warp::path::param -> reqwest post                      (http-request -> network-request)
+#   - warp::path::param -> format!("<h1>..")                  (http-request -> html-response)
+
+{"source_category": "file", "sink_category": "sql-query", "source_function": "fs::read_to_string", "sink_function": "sqlx::query", "expected": true}
+{"source_category": "http-request", "sink_category": "network-request", "source_function": "warp::path::param", "sink_function": "reqwest::Client::post", "expected": true}
+{"source_category": "http-request", "sink_category": "html-response", "source_function": "warp::path::param", "sink_function": "format!", "expected": true}
