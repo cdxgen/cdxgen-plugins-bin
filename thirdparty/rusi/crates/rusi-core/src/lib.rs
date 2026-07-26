@@ -134,6 +134,18 @@ struct FileContext {
 struct SimplifiedCall {
     callee_text: String,
     position: Position,
+    /// Receiver expression text for method calls (e.g. `store`, `x.field`).
+    /// Populated for `ExprMethodCall` so the resolver can apply
+    /// receiver-type inference (P1.2) and trait-impl filtering (P1.3).
+    receiver_text: Option<String>,
+    /// Bare method name for method calls (last segment only, no qualifier).
+    /// None for free-function `ExprCall`. Used by the trait/method resolver.
+    method_name: Option<String>,
+    /// True when this edge links a caller to an inline closure body that
+    /// was passed as an argument to a higher-order combinator
+    /// (`map`/`for_each`/`spawn`/...). The resolver labels these
+    /// `HigherOrder` so consumers can filter combinator-driven edges.
+    is_higher_order: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +160,12 @@ struct FunctionRecord {
     operations: Vec<Operation>,
     direct_calls: Vec<SimplifiedCall>,
     receiver_type: Option<String>,
+    /// Transmitter/receiver variable pairs declared by `let (tx, rx) =
+    /// channel()`-style tuple bindings in this function. Used by the
+    /// concrete pass to unify per-channel taint slots across the two
+    /// endpoints (P4.2) so an unrelated channel doesn't inherit another
+    /// channel's taint via a shared global slot.
+    channel_pairs: Vec<(String, String)>,
     // Reserved for loop-aware analysis; populated but not yet consumed.
     #[allow(dead_code)]
     is_loop_body: bool,
@@ -177,8 +195,7 @@ enum SimpleExpr {
     Literal,
     Field {
         base: Box<SimpleExpr>,
-        // Field name is captured for future field-sensitive analysis.
-        #[allow(dead_code)]
+        // Field name is consulted for access-path-aware reads/writes (P3.5).
         field: String,
     },
     MethodCall {
@@ -186,6 +203,14 @@ enum SimpleExpr {
         method: String,
         args: Vec<SimpleExpr>,
         position: Position,
+    },
+    /// `&x` / `&mut x`. Preserved (rather than silently unwrapped) so the
+    /// out-parameter propagation heuristic (P4.1) can fire only for true
+    /// mutable references, instead of unioning every call's taint onto
+    /// every Var argument.
+    Reference {
+        expr: Box<SimpleExpr>,
+        mutable: bool,
     },
     Unknown,
 }
@@ -331,17 +356,27 @@ fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPatte
     }
 
     for function in functions {
-        if function.return_type.contains("Self") || function.return_type.contains("Option<Self") || function.return_type.contains("Result<Self") {
-            let name = function.declaration.name.clone();
-            let fqn = function.declaration.qualified_name.clone();
-            proven_passthrough.insert(name.clone());
-            proven_passthrough.insert(fqn);
-        }
+        // P4.5: drop the unsound "return type contains `Self` => passthrough"
+        // rule. A method returning Self is not automatically a passthrough —
+        // it may discard its arguments entirely (e.g. `fn reset(&mut self) ->
+        // Self`). Only methods whose *abstract summary actually shows
+        // param→return flow* (computed below) AND whose name is in the
+        // curated allowlist count as proven passthroughs.
+        //
+        // We also explicitly exclude any method whose name matches a
+        // built-in sanitizer pattern: a method that is BOTH a sanitizer
+        // (clears taint) AND a passthrough (propagates taint) would be
+        // self-contradictory and historically laundered taint past the
+        // sanitize step.
+        let _ = function.return_type.contains("Self"); // intentionally dropped
     }
 
     let mut patterns = Vec::new();
     for (method_name, count) in &method_counts {
-        if proven_passthrough.contains(method_name) && *count >= 1 {
+        if proven_passthrough.contains(method_name)
+            && *count >= 1
+            && !is_sanitizer_call(method_name)
+        {
             let short_name = last_segment(method_name);
             patterns.push(DataFlowPattern {
                 target: "passthrough".to_string(),
@@ -1083,6 +1118,9 @@ struct FunctionFrame {
     receiver_type: Option<String>,
     #[allow(dead_code)]
     is_loop_body: bool,
+    /// Channel transmitter/receiver pairs declared inside this frame.
+    /// Populated by visit_stmt when it sees `let (tx, rx) = ... channel()`.
+    channel_pairs: Vec<(String, String)>,
 }
 
 impl SourceCollector {
@@ -1265,6 +1303,9 @@ impl SourceCollector {
             parent.direct_calls.push(SimplifiedCall {
                 callee_text: declaration.qualified_name.clone(),
                 position,
+                receiver_text: None,
+                method_name: None,
+                is_higher_order: true,
             });
         }
 
@@ -1274,6 +1315,7 @@ impl SourceCollector {
             direct_calls: Vec::new(),
             receiver_type: None,
             is_loop_body: false,
+            channel_pairs: Vec::new(),
         });
         visit_callable_body(self, &closure.body);
         let mut finished = self.current_function.take().expect("closure frame exists");
@@ -1297,6 +1339,7 @@ impl SourceCollector {
             direct_calls: finished.direct_calls,
             receiver_type: None,
             is_loop_body: false,
+            channel_pairs: finished.channel_pairs.clone(),
         });
         self.current_function = previous;
     }
@@ -1357,6 +1400,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             direct_calls: Vec::new(),
             receiver_type: None,
             is_loop_body: false,
+            channel_pairs: Vec::new(),
         });
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
@@ -1379,6 +1423,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             direct_calls: finished.direct_calls,
             receiver_type: None,
             is_loop_body: false,
+            channel_pairs: finished.channel_pairs.clone(),
         });
         self.current_function = previous;
     }
@@ -1409,6 +1454,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     direct_calls: Vec::new(),
                     receiver_type: Some(receiver.clone()),
                     is_loop_body: false,
+                    channel_pairs: Vec::new(),
                 });
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
@@ -1431,6 +1477,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     direct_calls: finished.direct_calls,
                     receiver_type: Some(receiver.clone()),
                     is_loop_body: false,
+                    channel_pairs: finished.channel_pairs.clone(),
                 });
                 self.current_function = previous;
             }
@@ -1550,6 +1597,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             frame.direct_calls.push(SimplifiedCall {
                 callee_text: callee_name.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                receiver_text: None,
+                method_name: None,
+                is_higher_order: false,
             });
         }
         syn::visit::visit_expr(self, &node.func);
@@ -1580,7 +1630,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             ],
         );
         let mut properties = IndexMap::new();
-        properties.insert("receiver".to_string(), receiver_text);
+        properties.insert("receiver".to_string(), receiver_text.clone());
         self.usages.push(LibraryUsage {
             id: usage_id,
             kind: "method-call".to_string(),
@@ -1604,6 +1654,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             frame.direct_calls.push(SimplifiedCall {
                 callee_text: callee_name.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                receiver_text: Some(receiver_text.clone()),
+                method_name: Some(node.method.to_string()),
+                is_higher_order: false,
             });
         }
         syn::visit::visit_expr(self, &node.receiver);
@@ -1666,23 +1719,63 @@ impl<'ast> Visit<'ast> for SourceCollector {
         if let Some(frame) = self.current_function.as_mut() {
             match node {
                 Stmt::Local(local) => {
-                    if let Pat::Ident(PatIdent { ident, .. }) = &local.pat
-                        && let Some(init) = &local.init
-                    {
-                        if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
-                            && let Some(target_var) = extract_path_name(base)
+                    if let Some(init) = &local.init {
+                        // P4.2: detect `let (tx, rx) = ... channel()`-style
+                        // tuple bindings so the concrete pass can unify
+                        // per-channel taint slots across the two endpoints.
+                        if let Pat::Tuple(pat_tuple) = &local.pat
+                            && pat_tuple.elems.len() == 2
+                            && let Some((tx_name, rx_name)) = channel_pair_names(pat_tuple)
+                            && channel_construction(init)
                         {
-                            let target_name = qualified_target_name(&self.struct_field_names, &target_var, &member_from_expr(member));
-                            frame.operations.push(Operation::AssignField {
-                                target: ident.to_string(),
-                                field: target_name,
-                                value: simple_expr(&init.expr),
-                            });
-                        } else {
+                            frame.channel_pairs.push((tx_name.clone(), rx_name.clone()));
+                            // Bind both names so the rest of the visitor
+                            // treats them like ordinary locals.
                             frame.operations.push(Operation::Assign {
-                                target: ident.to_string(),
+                                target: tx_name,
                                 value: simple_expr(&init.expr),
                             });
+                            frame.operations.push(Operation::Assign {
+                                target: rx_name,
+                                value: simple_expr(&init.expr),
+                            });
+                        } else if let Pat::Ident(PatIdent { ident, .. }) = &local.pat
+                        {
+                            if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
+                                && let Some(target_var) = extract_path_name(base)
+                            {
+                                let target_name = qualified_target_name(&self.struct_field_names, &target_var, &member_from_expr(member));
+                                frame.operations.push(Operation::AssignField {
+                                    target: ident.to_string(),
+                                    field: target_name,
+                                    value: simple_expr(&init.expr),
+                                });
+                            } else if let Expr::Struct(syn::ExprStruct { fields, .. }) = &*init.expr {
+                                // P3.5: struct-literal binding. Emit one
+                                // AssignField per named field so access-path-
+                                // aware reads can distinguish `x.tainted`
+                                // from `x.clean`. Critically, do NOT emit a
+                                // whole-object Assign for `x` — that would
+                                // union every field's taint back onto the
+                                // base key and defeat the per-field precision.
+                                // Whole-object reads of `x` still see the
+                                // union of all `x.*` keys via the
+                                // `SimpleExpr::Var` arm (sound-leaning).
+                                let target = ident.to_string();
+                                for field in fields {
+                                    let field_name = member_from_expr(&field.member);
+                                    frame.operations.push(Operation::AssignField {
+                                        target: target.clone(),
+                                        field: field_name,
+                                        value: simple_expr(&field.expr),
+                                    });
+                                }
+                            } else {
+                                frame.operations.push(Operation::Assign {
+                                    target: ident.to_string(),
+                                    value: simple_expr(&init.expr),
+                                });
+                            }
                         }
                     }
                 }
@@ -2390,10 +2483,9 @@ fn built_in_sanitizer_patterns() -> &'static [&'static str] {
 
 fn is_sanitizer_call(callee: &str) -> bool {
     let normalized = normalize_pattern_text(callee);
-    built_in_sanitizer_patterns().iter().any(|pattern| {
-        normalized == normalize_pattern_text(pattern)
-            || normalized.ends_with(&normalize_pattern_text(pattern))
-    })
+    built_in_sanitizer_patterns()
+        .iter()
+        .any(|pattern| pattern_matches_callee(&normalized, pattern))
 }
 
 fn method_call_callee(receiver: &Expr, method: &str) -> String {
@@ -2411,6 +2503,42 @@ fn method_call_callee(receiver: &Expr, method: &str) -> String {
         return "warp::reply::html".to_string();
     }
     method.to_string()
+}
+
+/// Extract `(tx_name, rx_name)` from a 2-element tuple pattern, when both
+/// elements are simple identifiers (the `let (tx, rx) = ...` shape). Used
+/// by the channel-pair discovery in P4.2.
+fn channel_pair_names(pat: &syn::PatTuple) -> Option<(String, String)> {
+    let mut elems = pat.elems.iter();
+    let tx = match elems.next()? {
+        Pat::Ident(ident) => ident.ident.to_string(),
+        _ => return None,
+    };
+    let rx = match elems.next()? {
+        Pat::Ident(ident) => ident.ident.to_string(),
+        _ => return None,
+    };
+    if elems.next().is_some() {
+        return None;
+    }
+    Some((tx, rx))
+}
+
+/// True when the local initializer looks like a channel construction:
+/// `channel()`, `mpsc::channel()`, `unbounded()`, `sync_channel(...)`, etc.
+/// Conservative — only matches the bare-call shape whose callee last
+/// segment is one of the recognized constructor names.
+fn channel_construction(init: &syn::LocalInit) -> bool {
+    let expr = &init.expr;
+    let callee = match expr.as_ref() {
+        Expr::Call(ExprCall { func, .. }) => callee_text_from_expr(func),
+        _ => return false,
+    };
+    let last = last_segment(&callee);
+    matches!(
+        last,
+        "channel" | "sync_channel" | "unbounded_channel" | "unbounded" | "bounded"
+    )
 }
 
 fn signature_text(sig: &Signature) -> String {
@@ -2482,7 +2610,10 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
                 },
             }
         }
-        Expr::Reference(ExprReference { expr, .. }) => simple_expr(expr),
+        Expr::Reference(ExprReference { expr, mutability, .. }) => SimpleExpr::Reference {
+            expr: Box::new(simple_expr(expr)),
+            mutable: mutability.is_some(),
+        },
         Expr::Paren(ExprParen { expr, .. }) => simple_expr(expr),
         Expr::Field(ExprField {
             base, member, ..
@@ -2650,7 +2781,22 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
     let mut diagnostics = Vec::new();
     let local_index = build_local_function_index(functions);
     let mut seen_nodes = HashSet::new();
+    // Per-function receiver-type bindings cache (P1.2). Computed lazily inside
+    // the loop because most functions never benefit (no method calls).
+    let mut type_bindings_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
+    // Resolve a candidate's decl id back to its qualified name so edges carry
+    // human-readable `target_name`s (not raw `decl-*` ids). Built once.
+    let id_to_qualified: HashMap<&str, &str> = functions
+        .iter()
+        .map(|f| {
+            (
+                f.declaration.id.as_str(),
+                f.declaration.qualified_name.as_str(),
+            )
+        })
+        .collect();
 
+    // Helper closures borrow `nodes`/`seen_nodes` mutably, so they live inline.
     for function in functions {
         if seen_nodes.insert(function.declaration.id.clone()) {
             nodes.push(CallGraphNode {
@@ -2669,66 +2815,136 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
             });
         }
 
+        let bindings = type_bindings_cache
+            .entry(function.declaration.id.clone())
+            .or_insert_with(|| infer_type_bindings(function));
+
         for call in &function.direct_calls {
-            let resolved =
-                resolve_call_target(&call.callee_text, &function.package_path, &local_index, Some(trait_index));
-            let target_node = match resolved {
-                Some(resolved) => resolved,
-                None => {
-                    let synthetic_id = stable_id("cg-node", &["external", &call.callee_text]);
-                    if seen_nodes.insert(synthetic_id.clone()) {
-                        nodes.push(CallGraphNode {
-                            id: synthetic_id.clone(),
-                            name: last_segment(&call.callee_text).to_string(),
-                            qualified_name: call.callee_text.clone(),
-                            canonical_name: rusi_schema::canonical_name(&call.callee_text),
-                            kind: "external-function".to_string(),
-                            package_path: inferred_package_path(&call.callee_text),
-                            purl: String::new(),
-                            file_path: String::new(),
-                            local: false,
-                            external: true,
-                            receiver: None,
-                            position: call.position.clone(),
-                        });
-                    }
-                    diagnostics.push(Diagnostic {
-                        kind: "resolution".to_string(),
-                        message: format!("unresolved or external call target {}", call.callee_text),
-                        package_path: Some(function.package_path.clone()),
-                        file_path: Some(function.file_path.clone()),
-                        position: Some(call.position.clone()),
+            let candidates = resolve_call_targets(
+                call,
+                &function.package_path,
+                &local_index,
+                trait_index,
+                bindings,
+            );
+
+            if candidates.is_empty() {
+                // Truly external — preserve the legacy synthetic node + diagnostic
+                // so consumers still see the call (e.g. for reachability matching).
+                let synthetic_id = stable_id("cg-node", &["external", &call.callee_text]);
+                if seen_nodes.insert(synthetic_id.clone()) {
+                    nodes.push(CallGraphNode {
+                        id: synthetic_id.clone(),
+                        name: last_segment(&call.callee_text).to_string(),
+                        qualified_name: call.callee_text.clone(),
+                        canonical_name: rusi_schema::canonical_name(&call.callee_text),
+                        kind: "external-function".to_string(),
+                        package_path: inferred_package_path(&call.callee_text),
+                        purl: String::new(),
+                        file_path: String::new(),
+                        local: false,
+                        external: true,
+                        receiver: None,
+                        position: call.position.clone(),
                     });
-                    synthetic_id
                 }
-            };
-            let mut properties = IndexMap::new();
-            properties.insert("calleeText".to_string(), call.callee_text.clone());
-            edges.push(CallGraphEdge {
-                id: stable_id(
-                    "cg-edge",
-                    &[
-                        &function.declaration.id,
-                        &target_node,
-                        &call.position.line.to_string(),
-                        &call.position.column.to_string(),
-                    ],
-                ),
-                source_id: function.declaration.id.clone(),
-                target_id: target_node.clone(),
-                source_name: function.declaration.qualified_name.clone(),
-                target_name: target_node.clone(),
-                source_purl: String::new(),
-                target_purl: String::new(),
-                purls: Vec::new(),
-                call_type: if target_node.starts_with("decl-") {
-                    "static".to_string()
-                } else {
-                    "external".to_string()
-                },
-                position: call.position.clone(),
-                properties,
-            });
+                diagnostics.push(Diagnostic {
+                    kind: "resolution".to_string(),
+                    message: format!(
+                        "unresolved or external call target {}",
+                        call.callee_text
+                    ),
+                    package_path: Some(function.package_path.clone()),
+                    file_path: Some(function.file_path.clone()),
+                    position: Some(call.position.clone()),
+                });
+                let mut properties = IndexMap::new();
+                properties.insert("calleeText".to_string(), call.callee_text.clone());
+                properties.insert(
+                    "confidence".to_string(),
+                    CallProvenance::External.confidence().to_string(),
+                );
+                properties.insert(
+                    "provenance".to_string(),
+                    CallProvenance::External.call_type().to_string(),
+                );
+                if let Some(receiver) = call.receiver_text.as_deref() {
+                    properties.insert("receiver".to_string(), receiver.to_string());
+                }
+                edges.push(CallGraphEdge {
+                    id: stable_id(
+                        "cg-edge",
+                        &[
+                            &function.declaration.id,
+                            &synthetic_id,
+                            &call.position.line.to_string(),
+                            &call.position.column.to_string(),
+                        ],
+                    ),
+                    source_id: function.declaration.id.clone(),
+                    target_id: synthetic_id,
+                    source_name: function.declaration.qualified_name.clone(),
+                    target_name: call.callee_text.clone(),
+                    source_purl: String::new(),
+                    target_purl: String::new(),
+                    purls: Vec::new(),
+                    call_type: CallProvenance::External.call_type().to_string(),
+                    position: call.position.clone(),
+                    properties,
+                });
+                continue;
+            }
+
+            // Over-approx path: emit one edge per candidate. The edge id is
+            // disambiguated by the candidate id so duplicates don't collapse.
+            for candidate in &candidates {
+                let mut properties = IndexMap::new();
+                properties.insert("calleeText".to_string(), call.callee_text.clone());
+                properties.insert(
+                    "confidence".to_string(),
+                    candidate.provenance.confidence().to_string(),
+                );
+                properties.insert(
+                    "provenance".to_string(),
+                    candidate.provenance.call_type().to_string(),
+                );
+                if candidates.len() > 1 {
+                    properties.insert(
+                        "candidateCount".to_string(),
+                        candidates.len().to_string(),
+                    );
+                }
+                if let Some(receiver) = call.receiver_text.as_deref() {
+                    properties.insert("receiver".to_string(), receiver.to_string());
+                }
+                if let Some(method) = call.method_name.as_deref() {
+                    properties.insert("method".to_string(), method.to_string());
+                }
+                edges.push(CallGraphEdge {
+                    id: stable_id(
+                        "cg-edge",
+                        &[
+                            &function.declaration.id,
+                            &candidate.target_id,
+                            &call.position.line.to_string(),
+                            &call.position.column.to_string(),
+                        ],
+                    ),
+                    source_id: function.declaration.id.clone(),
+                    target_id: candidate.target_id.clone(),
+                    source_name: function.declaration.qualified_name.clone(),
+                    target_name: id_to_qualified
+                        .get(candidate.target_id.as_str())
+                        .map(|q| q.to_string())
+                        .unwrap_or_else(|| call.callee_text.clone()),
+                    source_purl: String::new(),
+                    target_purl: String::new(),
+                    purls: Vec::new(),
+                    call_type: candidate.provenance.call_type().to_string(),
+                    position: call.position.clone(),
+                    properties,
+                });
+            }
         }
     }
 
@@ -2808,6 +3024,415 @@ fn resolve_call_target(
     }
     None
 }
+
+/// Resolution provenance for a single call-graph edge.
+///
+/// Every value except `External` represents a real local target the resolver
+/// managed to anchor. `External` is reserved for the synthetic node emitted
+/// by [`build_call_graph`] when *no* candidate is known — those edges keep
+/// the legacy `external` call_type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallProvenance {
+    /// Single fully-qualified or unique-name local match.
+    Static,
+    /// Multiple local candidates; emitted as a sound over-approximation
+    /// (one edge per candidate) rather than dropping the callsite.
+    StaticOverapprox,
+    /// Single trait-impl match resolved through the trait index.
+    TraitImpl,
+    /// Multiple trait impls visible; emitted as a sound over-approximation
+    /// (one edge per impl) instead of dropping the callsite.
+    TraitOverapprox,
+    /// Receiver-type-aware resolution: candidates were filtered by the
+    /// statically-known receiver type inferred from local bindings.
+    ReceiverTyped,
+    /// Closure / higher-order edge (combinator -> closure body).
+    #[allow(dead_code)]
+    HigherOrder,
+    /// No local candidate found; synthetic external node.
+    External,
+}
+
+impl CallProvenance {
+    fn call_type(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::StaticOverapprox => "static-overapprox",
+            Self::TraitImpl => "trait-impl",
+            Self::TraitOverapprox => "trait-overapprox",
+            Self::ReceiverTyped => "receiver-typed",
+            Self::HigherOrder => "higher-order",
+            Self::External => "external",
+        }
+    }
+
+    fn confidence(self) -> &'static str {
+        match self {
+            Self::Static | Self::TraitImpl | Self::HigherOrder => "high",
+            Self::ReceiverTyped => "medium",
+            Self::StaticOverapprox | Self::TraitOverapprox => "low",
+            Self::External => "low",
+        }
+    }
+}
+
+/// A single resolved target for a callsite, tagged with how it was resolved.
+#[derive(Debug, Clone)]
+struct ResolvedCall {
+    target_id: String,
+    provenance: CallProvenance,
+}
+
+/// Receiver-type-aware multi-candidate resolver (P1.1 + P1.2 + P1.3).
+///
+/// Returns every local candidate the callsite could resolve to, tagged with
+/// a provenance/confidence so downstream consumers can filter. The list is
+/// non-empty only when at least one real local target exists; an empty
+/// return tells [`build_call_graph`] to fall back to the synthetic external
+/// node (we never silently drop a real local call to external).
+///
+/// Resolution order (sound-leaning: prefer exact, over-approximate when
+/// ambiguous, filter by receiver type where the binding is known):
+///   1. Fully-qualified / normalized local match (single → Static,
+///      multiple → StaticOverapprox — qualified keys rarely collide, but
+///      two same-named items in different modules can both index under the
+///      same normalized key when the qualifier was elided at the call site).
+///   2. Method call with a receiver (method_name present):
+///        a. If receiver type is known and filters local same-name
+///           candidates to one → ReceiverTyped.
+///        b. Single local same-name match → Static.
+///        c. Multiple local matches → StaticOverapprox.
+///        d. Trait dispatch via method_to_impls, with the same
+///           receiver-type filter attempted first; one impl → TraitImpl,
+///           many → TraitOverapprox.
+///   3. Free function with a bare-name collision (no method_name):
+///      over-approximate via last-segment index.
+fn resolve_call_targets(
+    call: &SimplifiedCall,
+    package_path: &str,
+    local_index: &HashMap<String, Vec<String>>,
+    trait_index: &TraitImplIndex,
+    type_bindings: &HashMap<String, String>,
+) -> Vec<ResolvedCall> {
+    let callee = call.callee_text.as_str();
+    let normalized = normalize_local_path(callee, package_path);
+
+    // 0. Higher-order edge: combinator passed an inline closure. These
+    //    resolve to exactly one local closure body, so we emit a single
+    //    high-confidence edge tagged HigherOrder so consumers can filter.
+    //    Run this first so the closure edge isn't routed through the
+    //    generic over-approx path.
+    if call.is_higher_order {
+        if let Some(ids) = local_index.get(&normalized)
+            && !ids.is_empty()
+        {
+            return resolutions(ids, CallProvenance::HigherOrder);
+        }
+        if callee.contains("::")
+            && let Some(ids) = local_index.get(callee)
+            && !ids.is_empty()
+        {
+            return resolutions(ids, CallProvenance::HigherOrder);
+        }
+        if let Some(ids) = local_index.get(callee)
+            && !ids.is_empty()
+        {
+            return resolutions(ids, CallProvenance::HigherOrder);
+        }
+    }
+
+    // 1. Fully-qualified / normalized match. Qualified keys only collide
+    //    across modules with identical names; treat as StaticOverapprox
+    //    in that rare case rather than silently picking one.
+    if let Some(ids) = local_index.get(&normalized)
+        && !ids.is_empty()
+    {
+        return match ids.len() {
+            1 => resolutions(ids, CallProvenance::Static),
+            _ => resolutions(ids, CallProvenance::StaticOverapprox),
+        };
+    }
+    // An exact-text match only fires for fully-qualified callee strings
+    // (since the index stores qualified_name entries). Bare names fall
+    // through to the method_name / last-segment branches below so they get
+    // the right over-approx semantics.
+    if callee.contains("::")
+        && let Some(ids) = local_index.get(callee)
+        && !ids.is_empty()
+    {
+        return match ids.len() {
+            1 => resolutions(ids, CallProvenance::Static),
+            _ => resolutions(ids, CallProvenance::StaticOverapprox),
+        };
+    }
+
+    // 2. Method call with a receiver — apply receiver-type inference.
+    if let Some(method) = call.method_name.as_deref() {
+        let local_candidates = local_index.get(method).cloned().unwrap_or_default();
+        let trait_candidates = trait_index
+            .method_to_impls
+            .get(method)
+            .cloned()
+            .unwrap_or_default();
+
+        // Try to filter by the receiver's inferred type. This is the
+        // highest-leverage disambiguator we have without typeck.
+        if let Some(receiver_type) = call
+            .receiver_text
+            .as_deref()
+            .and_then(|r| type_bindings.get(r.trim()))
+        {
+            // Combine local + trait candidates so the filter sees every
+            // possible impl of this method, regardless of where it lives.
+            let mut combined: Vec<String> = local_candidates.clone();
+            for id in &trait_candidates {
+                if !combined.contains(id) {
+                    combined.push(id.clone());
+                }
+            }
+            if !combined.is_empty() {
+                let filtered = filter_by_receiver_type(
+                    &combined,
+                    local_index,
+                    receiver_type,
+                    method,
+                );
+                if !filtered.is_empty() {
+                    return resolutions(&filtered, CallProvenance::ReceiverTyped);
+                }
+            }
+        }
+
+        // No receiver type (or filter was empty). Emit one edge per
+        // candidate, preferring local statics over trait impls when both
+        // exist (a local method is more likely the intended target than a
+        // trait-method-family explosion).
+        if local_candidates.len() == 1 {
+            return resolutions(&local_candidates, CallProvenance::Static);
+        }
+        if !local_candidates.is_empty() {
+            return resolutions(&local_candidates, CallProvenance::StaticOverapprox);
+        }
+        if trait_candidates.len() == 1 {
+            return resolutions(&trait_candidates, CallProvenance::TraitImpl);
+        }
+        if !trait_candidates.is_empty() {
+            return resolutions(&trait_candidates, CallProvenance::TraitOverapprox);
+        }
+        return Vec::new();
+    }
+
+    // 3. Free function with a bare-name collision (no method_name).
+    if let Some(ids) = local_index.get(last_segment(callee))
+        && !ids.is_empty()
+    {
+        return match ids.len() {
+            1 => resolutions(ids, CallProvenance::Static),
+            _ => resolutions(ids, CallProvenance::StaticOverapprox),
+        };
+    }
+    if let Some(impl_ids) = trait_index.method_to_impls.get(callee)
+        && !impl_ids.is_empty()
+    {
+        return match impl_ids.len() {
+            1 => resolutions(impl_ids, CallProvenance::TraitImpl),
+            _ => resolutions(impl_ids, CallProvenance::TraitOverapprox),
+        };
+    }
+
+    Vec::new()
+}
+
+fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> {
+    ids.iter()
+        .map(|id| ResolvedCall {
+            target_id: id.clone(),
+            provenance,
+        })
+        .collect()
+}
+
+/// Filter a list of candidate target ids by whether the resolved function's
+/// qualified name is rooted at the given receiver type.
+///
+/// e.g. receiver_type=`FileStore`, method=`persist`, candidates=
+/// `[…::FileStore::persist, …::NetStore::persist]` → returns only the
+/// FileStore impl.
+///
+/// Returns an empty Vec when no candidate's qualified name contains the
+/// type as a path segment, so the caller knows the filter was useless
+/// and can fall through to over-approximation rather than mislabel
+/// an unfiltered list as ReceiverTyped.
+fn filter_by_receiver_type(
+    candidates: &[String],
+    local_index: &HashMap<String, Vec<String>>,
+    receiver_type: &str,
+    method: &str,
+) -> Vec<String> {
+    let target_token = last_segment(receiver_type);
+    let mut kept: Vec<String> = Vec::new();
+    for id in candidates {
+        if let Some(qname) = find_qualified_name_for_id(local_index, id)
+            && type_qualified_name_matches(&qname, target_token, method)
+        {
+            kept.push(id.clone());
+        }
+    }
+    kept
+}
+
+fn find_qualified_name_for_id(
+    local_index: &HashMap<String, Vec<String>>,
+    id: &str,
+) -> Option<String> {
+    for (name, ids) in local_index {
+        if ids.iter().any(|c| c == id) && name.contains("::") {
+            return Some(name.clone());
+        }
+    }
+    None
+}
+
+fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> bool {
+    if !qname
+        .split("::")
+        .any(|segment| segment == type_token)
+    {
+        return false;
+    }
+    last_segment(qname) == method
+}
+
+/// Best-effort, function-local receiver-type inference (P1.2).
+///
+/// Walks the function's operations looking for the small set of patterns
+/// that unambiguously reveal a variable's type without running typeck:
+///   * `let x: T = ...;`                → x:T
+///   * `let x = T::new(...);`           → x:T   (T capitalized, simple ident)
+///   * `let x = path::Type::new(...);`  → x:Type
+///   * `let mut x = ...;` parameters    → x:param_type
+/// Plus the function's parameter types seed bindings for `&self`/params.
+///
+/// Returned map keys are variable names (identifiers, not field accesses),
+/// values are bare type tokens (e.g. `FileStore`, `Config`) suitable for the
+/// resolver's path-segment match in [`filter_by_receiver_type`].
+fn infer_type_bindings(function: &FunctionRecord) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
+
+    // Parameters: name -> declared type (last segment, stripped of & / mut).
+    for (name, ty) in function.params.iter().zip(function.param_types.iter()) {
+        if name.is_empty() || ty.is_empty() {
+            continue;
+        }
+        if let Some(token) = bare_type_token(ty) {
+            bindings.insert(name.clone(), token);
+        }
+    }
+
+    // Walk simple assignments to harvest `let x: T = ...` and
+    // `let x = T::new(...)` / `let x = path::Type::new(...)`.
+    for op in &function.operations {
+        match op {
+            Operation::Assign { target, value } => {
+                if let Some((var, ty)) = binding_from_simple_expr(target, value) {
+                    bindings.insert(var, ty);
+                }
+            }
+            Operation::AssignField { target, .. } => {
+                // Field writes don't establish a binding for the base; skip.
+                if let Some(_var) = bare_ident(target) {
+                    // No type info from a bare field assign.
+                }
+            }
+            _ => {}
+        }
+    }
+
+    bindings
+}
+
+fn binding_from_simple_expr(target: &str, value: &SimpleExpr) -> Option<(String, String)> {
+    let var = bare_ident(target)?;
+    match value {
+        SimpleExpr::Call { callee, .. } => {
+            // T::new(...) or path::Type::new(...) — type is the segment before
+            // the final `::new`-style constructor.
+            if let Some(ty) = constructor_type(callee) {
+                return Some((var, ty));
+            }
+            None
+        }
+        SimpleExpr::Var(name) => {
+            // `let x = y;` propagates y's type if it's a simple type-ident
+            // that looks like a capitalized type.
+            if let Some(token) = bare_type_token(name) {
+                return Some((var, token));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn bare_ident(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let first = trimmed.chars().next()?;
+    if !first.is_alphabetic() && first != '_' {
+        return None;
+    }
+    // Reject `x.y` / `x[0]` / `&x` — only plain identifiers count as bindings.
+    if trimmed
+        .chars()
+        .any(|c| !(c.is_alphanumeric() || c == '_'))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn bare_type_token(ty: &str) -> Option<String> {
+    let cleaned: String = ty
+        .chars()
+        .filter(|&c| c.is_alphanumeric() || c == '_' || c == ':')
+        .collect();
+    let last = cleaned.rsplit("::").next()?;
+    if last.is_empty() {
+        return None;
+    }
+    let first = last.chars().next()?;
+    // Capitalized = conventionally a type name. This intentionally misses
+    // primitive types (lowercase) — we only need it to disambiguate
+    // user-defined types in method dispatch.
+    if first.is_uppercase() {
+        Some(last.to_string())
+    } else {
+        None
+    }
+}
+
+fn constructor_type(callee: &str) -> Option<String> {
+    let parts: Vec<&str> = callee.split("::").collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let final_seg = parts.last().copied()?;
+    // Convention: `new`, `default`, `from`, `with_` are constructors.
+    let is_constructor = matches!(
+        final_seg,
+        "new" | "default" | "from" | "with_capacity" | "with_rows"
+    );
+    if !is_constructor {
+        return None;
+    }
+    // Type is the segment immediately before the constructor.
+    let candidate = parts[parts.len() - 2];
+    bare_type_token(candidate)
+}
+
+
 
 fn normalize_local_path(callee: &str, package_path: &str) -> String {
     if callee.starts_with("crate::") {
@@ -3968,7 +4593,22 @@ fn eval_abstract_expr(
     patterns: &DataFlowPatternSet,
 ) -> BTreeSet<AbstractOrigin> {
     match expr {
-        SimpleExpr::Var(name) => env.get(name).cloned().unwrap_or_default(),
+        SimpleExpr::Var(name) => {
+            // P3.5: whole-object read. Sound-leaning with respect to
+            // per-field writes — a read of `x` sees taint from any
+            // `x.<field>` access path so writes to fields continue to
+            // flow through subsequent whole-object reads. The
+            // asymmetric direction (field reads do NOT inherit sibling
+            // field taints) is handled in the `SimpleExpr::Field` arm.
+            let mut taint = env.get(name).cloned().unwrap_or_default();
+            let prefix = format!("{}.", name);
+            for (key, value) in env {
+                if key.starts_with(&prefix) {
+                    taint.extend(value.iter().cloned());
+                }
+            }
+            taint
+        }
         SimpleExpr::Call { callee, args, .. } => {
             if let Some(source_match) = find_source_pattern(callee, &patterns.sources) {
                 return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
@@ -4027,8 +4667,27 @@ fn eval_abstract_expr(
             }
             taint
         }
-        SimpleExpr::Field { base, .. } => {
-            eval_abstract_expr(base, env, summaries, package_path, local_index, patterns)
+        SimpleExpr::Field { base, field } => {
+            // P3.5: access-path-aware field read. Reads of `x.a` consult
+            // the `x.a` access-path key first, then fall back to the
+            // whole-object taint on `x` (sound-leaning — a whole-object
+            // write still flows to field reads). Critically, sibling
+            // fields (`x.b`) are NOT consulted, so writes to one field
+            // do not pollute reads of another.
+            if let SimpleExpr::Var(name) = base.as_ref() {
+                let key = format!("{}.{}", name, field);
+                let mut taint = env.get(&key).cloned().unwrap_or_default();
+                if let Some(whole) = env.get(name) {
+                    taint.extend(whole.iter().cloned());
+                }
+                taint
+            } else {
+                // Nested or non-var base (e.g. `x.y.a`): fall back to
+                // whole-base read. Nested access paths are tracked at
+                // P3.1 (compiler side); stable keeps the conservative
+                // join here.
+                eval_abstract_expr(base, env, summaries, package_path, local_index, patterns)
+            }
         }
         SimpleExpr::MethodCall { method, receiver, args, .. } => {
             let callee = method.clone();
@@ -4060,6 +4719,13 @@ fn eval_abstract_expr(
                 }
             }
             taint
+        }
+        SimpleExpr::Reference { expr, .. } => {
+            // P4.1: a reference evaluates to its pointee's taint. The
+            // mutable flag is consulted by the out-param propagation
+            // heuristic in the concrete pass; here it does not change
+            // the read semantics.
+            eval_abstract_expr(expr, env, summaries, package_path, local_index, patterns)
         }
         SimpleExpr::Literal | SimpleExpr::Unknown => BTreeSet::new(),
     }
@@ -4259,10 +4925,15 @@ impl<'a> DataFlowBuilder<'a> {
                                 }
                             }
                         }
-                         // Support out-parameter mutation: if the call target has summaries, or by heuristic,
-                         // propagate taint from other arguments to mutable variable arguments (like `&mut x` which is represented as Var(x)).
-                         // To do this, let's check if any argument is a Var(x) and was passed as a mutable argument.
-                         // For simplicity, if a call has multiple arguments, propagate the union of taint from all args to all Var arguments.
+                         // P4.1 out-parameter mutation: only propagate
+                         // taint into arguments that are *mutable
+                         // references* (`&mut x`). The previous heuristic
+                         // unioned every call's taint onto every Var arg,
+                         // which manufactured cross-arg FPs whenever a
+                         // tainted value happened to share a callsite
+                         // with an unrelated sink-shaped argument.
+                         // Mutability is detected via the preserved
+                         // SimpleExpr::Reference{mutable:true} marker.
                          let mut union_taint = ConcreteTaint::default();
                          for arg in args {
                              union_taint.paths.extend(self.eval_concrete_expr(function, arg, &env).paths);
@@ -4270,9 +4941,12 @@ impl<'a> DataFlowBuilder<'a> {
                          let union_taint = union_taint.bounded();
                          if !union_taint.paths.is_empty() {
                              for arg in args {
-                                 if let SimpleExpr::Var(var_name) = arg {
-                                     // Propagate the union taint to this mutable variable in the environment
-                                     if var_name != "tx" && var_name != "rx" { // skip channel variables to avoid loop
+                                 if let SimpleExpr::Reference { expr, mutable: true } = arg
+                                     && let SimpleExpr::Var(var_name) = expr.as_ref()
+                                 {
+                                     // Confirmed &mut arg: the callee may
+                                     // write into it. Conservative union.
+                                     if var_name != "tx" && var_name != "rx" {
                                          let mut target_taint = env.get(var_name).cloned().unwrap_or_default();
                                          target_taint.paths.extend(union_taint.paths.clone());
                                          env.insert(var_name.clone(), target_taint.bounded());
@@ -4281,17 +4955,33 @@ impl<'a> DataFlowBuilder<'a> {
                              }
                          }
 
-                         // Support channel send/recv matching:
-                         // If tx.send(val) is called, copy the taint of val to a channel buffer or tx/rx map.
-                         // Let's store channel taints in a local map on DataFlowBuilder or env.
-                         // For simplicity, we can store it in a special environment variable `__channel_taint` so it's fully context-sensitive!
+                         // P4.2 channel send/recv: per-channel taint slot
+                         // keyed by the paired receiver identity. Falls
+                         // back to a global slot only when no pairing is
+                         // known (e.g. channel constructed outside this
+                         // function). The previous global `__channel_taint`
+                         // slot let an unrelated `rx.recv()` pick up taint
+                         // from a different channel's `tx.send()`.
                          if callee.ends_with("send") {
                              if let Some(val_arg) = args.get(1) {
                                  let val_taint = self.eval_concrete_expr(function, val_arg, &env);
                                  if !val_taint.paths.is_empty() {
-                                     let mut channel_taint = env.get("__channel_taint").cloned().unwrap_or_default();
+                                     // Channel identity: prefer the paired
+                                     // receiver name when we know it, so
+                                     // `rx.recv()` can find this taint
+                                     // without consulting the global slot.
+                                     let channel_key = match args.first() {
+                                         Some(SimpleExpr::Var(tx_name)) => {
+                                             match function.channel_pairs.iter().find(|(tx, _)| tx == tx_name) {
+                                                 Some((_, rx_name)) => format!("__channel:{rx_name}"),
+                                                 None => format!("__channel:{tx_name}"),
+                                             }
+                                         }
+                                         _ => "__channel_taint".to_string(),
+                                     };
+                                     let mut channel_taint = env.get(&channel_key).cloned().unwrap_or_default();
                                      channel_taint.paths.extend(val_taint.paths);
-                                     env.insert("__channel_taint".to_string(), channel_taint.bounded());
+                                     env.insert(channel_key, channel_taint.bounded());
                                  }
                              }
                          }
@@ -4340,10 +5030,21 @@ impl<'a> DataFlowBuilder<'a> {
         env: &HashMap<String, ConcreteTaint>,
     ) -> ConcreteTaint {
         match expr {
-            SimpleExpr::Var(name) => env
-                .get(name)
-                .cloned()
-                .unwrap_or(ConcreteTaint { paths: vec![] }),
+            SimpleExpr::Var(name) => {
+                // P3.5: whole-object read — include per-field writes so a
+                // subsequent sink on the whole object still slices.
+                let mut taint = env
+                    .get(name)
+                    .cloned()
+                    .unwrap_or(ConcreteTaint { paths: vec![] });
+                let prefix = format!("{}.", name);
+                for (key, value) in env {
+                    if key.starts_with(&prefix) {
+                        taint.paths.extend(value.paths.iter().cloned());
+                    }
+                }
+                taint.bounded()
+            }
             SimpleExpr::Call {
                 callee,
                 args,
@@ -4519,7 +5220,16 @@ impl<'a> DataFlowBuilder<'a> {
             }
             SimpleExpr::MethodCall { method, receiver, args, position } => {
                 if method.ends_with("recv") {
-                    if let Some(taint) = env.get("__channel_taint") {
+                    // P4.2: look up the per-channel taint slot keyed by
+                    // the receiver variable (e.g. `__channel:rx`). Falls
+                    // back to the global slot for non-Var receivers so we
+                    // don't lose flows through `arc.lock().recv()`-style
+                    // chains.
+                    let channel_key = match receiver.as_ref() {
+                        SimpleExpr::Var(name) => format!("__channel:{name}"),
+                        _ => "__channel_taint".to_string(),
+                    };
+                    if let Some(taint) = env.get(&channel_key) {
                         return taint.clone();
                     }
                 }
@@ -4577,7 +5287,26 @@ impl<'a> DataFlowBuilder<'a> {
                 }
                 ConcreteTaint { paths }
             }
-            SimpleExpr::Field { base, .. } => self.eval_concrete_expr(function, base, env),
+            SimpleExpr::Field { base, field } => {
+                // P3.5: access-path-aware field read. `x.a` consults the
+                // `x.a` access-path key first, then falls back to whole-
+                // object taint on `x` (sound-leaning). Sibling fields
+                // (`x.b`) are NOT consulted — that's the whole point.
+                if let SimpleExpr::Var(name) = base.as_ref() {
+                    let key = format!("{}.{}", name, field);
+                    let mut taint = env
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or(ConcreteTaint { paths: vec![] });
+                    if let Some(whole) = env.get(name) {
+                        taint.paths.extend(whole.paths.iter().cloned());
+                    }
+                    taint.bounded()
+                } else {
+                    self.eval_concrete_expr(function, base, env)
+                }
+            }
+            SimpleExpr::Reference { expr, .. } => self.eval_concrete_expr(function, expr, env),
             SimpleExpr::Literal | SimpleExpr::Unknown => ConcreteTaint { paths: vec![] },
         }
     }
@@ -4849,10 +5578,7 @@ fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<Sou
     let normalized = normalize_pattern_text(callee);
     patterns
         .iter()
-        .find(|pattern| {
-            normalized == normalize_pattern_text(&pattern.pattern)
-                || normalized.ends_with(&normalize_pattern_text(&pattern.pattern))
-        })
+        .find(|pattern| pattern_matches_callee(&normalized, &pattern.pattern))
         .map(|pattern| SourcePatternMatch {
             category: pattern.category.clone(),
         })
@@ -4867,8 +5593,7 @@ fn find_sink_pattern(
     patterns
         .iter()
         .find(|pattern| {
-            let candidate = normalize_pattern_text(&pattern.pattern);
-            (normalized == candidate || normalized.ends_with(&candidate))
+            pattern_matches_callee(&normalized, &pattern.pattern)
                 && sink_pattern_context_confident(&normalized, args, pattern)
         })
         .map(|pattern| SinkPatternMatch {
@@ -4943,16 +5668,49 @@ fn simple_expr_looks_sqlish(expr: &SimpleExpr) -> bool {
             simple_expr_looks_sqlish(receiver)
                 || args.iter().any(simple_expr_looks_sqlish)
         }
+        SimpleExpr::Reference { expr, .. } => simple_expr_looks_sqlish(expr),
         SimpleExpr::Literal | SimpleExpr::Unknown => false,
     }
 }
 
 fn has_passthrough_pattern(callee: &str, patterns: &[DataFlowPattern]) -> bool {
-    let normalized = callee.replace(' ', "");
-    patterns.iter().any(|pattern| {
-        let candidate = normalize_pattern_text(&pattern.pattern);
-        normalized == candidate || normalized.ends_with(&candidate)
-    })
+    let normalized = normalize_pattern_text(callee);
+    patterns
+        .iter()
+        .any(|pattern| pattern_matches_callee(&normalized, &pattern.pattern))
+}
+
+/// Path-segment-aware pattern matching (P4.4).
+///
+/// Replaces the previous `==` or `ends_with` matcher, which produced
+/// collisions like `ends_with("send")` matching `listen`/`suspend`, or
+/// `ends_with("open")` matching `reopen`/`uncover`. The new matcher splits
+/// both callee and pattern on `::` and compares trailing segments:
+///   * Single-segment pattern (e.g. `bind`, `recv`): matches iff the
+///     callee's *last* `::`-segment equals the pattern. So `bind` matches
+///     `sqlx::query::bind` and the bare `bind`, but NOT `push_bind` or
+///     `ammonia::clean` (different last segment).
+///   * Multi-segment pattern (e.g. `std::env::var`): matches iff the
+///     callee's trailing N segments equal the pattern's segments. So
+///     `std::env::var` matches `crate::std::env::var` but NOT
+///     `my::env::var::user` (different last-3 segments).
+///   * Exact-match fallback for patterns containing no separator but
+///     appearing as substrings of the callee string is intentionally
+///     NOT supported — the segment boundary is the contract.
+fn pattern_matches_callee(normalized_callee: &str, pattern: &str) -> bool {
+    let pat = normalize_pattern_text(pattern);
+    if normalized_callee == pat {
+        return true;
+    }
+    let callee_segs: Vec<&str> = normalized_callee.split("::").collect();
+    let pat_segs: Vec<&str> = pat.split("::").collect();
+    if pat_segs.len() > callee_segs.len() {
+        return false;
+    }
+    // Compare trailing segments: callee's last pat_segs.len() segments
+    // must equal pat_segs in order.
+    let offset = callee_segs.len() - pat_segs.len();
+    callee_segs[offset..] == pat_segs[..]
 }
 
 fn normalize_pattern_text(value: &str) -> String {
@@ -6594,6 +7352,51 @@ mod tests {
     }
 
     #[test]
+    fn field_taint_app_does_not_pollute_sibling_fields() {
+        // P3.5 negative case: the fixture builds `Mixed { tainted: env_var,
+        // clean: "literal-safe-host" }` and then calls `connect_sink(mixed.clean)`.
+        // Pre-P3.5 the stable backend unioned every struct field's taint
+        // onto the base binding, producing a spurious env→network-connect
+        // slice through `mixed.clean`. Access-path-aware reads/writes
+        // eliminate the FP; this test pins the behavior so a regression
+        // that re-introduces field-level pollution fails loudly.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("field-taint-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        // Positive assertion: `run_sink(mixed.tainted)` slices.
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "process-exec"
+                    && slice.source_name == "std::env::var"),
+            "Expected env->process-exec slice through mixed.tainted"
+        );
+        // Negative assertion: there must be NO env->network-connect slice
+        // sourced from `std::env::var` (USER). The only legitimate
+        // env->network-connect slice is via build_config (URL), so a
+        // direct env::var->connect_sink slice means `mixed.clean` picked
+        // up its sibling's taint.
+        let polluted = data_flow.slices.iter().any(|slice| {
+            slice.source_category == "env"
+                && slice.sink_category == "network-connect"
+                && slice.source_name == "std::env::var"
+        });
+        assert!(
+            !polluted,
+            "mixed.clean must NOT inherit mixed.tainted's env taint \
+             (access-path pollution regression)"
+        );
+    }
+
+    #[test]
     fn chain_flow_app_emits_flow_through_method_chain() {
         let report = analyze(AnalyzeOptionsInput {
             dir: fixture_path("chain-flow-app"),
@@ -6625,17 +7428,170 @@ mod tests {
         .expect("analysis succeeds");
 
         let graph = report.call_graph.expect("callgraph emitted");
+        // P1.1/P1.3 — both trait impls are reached as a sound over-approximation
+        // (one edge per candidate) instead of dropping the callsite when the
+        // dyn-dispatch receiver can't be pinned to a single impl.
+        let persist_edges: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.properties.get("calleeText").is_some_and(|t| t == "persist"))
+            .collect();
         assert!(
-            graph
-                .edges
-                .iter()
-                .any(|edge| edge.properties.get("calleeText") == Some(&"persist".to_string())),
+            !persist_edges.is_empty(),
             "Expected persist call in callgraph for dyn-dispatch"
         );
-        assert!(graph.nodes.iter().any(|node| {
-            node.qualified_name.ends_with("FileStore::persist")
-                || node.qualified_name.ends_with("NetStore::persist")
-        }));
+        assert!(
+            graph.nodes.iter().any(|node| node.qualified_name.ends_with("FileStore::persist")),
+            "Expected FileStore::persist node"
+        );
+        assert!(
+            graph.nodes.iter().any(|node| node.qualified_name.ends_with("NetStore::persist")),
+            "Expected NetStore::persist node"
+        );
+        // The receiver is `&dyn Store` so we can't pin a concrete type —
+        // every candidate impl must be reached (over-approximation, not drop).
+        assert_eq!(
+            persist_edges.len(),
+            2,
+            "dyn-dispatch should over-approximate to both trait impls, got {}",
+            persist_edges.len()
+        );
+        for edge in &persist_edges {
+            assert!(
+                edge.call_type == "static-overapprox" || edge.call_type == "trait-overapprox",
+                "expected over-approx call_type, got {}",
+                edge.call_type
+            );
+            assert_eq!(
+                edge.properties.get("confidence"),
+                Some(&"low".to_string()),
+                "over-approx edge must carry confidence=low"
+            );
+            assert_eq!(
+                edge.properties.get("candidateCount"),
+                Some(&"2".to_string()),
+                "over-approx edge must report candidateCount=2"
+            );
+            // Regression: resolved edges must carry the target's qualified name,
+            // never the raw `decl-*` id. A prior refactor leaked the id here,
+            // which also broke downstream purl inference keyed off target_name.
+            assert!(
+                !edge.target_name.starts_with("decl-"),
+                "edge target_name must be a qualified name, got {}",
+                edge.target_name
+            );
+            assert!(
+                edge.target_name.ends_with("::persist"),
+                "edge target_name should be the resolved impl method, got {}",
+                edge.target_name
+            );
+        }
+    }
+
+    #[test]
+    fn name_collision_app_resolves_methods_by_receiver_type() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("name-collision-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.expect("callgraph emitted");
+        // Both Cache::get and Store::get exist; both must be reached, but
+        // each via a receiver-typed edge from `cache.get(...)` / `store.get(...)`
+        // rather than the legacy drop-on-ambiguity or wrong-bucket behavior.
+        let cache_get_id = graph
+            .nodes
+            .iter()
+            .find(|node| node.qualified_name.ends_with("Cache::get"))
+            .expect("Cache::get node exists")
+            .id
+            .clone();
+        let store_get_id = graph
+            .nodes
+            .iter()
+            .find(|node| node.qualified_name.ends_with("Store::get"))
+            .expect("Store::get node exists")
+            .id
+            .clone();
+
+        let cache_edge = graph
+            .edges
+            .iter()
+            .find(|edge| edge.target_id == cache_get_id)
+            .expect("edge to Cache::get exists");
+        let store_edge = graph
+            .edges
+            .iter()
+            .find(|edge| edge.target_id == store_get_id)
+            .expect("edge to Store::get exists");
+
+        assert_eq!(
+            cache_edge.call_type, "receiver-typed",
+            "cache.get should resolve via receiver-type inference"
+        );
+        assert_eq!(
+            cache_edge.properties.get("receiver"),
+            Some(&"cache".to_string()),
+            "cache.get edge should record the receiver binding name"
+        );
+        assert_eq!(
+            store_edge.call_type, "receiver-typed",
+            "store.get should resolve via receiver-type inference"
+        );
+        assert_eq!(
+            store_edge.properties.get("receiver"),
+            Some(&"store".to_string()),
+        );
+        // Distinct targets — the entire point of P1.2.
+        assert_ne!(cache_get_id, store_get_id);
+    }
+
+    #[test]
+    fn higher_order_app_emits_edges_to_closure_bodies() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("higher-order-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.expect("callgraph emitted");
+        let ho_edges: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.call_type == "higher-order")
+            .collect();
+        // main passes one closure to `.map` and one to `.for_each` — expect
+        // two higher-order edges.
+        assert_eq!(
+            ho_edges.len(),
+            2,
+            "expected two higher-order edges (map + for_each closures), got {}: {:?}",
+            ho_edges.len(),
+            ho_edges.iter().map(|e| e.target_name.clone()).collect::<Vec<_>>()
+        );
+        for edge in &ho_edges {
+            assert_eq!(
+                edge.properties.get("confidence"),
+                Some(&"high".to_string()),
+                "higher-order edge confidence must be high (single target)"
+            );
+            // The edge's calleeText carries the closure's qualified name
+            // (e.g. `higher_order_app::closure_16_50`).
+            let callee = edge
+                .properties
+                .get("calleeText")
+                .expect("higher-order edge carries calleeText");
+            assert!(
+                callee.contains("closure_"),
+                "higher-order edge should target a closure body, got {}",
+                callee
+            );
+        }
     }
 
     #[test]
@@ -6686,6 +7642,68 @@ mod tests {
                 .any(|slice| slice.source_category == "env"
                     && slice.sink_category == "network-connect"),
             "Expected env-to-network-connect flow through projection"
+        );
+    }
+
+    #[test]
+    fn channel_alias_app_does_not_cross_taint_unrelated_channels() {
+        // P4.2: tx_safe.send(literal) and tx_unsafe.send(env_var) must not
+        // bleed taint across the two channels. The fixture calls
+        // Command::new on rx_safe.recv() (must NOT slice) and on
+        // rx_unsafe.recv() (must slice). Pre-P4.2 the global taint slot
+        // produced two env->process-exec slices; only one is correct.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("channel-alias-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let env_to_proc: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|s| s.source_category == "env" && s.sink_category == "process-exec")
+            .collect();
+        assert_eq!(
+            env_to_proc.len(),
+            1,
+            "expected exactly one env->process-exec slice (only rx_unsafe carries taint), got {}",
+            env_to_proc.len()
+        );
+    }
+
+    #[test]
+    fn sanitizer_scope_app_does_not_suppress_adjacent_tainted_string() {
+        // P4.3: bind() on one query must NOT sanitize a different,
+        // already-tainted concatenated SQL string. The fixture has both
+        // a tainted-format! slice (must fire) and a parameterized
+        // bind-on-literal (must NOT fire).
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("sanitizer-scope-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let sql_slices: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|s| s.sink_category == "sql-query")
+            .collect();
+        assert_eq!(
+            sql_slices.len(),
+            1,
+            "expected exactly one sql-query slice (the concatenated string); bind on a \
+             literal query must not slice, got {}",
+            sql_slices.len()
+        );
+        assert_eq!(
+            sql_slices[0].source_category, "env",
+            "the SQL slice must be env-sourced (the concatenated user input)"
         );
     }
 
