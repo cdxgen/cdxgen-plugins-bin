@@ -1,0 +1,58 @@
+# Ground truth for shiftleft-go-demo (formerly GoVWA), a deliberately
+# vulnerable Go web application.
+#
+# The expectations come from the application's own README, which enumerates its
+# exploits, checked against the code so each one names the source and sink it
+# actually has.
+#
+# Not every declared exploit is a taint flow, and the ones that are not are
+# listed here rather than silently dropped:
+#
+#   IDOR 1 and IDOR 2 (/idor1, /idor2) are authorization flaws. The SQL they
+#   reach is a compile-time constant with ? placeholders, executed through
+#   stmt.Exec(name, city, phoneNumber, uid) — properly parameterized. The bug
+#   is that the handler never checks the requester owns the profile. No taint
+#   analysis should report these, and one that did would be wrong.
+#
+#   CSA (/csa) is a client-side authorization bypass: the OTP is compared in
+#   the browser. There is no server-side flow from an untrusted source to a
+#   dangerous sink.
+#
+#   XXE (vulnerability/xxe) is a stub — the package contains one function that
+#   prints "tes". There is nothing to find.
+#
+# That leaves five real flows. Each is pinned to the handler it belongs to,
+# because sqli1/sqli2 and xss1/xss2 reach identical sinks and differ only in
+# where the input came from.
+
+# SQLi 1: the Uid cookie is read without sanitisation, formatted into a SELECT
+# with fmt.Sprintf in UnsafeQueryGetData, and executed with DB.Query.
+want flow source=http-input sink=data sourcefn=~sqli1Handler sinkfn=~Query
+
+# SQLi 2: the same sink, reached from the uid URL parameter instead.
+want flow source=http-input sink=data sourcefn=~sqli2Handler sinkfn=~Query
+
+# XSS 1: the search term is wrapped in template.HTML, which marks a string as
+# already-safe HTML and so suppresses the escaping that would neutralise it.
+# known-fail=legacy:34: template.HTML is a named string type, so this is a
+# conversion and not a call. Legacy models it as a function sink, which can
+# never match; SEAM matches the conversion (models entries with
+# match="conversion").
+want flow source=http-input sink=template-injection sourcefn=~xss1Handler known-fail=legacy:34
+
+# XSS 2: the uid URL parameter is interpolated into an inline <script> body and
+# marked safe the same way.
+want flow source=http-input sink=template-injection sourcefn=~xss2Handler known-fail=legacy:34
+
+# Zip slip: the request body is opened as an archive and extracted to disk with
+# a path taken from the archive's own entries. The sink is Extract on a
+# third-party archive library (github.com/gen2brain/go-unarr). The tainted
+# value is the archive itself, so the model marks the receiver relevant rather
+# than any argument, and the category is zip-slip.
+#
+# known-fail=33: the models are in place (NewArchiveFromReader as a
+# passthrough, (*Archive).Extract as a receiver-relevant zip-slip sink) and the
+# package builds, but no flow is reported and the hop that drops it has not
+# been isolated. The chain is r.Body -> NewArchiveFromReader -> Extract, all
+# three of which are individually shapes the engine handles elsewhere.
+want flow source=http-input sink=zip-slip sinkfn=~Extract known-fail=33

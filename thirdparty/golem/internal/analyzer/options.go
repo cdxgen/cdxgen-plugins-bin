@@ -8,9 +8,10 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/native"
 )
 
-const SchemaVersion = "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v1"
+const SchemaVersion = "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6"
 
 type Options struct {
 	Dir                             string
@@ -22,6 +23,10 @@ type Options struct {
 	IncludeStdlib                   bool
 	IncludeLocal                    bool
 	CallGraphMode                   string
+	Roots                           []string
+	CallGraphTimeout                time.Duration
+	ReachableSymbols                string
+	MaxPathsPerSymbol               int
 	DataFlowMode                    string
 	DataFlowPacks                   []string
 	DataFlowConfig                  string
@@ -34,6 +39,8 @@ type Options struct {
 	DataFlowMaxTraceEdges           int
 	DataFlowSkipGenerated           bool
 	DataFlowSkipTests               bool
+	DependencyDetail                string
+	TaintEngine                     string // "seam" (default) or "legacy" (escape hatch)
 	MaxProcs                        int
 	MemoryLimit                     int64
 	Progress                        bool
@@ -50,4 +57,5 @@ type Analyzer struct {
 	packageByPath map[string]*packages.Package
 	moduleByPath  map[string]*model.Module
 	rootModules   map[string]*model.Module
+	native        *native.Analyzer
 }

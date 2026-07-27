@@ -1,0 +1,638 @@
+{
+  "version": "2",
+  "fixtures": [
+    {
+      "name": "bufio-scanner",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "cgo-callback-export",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "cgo-string-roundtrip",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "closure-capture",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "const-only-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "context-value",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "deep-chain-8-levels",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "defer-taint",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "dep-drops-taint-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "dep-only-flow",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "dep-transitive-2-hops",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "direct-flow",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "embedded-struct-promotion",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "error-wrapping",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "field-discrimination-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "func-field-dispatch",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "generic-constraint-method",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "generic-container",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "global-var-carrier",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "goroutine-channel",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "handler-func-value",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "interface-dispatch",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "io-copy",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "json-roundtrip",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "linkname",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "logging-secret-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "loop-carried-taint",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "map-of-struct",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "method-field-flow",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "mutual-recursion",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "plugin-open",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "recursion",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "reflect-call",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "request-field-source",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "sanitizer-dominates",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "sanitizer-not-on-path-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "sanitizer-on-path-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "select-multiplex",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "slice-of-pointer",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "sqli-concatenated",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "sqli-parameterized-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "strings-builder",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "struct-field-through-call",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "template-injection",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "unrelated-value-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "validate-named-but-not-sanitizing",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "worker-pool",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "badger",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/dgraph-io/badger",
+      "commit": "64b2f3736e24c16219b0e74f826d46c7187d6f46",
+      "notes": "unsafe-heavy storage engine."
+    },
+    {
+      "name": "cli",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/cli/cli",
+      "commit": "fc19ff321a4b7f4198f788f08da20249c7950fbd",
+      "notes": "Large CLI: cobra registration roots plus an HTTP client surface.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "conc",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/sourcegraph/conc",
+      "commit": "7b8c8f2875cb861bb61844c9bcaa1aed070adbd4",
+      "notes": "Generic concurrency helpers; taint crosses goroutine boundaries."
+    },
+    {
+      "name": "confluent-kafka-go",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/confluentinc/confluent-kafka-go",
+      "commit": "ca4a207cca84ee837d7f23afe1477886e74d7976",
+      "notes": "cgo against an external native library (librdkafka)."
+    },
+    {
+      "name": "echo",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/labstack/echo",
+      "commit": "45524e39d60d424d8ac175001eed70d6ace92930",
+      "notes": "Interface-typed framework context: sources are interface methods, not concrete ones."
+    },
+    {
+      "name": "etcd",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/etcd-io/etcd",
+      "commit": "d109608e444d81cb4c5684e582fc93773ceb2da7",
+      "notes": "Multi-module workspace; channel-dominated flows.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "fiber",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/gofiber/fiber",
+      "commit": "e04f815c43cb8a84f4de90e1d1bd9507bc33fa8c",
+      "notes": "fasthttp-based framework; []byte-centric request APIs."
+    },
+    {
+      "name": "gin",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/gin-gonic/gin",
+      "commit": "75ccf94d605a05fe24817fc2f166f6f2959d5cea",
+      "notes": "Framework source and sink resolution through interfaces and context methods."
+    },
+    {
+      "name": "gitea",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/go-gitea/gitea",
+      "commit": "43ecd3598757877da9f1e159ffbf913b17ed1a28",
+      "notes": "Large web app: templates, ORM, and a wide sink surface.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "go-chi",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/go-chi/chi",
+      "commit": "71307f9b7e4e9527638bc951c42b782cd1560331",
+      "golden": true,
+      "notes": "Router library; middleware chains through func values. The exported-roots slot is the regression guard for library modules, which yield an empty graph under main/init roots.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta"
+        },
+        {
+          "label": "exported-roots",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "roots": [
+            "exported"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "go-plugin",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/hashicorp/go-plugin",
+      "commit": "5b05b3e78c6c3e4e0b8f21a9921cbd739ba72f2a",
+      "notes": "Process-boundary plugins over gRPC."
+    },
+    {
+      "name": "go-sqlite3",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/mattn/go-sqlite3",
+      "commit": "846fea6c1443e8cc366fc1966fe078d7f825f6a9",
+      "notes": "cgo with amalgamated C source; CGO_ENABLED skew is visible here."
+    },
+    {
+      "name": "go-test-bench",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/Contrast-Security-OSS/go-test-bench",
+      "commit": "92445700823205281369911a72b7127f18c8c9ed",
+      "golden": true,
+      "notes": "Primary labeled ground truth: the de facto intentionally-vulnerable Go taint benchmark.",
+      "partialGroundTruth": true
+    },
+    {
+      "name": "gocv",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/hybridgroup/gocv",
+      "commit": "beac0b62b8691dd8923627d14dc1559711649c7d",
+      "notes": "Large cgo surface over OpenCV with a C++ shim."
+    },
+    {
+      "name": "gokart-testdata",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/praetorian-inc/gokart",
+      "commit": "513efb67b089c49879d9dc51cd3ec26bf367d9a7",
+      "subdir": "testdata",
+      "notes": "SSA taint comparison corpus, including its constant-equivalence negatives."
+    },
+    {
+      "name": "gopacket",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/google/gopacket",
+      "commit": "a9779d139771f6a06fc983b18e0efd23ca30222f",
+      "notes": "cgo plus libpcap, unsafe, and build tags."
+    },
+    {
+      "name": "gorilla-mux",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/gorilla/mux",
+      "commit": "b4617d0b9670ad14039b2739167fd35a60f557c5",
+      "golden": true,
+      "notes": "Library-only module with no main: exercises the exported-roots requirement. The exported-roots slot is the regression guard for library modules, which yield an empty graph under main/init roots.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta"
+        },
+        {
+          "label": "exported-roots",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "roots": [
+            "exported"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gosec-testdata",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/securego/gosec",
+      "commit": "0afe0b0c2aa78ec16417d7d246b8cce7654fe665",
+      "subdir": "testutils",
+      "notes": "Rule corpus to mine for models and to compare findings against a pattern-only scanner."
+    },
+    {
+      "name": "govwa",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/0c34/govwa",
+      "commit": "4058f79f31eeb4a36d8f1e64bba1f0c899646e6f",
+      "notes": "Classic deliberately vulnerable Go web app."
+    },
+    {
+      "name": "gqlgen",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/99designs/gqlgen",
+      "commit": "95600f6ed6af570a1ba0e73ae93f67efe204f3f2",
+      "notes": "Generated resolvers; codegen entry points are not called from main."
+    },
+    {
+      "name": "hugo",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/gohugoio/hugo",
+      "commit": "666444f0a52132f9fec9f71cf25b441cc6a4f355",
+      "notes": "Medium-large; heavy template and interface use.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "kubernetes",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/kubernetes/kubernetes",
+      "commit": "f72a29c56f0f78c80ee1968cd334693374752dd3",
+      "notes": "Scale ceiling: client-go codegen and reflection. Phase 5 target.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "lo",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/samber/lo",
+      "commit": "bc6d6e8b8f5515c7c58a376423923c08b6f723cd",
+      "notes": "Generics-dominated library: summaries must key on the generic origin."
+    },
+    {
+      "name": "minio",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/minio/minio",
+      "commit": "e56c69a9d192e22ab20632b051f73b116c9a10f7",
+      "notes": "Assembly, unsafe, and a large HTTP surface.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "nsq",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/nsqio/nsq",
+      "commit": "4cc3d65b16a0988d584e93ecbfb6956b4c32652b",
+      "notes": "Goroutine and channel pipelines end to end."
+    },
+    {
+      "name": "prometheus",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/prometheus/prometheus",
+      "commit": "f61bb5dbfc6c863e826776b783fa3ac8338afd13",
+      "notes": "Large; generics and goroutine-heavy; incremental-cache target.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "protobuf-go",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/protocolbuffers/protobuf-go",
+      "commit": "f09e239720f1bcd654d565107b1d4feea184d552",
+      "notes": "Reflection-driven; the honest limit of static dispatch resolution.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "purego",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/ebitengine/purego",
+      "commit": "ef7c59abec1b82d73086592cef34e83fe4d6d6ea",
+      "notes": "dlopen-based FFI without cgo; symbol registration is dynamic."
+    },
+    {
+      "name": "shiftleft-go-demo",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/ShiftLeftSecurity/shiftleft-go-demo",
+      "commit": "da1198ad49be7940af11f0af9763dfa061a80f4d",
+      "golden": true,
+      "notes": "Second labeled target; framework-mediated flows.",
+      "partialGroundTruth": true
+    },
+    {
+      "name": "sqlc",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/sqlc-dev/sqlc",
+      "commit": "349137bd291b6da69489c22f34d0ac13bbaf3589",
+      "notes": "Generated database code: the sink shape most Go services actually use."
+    },
+    {
+      "name": "traefik",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/traefik/traefik",
+      "commit": "07e6491ace82b55be7f6881d11737821a41501d5",
+      "notes": "Plugins via yaegi; dynamic dispatch and reflection.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    },
+    {
+      "name": "vault",
+      "type": "remote",
+      "tier": "full",
+      "repo": "https://github.com/hashicorp/vault",
+      "commit": "2cb3755273dbd63f5b0f8ec50089b57ffd3fa330",
+      "notes": "Large; plugin RPC boundary and crypto material handling.",
+      "matrix": [
+        {
+          "label": "security",
+          "callgraph": "rta",
+          "dataflow": "security",
+          "dataflowCallgraph": "rta",
+          "dataflowMax": 2000,
+          "timeoutSeconds": 1800
+        }
+      ]
+    }
+  ]
+}

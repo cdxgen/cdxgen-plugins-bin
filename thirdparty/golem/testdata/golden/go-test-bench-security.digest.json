@@ -1,0 +1,342 @@
+{
+  "fixture": "go-test-bench",
+  "commit": "92445700823205281369911a72b7127f18c8c9ed",
+  "config": "security",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v5",
+  "counts": {
+    "apiEndpoints": 8,
+    "buildDirectives": 4,
+    "declarations": 846,
+    "files": 121,
+    "imports": 536,
+    "modules": 38,
+    "nativeArtifacts": 0,
+    "packages": 31,
+    "securitySignals": 100,
+    "usages": 2189
+  },
+  "callGraph": {
+    "algorithm": "rta",
+    "nodeCount": 1151,
+    "edgeCount": 6419,
+    "nodesByKind": {
+      "function": 1151
+    },
+    "edgesByCallType": {
+      "defer": 223,
+      "func-value": 1778,
+      "interface": 3447,
+      "static": 971
+    },
+    "nodeSetHash": "2ee7bc8f84b8c957",
+    "edgeSetHash": "ee67dfc7289356d2",
+    "syntheticNodes": 304,
+    "stdlibNodes": 0,
+    "externalNodes": 562
+  },
+  "dataFlow": {
+    "mode": "security",
+    "nodeCount": 573,
+    "edgeCount": 274,
+    "sliceCount": 61,
+    "uniqueFlowCount": 60,
+    "summaryCount": 348,
+    "flowsByCategoryPair": {
+      "http-input-\u003ecommand-execution": 5,
+      "http-input-\u003edata": 1,
+      "http-input-\u003eexternal-service": 1,
+      "http-input-\u003ehttp-response": 2,
+      "http-input-\u003elogging": 48,
+      "http-input-\u003eredirect": 1,
+      "parameter-\u003ecommand-execution": 1,
+      "parameter-\u003elogging": 1,
+      "parameter-\u003epanic": 1
+    },
+    "flowsBySeverity": {
+      "critical": 6,
+      "high": 1,
+      "medium": 54
+    },
+    "flowKeySetHash": "89174c1018a05395",
+    "edgeConnectivity": 1,
+    "integrityViolations": 0,
+    "dependencyCrossingSlices": 0,
+    "sampleFlows": [
+      {
+        "flowKey": "df-flow|sha256:0f127db4a850b097c46428f1714cbece9271e66b832d5e67b68121d8a686502c",
+        "source": "t28(t2, t4, t29)",
+        "sink": "(*github.com/gin-gonic/gin.Context).String",
+        "sourceAt": "pkg/servegin/servegin.go:81",
+        "sinkAt": "pkg/servegin/servegin.go:92",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0fb51d1d9e543e8fc8b4557d940ba620b7c26697606931d17caecca9635c407e",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/cmd/go-swagger/restapi/operations/ssrf.(*SsrfGetQueryHTTPParams).HTTPRequest",
+        "sink": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.RouteHandler",
+        "sourceAt": "pkg/serveswagger/generatedInit.go:126",
+        "sinkAt": "pkg/serveswagger/generatedInit.go:126",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:12f3dd5f47807ff388f4ef015761847afa5f58ac20aba8fc282e59d9c9e0d843",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.(*responder).req",
+        "sink": "log.Println",
+        "sourceAt": "pkg/serveswagger/setup.go:124",
+        "sinkAt": "pkg/serveswagger/setup.go:124",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:16baa111bab5d6a0da6323071aba29b2ed674acec55f9f6f25e9083acf481bd2",
+        "source": "github.com/gin-gonic/gin.(*Context).Request",
+        "sink": "log.Printf",
+        "sourceAt": "pkg/servegin/servegin.go:78",
+        "sinkAt": "pkg/servegin/servegin.go:78",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:18210ea058bc639e48b7aa025e896c65066960a29bc6b568e23c1cdfc06f3f3f",
+        "source": "parameter r : *net/http.Request",
+        "sink": "net/http.Redirect",
+        "sourceAt": "pkg/servechi/servechi.go:79",
+        "sinkAt": "pkg/servechi/servechi.go:87",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:1ea8ecb2bcb92e498033bca0656577a1704b431c5f621dbfcf2acff87ac16afa",
+        "source": "(*github.com/gin-gonic/gin.Context).Param",
+        "sink": "t28(t2, t4, t29)",
+        "sourceAt": "pkg/servegin/servegin.go:74",
+        "sinkAt": "pkg/servegin/servegin.go:81",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:259bc97a64a7a7a0af52fdb672352744b7f79e96aedae37fdc6982357ed0816b",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/cmd/go-swagger/restapi/operations/ssrf.(*SsrfFrontParams).HTTPRequest",
+        "sink": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.RouteHandler",
+        "sourceAt": "pkg/serveswagger/generatedInit.go:121",
+        "sinkAt": "pkg/serveswagger/generatedInit.go:121",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:25d9f76fe8e0e23a574c5343e1ed5f9f5c5944947315049a4dbaaedeb0347388",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/internal/common.GetUserInput",
+        "sink": "t31(t27, t29, t36)",
+        "sourceAt": "pkg/servechi/servechi.go:46",
+        "sinkAt": "pkg/servechi/servechi.go:47",
+        "severity": "critical",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "command-execution,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:26fbd652e02c2c61128527a416daf904fac7c4cc6519632237a43f3512962096",
+        "source": "parameter r : *net/http.Request",
+        "sink": "log.Println",
+        "sourceAt": "pkg/servechi/servechi.go:28",
+        "sinkAt": "pkg/servechi/servechi.go:29",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2ddc000e6c013d2b063494fd696fcd3b430592a2bda358908e7752badecdaaf0",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/pkg/servegin.extractInput",
+        "sink": "t28(t2, t4, t29)",
+        "sourceAt": "pkg/servegin/servegin.go:76",
+        "sinkAt": "pkg/servegin/servegin.go:81",
+        "severity": "critical",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "command-execution,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2f6384e0e214cf5ed262191dda3400636eca1f53ceb531eb79f622b3028e0b25",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/internal/common.GetUserInput",
+        "sink": "t35(t31, t33, t40)",
+        "sourceAt": "pkg/servejschmidt/servejschmidt.go:47",
+        "sinkAt": "pkg/servejschmidt/servejschmidt.go:48",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:32b5552c1c6b6865a64944b7c7b9419715da6b5a355fd5d82d6578350896e51e",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/pkg/servegin.extractInput",
+        "sink": "t28(t2, t4, t29)",
+        "sourceAt": "pkg/servegin/servegin.go:76",
+        "sinkAt": "pkg/servegin/servegin.go:81",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:3a464e0c28d7afebc02dc1c3115c89e2fb7fa8c1bf790f23c41684f16327f0c0",
+        "source": "t28(t2, t4, t29)",
+        "sink": "(*github.com/gin-gonic/gin.Context).String",
+        "sourceAt": "pkg/servegin/servegin.go:81",
+        "sinkAt": "pkg/servegin/servegin.go:92",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:3ac92f85b841ae069aa7a0af9e455bceca10be06628e829e2ff74590cfda628a",
+        "source": "(*github.com/gin-gonic/gin.Context).GetHeader",
+        "sink": "encoding/json.Unmarshal",
+        "sourceAt": "pkg/servegin/inputs.go:51",
+        "sinkAt": "pkg/servegin/inputs.go:56",
+        "severity": "high",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:3c33193ceda813037fbbb40036b6f61d3c5f1f6691cf5fe8cd7e7c9f2c9b4494",
+        "source": "(*github.com/gin-gonic/gin.Context).Param",
+        "sink": "github.com/Contrast-Security-OSS/go-test-bench/pkg/servegin.extractInput",
+        "sourceAt": "pkg/servegin/servegin.go:75",
+        "sinkAt": "pkg/servegin/servegin.go:76",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:44282fe8e9cd7a3ee39f971d62b49e0d2a30498ebeacac04df6a788728bd3696",
+        "source": "parameter input : string",
+        "sink": "log.Fatalf",
+        "sourceAt": "internal/common/templateFns.go:34",
+        "sinkAt": "internal/common/templateFns.go:58",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:4aea0b3feea7bebf3415dc0003a300c7f2477b7b120ef6333dd7906ac8001a5e",
+        "source": "parameter path : string",
+        "sink": "os/exec.Command",
+        "sourceAt": "cmd/go-swagger/regen/regen.go:100",
+        "sinkAt": "cmd/go-swagger/regen/regen.go:101",
+        "severity": "critical",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:4bba2444f20c31695354f2b7e0697f09a5793844a67d0d278df6d1826492bca4",
+        "source": "t31(t27, t29, t36)",
+        "sink": "fmt.Fprint",
+        "sourceAt": "pkg/servechi/servechi.go:47",
+        "sinkAt": "pkg/servechi/servechi.go:59",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:501378c176721cddb344dae4d927a48b49dd2717472d91d2c910b1a41248bb05",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.(*responder).req",
+        "sink": "t99(t82, t97, t100)",
+        "sourceAt": "pkg/serveswagger/setup.go:125",
+        "sinkAt": "pkg/serveswagger/setup.go:160",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:5f4be3c7f1944c4bc9e28923ae0f9f7b8805762985ec0bb7db64518f82a2b04b",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/internal/common.GetUserInput",
+        "sink": "t72(t68, t70, t77)",
+        "sourceAt": "pkg/servestd/servestd.go:106",
+        "sinkAt": "pkg/servestd/servestd.go:107",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:6f03fb9d64ad3e82db6ebc18124f1ffeb04ec8cb1420fcd6e870ff4cf12cf80f",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/cmd/go-swagger/restapi/operations/sql_injection.(*SQLInjectionGetQueryExecParams).HTTPRequest",
+        "sink": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.RouteHandler",
+        "sourceAt": "pkg/serveswagger/generatedInit.go:113",
+        "sinkAt": "pkg/serveswagger/generatedInit.go:113",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:70b20f868b8f0b564b85fd8e5a5f0fb64becde84fe6b9ca4fc9929611af0a9ff",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/internal/common.GetUserInput",
+        "sink": "t99(t82, t97, t100)",
+        "sourceAt": "pkg/serveswagger/setup.go:159",
+        "sinkAt": "pkg/serveswagger/setup.go:160",
+        "severity": "critical",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "command-execution,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:72e5f7fc51e73a7d9370e27eee22536bd935410e3c449894b25ad899f3e78b5f",
+        "source": "github.com/Contrast-Security-OSS/go-test-bench/cmd/go-swagger/restapi/operations/path_traversal.(*PathTraversalGetQueryCreateParams).HTTPRequest",
+        "sink": "github.com/Contrast-Security-OSS/go-test-bench/pkg/serveswagger.RouteHandler",
+        "sourceAt": "pkg/serveswagger/generatedInit.go:62",
+        "sinkAt": "pkg/serveswagger/generatedInit.go:62",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:75dbe077ad76ce9d3bb43d0b255e45a43ab2650164be20dfd2091e84430c9245",
+        "source": "parameter r : *net/http.Request",
+        "sink": "log.Println",
+        "sourceAt": "pkg/servechi/servechi.go:90",
+        "sinkAt": "pkg/servechi/servechi.go:91",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:773f2280a5d57becf1f30d5943bd5d2d790ff23d360d9b26236dcf0e368704b8",
+        "source": "net/http.NewRequest",
+        "sink": "(*github.com/Contrast-Security-OSS/go-test-bench/internal/common.Sink).AddPayloadToRequest",
+        "sourceAt": "internal/common/commontest/request_gen.go:44",
+        "sinkAt": "internal/common/commontest/request_gen.go:48",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "logging,user-input"
+      }
+    ]
+  }
+}

@@ -19,9 +19,17 @@ import (
 	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/seam"
 )
 
 const (
+	// seamCallGraphMode is the call graph SEAM is built on regardless of
+	// --dataflow-callgraph. SEAM resolves dispatch through its own
+	// implements-index, so the graph only has to be right about direct calls,
+	// and RTA is sparse on a library-only module where there is no main to seed
+	// it. The override is reported as a diagnostic rather than applied silently.
+	seamCallGraphMode = "static"
+
 	defaultDataFlowMaxTraceNodes           = 64
 	defaultDataFlowMaxTraceEdges           = 128
 	defaultDataFlowLargeRepoFunctions      = 1000
@@ -29,8 +37,13 @@ const (
 )
 
 type dataFlowTrace struct {
-	nodeIDs             []string
-	edgeIDs             []string
+	nodeIDs []string
+	edgeIDs []string
+	// tailID is the node the next hop extends from. Without it the tail is
+	// whichever node happens to be last in nodeIDs, which stops being the end
+	// of the path as soon as two traces merge or a node repeats — and the
+	// slice then carries edges that do not join its nodes.
+	tailID              string
 	params              map[int]bool
 	taintKinds          []string
 	fieldPaths          []string
@@ -69,6 +82,7 @@ type dataFlowBuilder struct {
 	dynamicCallees map[ssa.CallInstruction][]*ssa.Function
 	nodeSeen       map[string]bool
 	edgeSeen       map[string]bool
+	edgeByID       map[string]model.DataFlowEdge
 	sliceSeen      map[string]bool
 	diagnosticSeen map[string]bool
 	sliceBudget    *dataFlowBudget
@@ -85,10 +99,31 @@ type dataFlowBudget struct {
 
 func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, progress *progressLogger) *model.DataFlowEvidence {
 	started := time.Now()
+
+	// SEAM is the default. On the corpus it reaches recall 0.957 against
+	// legacy's 0.783 at equal precision, with a fifth of the open defects and
+	// a shorter median run; on real repositories it now matches or beats
+	// legacy on go-chi and stays within range elsewhere. Legacy remains
+	// available behind --taint-engine=legacy.
+	//
+	// Neither engine is good on real code yet: on go-test-bench, whose nine
+	// vulnerabilities are ground truth in
+	// testdata/bench/annotations/go-test-bench.golem, legacy finds one and
+	// SEAM none, because both lose taint at a function value held in a struct
+	// field (defect 31). That is a shared limitation, not a reason to prefer
+	// the older engine.
+	engine := strings.ToLower(strings.TrimSpace(a.options.TaintEngine))
+	if engine == "" {
+		engine = "seam"
+	}
+	if engine == "seam" {
+		return a.buildDataFlowSEAM(pkgs, ctx, progress, started)
+	}
+
 	patterns, diagnostics := loadDataFlowPatterns(a.options.DataFlowPacks, a.options.DataFlowConfig)
 	regexps, regexDiagnostics := compileDataFlowRegexps(patterns)
 	diagnostics = append(diagnostics, regexDiagnostics...)
-	out := &model.DataFlowEvidence{Mode: a.options.DataFlowMode, Patterns: patterns, Diagnostics: diagnostics}
+	out := &model.DataFlowEvidence{Engine: "legacy", Mode: a.options.DataFlowMode, Patterns: patterns, Diagnostics: diagnostics}
 	if ctx == nil || ctx.program == nil {
 		out.Diagnostics = append(out.Diagnostics, model.Diagnostic{Kind: "dataflow", Message: "SSA context was not available"})
 		return out
@@ -100,7 +135,7 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	progress.Memoryf("data-flow starting mode=%s functions=%d analyzedFunctions=%d skippedFunctions=%d workers=%d maxSlices=%d", a.options.DataFlowMode, len(funcs), len(analysisFuncs), skippedFuncs, workers, a.options.DataFlowMax)
 	progress.Logf("data-flow scheduled first=%s largest=%s", describeDataFlowFunctions(analysisFuncs, 6, false), describeDataFlowFunctions(analysisFuncs, 6, true))
 	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
-	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax, maxTraceNodes: dataFlowMaxTraceNodes(a.options), maxTraceEdges: dataFlowMaxTraceEdges(a.options)}
+	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, edgeByID: map[string]model.DataFlowEdge{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax, maxTraceNodes: dataFlowMaxTraceNodes(a.options), maxTraceEdges: dataFlowMaxTraceEdges(a.options)}
 	progress.Memoryf("data-flow inferring summaries")
 	b.inferSummaries(funcs)
 	progress.Memoryf("data-flow summaries inferred")
@@ -424,6 +459,11 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		p.RelevantArguments = args
 		set.Sinks = append(set.Sinks, p)
 	}
+	addWriter := func(kind, pattern, category string, writes []int) {
+		p := dfPattern("passthrough", kind, pattern, category)
+		p.WritesToArguments = writes
+		set.Passthroughs = append(set.Passthroughs, p)
+	}
 	addPass := func(kind, pattern, category string) {
 		set.Passthroughs = append(set.Passthroughs, dfPattern("passthrough", kind, pattern, category))
 	}
@@ -447,14 +487,47 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		paramPattern := dfPattern("source", "parameter", "^(input|query|command|cmd|path|file|filename|url|uri|token|key|secret|password)$", "parameter", "user-input")
 		paramPattern.Match = "regex"
 		set.Sources = append(set.Sources, paramPattern)
-		addSource("type", "*net/http.Request", "http-request", "user-input")
-		addSource("type", "http.Request", "http-request", "user-input")
-		for _, name := range []string{"fmt.Sprintf", "fmt.Sprint", "fmt.Sprintln", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "net/url.QueryEscape", "net/url.PathEscape", "net/url.JoinPath", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
+		addSource("type", "*net/http.Request", "http-input", "user-input")
+		addSource("type", "http.Request", "http-input", "user-input")
+		for _, name := range []string{"fmt.Sprintf", "fmt.Sprint", "fmt.Sprintln", "strings.Join", "strings.Trim", "strings.TrimSpace", "strings.Replace", "strings.ReplaceAll", "bytes.(*Buffer).String", "strconv.Itoa", "strconv.Format", "net/url.QueryEscape", "net/url.PathEscape", "net/url.JoinPath", "regexp.(*Regexp).ReplaceAllString", "regexp.(*Regexp).ReplaceAllLiteralString", "regexp.(*Regexp).ReplaceAllStringFunc", "regexp.(*Regexp).FindString", "regexp.(*Regexp).FindStringSubmatch", "regexp.(*Regexp).FindAllString", "regexp.(*Regexp).FindAllStringSubmatch", "regexp.(*Regexp).Split", "reflect.ValueOf", "reflect.Value.Interface", "reflect.Value).Interface", "reflect.Value.String", "reflect.Value).String", "reflect.Value.Bytes", "reflect.Value).Bytes", "reflect.Value.Convert", "reflect.Value).Convert"} {
 			addPass("function", name, "conversion")
 		}
-		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "go.uber.org/zap.(*Logger).Info", "go.uber.org/zap.(*Logger).Warn", "go.uber.org/zap.(*Logger).Error", "go.uber.org/zap.(*SugaredLogger).Info", "go.uber.org/zap.(*SugaredLogger).Infof", "go.uber.org/zap.(*SugaredLogger).Error", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln"} {
+		for _, name := range []string{"log.Print", "log.Printf", "log.Println", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Panic", "log.Panicf", "log.Panicln", "log/slog.Debug", "log/slog.Info", "log/slog.Warn", "log/slog.Error", "go.uber.org/zap.(*Logger).Info", "go.uber.org/zap.(*Logger).Warn", "go.uber.org/zap.(*Logger).Error", "go.uber.org/zap.(*SugaredLogger).Info", "go.uber.org/zap.(*SugaredLogger).Infof", "go.uber.org/zap.(*SugaredLogger).Error", "fmt.Print", "fmt.Printf", "fmt.Println"} {
 			addSink("function", name, "logging", "user-input", "secret")
 		}
+		// Values that pass through the standard library unchanged. Without these
+		// taint stops at the first io, bufio, context or errors call, which in Go
+		// is usually the first call of any consequence.
+		for _, name := range []string{
+			"strings.NewReader", "bytes.NewReader", "bytes.NewBufferString", "bufio.NewScanner", "bufio.NewReader",
+			"io.ReadAll", "io.NopCloser", "errors.New", "errors.Unwrap", "errors.Join",
+			"context.WithValue", "context.Value",
+			"(*bufio.Scanner).Text", "(*bufio.Scanner).Bytes", "(*bufio.Reader).ReadString", "(*bufio.Reader).ReadBytes",
+			"(*strings.Builder).String", "(*bytes.Buffer).String", "(*bytes.Buffer).Bytes",
+			"(*strings.Reader).ReadString", "(*net/url.URL).String",
+		} {
+			addPass("function", name, "conversion")
+		}
+		// An error's message carries whatever was wrapped into it. The symbol for
+		// the interface method is bare, so match it exactly rather than loosely.
+		errorMessage := dfPattern("passthrough", "function", "Error", "conversion")
+		errorMessage.Match = "exact"
+		set.Passthroughs = append(set.Passthroughs, errorMessage)
+
+		// Calls that fill memory reached through an argument rather than
+		// returning a value.
+		addWriter("function", "io.Copy", "conversion", []int{0})
+		addWriter("function", "io.CopyN", "conversion", []int{0})
+		addWriter("function", "io.ReadFull", "conversion", []int{1})
+		addWriter("function", "encoding/json.Unmarshal", "conversion", []int{1})
+		addWriter("function", "encoding/json.NewDecoder", "conversion", []int{})
+		addWriter("function", "(*encoding/json.Decoder).Decode", "conversion", []int{1})
+		addWriter("function", "gopkg.in/yaml.v3.Unmarshal", "conversion", []int{1})
+		addWriter("function", "(*strings.Builder).WriteString", "conversion", []int{0})
+		addWriter("function", "(*strings.Builder).Write", "conversion", []int{0})
+		addWriter("function", "(*bytes.Buffer).WriteString", "conversion", []int{0})
+		addWriter("function", "(*bytes.Buffer).Write", "conversion", []int{0})
+
 		customPass := dfPattern("passthrough", "name", `(?i)(identity|passthrough|forward|wrap|unwrap)$`, "custom-helper")
 		customPass.Match = "regex"
 		set.Passthroughs = append(set.Passthroughs, customPass)
@@ -479,13 +552,17 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 			addSource("function", name, "http-input", "user-input")
 		}
 		addSink("function", "net/http.ResponseWriter.Write", "http-response", "user-input")
-		addSink("function", "fmt.Fprintf", "formatted-output", "user-input")
+		for _, name := range []string{"fmt.Fprintf", "fmt.Fprint", "fmt.Fprintln"} {
+			addSink("function", name, "formatted-output", "user-input")
+		}
 		addSinkArgs("function", "http.Error", "http-response", []int{1}, "user-input")
 		addSink("function", "encoding/json.(*Encoder).Encode", "http-response", "user-input")
 		addSinkArgs("function", "http.Redirect", "redirect", []int{2}, "url")
+		addSinkArgs("function", "net/http.RedirectHandler", "redirect", []int{0}, "url")
 		addCategorySan("function", "net/url.QueryEscape", "url-encoding", []string{"redirect"}, "url")
 		addCategorySan("function", "net/url.PathEscape", "url-encoding", []string{"redirect"}, "url")
 		addCategorySan("function", "html/template.HTMLEscapeString", "html-escaping", []string{"http-response", "formatted-output"})
+		addCategorySan("function", "html/template.HTMLEscaper", "html-escaping", []string{"http-response", "formatted-output"})
 	}
 	if selected["frameworks"] {
 		for _, sourceType := range []string{"chi.Context", "mux.RouteMatch", "connectrpc.com/connect.AnyRequest", "*connectrpc.com/connect.Request"} {
@@ -511,7 +588,22 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		addPass("function", "plugin.Lookup", "dynamic-loading")
 	}
 	if selected["data"] {
-		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).QueryContext", "database/sql.(*DB).Exec", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec", "github.com/jmoiron/sqlx", "github.com/jmoiron/sqlx.Queryx", "github.com/jmoiron/sqlx.Select", "github.com/jmoiron/sqlx.Get", "github.com/jackc/pgx", "github.com/jackc/pgx.Query", "github.com/jackc/pgx.Exec", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "gorm.io/gorm.(*DB).Where", "go.mongodb.org/mongo-driver/mongo", "github.com/redis/go-redis", "github.com/redis/go-redis/v9", "github.com/segmentio/kafka-go", "github.com/nats-io/nats.go", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
+		// Only the query string is a SQL-injection sink. The values that follow
+		// it are bound parameters, which the driver sends out of band and which
+		// are therefore safe by construction; treating them as sink arguments
+		// reports every correctly parameterised query as an injection.
+		//
+		// Indices are SSA argument positions, and for a method call SSA passes
+		// the receiver as argument zero — so the query string is at index one,
+		// and at index two for the variants that take a context first.
+		for _, name := range []string{"database/sql.(*DB).Query", "database/sql.(*DB).Exec", "database/sql.(*Tx).Query", "database/sql.(*Tx).Exec", "database/sql.(*Conn).Query", "database/sql.(*Conn).Exec"} {
+			addSinkArgs("function", name, "data", []int{1}, "user-input")
+		}
+		// The Context variants take the context first, so the query is second.
+		for _, name := range []string{"database/sql.(*DB).QueryContext", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).QueryContext", "database/sql.(*Tx).ExecContext", "database/sql.(*Conn).QueryContext", "database/sql.(*Conn).ExecContext"} {
+			addSinkArgs("function", name, "data", []int{2}, "user-input")
+		}
+		for _, name := range []string{"github.com/jmoiron/sqlx", "github.com/jmoiron/sqlx.Queryx", "github.com/jmoiron/sqlx.Select", "github.com/jmoiron/sqlx.Get", "github.com/jackc/pgx", "github.com/jackc/pgx.Query", "github.com/jackc/pgx.Exec", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "gorm.io/gorm.(*DB).Where", "go.mongodb.org/mongo-driver/mongo", "github.com/redis/go-redis", "github.com/redis/go-redis/v9", "github.com/segmentio/kafka-go", "github.com/nats-io/nats.go", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
 			addSink("function", name, "data", "user-input")
 		}
 		addCategorySan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", []string{"data"}, "sql")
@@ -534,6 +626,13 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	if selected["native"] {
 		addSink("function", "_Cfunc_", "native-interop", "native")
 		addPass("function", "_Cfunc_CString", "native-conversion")
+		addPass("function", "_Cfunc_GoString", "native-conversion")
+		addPass("function", "_Cfunc_GoStringN", "native-conversion")
+		addPass("function", "_Cfunc_GoBytes", "native-conversion")
+		addSource("function", "_Cfunc_GoString", "native-conversion", "native")
+		addSource("function", "_Cfunc_GoStringN", "native-conversion", "native")
+		addSource("function", "_Cfunc_GoBytes", "native-conversion", "native")
+		addPass("function", "_Cfunc_CBytes", "native-conversion")
 		addPass("function", "_Cgo_ptr", "native-conversion")
 		addSink("package", "unsafe", "unsafe", "native")
 		for _, name := range []string{"unsafe.String", "unsafe.Slice", "reflect.Value.Call", "reflect.Value).Call", "reflect.Value.CallSlice", "reflect.Value).CallSlice"} {
@@ -551,7 +650,7 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"github.com/aws/aws-sdk-go", "github.com/aws/aws-sdk-go-v2", "cloud.google.com/go", "google.golang.org/api", "github.com/Azure/azure-sdk-for-go"} {
 			addSink("package", name, "external-service", "user-input", "secret")
 		}
-		for _, name := range []string{"net/http.(*Client).Do", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg", "connectrpc.com/connect.Client.CallUnary", "cloud.google.com/go/storage.(*Client).Bucket", "cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage"} {
+		for _, name := range []string{"net/http.(*Client).Do", "net/http.(*Client).Get", "net/http.Get", "net/http.Head", "net/http.Post", "net/http.PostForm", "net/http.NewRequest", "net/http.NewRequestWithContext", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg", "connectrpc.com/connect.Client.CallUnary", "cloud.google.com/go/storage.(*Client).Bucket", "cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage"} {
 			addSink("function", name, "external-service", "user-input", "secret")
 		}
 	}
@@ -574,6 +673,30 @@ func dfPattern(target, kind, pattern, category string, taints ...string) model.D
 	return model.DataFlowPattern{Target: target, Kind: kind, Match: "contains", Pattern: pattern, Category: category, TaintKinds: taints, Confidence: "medium"}
 }
 
+// ssaReceiverNotation rewrites a pattern written in source notation into the
+// notation the SSA printer uses for a method on a pointer receiver.
+//
+// A pattern reading "database/sql.(*DB).Query" can never match, because the
+// symbol it is compared against reads "(*database/sql.DB).Query". The two
+// notations differ in where the package qualifier sits, and because matching is
+// a substring test the mismatch is silent: the entire database/sql sink family,
+// and every third-party pattern written the same way, matches nothing at all.
+var ssaReceiverNotation = regexp.MustCompile(`^(.*)\.\(\*([A-Za-z_][A-Za-z0-9_]*)\)\.(.+)$`)
+
+// normalizeSSASymbolNotation converts source notation to SSA notation, leaving
+// anything that does not look like a pointer-receiver method untouched.
+func normalizeSSASymbolNotation(pattern string) string {
+	groups := ssaReceiverNotation.FindStringSubmatch(pattern)
+	if groups == nil {
+		return pattern
+	}
+	pkg, typeName, method := groups[1], groups[2], groups[3]
+	if pkg == "" {
+		return pattern
+	}
+	return "(*" + pkg + "." + typeName + ")." + method
+}
+
 func normalizePatterns(target string, in []model.DataFlowPattern) []model.DataFlowPattern {
 	out := make([]model.DataFlowPattern, 0, len(in))
 	for _, p := range in {
@@ -591,6 +714,9 @@ func normalizePatterns(target string, in []model.DataFlowPattern) []model.DataFl
 		p.Match = strings.ToLower(p.Match)
 		if p.Confidence == "" {
 			p.Confidence = "medium"
+		}
+		if p.Match == "contains" && (p.Kind == "function" || p.Kind == "method" || p.Kind == "symbol") {
+			p.Pattern = normalizeSSASymbolNotation(p.Pattern)
 		}
 		p = enrichDataFlowPatternDefaults(p)
 		if p.Pattern != "" {
@@ -836,7 +962,7 @@ func (b *dataFlowBuilder) analyzeFunctions(funcs []*ssa.Function, workers int, p
 			for idx := range jobs {
 				fn := funcs[idx]
 				localOut := &model.DataFlowEvidence{Mode: b.out.Mode, Patterns: b.patterns}
-				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: b.sliceBudget, maxSlices: b.maxSlices, maxTraceNodes: b.maxTraceNodes, maxTraceEdges: b.maxTraceEdges}
+				local := &dataFlowBuilder{analyzer: b.analyzer, out: localOut, patterns: b.patterns, regexps: b.regexps, summaries: b.summaries, endpoints: b.endpoints, dynamicCallees: b.dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, edgeByID: map[string]model.DataFlowEdge{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: b.sliceBudget, maxSlices: b.maxSlices, maxTraceNodes: b.maxTraceNodes, maxTraceEdges: b.maxTraceEdges}
 				local.analyzeFunction(fn)
 				results <- dataFlowFunctionResult{index: idx, functionName: fn.String(), evidence: localOut, instructions: local.instructionCt}
 			}
@@ -890,6 +1016,7 @@ func (b *dataFlowBuilder) mergeFunctionEvidence(df *model.DataFlowEvidence) {
 			continue
 		}
 		b.edgeSeen[edge.ID] = true
+		b.edgeByID[edge.ID] = edge
 		b.out.Edges = append(b.out.Edges, edge)
 	}
 	for _, slice := range df.Slices {
@@ -975,7 +1102,27 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 	for _, pat := range b.matchCall(common, b.patterns.Sinks) {
 		b.emitSink(fn, state, call, common, pat)
 	}
+	// Propagation runs before source matching so that a value arriving already
+	// tainted keeps the identity of where it actually came from.
+	//
+	// Some calls are modelled as both: C.GoString introduces taint when it
+	// returns a buffer the C side produced, and carries taint when that buffer
+	// began life as a Go string handed across by C.CString. Only one of the two
+	// can be true of any given call, and attaching a fresh source to a value
+	// that is already carrying one leaves an orphan node in the report — cited
+	// by a slice, reachable by no edge.
+	propagated := false
+	if b.shouldPropagate(common) {
+		if tr, ok := b.combineCallArgTaints(state, common); ok {
+			n := b.addNode("call", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, nil)
+			state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "call-return", call.Pos(), callName(common)))
+			propagated = true
+		}
+	}
 	for _, pat := range b.matchCall(common, b.patterns.Sources) {
+		if propagated {
+			continue
+		}
 		n := b.addNode("source", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), true, false, pat.Category, pat.TaintKinds, "", pat.Confidence, map[string]string{"pattern": pat.Pattern})
 		state.values[call] = combineTraces(state.values[call], dataFlowTrace{nodeIDs: []string{n.ID}, sourceID: n.ID, sourceCategory: n.Category, sourcePURL: n.PURL, sourcePatterns: []model.DataFlowPattern{pat}, taintKinds: taintsForPattern(pat), confidence: pat.Confidence, generated: true})
 	}
@@ -1001,10 +1148,71 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 			b.replaySummary(fn, state, call, common, callee, "interface-summary")
 		}
 	}
-	if b.shouldPropagate(common) {
-		if tr, ok := b.combineCallArgTaints(state, common); ok {
-			n := b.addNode("call", callName(common), callSymbol(common), valueType(call), fn, call.Pos(), false, false, "", tr.taintKinds, "", tr.confidence, nil)
-			state.values[call] = combineTraces(state.values[call], b.connectTrace(tr, n, "call-return", call.Pos(), callName(common)))
+	b.applyArgumentWrites(fn, state, common, call.Pos())
+}
+
+// unwrapWriteTarget looks through the conversions a destination argument passes
+// through on its way to an interface parameter.
+//
+// io.Copy takes an io.Writer and json.Unmarshal takes an any, so the pointer the
+// caller supplied arrives wrapped in a MakeInterface. Keying memory off the
+// wrapper rather than the allocation it wraps means the later read of that
+// allocation never sees what was written into it.
+func unwrapWriteTarget(v ssa.Value) ssa.Value {
+	for {
+		switch x := v.(type) {
+		case *ssa.MakeInterface:
+			v = x.X
+		case *ssa.ChangeInterface:
+			v = x.X
+		case *ssa.ChangeType:
+			v = x.X
+		case *ssa.Convert:
+			v = x.X
+		default:
+			return v
+		}
+	}
+}
+
+// applyArgumentWrites records taint that a call deposits into memory reached
+// through one of its arguments.
+//
+// Go's standard library moves a great deal of data this way rather than by
+// returning it: io.Copy fills its destination, json.Unmarshal fills the value
+// behind a pointer, and a strings.Builder accumulates into its receiver. A model
+// that only understands return values loses the taint at each of these calls,
+// and with it every flow that passes through one.
+func (b *dataFlowBuilder) applyArgumentWrites(fn *ssa.Function, state dataFlowState, common *ssa.CallCommon, pos token.Pos) {
+	patterns := b.matchCall(common, b.patterns.Passthroughs)
+	if len(patterns) == 0 {
+		return
+	}
+	args := callArgs(common)
+	for _, pat := range patterns {
+		if len(pat.WritesToArguments) == 0 {
+			continue
+		}
+		incoming, ok := b.combineCallArgTaints(state, common)
+		if !ok {
+			continue
+		}
+		for _, idx := range pat.WritesToArguments {
+			if idx < 0 || idx >= len(args) {
+				continue
+			}
+			target := unwrapWriteTarget(args[idx])
+			n := b.addNode("argument-write", valueName(target), callSymbol(common), valueType(target), fn, pos, false, false, "", incoming.taintKinds, "", incoming.confidence, map[string]string{"writesArgument": fmt.Sprint(idx)})
+			written := b.connectTrace(incoming, n, "argument-write", pos, valueName(target))
+			key := addrKey(target)
+			state.memory[key] = combineTraces(state.memory[key], written)
+			// A destination is usually a pointer to an aggregate, so record the
+			// element and field views a later read will look through.
+			state.memory[key+"[*]"] = combineTraces(state.memory[key+"[*]"], written)
+			if load, isLoad := target.(*ssa.UnOp); isLoad && load.Op == token.MUL {
+				inner := addrKey(load.X)
+				state.memory[inner] = combineTraces(state.memory[inner], written)
+			}
 		}
 	}
 }
@@ -1330,7 +1538,16 @@ func (b *dataFlowBuilder) emitSliceSink(fn *ssa.Function, tr dataFlowTrace, pos 
 	}
 	b.sliceSeen[id] = true
 	sinkPURL := firstNonEmpty(pat.PURL, sink.PURL)
-	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(append(append([]string{}, tr.nodeIDs...), sink.ID)), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: sinkPURL, PURLs: orderedUniqueStrings([]string{tr.sourcePURL, sinkPURL}), SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), RuleID: pat.RuleID, RuleName: pat.RuleName, Severity: pat.Severity, RiskScore: pat.RiskScore, Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
+	// A slice must be able to stand on its own: a consumer walks its edges to
+	// draw the path, so every node an edge touches has to be listed, whatever
+	// the trace happened to record.
+	nodeIDs := append(append([]string{}, tr.nodeIDs...), sink.ID)
+	for _, edgeID := range tr.edgeIDs {
+		if edge, ok := b.edgeByID[edgeID]; ok {
+			nodeIDs = append(nodeIDs, edge.SourceID, edge.TargetID)
+		}
+	}
+	b.out.Slices = append(b.out.Slices, model.DataFlowSlice{ID: id, SourceID: sourceID, SinkID: sink.ID, NodeIDs: orderedUniqueStrings(nodeIDs), EdgeIDs: orderedUniqueStrings(tr.edgeIDs), SourceCategory: tr.sourceCategory, SinkCategory: pat.Category, SourcePURL: tr.sourcePURL, SinkPURL: sinkPURL, PURLs: orderedUniqueStrings([]string{tr.sourcePURL, sinkPURL}), SinkArgumentIndex: &idx, TaintKinds: uniqueStrings(mergeStrings(tr.taintKinds, taintsForPattern(pat))), FieldPaths: uniqueStrings(tr.fieldPaths), RuleID: pat.RuleID, RuleName: pat.RuleName, Severity: pat.Severity, RiskScore: pat.RiskScore, Confidence: firstNonEmpty(pat.Confidence, tr.confidence, "medium"), Description: summary})
 }
 
 func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Function, pos token.Pos, source, sink bool, category string, taints []string, fieldPath, confidence string, props map[string]string) model.DataFlowNode {
@@ -1361,16 +1578,23 @@ func (b *dataFlowBuilder) addNode(kind, name, symbol, typ string, fn *ssa.Functi
 func (b *dataFlowBuilder) connectTrace(tr dataFlowTrace, node model.DataFlowNode, kind string, pos token.Pos, label string) dataFlowTrace {
 	if len(tr.nodeIDs) == 0 {
 		tr.nodeIDs = append(tr.nodeIDs, node.ID)
+		tr.tailID = node.ID
 		return tr
 	}
-	previousID := tr.nodeIDs[len(tr.nodeIDs)-1]
+	previousID := tr.tailID
+	if previousID == "" {
+		previousID = tr.nodeIDs[len(tr.nodeIDs)-1]
+	}
 	id := stableID("df-edge", previousID, node.ID, kind, label, fmt.Sprint(b.analyzer.position(pos).Line))
 	if !b.edgeSeen[id] {
 		b.edgeSeen[id] = true
-		b.out.Edges = append(b.out.Edges, model.DataFlowEdge{ID: id, SourceID: previousID, TargetID: node.ID, Kind: kind, Label: label, Position: b.analyzer.position(pos)})
+		edge := model.DataFlowEdge{ID: id, SourceID: previousID, TargetID: node.ID, Kind: kind, Label: label, Position: b.analyzer.position(pos)}
+		b.edgeByID[id] = edge
+		b.out.Edges = append(b.out.Edges, edge)
 	}
 	tr.edgeIDs = appendLimitedUnique(tr.edgeIDs, id, b.maxTraceEdges)
 	tr.nodeIDs = appendLimitedUnique(tr.nodeIDs, node.ID, b.maxTraceNodes)
+	tr.tailID = node.ID
 	return tr
 }
 
@@ -2193,7 +2417,39 @@ func combineTraces(a, b dataFlowTrace) dataFlowTrace {
 	if b.empty() {
 		return a
 	}
-	out := dataFlowTrace{nodeIDs: orderedUniqueLimit(append(a.nodeIDs, b.nodeIDs...), defaultDataFlowMaxTraceNodes), edgeIDs: orderedUniqueLimit(append(a.edgeIDs, b.edgeIDs...), defaultDataFlowMaxTraceEdges), params: map[int]bool{}, taintKinds: uniqueStrings(append(a.taintKinds, b.taintKinds...)), fieldPaths: uniqueStrings(append(a.fieldPaths, b.fieldPaths...)), sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)), sourceID: firstNonEmpty(a.sourceID, b.sourceID), sourceCategory: firstNonEmpty(a.sourceCategory, b.sourceCategory), sourcePURL: firstNonEmpty(a.sourcePURL, b.sourcePURL), sourcePatterns: append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...), confidence: firstNonEmpty(a.confidence, b.confidence, "medium"), generated: a.generated || b.generated}
+	// Keep one coherent route rather than the union of two.
+	//
+	// A trace is a path, and connectTrace extends it from whichever node is
+	// last. Unioning the nodes and edges of two routes leaves no single tail,
+	// so the next hop attaches to an arbitrary node of the merged set and the
+	// slice stops describing a path at all — its nodes and its edges disagree
+	// about how the taint travelled. The union was never faithful in any case:
+	// only one sourceID survives a merge, so the other route's nodes were
+	// already orphans in the report.
+	//
+	// Everything that is a property of the taint rather than of the route is
+	// still merged, and the shorter route wins because a shorter path is both
+	// likelier to be the one a reader wants and cheaper to render.
+	route := a
+	other := b
+	if len(b.nodeIDs) < len(a.nodeIDs) && (a.sourceID == "" || b.sourceID != "") {
+		route, other = b, a
+	}
+	out := dataFlowTrace{
+		nodeIDs:             orderedUniqueLimit(route.nodeIDs, defaultDataFlowMaxTraceNodes),
+		tailID:              route.tailID,
+		edgeIDs:             orderedUniqueLimit(route.edgeIDs, defaultDataFlowMaxTraceEdges),
+		params:              map[int]bool{},
+		taintKinds:          uniqueStrings(append(a.taintKinds, b.taintKinds...)),
+		fieldPaths:          uniqueStrings(append(a.fieldPaths, b.fieldPaths...)),
+		sanitizedCategories: uniqueStrings(append(a.sanitizedCategories, b.sanitizedCategories...)),
+		sourceID:            firstNonEmpty(route.sourceID, other.sourceID),
+		sourceCategory:      firstNonEmpty(route.sourceCategory, other.sourceCategory),
+		sourcePURL:          firstNonEmpty(route.sourcePURL, other.sourcePURL),
+		sourcePatterns:      append(append([]model.DataFlowPattern{}, a.sourcePatterns...), b.sourcePatterns...),
+		confidence:          firstNonEmpty(a.confidence, b.confidence, "medium"),
+		generated:           a.generated || b.generated,
+	}
 	for k := range a.params {
 		out.params[k] = true
 	}
@@ -2316,6 +2572,23 @@ func enrichDataFlowSlices(df *model.DataFlowEvidence) {
 			}
 		}
 		s.SanitizerNodeIDs = uniqueStrings(sanitizerIDs)
+		// Rule metadata is part of the published slice schema, and a consumer
+		// filtering on severity or riskScore has to get the same answer from
+		// either engine. Legacy fills these in while compiling its pattern
+		// pack, so only entries whose model omits them arrive here empty;
+		// deriving from the sink category is the same rule legacy applies.
+		if s.RuleID == "" || s.RuleName == "" || s.Severity == "" || s.RiskScore == 0 {
+			ruleID, ruleName, severity, score := dataFlowRuleForCategory(s.SinkCategory)
+			s.RuleID = firstNonEmpty(s.RuleID, ruleID)
+			s.RuleName = firstNonEmpty(s.RuleName, ruleName)
+			s.Severity = firstNonEmpty(s.Severity, severity)
+			if s.RiskScore == 0 {
+				s.RiskScore = score
+			}
+		}
+		if s.Confidence == "" {
+			s.Confidence = "medium"
+		}
 		s.PathLength = len(s.EdgeIDs)
 		totalPathLength += s.PathLength
 		if s.PathLength > df.Stats.MaxPathLength {
@@ -2354,7 +2627,7 @@ func sourceCriticality(category string) string {
 	switch strings.ToLower(category) {
 	case "http-input", "http-endpoint", "cli", "environment", "crypto-material":
 		return "high"
-	case "http-request", "framework-context", "configuration":
+	case "framework-context", "configuration":
 		return "medium"
 	case "parameter":
 		return "low"
@@ -2477,4 +2750,136 @@ func sortDataFlowEvidence(df *model.DataFlowEvidence) {
 	sort.Slice(df.Edges, func(i, j int) bool { return df.Edges[i].ID < df.Edges[j].ID })
 	sort.Slice(df.Slices, func(i, j int) bool { return df.Slices[i].ID < df.Slices[j].ID })
 	sort.Slice(df.Summaries, func(i, j int) bool { return df.Summaries[i].FunctionID < df.Summaries[j].FunctionID })
+}
+
+// buildDataFlowSEAM runs the SEAM taint engine and adapts its output.
+func (a *Analyzer) buildDataFlowSEAM(pkgs []*packages.Package, ctx *ssaContext, progress *progressLogger, started time.Time) *model.DataFlowEvidence {
+	mode := a.options.DataFlowMode
+	if mode == "" || mode == "none" {
+		return &model.DataFlowEvidence{Engine: "seam", Mode: mode}
+	}
+
+	// Build the call graph for summary SCC ordering and reachability. SEAM uses
+	// its own implements-index for dispatch resolution, so the call graph only
+	// needs to be correct for direct calls — which the static call graph is.
+	// RTA can be sparse for library-only modules (no main → few roots), which
+	// would miss functions that are obviously reachable.
+	graph, _, cgDiags := a.buildRawCallGraph(ctx, seamCallGraphMode)
+	if requested := a.options.DataFlowCallGraphMode; requested != "" && requested != seamCallGraphMode {
+		cgDiags = append(cgDiags, model.Diagnostic{
+			Kind:    "dataflow",
+			Message: fmt.Sprintf("SEAM built its call graph with %q rather than the requested %q: it resolves dispatch through its own implements-index, and RTA is sparse on a module with no main package", seamCallGraphMode, requested),
+		})
+	}
+	dynamicCallees := callGraphCalleeIndex(graph)
+
+	// Module and package attribution for the whole loaded graph, not just the
+	// roots. Taint that reaches a dependency has to be attributable to that
+	// dependency: without the transitive walk every dependency package looks
+	// module-less, which reads downstream as "part of the module under
+	// analysis" and makes dependencyCrossingSliceCount zero by construction.
+	moduleByPath := make(map[string]*model.Module)
+	packageByPath := make(map[string]*packages.Package)
+	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+		if pkg == nil || pkg.PkgPath == "" {
+			return
+		}
+		packageByPath[pkg.PkgPath] = pkg
+		if mod := moduleForPackage(pkg); mod != nil {
+			moduleByPath[pkg.PkgPath] = mod
+		}
+	})
+
+	// The scope controls what gets materialised (reported), not what gets
+	// summarised. Summaries are always computed for the whole reachable
+	// program (including dependencies and stdlib) so taint can cross those
+	// boundaries. Materialisation is always local: a slice is reported for
+	// code in the module under analysis, not for stdlib internals. This is the
+	// two-tier policy from §4.2: summary scope = whole program, materialisation
+	// scope = local.
+	// --dataflow all widens materialisation to the dependency tree, which is
+	// what it has always meant in practice. It stops short of the standard
+	// library: a finding reported inside net/http names a function the reader
+	// did not write, and on this corpus that alone produced ten such findings
+	// per fixture.
+	scope := "local"
+	if mode == "all" {
+		scope = "dependencies"
+	}
+
+	// Create and run SEAM engine.
+	seamOpts := seam.Options{
+		Mode:      mode,
+		Scope:     scope,
+		MaxSlices: a.options.DataFlowMax,
+	}
+	if seamOpts.MaxSlices <= 0 {
+		seamOpts.MaxSlices = 1000
+	}
+	engine := seam.NewEngine(seamOpts)
+
+	// //go:linkname is invisible to SSA, so a call to a body-less declaration
+	// leads into nothing. The call graph already draws the alias edge; give
+	// the taint engine the same mapping so a flow can cross it too.
+	if a.native != nil {
+		aliases := map[*ssa.Function]*ssa.Function{}
+		for _, directive := range a.native.Linknames() {
+			local := a.native.ResolveTarget(directive.PackagePath + "." + directive.Local)
+			target := a.native.ResolveTarget(directive.Target)
+			if local != nil && target != nil && local != target {
+				aliases[local] = target
+			}
+		}
+		if len(aliases) > 0 {
+			engine.SetLinknameAliases(aliases)
+		}
+	}
+
+	progress.Memoryf("data-flow starting engine=seam mode=%s scope=%s functions=%d maxSlices=%d",
+		mode, scope, len(ctx.program.AllPackages()), seamOpts.MaxSlices)
+	out := engine.Analyze(ctx.program, pkgs, graph, dynamicCallees, moduleByPath, packageByPath, a.fset)
+
+	// SEAM's diagnostics are emitted with Kind="seam". A subset of them —
+	// the slice-limit message — is the same condition legacy reports as
+	// Kind="dataflow-budget", and downstream stats (Truncated,
+	// TruncationReasons) key off that Kind. Reclassify them so the budget
+	// signal is visible to consumers of either engine's report.
+	for i, diag := range out.Diagnostics {
+		if diag.Kind == "seam" && strings.Contains(diag.Message, "slice limit reached") {
+			out.Diagnostics[i].Kind = "dataflow-budget"
+		}
+	}
+
+	// Attach diagnostics.
+	for _, diag := range cgDiags {
+		out.Diagnostics = append(out.Diagnostics, model.Diagnostic{Kind: diag.Kind, Message: diag.Message})
+	}
+
+	// Enrich slices with source/sink info (like legacy does).
+	enrichDataFlowSlices(out)
+	sortDataFlowEvidence(out)
+
+	// Compute stats.
+	out.Stats.NodeCount = len(out.Nodes)
+	out.Stats.EdgeCount = len(out.Edges)
+	out.Stats.SliceCount = len(out.Slices)
+	out.Stats.SummaryCount = len(out.Summaries)
+	out.Stats.FunctionCount = engine.AllFuncs()
+	out.Stats.ElapsedMillis = int(time.Since(started).Milliseconds())
+	out.Stats.TruncationReasons = dataFlowTruncationReasons(out.Diagnostics)
+	out.Stats.Truncated = len(out.Stats.TruncationReasons) > 0
+
+	for _, n := range out.Nodes {
+		if n.Source {
+			out.Stats.SourceCount++
+		}
+		if n.Sink {
+			out.Stats.SinkCount++
+		}
+	}
+
+	progress.Memoryf("data-flow SEAM engine complete slices=%d nodes=%d edges=%d elapsed=%dms",
+		out.Stats.SliceCount, out.Stats.NodeCount, out.Stats.EdgeCount, out.Stats.ElapsedMillis)
+
+	return out
 }

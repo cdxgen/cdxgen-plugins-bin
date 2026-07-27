@@ -8,34 +8,40 @@ The canonical schema lives in `internal/model/model.go`.
 
 Golem always emits a report envelope and core source evidence. Call graph and data-flow sections are optional. Crypto evidence is always collected from parsed source and type information.
 
-| Invocation option          | Allowed values                                                                                              | JSON sections affected                    | What changes in output                                                                              |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `--callgraph`              | `none`, `static`, `cha`, `rta`, `vta`                                                                       | `callGraph`, `stats.callGraph*`           | When not `none`, `callGraph` contains graph nodes, edges, diagnostics, and stats.                   |
-| `--dataflow`               | `none`, `security`, `crypto`, `all`                                                                         | `dataFlow`, `stats.dataFlow*`             | When not `none`, `dataFlow` contains taint slices, nodes, edges, summaries, diagnostics, and stats. |
-| `--dataflow-callgraph`     | `none`, `static`, `cha`, `rta`, `vta`                                                                       | `dataFlow.diagnostics`, slice quality     | Controls dynamic summary replay for data-flow interprocedural propagation.                          |
-| `--dataflow-pattern-packs` | `all`, `base`, `http`, `frameworks`, `data`, `filesystem`, `process`, `crypto`, `native`, `config`, `cloud` | `dataFlow.patterns` and downstream slices | Changes which sources, sinks, passthroughs, and sanitizers can match.                               |
-| `--include-stdlib`         | boolean                                                                                                     | `callGraph`, `dataFlow`, core usages      | Includes standard library nodes/usages when enabled.                                                |
-| `--include-local`          | boolean                                                                                                     | `callGraph`, `dataFlow`, core usages      | Controls whether local module symbols are included.                                                 |
-| `--include-all-flows`      | boolean                                                                                                     | `callGraph`, `dataFlow`                   | When false, external-only module-cache flows are filtered out.                                      |
+| Invocation option          | Allowed values                                                                                              | JSON sections affected                    | What changes in output                                                                                                                                      |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--callgraph`              | `none`, `static`, `cha`, `rta`, `vta`                                                                       | `callGraph`, `stats.callGraph*`           | When not `none`, `callGraph` contains graph nodes, edges, diagnostics, and stats.                                                                           |
+| `--dataflow`               | `none`, `security`, `crypto`, `all`                                                                         | `dataFlow`, `stats.dataFlow*`             | When not `none`, `dataFlow` contains taint slices, nodes, edges, summaries, diagnostics, and stats.                                                         |
+| `--dataflow-callgraph`     | `none`, `static`, `cha`, `rta`, `vta`                                                                       | `dataFlow.diagnostics`, slice quality     | Controls dynamic summary replay for data-flow interprocedural propagation.                                                                                  |
+| `--taint-engine`           | `seam` (default), `legacy`                                                                                  | `dataFlow.engine`                         | Selects the taint engine. `seam` is the default structured-model SCC-fixpoint engine; `legacy` is the older engine, kept as an escape hatch.                |
+| `--dataflow-pattern-packs` | `all`, `base`, `http`, `frameworks`, `data`, `filesystem`, `process`, `crypto`, `native`, `config`, `cloud` | `dataFlow.patterns` and downstream slices | Changes which sources, sinks, passthroughs, and sanitizers can match.                                                                                       |
+| `--include-stdlib`         | boolean                                                                                                     | `callGraph`, `dataFlow`, core usages      | Includes standard library nodes/usages when enabled.                                                                                                        |
+| `--include-local`          | boolean                                                                                                     | `callGraph`, `dataFlow`, core usages      | Controls whether local module symbols are included.                                                                                                         |
+| `--include-all-flows`      | boolean                                                                                                     | `callGraph`, `dataFlow`                   | Alias for `--dependency-detail=full`.                                                                                                                       |
+| `--dependency-detail`      | `drop`, `collapse`, `full`                                                                                  | `callGraph`, `dataFlow`                   | How much dependency interior to show. `collapse` (default) replaces interior chains with one annotated edge; the boundary into a dependency is always kept. |
+| `--roots`                  | `main`, `init`, `exported`, `tests`, `handlers`, `all`, `symbol:<regex>`                                    | `callGraph.roots`, `callGraph`            | Entry points for reachability. Defaults to `main`/`init` plus framework registrations.                                                                      |
+| `--reachable-symbols`      | file path                                                                                                   | `callGraph.reachability.paths`            | Emit shortest witness paths for the listed symbols.                                                                                                         |
 
 ## Report envelope
 
 The top-level `Report` carries metadata plus optional analysis sections.
 
-| JSON path                                                | Type             | Purpose                                         | Typical use case                                 |
-| -------------------------------------------------------- | ---------------- | ----------------------------------------------- | ------------------------------------------------ |
-| `schemaVersion`                                          | string           | Versioned schema URL for compatibility checks.  | Contract gating in ingestion pipelines.          |
-| `tool.name`                                              | string           | Producer tool name.                             | Multi-tool provenance in merged evidence.        |
-| `tool.version`                                           | string           | Producer version string.                        | Drift analysis and reproducibility.              |
-| `runtime.*`                                              | object           | Host/runtime context used during analysis.      | Explain platform-specific evidence differences.  |
-| `options.*`                                              | object           | Effective analysis options persisted in report. | Auditing and replay of analysis behavior.        |
-| `packages`, `files`, `imports`, `declarations`, `usages` | arrays           | Core source and symbol evidence.                | Occurrence evidence and code ownership mapping.  |
-| `securitySignals`                                        | array            | Security API pattern observations.              | Lightweight risk surfacing before taint review.  |
-| `crypto`                                                 | object, optional | Crypto-focused evidence extracted from source.  | CBOM-like enrichment and crypto policy checks.   |
-| `callGraph`                                              | object, optional | Call graph section when enabled.                | Reachability and blast radius analysis.          |
-| `dataFlow`                                               | object, optional | Data-flow section when enabled.                 | Source-to-sink triage and exploitability review. |
-| `diagnostics`                                            | array            | Global diagnostic messages.                     | Handling partial analysis gracefully.            |
-| `stats`                                                  | object           | Aggregate counters across evidence sections.    | Dashboards, trend baselining, quality checks.    |
+| JSON path                                                | Type                       | Purpose                                         | Typical use case                                 |
+| -------------------------------------------------------- | -------------------------- | ----------------------------------------------- | ------------------------------------------------ |
+| `schemaVersion`                                          | string                     | Versioned schema URL for compatibility checks.  | Contract gating in ingestion pipelines.          |
+| `tool.name`                                              | string                     | Producer tool name.                             | Multi-tool provenance in merged evidence.        |
+| `tool.version`                                           | string                     | Producer version string.                        | Drift analysis and reproducibility.              |
+| `runtime.*`                                              | object                     | Host/runtime context used during analysis.      | Explain platform-specific evidence differences.  |
+| `options.*`                                              | object                     | Effective analysis options persisted in report. | Auditing and replay of analysis behavior.        |
+| `packages`, `files`, `imports`, `declarations`, `usages` | arrays                     | Core source and symbol evidence.                | Occurrence evidence and code ownership mapping.  |
+| `securitySignals`                                        | array                      | Security API pattern observations.              | Lightweight risk surfacing before taint review.  |
+| `crypto`                                                 | object, optional           | Crypto-focused evidence extracted from source.  | CBOM-like enrichment and crypto policy checks.   |
+| `callGraph`                                              | object, optional           | Call graph section when enabled.                | Reachability and blast radius analysis.          |
+| `dataFlow`                                               | object, optional           | Data-flow section when enabled.                 | Source-to-sink triage and exploitability review. |
+| `diagnostics`                                            | array                      | Global diagnostic messages.                     | Handling partial analysis gracefully.            |
+| `nativeBoundary[]`                                       | array of `NativeCall`      | cgo Go↔C boundary records.                      | Hybrid-project boundary auditing.                |
+| `buildShapeDeltas[]`                                     | array of `BuildShapeDelta` | Files excluded by build constraints.            | Diagnose CGO_ENABLED skew.                       |
+| `stats`                                                  | object                     | Aggregate counters across evidence sections.    | Dashboards, trend baselining, quality checks.    |
 
 ## `options` object details
 
@@ -68,47 +74,84 @@ The `callGraph` section exists only when `--callgraph` is not `none`.
 | `callGraph.algorithm`       | string                   | Effective algorithm used internally. | Debug mode coercions or fallback behavior.    |
 | `callGraph.nodes[]`         | array of `CallGraphNode` | Function-level graph vertices.       | API fan-in and fan-out exploration.           |
 | `callGraph.edges[]`         | array of `CallGraphEdge` | Caller to callee relations.          | Reachability and impact tracing.              |
+| `callGraph.roots[]`         | array of `CallGraphRoot` | Resolved analysis entry points.      | Explain why a symbol is or is not reachable.  |
+| `callGraph.reachability`    | object, optional         | Per-node reachability and witnesses. | Reachability triage without re-walking edges. |
 | `callGraph.diagnostics[]`   | array                    | Call graph construction issues.      | Explain graph sparsity or unsupported shapes. |
 | `callGraph.stats.nodeCount` | integer                  | Number of graph nodes emitted.       | Sanity checks and trend monitoring.           |
 | `callGraph.stats.edgeCount` | integer                  | Number of graph edges emitted.       | Graph density checks over time.               |
 
 ### `callGraph.nodes[]` fields
 
-| Field         | Type    | Purpose                                          | Typical use case                            |
-| ------------- | ------- | ------------------------------------------------ | ------------------------------------------- |
-| `id`          | string  | Stable node id, generally SSA function identity. | Join key for edge processing.               |
-| `name`        | string  | Function short name.                             | Human-readable graph labels.                |
-| `label`       | string  | Expanded function label.                         | Disambiguate overload-like patterns.        |
-| `kind`        | string  | Node kind, usually `function`.                   | Future compatibility checks.                |
-| `packagePath` | string  | Go package path.                                 | Package-level aggregation and ownership.    |
-| `packageName` | string  | Package short name.                              | UI grouping convenience.                    |
-| `module`      | object  | Module metadata for this node.                   | Internal versus external module decisions.  |
-| `purl`        | string  | Package URL for dependency mapping.              | Component evidence linking in SBOM.         |
-| `standard`    | boolean | Standard library classification.                 | Filter stdlib-heavy fan-outs.               |
-| `local`       | boolean | Local module classification.                     | Focus on first-party execution paths.       |
-| `external`    | boolean | External dependency classification.              | Third-party reachability insights.          |
-| `synthetic`   | boolean | Synthetic SSA function indicator.                | Exclude compiler-generated nodes in UX.     |
-| `signature`   | string  | Function signature text.                         | Method shape and call-compatibility review. |
-| `receiver`    | string  | Receiver type for methods.                       | OO-like method dispatch analysis.           |
-| `position.*`  | object  | Source location for function definition.         | Jump-to-code from graph nodes.              |
+| Field           | Type    | Purpose                                          | Typical use case                            |
+| --------------- | ------- | ------------------------------------------------ | ------------------------------------------- |
+| `id`            | string  | Stable node id, generally SSA function identity. | Join key for edge processing.               |
+| `name`          | string  | Function short name.                             | Human-readable graph labels.                |
+| `label`         | string  | Expanded function label.                         | Disambiguate overload-like patterns.        |
+| `kind`          | string  | Node kind, usually `function`.                   | Future compatibility checks.                |
+| `packagePath`   | string  | Go package path.                                 | Package-level aggregation and ownership.    |
+| `packageName`   | string  | Package short name.                              | UI grouping convenience.                    |
+| `module`        | object  | Module metadata for this node.                   | Internal versus external module decisions.  |
+| `purl`          | string  | Package URL for dependency mapping.              | Component evidence linking in SBOM.         |
+| `standard`      | boolean | Standard library classification.                 | Filter stdlib-heavy fan-outs.               |
+| `local`         | boolean | Local module classification.                     | Focus on first-party execution paths.       |
+| `external`      | boolean | External dependency classification.              | Third-party reachability insights.          |
+| `synthetic`     | boolean | Synthetic SSA function indicator.                | Exclude compiler-generated nodes in UX.     |
+| `syntheticKind` | string  | Kind of synthetic function, from SSA.            | Distinguish thunks from generic wrappers.   |
+| `visibility`    | string  | `local`, `dependency`, `stdlib`, or `synthetic`. | Scope filtering without re-deriving origin. |
+| `signature`     | string  | Function signature text.                         | Method shape and call-compatibility review. |
+| `receiver`      | string  | Receiver type for methods.                       | OO-like method dispatch analysis.           |
+| `position.*`    | object  | Source location for function definition.         | Jump-to-code from graph nodes.              |
 
 ### `callGraph.edges[]` fields
 
-| Field         | Type         | Purpose                      | Typical use case                         |
-| ------------- | ------------ | ---------------------------- | ---------------------------------------- |
-| `id`          | string       | Stable edge id.              | De-duplication and graph diffs.          |
-| `sourceId`    | string       | Caller node id.              | Upstream traversal.                      |
-| `targetId`    | string       | Callee node id.              | Downstream traversal.                    |
-| `sourceName`  | string       | Caller function text.        | Fast context in logs/UI.                 |
-| `targetName`  | string       | Callee function text.        | Fast context in logs/UI.                 |
-| `sourcePurl`  | string       | Caller package URL.          | Component-level stack evidence.          |
-| `sinkPurl`    | string       | Callee package URL.          | Component-level stack evidence.          |
-| `purls[]`     | string array | Combined purls seen on edge. | Dependency evidence enrichment.          |
-| `callType`    | string       | `static` or `dynamic`.       | Confidence scoring and triage order.     |
-| `static`      | boolean      | Static callsite marker.      | Precision-oriented filtering.            |
-| `position.*`  | object       | Source location of callsite. | File and line call stack rendering.      |
-| `description` | string       | Optional edge description.   | Custom narratives in future exporters.   |
-| `properties`  | object       | Optional edge metadata map.  | Extended analytics without schema churn. |
+| Field           | Type         | Purpose                                          | Typical use case                                  |
+| --------------- | ------------ | ------------------------------------------------ | ------------------------------------------------- |
+| `id`            | string       | Stable edge id.                                  | De-duplication and graph diffs.                   |
+| `sourceId`      | string       | Caller node id.                                  | Upstream traversal.                               |
+| `targetId`      | string       | Callee node id.                                  | Downstream traversal.                             |
+| `sourceName`    | string       | Caller function text.                            | Fast context in logs/UI.                          |
+| `targetName`    | string       | Callee function text.                            | Fast context in logs/UI.                          |
+| `sourcePurl`    | string       | Caller package URL.                              | Component-level stack evidence.                   |
+| `sinkPurl`      | string       | Callee package URL.                              | Component-level stack evidence.                   |
+| `purls[]`       | string array | Combined purls seen on edge.                     | Dependency evidence enrichment.                   |
+| `callType`      | string       | Dispatch kind, see below.                        | Confidence scoring and triage order.              |
+| `static`        | boolean      | Static callsite marker.                          | Precision-oriented filtering.                     |
+| `collapsed`     | boolean      | Edge stands in for a path through omitted nodes. | Distinguish a direct call from a summarised path. |
+| `collapsedHops` | integer      | Hops folded into a collapsed edge.               | Judge how indirect a collapsed path is.           |
+| `via[]`         | string array | Packages traversed by a collapsed edge.          | Show what a collapsed path went through.          |
+| `position.*`    | object       | Source location of callsite.                     | File and line call stack rendering.               |
+| `description`   | string       | Optional edge description.                       | Custom narratives in future exporters.            |
+| `properties`    | object       | Optional edge metadata map.                      | Extended analytics without schema churn.          |
+
+`callType` is one of `static`, `interface`, `func-value`, `bound method wrapper`,
+`generic wrapper`, `defer`, `go`, `reflect`, `cgo`, or `synthetic-root`. The
+`static` boolean remains true only for statically resolved calls, so existing
+consumers keep their previous meaning.
+
+### `callGraph.roots[]` fields
+
+| Field        | Type   | Purpose                             | Typical use case                                                                                          |
+| ------------ | ------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `id`         | string | Root node id.                       | Join to `callGraph.nodes[]`.                                                                              |
+| `function`   | string | Root function text.                 | Human-readable entry point list.                                                                          |
+| `rootReason` | string | Why the function was chosen a root. | Distinguish `main` from `exported`, and either from `escaped-func-value`, which is an over-approximation. |
+
+### `callGraph.reachability` fields
+
+| JSON path                                 | Type         | Purpose                                | Typical use case                            |
+| ----------------------------------------- | ------------ | -------------------------------------- | ------------------------------------------- |
+| `reachability.nodes[].nodeId`             | string       | Node the entry describes.              | Join to `callGraph.nodes[]`.                |
+| `reachability.nodes[].reachableFromRoots` | boolean      | Whether any root reaches the node.     | Drop findings in unreachable code.          |
+| `reachability.nodes[].minDepth`           | integer      | Shortest distance from a root.         | Rank findings by how directly they are hit. |
+| `reachability.nodes[].rootIds[]`          | string array | Roots that reach the node.             | Explain reachability per entry point.       |
+| `reachability.paths[].symbol`             | string       | Symbol the witness path targets.       | Requested via `--reachable-symbols`.        |
+| `reachability.paths[].nodeIds[]`          | string array | Nodes along the shortest witness path. | Render a call stack for a reachable symbol. |
+| `reachability.paths[].edgeIds[]`          | string array | Edges along the witness path.          | Attribute each hop to a call site.          |
+| `reachability.paths[].depth`              | integer      | Length of the witness path.            | Sort witnesses shortest-first.              |
+
+Reachability is computed on the complete graph, before any view filtering, so a
+node omitted from `callGraph.nodes[]` never leaves a dangling reference behind:
+entries and witness paths referring to omitted nodes are removed with it.
 
 ## Data-flow JSON reference
 
@@ -116,16 +159,17 @@ The `dataFlow` section exists only when `--dataflow` is not `none`.
 
 ### `dataFlow` section
 
-| JSON path                | Type                     | Purpose                                    | Typical use case                            |
-| ------------------------ | ------------------------ | ------------------------------------------ | ------------------------------------------- |
-| `dataFlow.mode`          | string                   | Effective data-flow mode.                  | Confirm security versus all-mode operation. |
-| `dataFlow.nodes[]`       | array of `DataFlowNode`  | Taint graph nodes.                         | Interactive path inspection.                |
-| `dataFlow.edges[]`       | array of `DataFlowEdge`  | Taint transitions between nodes.           | Explain propagation hops.                   |
-| `dataFlow.slices[]`      | array of `DataFlowSlice` | Source-to-sink traces selected for output. | Triage and evidence export.                 |
-| `dataFlow.patterns`      | `DataFlowPatternSet`     | Active source/sink/sanitizer patterns.     | Explain why a flow was or was not matched.  |
-| `dataFlow.summaries[]`   | `DataFlowMethodSummary`  | Interprocedural summary models.            | Debug summary replay quality.               |
-| `dataFlow.diagnostics[]` | array                    | Data-flow analysis diagnostics.            | Understand truncation and skipped coverage. |
-| `dataFlow.stats.*`       | object                   | Counts, performance, and quality metrics.  | Capacity planning and confidence scoring.   |
+| JSON path                | Type                     | Purpose                                                                                                                                                                                                                        | Typical use case                                                        |
+| ------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `dataFlow.engine`        | string                   | Producing taint engine: `seam` (default) or `legacy`. Tells a consumer which engine produced a report, so the `known-fail` ratchet, the model set in force, and the precision/recall expectations can be attributed correctly. | Differential triage; consumer-side gating on engine-specific behaviour. |
+| `dataFlow.mode`          | string                   | Effective data-flow mode.                                                                                                                                                                                                      | Confirm security versus all-mode operation.                             |
+| `dataFlow.nodes[]`       | array of `DataFlowNode`  | Taint graph nodes.                                                                                                                                                                                                             | Interactive path inspection.                                            |
+| `dataFlow.edges[]`       | array of `DataFlowEdge`  | Taint transitions between nodes.                                                                                                                                                                                               | Explain propagation hops.                                               |
+| `dataFlow.slices[]`      | array of `DataFlowSlice` | Source-to-sink traces selected for output.                                                                                                                                                                                     | Triage and evidence export.                                             |
+| `dataFlow.patterns`      | `DataFlowPatternSet`     | Active source/sink/sanitizer patterns.                                                                                                                                                                                         | Explain why a flow was or was not matched.                              |
+| `dataFlow.summaries[]`   | `DataFlowMethodSummary`  | Interprocedural summary models.                                                                                                                                                                                                | Debug summary replay quality.                                           |
+| `dataFlow.diagnostics[]` | array                    | Data-flow analysis diagnostics.                                                                                                                                                                                                | Understand truncation and skipped coverage.                             |
+| `dataFlow.stats.*`       | object                   | Counts, performance, and quality metrics.                                                                                                                                                                                      | Capacity planning and confidence scoring.                               |
 
 ### `dataFlow.patterns` fields
 
@@ -211,6 +255,8 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 | `sinkArgument`, `sinkArgumentIndex`    | string, integer          | Sink argument context.                         | Precision remediation at callsite.      |
 | `taintKinds[]`                         | string array             | Taint labels observed in path.                 | Data-class and policy checks.           |
 | `fieldPaths[]`                         | string array             | Aggregate field-level path context.            | Object-graph taint debugging.           |
+| `crossesDependency`                    | boolean                  | Taint left the module under analysis.          | Dependency risk and blast radius.       |
+| `dependencyHops`                       | integer                  | Dependency boundaries the flow crossed.        | Ranking flows by distance from the app. |
 | `ruleId`, `ruleName`                   | strings                  | Rule metadata from sink classification.        | Stable issue keys in ticketing systems. |
 | `severity`, `riskScore`                | string, integer          | Priority metadata.                             | Sorting and threshold gating.           |
 | `sourceScope`, `sinkScope`             | strings                  | Runtime/test/example scope context.            | Ignore test-only findings in CI.        |
@@ -361,6 +407,66 @@ Sort slices by `severity`, `riskScore`, `confidence`, then `pathLength`. For cry
 ### 4. Detect incomplete runs
 
 Check `dataFlow.stats.truncated`, `dataFlow.stats.truncationReasons`, and section diagnostics. If truncated, rerun with larger slice budget or narrower patterns.
+
+## Native boundary reference
+
+The `nativeBoundary[]` section records crossing points between Go and C, in both
+directions: `_Cfunc_*` wrappers for calls into C, and `//export`ed Go functions
+for calls out of it. Records are derived from source and SSA; no C compiler is
+invoked.
+
+`direction` is the direction data moves, not the direction of the call. That
+matters for the conversion functions cgo generates for itself: `C.GoString` is
+`c->go` even though Go calls it. Those functions carry `properties.cgoHelper`
+and have no `cSymbol`, because there is no C declaration to point at - reporting
+one named `GoString` would send a reader looking for something that does not
+exist.
+
+### `NativeCall` fields
+
+| Field             | Type                          | Purpose                                                                                                              |
+| ----------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `id`              | string                        | Stable record identifier.                                                                                            |
+| `goSymbol`        | string                        | Go-side cgo wrapper symbol (`_Cfunc_*`).                                                                             |
+| `cSymbol`         | string                        | Resolved C function name. Absent for cgo-generated conversions.                                                      |
+| `direction`       | string                        | `go->c` or `c->go`.                                                                                                  |
+| `headerFile`      | string                        | The preamble's `#include`, when the package has exactly one. Ambiguous preambles are left blank rather than guessed. |
+| `libraries[]`     | string array                  | Linked libraries from `#cgo LDFLAGS`.                                                                                |
+| `argumentRoles[]` | array of `NativeArgumentRole` | Per-argument role classification.                                                                                    |
+| `position.*`      | object                        | Source location from SSA function.                                                                                   |
+| `confidence`      | string                        | Evidence confidence.                                                                                                 |
+| `evidence[]`      | string array                  | Raw `#cgo` directive text supporting the entry.                                                                      |
+| `packagePath`     | string                        | Go package owning the cgo function.                                                                                  |
+| `goFunctionId`    | string                        | SSA function identity.                                                                                               |
+| `goFunctionName`  | string                        | Human-readable function qualified name.                                                                              |
+| `properties`      | object                        | `cgoHelper` and `role` for cgo's own conversions.                                                                    |
+
+### `NativeArgumentRole` fields
+
+| Field      | Type    | Purpose                                          |
+| ---------- | ------- | ------------------------------------------------ |
+| `index`    | integer | Zero-based argument index.                       |
+| `role`     | string  | Semantic role (e.g. pointer, c-string, integer). |
+| `type`     | string  | Go type string of the argument.                  |
+| `variadic` | boolean | True when this is a variadic argument.           |
+
+## Build shape delta reference
+
+The `buildShapeDeltas[]` section lists Go files present in the tree that took no
+part in the analysis. A single `packages.Load` picks one build configuration, so
+on a hybrid repository whole files - the `CGO_ENABLED=0` fallbacks, the other
+platform's syscalls - are invisible; this section is what says so.
+
+Note that a cgo package's `CompiledGoFiles` are generated files in the build
+cache rather than its sources, so the check is made against `GoFiles` too.
+
+### `BuildShapeDelta` fields
+
+| Field        | Type   | Purpose                                                                                                                        |
+| ------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `path`       | string | File system path to the excluded file.                                                                                         |
+| `reason`     | string | `excluded-by-build-constraint`, `test-only`, or `not-in-any-loaded-package`.                                                   |
+| `constraint` | string | The file's parsed `//go:build` expression, or the constraint implied by its name (`GOOS=windows`). Empty when neither applies. |
 
 ## Notes on compatibility
 

@@ -1,0 +1,796 @@
+[
+ {
+  "id": "chi-urlparam.source",
+  "kind": "source",
+  "module": "github.com/go-chi/chi",
+  "package": "github.com/go-chi/chi/v5",
+  "function": "URLParam",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "chi-urlparamfromctx.source",
+  "kind": "source",
+  "module": "github.com/go-chi/chi",
+  "package": "github.com/go-chi/chi/v5",
+  "function": "URLParamFromCtx",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-bind.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "Bind",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-cookie.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "Cookie",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-formvalue.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "FormValue",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-json.sink",
+  "kind": "sink",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "JSON",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-param.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "Param",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-queryparam.source",
+  "kind": "source",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "QueryParam",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "echo-context-string.sink",
+  "kind": "sink",
+  "module": "github.com/labstack/echo",
+  "package": "github.com/labstack/echo/v4",
+  "receiver": "Context",
+  "function": "String",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-body.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Body",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-bodyparser.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "BodyParser",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-cookies.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Cookies",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-formvalue.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "FormValue",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-get.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Get",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-json.sink",
+  "kind": "sink",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "JSON",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-params.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Params",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-query.source",
+  "kind": "source",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Query",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "fiber-ctx-send.sink",
+  "kind": "sink",
+  "module": "github.com/gofiber/fiber",
+  "package": "github.com/gofiber/fiber/v2",
+  "receiver": "*Ctx",
+  "function": "Send",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-bind.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "Bind",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-bindjson.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "BindJSON",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-cookie.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "Cookie",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-getheader.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "GetHeader",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-html.sink",
+  "kind": "sink",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "HTML",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-json.sink",
+  "kind": "sink",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "JSON",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-param.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "Param",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-postform.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "PostForm",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-query.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "Query",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-shouldbind.source",
+  "kind": "source",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "ShouldBind",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gin-context-string.sink",
+  "kind": "sink",
+  "module": "github.com/gin-gonic/gin",
+  "package": "github.com/gin-gonic/gin",
+  "receiver": "*Context",
+  "function": "String",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "body"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "gorilla-mux-vars.source",
+  "kind": "source",
+  "module": "github.com/gorilla/mux",
+  "package": "github.com/gorilla/mux",
+  "function": "Vars",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gorm-db-exec.sink",
+  "kind": "sink",
+  "module": "gorm.io/gorm",
+  "package": "gorm.io/gorm",
+  "receiver": "*DB",
+  "function": "Exec",
+  "category": "data",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "query"
+   }
+  ],
+  "cwe": [
+   "CWE-89"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "gorm-db-raw.sink",
+  "kind": "sink",
+  "module": "gorm.io/gorm",
+  "package": "gorm.io/gorm",
+  "receiver": "*DB",
+  "function": "Raw",
+  "category": "data",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "query"
+   }
+  ],
+  "cwe": [
+   "CWE-89"
+  ],
+  "severity": "high",
+  "confidence": "high"
+ },
+ {
+  "id": "grpc-metadata.source",
+  "kind": "source",
+  "module": "google.golang.org/grpc",
+  "package": "google.golang.org/grpc/metadata",
+  "function": "FromIncomingContext",
+  "category": "http-input",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "pflag-flagset-getbool.source",
+  "kind": "source",
+  "module": "github.com/spf13/pflag",
+  "package": "github.com/spf13/pflag",
+  "receiver": "*FlagSet",
+  "function": "GetBool",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "pflag-flagset-getint.source",
+  "kind": "source",
+  "module": "github.com/spf13/pflag",
+  "package": "github.com/spf13/pflag",
+  "receiver": "*FlagSet",
+  "function": "GetInt",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "pflag-flagset-getstring.source",
+  "kind": "source",
+  "module": "github.com/spf13/pflag",
+  "package": "github.com/spf13/pflag",
+  "receiver": "*FlagSet",
+  "function": "GetString",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "pflag-flagset-getstringslice.source",
+  "kind": "source",
+  "module": "github.com/spf13/pflag",
+  "package": "github.com/spf13/pflag",
+  "receiver": "*FlagSet",
+  "function": "GetStringSlice",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "unarr-archive-extract.sink",
+  "kind": "sink",
+  "module": "github.com/gen2brain/go-unarr",
+  "package": "github.com/gen2brain/go-unarr",
+  "receiver": "*Archive",
+  "function": "Extract",
+  "category": "zip-slip",
+  "taintKinds": [
+   "user-input",
+   "path"
+  ],
+  "receiverRelevant": true,
+  "cwe": [
+   "CWE-22"
+  ],
+  "severity": "high",
+  "confidence": "medium",
+  "description": "Extracts an untrusted archive to disk; entry paths are attacker-chosen"
+ },
+ {
+  "id": "unarr-archive-extractto.sink",
+  "kind": "sink",
+  "module": "github.com/gen2brain/go-unarr",
+  "package": "github.com/gen2brain/go-unarr",
+  "receiver": "*Archive",
+  "function": "ExtractTo",
+  "category": "zip-slip",
+  "taintKinds": [
+   "user-input",
+   "path"
+  ],
+  "receiverRelevant": true,
+  "cwe": [
+   "CWE-22"
+  ],
+  "severity": "high",
+  "confidence": "medium",
+  "description": "Extracts an untrusted archive to disk; entry paths are attacker-chosen"
+ },
+ {
+  "id": "unarr-newarchive.passthrough",
+  "kind": "passthrough",
+  "module": "github.com/gen2brain/go-unarr",
+  "package": "github.com/gen2brain/go-unarr",
+  "function": "NewArchive",
+  "category": "conversion"
+ },
+ {
+  "id": "unarr-newarchivefrommemory.passthrough",
+  "kind": "passthrough",
+  "module": "github.com/gen2brain/go-unarr",
+  "package": "github.com/gen2brain/go-unarr",
+  "function": "NewArchiveFromMemory",
+  "category": "conversion"
+ },
+ {
+  "id": "unarr-newarchivefromreader.passthrough",
+  "kind": "passthrough",
+  "module": "github.com/gen2brain/go-unarr",
+  "package": "github.com/gen2brain/go-unarr",
+  "function": "NewArchiveFromReader",
+  "category": "conversion"
+ },
+ {
+  "id": "viper-get.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "Get",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getbool.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetBool",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getduration.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetDuration",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getfloat64.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetFloat64",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getint.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetInt",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getint32.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetInt32",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getint64.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetInt64",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getstring.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetString",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getstringmap.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetStringMap",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getstringmapstring.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetStringMapString",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-getstringslice.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetStringSlice",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ },
+ {
+  "id": "viper-gettime.source",
+  "kind": "source",
+  "module": "github.com/spf13/viper",
+  "package": "github.com/spf13/viper",
+  "function": "GetTime",
+  "category": "configuration",
+  "taintKinds": [
+   "user-input"
+  ],
+  "severity": "medium",
+  "confidence": "high"
+ }
+]

@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/packages"
+	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/native"
 )
 
 func Analyze(options Options) (*model.Report, error) {
@@ -153,6 +155,15 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.CallGraphMode != "none" || options.DataFlowMode != "none" {
 		ssaCtx = a.buildSSA(pkgs, progress)
 	}
+	// Native boundary records and build-shape diagnostics. Both are derived
+	// from source and from what the loader reported; no compiler is invoked.
+	var program *ssa.Program
+	if ssaCtx != nil {
+		program = ssaCtx.program
+	}
+	a.native = native.NewAnalyzer(a.fset, pkgs, program, a.packageByPath)
+	report.NativeBoundary = a.native.RecognizeBoundary()
+	report.BuildShapeDeltas = native.BuildShapeCheck(absDir, pkgs)
 	if options.CallGraphMode != "none" {
 		progress.Memoryf("building call graph mode=%s", options.CallGraphMode)
 		report.CallGraph = a.buildCallGraph(ssaCtx)
@@ -161,7 +172,7 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.DataFlowMode != "none" {
 		report.DataFlow = a.buildDataFlow(pkgs, ssaCtx, progress)
 	}
-	filterExternalOnlyModuleCacheFlows(report, options.IncludeAllFlows)
+	applyReportView(report, options)
 	a.populateStats(report)
 	sortReport(report)
 	progress.Memoryf("analysis complete")
@@ -216,6 +227,8 @@ func (a *Analyzer) populateStats(report *model.Report) {
 	}
 	report.Stats.BuildDirectiveCount = len(report.BuildDirectives)
 	report.Stats.NativeArtifactCount = len(report.NativeArtifacts)
+	report.Stats.NativeBoundaryCount = len(report.NativeBoundary)
+	report.Stats.BuildShapeDeltaCount = len(report.BuildShapeDeltas)
 	report.Stats.APIEndpointCount = len(report.APIEndpoints)
 	report.Stats.ExternalURLCount = len(report.ExternalURLs)
 	report.Stats.ServiceCount = len(report.Services)

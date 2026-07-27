@@ -1,0 +1,235 @@
+{
+  "fixture": "shiftleft-go-demo",
+  "commit": "da1198ad49be7940af11f0af9763dfa061a80f4d",
+  "config": "security",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v5",
+  "counts": {
+    "apiEndpoints": 22,
+    "buildDirectives": 0,
+    "declarations": 124,
+    "files": 21,
+    "imports": 124,
+    "modules": 9,
+    "nativeArtifacts": 0,
+    "packages": 15,
+    "securitySignals": 24,
+    "usages": 278
+  },
+  "callGraph": {
+    "algorithm": "rta",
+    "nodeCount": 34,
+    "edgeCount": 99,
+    "nodesByKind": {
+      "function": 34
+    },
+    "edgesByCallType": {
+      "func-value": 4,
+      "interface": 43,
+      "static": 52
+    },
+    "nodeSetHash": "50542be3a57877ef",
+    "edgeSetHash": "90a8d564ea6a1ab6",
+    "syntheticNodes": 20,
+    "stdlibNodes": 0,
+    "externalNodes": 14
+  },
+  "dataFlow": {
+    "mode": "security",
+    "nodeCount": 190,
+    "edgeCount": 60,
+    "sliceCount": 16,
+    "uniqueFlowCount": 11,
+    "summaryCount": 20,
+    "flowsByCategoryPair": {
+      "http-input-\u003edata": 2,
+      "http-input-\u003elogging": 10,
+      "http-input-\u003eredirect": 4
+    },
+    "flowsBySeverity": {
+      "high": 2,
+      "medium": 14
+    },
+    "flowKeySetHash": "7f64d23e2e8cab68",
+    "edgeConnectivity": 1,
+    "integrityViolations": 0,
+    "dependencyCrossingSlices": 0,
+    "sampleFlows": [
+      {
+        "flowKey": "df-flow|sha256:09c5851338fd9ffd4eb3aaa64293ac9e1f35cac688afde45611c353e70b01308",
+        "source": "(*github.com/gorilla/sessions.CookieStore).Get",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:82",
+        "sinkAt": "user/session/session.go:84",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:4061dca607e5fe66d8938eeba4aa0420135e6b79a34172421159d77658eb839c",
+        "source": "(*github.com/gorilla/sessions.CookieStore).Get",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:61",
+        "sinkAt": "user/session/session.go:63",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:4061dca607e5fe66d8938eeba4aa0420135e6b79a34172421159d77658eb839c",
+        "source": "(*github.com/gorilla/sessions.Session).Save",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:72",
+        "sinkAt": "user/session/session.go:75",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:4c5423176dc9d1b0708cd86d3d105b7ddb7ad0065b9d9fa604f8b0fc806bf47e",
+        "source": "(*net/http.Request).FormValue",
+        "sink": "(*github.com/ShiftLeftSecurity/shiftleft-go-demo/vulnerability/sqli.Profile).UnsafeQueryGetData",
+        "sourceAt": "vulnerability/sqli/sqli.go:66",
+        "sinkAt": "vulnerability/sqli/sqli.go:73",
+        "severity": "high",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "data,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:55e00ee293d75e6bf7be7a972b9b9e0aeb360cca31380ed0300d4be8693e34c3",
+        "source": "parameter r : *net/http.Request",
+        "sink": "log.Printf",
+        "sourceAt": "util/middleware/middleware.go:23",
+        "sinkAt": "util/middleware/middleware.go:26",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:55e00ee293d75e6bf7be7a972b9b9e0aeb360cca31380ed0300d4be8693e34c3",
+        "source": "parameter r : *net/http.Request",
+        "sink": "log.Printf",
+        "sourceAt": "util/middleware/middleware.go:23",
+        "sinkAt": "util/middleware/middleware.go:28",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:6f1d9986ba5e3e82db87a4c2941e9a4f9c5f85174828a4b44b3ca89e0951eaf3",
+        "source": "(*github.com/gorilla/sessions.CookieStore).Get",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:21",
+        "sinkAt": "user/session/session.go:24",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:6f1d9986ba5e3e82db87a4c2941e9a4f9c5f85174828a4b44b3ca89e0951eaf3",
+        "source": "(*github.com/gorilla/sessions.Session).Save",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:41",
+        "sinkAt": "user/session/session.go:44",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:8571377dca29a4796fdbb79753e4234dbe017cd3f495eac3cb2d69bbdcd5d0c8",
+        "source": "github.com/ShiftLeftSecurity/shiftleft-go-demo/util.GetCookie",
+        "sink": "(*github.com/ShiftLeftSecurity/shiftleft-go-demo/vulnerability/sqli.Profile).UnsafeQueryGetData",
+        "sourceAt": "vulnerability/sqli/sqli.go:29",
+        "sinkAt": "vulnerability/sqli/sqli.go:45",
+        "severity": "high",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "data,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:c71a4b6e04d14aaa25db4f690544e2379f2d9a995cb65c391c1de601966ced1b",
+        "source": "(*net/http.Request).FormValue",
+        "sink": "log.Printf",
+        "sourceAt": "vulnerability/idor/idor.go:124",
+        "sinkAt": "vulnerability/idor/idor.go:138",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:e3fcdaaee9f222aeab8e30991c6024991f7a8c34c37fd8f9d0e96b0b3256ecde",
+        "source": "(*github.com/gorilla/sessions.CookieStore).Get",
+        "sink": "log.Println",
+        "sourceAt": "user/session/session.go:49",
+        "sinkAt": "user/session/session.go:52",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f5286bad53b6a89f55250a462397094a29eb646eeb9657f70792642f6f48aeaf",
+        "source": "parameter r : *net/http.Request",
+        "sink": "github.com/ShiftLeftSecurity/shiftleft-go-demo/util.Redirect",
+        "sourceAt": "user/user.go:45",
+        "sinkAt": "user/user.go:52",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "redirect,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f5286bad53b6a89f55250a462397094a29eb646eeb9657f70792642f6f48aeaf",
+        "source": "parameter r : *net/http.Request",
+        "sink": "github.com/ShiftLeftSecurity/shiftleft-go-demo/util.Redirect",
+        "sourceAt": "user/user.go:45",
+        "sinkAt": "user/user.go:63",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "redirect,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f5286bad53b6a89f55250a462397094a29eb646eeb9657f70792642f6f48aeaf",
+        "source": "parameter r : *net/http.Request",
+        "sink": "github.com/ShiftLeftSecurity/shiftleft-go-demo/util.Redirect",
+        "sourceAt": "user/user.go:45",
+        "sinkAt": "user/user.go:72",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "redirect,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f582647a148bca7496f246c8c42a28114f703efa5d181f1934f5b091dde3074c",
+        "source": "parameter r : *net/http.Request",
+        "sink": "github.com/ShiftLeftSecurity/shiftleft-go-demo/util.Redirect",
+        "sourceAt": "user/user.go:107",
+        "sinkAt": "user/user.go:112",
+        "severity": "medium",
+        "pathLength": 1,
+        "connected": true,
+        "taintKinds": "redirect,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:f739d63e77208b96347d4c4454b59739b2ddcac5f5bf56d871dfa58d63a7f84d",
+        "source": "(net/http.Header).Get",
+        "sink": "log.Printf",
+        "sourceAt": "util/middleware/middleware.go:25",
+        "sinkAt": "util/middleware/middleware.go:25",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      }
+    ]
+  }
+}
