@@ -1,0 +1,132 @@
+thirdparty/golem/internal/seam/inter.go
+  s_e2b6218f3801bd::t_d729cc0a8274c8 309-311,315,317-318
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,44-46,51,57,68,79,81-83,85,87,90,92-94,96,98,101,105,109,112,120,123,127,134,145,147-149,151
+thirdparty/golem/testdata/golden/gorilla-mux-security.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,42,50,56,67,78,88-98,166
+thirdparty/golem/testdata/corpus/method-field-flow/go.mod
+  s_e2b6218f3801bd::t_98764a7cbed2ce 1-3
+thirdparty/golem/internal/models/thirdparty.json
+  s_cdb2fa2bd51788::t_99208035b592e9 2-731
+thirdparty/golem/internal/models/models.go
+  s_cdb2fa2bd51788::t_af9a98a9192835 38
+  s_cdb2fa2bd51788::t_db55a52449eb23 31-37
+  s_cdb2fa2bd51788::t_4dbf565c54854d 8,140-143,200-212,366-389
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,38,44-46,52,57-67,90-111,124,126-128,130,132-143,146,157,167-177,190-191,193-205,212-213,215-216,223-234,245,256,267,269-271,275
+thirdparty/golem/internal/bench/promotion_test.go
+  s_cdb2fa2bd51788::t_c158caf7192dd4 191-240
+  s_cdb2fa2bd51788::t_3c26b72793cdc2 14-17,26,46-47
+  s_cdb2fa2bd51788::t_cadea48cca0643 151-158
+thirdparty/golem/testdata/corpus/handler-func-value/go.mod
+  s_e2b6218f3801bd::t_b17fa1da097a32 1
+  s_e2b6218f3801bd::t_8c887782ac8e66 2-3
+thirdparty/golem/internal/analyzer/options.go
+  s_e2b6218f3801bd::t_78324768350b3b 14
+thirdparty/golem/cmd/golem/bench.go
+  s_e2b6218f3801bd::t_1500edfe40eb58 31
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,39,46,48,51-53,62,71-75,79,82-86,90,93-94,96-97,104-108,112,115-119,121,123,126-130,132,134,137,140-141,148-152,156,159-163,170,181-182,184-185,192-197,200,203-207,211,214,216-218,220,222,236-240,247-251,258,261-262,302-306,313-324,327-328,333-343
+thirdparty/golem/cmd/golem/main.go
+  s_cdb2fa2bd51788::t_0ec81e4a4f774c 75,128-137
+  s_cdb2fa2bd51788::t_30a94698b814e0 9
+  s_cdb2fa2bd51788::t_5c1a52a0b13843 138
+thirdparty/golem/internal/seam/seam.go
+  s_cdb2fa2bd51788::t_32ca7a98b6ede9 512-521
+  s_e2b6218f3801bd::t_5cc1dd13314c90 555
+  s_e2b6218f3801bd::t_02824e36a6e166 753
+  s_e2b6218f3801bd::t_9ffeabba1c4028 756-762,766,768-772,779-786
+  s_e2b6218f3801bd::t_499f608e71edab 133-138
+  s_e2b6218f3801bd::t_095df36b944eae 376-377
+  s_e2b6218f3801bd::t_520b96ff347f5a 52-56
+  s_e2b6218f3801bd::t_10b65c4045f5e5 873-880
+  s_e2b6218f3801bd::t_f59621bba143a2 763-765,767
+  s_e2b6218f3801bd::t_2b944276ecd1a8 754-755,787,810-855
+  s_e2b6218f3801bd::t_f7a7483ce770cf 788
+thirdparty/golem/testdata/corpus/handler-func-value/main.go
+  s_e2b6218f3801bd::t_bf165a91ff07f9 13
+  s_e2b6218f3801bd::t_8c887782ac8e66 1-12,14-19
+thirdparty/golem/internal/seam/intra.go
+  s_cdb2fa2bd51788::t_91f94ac1acbbb0 539-549
+thirdparty/golem/internal/analyzer/dataflow.go
+  s_e2b6218f3801bd::t_944561330d8779 2621
+  s_e2b6218f3801bd::t_190fe86b50080d 485-486
+thirdparty/golem/testdata/bench/manifest.json
+  s_e2b6218f3801bd::t_a1bf2aad1bb07f 64-73
+thirdparty/golem/testdata/corpus/interface-dispatch/main.go
+  s_e2b6218f3801bd::t_f0d970ed3b2513 9
+thirdparty/golem/internal/corpus/annotations.go
+  s_e2b6218f3801bd::t_2d11de0b9b5098 16
+  s_cdb2fa2bd51788::t_d286eb72ababe4 73,265-266
+  s_e2b6218f3801bd::t_4a79becc8001b1 381
+thirdparty/golem/testdata/bench/baseline.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 30-31,58-59,86-87,114-115,142-143,170-171,198-199,226-227,254-255,282-283,310-311,338-339,366-367,394-395,422-423,450-451,457,459,461-462,464-465,478-479,506-507,534-535,562-563,590-591,618-619,646-647,674-675,702-703,730-731,758-759,786-787,814-815,842-843,870-871,898-899,926-927,954-955,982-983,1010-1011,1038-1039,1066-1123,1150-1151,1178-1179,1206-1207,1234-1235,1262-1263,1291,1318-1319,1346-1347,1374-1375,1402-1403,1430-1431,1458-1459,1486-1487,1514-1571,1598-1599,1626-1627,1654-1655,1682-1683,1710-1711,1738-1739,1767,1794-1795,1801-1803,1805-1807,1809,1822-1823,1829-1831,1833-1835,1837,1850-1851,1878-1879,1906-1907,1934-1935,1962-1963,1990-1991,2018-2019,2046-2047,2074-2075,2102-2103,2130-2131,2158-2159,2186-2187,2214-2215,2242-2243,2270-2271,2298-2299,2326-2327,2354-2355,2382-2383,2410-2411,2438-2439,2466-2467,2494-2495,2522-2523,2550-2551,2578-2579
+thirdparty/golem/internal/models/stdlib.json
+  s_cdb2fa2bd51788::t_af9a98a9192835 2-1976
+thirdparty/golem/testdata/corpus/request-field-source/main.go
+  s_e2b6218f3801bd::t_bf165a91ff07f9 18-19
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,45-47,52,58,69,80,82-84,86,88,91,93-95,97,99,102,106,110,113,121,124,128,135,146,148-150,152
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,39,45,47,49-50,60,77-78,80-81,88,90-92,94,96,99-103,105,107-118,132-133,135-136,143-147,154-165,170,173,176-180,187-191,262-338
+thirdparty/golem/testdata/golden/gorilla-mux-exported-roots.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,44,52,58,69,80,91,102,113,123-133,201
+thirdparty/golem/internal/bench/promotion.go
+  s_cdb2fa2bd51788::t_a01bc902e29f20 195,203
+  s_e2b6218f3801bd::t_6095f100ba365d 36-41
+  s_e2b6218f3801bd::t_89c05499e4e127 185-194,196-202,204-212,231,235-237
+  s_e2b6218f3801bd::t_0fc42bed3a2a52 54
+  s_cdb2fa2bd51788::t_ad63f6d0586689 213-230,232-234
+thirdparty/golem/testdata/corpus/cgo-callback-export/main.go
+  s_cdb2fa2bd51788::t_d3d63cfda7080e 24
+thirdparty/golem/internal/seam/step.go
+  s_e2b6218f3801bd::t_931dc130274561 91-92,122
+  s_e2b6218f3801bd::t_62496809c1c8c5 5,40
+  s_cdb2fa2bd51788::t_7f330f79e5e095 98-112
+  s_e2b6218f3801bd::t_a09bcca8640cc9 94-96
+  s_e2b6218f3801bd::t_b52709ef915f8b 97,113,115
+  s_e2b6218f3801bd::t_cd40a097dcdac1 41-45
+thirdparty/golem/testdata/corpus/dep-drops-taint-negative/main.go
+  s_cdb2fa2bd51788::t_3242c46add4a7a 19-28
+thirdparty/golem/internal/seam/label.go
+  s_e2b6218f3801bd::t_d35da6f1d424dd 320-321,328-333
+  s_e2b6218f3801bd::t_c55d78f6a14bdd 334-335
+thirdparty/golem/internal/corpus/evaluate.go
+  s_cdb2fa2bd51788::t_d286eb72ababe4 180-182
+  s_cdb2fa2bd51788::t_5f0627cb829250 112-118
+thirdparty/golem/testdata/golden/shiftleft-go-demo-security.digest.json
+  s_cdb2fa2bd51788::t_f36dcca977f061 5,38,44-46,52,57-89,102,104-106,108,110,113-124,135,146-161,168-169,171-172,179,190,201,212,214-216,220
+thirdparty/golem/testdata/corpus/method-field-flow/main.go
+  s_e2b6218f3801bd::t_bf165a91ff07f9 14
+  s_e2b6218f3801bd::t_98764a7cbed2ce 1-13,20-30
+  s_cdb2fa2bd51788::t_9a0159631c3ac1 15-19
+thirdparty/golem/internal/corpus/corpus_test.go
+  s_e2b6218f3801bd::t_a74bc959e0b5a6 106
+thirdparty/golem/testdata/seam-parity.json
+  s_e2b6218f3801bd::t_0383466df345bb 9
+  s_e2b6218f3801bd::t_5731d238f7b379 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f1197c9eab78b4ecf853ed80e7a399137c21d3e2",
+  "prompts": {},
+  "sessions": {
+    "s_cdb2fa2bd51788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2cc4c8d-c3f6-40c3-a016-c7a9d7be5d04",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_e2b6218f3801bd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05af19243ffef7sWTT3EWhHWhN",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
