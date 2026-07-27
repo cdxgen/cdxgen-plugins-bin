@@ -1,0 +1,167 @@
+thirdparty/golem/testdata/corpus/request-field-source/main.go
+  s_cdb2fa2bd51788::t_e6ed684444ff1e 18-27
+  s_cdb2fa2bd51788::t_0c3c8c3fd4e95e 1-17,28-32
+thirdparty/golem/testdata/corpus/generic-container/main.go
+  s_265ec1134b4348::t_2f08dd29103fe6 9
+thirdparty/golem/internal/corpus/corpus_test.go
+  s_cdb2fa2bd51788::t_67ad2ac64b05f9 265-273,277,279-285
+  s_cdb2fa2bd51788::t_64ca83bb1cdc65 274-276,278
+thirdparty/golem/testdata/bench/baseline.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 30-31,58-59,86-87,114-115,142-143,170-171,198-199,226-227,254-255,282-283,310-311,338-339,366-367,394-395,422-423,450-451,478-479,506-507,534-535,562-563,590-591,618-619,646-647,674-675,702-703,730-731,758-759,786-787,814-815,842-843,870-871,898,926-927,954-955,982-983,1010-1011,1038-1039,1066-1067,1094-1095,1122-1123,1150-1151,1178-1179,1206-1207,1234-1235,1262-1263,1290-1291,1318-1319,1346-1347,1374-1375,1402-1403,1430-1431,1458-1459,1486-1487,1514-1515,1542-1543,1570-1571,1598-1599,1626-1627,1654-1655,1682-1739,1766-1767,1794-1795,1822-1823,1850-1851,1878-1879,1906-1907,1934-1935,1962-1963,1990-1991,2018-2019,2046-2047,2074-2075,2102-2103,2130-2131,2158-2159,2186-2187,2214-2215,2242-2243,2270-2271,2298-2299,2326-2327,2354-2355,2382-2383,2410-2411,2438-2439,2466-2467
+thirdparty/golem/internal/models/native.json
+  s_265ec1134b4348::t_c83fe4319cf6d8 2,4,6,8,10
+thirdparty/golem/internal/seam/summary.go
+  s_265ec1134b4348::t_1b781f4153faad 30-44
+  s_265ec1134b4348::t_e4628e5b517d06 172-187
+  s_265ec1134b4348::t_6dd1068d765ee2 256-261
+thirdparty/golem/testdata/corpus/plugin-open/main.go
+  s_265ec1134b4348::t_a7bfc66a42d690 14
+thirdparty/golem/cmd/golem/main.go
+  s_cdb2fa2bd51788::t_7088f6ff9719da 66
+thirdparty/golem/testdata/corpus/strings-builder/main.go
+  s_265ec1134b4348::t_ba35ec6e079b29 11
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  s_cdb2fa2bd51788::t_70a464f8ac66c2 16,164
+thirdparty/golem/testdata/corpus/map-of-struct/main.go
+  s_265ec1134b4348::t_ddc00e9a54654f 9
+thirdparty/golem/testdata/seam-parity.json
+  s_265ec1134b4348::t_ce26ec53bb8342 17-18
+  s_265ec1134b4348::t_375b539c983201 6
+  s_265ec1134b4348::t_1a5cdf20b424b2 2,4-5,13
+  s_cdb2fa2bd51788::t_58385b505538b3 7,9,15
+thirdparty/golem/internal/seam/intra.go
+  s_265ec1134b4348::t_c58410566a4478 639-647
+  s_265ec1134b4348::t_06e85b265193d2 480,864-878
+  s_265ec1134b4348::t_9f99346e8c06b3 396,405-479
+  s_265ec1134b4348::t_d9045fae1d8bfe 851-858
+  s_265ec1134b4348::t_73c74330c069e7 207-215,225,229-261
+  s_265ec1134b4348::t_999141e761f95f 691-695
+  s_265ec1134b4348::t_eed469a6c6b7f0 520-524,526,529-532
+  s_265ec1134b4348::t_dee0649d7bb998 687-690,696-699
+  s_265ec1134b4348::t_a72b56b3c40c21 221-224
+  s_265ec1134b4348::t_11bd7a39c2b094 481
+thirdparty/golem/testdata/corpus/request-field-source/go.mod
+  s_cdb2fa2bd51788::t_c9cbe01bb22928 1-3
+thirdparty/golem/README.md
+  s_cdb2fa2bd51788::t_70a464f8ac66c2 137-163
+thirdparty/golem/testdata/corpus/defer-taint/main.go
+  s_265ec1134b4348::t_0e9743f380ff32 9
+thirdparty/golem/testdata/corpus/io-copy/main.go
+  s_265ec1134b4348::t_c432db901f16fa 11
+thirdparty/golem/testdata/corpus/error-wrapping/main.go
+  s_265ec1134b4348::t_dfbad406875c0b 12
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5,20-21,23,27-28,31-32,35
+thirdparty/golem/internal/analyzer/options.go
+  s_cdb2fa2bd51788::t_7088f6ff9719da 43
+  s_265ec1134b4348::t_0f19ffe4018ece 14
+thirdparty/golem/testdata/corpus/cgo-string-roundtrip/main.go
+  s_265ec1134b4348::t_86adaa67cc50ef 14-15
+thirdparty/golem/testdata/corpus/cgo-callback-export/main.go
+  s_265ec1134b4348::t_cc9ce7f2558dcb 23
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5
+thirdparty/golem/internal/models/stdlib.json
+  s_265ec1134b4348::t_b706574a3662a1 83
+  s_265ec1134b4348::t_61623674012829 87
+  s_265ec1134b4348::t_f2cb5aa97bc007 68-69
+  s_265ec1134b4348::t_367367625f9796 119-120
+  s_265ec1134b4348::t_2b7180797374e6 8-9
+  s_265ec1134b4348::t_de247d86b97805 45-47,49-50
+  s_265ec1134b4348::t_cff233a4476283 115-118
+  s_265ec1134b4348::t_1bebbc2f32d21e 57-60
+  s_265ec1134b4348::t_a99792232b95f5 82
+  s_265ec1134b4348::t_66d9deb612aa7f 89
+thirdparty/golem/internal/models/models.go
+  s_265ec1134b4348::t_ce1683e7e35301 205-210
+  s_cdb2fa2bd51788::t_868fb987e63aa8 68-76
+  s_265ec1134b4348::t_058c2f64b45914 188-197
+  s_265ec1134b4348::t_7b5a76e4abffda 120-125,142
+  s_265ec1134b4348::t_3056b7df05e27d 298-312
+  s_265ec1134b4348::t_63c5c0ede1de7b 16-21
+  s_265ec1134b4348::t_76a53f96f16a63 314-318,325-326,331-333
+  s_265ec1134b4348::t_03d9e88c3713e6 126-131,143
+  s_265ec1134b4348::t_03ff38b4a7e226 319-324,327-330
+  s_265ec1134b4348::t_dd259fcd4240e4 437-445
+  s_265ec1134b4348::t_6a6fa4bfacc19f 446-459
+  s_265ec1134b4348::t_ddb8e853252a6b 199-204,211
+  s_265ec1134b4348::t_40594bd04d99a9 38
+  s_265ec1134b4348::t_36473f72e69b8d 22-24
+  s_265ec1134b4348::t_77effac3376ffa 198
+  s_265ec1134b4348::t_8176adc8b5b3ba 313
+  s_cdb2fa2bd51788::t_bb554a2541d4e1 25-30
+thirdparty/golem/testdata/corpus/struct-field-through-call/main.go
+  s_265ec1134b4348::t_812686574384d0 9
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_cdb2fa2bd51788::t_4f45ece71aabc9 5
+thirdparty/golem/testdata/golden/gorilla-mux-security.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5,20-21,23,27-28,31-32,35
+thirdparty/golem/internal/seam/seam.go
+  s_265ec1134b4348::t_af491e7d8264e8 203,215-216,221,224,226,229-232,234,250-252
+  s_265ec1134b4348::t_078a247eb51a68 543
+  s_265ec1134b4348::t_10a86bd940fa49 280-287,292-324,327
+  s_cdb2fa2bd51788::t_de7e4062110563 513-522
+  s_265ec1134b4348::t_58aeef93f5b080 253,533-542,544-546,574
+  s_265ec1134b4348::t_44912264c5fdae 204-213,217,222,235,238-249
+thirdparty/golem/internal/seam/inter.go
+  s_265ec1134b4348::t_81f02a35a4f746 5
+  s_265ec1134b4348::t_83ce7aa7910d2b 263,540-613
+  s_265ec1134b4348::t_fd400b8a5746f1 383
+  s_265ec1134b4348::t_7bb6d05a45662c 247-248,261-262
+thirdparty/golem/internal/seam/engine.go
+  s_265ec1134b4348::t_596de636a3a21f 6
+  s_265ec1134b4348::t_2eb3dd4c8e0762 97-140
+thirdparty/golem/testdata/corpus/context-value/main.go
+  s_265ec1134b4348::t_fa5ac0e79b1bcc 11
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5
+thirdparty/golem/internal/analyzer/analyzer_test.go
+  s_cdb2fa2bd51788::t_eb34f5b0acc66e 319-321
+  s_265ec1134b4348::t_34e7446e44b3b2 890-893,898
+thirdparty/golem/testdata/golden/gorilla-mux-exported-roots.digest.json
+  s_cdb2fa2bd51788::t_f73e9a158f1dc5 5
+thirdparty/golem/testdata/golden/shiftleft-go-demo-security.digest.json
+  s_cdb2fa2bd51788::t_4f45ece71aabc9 5
+thirdparty/golem/testdata/corpus/worker-pool/main.go
+  s_265ec1134b4348::t_72703e543460d6 9
+thirdparty/golem/internal/analyzer/dataflow.go
+  s_265ec1134b4348::t_b02c7a3cd5c5b4 2812-2813
+  s_265ec1134b4348::t_a6399bd87a8485 2816-2826
+  s_cdb2fa2bd51788::t_929c7f5a0c57b7 2770-2771
+  s_265ec1134b4348::t_ee0a07344138fe 110-111,113-114
+  s_265ec1134b4348::t_f2ca516a61a138 2843-2844
+  s_265ec1134b4348::t_8c813d985a9a81 121
+  s_cdb2fa2bd51788::t_1871e8051809cc 103-109,112
+  s_cdb2fa2bd51788::t_1db9efe72488ce 2566-2582
+thirdparty/golem/testdata/corpus/json-roundtrip/main.go
+  s_265ec1134b4348::t_78472fb9214484 11-12
+thirdparty/golem/testdata/bench/manifest.json
+  s_cdb2fa2bd51788::t_c511691b5ef8a9 155-158
+  s_cdb2fa2bd51788::t_fbb5ce1a445da6 154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7e3172246f6eab5f33df573cd7099e28ea632296",
+  "prompts": {},
+  "sessions": {
+    "s_265ec1134b4348": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05bc5a0aaffePC5q6IlPPWNeUa",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_cdb2fa2bd51788": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2cc4c8d-c3f6-40c3-a016-c7a9d7be5d04",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
