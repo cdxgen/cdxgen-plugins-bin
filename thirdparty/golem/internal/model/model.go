@@ -35,6 +35,7 @@ type AnalysisOptions struct {
 	IncludeStdlib                   bool     `json:"includeStdlib"`
 	IncludeLocal                    bool     `json:"includeLocal"`
 	CallGraphMode                   string   `json:"callGraphMode"`
+	Roots                           []string `json:"roots,omitempty"`
 	DataFlowMode                    string   `json:"dataFlowMode,omitempty"`
 	DataFlowCallGraphMode           string   `json:"dataFlowCallGraphMode,omitempty"`
 	DataFlowPacks                   []string `json:"dataFlowPacks,omitempty"`
@@ -45,6 +46,7 @@ type AnalysisOptions struct {
 	DataFlowMaxTraceEdges           int      `json:"dataFlowMaxTraceEdges,omitempty"`
 	DataFlowSkipGenerated           bool     `json:"dataFlowSkipGenerated,omitempty"`
 	DataFlowSkipTests               bool     `json:"dataFlowSkipTests,omitempty"`
+	DependencyDetail                string   `json:"dependencyDetail,omitempty"`
 	MaxProcs                        int      `json:"maxProcs,omitempty"`
 	MemoryLimitBytes                int64    `json:"memoryLimitBytes,omitempty"`
 	IncludeSSA                      bool     `json:"includeSsa"`
@@ -101,6 +103,41 @@ type NativeArtifact struct {
 	PackageID  string            `json:"packageId,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
+
+// NativeCall describes a cgo binding point between Go and C.
+type NativeCall struct {
+	ID             string               `json:"id"`
+	GoSymbol       string               `json:"goSymbol"`
+	CSymbol        string               `json:"cSymbol,omitempty"`
+	Direction      string               `json:"direction"`
+	HeaderFile     string               `json:"headerFile,omitempty"`
+	Libraries      []string             `json:"libraries,omitempty"`
+	ArgumentRoles  []NativeArgumentRole `json:"argumentRoles,omitempty"`
+	Position       Position             `json:"position,omitempty"`
+	Confidence     string               `json:"confidence,omitempty"`
+	Evidence       []string             `json:"evidence,omitempty"`
+	PackagePath    string               `json:"packagePath,omitempty"`
+	GoFunctionID   string               `json:"goFunctionId,omitempty"`
+	GoFunctionName string               `json:"goFunctionName,omitempty"`
+	Properties     map[string]string    `json:"properties,omitempty"`
+}
+
+// NativeArgumentRole describes the role of an argument in a native call.
+type NativeArgumentRole struct {
+	Index    int    `json:"index"`
+	Role     string `json:"role,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Variadic bool   `json:"variadic,omitempty"`
+}
+
+// BuildShapeDelta records a file that exists on disk but was excluded by build
+// constraints or configuration.
+type BuildShapeDelta struct {
+	Path       string `json:"path"`
+	Reason     string `json:"reason,omitempty"`
+	Constraint string `json:"constraint,omitempty"`
+}
+
 type APIEndpoint struct {
 	ID          string            `json:"id"`
 	Kind        string            `json:"kind"`
@@ -325,49 +362,77 @@ type PackageEvidence struct {
 	Diagnostics     []Diagnostic     `json:"diagnostics,omitempty"`
 }
 type CallGraph struct {
-	Mode        string          `json:"mode"`
-	Algorithm   string          `json:"algorithm,omitempty"`
-	Nodes       []CallGraphNode `json:"nodes,omitempty"`
-	Edges       []CallGraphEdge `json:"edges,omitempty"`
-	Diagnostics []Diagnostic    `json:"diagnostics,omitempty"`
-	Stats       GraphStats      `json:"stats"`
+	Mode         string            `json:"mode"`
+	Algorithm    string            `json:"algorithm,omitempty"`
+	Roots        []CallGraphRoot   `json:"roots,omitempty"`
+	Reachability *ReachabilityInfo `json:"reachability,omitempty"`
+	Nodes        []CallGraphNode   `json:"nodes,omitempty"`
+	Edges        []CallGraphEdge   `json:"edges,omitempty"`
+	Diagnostics  []Diagnostic      `json:"diagnostics,omitempty"`
+	Stats        GraphStats        `json:"stats"`
+}
+type ReachabilityInfo struct {
+	Nodes []ReachableNode `json:"nodes,omitempty"`
+	Paths []WitnessPath   `json:"paths,omitempty"`
+}
+type ReachableNode struct {
+	NodeID             string   `json:"nodeId"`
+	ReachableFromRoots bool     `json:"reachableFromRoots"`
+	MinDepth           int      `json:"minDepth,omitempty"`
+	RootIDs            []string `json:"rootIds,omitempty"`
+}
+type WitnessPath struct {
+	Symbol  string   `json:"symbol"`
+	NodeIDs []string `json:"nodeIds"`
+	EdgeIDs []string `json:"edgeIds,omitempty"`
+	Depth   int      `json:"depth"`
+}
+type CallGraphRoot struct {
+	ID         string `json:"id"`
+	Function   string `json:"function"`
+	RootReason string `json:"rootReason"`
 }
 type GraphStats struct {
 	NodeCount int `json:"nodeCount"`
 	EdgeCount int `json:"edgeCount"`
 }
 type CallGraphNode struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Label       string   `json:"label,omitempty"`
-	Kind        string   `json:"kind"`
-	PackagePath string   `json:"packagePath,omitempty"`
-	PackageName string   `json:"packageName,omitempty"`
-	Module      *Module  `json:"module,omitempty"`
-	PURL        string   `json:"purl,omitempty"`
-	Standard    bool     `json:"standard"`
-	Local       bool     `json:"local"`
-	External    bool     `json:"external"`
-	Synthetic   bool     `json:"synthetic,omitempty"`
-	Signature   string   `json:"signature,omitempty"`
-	Receiver    string   `json:"receiver,omitempty"`
-	Position    Position `json:"position,omitempty"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Label         string   `json:"label,omitempty"`
+	Kind          string   `json:"kind"`
+	PackagePath   string   `json:"packagePath,omitempty"`
+	PackageName   string   `json:"packageName,omitempty"`
+	Module        *Module  `json:"module,omitempty"`
+	PURL          string   `json:"purl,omitempty"`
+	Standard      bool     `json:"standard"`
+	Local         bool     `json:"local"`
+	External      bool     `json:"external"`
+	Synthetic     bool     `json:"synthetic,omitempty"`
+	SyntheticKind string   `json:"syntheticKind,omitempty"`
+	Visibility    string   `json:"visibility,omitempty"`
+	Signature     string   `json:"signature,omitempty"`
+	Receiver      string   `json:"receiver,omitempty"`
+	Position      Position `json:"position,omitempty"`
 }
 type CallGraphEdge struct {
-	ID          string            `json:"id"`
-	SourceID    string            `json:"sourceId"`
-	TargetID    string            `json:"targetId"`
-	SourceName  string            `json:"sourceName,omitempty"`
-	TargetName  string            `json:"targetName,omitempty"`
-	SourcePURL  string            `json:"sourcePurl,omitempty"`
-	SinkPURL    string            `json:"sinkPurl,omitempty"`
-	PURLs       []string          `json:"purls,omitempty"`
-	CallType    string            `json:"callType"`
-	Static      bool              `json:"static"`
-	Synthetic   bool              `json:"synthetic,omitempty"`
-	Position    Position          `json:"position,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Properties  map[string]string `json:"properties,omitempty"`
+	ID            string            `json:"id"`
+	SourceID      string            `json:"sourceId"`
+	TargetID      string            `json:"targetId"`
+	SourceName    string            `json:"sourceName,omitempty"`
+	TargetName    string            `json:"targetName,omitempty"`
+	SourcePURL    string            `json:"sourcePurl,omitempty"`
+	SinkPURL      string            `json:"sinkPurl,omitempty"`
+	PURLs         []string          `json:"purls,omitempty"`
+	CallType      string            `json:"callType"`
+	Static        bool              `json:"static"`
+	Synthetic     bool              `json:"synthetic,omitempty"`
+	Collapsed     bool              `json:"collapsed,omitempty"`
+	CollapsedHops int               `json:"collapsedHops,omitempty"`
+	Via           []string          `json:"via,omitempty"`
+	Position      Position          `json:"position,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Properties    map[string]string `json:"properties,omitempty"`
 }
 type DataFlowPattern struct {
 	Target              string   `json:"target"`
@@ -381,12 +446,17 @@ type DataFlowPattern struct {
 	RemovesTaintKinds   []string `json:"removesTaintKinds,omitempty"`
 	SanitizesCategories []string `json:"sanitizesCategories,omitempty"`
 	RelevantArguments   []int    `json:"relevantArguments,omitempty"`
-	ReceiverRelevant    bool     `json:"receiverRelevant,omitempty"`
-	RuleID              string   `json:"ruleId,omitempty"`
-	RuleName            string   `json:"ruleName,omitempty"`
-	Severity            string   `json:"severity,omitempty"`
-	RiskScore           int      `json:"riskScore,omitempty"`
-	Confidence          string   `json:"confidence,omitempty"`
+	// WritesToArguments lists argument positions whose pointed-to memory the
+	// call fills from its other arguments, as io.Copy fills its destination and
+	// json.Unmarshal fills the value behind its pointer. Without it the taint of
+	// what went in is lost at the call, because nothing was returned.
+	WritesToArguments []int  `json:"writesToArguments,omitempty"`
+	ReceiverRelevant  bool   `json:"receiverRelevant,omitempty"`
+	RuleID            string `json:"ruleId,omitempty"`
+	RuleName          string `json:"ruleName,omitempty"`
+	Severity          string `json:"severity,omitempty"`
+	RiskScore         int    `json:"riskScore,omitempty"`
+	Confidence        string `json:"confidence,omitempty"`
 }
 type DataFlowPatternSet struct {
 	Sources      []DataFlowPattern `json:"sources,omitempty"`
@@ -425,34 +495,40 @@ type DataFlowEdge struct {
 	Properties map[string]string `json:"properties,omitempty"`
 }
 type DataFlowSlice struct {
-	ID                string            `json:"id"`
-	SourceID          string            `json:"sourceId"`
-	SinkID            string            `json:"sinkId"`
-	FlowKey           string            `json:"flowKey,omitempty"`
-	DuplicateOf       string            `json:"duplicateOf,omitempty"`
-	DuplicateIndex    int               `json:"duplicateIndex,omitempty"`
-	NodeIDs           []string          `json:"nodeIds,omitempty"`
-	EdgeIDs           []string          `json:"edgeIds,omitempty"`
-	EdgeKinds         []string          `json:"edgeKinds,omitempty"`
-	SanitizerNodeIDs  []string          `json:"sanitizerNodeIds,omitempty"`
-	PathLength        int               `json:"pathLength,omitempty"`
-	SourceCategory    string            `json:"sourceCategory,omitempty"`
-	SinkCategory      string            `json:"sinkCategory,omitempty"`
-	SourceName        string            `json:"sourceName,omitempty"`
-	SourceSymbol      string            `json:"sourceSymbol,omitempty"`
-	SourceFunction    string            `json:"sourceFunction,omitempty"`
-	SourcePackagePath string            `json:"sourcePackagePath,omitempty"`
-	SourcePURL        string            `json:"sourcePurl,omitempty"`
-	SinkName          string            `json:"sinkName,omitempty"`
-	SinkSymbol        string            `json:"sinkSymbol,omitempty"`
-	SinkFunction      string            `json:"sinkFunction,omitempty"`
-	SinkPackagePath   string            `json:"sinkPackagePath,omitempty"`
-	SinkPURL          string            `json:"sinkPurl,omitempty"`
-	PURLs             []string          `json:"purls,omitempty"`
-	SinkArgument      string            `json:"sinkArgument,omitempty"`
-	SinkArgumentIndex *int              `json:"sinkArgumentIndex,omitempty"`
-	TaintKinds        []string          `json:"taintKinds,omitempty"`
-	FieldPaths        []string          `json:"fieldPaths,omitempty"`
+	ID                string   `json:"id"`
+	SourceID          string   `json:"sourceId"`
+	SinkID            string   `json:"sinkId"`
+	FlowKey           string   `json:"flowKey,omitempty"`
+	DuplicateOf       string   `json:"duplicateOf,omitempty"`
+	DuplicateIndex    int      `json:"duplicateIndex,omitempty"`
+	NodeIDs           []string `json:"nodeIds,omitempty"`
+	EdgeIDs           []string `json:"edgeIds,omitempty"`
+	EdgeKinds         []string `json:"edgeKinds,omitempty"`
+	SanitizerNodeIDs  []string `json:"sanitizerNodeIds,omitempty"`
+	PathLength        int      `json:"pathLength,omitempty"`
+	SourceCategory    string   `json:"sourceCategory,omitempty"`
+	SinkCategory      string   `json:"sinkCategory,omitempty"`
+	SourceName        string   `json:"sourceName,omitempty"`
+	SourceSymbol      string   `json:"sourceSymbol,omitempty"`
+	SourceFunction    string   `json:"sourceFunction,omitempty"`
+	SourcePackagePath string   `json:"sourcePackagePath,omitempty"`
+	SourcePURL        string   `json:"sourcePurl,omitempty"`
+	SinkName          string   `json:"sinkName,omitempty"`
+	SinkSymbol        string   `json:"sinkSymbol,omitempty"`
+	SinkFunction      string   `json:"sinkFunction,omitempty"`
+	SinkPackagePath   string   `json:"sinkPackagePath,omitempty"`
+	SinkPURL          string   `json:"sinkPurl,omitempty"`
+	PURLs             []string `json:"purls,omitempty"`
+	SinkArgument      string   `json:"sinkArgument,omitempty"`
+	SinkArgumentIndex *int     `json:"sinkArgumentIndex,omitempty"`
+	TaintKinds        []string `json:"taintKinds,omitempty"`
+	FieldPaths        []string `json:"fieldPaths,omitempty"`
+	// CrossesDependency and DependencyHops record that the taint left the
+	// module under analysis. They are first-class fields rather than something
+	// a consumer infers from node module attribution, because an engine that
+	// fails to attribute modules then reports zero crossings and looks correct.
+	CrossesDependency bool              `json:"crossesDependency,omitempty"`
+	DependencyHops    int               `json:"dependencyHops,omitempty"`
 	RuleID            string            `json:"ruleId,omitempty"`
 	RuleName          string            `json:"ruleName,omitempty"`
 	Severity          string            `json:"severity,omitempty"`
@@ -506,6 +582,7 @@ type DataFlowStats struct {
 	SanitizedSliceCount    int      `json:"sanitizedSliceCount,omitempty"`
 }
 type DataFlowEvidence struct {
+	Engine      string                  `json:"engine,omitempty"` // "legacy" or "seam"
 	Mode        string                  `json:"mode"`
 	Nodes       []DataFlowNode          `json:"nodes,omitempty"`
 	Edges       []DataFlowEdge          `json:"edges,omitempty"`
@@ -530,6 +607,8 @@ type Stats struct {
 	ExampleUsageCount      int `json:"exampleUsageCount"`
 	BuildDirectiveCount    int `json:"buildDirectiveCount"`
 	NativeArtifactCount    int `json:"nativeArtifactCount"`
+	NativeBoundaryCount    int `json:"nativeBoundaryCount"`
+	BuildShapeDeltaCount   int `json:"buildShapeDeltaCount"`
 	APIEndpointCount       int `json:"apiEndpointCount"`
 	ExternalURLCount       int `json:"externalUrlCount"`
 	ServiceCount           int `json:"serviceCount"`
@@ -586,27 +665,29 @@ type SupplyChainEvidence struct {
 	Properties             map[string]string  `json:"properties,omitempty"`
 }
 type Report struct {
-	SchemaVersion   string               `json:"schemaVersion"`
-	Tool            ToolInfo             `json:"tool"`
-	Runtime         RuntimeInfo          `json:"runtime"`
-	Options         AnalysisOptions      `json:"options"`
-	RootModules     []Module             `json:"rootModules,omitempty"`
-	Modules         []Module             `json:"modules,omitempty"`
-	Packages        []PackageEvidence    `json:"packages,omitempty"`
-	Files           []FileEvidence       `json:"files,omitempty"`
-	Imports         []ImportUsage        `json:"imports,omitempty"`
-	Declarations    []Declaration        `json:"declarations,omitempty"`
-	Usages          []LibraryUsage       `json:"usages,omitempty"`
-	BuildDirectives []BuildDirective     `json:"buildDirectives,omitempty"`
-	NativeArtifacts []NativeArtifact     `json:"nativeArtifacts,omitempty"`
-	APIEndpoints    []APIEndpoint        `json:"apiEndpoints,omitempty"`
-	ExternalURLs    []ExternalURL        `json:"externalUrls,omitempty"`
-	Services        []ServiceEvidence    `json:"services,omitempty"`
-	SecuritySignals []SecuritySignal     `json:"securitySignals,omitempty"`
-	Crypto          *CryptoEvidence      `json:"crypto,omitempty"`
-	DataFlow        *DataFlowEvidence    `json:"dataFlow,omitempty"`
-	SupplyChain     *SupplyChainEvidence `json:"supplyChain,omitempty"`
-	CallGraph       *CallGraph           `json:"callGraph,omitempty"`
-	Diagnostics     []Diagnostic         `json:"diagnostics,omitempty"`
-	Stats           Stats                `json:"stats"`
+	SchemaVersion    string               `json:"schemaVersion"`
+	Tool             ToolInfo             `json:"tool"`
+	Runtime          RuntimeInfo          `json:"runtime"`
+	Options          AnalysisOptions      `json:"options"`
+	RootModules      []Module             `json:"rootModules,omitempty"`
+	Modules          []Module             `json:"modules,omitempty"`
+	Packages         []PackageEvidence    `json:"packages,omitempty"`
+	Files            []FileEvidence       `json:"files,omitempty"`
+	Imports          []ImportUsage        `json:"imports,omitempty"`
+	Declarations     []Declaration        `json:"declarations,omitempty"`
+	Usages           []LibraryUsage       `json:"usages,omitempty"`
+	BuildDirectives  []BuildDirective     `json:"buildDirectives,omitempty"`
+	NativeArtifacts  []NativeArtifact     `json:"nativeArtifacts,omitempty"`
+	NativeBoundary   []NativeCall         `json:"nativeBoundary,omitempty"`
+	BuildShapeDeltas []BuildShapeDelta    `json:"buildShapeDeltas,omitempty"`
+	APIEndpoints     []APIEndpoint        `json:"apiEndpoints,omitempty"`
+	ExternalURLs     []ExternalURL        `json:"externalUrls,omitempty"`
+	Services         []ServiceEvidence    `json:"services,omitempty"`
+	SecuritySignals  []SecuritySignal     `json:"securitySignals,omitempty"`
+	Crypto           *CryptoEvidence      `json:"crypto,omitempty"`
+	DataFlow         *DataFlowEvidence    `json:"dataFlow,omitempty"`
+	SupplyChain      *SupplyChainEvidence `json:"supplyChain,omitempty"`
+	CallGraph        *CallGraph           `json:"callGraph,omitempty"`
+	Diagnostics      []Diagnostic         `json:"diagnostics,omitempty"`
+	Stats            Stats                `json:"stats"`
 }

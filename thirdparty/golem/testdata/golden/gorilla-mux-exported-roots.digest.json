@@ -1,0 +1,168 @@
+{
+  "fixture": "gorilla-mux",
+  "commit": "b4617d0b9670ad14039b2739167fd35a60f557c5",
+  "config": "exported-roots",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6",
+  "counts": {
+    "apiEndpoints": 0,
+    "buildDirectives": 0,
+    "declarations": 123,
+    "files": 6,
+    "imports": 22,
+    "modules": 1,
+    "nativeArtifacts": 0,
+    "packages": 1,
+    "securitySignals": 0,
+    "usages": 394
+  },
+  "callGraph": {
+    "algorithm": "rta",
+    "nodeCount": 90,
+    "edgeCount": 122,
+    "nodesByKind": {
+      "function": 90
+    },
+    "edgesByCallType": {
+      "func-value": 8,
+      "interface": 18,
+      "static": 96
+    },
+    "nodeSetHash": "2aa250f2f7a38f8f",
+    "edgeSetHash": "71ac2d441092a440",
+    "syntheticNodes": 7,
+    "stdlibNodes": 0,
+    "externalNodes": 1
+  },
+  "dataFlow": {
+    "mode": "security",
+    "nodeCount": 24,
+    "edgeCount": 20,
+    "sliceCount": 10,
+    "uniqueFlowCount": 10,
+    "summaryCount": 0,
+    "flowsByCategoryPair": {
+      "http-input-\u003eredirect": 6,
+      "parameter-\u003eformatted-output": 2,
+      "parameter-\u003epanic": 2
+    },
+    "flowsBySeverity": {
+      "medium": 10
+    },
+    "flowKeySetHash": "84e1aeaf172e40fb",
+    "edgeConnectivity": 1,
+    "integrityViolations": 0,
+    "dependencyCrossingSlices": 1,
+    "sampleFlows": [
+      {
+        "flowKey": "df-flow|http-input|redirect|(*github.com/gorilla/mux.Route).Match|(github.com/gorilla/mux.routeRegexpGroup).setMatch|net/http.RedirectHandler|1|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "route.go:41",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|redirect|(*github.com/gorilla/mux.Router).Match|(*github.com/gorilla/mux.Route).Match|net/http.RedirectHandler|1|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "mux.go:138",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|redirect|(*github.com/gorilla/mux.Router).ServeHTTP|(*github.com/gorilla/mux.Router).Match|net/http.RedirectHandler|1|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "mux.go:175",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|redirect|(github.com/gorilla/mux.routeRegexpGroup).setMatch|(github.com/gorilla/mux.routeRegexpGroup).setMatch|net/http.RedirectHandler|0|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "regexp.go:324",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 4,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|redirect|github.com/gorilla/mux.CORSMethodMiddleware$1$1|github.com/gorilla/mux.getAllMethodsForRoute|net/http.RedirectHandler|1|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "middleware.go:41",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|http-input|redirect|github.com/gorilla/mux.getAllMethodsForRoute|(*github.com/gorilla/mux.Route).Match|net/http.RedirectHandler|1|url,user-input|",
+        "source": "net/http.(*Request)",
+        "sink": "net/http.RedirectHandler",
+        "sourceAt": "middleware.go:58",
+        "sinkAt": "regexp.go:359",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|parameter|formatted-output|(*github.com/gorilla/mux.Router).HandleFunc|(*github.com/gorilla/mux.Route).Path|fmt.Fprintf|1|user-input|",
+        "source": "path",
+        "sink": "fmt.Fprintf",
+        "sourceAt": "mux.go:300",
+        "sinkAt": "regexp.go:89",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|parameter|formatted-output|(*github.com/gorilla/mux.Router).Handle|(*github.com/gorilla/mux.Route).Path|fmt.Fprintf|1|user-input|",
+        "source": "path",
+        "sink": "fmt.Fprintf",
+        "sourceAt": "mux.go:294",
+        "sinkAt": "regexp.go:89",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|parameter|panic|(*github.com/gorilla/mux.Router).HandleFunc|(*github.com/gorilla/mux.Route).Path|github.com/gorilla/mux.newRouteRegexp|1|secret,user-input|",
+        "source": "path",
+        "sink": "github.com/gorilla/mux.newRouteRegexp",
+        "sourceAt": "mux.go:300",
+        "sinkAt": "regexp.go:135",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|parameter|panic|(*github.com/gorilla/mux.Router).Handle|(*github.com/gorilla/mux.Route).Path|github.com/gorilla/mux.newRouteRegexp|1|secret,user-input|",
+        "source": "path",
+        "sink": "github.com/gorilla/mux.newRouteRegexp",
+        "sourceAt": "mux.go:294",
+        "sinkAt": "regexp.go:135",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      }
+    ]
+  }
+}

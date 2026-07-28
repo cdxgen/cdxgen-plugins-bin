@@ -64,7 +64,7 @@ func analyzeAcrossChildModules(options Options, absDir string, progress *progres
 	merged.Options.CallGraphMode = options.CallGraphMode
 	merged.Options.DataFlowMode = options.DataFlowMode
 	merged.Options.DataFlowCallGraphMode = options.DataFlowCallGraphMode
-	filterExternalOnlyModuleCacheFlows(merged, options.IncludeAllFlows)
+	applyReportView(merged, options)
 	a := &Analyzer{}
 	a.populateStats(merged)
 	sortReport(merged)

@@ -1,0 +1,70 @@
+# Ground truth for Contrast Security's go-test-bench, a deliberate
+# vulnerability benchmark.
+#
+# Every expectation below comes from the benchmark's own declaration of what it
+# demonstrates, not from what either engine currently reports. Its OpenAPI
+# document (cmd/go-swagger/restapi/embedded_spec.go) enumerates the routes as
+# "/<family>/<vulnerable function>/query/{safety}", and each one names the
+# function the payload is supposed to reach.
+#
+# Until this file existed, no real repository in the manifest carried ground
+# truth, so recall and precision were only ever measured on the ninety-odd
+# twenty-line corpus fixtures. On this repository the two engines reported 62
+# and 17 findings and nothing in the harness could say which was closer to
+# right.
+#
+# Every route takes its payload from an HTTP query parameter, so the source is
+# http-input throughout. Each expectation is pinned to the sink function the
+# benchmark names, so a flow reaching some other sink cannot satisfy it.
+#
+# The {safety} segment selects a sanitized or unsanitized variant of the same
+# route, but both live in one binary and reach the same sink, so a want-not on
+# the sanitized path is not expressible per-route here. Sanitizer behaviour is
+# covered by the corpus instead.
+
+# Both engines miss almost all of this, and for one shared reason. Every route
+# reaches its vulnerable function the same way: internal/common/handler.go:42
+# calls s.VulnerableFnWrapper(opaque, payload), where VulnerableFnWrapper is a
+# func-typed *struct field* holding a closure that the route registered. Neither
+# engine carries taint through a function value stored in a field and invoked
+# indirectly, so the payload is lost at that one line and nothing downstream —
+# exec.Command, os.ReadFile, http.Get, db.Exec — is ever reached from the
+# request. That is defect 31, and it is the single largest known cause of the
+# gap between what these engines find on twenty-line fixtures and what they
+# find on real code.
+#
+# SEAM finds all nine. Getting there took five separate fixes, none of which
+# the corpus could have prompted: resolving dispatch through a func-typed
+# struct field at all; not minting source labels during summary computation,
+# which replaced the param labels the ParamReturn matcher keys on; naming the
+# summary-derived sink rather than the dispatch temp; reading taint out of a
+# variadic slice when applying a passthrough, without which fmt.Sprintf — the
+# commonest taint carrier in Go — returned clean; and unioning the result taint
+# over every candidate a field may hold rather than the first.
+#
+# Legacy finds one, so the other eight carry known-fail=legacy:31 rather than
+# no marker: dropping a marker because the candidate passes leaves the other
+# engine failing with nothing recording why.
+
+# Command injection: exec.Command and exec.CommandContext.
+want flow source=http-input sink=command-execution sinkfn=~os/exec.Command known-fail=legacy:31
+want flow source=http-input sink=command-execution sinkfn=~os/exec.CommandContext known-fail=legacy:31
+
+# Path traversal: four separate filesystem entry points.
+want flow source=http-input sink=filesystem sinkfn=~os.ReadFile known-fail=legacy:31
+want flow source=http-input sink=filesystem sinkfn=~os.Open known-fail=legacy:31
+want flow source=http-input sink=filesystem sinkfn=~os.WriteFile known-fail=legacy:31
+want flow source=http-input sink=filesystem sinkfn=~os.Create known-fail=legacy:31
+
+# SQL injection: the payload is concatenated into a statement run by the
+# sqlite3 driver. Pinned to the sink, because an unpinned "sink=data" was
+# satisfied by an unrelated encoding/json.Unmarshal flow elsewhere in the
+# program and reported recall the engine had not earned.
+want flow source=http-input sink=data sinkfn=~Exec known-fail=legacy:31
+
+# SSRF: the payload becomes the URL passed to http.Get.
+want flow source=http-input sink=external-service sinkfn=~http.Get known-fail=legacy:31
+
+# Reflected XSS: the payload is echoed into the response body. Under the gin
+# server that is Context.String; the same route exists on the other frameworks.
+want flow source=http-input sink=http-response

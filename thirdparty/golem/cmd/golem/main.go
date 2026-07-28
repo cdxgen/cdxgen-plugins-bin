@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		case "version", "--version":
 			_, _ = fmt.Fprintf(stdout, "golem %s\n", version)
 			return nil
+		case "bench":
+			return runBench(args[1:], stdout, stderr)
+		case "golden":
+			return runGolden(args[1:], stdout, stderr)
 		case "analyze":
 			args = args[1:]
 		}
@@ -42,9 +47,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	patterns := flags.String("patterns", "./...", "comma-separated go/packages patterns")
 	formatValue := flags.String("format", "json", "output format: json, graphml, or gexf")
 	outFile := flags.String("out", "", "output file path; defaults to stdout")
-	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, or vta")
+	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, vta, or auto")
+	callgraphTimeout := flags.Duration("callgraph-timeout", 0, "call-graph construction timeout; 0 disables")
+	rootsFlag := flags.String("roots", "", "comma-separated root set specifiers: main, init, exported, tests, handlers, all, symbol:<regex>")
+	reachableSymbols := flags.String("reachable-symbols", "", "file containing symbol names to compute reachability paths for")
+	maxPathsPerSymbol := flags.Int("max-paths-per-symbol", 3, "maximum witness paths per reachable symbol")
 	dataflow := flags.String("dataflow", "none", "data-flow mode: none, security, crypto, or all")
-	includeAllFlows := flags.Bool("include-all-flows", false, "retain external-only flows/call stacks fully rooted in Go module cache paths")
 	dataflowPatterns := flags.String("dataflow-patterns", "", "optional JSON file with data-flow sources, sinks, passthroughs, and sanitizers")
 	dataflowPacks := flags.String("dataflow-pattern-packs", "all", "comma-separated data-flow pattern packs: all, base, http, frameworks, data, filesystem, process, crypto, native, config, cloud")
 	dataflowCallgraph := flags.String("dataflow-callgraph", "static", "call graph mode for data-flow dynamic summary replay: none, static, cha, rta, or vta")
@@ -56,11 +64,15 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	dataflowMaxTraceEdges := flags.Int("dataflow-max-trace-edges", 128, "maximum ordered edge IDs retained per data-flow trace")
 	dataflowSkipGenerated := flags.Bool("dataflow-skip-generated", false, "skip generated files during per-function data-flow slice materialization")
 	dataflowSkipTests := flags.Bool("dataflow-skip-tests", false, "skip test/example/benchmark files during per-function data-flow slice materialization")
+	taintEngine := flags.String("taint-engine", "seam", "taint engine: seam (default; structured models, SCC-condensation summaries) or legacy (escape hatch)")
+	dependencyDetail := flags.String("dependency-detail", "collapse", "call-graph dependency detail: drop, collapse, or full")
+	includeAllFlows := flags.Bool("include-all-flows", false, "retain external-only flows/call stacks fully rooted in Go module cache paths (alias for --dependency-detail=full)")
 	dataflowGraphFormat := flags.String("dataflow-graph-format", "graphml", "data-flow graph sidecar format: graphml or gexf")
 	dataflowGraphOut := flags.String("dataflow-graph-out", "", "optional data-flow graph sidecar output path")
 	maxProcs := flags.Int("max-procs", 0, "maximum Go scheduler threads; 0 uses all available CPU cores")
 	memoryLimit := flags.String("memory-limit", "", "optional Go soft memory limit such as 4GiB, 800MiB, or 2GB")
 	progress := flags.Bool("progress", false, "emit coarse progress logs to stderr during large analyses")
+	cpuProfile := flags.String("cpuprofile", "", "write a CPU profile to this path; for diagnosing analysis slowness on large repositories")
 	progressInterval := flags.Duration("progress-interval", 5*time.Second, "minimum interval between progress logs")
 	tags := flags.String("tags", "", "comma-separated Go build tags")
 	tests := flags.Bool("tests", false, "include test variants")
@@ -77,8 +89,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if mode == "" {
 		mode = "none"
 	}
-	if mode != "none" && mode != "static" && mode != "cha" && mode != "rta" && mode != "vta" {
-		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, cha, rta, or vta", *callgraph)
+	if mode != "none" && mode != "static" && mode != "cha" && mode != "rta" && mode != "vta" && mode != "auto" {
+		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, cha, rta, vta, or auto", *callgraph)
 	}
 	dfMode := strings.ToLower(strings.TrimSpace(*dataflow))
 	if dfMode == "" {
@@ -101,7 +113,30 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, NoRecurse: *noRecurse, IncludeAllFlows: *includeAllFlows, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
+	// Resolve dependency-detail with include-all-flows override.
+	detail := *dependencyDetail
+	if *includeAllFlows {
+		detail = "full"
+	}
+	if detail != "drop" && detail != "collapse" && detail != "full" {
+		return fmt.Errorf("unsupported dependency-detail %q: expected drop, collapse, or full", detail)
+	}
+	te := strings.ToLower(strings.TrimSpace(*taintEngine))
+	if te != "legacy" && te != "seam" {
+		return fmt.Errorf("unsupported taint-engine %q: expected legacy or seam", *taintEngine)
+	}
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			return fmt.Errorf("create cpu profile: %w", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return fmt.Errorf("start cpu profile: %w", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, NoRecurse: *noRecurse, IncludeAllFlows: *includeAllFlows, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, Roots: splitCSV(*rootsFlag), CallGraphTimeout: *callgraphTimeout, ReachableSymbols: *reachableSymbols, MaxPathsPerSymbol: *maxPathsPerSymbol, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, DependencyDetail: detail, TaintEngine: te, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
 	if err != nil {
 		return err
 	}
@@ -144,9 +179,16 @@ func splitCSV(value string) []string {
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `Usage:
   golem analyze [options]
+  golem bench [options]
+  golem golden [options]
   golem version
 
-Options:
+Commands:
+  analyze   Run static analysis on a Go project
+  bench     Measure the annotated corpus and pinned upstream fixtures
+  golden    Generate or verify report digests for the golden fixtures
+
+analyze Options:
   --dir <path>             Go module/workspace directory to analyze (default: .)
   --no-recurse             Disable recursive child go.mod discovery when root has no go.mod/go.work
   --patterns <patterns>    Comma-separated go/packages patterns (default: ./...)
@@ -175,5 +217,26 @@ Options:
   --tags <tags>            Comma-separated Go build tags
   --tests                  Include test variants
   --include-stdlib         Include standard-library usages and call graph nodes
-  --include-local          Include current-module usages and graph nodes (default: true)`)
+  --include-local          Include current-module usages and graph nodes (default: true)
+
+bench Options:
+  --manifest <file>        Fixture manifest (default: testdata/bench/manifest.json)
+  --corpus <dir>           Corpus root (default: sibling of the manifest)
+  --tier <tier>            quick (corpus only) or full (adds upstream repositories)
+  --only <names>           Comma-separated fixture names
+  --taint-engine <name>    Run every fixture under this engine: legacy or seam
+  --baseline <file>        Compare against this baseline
+  --update-baseline <file> Write measurements to this baseline
+  --fail-on-regression     Exit non-zero on a blocking regression, unexpected
+                           annotation failure, or report integrity violation
+  --sarif <dir>            Write per-fixture SARIF findings
+  --compare <file>         Results from the incumbent engine; prints a promotion verdict
+  --fail-unless-promotable With --compare, exit non-zero unless every criterion is met
+  --cache-dir <dir>        Upstream fixture cache (default: $XDG_CACHE_HOME/golem-bench)
+  --out <file>             Results JSON path (default: stdout)
+
+golden Options:
+  --manifest, --corpus, --tier, --only, --cache-dir as above
+  --dir <dir>              Golden digest directory (default: testdata/golden)
+  --update                 Write digests instead of comparing them`)
 }

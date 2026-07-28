@@ -10,7 +10,7 @@ on:
       repos:
         description: 'Comma-separated built-in repo names or all'
         required: false
-        default: 'fatih-color,gorilla-mux,gin-examples,govwa,go-sqlite3'
+        default: 'fatih-color,gorilla-mux,govwa,go-sqlite3'
       callgraph_modes:
         description: 'Comma-separated call graph modes'
         required: false
@@ -58,7 +58,7 @@ jobs:
     env:
       CGO_ENABLED: '1'
       GOFLAGS: '-mod=mod'
-      GOLEM_E2E_REPOS: ${{ github.event.inputs.repos || 'fatih-color,gorilla-mux,gin-examples,govwa,go-sqlite3' }}
+      GOLEM_E2E_REPOS: ${{ github.event.inputs.repos || 'fatih-color,gorilla-mux,govwa,go-sqlite3' }}
       GOLEM_E2E_CALLGRAPH_MODES: ${{ github.event.inputs.callgraph_modes || 'none,static' }}
       GOLEM_E2E_DATAFLOW_MODES: ${{ github.event.inputs.dataflow_modes || 'none,security,all' }}
       GOLEM_E2E_DATAFLOW_CALLGRAPH: ${{ github.event.inputs.dataflow_callgraph || 'static' }}

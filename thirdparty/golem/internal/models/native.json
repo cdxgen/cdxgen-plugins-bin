@@ -1,0 +1,13 @@
+[
+  {"id":"cgo-func.sink","kind":"sink","function":"_Cfunc_","match":"prefix","category":"native-interop","taintKinds":["native"],"confidence":"high","description":"Any cgo wrapper call (_Cfunc_*) crosses the Go/C boundary; treat reaching it as a finding"},
+  {"id":"cgo-cstring.passthrough","kind":"passthrough","function":"_Cfunc_CString","category":"native-conversion","taintKinds":["native"],"description":"C.CString converts a Go string to a C string; taint crosses the boundary"},
+  {"id":"cgo-cbytes.passthrough","kind":"passthrough","function":"_Cfunc_CBytes","category":"native-conversion","taintKinds":["native"],"description":"C.CBytes converts a Go []byte to C bytes; taint crosses the boundary"},
+  {"id":"cgo-gostring.passthrough","kind":"passthrough","function":"_Cfunc_GoString","category":"native-conversion","taintKinds":["native"],"description":"C.GoString converts a C string to a Go string; data from C side carries taint"},
+  {"id":"cgo-gostring.source","kind":"source","function":"_Cfunc_GoString","category":"native-conversion","taintKinds":["native"],"confidence":"high","description":"A C-returned buffer is untrusted input: nothing in Go checked where C obtained it"},
+  {"id":"cgo-gostringn.passthrough","kind":"passthrough","function":"_Cfunc_GoStringN","category":"native-conversion","taintKinds":["native"],"description":"C.GoStringN converts a C string of known length to a Go string"},
+  {"id":"cgo-gostringn.source","kind":"source","function":"_Cfunc_GoStringN","category":"native-conversion","taintKinds":["native"],"confidence":"high","description":"A C-returned buffer is untrusted input"},
+  {"id":"cgo-gobytes.passthrough","kind":"passthrough","function":"_Cfunc_GoBytes","category":"native-conversion","taintKinds":["native"],"description":"C.GoBytes converts C bytes to a Go []byte"},
+  {"id":"cgo-gobytes.source","kind":"source","function":"_Cfunc_GoBytes","category":"native-conversion","taintKinds":["native"],"confidence":"high","description":"A C-returned buffer is untrusted input"},
+  {"id":"cgo-malloc.sink","kind":"sink","function":"_Cfunc_malloc","category":"native-interop","taintKinds":["native"],"description":"C.malloc allocates C-side memory"},
+  {"id":"cgo-free.sink","kind":"sink","function":"_Cfunc_free","category":"native-interop","taintKinds":["native"],"description":"C.free deallocates C-side memory"}
+]

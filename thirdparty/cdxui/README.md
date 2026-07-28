@@ -80,23 +80,23 @@ Options:
 
 ## Keyboard shortcuts
 
-| Key                              | Action                                                         |
-| -------------------------------- | -------------------------------------------------------------- |
-| `0`-`7`                          | Switch to tab by number                                        |
-| `Tab` / `Shift+Tab`              | Next/previous tab                                              |
-| `Up`/`Down` or `j`/`k`           | Move selection                                                 |
-| `Ctrl+Up`/`Ctrl+Down`            | Scroll panel without moving selection                          |
-| `Space` / `b`                    | Page down / page up                                            |
-| `g` / `G`                        | Go to top / bottom                                             |
-| `Enter`                          | Toggle detail panel (or expand dependency node in Summary tab) |
-| `/`                              | Focus search bar                                               |
-| `Esc`                            | Clear search                                                   |
+| Key                              | Action                                                             |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `0`-`7`                          | Switch to tab by number                                            |
+| `Tab` / `Shift+Tab`              | Next/previous tab                                                  |
+| `Up`/`Down` or `j`/`k`           | Move selection                                                     |
+| `Ctrl+Up`/`Ctrl+Down`            | Scroll panel without moving selection                              |
+| `Space` / `b`                    | Page down / page up                                                |
+| `g` / `G`                        | Go to top / bottom                                                 |
+| `Enter`                          | Toggle detail panel (or expand dependency node in Summary tab)     |
+| `/`                              | Focus search bar                                                   |
+| `Esc`                            | Clear search                                                       |
 | `f`                              | Filter by component type (or cycle vuln quick-filter on Vulns tab) |
-| `s`                              | Cycle sort column                                              |
-| `Space` (on Deps/Summary)        | Toggle expand/collapse of selected dependency node             |
-| `Left`/`Right` (on Deps/Summary) | Collapse/expand selected dependency node                       |
-| `+`/`-` (on Deps/Summary)        | Expand all / collapse all dependency nodes                     |
-| `q`                              | Quit                                                           |
+| `s`                              | Cycle sort column                                                  |
+| `Space` (on Deps/Summary)        | Toggle expand/collapse of selected dependency node                 |
+| `Left`/`Right` (on Deps/Summary) | Collapse/expand selected dependency node                           |
+| `+`/`-` (on Deps/Summary)        | Expand all / collapse all dependency nodes                         |
+| `q`                              | Quit                                                               |
 
 Mouse wheel scrolls panels vertically.
 

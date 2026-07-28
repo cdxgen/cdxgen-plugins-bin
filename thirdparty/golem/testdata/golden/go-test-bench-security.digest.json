@@ -1,0 +1,346 @@
+{
+  "fixture": "go-test-bench",
+  "commit": "92445700823205281369911a72b7127f18c8c9ed",
+  "config": "security",
+  "schemaVersion": "https://cdxgen.github.io/cdxgen-plugins-bin/golem/schema/v6",
+  "counts": {
+    "apiEndpoints": 8,
+    "buildDirectives": 4,
+    "declarations": 846,
+    "files": 121,
+    "imports": 536,
+    "modules": 38,
+    "nativeArtifacts": 0,
+    "packages": 31,
+    "securitySignals": 100,
+    "usages": 2189
+  },
+  "callGraph": {
+    "algorithm": "rta",
+    "nodeCount": 1151,
+    "edgeCount": 6419,
+    "nodesByKind": {
+      "function": 1151
+    },
+    "edgesByCallType": {
+      "defer": 223,
+      "func-value": 1778,
+      "interface": 3447,
+      "static": 971
+    },
+    "nodeSetHash": "2ee7bc8f84b8c957",
+    "edgeSetHash": "ee67dfc7289356d2",
+    "syntheticNodes": 304,
+    "stdlibNodes": 0,
+    "externalNodes": 562
+  },
+  "dataFlow": {
+    "mode": "security",
+    "nodeCount": 333,
+    "edgeCount": 385,
+    "sliceCount": 191,
+    "uniqueFlowCount": 169,
+    "summaryCount": 0,
+    "flowsByCategoryPair": {
+      "http-input-\u003ecommand-execution": 6,
+      "http-input-\u003edata": 4,
+      "http-input-\u003eexternal-service": 33,
+      "http-input-\u003efilesystem": 12,
+      "http-input-\u003eformatted-output": 3,
+      "http-input-\u003ehttp-response": 1,
+      "http-input-\u003elogging": 28,
+      "http-input-\u003epanic": 96,
+      "http-input-\u003eredirect": 4,
+      "parameter-\u003ecommand-execution": 1,
+      "parameter-\u003elogging": 1,
+      "parameter-\u003epanic": 1,
+      "parameter-\u003eredirect": 1
+    },
+    "flowsBySeverity": {
+      "critical": 7,
+      "high": 48,
+      "medium": 136
+    },
+    "flowKeySetHash": "3b9c0d1c12c24656",
+    "edgeConnectivity": 1,
+    "integrityViolations": 0,
+    "dependencyCrossingSlices": 105,
+    "sampleFlows": [
+      {
+        "flowKey": "df-flow|sha256:0016713881a274e120a8beaf17971e0733c4abf79cd0fe27c11d71126ea2053a",
+        "source": "net/url.(*URL).Query",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_buffered_query_read_file_parameters.go:56",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:02120dd3d73823a763f86a16596a53ce1701d8a6f3688164a1225c313efd44b7",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).assignTo",
+        "sourceAt": "cmd/go-swagger/restapi/operations/xss/xss_get_buffered_query_reflected_xss_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3215",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:02b90940b32eb17c6720e810a628cb824cc14074374d6196555e8c59a51bc4a3",
+        "source": "net/http.(*Request)",
+        "sink": "(net/http.Header).Get",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_create.go:42",
+        "sinkAt": ".../go-openapi/runtime@v0.23.3/request.go:51",
+        "severity": "high",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0388bd7d994f16b1563b93efad4f8e11c7834253d8205868b67dfd2fabcc9571",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_buffered_query_write_file_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0b8545eab4d56e6e840cd18c655f538e21575f2c129089a67adec21941984aa5",
+        "source": "net/http.(*Request)",
+        "sink": "(*github.com/go-openapi/runtime/middleware.Context).Respond",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_read_file.go:42",
+        "sinkAt": ".../runtime@v0.23.3/middleware/context.go:566",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0b8545eab4d56e6e840cd18c655f538e21575f2c129089a67adec21941984aa5",
+        "source": "net/http.(*Request)",
+        "sink": "(*github.com/go-openapi/runtime/middleware.Context).Respond",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_read_file.go:42",
+        "sinkAt": ".../runtime@v0.23.3/middleware/context.go:566",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0c1fdd66517bb7f6f6873c274a8fe2ad8dcb972de5a296c559b47ca524796196",
+        "source": "net/http.(*Request)",
+        "sink": "(*database/sql.DB).Exec",
+        "sourceAt": "pkg/servestd/servestd.go:71",
+        "sinkAt": "internal/injection/sqli/sql-injection.go:57",
+        "severity": "high",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:0f127db4a850b097c46428f1714cbece9271e66b832d5e67b68121d8a686502c",
+        "source": "github.com/gin-gonic/gin.(*Context).Param",
+        "sink": "(*github.com/gin-gonic/gin.Context).String",
+        "sourceAt": "pkg/servegin/servegin.go:74",
+        "sinkAt": "pkg/servegin/servegin.go:92",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:1a087d193ffa8438b209f04a6d2b1baf9246a5d7cb9684607d9aa6a5d0591b05",
+        "source": "net/http.(*Request)",
+        "sink": "log.Print",
+        "sourceAt": "pkg/servechi/servechi.go:28",
+        "sinkAt": "internal/injection/cmdi/cmd-injection.go:65",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:1bd8fda344d11f5a813fd56c43524b62e8ac2266227e7f8de53b79692f04ecee",
+        "source": "net/http.(*Request)",
+        "sink": "log.Println",
+        "sourceAt": "pkg/servejschmidt/servejschmidt.go:79",
+        "sinkAt": "pkg/servejschmidt/servejschmidt.go:80",
+        "severity": "medium",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:1f0e59e37871b626ebabc63e8d26cc8cc3591b983f3419426ee7697a5e9913d9",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).assignTo",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_buffered_query_write_file_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3215",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:20cf5cf633a6f3767365d02bfadcde64c507e7af14de48711f53f8db04cf2f47",
+        "source": "net/url.(*URL).Query",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_write_file_parameters.go:56",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:20d7e9d89ebe3b94e08026ecb9e0dd9aec7369532ef5b0328c89d1add215c281",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_buffered_query_open_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:23206a3828ec8c8d28973ab0db17e8284660ebd310f9367a2dadff1343ffe659",
+        "source": "net/http.(*Request)",
+        "sink": "(net/http.Header).Get",
+        "sourceAt": "cmd/go-swagger/restapi/operations/sql_injection/sql_injection_front.go:42",
+        "sinkAt": ".../go-openapi/runtime@v0.23.3/request.go:51",
+        "severity": "high",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2435ba4fcf5bed61a6fd918bc33a0f770957747c02c777f68be095dbd5d293f1",
+        "source": "net/http.(*Request)",
+        "sink": "(net/http.Header).Get",
+        "sourceAt": "pkg/servestd/servestd.go:71",
+        "sinkAt": "internal/common/input.go:87",
+        "severity": "high",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:259ce14a7cc84abd5de2afe681a6d724c885fe3e13f2badc98263984764bcef1",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_create_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:261b80354a41a1465a38c9b95ed4e91eb94f70f4802633df772eb1ba574b9242",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/sql_injection/sql_injection_get_query_exec_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:274ecf4f9926454e78e294c47e8094946e29d1a2d3a9c1ec7920dc288deba8c5",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/cmd_injection/cmd_injection_get_query_command_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2763a918f9c7b692888b8c5835f7c1c1d7b1c12cc32b36ac8aa89d3f6d890c7c",
+        "source": "net/http.(*Request)",
+        "sink": "(net/http.Header).Get",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_open.go:42",
+        "sinkAt": ".../go-openapi/runtime@v0.23.3/request.go:51",
+        "severity": "high",
+        "pathLength": 2,
+        "connected": true,
+        "taintKinds": "url,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:27d1515ffa49a964399e079604604f2243a29dc5535975c21baba5fbf4b8254b",
+        "source": "net/url.(*URL).Query",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/xss/xss_get_query_reflected_xss_parameters.go:56",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2852299794ac600a9124f5739f339f48685c719b87c16cbff48c49f8341d0af8",
+        "source": "net/url.(*URL).Query",
+        "sink": "(reflect.Value).assignTo",
+        "sourceAt": "cmd/go-swagger/restapi/operations/cmd_injection/cmd_injection_get_query_command_context_parameters.go:56",
+        "sinkAt": ".../src/reflect/value.go:3215",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:28be77b76e62e6fbccb8cdee154ca16775abf804d10d274a0cb84c13c714b2ca",
+        "source": "net/http.(*Request)",
+        "sink": "log.Println",
+        "sourceAt": "pkg/servechi/servechi.go:28",
+        "sinkAt": "internal/ssrf/ssrf.go:60",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2905e60315e8a75c1e665d775f9438fa01b7e746ff88522f27a732b08b489302",
+        "source": "net/url.(*URL).Query",
+        "sink": "(reflect.Value).Convert",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_buffered_query_write_file_parameters.go:56",
+        "sinkAt": ".../src/reflect/value.go:3227",
+        "severity": "medium",
+        "pathLength": 5,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:29e445bde616d1702536b4e24b8d4d63179a63cecc6b50dad5de479fee5514ed",
+        "source": "net/http.(*Request)",
+        "sink": "(reflect.Value).assignTo",
+        "sourceAt": "cmd/go-swagger/restapi/operations/xss/xss_get_query_reflected_xss_parameters.go:51",
+        "sinkAt": ".../src/reflect/value.go:3215",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      },
+      {
+        "flowKey": "df-flow|sha256:2a4f64019d10f47ca5830805a4c49bc4990c4960d4ddd20546532aa32968df99",
+        "source": "net/http.(*Request)",
+        "sink": "(*github.com/go-openapi/runtime/middleware.Context).Respond",
+        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_write_file.go:42",
+        "sinkAt": ".../runtime@v0.23.3/middleware/context.go:566",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "secret,user-input"
+      }
+    ]
+  }
+}

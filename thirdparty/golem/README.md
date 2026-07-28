@@ -43,17 +43,26 @@ For a field-by-field JSON reference, see [JSON_ATTRIBUTE_REFERENCE.md](JSON_ATTR
 
 Call graphs are built from Go SSA using the implementations in `golang.org/x/tools/go/callgraph`:
 
-| Mode   | Implementation   | Practical behavior                                                                                                                            |
-| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| none   | No graph         | Fastest mode. Reports source evidence only.                                                                                                   |
-| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited.                                                               |
-| cha    | cha.CallGraph    | More conservative for interface dispatch. Usually more edges.                                                                                 |
-| rta    | rta.Analyze      | Starts from discovered init and main roots. Useful for executable reachability.                                                               |
-| vta    | vta.CallGraph    | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by x/tools. |
+| Mode   | Implementation   | Practical behavior                                                                                                                                                                                                   |
+| ------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| none   | No graph         | Fastest mode. Reports source evidence only.                                                                                                                                                                          |
+| static | static.CallGraph | Fast and deterministic. Direct calls are reliable, dynamic dispatch is limited.                                                                                                                                      |
+| cha    | cha.CallGraph    | More conservative for interface dispatch. Usually more edges.                                                                                                                                                        |
+| rta    | rta.Analyze      | Starts from the resolved root set (see `--roots`). Useful for executable reachability.                                                                                                                               |
+| vta    | vta.CallGraph    | Uses variable type analysis over functions reachable in the static graph. Often more precise, but depends on the shapes supported by x/tools.                                                                        |
+| auto   | CHA → RTA → VTA  | Seeds RTA from the resolved roots, then iterates VTA twice over that result, falling back down the chain on timeout (`--callgraph-timeout`). The algorithm that actually ran is recorded in `callGraph.diagnostics`. |
 
 Golem converts the raw graph into stable node and edge records. A node represents an SSA function with package path, package name, module, package URL when available, receiver, signature, local or external classification, standard library classification, synthetic flag, and source position. An edge records caller, callee, call site location, package URLs for both ends, and whether the call site has a static callee.
 
-Graph filtering is explicit. Standard-library functions are excluded unless `--include-stdlib` is set. Local module functions are included by default and can be disabled with `--include-local=false`.
+Graph filtering is explicit and is applied as a _view_, after reachability has been computed on the complete graph, so filtering never changes what golem concluded.
+
+Standard-library functions are excluded unless `--include-stdlib` is set, and local module functions can be excluded with `--include-local=false`. Excluding a scope does not sever the graph: a path that runs through omitted nodes is preserved as a single edge marked `collapsed`, carrying the hop count and the packages traversed, so a handler invoked through `net/http` still has an edge from the code that registered it. Bridges are only walked through statically resolved calls — following speculative interface dispatch inside omitted code multiplies guesses, and on a mid-sized service that turns a few thousand real edges into tens of thousands of invented ones. The final hop into a visible node may be a dispatch, since that is the callback shape worth keeping.
+
+`--dependency-detail` controls how much of a dependency's interior is shown: `collapse` (default) replaces interior chains with one annotated edge, `drop` removes them, and `full` keeps everything. In every case the boundary edge from local code into a dependency is retained, because that edge is the evidence a reachability consumer wants. `--include-all-flows` is an alias for `full`.
+
+`--roots` selects entry points: `main` (default, with `init` and type-resolved framework registrations), `init`, `exported`, `tests`, `handlers`, `all`, or `symbol:<regex>`, repeatable. Root selection is limited to the module under analysis. `exported` is what makes a library analyzable — with `main`/`init` roots a module without a `main` yields almost nothing, since nothing is reachable.
+
+`callGraph.reachability` reports, per node, whether any root reaches it, the shortest distance, and which roots. Pass `--reachable-symbols <file>` to also emit shortest witness paths for named symbols (`--max-paths-per-symbol`, default 3).
 
 Call graphs are also used by data-flow analysis when `--dataflow-callgraph` is not `none`. In that case Golem indexes dynamic callees by call site and replays method summaries through those edges.
 
@@ -122,6 +131,57 @@ Golem is static analysis. It does not execute the program, evaluate runtime conf
 
 The data-flow engine is path-insensitive and mostly field-insensitive. It uses compact traces and bounded materialization, so long or highly branched flows may be truncated. Summaries are approximate and intentionally small. Interface and function-value calls improve when a call graph is enabled, but dynamic dispatch remains conservative.
 
+Call-graph construction was reworked in phase 1: nodes are classified by visibility rather than dropped, paths through omitted nodes are preserved as annotated collapsed edges, `--roots` selects entry points (`exported` makes library-only modules analyzable — `gorilla/mux` goes from one node and no edges to 90 nodes and 122 edges), `--callgraph auto` seeds VTA from RTA, edges carry a dispatch kind, and `callGraph.reachability` reports per-node reachability with witness paths.
+
+Two taint engines ship. `--taint-engine seam` (Summary Evaluation Across
+Modules) is the default; `--taint-engine legacy` is the older engine, kept as an
+escape hatch. SEAM replaces the legacy per-function walker with an SSA fixpoint
+over basic blocks, summaries computed bottom-up over the call graph's SCC
+condensation, an implements-index for interface dispatch, a structured model
+database with prefix matching for the cgo boundary, and argument-write effects
+for the standard-library carriers (`io.Copy`, `json.Unmarshal`,
+`strings.Builder`, `context.Value`, error wrapping). A `known-fail` marker can
+name an engine (`known-fail=seam:9`), because a defect closed in one engine and
+open in the other is the normal state of the project and the corpus has to be
+able to say so.
+
+On the quick tier (94 paired results) SEAM reaches recall 1.000 against legacy's
+0.766 at the same precision, 0.982, with no open defects against 23 and 0.90x the
+median wall clock. It finds flows legacy cannot — through package-level
+variables, eight-deep call chains, a slice of pointers, into `html/template`,
+across the cgo boundary, through deferred closures and through goroutine worker
+pools. Promotion is gated by `golem bench --taint-engine seam --compare
+<legacy.json> --fail-unless-promotable`, which also compares per-fixture flow
+counts on the real repositories in `--tier full` and refuses to return a verdict
+from criteria it had no data for.
+
+Recall is also measured on real code, not only on the corpus. Two deliberate
+vulnerability benchmarks carry ground truth, in
+`testdata/bench/annotations/`: on `go-test-bench` SEAM finds all nine declared
+routes to legacy's one, and on `shiftleft-go-demo` four of five to legacy's
+two. The fifth is a zip slip through a cgo archive library whose package
+produces no SSA; it is marked `known-fail=33`.
+
+Annotating a real repository is also where the limits of the model get written
+down. shiftleft-go-demo declares seven exploits and only five are taint flows:
+its two IDOR routes reach a compile-time-constant parameterized statement and
+are authorization failures, and its CSA route is a client-side check. A taint
+engine that reported those would be wrong, and the annotation file says so. Closing that gap needed five fixes that no corpus fixture would have
+prompted, the largest being dispatch through a func-typed struct field
+(`internal/seam/funcfield.go`) and reading taint out of a variadic slice when
+applying a passthrough — without which `fmt.Sprintf`, the commonest taint
+carrier in Go, returned clean.
+
+The following limitations are measured by the corpus rather than estimated, and each is tracked by a `known-fail` marker:
+
+- **Dependencies are not summarized outside `--dataflow all`.** In the default modes no summary is computed for any function in a third-party module, so a flow contained within a dependency is invisible (`testdata/corpus/dep-only-flow`). Where taint does appear to cross a dependency in those modes, it is usually the blanket "assume an unresolved call returns its arguments" rule rather than an understanding of the callee — which also invents flows through functions that discard their input (`dep-drops-taint-negative`).
+- **Standard-library coverage is a model list, not a general mechanism.** The common carriers are modelled — `io.Copy`, `io.ReadAll`, `bufio.Scanner`, `strings.Builder`, `bytes.Buffer`, `encoding/json.Unmarshal`, `context.WithValue`/`Value`, error wrapping — including the calls that fill memory reached through an argument rather than returning it. Anything not on that list still terminates taint, and `dataFlow.unmodeledSinks` is not yet emitted, so absence is silent.
+- **Only one route to a value is kept.** When taint reaches a value by two routes the shorter one is reported and the other is dropped, because a trace is a path and merging two of them leaves a slice whose nodes and edges disagree about how the taint travelled. Every reported slice is a connected source-to-sink path, enforced on every corpus case; the route shown is not necessarily the only one.
+- **Symbols are matched as substrings of the SSA symbol text.** Patterns written in source notation are normalised into the notation the SSA printer uses, which is what makes `database/sql` and the framework patterns match at all; but the matcher is still textual, so a pattern can match a symbol it was not meant to. Structural matching on resolved types is the durable fix.
+- **Loops, deep chains and recursion.** The intra-procedural pass runs once per function with no fixpoint and treats a value cycle as untainted; the summary pass iterates a fixed four times (`loop-carried-taint`, `deep-chain-8-levels`, `recursion`, `mutual-recursion`).
+- **Globals and generics.** Package-level variables carry no taint between functions, and summaries do not follow generic instantiations back to their origin (`global-var-carrier`, `generic-container`, `generic-constraint-method`).
+- **The native boundary is recognised but not yet traversed by every analysis.** cgo crossings are reported in `nativeBoundary[]` in both directions, the conversion functions are modelled as taint operations, and `//go:linkname` produces real call-graph edges. What does not yet work: taint does not cross a pull linkname, because the local declaration has no body to walk into (`linkname`); there is no C-side call graph, so a flow that enters C and returns through a different function is two findings rather than one; and `--build-matrix` is not implemented, so a single build configuration is analysed and `buildShapeDeltas[]` reports what that configuration left out rather than analysing it.
+
 Crypto evidence classifies API use and obvious material indicators. It does not validate protocol handshakes, key sizes derived at runtime, entropy quality beyond recognized APIs, certificate validation logic beyond simple patterns, or whether a weak primitive is acceptable for a non-security checksum.
 
 Package loading follows the local Go environment. Missing modules, unsupported build tags, cgo settings, platform differences, or incomplete workspaces can change what Golem sees. Always inspect diagnostics before treating absence of evidence as meaningful.
@@ -130,12 +190,76 @@ Package loading follows the local Go environment. Missing modules, unsupported b
 
 Threat model notes live in [THREAT_MODEL.md](THREAT_MODEL.md). In short, Golem treats the analyzed repository as untrusted input, does not run `go:generate`, and avoids copying raw secret values into the report. Source paths, package names, module paths, and symbols can still be sensitive metadata.
 
+## Measured Behaviour
+
+Golem's accuracy is measured rather than asserted. Two artifacts do the work:
+
+- **The annotated corpus** (`testdata/corpus/`). Each case is a self-contained
+  module carrying inline expectations, checked by `TestCorpus`:
+
+  ```go
+  // golem:want     flow source=http-input sink=command-execution [count=N] [mode=security|all] [connected] [known-fail=<defect>]
+  // golem:want-not flow source=http-input sink=filesystem
+  // golem:want     edge from=pkg.Handler to=pkg.exec calltype=static
+  // golem:want     reachable symbol=vulnpkg.Bad from=main.main maxdepth=4
+  ```
+
+  Values match exactly; prefix one with `~` for a substring match. Every case is
+  evaluated in both `security` and `all` data-flow mode, because an expectation
+  that only holds under `--dataflow all` is a gap rather than a feature — mark
+  those with `mode=all`. Unknown category names are rejected at parse time, so a
+  negative expectation cannot be vacuously satisfied by naming a category golem
+  never emits.
+
+  `known-fail=<n>` records a defect the expectation currently trips over. The
+  suite is a ratchet in both directions: an unmarked failure fails the build, and
+  a marked expectation that starts passing also fails, asking for the marker to be
+  removed. Known limitations cannot accumulate silently and cannot outlive their
+  fix.
+
+- **The benchmark** (`golem bench`), which runs the corpus plus pinned upstream
+  repositories and compares the measurements to `testdata/bench/baseline.json`:
+
+  ```bash
+  golem bench --tier quick --baseline testdata/bench/baseline.json --fail-on-regression
+  golem bench --tier full --only go-test-bench --sarif /tmp/sarif
+  golem golden --tier full --only gorilla-mux            # verify report digests
+  ```
+
+  Upstream fixtures are pinned to full commit SHAs and fetched by SHA, so a
+  baseline describes one exact tree. Metrics: precision, recall and F1 from
+  per-expectation outcomes with every unsanctioned flow counted as a false
+  positive; `edgeConnectivity`, the fraction of reported flows whose node and edge
+  lists form a real path from source to sink; `integrityViolations`, references to
+  identifiers absent from the report; and `dependencyCrossingSlices`, flows that
+  leave the module under analysis. Regressions block; improvements are reported
+  so the baseline gets refreshed.
+
+  Golden artifacts are report _digests_ (counts, category distributions, content
+  hashes over sorted identifiers, and a bounded sample of spelled-out flows)
+  rather than whole reports, which for a medium repository run to tens of
+  megabytes of mostly machine-specific detail.
+
+Current quick-tier measurement, for reference: 90 expectations across 41 corpus
+cases, 38 of them marked against a known defect. On the labeled upstream
+fixtures `edgeConnectivity` is 0.43 to 0.84 — a quarter to a half of reported
+flows carry a path that does not connect, which the small corpus cases never
+trigger. `golem bench --tier full` reproduces this.
+
 ## Build and Test
 
 ```bash
-go test ./...
+go test ./... -short   # ~15s: everything except the corpus suites
+go test ./...          # ~3.5min: adds the corpus and engine-parity suites
+go test ./... -golem.full   # ~8min: the above over every data-flow mode
 go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
 ```
+
+The corpus suites are slow for a structural reason worth knowing: every `Analyze`
+call loads and builds SSA for the whole standard-library closure, about 1.3
+seconds even for a twelve-line fixture, and the suites make a few hundred such
+calls. The work is parallel and the fixed cost dominates, so the useful levers
+are how many configurations run rather than how fast the analysis is.
 
 Cross-platform release builds are handled by the Makefile:
 
