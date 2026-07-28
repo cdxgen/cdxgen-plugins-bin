@@ -50,9 +50,19 @@ want flow source=http-input sink=template-injection sourcefn=~xss2Handler known-
 # value is the archive itself, so the model marks the receiver relevant rather
 # than any argument, and the category is zip-slip.
 #
-# known-fail=33: the models are in place (NewArchiveFromReader as a
-# passthrough, (*Archive).Extract as a receiver-relevant zip-slip sink) and the
-# package builds, but no flow is reported and the hop that drops it has not
-# been isolated. The chain is r.Body -> NewArchiveFromReader -> Extract, all
-# three of which are individually shapes the engine handles elsewhere.
-want flow source=http-input sink=zip-slip sinkfn=~Extract known-fail=33
+# SEAM finds this flow. It did not until the SSA builder stopped skipping
+# packages that inherit IllTyped from a dependency: go-unarr's `import "C"`
+# cannot be resolved by the loader, packages.IllTyped is transitive, and
+# ssautil.AllPackages therefore built no bodies for path-traversal even though
+# its own type-checking succeeded with no errors. See buildAllPackages in
+# internal/analyzer/ssa_context.go.
+#
+# known-fail=legacy:33: legacy reports no slice anywhere in this repository that
+# mentions unarr, so it drops the flow somewhere between the r.Body field read
+# and the sink. It is not the sink shape — legacy does honour ReceiverRelevant
+# (dataflow.go:1476) and does propagate through *ssa.Extract (dataflow.go:1666).
+# The hop that loses it has not been isolated. SEAM's depCrossing count on this
+# repository is 54 against legacy's 0, so the likeliest cause is the general
+# weakness this marker shares with the other legacy xfails: taint that has to
+# cross into a dependency's modelled surface and come back out.
+want flow source=http-input sink=zip-slip sinkfn=~Extract known-fail=legacy:33
