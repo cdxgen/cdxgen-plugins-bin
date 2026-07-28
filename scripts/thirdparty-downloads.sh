@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly OSQUERY_VERSION="5.23.0"
-readonly UPX_VERSION="5.1.1"
+readonly OSQUERY_VERSION="5.23.1"
+readonly UPX_VERSION="5.2.0"
 readonly DOSAI_VERSION="3.0.5"
 
 print_usage() {
@@ -51,27 +51,27 @@ resolve_asset() {
     osquery-linux-amd64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.linux_x86_64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="0045739a68475760f7bc26ca493afda71cc02a8e4d29984717742d3e4c099296"
+      asset_sha256="0f37a478a1dbda24b67c81551e32d734b392c5a2f5deb156bf1c41ca204cfa67"
       ;;
     osquery-linux-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.linux_aarch64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="d9d4e5f6eeabda4949ae0ba6a8db424c789ec60ffef99269f479ff4b73f46e33"
+      asset_sha256="9ae763820166f75f19970b5147b1930a308865a923ab127f4b8bbaea7b69962a"
       ;;
     osquery-darwin-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}_1.macos_arm64.tar.gz"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="968ef172e900e05bf8365974293c94dbbb0351d2fcc4c54404629036e3336cc6"
+      asset_sha256="5484f0b62e05a7b2fa9d6e43f038915ea2b7ce063d59bd671ede0cf8dd0552da"
       ;;
     osquery-windows-amd64)
       asset_filename="osquery-${OSQUERY_VERSION}.windows_x86_64.zip"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="5ddb8e1c23fd870838ef4ff47c0d2e5a080f22a6944fc4870d726e7b20e962a4"
+      asset_sha256="7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a6e1bdf30b"
       ;;
     osquery-windows-arm64)
       asset_filename="osquery-${OSQUERY_VERSION}.windows_arm64.zip"
       asset_url="https://github.com/osquery/osquery/releases/download/${OSQUERY_VERSION}/${asset_filename}"
-      asset_sha256="92a820a39c12f7516040b62dc8e8546469c821f505eed0b7ff1eb7e43cc4b018"
+      asset_sha256="0913d05cc3fc92dd9253c945caacde10a776408f267cc1cc853a05de24dba900"
       ;;
     dosai-linux-amd64)
       asset_filename="Dosai-linux-amd64"
@@ -121,12 +121,12 @@ resolve_asset() {
     upx-linux-amd64)
       asset_filename="upx-${UPX_VERSION}-amd64_linux.tar.xz"
       asset_url="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${asset_filename}"
-      asset_sha256="1ff660454227861e00772f743f66b900072116b9dc24f6ee28b97cce88a7828a"
+      asset_sha256="3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1"
       ;;
     upx-linux-arm64)
       asset_filename="upx-${UPX_VERSION}-arm64_linux.tar.xz"
       asset_url="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${asset_filename}"
-      asset_sha256="a307c2c821eeab47607ba5c232408b22ab884cca13884682508b98f7308b8443"
+      asset_sha256="55d48a61e8ffd17152db871c855376cba7f08e830b37799d0947a16dff8ec36c"
       ;;
     *)
       echo "Unsupported asset key: $asset_key" >&2
