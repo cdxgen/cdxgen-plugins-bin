@@ -1,0 +1,36 @@
+build.ps1
+  s_32691335cadfff::t_3029cd7f937fbc 7,9
+  s_32691335cadfff::t_1aeea6b4bbec91 10,12
+thirdparty/sourcekitten/build.sh
+  s_32691335cadfff::t_96a4862c6c39b7 6-9
+scripts/thirdparty-downloads.sh
+  s_32691335cadfff::t_a6bca4a7aae451 59
+  s_32691335cadfff::t_8e7bdcb43c063c 54
+  s_32691335cadfff::t_f9399b52e886e6 124
+  s_32691335cadfff::t_3dba57042f2d8f 5
+  s_32691335cadfff::t_5159633c2dd4a7 69
+  s_32691335cadfff::t_e89f6ea3795f9a 74
+  s_32691335cadfff::t_1b60fdeafdbd0c 129
+  s_32691335cadfff::t_1968cbbd84996e 64
+  s_32691335cadfff::t_e969ffae21488b 4
+scripts/generate-metadata.js
+  s_32691335cadfff::t_b423858e8a073a 9
+  s_32691335cadfff::t_65fcf4edd37ee7 283
+  s_32691335cadfff::t_75f1dbd028b143 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f916bb1eb2e89c43ba35a858ed78d8ca03cf01f0",
+  "prompts": {},
+  "sessions": {
+    "s_32691335cadfff": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_057ea7557ffeB5YHZpcBudvG2i",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
