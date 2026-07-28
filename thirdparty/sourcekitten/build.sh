@@ -3,10 +3,10 @@
 pushd .
 cd thirdparty/sourcekitten
 rm -rf SourceKitten
-wget https://github.com/jpsim/SourceKitten/releases/download/0.37.3/SourceKitten-0.37.3.tar.gz
-tar -xf SourceKitten-0.37.3.tar.gz
-rm SourceKitten-0.37.3.tar.gz
-mv SourceKitten-0.37.3 SourceKitten
+wget https://github.com/jpsim/SourceKitten/releases/download/0.38.0/SourceKitten-0.38.0.tar.gz
+tar -xf SourceKitten-0.38.0.tar.gz
+rm SourceKitten-0.38.0.tar.gz
+mv SourceKitten-0.38.0 SourceKitten
 cd SourceKitten
 swift build -c release
 chmod +x .build/release/sourcekitten

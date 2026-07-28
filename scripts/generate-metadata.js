@@ -6,8 +6,8 @@ import { fileURLToPath } from "url";
 const pluginsPackageJson = JSON.parse(
   fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
 );
-const osqueryVersion = "5.23.0";
-const sourcekittenVersion = "0.37.3";
+const osqueryVersion = "5.23.1";
+const sourcekittenVersion = "0.38.0";
 const trivyVersion = "v0.68.2";
 const dosaiVersion = "v3.0.5";
 const trustInspectorVersion = pluginsPackageJson.version;
@@ -280,7 +280,7 @@ async function main() {
   const outData = { bomFormat: "CycloneDX", specVersion: "1.7", version: 1, metadata: {timestamp: `${new Date().toISOString().split(".")[0]}Z`, lifecycles: [{phase: "post-build"}]}, components: allComponents };
   if (allDependencies.length > 0) {
     // Fix the sourcekitten ref
-    // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.37.3
+    // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.38.0
     for (const d of allDependencies) {
       if (d.ref === "pkg:swift/SourceKitten@unspecified") {
         d.ref = `pkg:github/jpsim/sourcekitten@${sourcekittenVersion}`;

@@ -4,12 +4,12 @@ New-Item -ItemType Directory -Path plugins\trivy -Force
 New-Item -ItemType Directory -Path plugins\trustinspector -Force
 New-Item -ItemType Directory -Path plugins\golem -Force
 
-$upxVersion = "5.1.1"
+$upxVersion = "5.2.0"
 $upxArchive = "upx-$upxVersion-win64.zip"
-$upxArchiveSha256 = "fa5380bca4c2718547aaa0134bc0d8a7fa27e102f0ac6371573d60d1c21d64de"
-$osqueryVersion = "5.23.0"
+$upxArchiveSha256 = "b471ebf1b7f20f4a89150264ed9a008a2a5bfd247f3c6d1184a75bb59ca08f5d"
+$osqueryVersion = "5.23.1"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
-$osqueryArchiveSha256 = "5ddb8e1c23fd870838ef4ff47c0d2e5a080f22a6944fc4870d726e7b20e962a4"
+$osqueryArchiveSha256 = "7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a6e1bdf30b"
 $dosaiVersion = "3.0.5"
 $dosaiArchive = "Dosai.exe"
 $dosaiArchiveSha256 = "34fbbe401a6d62d127516ff1c1e145923a494698e788c0f0c2088e22a391aabc"
