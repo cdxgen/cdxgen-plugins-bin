@@ -1,0 +1,21 @@
+---
+source: tests/validate.rs
+expression: serialized
+---
+{
+  "valid": false,
+  "specVersion": "1.6",
+  "findings": [
+    {
+      "id": "purl.invalid-syntax",
+      "severity": "error",
+      "path": "/components/0/purl",
+      "message": "Invalid purl INVALID"
+    }
+  ],
+  "summary": {
+    "error": 1,
+    "warning": 0,
+    "info": 0
+  }
+}

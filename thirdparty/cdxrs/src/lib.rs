@@ -9,6 +9,7 @@ pub mod cmd;
 pub mod error;
 pub mod io;
 pub mod log;
+pub mod validate;
 
 /// Semantic version of the cdxrs binary, embedded at compile time from
 /// `env!("CARGO_PKG_VERSION")`.

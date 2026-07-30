@@ -23,6 +23,12 @@ pub enum CdxrsError {
     #[error("input is empty or not valid UTF-8")]
     EmptyInput,
 
+    /// Validation completed successfully but the BOM has `error`-severity
+    /// findings. The findings document has already been written to stdout;
+    /// this variant exists solely to signal exit code 3.
+    #[error("validation failure")]
+    ValidationFailure,
+
     #[error("{0}")]
     Other(String),
 }
@@ -42,6 +48,7 @@ impl CdxrsError {
             Self::Io(_) | Self::Json(_) | Self::InputTooLarge(..) | Self::EmptyInput => {
                 exit_code::OPERATIONAL_FAILURE
             }
+            Self::ValidationFailure => exit_code::VALIDATION_FAILURE,
             Self::Other(_) => exit_code::OPERATIONAL_FAILURE,
         }
     }

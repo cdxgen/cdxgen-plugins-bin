@@ -1,0 +1,13 @@
+# parity-exceptions.toml — known divergences between JS and Rust validators.
+#
+# Each entry has:
+#   rule       — the rule id or category that diverges
+#   direction  — "rust-stricter" or "rust-narrower"
+#   reason     — why this divergence is correct and intentional
+#   impact     — what happens in practice
+
+[[exception]]
+rule = "props.suspicious-native-name"
+direction = "js-only"
+reason = "The JS check is gated on DEBUG_MODE (L736: 'if (suspicious.length > 0 && DEBUG_MODE)'), so it is silent in production. Porting it as an always-on warning would be a false-positive regression for every cdxgen user with 'native' or 'bindings' in a package name. The rule is documented in validation-rules.md as dropped."
+impact = "No production impact — the JS check never fires in normal operation either."

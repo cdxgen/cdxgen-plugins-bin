@@ -30,4 +30,7 @@ pub enum Command {
 
     /// Print the supported CycloneDX spec versions.
     SchemaVersion,
+
+    /// Validate a CycloneDX BOM (schema + semantic checks).
+    Validate,
 }

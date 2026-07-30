@@ -16,12 +16,14 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+jsonschema = { version = "0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 
 [dev-dependencies]
 insta = "1"
+sha2 = "0.10"
 tempfile = "3"
 
 [profile.release]
