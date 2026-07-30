@@ -1,0 +1,31 @@
+thirdparty/cdxrs/tests/validate.rs
+  s_7d724ea76adc3c::t_b60ee9bf188c7a 103-106,108-111,113-119
+  s_7d724ea76adc3c::t_562c523c7cdcb0 411-583
+thirdparty/cdxrs/src/validate/findings.rs
+  s_7d724ea76adc3c::t_caaea8d2a07737 42-47,49
+thirdparty/cdxrs/src/validate/semantic.rs
+  s_7d724ea76adc3c::t_8759ee2fced879 406-420,423-426,435-438,447
+  s_7d724ea76adc3c::t_6b36fceec9441d 348-361,369-372,375-376
+  s_7d724ea76adc3c::t_e32b0c0719fca9 362-367
+  s_7d724ea76adc3c::t_791ef71d43836a 452-458,461,464,467,472,475
+  s_7d724ea76adc3c::t_d12dbfba16560d 247-251,253
+  s_7d724ea76adc3c::t_2469ecf12c8775 337-341
+thirdparty/cdxrs/tests/snapshots/validate__insta_snapshot_invalid_purl.snap
+  s_7d724ea76adc3c::t_bea82861e91cfc 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e11905947a3869c53a370829c574a973eceb1544",
+  "prompts": {},
+  "sessions": {
+    "s_7d724ea76adc3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a0b9959-84de-46e0-a87e-11e7f1e7f1e3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
