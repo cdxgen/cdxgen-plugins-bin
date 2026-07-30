@@ -1,0 +1,19 @@
+BLOCKERS.md
+  s_dc4206b5a672dc::t_720395fb93e1fa 5-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e0ff255006d1592c9c52059d4a90aead8d7ed516",
+  "prompts": {},
+  "sessions": {
+    "s_dc4206b5a672dc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04f9e962affeCpkCOvNqJikH4d",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
