@@ -328,13 +328,13 @@
               "name": "OWASP Foundation"
             }
           ],
-          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@_normalized_",
+          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@0.0.0-normalized",
           "group": "@cyclonedx",
           "name": "cdxgen",
           "publisher": "OWASP Foundation",
-          "purl": "pkg:npm/%40cyclonedx/cdxgen@<normalized>",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@0.0.0-normalized",
           "type": "application",
-          "version": "<normalized>"
+          "version": "0.0.0-normalized"
         }
       ]
     }
