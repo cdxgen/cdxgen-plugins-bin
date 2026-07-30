@@ -11,9 +11,21 @@ use sha2::{Digest, Sha256};
 
 const CHECKSUMS_FILE: &str = "schemas/checksums.sha256";
 
+/// Hash schema *content*, independent of checkout line endings.
+///
+/// CRLF normalisation matters: git checks these JSON files out with CRLF on
+/// Windows, so hashing raw bytes makes the guard fail for a reason unrelated to
+/// drift (`bom-1.6.schema.json` hashes to 25dea08c… with LF, b82391bf… with
+/// CRLF). The cdxgen-side guard in `lib/validator/schema-drift.poku.js`
+/// normalises identically, so both sides agree on one digest per schema.
 fn compute_sha256(data: &[u8]) -> String {
+    let normalized: Vec<u8> = match std::str::from_utf8(data) {
+        Ok(text) => text.replace("\r\n", "\n").into_bytes(),
+        // Not UTF-8: hash as-is rather than guessing.
+        Err(_) => data.to_vec(),
+    };
     let mut hasher = Sha256::new();
-    hasher.update(data);
+    hasher.update(&normalized);
     let result = hasher.finalize();
     result.iter().map(|b| format!("{b:02x}")).collect()
 }
