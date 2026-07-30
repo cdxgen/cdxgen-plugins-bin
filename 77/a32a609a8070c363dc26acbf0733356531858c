@@ -1,0 +1,176 @@
+packages/linux-arm64/package.json
+  s_dc4206b5a672dc::t_187f0408720a55 3
+packages/linux-riscv64/package.json
+  s_dc4206b5a672dc::t_e63c5b6c317afe 3
+thirdparty/golem/cmd/golem/main.go
+  s_dc4206b5a672dc::t_ecfeaca00088ee 17
+BLOCKERS.md
+  s_dc4206b5a672dc::t_186104154f64d1 1-4
+  s_dc4206b5a672dc::t_720395fb93e1fa 5-11
+packages/linux-amd64/package.json
+  s_dc4206b5a672dc::t_bbad48281366c3 3
+packages/windows-arm64/package.json
+  s_dc4206b5a672dc::t_b57f2ae4a3b229 3
+packages/darwin-arm64/package.json
+  s_dc4206b5a672dc::t_088f447f58cc4a 3
+thirdparty/cdxui/Cargo.toml
+  s_dc4206b5a672dc::t_34add13c07ddf8 3
+thirdparty/rusi/Cargo.toml
+  s_dc4206b5a672dc::t_87706aa8fe46f2 23
+packages/windows-amd64/package.json
+  s_dc4206b5a672dc::t_25fb385f1577e7 3
+packages/ppc64/package.json
+  s_dc4206b5a672dc::t_614a5fee978e0d 3
+PROGRESS.md
+  s_dc4206b5a672dc::t_5a2bb5a402403c 1-5
+  s_dc4206b5a672dc::t_d10f30e128891b 6-11
+packages/darwin-amd64/package.json
+  s_dc4206b5a672dc::t_73a2f65519cddd 3
+packages/linuxmusl-amd64/package.json
+  s_dc4206b5a672dc::t_5b87665b425c3c 3
+packages/linuxmusl-arm64/package.json
+  s_dc4206b5a672dc::t_4d9e82ad4fdb4f 3
+package.json
+  s_dc4206b5a672dc::t_bbc5b7d258dc36 3
+packages/linux-arm/package.json
+  s_dc4206b5a672dc::t_31a51e6377ac24 3
+package-lock.json
+  s_dc4206b5a672dc::t_3fc0dbc85414d3 3,9
+thirdparty/cdxui/Cargo.lock
+  s_dc4206b5a672dc::t_468ba2bf3ce423 90
+thirdparty/rusi/Cargo.lock
+  s_dc4206b5a672dc::t_c13369c33c7036 290,303,319,337,349
+thirdparty/cdxrs/testdata/pubspec-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-12766
+thirdparty/cdxrs/src/log.rs
+  s_dc4206b5a672dc::t_19eb21368dd214 6
+  s_dc4206b5a672dc::t_11be723ac5ffe9 1-5,7-33,40-59
+  s_dc4206b5a672dc::t_d1ee3624026777 34-39
+thirdparty/cdxrs/testdata/maven-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-345
+packages/linuxmusl-arm64/build-linuxmusl-arm64.sh
+  s_dc4206b5a672dc::t_1f011ab585462f 5-6
+  s_dc4206b5a672dc::t_726f014b0e6607 15
+thirdparty/cdxrs/testdata/composer-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-3329
+packages/linux-riscv64/build-linux-riscv64.sh
+  s_dc4206b5a672dc::t_67d77cdcade279 6,8
+packages/linux-arm64/build-linux-arm64.sh
+  s_dc4206b5a672dc::t_d9dae7d3eeaa3c 9-10
+  s_dc4206b5a672dc::t_c80c547fa110de 23
+thirdparty/cdxrs/testdata/npm-smoke-1.7.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-322
+thirdparty/cdxrs/testdata/ruby-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-3773
+thirdparty/cdxrs/Makefile
+  s_dc4206b5a672dc::t_c96b73c82efacc 1-169
+thirdparty/cdxrs/testdata/go-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-120
+packages/ppc64/build-ppc64.sh
+  s_dc4206b5a672dc::t_585462c653565c 6,8
+build.sh
+  s_dc4206b5a672dc::t_ed5f6a2e0d3261 5-6,8,12
+thirdparty/cdxrs/src/cmd/mod.rs
+  s_dc4206b5a672dc::t_2c74e52a2e73f4 1-3
+thirdparty/cdxrs/testdata/cargo-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-9656
+thirdparty/cdxrs/src/main.rs
+  s_dc4206b5a672dc::t_db02348bb12116 17-20
+  s_dc4206b5a672dc::t_0bbffac02ac9a6 1-8,10-16,22-44
+  s_dc4206b5a672dc::t_19eb21368dd214 9,21
+thirdparty/cdxrs/Cargo.toml
+  s_dc4206b5a672dc::t_1a028d8ef0a35d 1-19,21-32
+  s_7d724ea76adc3c::t_0f2cc9d65dfcf7 20
+packages/darwin-arm64/build-darwin-arm64.sh
+  s_dc4206b5a672dc::t_14d023b45e5fdc 9-10
+  s_dc4206b5a672dc::t_945baf226a89ae 19
+thirdparty/cdxrs/src/bom/write.rs
+  s_dc4206b5a672dc::t_652d12006eedcc 1-2,8-28
+  s_7d724ea76adc3c::t_1f5a793d87e634 3-7
+thirdparty/cdxrs/src/lib.rs
+  s_dc4206b5a672dc::t_369d83b754fbd9 1-18
+thirdparty/cdxrs/.gitignore
+  s_dc4206b5a672dc::t_e35a9b09bd60f6 1-2
+thirdparty/cdxrs/src/bom/read.rs
+  s_dc4206b5a672dc::t_c7c6e6f933e5bd 1-3,15-16,18-50
+  s_dc4206b5a672dc::t_19eb21368dd214 17
+  s_7d724ea76adc3c::t_eaaffdd8a9b191 4-14
+thirdparty/cdxrs/src/cli.rs
+  s_dc4206b5a672dc::t_c761ddc14c1aa2 1-33
+packages/windows-amd64/build-windows-amd64.sh
+  s_dc4206b5a672dc::t_1c80083adbb0a8 18
+  s_dc4206b5a672dc::t_875e8ed5cb9dcd 8-9
+thirdparty/cdxrs/src/error.rs
+  s_dc4206b5a672dc::t_ca47e5b2e328d8 1-41,43-48
+  s_dc4206b5a672dc::t_486489c483e9bc 42
+thirdparty/cdxrs/src/bom/refs.rs
+  s_dc4206b5a672dc::t_71097ab0b10fa8 1-53,59-74
+  s_dc4206b5a672dc::t_19eb21368dd214 54-58
+packages/linux-amd64/build-linux-amd64.sh
+  s_dc4206b5a672dc::t_d3ae095f59524a 5-6
+  s_dc4206b5a672dc::t_1bee10ec299ecc 21
+thirdparty/cdxrs/src/cmd/info.rs
+  s_dc4206b5a672dc::t_19eb21368dd214 20,22
+  s_dc4206b5a672dc::t_51aad4322e760c 1-19,21,23-211
+thirdparty/cdxrs/testdata/dotnet-eshop.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-337
+thirdparty/cdxrs/tests/roundtrip.rs
+  s_dc4206b5a672dc::t_52e3914b90aa49 1-31,33-36,38-41,43-104,110-116,119-126,129-130,145-176
+  s_dc4206b5a672dc::t_a3fd0deaaf1546 32,37,42,140-141
+  s_dc4206b5a672dc::t_14926feb2b096a 105-109,117-118,127-128,131-139,142-144
+  s_7d724ea76adc3c::t_873c4896c9dd4e 177-234
+thirdparty/cdxrs/testdata/poetry-smoke.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-3295
+packages/linux-arm/build-linux-arm.sh
+  s_dc4206b5a672dc::t_586ffe5e3aa470 8-9
+  s_dc4206b5a672dc::t_590b8d00bddd22 14
+packages/darwin-amd64/build-darwin-amd64.sh
+  s_dc4206b5a672dc::t_0e9d3ad0bb5922 17
+  s_dc4206b5a672dc::t_dd68479ea48a82 9-10
+packages/windows-arm64/build-windows-arm64.sh
+  s_dc4206b5a672dc::t_ba69059df6d8d0 17
+  s_dc4206b5a672dc::t_c136c7ec7b7e3c 8-9
+thirdparty/cdxrs/src/io.rs
+  s_dc4206b5a672dc::t_4d5c34c7359743 66-72
+  s_dc4206b5a672dc::t_4409b5cb2d8cb3 1-11,13-55,57-65,73-86
+  s_dc4206b5a672dc::t_797134f2fe3557 12
+  s_dc4206b5a672dc::t_19eb21368dd214 56
+thirdparty/cdxrs/src/bom/model.rs
+  s_dc4206b5a672dc::t_23b218b62f3a5b 1-487
+thirdparty/cdxrs/src/bom/mod.rs
+  s_dc4206b5a672dc::t_308ec8cdef21b4 1-6
+thirdparty/cdxrs/testdata/npm-smoke-1.6.json
+  s_dc4206b5a672dc::t_b6adf42be6bae5 1-322
+packages/linuxmusl-amd64/build-linuxmusl-amd64.sh
+  s_dc4206b5a672dc::t_94f37f4b6638dc 15
+  s_dc4206b5a672dc::t_1b4b8e06d70457 5-6
+thirdparty/cdxrs/Cargo.lock
+  s_dc4206b5a672dc::t_24f7e5e33d3883 1-141,148-174,181-186,197-323,325-419
+  s_7d724ea76adc3c::t_02d7f43c321f99 142-147,175-180,187-196,324
+thirdparty/cdxrs/testdata/real-unsorted-npm.json
+  s_7d724ea76adc3c::t_7dc57524620cec 1-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "77a32a609a8070c363dc26acbf0733356531858c",
+  "prompts": {},
+  "sessions": {
+    "s_7d724ea76adc3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a0b9959-84de-46e0-a87e-11e7f1e7f1e3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_dc4206b5a672dc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04f9e962affeCpkCOvNqJikH4d",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
