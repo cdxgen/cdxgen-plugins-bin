@@ -1,0 +1,41 @@
+thirdparty/cdxrs/testdata/invalid/crypto-algorithm-no-oid.json
+  s_451ada53dfcab8::t_b7318de2a88db2 1-14
+thirdparty/cdxrs/testdata/invalid/schema-invalid-type.json
+  s_451ada53dfcab8::t_a10228d5a0743a 1-11
+thirdparty/cdxrs/parity-exceptions.toml
+  s_56bdcfbf76146c::t_41cce2f5dfb375 1-19
+thirdparty/cdxrs/testdata/invalid/epoch-mismatch.json
+  s_451ada53dfcab8::t_a516b7e22a32ee 1-13
+thirdparty/cdxrs/testdata/invalid/invalid-purl.json
+  s_451ada53dfcab8::t_151786db0cfd64 1-12
+thirdparty/cdxrs/testdata/invalid/unsupported-version.json
+  s_451ada53dfcab8::t_b65f2f4281386d 1-12
+thirdparty/cdxrs/testdata/invalid/encoded-dep-ref.json
+  s_451ada53dfcab8::t_1f6f17b730ccfd 1-17
+thirdparty/cdxrs/testdata/invalid/crypto-asset-with-purl.json
+  s_451ada53dfcab8::t_12f2b05cb437c8 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b3521f5bf0581214c8d6b7a33ba9ad6ae6866e12",
+  "prompts": {},
+  "sessions": {
+    "s_451ada53dfcab8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04d4a8b96ffetVRsfj73jmHfyO",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_56bdcfbf76146c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04d5ae778ffe3FVRW0LI40jz16",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
