@@ -1,0 +1,37 @@
+thirdparty/cdxrs/testdata/cargo-smoke.json
+  s_7d724ea76adc3c::t_744bb614b0a72e 9642,9646,9648
+thirdparty/cdxrs/testdata/composer-smoke.json
+  s_7d724ea76adc3c::t_b7e4fd5dd6ef76 3315,3319,3321
+thirdparty/cdxrs/testdata/dotnet-eshop.json
+  s_7d724ea76adc3c::t_4303aebfef78f8 323,327,329
+thirdparty/cdxrs/testdata/go-smoke.json
+  s_7d724ea76adc3c::t_27869551ce1b1f 106,110,112
+thirdparty/cdxrs/testdata/maven-smoke.json
+  s_7d724ea76adc3c::t_79a15416add1ce 331,335,337
+thirdparty/cdxrs/testdata/npm-smoke-1.6.json
+  s_7d724ea76adc3c::t_f3fcb0f4f37c95 308,312,314
+thirdparty/cdxrs/testdata/npm-smoke-1.7.json
+  s_7d724ea76adc3c::t_446cc81d0d7c87 308,312,314
+thirdparty/cdxrs/testdata/poetry-smoke.json
+  s_7d724ea76adc3c::t_73e61e0372bcdd 3281,3285,3287
+thirdparty/cdxrs/testdata/pubspec-smoke.json
+  s_7d724ea76adc3c::t_4a0b96600414de 12752,12756,12758
+thirdparty/cdxrs/testdata/ruby-smoke.json
+  s_7d724ea76adc3c::t_ce0d166dc8bcac 3759,3763,3765
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1a4cfae755f207c4c490eb58d56a9aede8d293d9",
+  "prompts": {},
+  "sessions": {
+    "s_7d724ea76adc3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a0b9959-84de-46e0-a87e-11e7f1e7f1e3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
