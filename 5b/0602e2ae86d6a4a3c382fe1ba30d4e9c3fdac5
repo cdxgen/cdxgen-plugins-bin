@@ -1,0 +1,123 @@
+thirdparty/cdxrs/tests/schema_drift.rs
+  s_56bdcfbf76146c::t_e3717a89c36eb3 1-16,19-51,53-78
+  s_56bdcfbf76146c::t_e933173af1dd9d 52
+  s_56bdcfbf76146c::t_d2676271669211 17-18
+thirdparty/cdxrs/schemas/checksums.sha256
+  s_56bdcfbf76146c::t_d571193c56c001 1-5
+thirdparty/cdxrs/Cargo.toml
+  s_56bdcfbf76146c::t_41615d65674ca3 26
+  s_56bdcfbf76146c::t_4596d97fe3b63f 19
+thirdparty/cdxrs/Cargo.lock
+  s_56bdcfbf76146c::t_7275709e2a7997 111-119,147,215-233,240-249,336-345,940-950,1072-1077,1112-1117
+  s_56bdcfbf76146c::t_2779960cd29785 5-33,84-104,120-137,144,189,234-239,250-269,292-302,309-335,346-359,368,376-380,388-490,525-592,605-619,626-709,722-765,784-789,796-870,884-895,923,957-968,975-1006,1018-1028,1036,1059-1069,1078-1083,1090-1095,1102-1111,1118-1177,1193-1301
+thirdparty/cdxrs/schemas/bom-1.6.schema.json
+  s_56bdcfbf76146c::t_0f3b697c3ef09e 1-5511
+thirdparty/cdxrs/schemas/bom-1.7.schema.json
+  s_56bdcfbf76146c::t_9f3ccd58d7eb7c 1-6700
+thirdparty/cdxrs/schemas/cryptography-defs.schema.json
+  s_56bdcfbf76146c::t_e659abf396a4c6 1-576
+thirdparty/cdxrs/schemas/jsf-0.82.schema.json
+  s_56bdcfbf76146c::t_58e596e156a320 1-211
+thirdparty/cdxrs/schemas/spdx.schema.json
+  s_56bdcfbf76146c::t_5908b6f04c5038 1-819
+thirdparty/cdxrs/src/cmd/validate.rs
+  s_56bdcfbf76146c::t_bc9ff39fe8fb9a 1-11,13,15-34,39-42
+  s_56bdcfbf76146c::t_3f79966f95a68d 12,14,35-38
+thirdparty/cdxrs/src/validate/schema.rs
+  s_56bdcfbf76146c::t_667c447e81cf63 114-115,119
+  s_56bdcfbf76146c::t_5efc2f4d5938ef 59
+  s_56bdcfbf76146c::t_ff347d09ddedcc 9
+  s_56bdcfbf76146c::t_86a78a548fb2e8 1-8,10-20,22-58,66,68,70-72,74-75,77-85,87-102,104-112,116-118,120-121,123-126,129-137,144-151,156-174
+  s_56bdcfbf76146c::t_670258c140a490 21,60-65,67,69,73,76,86,103,113,122,127-128,138-143,152-155
+thirdparty/cdxrs/src/main.rs
+  s_56bdcfbf76146c::t_4745051c20d41e 8
+  s_56bdcfbf76146c::t_d70a23d4b14709 40-45
+  s_56bdcfbf76146c::t_f97b04a6942576 17-19,47
+  s_56bdcfbf76146c::t_4c603b65396458 46
+thirdparty/cdxrs/src/cli.rs
+  s_56bdcfbf76146c::t_6d5000cbb96d59 33-35
+thirdparty/cdxrs/src/validate/findings.rs
+  s_56bdcfbf76146c::t_e2eeb859283509 1-41,48,50-55
+  s_7d724ea76adc3c::t_caaea8d2a07737 42-47,49
+thirdparty/cdxrs/src/cmd/mod.rs
+  s_56bdcfbf76146c::t_3296c166a5b350 4
+thirdparty/cdxrs/src/lib.rs
+  s_56bdcfbf76146c::t_8f829716179bde 12
+thirdparty/cdxrs/src/validate/semantic.rs
+  s_56bdcfbf76146c::t_263c1c15230d44 740,743,773-779
+  s_56bdcfbf76146c::t_b5b652e9563760 333
+  s_56bdcfbf76146c::t_8d26b88eac3abc 1-99,101-128,130-172,174-246,252,254-282,284-332,334-336,342-347,368,373-374,377-405,421-422,427-434,439-446,448-451,459,460,462-463,465-466,468-471,473-474,476-539,541-543,546-612,614-639,642-657,659-739,741-742,744-772,780-815
+  s_56bdcfbf76146c::t_b5a6f08842202f 640
+  s_56bdcfbf76146c::t_1d0b81b66120bc 100,129,173,283,540,544-545,613,641,658,816-826
+  s_7d724ea76adc3c::t_8759ee2fced879 406-420,423-426,435-438,447
+  s_7d724ea76adc3c::t_6b36fceec9441d 348-361,369-372,375-376
+  s_7d724ea76adc3c::t_e32b0c0719fca9 362-367
+  s_7d724ea76adc3c::t_791ef71d43836a 452-458,461,464,467,472,475
+  s_7d724ea76adc3c::t_d12dbfba16560d 247-251,253
+  s_7d724ea76adc3c::t_2469ecf12c8775 337-341
+thirdparty/cdxrs/src/error.rs
+  s_56bdcfbf76146c::t_ddc4459847b68c 26-31
+  s_56bdcfbf76146c::t_2f8c43797871e3 51
+thirdparty/cdxrs/src/validate/mod.rs
+  s_56bdcfbf76146c::t_c0809b07d46aee 1-30,34-41,43-96
+  s_56bdcfbf76146c::t_dff0fa5b427b59 31-33,42
+  s_56bdcfbf76146c::t_21fa23f09fadb0 97-101
+thirdparty/cdxrs/testdata/invalid/crypto-algorithm-no-oid.json
+  s_451ada53dfcab8::t_b7318de2a88db2 1-14
+thirdparty/cdxrs/testdata/invalid/schema-invalid-type.json
+  s_451ada53dfcab8::t_a10228d5a0743a 1-11
+thirdparty/cdxrs/parity-exceptions.toml
+  s_56bdcfbf76146c::t_41cce2f5dfb375 1-8,9-13
+thirdparty/cdxrs/testdata/invalid/epoch-mismatch.json
+  s_451ada53dfcab8::t_a516b7e22a32ee 1-13
+thirdparty/cdxrs/testdata/invalid/invalid-purl.json
+  s_451ada53dfcab8::t_151786db0cfd64 1-12
+thirdparty/cdxrs/testdata/invalid/unsupported-version.json
+  s_451ada53dfcab8::t_b65f2f4281386d 1-12
+thirdparty/cdxrs/testdata/invalid/encoded-dep-ref.json
+  s_451ada53dfcab8::t_1f6f17b730ccfd 1-17
+thirdparty/cdxrs/testdata/invalid/crypto-asset-with-purl.json
+  s_451ada53dfcab8::t_12f2b05cb437c8 1-18
+thirdparty/cdxrs/tests/validate.rs
+  s_56bdcfbf76146c::t_7c26c77fbd7e97 1-102,107,112,120-384
+  s_56bdcfbf76146c::t_891104978c5861 385-410
+  s_7d724ea76adc3c::t_b60ee9bf188c7a 103-106,108-111,113-119
+  s_7d724ea76adc3c::t_562c523c7cdcb0 411-583
+thirdparty/cdxrs/tests/snapshots/validate__insta_snapshot_invalid_purl.snap
+  s_56bdcfbf76146c::t_c3e1d6c61a3b31 1-6,8-21
+  s_7d724ea76adc3c::t_bea82861e91cfc 7
+PROGRESS.md
+  s_56bdcfbf76146c::t_b96964b4338e7b 1,3,5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5b0602e2ae86d6a4a3c382fe1ba30d4e9c3fdac5",
+  "prompts": {},
+  "sessions": {
+    "s_451ada53dfcab8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04d4a8b96ffetVRsfj73jmHfyO",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_56bdcfbf76146c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04d5ae778ffe3FVRW0LI40jz16",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_7d724ea76adc3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a0b9959-84de-46e0-a87e-11e7f1e7f1e3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
