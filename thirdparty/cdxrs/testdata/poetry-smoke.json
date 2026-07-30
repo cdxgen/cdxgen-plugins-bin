@@ -1,0 +1,3295 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:pypi/anyio@4.14.2",
+      "description": "High-level concurrency and networking framework on top of asyncio or Trio",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "anyio",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/anyio@4.14.2",
+      "type": "framework",
+      "version": "4.14.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/ast-serialize@0.6.0",
+      "description": "Python bindings for mypy AST serialization",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "ast-serialize",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/ast-serialize@0.6.0",
+      "type": "library",
+      "version": "0.6.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/backports-tarfile@1.2.0",
+      "description": "Backport of CPython tarfile module",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "backports-tarfile",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/backports-tarfile@1.2.0",
+      "type": "library",
+      "version": "1.2.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/backports-zstd@1.6.0",
+      "description": "Backport of compression.zstd",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "backports-zstd",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "<3.14,>=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/backports-zstd@1.6.0",
+      "type": "library",
+      "version": "1.6.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/build@1.5.0",
+      "description": "A simple, correct Python build frontend",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "build",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/build@1.5.0",
+      "type": "library",
+      "version": "1.5.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/cachebox@5.2.3",
+      "description": "The fastest memoizing and caching Python library written in Rust",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cachebox",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/cachebox@5.2.3",
+      "type": "library",
+      "version": "5.2.3"
+    },
+    {
+      "bom-ref": "pkg:pypi/cachecontrol@0.14.4",
+      "description": "httplib2 caching for requests",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cachecontrol",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/cachecontrol@0.14.4",
+      "type": "library",
+      "version": "0.14.4"
+    },
+    {
+      "bom-ref": "pkg:pypi/certifi@2026.6.17",
+      "description": "Python package for providing Mozilla's CA Bundle.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "certifi",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/certifi@2026.6.17",
+      "type": "library",
+      "version": "2026.6.17"
+    },
+    {
+      "bom-ref": "pkg:pypi/cffi@2.1.0",
+      "description": "Foreign Function Interface for Python calling C code.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cffi",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/cffi@2.1.0",
+      "type": "library",
+      "version": "2.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/cfgv@3.5.0",
+      "description": "Validate configuration and produce human readable error messages.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cfgv",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/cfgv@3.5.0",
+      "type": "library",
+      "version": "3.5.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/charset-normalizer@3.4.9",
+      "description": "The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "charset-normalizer",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/charset-normalizer@3.4.9",
+      "type": "library",
+      "version": "3.4.9"
+    },
+    {
+      "bom-ref": "pkg:pypi/cleo@2.1.0",
+      "description": "Cleo allows you to create beautiful and testable command-line interfaces.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cleo",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7,<4.0"
+        }
+      ],
+      "purl": "pkg:pypi/cleo@2.1.0",
+      "type": "library",
+      "version": "2.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/colorama@0.4.6",
+      "description": "Cross-platform colored terminal text.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "colorama",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
+        }
+      ],
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "type": "library",
+      "version": "0.4.6"
+    },
+    {
+      "bom-ref": "pkg:pypi/coverage@7.15.2",
+      "description": "Code coverage measurement for Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "coverage",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/coverage@7.15.2",
+      "type": "library",
+      "version": "7.15.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/crashtest@0.4.1",
+      "description": "Manage Python errors with ease",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "crashtest",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7,<4.0"
+        }
+      ],
+      "purl": "pkg:pypi/crashtest@0.4.1",
+      "type": "library",
+      "version": "0.4.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/cryptography@49.0.0",
+      "description": "cryptography is a package which provides cryptographic recipes and primitives to Python developers.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "cryptography",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "!=3.9.0,!=3.9.1,>=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/cryptography@49.0.0",
+      "type": "library",
+      "version": "49.0.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/deepdiff@9.1.0",
+      "description": "Deep Difference and Search of any Python object/data. Recreate objects by adding adding deltas to each other.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "deepdiff",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/deepdiff@9.1.0",
+      "type": "library",
+      "version": "9.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/distlib@0.4.3",
+      "description": "Distribution utilities",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "distlib",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "*"
+        }
+      ],
+      "purl": "pkg:pypi/distlib@0.4.3",
+      "type": "library",
+      "version": "0.4.3"
+    },
+    {
+      "bom-ref": "pkg:pypi/dulwich@1.2.12",
+      "description": "Python Git Library",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "dulwich",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/dulwich@1.2.12",
+      "type": "library",
+      "version": "1.2.12"
+    },
+    {
+      "bom-ref": "pkg:pypi/exceptiongroup@1.3.1",
+      "description": "Backport of PEP 654 (exception groups)",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "exceptiongroup",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/exceptiongroup@1.3.1",
+      "type": "library",
+      "version": "1.3.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/execnet@2.1.2",
+      "description": "execnet: rapid multi-Python deployment",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "execnet",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/execnet@2.1.2",
+      "type": "library",
+      "version": "2.1.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/fastjsonschema@2.21.2",
+      "description": "Fastest Python implementation of JSON schema",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "fastjsonschema",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "*"
+        }
+      ],
+      "purl": "pkg:pypi/fastjsonschema@2.21.2",
+      "type": "library",
+      "version": "2.21.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/filelock@3.31.0",
+      "description": "A platform independent file lock.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "filelock",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/filelock@3.31.0",
+      "type": "library",
+      "version": "3.31.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/findpython@0.8.0",
+      "description": "A utility to find python versions on your system",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "findpython",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/findpython@0.8.0",
+      "type": "library",
+      "version": "0.8.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/h11@0.16.0",
+      "description": "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "h11",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/h11@0.16.0",
+      "type": "library",
+      "version": "0.16.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/httpcore@1.0.9",
+      "description": "A minimal low-level HTTP client.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "httpcore",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/httpcore@1.0.9",
+      "type": "library",
+      "version": "1.0.9"
+    },
+    {
+      "bom-ref": "pkg:pypi/httpx@0.28.1",
+      "description": "The next generation HTTP client.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "httpx",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/httpx@0.28.1",
+      "type": "library",
+      "version": "0.28.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/identify@2.6.19",
+      "description": "File identification library for Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "identify",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/identify@2.6.19",
+      "type": "library",
+      "version": "2.6.19"
+    },
+    {
+      "bom-ref": "pkg:pypi/idna@3.18",
+      "description": "Internationalized Domain Names in Applications (IDNA)",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "idna",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/idna@3.18",
+      "type": "library",
+      "version": "3.18"
+    },
+    {
+      "bom-ref": "pkg:pypi/importlib-metadata@9.0.0",
+      "description": "Read metadata from Python packages",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "importlib-metadata",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/importlib-metadata@9.0.0",
+      "type": "library",
+      "version": "9.0.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/iniconfig@2.3.0",
+      "description": "brain-dead simple config-ini parsing",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "iniconfig",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/iniconfig@2.3.0",
+      "type": "library",
+      "version": "2.3.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/installer@1.0.1",
+      "description": "A library for installing Python wheels.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "installer",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/installer@1.0.1",
+      "type": "library",
+      "version": "1.0.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/jaraco-classes@3.4.0",
+      "description": "Utility functions for Python class constructs",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jaraco-classes",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/jaraco-classes@3.4.0",
+      "type": "library",
+      "version": "3.4.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/jaraco-context@6.1.2",
+      "description": "Useful decorators and context managers",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jaraco-context",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/jaraco-context@6.1.2",
+      "type": "library",
+      "version": "6.1.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/jaraco-functools@4.6.0",
+      "description": "Functools like those found in stdlib",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jaraco-functools",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/jaraco-functools@4.6.0",
+      "type": "library",
+      "version": "4.6.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/jeepney@0.9.0",
+      "description": "Low-level, pure Python DBus protocol wrapper.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jeepney",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/jeepney@0.9.0",
+      "type": "library",
+      "version": "0.9.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/keyring@25.7.0",
+      "description": "Store and access your passwords safely.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "keyring",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/keyring@25.7.0",
+      "type": "library",
+      "version": "25.7.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/librt@0.13.0",
+      "description": "Mypyc runtime library",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "librt",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/librt@0.13.0",
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/more-itertools@11.1.0",
+      "description": "More routines for operating on iterables, beyond itertools",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "more-itertools",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/more-itertools@11.1.0",
+      "type": "library",
+      "version": "11.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/msgpack@1.2.1",
+      "description": "MessagePack serializer",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "msgpack",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/msgpack@1.2.1",
+      "type": "library",
+      "version": "1.2.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/mypy-extensions@1.1.0",
+      "description": "Type system extensions for programs checked with the mypy type checker.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "mypy-extensions",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/mypy-extensions@1.1.0",
+      "type": "library",
+      "version": "1.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/mypy@2.3.0",
+      "description": "Optional static typing for Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "mypy",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/mypy@2.3.0",
+      "type": "library",
+      "version": "2.3.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/nodeenv@1.10.0",
+      "description": "Node.js virtual environment builder",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "nodeenv",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
+        }
+      ],
+      "purl": "pkg:pypi/nodeenv@1.10.0",
+      "type": "library",
+      "version": "1.10.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/orderly-set@5.5.0",
+      "description": "Orderly set",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "orderly-set",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/orderly-set@5.5.0",
+      "type": "library",
+      "version": "5.5.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/packaging@26.2",
+      "description": "Core utilities for Python packages",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "packaging",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/packaging@26.2",
+      "type": "library",
+      "version": "26.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/pathspec@1.1.1",
+      "description": "Utility library for gitignore style pattern matching of file paths.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pathspec",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pathspec@1.1.1",
+      "type": "library",
+      "version": "1.1.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/pbs-installer@2026.7.18",
+      "description": "Installer for Python Build Standalone",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pbs-installer",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pbs-installer@2026.7.18",
+      "type": "library",
+      "version": "2026.7.18"
+    },
+    {
+      "bom-ref": "pkg:pypi/pkginfo@1.12.1.2",
+      "description": "Query metadata from sdists / bdists / installed packages.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pkginfo",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/pkginfo@1.12.1.2",
+      "type": "library",
+      "version": "1.12.1.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/platformdirs@4.10.1",
+      "description": "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "platformdirs",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/platformdirs@4.10.1",
+      "type": "library",
+      "version": "4.10.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/pluggy@1.6.0",
+      "description": "plugin and hook calling mechanisms for python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pluggy",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pluggy@1.6.0",
+      "type": "library",
+      "version": "1.6.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/poetry-core@2.4.1",
+      "description": "Poetry PEP 517 Build Backend",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "externalReferences": [
+        {
+          "comment": "source",
+          "type": "distribution",
+          "url": "https://github.com/python-poetry/poetry-core.git"
+        }
+      ],
+      "group": "",
+      "name": "poetry-core",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:manifestSource",
+          "value": "https://github.com/python-poetry/poetry-core.git"
+        },
+        {
+          "name": "cdx:pypi:manifestSourceType",
+          "value": "url"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10, <4.0"
+        }
+      ],
+      "purl": "pkg:pypi/poetry-core@2.4.1",
+      "type": "library",
+      "version": "2.4.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/pre-commit@4.6.0",
+      "description": "A framework for managing and maintaining multi-language pre-commit hooks.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pre-commit",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/pre-commit@4.6.0",
+      "type": "framework",
+      "version": "4.6.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/psutil@7.2.2",
+      "description": "Cross-platform lib for process and system monitoring.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "psutil",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.6"
+        }
+      ],
+      "purl": "pkg:pypi/psutil@7.2.2",
+      "type": "library",
+      "version": "7.2.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/pycparser@3.0",
+      "description": "C parser in Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pycparser",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/pycparser@3.0",
+      "type": "library",
+      "version": "3.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pygments@2.20.0",
+      "description": "Pygments is a syntax highlighting package written in Python.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pygments",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pygments@2.20.0",
+      "type": "library",
+      "version": "2.20.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pyproject-hooks@1.2.0",
+      "description": "Wrappers to call pyproject.toml-based build backend hooks.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pyproject-hooks",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/pyproject-hooks@1.2.0",
+      "type": "library",
+      "version": "1.2.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest-cov@7.1.0",
+      "description": "Pytest plugin for measuring coverage.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest-cov",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pytest-cov@7.1.0",
+      "type": "library",
+      "version": "7.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest-github-actions-annotate-failures@0.1.8",
+      "description": "pytest plugin to annotate failed tests with a workflow command for GitHub Actions",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest-github-actions-annotate-failures",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*"
+        }
+      ],
+      "purl": "pkg:pypi/pytest-github-actions-annotate-failures@0.1.8",
+      "type": "library",
+      "version": "0.1.8"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest-mock@3.15.1",
+      "description": "Thin-wrapper around the mock package for easier use with pytest",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest-mock",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pytest-mock@3.15.1",
+      "type": "library",
+      "version": "3.15.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest-randomly@4.1.0",
+      "description": "Pytest plugin to randomly order tests and control random.seed.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest-randomly",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/pytest-randomly@4.1.0",
+      "type": "library",
+      "version": "4.1.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest-xdist@3.8.0",
+      "description": "pytest xdist plugin for distributed testing, most importantly across multiple CPUs",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest-xdist",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/pytest-xdist@3.8.0",
+      "type": "library",
+      "version": "3.8.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/pytest@9.1.1",
+      "description": "pytest: simple powerful testing with Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pytest",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/pytest@9.1.1",
+      "type": "library",
+      "version": "9.1.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/python-discovery@1.4.4",
+      "description": "Python interpreter discovery",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "python-discovery",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/python-discovery@1.4.4",
+      "type": "library",
+      "version": "1.4.4"
+    },
+    {
+      "bom-ref": "pkg:pypi/pywin32-ctypes@0.2.3",
+      "description": "A (partial) reimplementation of pywin32 using ctypes/cffi",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pywin32-ctypes",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.6"
+        }
+      ],
+      "purl": "pkg:pypi/pywin32-ctypes@0.2.3",
+      "type": "library",
+      "version": "0.2.3"
+    },
+    {
+      "bom-ref": "pkg:pypi/pyyaml@6.0.3",
+      "description": "YAML parser and emitter for Python",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "pyyaml",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/pyyaml@6.0.3",
+      "type": "library",
+      "version": "6.0.3"
+    },
+    {
+      "bom-ref": "pkg:pypi/rapidfuzz@3.14.5",
+      "description": "rapid fuzzy string matching",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "rapidfuzz",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/rapidfuzz@3.14.5",
+      "type": "library",
+      "version": "3.14.5"
+    },
+    {
+      "bom-ref": "pkg:pypi/requests-toolbelt@1.0.0",
+      "description": "A utility belt for advanced users of python-requests",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "requests-toolbelt",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+        }
+      ],
+      "purl": "pkg:pypi/requests-toolbelt@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/requests@2.34.2",
+      "description": "Python HTTP for Humans.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "requests",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/requests@2.34.2",
+      "type": "library",
+      "version": "2.34.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/responses@0.26.2",
+      "description": "A utility library for mocking out the `requests` Python library.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "responses",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/responses@0.26.2",
+      "type": "library",
+      "version": "0.26.2"
+    },
+    {
+      "bom-ref": "pkg:pypi/secretstorage@3.5.0",
+      "description": "Python bindings to FreeDesktop.org Secret Service API",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "secretstorage",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/secretstorage@3.5.0",
+      "type": "library",
+      "version": "3.5.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/shellingham@1.5.4",
+      "description": "Tool to Detect Surrounding Shell",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "shellingham",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.7"
+        }
+      ],
+      "purl": "pkg:pypi/shellingham@1.5.4",
+      "type": "library",
+      "version": "1.5.4"
+    },
+    {
+      "bom-ref": "pkg:pypi/tomli@2.4.1",
+      "description": "A lil' TOML parser",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "tomli",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.8"
+        }
+      ],
+      "purl": "pkg:pypi/tomli@2.4.1",
+      "type": "library",
+      "version": "2.4.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/tomlkit@0.15.1",
+      "description": "Style preserving TOML library",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "tomlkit",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/tomlkit@0.15.1",
+      "type": "library",
+      "version": "0.15.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/trove-classifiers@2026.6.1.19",
+      "description": "Canonical source for classifiers on PyPI (pypi.org).",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "trove-classifiers",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": "*"
+        }
+      ],
+      "purl": "pkg:pypi/trove-classifiers@2026.6.1.19",
+      "type": "library",
+      "version": "2026.6.1.19"
+    },
+    {
+      "bom-ref": "pkg:pypi/types-requests@2.33.0.20260712",
+      "description": "Typing stubs for requests",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "types-requests",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/types-requests@2.33.0.20260712",
+      "type": "library",
+      "version": "2.33.0.20260712"
+    },
+    {
+      "bom-ref": "pkg:pypi/typing-extensions@4.16.0",
+      "description": "Backported and Experimental Type Hints for Python 3.9+",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "typing-extensions",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/typing-extensions@4.16.0",
+      "type": "library",
+      "version": "4.16.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/urllib3@2.7.0",
+      "description": "HTTP library with thread-safe connection pooling, file post, and more.",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "urllib3",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/urllib3@2.7.0",
+      "type": "library",
+      "version": "2.7.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/virtualenv@21.6.1",
+      "description": "Virtual Python Environment builder",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "virtualenv",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/virtualenv@21.6.1",
+      "type": "library",
+      "version": "21.6.1"
+    },
+    {
+      "bom-ref": "pkg:pypi/xattr@1.3.0",
+      "description": "Python wrapper for extended filesystem attributes",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "xattr",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.9"
+        }
+      ],
+      "purl": "pkg:pypi/xattr@1.3.0",
+      "type": "library",
+      "version": "1.3.0"
+    },
+    {
+      "bom-ref": "pkg:pypi/zipp@4.1.0",
+      "description": "Backport of pathlib-compatible object wrapper for zip files",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/poetry.lock",
+            "confidence": 1,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 1,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/poetry.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "zipp",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        },
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.10"
+        }
+      ],
+      "purl": "pkg:pypi/zipp@4.1.0",
+      "type": "library",
+      "version": "4.1.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "pkg:pypi/exceptiongroup@1.3.1",
+        "pkg:pypi/idna@3.18"
+      ],
+      "ref": "pkg:pypi/anyio@4.14.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/ast-serialize@0.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/backports-tarfile@1.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/backports-zstd@1.6.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/colorama@0.4.6",
+        "pkg:pypi/importlib-metadata@9.0.0",
+        "pkg:pypi/packaging@26.2",
+        "pkg:pypi/tomli@2.4.1"
+      ],
+      "ref": "pkg:pypi/build@1.5.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/cachebox@5.2.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/filelock@3.31.0",
+        "pkg:pypi/msgpack@1.2.1",
+        "pkg:pypi/requests@2.34.2"
+      ],
+      "ref": "pkg:pypi/cachecontrol@0.14.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/certifi@2026.6.17"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/pycparser@3.0"
+      ],
+      "ref": "pkg:pypi/cffi@2.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/cfgv@3.5.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/charset-normalizer@3.4.9"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/crashtest@0.4.1",
+        "pkg:pypi/rapidfuzz@3.14.5"
+      ],
+      "ref": "pkg:pypi/cleo@2.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/colorama@0.4.6"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/tomli@2.4.1"
+      ],
+      "ref": "pkg:pypi/coverage@7.15.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/crashtest@0.4.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/cffi@2.1.0",
+        "pkg:pypi/typing-extensions@4.16.0"
+      ],
+      "ref": "pkg:pypi/cryptography@49.0.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/cachebox@5.2.3",
+        "pkg:pypi/orderly-set@5.5.0"
+      ],
+      "ref": "pkg:pypi/deepdiff@9.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/distlib@0.4.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/urllib3@2.7.0"
+      ],
+      "ref": "pkg:pypi/dulwich@1.2.12"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/typing-extensions@4.16.0"
+      ],
+      "ref": "pkg:pypi/exceptiongroup@1.3.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/execnet@2.1.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/fastjsonschema@2.21.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/filelock@3.31.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/packaging@26.2",
+        "pkg:pypi/platformdirs@4.10.1"
+      ],
+      "ref": "pkg:pypi/findpython@0.8.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/h11@0.16.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/certifi@2026.6.17",
+        "pkg:pypi/h11@0.16.0"
+      ],
+      "ref": "pkg:pypi/httpcore@1.0.9"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/anyio@4.14.2",
+        "pkg:pypi/certifi@2026.6.17",
+        "pkg:pypi/httpcore@1.0.9",
+        "pkg:pypi/idna@3.18"
+      ],
+      "ref": "pkg:pypi/httpx@0.28.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/identify@2.6.19"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/idna@3.18"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/zipp@4.1.0"
+      ],
+      "ref": "pkg:pypi/importlib-metadata@9.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/iniconfig@2.3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/installer@1.0.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/more-itertools@11.1.0"
+      ],
+      "ref": "pkg:pypi/jaraco-classes@3.4.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/jaraco-context@6.1.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/jaraco-functools@4.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/jeepney@0.9.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/jeepney@0.9.0",
+        "pkg:pypi/pywin32-ctypes@0.2.3",
+        "pkg:pypi/secretstorage@3.5.0"
+      ],
+      "ref": "pkg:pypi/keyring@25.7.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/librt@0.13.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/more-itertools@11.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/msgpack@1.2.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/mypy-extensions@1.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/ast-serialize@0.6.0",
+        "pkg:pypi/librt@0.13.0",
+        "pkg:pypi/pathspec@1.1.1",
+        "pkg:pypi/tomli@2.4.1"
+      ],
+      "ref": "pkg:pypi/mypy@2.3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/nodeenv@1.10.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/orderly-set@5.5.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/packaging@26.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pathspec@1.1.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/httpx@0.28.1"
+      ],
+      "ref": "pkg:pypi/pbs-installer@2026.7.18"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pkginfo@1.12.1.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/platformdirs@4.10.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pluggy@1.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/poetry-core@2.4.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/cfgv@3.5.0",
+        "pkg:pypi/identify@2.6.19",
+        "pkg:pypi/nodeenv@1.10.0",
+        "pkg:pypi/pyyaml@6.0.3",
+        "pkg:pypi/virtualenv@21.6.1"
+      ],
+      "ref": "pkg:pypi/pre-commit@4.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/psutil@7.2.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pycparser@3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pygments@2.20.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pyproject-hooks@1.2.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/coverage@7.15.2",
+        "pkg:pypi/pluggy@1.6.0",
+        "pkg:pypi/pytest@9.1.1"
+      ],
+      "ref": "pkg:pypi/pytest-cov@7.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/pytest@9.1.1"
+      ],
+      "ref": "pkg:pypi/pytest-github-actions-annotate-failures@0.1.8"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/pytest@9.1.1"
+      ],
+      "ref": "pkg:pypi/pytest-mock@3.15.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/pytest@9.1.1"
+      ],
+      "ref": "pkg:pypi/pytest-randomly@4.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/execnet@2.1.2",
+        "pkg:pypi/psutil@7.2.2",
+        "pkg:pypi/pytest@9.1.1"
+      ],
+      "ref": "pkg:pypi/pytest-xdist@3.8.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/colorama@0.4.6",
+        "pkg:pypi/exceptiongroup@1.3.1",
+        "pkg:pypi/iniconfig@2.3.0",
+        "pkg:pypi/packaging@26.2",
+        "pkg:pypi/pluggy@1.6.0",
+        "pkg:pypi/pygments@2.20.0",
+        "pkg:pypi/tomli@2.4.1"
+      ],
+      "ref": "pkg:pypi/pytest@9.1.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/filelock@3.31.0",
+        "pkg:pypi/platformdirs@4.10.1"
+      ],
+      "ref": "pkg:pypi/python-discovery@1.4.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pywin32-ctypes@0.2.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/pyyaml@6.0.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/rapidfuzz@3.14.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/requests@2.34.2"
+      ],
+      "ref": "pkg:pypi/requests-toolbelt@1.0.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/certifi@2026.6.17",
+        "pkg:pypi/idna@3.18",
+        "pkg:pypi/urllib3@2.7.0"
+      ],
+      "ref": "pkg:pypi/requests@2.34.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/pyyaml@6.0.3",
+        "pkg:pypi/requests@2.34.2",
+        "pkg:pypi/urllib3@2.7.0"
+      ],
+      "ref": "pkg:pypi/responses@0.26.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/cryptography@49.0.0",
+        "pkg:pypi/jeepney@0.9.0"
+      ],
+      "ref": "pkg:pypi/secretstorage@3.5.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/shellingham@1.5.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/tomli@2.4.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/tomlkit@0.15.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/trove-classifiers@2026.6.1.19"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/urllib3@2.7.0"
+      ],
+      "ref": "pkg:pypi/types-requests@2.33.0.20260712"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/typing-extensions@4.16.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/urllib3@2.7.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/distlib@0.4.3",
+        "pkg:pypi/filelock@3.31.0",
+        "pkg:pypi/platformdirs@4.10.1",
+        "pkg:pypi/python-discovery@1.4.4",
+        "pkg:pypi/typing-extensions@4.16.0"
+      ],
+      "ref": "pkg:pypi/virtualenv@21.6.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:pypi/cffi@2.1.0"
+      ],
+      "ref": "pkg:pypi/xattr@1.3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:pypi/zipp@4.1.0"
+    }
+  ],
+  "metadata": {
+    "authors": [],
+    "component": {
+      "bom-ref": "pkg:pypi/poetry-smoke@2.5.0",
+      "description": "Poetry smoke test fixture for cdxgen golden tests.",
+      "name": "poetry-smoke",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/pyproject.toml"
+        }
+      ],
+      "purl": "pkg:pypi/poetry-smoke@2.5.0",
+      "type": "application",
+      "version": "2.5.0"
+    },
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "tools": {
+      "components": [
+        {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@_normalized_",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@<normalized>",
+          "type": "application",
+          "version": "<normalized>"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+  "specVersion": "1.7",
+  "version": 1
+}

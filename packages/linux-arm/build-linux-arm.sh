@@ -5,13 +5,13 @@ set -e
 rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui
-mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxrs
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-arm plugins/dosai/dosai-linux-arm
 sha256sum plugins/dosai/dosai-linux-arm > plugins/dosai/dosai-linux-arm.sha256
 
-for plug in trivy trustinspector golem rusi cdxui
+for plug in trivy trustinspector golem rusi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-arm" "linux-arm64"

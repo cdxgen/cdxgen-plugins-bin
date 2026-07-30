@@ -1,0 +1,120 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:golang/github.com/stretchr/testify@v1.8.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/go.mod",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/go.mod"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "github.com/stretchr/testify",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/go.mod"
+        }
+      ],
+      "purl": "pkg:golang/github.com/stretchr/testify@v1.8.4",
+      "scope": "required",
+      "type": "library",
+      "version": "v1.8.4"
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/text@v0.14.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/go.mod",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/go.mod"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "golang.org/x/text",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/go.mod"
+        }
+      ],
+      "purl": "pkg:golang/golang.org/x/text@v0.14.0",
+      "scope": "required",
+      "type": "library",
+      "version": "v0.14.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "pkg:golang/github.com/stretchr/testify@v1.8.4",
+        "pkg:golang/golang.org/x/text@v0.14.0"
+      ],
+      "ref": "pkg:golang/cdxgen-test/gosmoke"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:golang/github.com/stretchr/testify@v1.8.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:golang/golang.org/x/text@v0.14.0"
+    }
+  ],
+  "metadata": {
+    "authors": [],
+    "component": {
+      "bom-ref": "pkg:golang/cdxgen-test/gosmoke",
+      "name": "cdxgen-test/gosmoke",
+      "purl": "pkg:golang/cdxgen-test/gosmoke",
+      "type": "application"
+    },
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "tools": {
+      "components": [
+        {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@_normalized_",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@<normalized>",
+          "type": "application",
+          "version": "<normalized>"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+  "specVersion": "1.7",
+  "version": 1
+}

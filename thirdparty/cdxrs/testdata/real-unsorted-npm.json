@@ -1,0 +1,249 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:ff1cfb77-ec53-4c2a-885b-470260ebb923",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-07-30T08:12:25Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "13.0.0",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@13.0.0",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@13.0.0",
+          "author": "OWASP Foundation",
+          "publisher": "OWASP Foundation"
+        }
+      ]
+    },
+    "authors": [],
+    "component": {
+      "name": "npm-smoke",
+      "group": "",
+      "version": "1.0.0",
+      "description": "Golden SBOM smoke fixture for npm manifest parsing",
+      "purl": "pkg:npm/npm-smoke@1.0.0",
+      "bom-ref": "pkg:npm/npm-smoke@1.0.0",
+      "properties": [],
+      "type": "application"
+    }
+  },
+  "components": [
+    {
+      "group": "",
+      "name": "left-pad",
+      "version": "1.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5c8e4c3f354d0298c0ca1433a615fc06498ab0a5310f82ddc8adb88997901a29c137dc93413ddb165081cbf695c761eb35ca901ac768b7c821ae3cabbcc0a810"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "WTFPL",
+            "url": "https://opensource.org/licenses/WTFPL"
+          }
+        }
+      ],
+      "purl": "pkg:npm/left-pad@1.3.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz"
+        }
+      ],
+      "type": "library",
+      "bom-ref": "pkg:npm/left-pad@1.3.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/Users/prabhu/work/cdxgen/cdxgen/repotests/npm-smoke/package-lock.json"
+        },
+        {
+          "name": "ResolvedUrl",
+          "value": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz"
+        },
+        {
+          "name": "LocalNodeModulesPath",
+          "value": "node_modules/left-pad"
+        },
+        {
+          "name": "cdx:npm:deprecated",
+          "value": "use String.prototype.padStart()"
+        }
+      ]
+    },
+    {
+      "group": "",
+      "name": "semver",
+      "version": "7.3.5",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3e878625887c1cae014cefdaf537fa646def7a8fc0ed956c62b480e89f27cbd9dbdc1d55ae992e37ecfd384e707c4e69e87e0b721619b1e8224206c90fde1915"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC",
+            "url": "https://opensource.org/licenses/ISC"
+          }
+        }
+      ],
+      "purl": "pkg:npm/semver@7.3.5",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/semver/-/semver-7.3.5.tgz"
+        }
+      ],
+      "type": "library",
+      "bom-ref": "pkg:npm/semver@7.3.5",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/Users/prabhu/work/cdxgen/cdxgen/repotests/npm-smoke/package-lock.json"
+        },
+        {
+          "name": "ResolvedUrl",
+          "value": "https://registry.npmjs.org/semver/-/semver-7.3.5.tgz"
+        },
+        {
+          "name": "LocalNodeModulesPath",
+          "value": "node_modules/semver"
+        },
+        {
+          "name": "cdx:npm:binPaths",
+          "value": "/Users/prabhu/work/cdxgen/cdxgen/repotests/npm-smoke/node_modules/.bin/semver"
+        },
+        {
+          "name": "cdx:npm:bin",
+          "value": "semver"
+        },
+        {
+          "name": "cdx:npm:has_binary",
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "group": "",
+      "name": "lru-cache",
+      "version": "6.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "268e9d274e029928eece7c09492de951e5a677f1f47df4e59175e0c198be7aad540a6a90c0287e78bb183980b063df758b615a878875044302c78a938466ec88"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC",
+            "url": "https://opensource.org/licenses/ISC"
+          }
+        }
+      ],
+      "purl": "pkg:npm/lru-cache@6.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/lru-cache/-/lru-cache-6.0.0.tgz"
+        }
+      ],
+      "type": "library",
+      "bom-ref": "pkg:npm/lru-cache@6.0.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/Users/prabhu/work/cdxgen/cdxgen/repotests/npm-smoke/package-lock.json"
+        },
+        {
+          "name": "ResolvedUrl",
+          "value": "https://registry.npmjs.org/lru-cache/-/lru-cache-6.0.0.tgz"
+        },
+        {
+          "name": "LocalNodeModulesPath",
+          "value": "node_modules/lru-cache"
+        }
+      ]
+    },
+    {
+      "group": "",
+      "name": "yallist",
+      "version": "4.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "df074689d672ab93c1d3ce172c44b94e9392440df08d7025216321ba6da445cbffe354a7d9e990d1dc9c416e2e6572de8f02af83a12cbdb76554bf8560472dec"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC",
+            "url": "https://opensource.org/licenses/ISC"
+          }
+        }
+      ],
+      "purl": "pkg:npm/yallist@4.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/yallist/-/yallist-4.0.0.tgz"
+        }
+      ],
+      "type": "library",
+      "bom-ref": "pkg:npm/yallist@4.0.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/Users/prabhu/work/cdxgen/cdxgen/repotests/npm-smoke/package-lock.json"
+        },
+        {
+          "name": "ResolvedUrl",
+          "value": "https://registry.npmjs.org/yallist/-/yallist-4.0.0.tgz"
+        },
+        {
+          "name": "LocalNodeModulesPath",
+          "value": "node_modules/yallist"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:npm/left-pad@1.3.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/yallist@4.0.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:npm/lru-cache@6.0.0",
+      "dependsOn": [
+        "pkg:npm/yallist@4.0.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/semver@7.3.5",
+      "dependsOn": [
+        "pkg:npm/lru-cache@6.0.0"
+      ]
+    },
+    {
+      "ref": "pkg:npm/npm-smoke@1.0.0",
+      "dependsOn": [
+        "pkg:npm/left-pad@1.3.0",
+        "pkg:npm/semver@7.3.5"
+      ]
+    }
+  ]
+}

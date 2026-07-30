@@ -2,14 +2,14 @@
 set -e
 
 rm -rf plugins/trivy plugins/osquery plugins/dosai plugins/sourcekitten
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
 
-for plug in trivy trustinspector golem rusi cdxui
+for plug in trivy trustinspector golem rusi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]]; } && find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
+    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]] || [[ "$plug" == "cdxrs" ]]; } && find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
         make sbom
     else
         make all

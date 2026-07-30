@@ -1,0 +1,337 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:nuget/AutoMapper@13.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "AutoMapper",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/AutoMapper@13.0.1",
+      "type": "library",
+      "version": "13.0.1"
+    },
+    {
+      "bom-ref": "pkg:nuget/FluentValidation@11.9.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "FluentValidation",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/FluentValidation@11.9.0",
+      "type": "library",
+      "version": "11.9.0"
+    },
+    {
+      "bom-ref": "pkg:nuget/MediatR@12.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "MediatR",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/MediatR@12.2.0",
+      "type": "library",
+      "version": "12.2.0"
+    },
+    {
+      "bom-ref": "pkg:nuget/Microsoft.Extensions.DependencyInjection@8.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Microsoft.Extensions.DependencyInjection",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Microsoft.Extensions.DependencyInjection@8.0.1",
+      "type": "library",
+      "version": "8.0.1"
+    },
+    {
+      "bom-ref": "pkg:nuget/Microsoft.Extensions.Logging@8.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Microsoft.Extensions.Logging",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Microsoft.Extensions.Logging@8.0.1",
+      "type": "library",
+      "version": "8.0.1"
+    },
+    {
+      "bom-ref": "pkg:nuget/Newtonsoft.Json@13.0.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Newtonsoft.Json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Newtonsoft.Json@13.0.3",
+      "type": "library",
+      "version": "13.0.3"
+    },
+    {
+      "bom-ref": "pkg:nuget/Polly@7.2.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Polly",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Polly@7.2.4",
+      "type": "library",
+      "version": "7.2.4"
+    },
+    {
+      "bom-ref": "pkg:nuget/Serilog@3.1.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Serilog",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Serilog@3.1.1",
+      "type": "library",
+      "version": "3.1.1"
+    },
+    {
+      "bom-ref": "pkg:nuget/Swashbuckle.AspNetCore@6.5.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/eShop.Shared.csproj",
+            "confidence": 0.7,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.7,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/eShop.Shared.csproj"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "Swashbuckle.AspNetCore",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/eShop.Shared.csproj"
+        }
+      ],
+      "purl": "pkg:nuget/Swashbuckle.AspNetCore@6.5.0",
+      "type": "library",
+      "version": "6.5.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "pkg:nuget/AutoMapper@13.0.1",
+        "pkg:nuget/FluentValidation@11.9.0",
+        "pkg:nuget/MediatR@12.2.0",
+        "pkg:nuget/Microsoft.Extensions.DependencyInjection@8.0.1",
+        "pkg:nuget/Microsoft.Extensions.Logging@8.0.1",
+        "pkg:nuget/Newtonsoft.Json@13.0.3",
+        "pkg:nuget/Polly@7.2.4",
+        "pkg:nuget/Serilog@3.1.1",
+        "pkg:nuget/Swashbuckle.AspNetCore@6.5.0"
+      ],
+      "ref": "pkg:nuget/eShop.Shared@latest"
+    }
+  ],
+  "metadata": {
+    "authors": [],
+    "component": {
+      "bom-ref": "pkg:nuget/eShop.Shared@latest",
+      "name": "eShop.Shared",
+      "properties": [
+        {
+          "name": "Namespaces",
+          "value": "eShop.Shared"
+        },
+        {
+          "name": "cdx:dotnet:target_framework",
+          "value": "net8.0"
+        }
+      ],
+      "purl": "pkg:nuget/eShop.Shared@latest",
+      "type": "application"
+    },
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "tools": {
+      "components": [
+        {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@_normalized_",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@<normalized>",
+          "type": "application",
+          "version": "<normalized>"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+  "specVersion": "1.7",
+  "version": 1
+}

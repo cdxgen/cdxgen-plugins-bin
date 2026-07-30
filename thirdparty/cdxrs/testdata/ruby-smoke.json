@@ -1,0 +1,3773 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:gem/CFPropertyList@3.0.9",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "CFPropertyList",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/CFPropertyList@3.0.9",
+      "type": "library",
+      "version": "3.0.9"
+    },
+    {
+      "bom-ref": "pkg:gem/abbrev@0.1.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "abbrev",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/abbrev@0.1.2",
+      "type": "library",
+      "version": "0.1.2"
+    },
+    {
+      "bom-ref": "pkg:gem/addressable@2.9.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "addressable",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/addressable@2.9.0",
+      "type": "library",
+      "version": "2.9.0"
+    },
+    {
+      "bom-ref": "pkg:gem/artifactory@3.0.17",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "artifactory",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/artifactory@3.0.17",
+      "type": "library",
+      "version": "3.0.17"
+    },
+    {
+      "bom-ref": "pkg:gem/atomos@0.1.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "atomos",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/atomos@0.1.3",
+      "type": "library",
+      "version": "0.1.3"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-eventstream@1.3.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-eventstream",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-eventstream@1.3.2",
+      "type": "library",
+      "version": "1.3.2"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-partitions@1.1109.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-partitions",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-partitions@1.1109.0",
+      "type": "library",
+      "version": "1.1109.0"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-sdk-core@3.224.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-sdk-core",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-sdk-core@3.224.1",
+      "type": "library",
+      "version": "3.224.1"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-sdk-kms@1.101.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-sdk-kms",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-sdk-kms@1.101.0",
+      "type": "library",
+      "version": "1.101.0"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-sdk-s3@1.188.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-sdk-s3",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-sdk-s3@1.188.0",
+      "type": "library",
+      "version": "1.188.0"
+    },
+    {
+      "bom-ref": "pkg:gem/aws-sigv4@1.11.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "aws-sigv4",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/aws-sigv4@1.11.0",
+      "type": "library",
+      "version": "1.11.0"
+    },
+    {
+      "bom-ref": "pkg:gem/babosa@1.0.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "babosa",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/babosa@1.0.4",
+      "type": "library",
+      "version": "1.0.4"
+    },
+    {
+      "bom-ref": "pkg:gem/base64@0.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "base64",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/base64@0.2.0",
+      "type": "library",
+      "version": "0.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/claide@1.1.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "claide",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/claide@1.1.0",
+      "type": "library",
+      "version": "1.1.0"
+    },
+    {
+      "bom-ref": "pkg:gem/colored2@3.1.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "colored2",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/colored2@3.1.2",
+      "type": "library",
+      "version": "3.1.2"
+    },
+    {
+      "bom-ref": "pkg:gem/colored@1.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "colored",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/colored@1.2",
+      "type": "library",
+      "version": "1.2"
+    },
+    {
+      "bom-ref": "pkg:gem/commander@4.6.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "commander",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/commander@4.6.0",
+      "type": "library",
+      "version": "4.6.0"
+    },
+    {
+      "bom-ref": "pkg:gem/csv@3.3.5",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "csv",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/csv@3.3.5",
+      "type": "library",
+      "version": "3.3.5"
+    },
+    {
+      "bom-ref": "pkg:gem/declarative@0.0.20",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "declarative",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/declarative@0.0.20",
+      "type": "library",
+      "version": "0.0.20"
+    },
+    {
+      "bom-ref": "pkg:gem/digest-crc@0.7.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "digest-crc",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/digest-crc@0.7.0",
+      "type": "library",
+      "version": "0.7.0"
+    },
+    {
+      "bom-ref": "pkg:gem/domain_name@0.5.20190701",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "domain_name",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/domain_name@0.5.20190701",
+      "type": "library",
+      "version": "0.5.20190701"
+    },
+    {
+      "bom-ref": "pkg:gem/dotenv@2.8.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "dotenv",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/dotenv@2.8.1",
+      "type": "library",
+      "version": "2.8.1"
+    },
+    {
+      "bom-ref": "pkg:gem/emoji_regex@3.2.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "emoji_regex",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/emoji_regex@3.2.3",
+      "type": "library",
+      "version": "3.2.3"
+    },
+    {
+      "bom-ref": "pkg:gem/excon@0.109.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "excon",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/excon@0.109.0",
+      "type": "library",
+      "version": "0.109.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-cookie_jar@0.0.8",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-cookie_jar",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-cookie_jar@0.0.8",
+      "type": "library",
+      "version": "0.0.8"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-em_http@1.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-em_http",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-em_http@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-em_synchrony@1.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-em_synchrony",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-em_synchrony@1.0.1",
+      "type": "library",
+      "version": "1.0.1"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-excon@1.1.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-excon",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-excon@1.1.0",
+      "type": "library",
+      "version": "1.1.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-httpclient@1.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-httpclient",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-httpclient@1.0.1",
+      "type": "library",
+      "version": "1.0.1"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-multipart@1.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-multipart",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-multipart@1.2.0",
+      "type": "library",
+      "version": "1.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-net_http@1.0.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-net_http",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-net_http@1.0.2",
+      "type": "library",
+      "version": "1.0.2"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-net_http_persistent@1.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-net_http_persistent",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-net_http_persistent@1.2.0",
+      "type": "library",
+      "version": "1.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-patron@1.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-patron",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-patron@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-rack@1.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-rack",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-rack@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday-retry@1.0.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday-retry",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday-retry@1.0.4",
+      "type": "library",
+      "version": "1.0.4"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday@1.10.5",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday@1.10.5",
+      "type": "library",
+      "version": "1.10.5"
+    },
+    {
+      "bom-ref": "pkg:gem/faraday_middleware@1.2.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "faraday_middleware",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/faraday_middleware@1.2.1",
+      "type": "library",
+      "version": "1.2.1"
+    },
+    {
+      "bom-ref": "pkg:gem/fastimage@2.4.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "fastimage",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/fastimage@2.4.1",
+      "type": "library",
+      "version": "2.4.1"
+    },
+    {
+      "bom-ref": "pkg:gem/fastlane-sirp@1.1.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "fastlane-sirp",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/fastlane-sirp@1.1.0",
+      "type": "library",
+      "version": "1.1.0"
+    },
+    {
+      "bom-ref": "pkg:gem/fastlane@2.230.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "fastlane",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/fastlane@2.230.0",
+      "type": "library",
+      "version": "2.230.0"
+    },
+    {
+      "bom-ref": "pkg:gem/gh_inspector@1.1.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "gh_inspector",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/gh_inspector@1.1.3",
+      "type": "library",
+      "version": "1.1.3"
+    },
+    {
+      "bom-ref": "pkg:gem/google-apis-androidpublisher_v3@0.54.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-apis-androidpublisher_v3",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-apis-androidpublisher_v3@0.54.0",
+      "type": "library",
+      "version": "0.54.0"
+    },
+    {
+      "bom-ref": "pkg:gem/google-apis-core@0.11.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-apis-core",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-apis-core@0.11.3",
+      "type": "library",
+      "version": "0.11.3"
+    },
+    {
+      "bom-ref": "pkg:gem/google-apis-iamcredentials_v1@0.17.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-apis-iamcredentials_v1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-apis-iamcredentials_v1@0.17.0",
+      "type": "library",
+      "version": "0.17.0"
+    },
+    {
+      "bom-ref": "pkg:gem/google-apis-playcustomapp_v1@0.13.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-apis-playcustomapp_v1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-apis-playcustomapp_v1@0.13.0",
+      "type": "library",
+      "version": "0.13.0"
+    },
+    {
+      "bom-ref": "pkg:gem/google-apis-storage_v1@0.29.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-apis-storage_v1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-apis-storage_v1@0.29.0",
+      "type": "library",
+      "version": "0.29.0"
+    },
+    {
+      "bom-ref": "pkg:gem/google-cloud-core@1.6.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-cloud-core",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-cloud-core@1.6.1",
+      "type": "library",
+      "version": "1.6.1"
+    },
+    {
+      "bom-ref": "pkg:gem/google-cloud-env@1.6.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-cloud-env",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-cloud-env@1.6.0",
+      "type": "library",
+      "version": "1.6.0"
+    },
+    {
+      "bom-ref": "pkg:gem/google-cloud-errors@1.3.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-cloud-errors",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-cloud-errors@1.3.1",
+      "type": "library",
+      "version": "1.3.1"
+    },
+    {
+      "bom-ref": "pkg:gem/google-cloud-storage@1.45.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "google-cloud-storage",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/google-cloud-storage@1.45.0",
+      "type": "library",
+      "version": "1.45.0"
+    },
+    {
+      "bom-ref": "pkg:gem/googleauth@1.8.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "googleauth",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/googleauth@1.8.1",
+      "type": "library",
+      "version": "1.8.1"
+    },
+    {
+      "bom-ref": "pkg:gem/highline@2.0.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "highline",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/highline@2.0.3",
+      "type": "library",
+      "version": "2.0.3"
+    },
+    {
+      "bom-ref": "pkg:gem/http-cookie@1.0.8",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "http-cookie",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/http-cookie@1.0.8",
+      "type": "library",
+      "version": "1.0.8"
+    },
+    {
+      "bom-ref": "pkg:gem/httpclient@2.9.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "httpclient",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/httpclient@2.9.0",
+      "type": "library",
+      "version": "2.9.0"
+    },
+    {
+      "bom-ref": "pkg:gem/jmespath@1.6.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jmespath",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/jmespath@1.6.2",
+      "type": "library",
+      "version": "1.6.2"
+    },
+    {
+      "bom-ref": "pkg:gem/json@2.7.6",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/json@2.7.6",
+      "type": "library",
+      "version": "2.7.6"
+    },
+    {
+      "bom-ref": "pkg:gem/jwt@2.10.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "jwt",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/jwt@2.10.3",
+      "type": "library",
+      "version": "2.10.3"
+    },
+    {
+      "bom-ref": "pkg:gem/logger@1.7.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "logger",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/logger@1.7.0",
+      "type": "library",
+      "version": "1.7.0"
+    },
+    {
+      "bom-ref": "pkg:gem/mini_magick@4.13.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "mini_magick",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/mini_magick@4.13.2",
+      "type": "library",
+      "version": "4.13.2"
+    },
+    {
+      "bom-ref": "pkg:gem/mini_mime@1.1.5",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "mini_mime",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/mini_mime@1.1.5",
+      "type": "library",
+      "version": "1.1.5"
+    },
+    {
+      "bom-ref": "pkg:gem/multi_json@1.15.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "multi_json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/multi_json@1.15.0",
+      "type": "library",
+      "version": "1.15.0"
+    },
+    {
+      "bom-ref": "pkg:gem/multipart-post@2.4.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "multipart-post",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/multipart-post@2.4.1",
+      "type": "library",
+      "version": "2.4.1"
+    },
+    {
+      "bom-ref": "pkg:gem/mutex_m@0.3.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "mutex_m",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/mutex_m@0.3.0",
+      "type": "library",
+      "version": "0.3.0"
+    },
+    {
+      "bom-ref": "pkg:gem/nanaimo@0.4.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "nanaimo",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/nanaimo@0.4.0",
+      "type": "library",
+      "version": "0.4.0"
+    },
+    {
+      "bom-ref": "pkg:gem/naturally@2.3.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "naturally",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/naturally@2.3.0",
+      "type": "library",
+      "version": "2.3.0"
+    },
+    {
+      "bom-ref": "pkg:gem/nkf@0.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "nkf",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/nkf@0.2.0",
+      "type": "library",
+      "version": "0.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/optparse@0.8.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "optparse",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/optparse@0.8.1",
+      "type": "library",
+      "version": "0.8.1"
+    },
+    {
+      "bom-ref": "pkg:gem/os@1.1.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "os",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/os@1.1.4",
+      "type": "library",
+      "version": "1.1.4"
+    },
+    {
+      "bom-ref": "pkg:gem/plist@3.7.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "plist",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/plist@3.7.2",
+      "type": "library",
+      "version": "3.7.2"
+    },
+    {
+      "bom-ref": "pkg:gem/public_suffix@5.1.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "public_suffix",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/public_suffix@5.1.1",
+      "type": "library",
+      "version": "5.1.1"
+    },
+    {
+      "bom-ref": "pkg:gem/rake@13.4.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "rake",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/rake@13.4.2",
+      "type": "library",
+      "version": "13.4.2"
+    },
+    {
+      "bom-ref": "pkg:gem/representable@3.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "representable",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/representable@3.2.0",
+      "type": "library",
+      "version": "3.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/retriable@3.8.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "retriable",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/retriable@3.8.0",
+      "type": "library",
+      "version": "3.8.0"
+    },
+    {
+      "bom-ref": "pkg:gem/rexml@3.4.4",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "rexml",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/rexml@3.4.4",
+      "type": "library",
+      "version": "3.4.4"
+    },
+    {
+      "bom-ref": "pkg:gem/rouge@3.28.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "rouge",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/rouge@3.28.0",
+      "type": "library",
+      "version": "3.28.0"
+    },
+    {
+      "bom-ref": "pkg:gem/ruby-smoke@1.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/ruby-smoke.gemspec",
+            "confidence": 0.5,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.5,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/ruby-smoke.gemspec"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "ruby-smoke",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/ruby-smoke.gemspec"
+        }
+      ],
+      "purl": "pkg:gem/ruby-smoke@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/ruby2_keywords@0.0.5",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "ruby2_keywords",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/ruby2_keywords@0.0.5",
+      "type": "library",
+      "version": "0.0.5"
+    },
+    {
+      "bom-ref": "pkg:gem/rubyzip@2.4.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "rubyzip",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/rubyzip@2.4.1",
+      "type": "library",
+      "version": "2.4.1"
+    },
+    {
+      "bom-ref": "pkg:gem/security@0.1.5",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "security",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/security@0.1.5",
+      "type": "library",
+      "version": "0.1.5"
+    },
+    {
+      "bom-ref": "pkg:gem/signet@0.18.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "signet",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/signet@0.18.0",
+      "type": "library",
+      "version": "0.18.0"
+    },
+    {
+      "bom-ref": "pkg:gem/simctl@1.6.10",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "simctl",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/simctl@1.6.10",
+      "type": "library",
+      "version": "1.6.10"
+    },
+    {
+      "bom-ref": "pkg:gem/terminal-notifier@2.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "terminal-notifier",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/terminal-notifier@2.0.0",
+      "type": "library",
+      "version": "2.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/terminal-table@3.0.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "terminal-table",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/terminal-table@3.0.2",
+      "type": "library",
+      "version": "3.0.2"
+    },
+    {
+      "bom-ref": "pkg:gem/trailblazer-option@0.1.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "trailblazer-option",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/trailblazer-option@0.1.2",
+      "type": "framework",
+      "version": "0.1.2"
+    },
+    {
+      "bom-ref": "pkg:gem/tty-cursor@0.7.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "tty-cursor",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/tty-cursor@0.7.1",
+      "type": "library",
+      "version": "0.7.1"
+    },
+    {
+      "bom-ref": "pkg:gem/tty-screen@0.8.2",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "tty-screen",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/tty-screen@0.8.2",
+      "type": "library",
+      "version": "0.8.2"
+    },
+    {
+      "bom-ref": "pkg:gem/tty-spinner@0.9.3",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "tty-spinner",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/tty-spinner@0.9.3",
+      "type": "library",
+      "version": "0.9.3"
+    },
+    {
+      "bom-ref": "pkg:gem/uber@0.1.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "uber",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/uber@0.1.0",
+      "type": "library",
+      "version": "0.1.0"
+    },
+    {
+      "bom-ref": "pkg:gem/unf@0.2.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "unf",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/unf@0.2.0",
+      "type": "library",
+      "version": "0.2.0"
+    },
+    {
+      "bom-ref": "pkg:gem/unicode-display_width@2.6.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "unicode-display_width",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/unicode-display_width@2.6.0",
+      "type": "library",
+      "version": "2.6.0"
+    },
+    {
+      "bom-ref": "pkg:gem/word_wrap@1.0.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "word_wrap",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/word_wrap@1.0.0",
+      "type": "library",
+      "version": "1.0.0"
+    },
+    {
+      "bom-ref": "pkg:gem/xcodeproj@1.27.0",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "xcodeproj",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/xcodeproj@1.27.0",
+      "type": "library",
+      "version": "1.27.0"
+    },
+    {
+      "bom-ref": "pkg:gem/xcpretty-travis-formatter@1.0.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "xcpretty-travis-formatter",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/xcpretty-travis-formatter@1.0.1",
+      "type": "library",
+      "version": "1.0.1"
+    },
+    {
+      "bom-ref": "pkg:gem/xcpretty@0.4.1",
+      "evidence": {
+        "identity": [
+          {
+            "concludedValue": "$ROOT/Gemfile.lock",
+            "confidence": 0.8,
+            "field": "purl",
+            "methods": [
+              {
+                "confidence": 0.8,
+                "technique": "manifest-analysis",
+                "value": "$ROOT/Gemfile.lock"
+              }
+            ]
+          }
+        ]
+      },
+      "group": "",
+      "name": "xcpretty",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "$ROOT/Gemfile.lock"
+        },
+        {
+          "name": "cdx:gem:remote",
+          "value": "https://rubygems.org/"
+        }
+      ],
+      "purl": "pkg:gem/xcpretty@0.4.1",
+      "type": "library",
+      "version": "0.4.1"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/CFPropertyList@3.0.9"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/abbrev@0.1.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/public_suffix@5.1.1"
+      ],
+      "ref": "pkg:gem/addressable@2.9.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/artifactory@3.0.17"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/atomos@0.1.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/aws-eventstream@1.3.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/aws-partitions@1.1109.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/aws-eventstream@1.3.2",
+        "pkg:gem/aws-partitions@1.1109.0",
+        "pkg:gem/aws-sigv4@1.11.0",
+        "pkg:gem/base64@0.2.0",
+        "pkg:gem/jmespath@1.6.2",
+        "pkg:gem/logger@1.7.0"
+      ],
+      "ref": "pkg:gem/aws-sdk-core@3.224.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/aws-sdk-core@3.224.1",
+        "pkg:gem/aws-sigv4@1.11.0"
+      ],
+      "ref": "pkg:gem/aws-sdk-kms@1.101.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/aws-sdk-core@3.224.1",
+        "pkg:gem/aws-sdk-kms@1.101.0",
+        "pkg:gem/aws-sigv4@1.11.0"
+      ],
+      "ref": "pkg:gem/aws-sdk-s3@1.188.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/aws-eventstream@1.3.2"
+      ],
+      "ref": "pkg:gem/aws-sigv4@1.11.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/babosa@1.0.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/base64@0.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/claide@1.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/colored2@3.1.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/colored@1.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/highline@2.0.3"
+      ],
+      "ref": "pkg:gem/commander@4.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/csv@3.3.5"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/declarative@0.0.20"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/rake@13.4.2"
+      ],
+      "ref": "pkg:gem/digest-crc@0.7.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/unf@0.2.0"
+      ],
+      "ref": "pkg:gem/domain_name@0.5.20190701"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/dotenv@2.8.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/emoji_regex@3.2.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/excon@0.109.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/faraday@1.10.5",
+        "pkg:gem/http-cookie@1.0.8"
+      ],
+      "ref": "pkg:gem/faraday-cookie_jar@0.0.8"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-em_http@1.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-em_synchrony@1.0.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-excon@1.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-httpclient@1.0.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/multipart-post@2.4.1"
+      ],
+      "ref": "pkg:gem/faraday-multipart@1.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-net_http@1.0.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-net_http_persistent@1.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-patron@1.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-rack@1.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/faraday-retry@1.0.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/faraday-em_http@1.0.0",
+        "pkg:gem/faraday-em_synchrony@1.0.1",
+        "pkg:gem/faraday-excon@1.1.0",
+        "pkg:gem/faraday-httpclient@1.0.1",
+        "pkg:gem/faraday-multipart@1.2.0",
+        "pkg:gem/faraday-net_http@1.0.2",
+        "pkg:gem/faraday-net_http_persistent@1.2.0",
+        "pkg:gem/faraday-patron@1.0.0",
+        "pkg:gem/faraday-rack@1.0.0",
+        "pkg:gem/faraday-retry@1.0.4",
+        "pkg:gem/ruby2_keywords@0.0.5"
+      ],
+      "ref": "pkg:gem/faraday@1.10.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/faraday@1.10.5"
+      ],
+      "ref": "pkg:gem/faraday_middleware@1.2.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/fastimage@2.4.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/fastlane-sirp@1.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/CFPropertyList@3.0.9",
+        "pkg:gem/abbrev@0.1.2",
+        "pkg:gem/addressable@2.9.0",
+        "pkg:gem/artifactory@3.0.17",
+        "pkg:gem/aws-sdk-s3@1.188.0",
+        "pkg:gem/babosa@1.0.4",
+        "pkg:gem/base64@0.2.0",
+        "pkg:gem/colored@1.2",
+        "pkg:gem/commander@4.6.0",
+        "pkg:gem/csv@3.3.5",
+        "pkg:gem/dotenv@2.8.1",
+        "pkg:gem/emoji_regex@3.2.3",
+        "pkg:gem/excon@0.109.0",
+        "pkg:gem/faraday-cookie_jar@0.0.8",
+        "pkg:gem/faraday@1.10.5",
+        "pkg:gem/faraday_middleware@1.2.1",
+        "pkg:gem/fastimage@2.4.1",
+        "pkg:gem/fastlane-sirp@1.1.0",
+        "pkg:gem/gh_inspector@1.1.3",
+        "pkg:gem/google-apis-androidpublisher_v3@0.54.0",
+        "pkg:gem/google-apis-playcustomapp_v1@0.13.0",
+        "pkg:gem/google-cloud-env@1.6.0",
+        "pkg:gem/google-cloud-storage@1.45.0",
+        "pkg:gem/highline@2.0.3",
+        "pkg:gem/http-cookie@1.0.8",
+        "pkg:gem/json@2.7.6",
+        "pkg:gem/jwt@2.10.3",
+        "pkg:gem/logger@1.7.0",
+        "pkg:gem/mini_magick@4.13.2",
+        "pkg:gem/multipart-post@2.4.1",
+        "pkg:gem/mutex_m@0.3.0",
+        "pkg:gem/naturally@2.3.0",
+        "pkg:gem/nkf@0.2.0",
+        "pkg:gem/optparse@0.8.1",
+        "pkg:gem/plist@3.7.2",
+        "pkg:gem/rubyzip@2.4.1",
+        "pkg:gem/security@0.1.5",
+        "pkg:gem/simctl@1.6.10",
+        "pkg:gem/terminal-notifier@2.0.0",
+        "pkg:gem/terminal-table@3.0.2",
+        "pkg:gem/tty-screen@0.8.2",
+        "pkg:gem/tty-spinner@0.9.3",
+        "pkg:gem/word_wrap@1.0.0",
+        "pkg:gem/xcodeproj@1.27.0",
+        "pkg:gem/xcpretty-travis-formatter@1.0.1",
+        "pkg:gem/xcpretty@0.4.1"
+      ],
+      "ref": "pkg:gem/fastlane@2.230.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/gh_inspector@1.1.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/google-apis-core@0.11.3"
+      ],
+      "ref": "pkg:gem/google-apis-androidpublisher_v3@0.54.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/addressable@2.9.0",
+        "pkg:gem/googleauth@1.8.1",
+        "pkg:gem/httpclient@2.9.0",
+        "pkg:gem/mini_mime@1.1.5",
+        "pkg:gem/representable@3.2.0",
+        "pkg:gem/retriable@3.8.0",
+        "pkg:gem/rexml@3.4.4"
+      ],
+      "ref": "pkg:gem/google-apis-core@0.11.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/google-apis-core@0.11.3"
+      ],
+      "ref": "pkg:gem/google-apis-iamcredentials_v1@0.17.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/google-apis-core@0.11.3"
+      ],
+      "ref": "pkg:gem/google-apis-playcustomapp_v1@0.13.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/google-apis-core@0.11.3"
+      ],
+      "ref": "pkg:gem/google-apis-storage_v1@0.29.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/google-cloud-env@1.6.0",
+        "pkg:gem/google-cloud-errors@1.3.1"
+      ],
+      "ref": "pkg:gem/google-cloud-core@1.6.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/faraday@1.10.5"
+      ],
+      "ref": "pkg:gem/google-cloud-env@1.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/google-cloud-errors@1.3.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/addressable@2.9.0",
+        "pkg:gem/digest-crc@0.7.0",
+        "pkg:gem/google-apis-iamcredentials_v1@0.17.0",
+        "pkg:gem/google-apis-storage_v1@0.29.0",
+        "pkg:gem/google-cloud-core@1.6.1",
+        "pkg:gem/googleauth@1.8.1",
+        "pkg:gem/mini_mime@1.1.5"
+      ],
+      "ref": "pkg:gem/google-cloud-storage@1.45.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/faraday@1.10.5",
+        "pkg:gem/jwt@2.10.3",
+        "pkg:gem/multi_json@1.15.0",
+        "pkg:gem/os@1.1.4",
+        "pkg:gem/signet@0.18.0"
+      ],
+      "ref": "pkg:gem/googleauth@1.8.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/highline@2.0.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/domain_name@0.5.20190701"
+      ],
+      "ref": "pkg:gem/http-cookie@1.0.8"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/mutex_m@0.3.0"
+      ],
+      "ref": "pkg:gem/httpclient@2.9.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/jmespath@1.6.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/json@2.7.6"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/base64@0.2.0"
+      ],
+      "ref": "pkg:gem/jwt@2.10.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/logger@1.7.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/mini_magick@4.13.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/mini_mime@1.1.5"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/multi_json@1.15.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/multipart-post@2.4.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/mutex_m@0.3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/nanaimo@0.4.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/naturally@2.3.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/nkf@0.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/optparse@0.8.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/os@1.1.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/plist@3.7.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/public_suffix@5.1.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/rake@13.4.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/declarative@0.0.20",
+        "pkg:gem/trailblazer-option@0.1.2",
+        "pkg:gem/uber@0.1.0"
+      ],
+      "ref": "pkg:gem/representable@3.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/retriable@3.8.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/rexml@3.4.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/rouge@3.28.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/fastlane@2.230.0"
+      ],
+      "ref": "pkg:gem/ruby-smoke@1.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/ruby2_keywords@0.0.5"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/rubyzip@2.4.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/security@0.1.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/addressable@2.9.0",
+        "pkg:gem/faraday@1.10.5",
+        "pkg:gem/jwt@2.10.3",
+        "pkg:gem/multi_json@1.15.0"
+      ],
+      "ref": "pkg:gem/signet@0.18.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/CFPropertyList@3.0.9",
+        "pkg:gem/naturally@2.3.0"
+      ],
+      "ref": "pkg:gem/simctl@1.6.10"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/terminal-notifier@2.0.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/unicode-display_width@2.6.0"
+      ],
+      "ref": "pkg:gem/terminal-table@3.0.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/trailblazer-option@0.1.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/tty-cursor@0.7.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/tty-screen@0.8.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/tty-cursor@0.7.1"
+      ],
+      "ref": "pkg:gem/tty-spinner@0.9.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/uber@0.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/unf@0.2.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/unicode-display_width@2.6.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:gem/word_wrap@1.0.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/CFPropertyList@3.0.9",
+        "pkg:gem/atomos@0.1.3",
+        "pkg:gem/claide@1.1.0",
+        "pkg:gem/colored2@3.1.2",
+        "pkg:gem/nanaimo@0.4.0",
+        "pkg:gem/rexml@3.4.4"
+      ],
+      "ref": "pkg:gem/xcodeproj@1.27.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/xcpretty@0.4.1"
+      ],
+      "ref": "pkg:gem/xcpretty-travis-formatter@1.0.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:gem/rouge@3.28.0"
+      ],
+      "ref": "pkg:gem/xcpretty@0.4.1"
+    }
+  ],
+  "metadata": {
+    "authors": [],
+    "component": {
+      "bom-ref": "pkg:gem/ruby-smoke@1.0.0#1",
+      "group": "",
+      "name": "ruby-smoke",
+      "purl": "pkg:gem/ruby-smoke@1.0.0",
+      "type": "application",
+      "version": "1.0.0"
+    },
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "tools": {
+      "components": [
+        {
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ],
+          "bom-ref": "pkg:npm/%40cyclonedx/cdxgen@_normalized_",
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "publisher": "OWASP Foundation",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@<normalized>",
+          "type": "application",
+          "version": "<normalized>"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+  "specVersion": "1.7",
+  "version": 1
+}
