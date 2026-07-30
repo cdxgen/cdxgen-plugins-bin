@@ -1,0 +1,56 @@
+thirdparty/cdxrs/src/cmd/validate.rs
+  s_56bdcfbf76146c::t_bc9ff39fe8fb9a 1-11,13,15-34,39-42
+  s_56bdcfbf76146c::t_3f79966f95a68d 12,14,35-38
+thirdparty/cdxrs/src/validate/schema.rs
+  s_56bdcfbf76146c::t_667c447e81cf63 114-115,119
+  s_56bdcfbf76146c::t_5efc2f4d5938ef 59
+  s_56bdcfbf76146c::t_ff347d09ddedcc 9
+  s_56bdcfbf76146c::t_86a78a548fb2e8 1-8,10-20,22-58,66,68,70-72,74-75,77-85,87-102,104-112,116-118,120-121,123-126,129-137,144-151,156-174
+  s_56bdcfbf76146c::t_670258c140a490 21,60-65,67,69,73,76,86,103,113,122,127-128,138-143,152-155
+thirdparty/cdxrs/Cargo.toml
+  s_56bdcfbf76146c::t_4596d97fe3b63f 19
+thirdparty/cdxrs/src/main.rs
+  s_56bdcfbf76146c::t_4745051c20d41e 8
+  s_56bdcfbf76146c::t_d70a23d4b14709 40-45
+  s_56bdcfbf76146c::t_f97b04a6942576 17-19,47
+  s_56bdcfbf76146c::t_4c603b65396458 46
+thirdparty/cdxrs/src/cli.rs
+  s_56bdcfbf76146c::t_6d5000cbb96d59 33-35
+thirdparty/cdxrs/src/validate/findings.rs
+  s_56bdcfbf76146c::t_e2eeb859283509 1-48
+thirdparty/cdxrs/src/cmd/mod.rs
+  s_56bdcfbf76146c::t_3296c166a5b350 4
+thirdparty/cdxrs/src/lib.rs
+  s_56bdcfbf76146c::t_8f829716179bde 12
+thirdparty/cdxrs/src/validate/semantic.rs
+  s_56bdcfbf76146c::t_263c1c15230d44 688,691,721-727
+  s_56bdcfbf76146c::t_b5b652e9563760 329
+  s_56bdcfbf76146c::t_8d26b88eac3abc 1-99,101-128,130-172,174-278,280-328,330-487,489-491,494-560,562-587,590-605,607-687,689-690,692-720,728-763
+  s_56bdcfbf76146c::t_b5a6f08842202f 588
+  s_56bdcfbf76146c::t_1d0b81b66120bc 100,129,173,279,488,492-493,561,589,606,764-774
+thirdparty/cdxrs/src/error.rs
+  s_56bdcfbf76146c::t_ddc4459847b68c 26-31
+  s_56bdcfbf76146c::t_2f8c43797871e3 51
+thirdparty/cdxrs/src/validate/mod.rs
+  s_56bdcfbf76146c::t_c0809b07d46aee 1-30,34-41,43-96
+  s_56bdcfbf76146c::t_dff0fa5b427b59 31-33,42
+  s_56bdcfbf76146c::t_21fa23f09fadb0 97-101
+thirdparty/cdxrs/Cargo.lock
+  s_56bdcfbf76146c::t_2779960cd29785 5-33,84-104,120-137,144,189,234-239,250-269,292-302,309-335,346-359,368,376-380,388-490,525-592,605-619,626-709,722-765,784-789,796-870,884-895,923,957-968,975-1006,1018-1028,1036,1059-1069,1078-1083,1090-1095,1102-1111,1118-1177,1193-1301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b5422d3cfd8ff4335d3815eeb9bfd73d95f8db4e",
+  "prompts": {},
+  "sessions": {
+    "s_56bdcfbf76146c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04d5ae778ffe3FVRW0LI40jz16",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
