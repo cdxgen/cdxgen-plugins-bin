@@ -1,0 +1,74 @@
+thirdparty/cdxrs/src/lib.rs
+  s_4f2c68d492bfd3::t_47ff15615e8de3 10
+thirdparty/cdxrs/src/fetch/registries/npm.rs
+  s_4f2c68d492bfd3::t_755fe9575526e7 163
+  s_4f2c68d492bfd3::t_50d549d8d29b15 1-18,20-162,164-178
+  s_4f2c68d492bfd3::t_b098a6c0c99c8e 19
+thirdparty/cdxrs/src/cmd/fetch.rs
+  s_4f2c68d492bfd3::t_f8a50d86d0ce00 45-46
+  s_4f2c68d492bfd3::t_74b807a334fffe 107
+  s_4f2c68d492bfd3::t_8c2f3935bcc961 35-38,47,56-60,67,75-77,80,82,86-89,91-97,100,109-111,154-161,164,167-180
+  s_4f2c68d492bfd3::t_60a23fe0268261 1-34,39-44,48-55,61-66,68-74,78-79,81,83-85,90,98-99,101-104,108,112-153,162-163,165-166,181-184
+  s_4f2c68d492bfd3::t_a9e406392c2617 105-106
+thirdparty/cdxrs/Cargo.toml
+  s_4f2c68d492bfd3::t_47a89b1d9feab3 26
+  s_4f2c68d492bfd3::t_41e7e4c8ae8cd1 20,23,25,32
+thirdparty/cdxrs/src/fetch/cache.rs
+  s_4f2c68d492bfd3::t_e1f1192216f8c2 35
+  s_4f2c68d492bfd3::t_a3336161afd443 169
+  s_4f2c68d492bfd3::t_27b101bad08d04 29
+  s_4f2c68d492bfd3::t_8ce5df4dfc88df 1-28,30-34,36-168,170-346
+thirdparty/cdxrs/src/cli.rs
+  s_4f2c68d492bfd3::t_6c4675dc4820b7 36-71
+thirdparty/cdxrs/src/fetch/mod.rs
+  s_4f2c68d492bfd3::t_e0dc764f22ad25 1-19
+thirdparty/cdxrs/src/fetch/registries/mod.rs
+  s_4f2c68d492bfd3::t_173ef911af29e6 1-11
+thirdparty/cdxrs/src/fetch/registries/repo_license.rs
+  s_4f2c68d492bfd3::t_2d2dd4e5d6229e 1-88,90-150
+  s_4f2c68d492bfd3::t_ae65f5f911912e 89
+thirdparty/cdxrs/src/fetch/adapter.rs
+  s_4f2c68d492bfd3::t_0d6e3baec79a13 1-145
+thirdparty/cdxrs/src/cmd/mod.rs
+  s_4f2c68d492bfd3::t_de67e101917ba9 3
+thirdparty/cdxrs/src/fetch/registries/crates_io.rs
+  s_4f2c68d492bfd3::t_62c963093def7b 65
+  s_4f2c68d492bfd3::t_d073c38ab24265 35,37-39
+  s_4f2c68d492bfd3::t_423fb19fd16939 175
+  s_4f2c68d492bfd3::t_9a0d30c83fbf70 1-15,17-34,36,40-64,66-174,176-212
+  s_4f2c68d492bfd3::t_0cbcb26247dc8b 16
+thirdparty/cdxrs/src/fetch/rate.rs
+  s_4f2c68d492bfd3::t_b75d7282cb2cae 1-22,24-36,38-54,57-80
+  s_4f2c68d492bfd3::t_b95d13aac05b63 23
+  s_4f2c68d492bfd3::t_2dd625b8a4c2cf 55-56
+  s_4f2c68d492bfd3::t_a451bb2bdfe0e7 37
+thirdparty/cdxrs/src/fetch/registries/pub_dev.rs
+  s_4f2c68d492bfd3::t_9e27db320f1793 1-16,18-155
+  s_4f2c68d492bfd3::t_2af7552cf3403c 17
+thirdparty/cdxrs/src/main.rs
+  s_4f2c68d492bfd3::t_2015b3d7445a4e 21,24-27,29-30
+  s_4f2c68d492bfd3::t_1839520c37bd83 28
+  s_4f2c68d492bfd3::t_ce27e86afbd7c5 74-92
+  s_4f2c68d492bfd3::t_204abafbd98349 20,22-23,31-37
+thirdparty/cdxrs/src/fetch/client.rs
+  s_4f2c68d492bfd3::t_de7cca77a2492c 1-12,14-318
+  s_4f2c68d492bfd3::t_27b101bad08d04 13
+thirdparty/cdxrs/Cargo.lock
+  s_4f2c68d492bfd3::t_6844a11026631b 5-10,76,87-109,112-117,124-129,178-193,201,207-209,218-234,281-297,306,318-335,352-369,419,439-454,466-471,478-486,497-584,595-607,629,632-652,672-783,909-914,934,1023-1034,1047-1067,1146-1155,1203-1208,1227-1282,1304-1329,1405-1462,1473-1508,1517-1522,1573-1584,1592,1596-1607,1614-1619,1626-1635,1669-1674,1697-1705,1727,1760-1899,1918-1935,1970-1984,2007-2016,2049-2077,2084-2092,2102-2188,2265-2270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1444e0b42f7cef8ca08d21031afb33e4e95eb647",
+  "prompts": {},
+  "sessions": {
+    "s_4f2c68d492bfd3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_040421211ffeSk1lVQBW2MWlVR",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
