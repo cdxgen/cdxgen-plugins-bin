@@ -7,6 +7,7 @@ pub mod bom;
 pub mod cli;
 pub mod cmd;
 pub mod error;
+pub mod fetch;
 pub mod io;
 pub mod log;
 pub mod validate;
