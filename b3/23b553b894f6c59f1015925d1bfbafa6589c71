@@ -1,0 +1,19 @@
+thirdparty/cdxrs/src/fetch/cache.rs
+  s_4cf5bc23eb44ec::t_2b5589a542ec46 1238-1279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b323b553b894f6c59f1015925d1bfbafa6589c71",
+  "prompts": {},
+  "sessions": {
+    "s_4cf5bc23eb44ec": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_033e36545ffeEWj4w6PrZoUpo3",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
