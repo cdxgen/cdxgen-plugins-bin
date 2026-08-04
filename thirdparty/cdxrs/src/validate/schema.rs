@@ -154,12 +154,9 @@ fn extract_bom_ref(bom: &Value, instance_path_str: &str) -> Option<String> {
         if let Some(v) = current.get(*seg) {
             current = v;
         } else if let Ok(idx) = seg.parse::<usize>() {
-            if let Some(arr) = current.as_array() {
-                if idx < arr.len() {
-                    current = &arr[idx];
-                } else {
-                    return None;
-                }
+            let arr = current.as_array()?;
+            if idx < arr.len() {
+                current = &arr[idx];
             } else {
                 return None;
             }
