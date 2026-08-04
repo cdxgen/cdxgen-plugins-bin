@@ -1,0 +1,35 @@
+thirdparty/cdxrs/src/fetch/cache.rs
+  s_7d724ea76adc3c::t_ee16ca79d0c881 20-22
+  s_7d724ea76adc3c::t_2eeef123a98360 51-64
+  s_7d724ea76adc3c::t_95ff7933da79e7 1152-1154,1156,1158-1159,1162-1164,1166-1167,1170-1175,1177-1185,1187-1188
+  s_7d724ea76adc3c::t_f22b23c6096572 364-370
+  s_7d724ea76adc3c::t_8d78c7558357ad 224,709,711,1191,1307-1313,1315-1341,1343-1368,1370-1397,1400,1403
+  s_7d724ea76adc3c::t_e6841829d50a57 488-489
+  s_7d724ea76adc3c::t_300c299e652fef 459-474,708
+  s_7d724ea76adc3c::t_e9ddc8100985ed 616-632
+  s_7d724ea76adc3c::t_8d3c414c3ba1a0 66-69
+  s_7d724ea76adc3c::t_0bcd1dc9e41d23 670-676,678,680-682
+  s_7d724ea76adc3c::t_a605b3d1add1f6 477-483
+  s_7d724ea76adc3c::t_b43f255787a1b1 513-524,526,532
+  s_7d724ea76adc3c::t_0ea74952a9d922 169,171-173
+  s_7d724ea76adc3c::t_d9b64927337092 217,221-223
+  s_7d724ea76adc3c::t_243d26e81bf5e2 413
+  s_7d724ea76adc3c::t_16e40c07b0311a 74-76
+  s_7d724ea76adc3c::t_ec881c9a3ec494 65,225,696-707,710,712,1192,1314,1342,1369,1398-1399,1401-1402
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ce64136c7844f4b886df9573243698645ebfd438",
+  "prompts": {},
+  "sessions": {
+    "s_7d724ea76adc3c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a0b9959-84de-46e0-a87e-11e7f1e7f1e3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
