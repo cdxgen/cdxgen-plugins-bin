@@ -88,11 +88,10 @@ fn build_fetch_config(args: &cdxrs::cli::FetchArgs) -> cdxrs::cmd::fetch::FetchC
     };
     cdxrs::cmd::fetch::FetchConfig {
         client_config,
-        // --offline means "cache only", so it *needs* the cache. Treating it as
-        // a reason to disable the cache made the flag guarantee a miss and then
-        // go to the network anyway — the exact opposite of what it promises.
         cache_enabled: !args.no_cache,
         cache_ttl_secs: args.cache_ttl,
+        cache_max_bytes: args.max_cache_bytes,
+        cache_dir: args.cache_dir.as_ref().map(std::path::PathBuf::from),
         offline: args.offline,
     }
 }

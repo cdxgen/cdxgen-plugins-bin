@@ -74,6 +74,7 @@ pub fn run_fetch_env(input_json: &str, extra_args: &[&str], env: &[(&str, &str)]
     let overrides: HashMap<&str, &str> = env.iter().copied().collect();
     for key in [
         "CDXGEN_CACHE_DIR",
+        "CDXGEN_CACHE_LOOPBACK",
         "GITHUB_TOKEN",
         "HTTPS_PROXY",
         "https_proxy",
@@ -114,7 +115,8 @@ pub fn run_fetch_env(input_json: &str, extra_args: &[&str], env: &[(&str, &str)]
     }
 }
 
-/// Run with a dedicated, empty cache directory.
+/// Run with a dedicated, empty cache directory. Sets `CDXGEN_CACHE_LOOPBACK=1`
+/// because every cache test uses a wiremock server on `127.0.0.1`.
 pub fn run_fetch_cached(
     input_json: &str,
     extra_args: &[&str],
@@ -123,7 +125,10 @@ pub fn run_fetch_cached(
     run_fetch_env(
         input_json,
         extra_args,
-        &[("CDXGEN_CACHE_DIR", &cache_dir.to_string_lossy())],
+        &[
+            ("CDXGEN_CACHE_DIR", &cache_dir.to_string_lossy()),
+            ("CDXGEN_CACHE_LOOPBACK", "1"),
+        ],
     )
 }
 

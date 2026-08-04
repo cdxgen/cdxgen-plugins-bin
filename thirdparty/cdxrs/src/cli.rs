@@ -77,6 +77,16 @@ pub struct FetchArgs {
     #[arg(long)]
     pub no_cache: bool,
 
+    /// Explicit cache directory. When omitted, Rust resolves it from the
+    /// platform convention (standalone CLI use only).
+    #[arg(long)]
+    pub cache_dir: Option<String>,
+
+    /// Byte ceiling for the on-disk cache. When exceeded, entries are evicted
+    /// least-recently-used first.
+    #[arg(long, default_value_t = crate::fetch::cache::DEFAULT_MAX_CACHE_BYTES)]
+    pub max_cache_bytes: u64,
+
     /// Offline mode: serve only from cache, never hit the network. A cache
     /// miss is a recorded non-fatal absence.
     #[arg(long)]

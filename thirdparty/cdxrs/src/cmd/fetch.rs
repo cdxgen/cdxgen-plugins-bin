@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::error::CdxrsError;
 use crate::fetch::batch::{BatchInput, BatchOptions, run_batch};
-use crate::fetch::cache::{DEFAULT_CACHE_TTL_SECS, HttpCache};
+use crate::fetch::cache::{DEFAULT_CACHE_TTL_SECS, DEFAULT_MAX_CACHE_BYTES, HttpCache};
 use crate::fetch::client::{FetchClient, FetchClientConfig};
 use crate::io as io_mod;
 use crate::log;
@@ -24,6 +24,10 @@ pub struct FetchConfig {
     pub client_config: FetchClientConfig,
     pub cache_enabled: bool,
     pub cache_ttl_secs: u64,
+    pub cache_max_bytes: u64,
+    /// Explicit cache directory from `--cache-dir`. When `None`, Rust falls
+    /// back to its own resolution (standalone CLI use only).
+    pub cache_dir: Option<std::path::PathBuf>,
     pub offline: bool,
 }
 
@@ -33,6 +37,8 @@ impl Default for FetchConfig {
             client_config: FetchClientConfig::default(),
             cache_enabled: true,
             cache_ttl_secs: DEFAULT_CACHE_TTL_SECS,
+            cache_max_bytes: DEFAULT_MAX_CACHE_BYTES,
+            cache_dir: None,
             offline: false,
         }
     }
@@ -67,17 +73,22 @@ pub async fn run(
             .map_err(|e| CdxrsError::Other(format!("failed to create HTTP client: {e}")))?,
     );
 
-    // With the cache disabled nothing is ever read or written, so the root is
-    // irrelevant; it is still given a real path rather than the temp dir so a
-    // stray write would be obvious rather than silently landing in /tmp.
-    let cache_root = HttpCache::resolve_cache_dir().unwrap_or_else(|| {
+    // JS is the authority for the cache directory: when it passes --cache-dir,
+    // that path wins. Rust's own resolution is the fallback for standalone CLI
+    // use only.
+    let resolved = config
+        .cache_dir
+        .clone()
+        .or_else(HttpCache::resolve_cache_dir);
+    let cache_enabled = config.cache_enabled && resolved.is_some();
+    let cache_root = resolved.unwrap_or_else(|| {
         log::debug("no cache directory could be resolved; running without a cache");
         std::path::PathBuf::from(".cdxgen-cache-unavailable")
     });
-    let cache_enabled = config.cache_enabled && HttpCache::resolve_cache_dir().is_some();
     let cache = Arc::new(HttpCache::new(
         cache_root,
         config.cache_ttl_secs,
+        config.cache_max_bytes,
         cache_enabled,
     ));
 

@@ -554,6 +554,7 @@ async fn credentials_never_reach_output_or_disk() {
         &[],
         &[
             ("CDXGEN_CACHE_DIR", &cache.path().to_string_lossy()),
+            ("CDXGEN_CACHE_LOOPBACK", "1"),
             ("GITHUB_TOKEN", SENTINEL),
         ],
     )
@@ -684,4 +685,88 @@ async fn per_host_concurrency_cap_is_respected() {
         elapsed >= std::time::Duration::from_millis(700),
         "per-host cap was not enforced (elapsed {elapsed:?})"
     );
+}
+
+// ---------------------------------------------------------- loopback caching
+
+/// Loopback hosts must not be written to the cache. Their entries are keyed by
+/// ephemeral ports that will never be reused, so caching them pollutes the
+/// directory permanently.
+#[tokio::test]
+async fn loopback_hosts_are_not_cached() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/pkg"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": 1})))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let cache = TempDir::new().unwrap();
+    let input = batch(vec![request("x", &format!("{}/pkg", server.uri()))]);
+    // run_fetch_cached sets CDXGEN_CACHE_LOOPBACK=1, so use run_fetch_env
+    // directly with only CDXGEN_CACHE_DIR (loopback is excluded by default).
+    let first = run_fetch_env(
+        &input,
+        &[],
+        &[("CDXGEN_CACHE_DIR", &cache.path().to_string_lossy())],
+    )
+    .expect_success();
+    assert_eq!(first.result("x")["ok"], true);
+    assert_eq!(first.result("x")["fromCache"], false);
+
+    let second = run_fetch_env(
+        &input,
+        &[],
+        &[("CDXGEN_CACHE_DIR", &cache.path().to_string_lossy())],
+    )
+    .expect_success();
+    assert_eq!(second.result("x")["ok"], true);
+    // Must not be served from cache — loopback entries are never written.
+    assert_eq!(second.result("x")["fromCache"], false);
+
+    // No cache files should exist on disk.
+    let files = walk(cache.path());
+    assert!(
+        files.iter().all(|p| !p.to_string_lossy().contains(".json")),
+        "loopback host wrote cache files: {files:?}"
+    );
+}
+
+/// With CDXGEN_CACHE_LOOPBACK=1, loopback hosts are cached normally — needed
+/// by contrib/bench-fetch.js so the warm-cache benchmark measures a hit.
+#[tokio::test]
+async fn loopback_cached_when_override_env_is_set() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/pkg"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"v": 1})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let cache = TempDir::new().unwrap();
+    let input = batch(vec![request("x", &format!("{}/pkg", server.uri()))]);
+    let first = run_fetch_env(
+        &input,
+        &[],
+        &[
+            ("CDXGEN_CACHE_DIR", &cache.path().to_string_lossy()),
+            ("CDXGEN_CACHE_LOOPBACK", "1"),
+        ],
+    )
+    .expect_success();
+    assert_eq!(first.result("x")["fromCache"], false);
+
+    let second = run_fetch_env(
+        &input,
+        &[],
+        &[
+            ("CDXGEN_CACHE_DIR", &cache.path().to_string_lossy()),
+            ("CDXGEN_CACHE_LOOPBACK", "1"),
+        ],
+    )
+    .expect_success();
+    assert_eq!(second.result("x")["fromCache"], true);
+    assert_eq!(second.result("x")["body"]["v"], 1);
 }
