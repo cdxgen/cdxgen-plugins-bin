@@ -177,6 +177,40 @@ A Rust-based terminal user interface (TUI) for exploring CycloneDX Bill of Mater
 
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64, darwin-amd64, windows-amd64, windows-arm64
 
+### cdxrs
+
+Rust-native CycloneDX BOM tooling. cdxgen routes its `validate` and `fetch`
+stages through cdxrs when the binary is present, and falls back to its own
+JavaScript implementation when it is not.
+
+The fallback is what makes cdxrs safe to treat as optional, and it is also the
+reason a missing binary is dangerous: cdxgen keeps producing correct output, so
+nothing reports that the accelerator never ran. cdxgen's
+`contrib/rs-disable-golden-test.js` asserts that `CDXGEN_RS_DISABLE=all`
+produces byte-identical output, which is the guarantee that lets the fallback
+be silent.
+
+**What it does:**
+
+- Validates a BOM against the vendored CycloneDX 1.6 and 1.7 schemas, plus
+  semantic rules the schema cannot express (purl well-formedness, SPDX
+  expressions, metadata completeness)
+- Covers the CycloneDX 1.7 additions cdxgen emits: root-level `citations`,
+  `algorithmFamily`/`ellipticCurve`, and `metadata.distributionConstraints.tlp`
+- Performs batched registry metadata fetches with per-host concurrency limits,
+  a TTL- and size-bounded on-disk cache, and credential redaction
+- Round-trips BOMs byte-identically: the I/O path uses untyped JSON values, so
+  unknown fields survive and key order is deterministic
+
+cdxgen pins cdxrs by **major** version. A mismatch is not an error — the bridge
+logs once and uses the JavaScript path — so release this package before cdxgen
+when that major changes.
+
+See [thirdparty/cdxrs/README.md](thirdparty/cdxrs/README.md) for the command
+surface, the protocol and exit codes.
+
+**Supported platforms:** linux-amd64, linux-arm64, linux-arm, linux-ppc64le, linux-riscv64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
+
 ## Installation
 
 The package is consumed indirectly by cdxgen. Install cdxgen, which installs this plugin as an optional dependency:

@@ -1,0 +1,87 @@
+name: cdxrs test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "thirdparty/cdxrs/**"
+      - ".github/workflows/cdxrs-test.yml"
+  pull_request:
+    paths:
+      - "thirdparty/cdxrs/**"
+      - ".github/workflows/cdxrs-test.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: thirdparty/cdxrs
+
+jobs:
+  # cdxrs is the accelerator behind cdxgen's `validate` and `fetch` stages. Its
+  # output has to stay byte-identical to the JavaScript path it replaces, which
+  # is what lets cdxgen fall back silently when the binary is absent, so the
+  # suite is a release gate rather than a convenience.
+  #
+  # tests/fetch.rs runs against a local mock server and makes no outbound
+  # requests. tests/schema_drift.rs pins the vendored schema hashes: if it
+  # fails, a CycloneDX schema changed underneath us and that is the finding.
+  test:
+    name: cargo test (stable)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
+          rustup default stable
+          rustc --version
+      - name: cargo test
+        run: cargo test
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo fmt
+        run: cargo fmt --check
+
+  # The binary is cross-built for eleven targets at release time. Building the
+  # host target here catches a broken build long before the release job, where
+  # it would otherwise surface after the slow bootstrap steps.
+  build:
+    name: cargo build --release (host)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: cargo build --release
+        run: cargo build --release --locked
+      - name: Smoke test the built binary
+        shell: bash
+        run: |
+          bin=target/release/cdxrs
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --version
+          "$bin" schema-version

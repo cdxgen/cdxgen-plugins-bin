@@ -20,8 +20,8 @@ stage_plugin_files() {
   mkdir -p "$destination_dir"
 
   if [[ ! -d "$source_dir" ]]; then
-    echo "Warning: No files found for $plugin_name in $source_dir/" >&2
-    return 0
+    echo "Error: $plugin_name was never built: $source_dir/ does not exist." >&2
+    return 1
   fi
 
   while IFS= read -r -d '' file_path; do
@@ -40,8 +40,18 @@ stage_plugin_files() {
       \( -name "*${platform_fragment}*" -o -name 'sbom*' \) -print0
   )
 
+  # Every plugin staged through this script builds for every platform the
+  # packages/ directory covers, so a missing binary means a build step did not
+  # run, not that the combination is unsupported. Failing here is the point:
+  # this returned 0 while cdxrs was absent from both macOS packages, and the
+  # release went out green because the only signal was a warning in a log
+  # nobody reads. A silently incomplete package is worse than a failed release.
   if [[ "$staged_binary" -eq 0 ]]; then
-    echo "Warning: No files found for $plugin_name in $source_dir/" >&2
+    echo "Error: no $plugin_name binary matching '$platform_fragment' in $source_dir/" >&2
+    local present
+    present="$(find "$source_dir" -maxdepth 1 -type f -exec basename {} \; 2>/dev/null | sort | tr '\n' ' ')"
+    echo "       Built files present: ${present:-<none>}" >&2
+    return 1
   fi
 }
 

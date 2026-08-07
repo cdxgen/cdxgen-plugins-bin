@@ -31,6 +31,21 @@ do
     popd
 done
 
+# Coverage before size: a package missing a plugin can still be under the size
+# limit, and shipping one is the worse outcome.
+bash ./scripts/check-plugin-coverage.sh \
+    packages/windows-amd64 \
+    packages/linux-amd64 \
+    packages/linux-arm64 \
+    packages/linuxmusl-amd64 \
+    packages/linuxmusl-arm64 \
+    packages/linux-riscv64 \
+    packages/linux-arm \
+    packages/windows-arm64 \
+    packages/darwin-arm64 \
+    packages/darwin-amd64 \
+    packages/ppc64
+
 bash ./scripts/check-package-size.sh \
     packages/windows-amd64 \
     packages/linux-amd64 \
