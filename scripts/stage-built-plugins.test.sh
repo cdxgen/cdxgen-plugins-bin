@@ -27,7 +27,14 @@ hash_only_source="$tmpdir/source/hash-only"
 hash_only_dest="$tmpdir/destination/hash-only"
 mkdir -p "$hash_only_source" "$hash_only_dest"
 printf 'hash-sidecar' > "$hash_only_source/trivy-linux-amd64.sha256"
-warning_output="$(bash "$helper_script" "$hash_only_source" "$hash_only_dest" "linux-amd64" 2>&1 >/dev/null)"
-[[ "$warning_output" == *"Warning: No files found for hash-only"* ]]
+# A sidecar-only source directory means the build never produced a binary, so the
+# helper must fail the release rather than stage an incomplete package.
+set +e
+error_output="$(bash "$helper_script" "$hash_only_source" "$hash_only_dest" "linux-amd64" 2>&1 >/dev/null)"
+error_status=$?
+set -e
+[[ "$error_status" -ne 0 ]]
+[[ "$error_output" == *"Error: no hash-only binary matching 'linux-amd64'"* ]]
+[[ "$error_output" == *"Built files present: trivy-linux-amd64.sha256"* ]]
 
 echo "stage-built-plugins helper test passed"
