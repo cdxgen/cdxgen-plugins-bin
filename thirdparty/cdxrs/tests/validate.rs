@@ -581,3 +581,132 @@ fn test_purl_encoded_slash_rule_survives_parser_changes() {
         "purl.encoded-slash-without-namespace"
     ));
 }
+
+// --- CycloneDX 1.7 citations ------------------------------------------------
+//
+// cdxgen emits a root-level `citations` array by default at 1.7, so these
+// guard the version gate and the schema's own constraints on a citation:
+// `timestamp` is required, exactly one of `pointers`/`expressions` may be
+// present (oneOf), and at least one of `attributedTo`/`process` must be
+// (anyOf).
+
+fn bom_with_citations(spec_version: &str, citation: Value) -> Value {
+    json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": spec_version,
+        "version": 1,
+        "metadata": {
+            "component": {
+                "type": "application",
+                "name": "demo",
+                "version": "1.0.0",
+                "purl": "pkg:generic/demo@1.0.0",
+                "bom-ref": "pkg:generic/demo@1.0.0"
+            }
+        },
+        "components": [],
+        "citations": [citation]
+    })
+}
+
+#[test]
+fn test_citations_valid_with_expressions() {
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "expressions": ["$.components"],
+            "attributedTo": "pkg:generic/demo@1.0.0",
+            "note": "Component inventory collected by cdxgen."
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(!has_finding(&f.findings, "schema.invalid"));
+}
+
+#[test]
+fn test_citations_valid_with_pointers_and_process() {
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "pointers": ["/components/0/licenses/0"],
+            "process": "urn:cdx:formula:audit"
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(!has_finding(&f.findings, "schema.invalid"));
+}
+
+#[test]
+fn test_citations_reject_both_targeting_mechanisms() {
+    // oneOf: pointers and expressions are mutually exclusive.
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "pointers": ["/components"],
+            "expressions": ["$.components"],
+            "attributedTo": "pkg:generic/demo@1.0.0"
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
+
+#[test]
+fn test_citations_reject_neither_targeting_mechanism() {
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "attributedTo": "pkg:generic/demo@1.0.0"
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
+
+#[test]
+fn test_citations_reject_missing_timestamp() {
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "expressions": ["$.components"],
+            "attributedTo": "pkg:generic/demo@1.0.0"
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
+
+#[test]
+fn test_citations_reject_missing_attribution() {
+    // anyOf: at least one of attributedTo / process.
+    let bom = bom_with_citations(
+        "1.7",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "expressions": ["$.components"]
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
+
+#[test]
+fn test_citations_rejected_at_1_6() {
+    // `citations` is a 1.7 addition. A 1.6 document carrying one is invalid,
+    // which is what makes cdxgen's downgrade strip load-bearing rather than
+    // cosmetic.
+    let bom = bom_with_citations(
+        "1.6",
+        json!({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "expressions": ["$.components"],
+            "attributedTo": "pkg:generic/demo@1.0.0"
+        }),
+    );
+    let f = validate_bom(&bom);
+    assert!(has_severity(&f.findings, "schema.invalid", Severity::Error));
+}
