@@ -108,12 +108,12 @@ file.
 stdin and stdout carry JSON. **stderr carries NDJSON log records only** — never
 human-readable text, because cdxgen parses it. Exit codes:
 
-| Code | Meaning |
-| ---- | ------- |
-| 0 | Success |
-| 1 | Operational failure (I/O, parse, size limit) |
-| 2 | Bad usage (invalid arguments) |
-| 3 | Validation found error-severity findings |
+| Code | Meaning                                      |
+| ---- | -------------------------------------------- |
+| 0    | Success                                      |
+| 1    | Operational failure (I/O, parse, size limit) |
+| 2    | Bad usage (invalid arguments)                |
+| 3    | Validation found error-severity findings     |
 
 The full protocol, including the JS bridge API and every fallback reason, is in
 `docs/CDXRS_PROTOCOL.md` in the cdxgen repository.

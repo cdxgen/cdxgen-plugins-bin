@@ -16,11 +16,11 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
     - name: Install Zig
@@ -52,7 +52,7 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Build Rusi Darwin helper artifacts
@@ -80,11 +80,11 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
     - name: Install Zig
@@ -116,7 +116,7 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Build cdxui Darwin helper artifacts
@@ -144,11 +144,11 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
         package-manager-cache: false
@@ -181,7 +181,7 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Build cdxrs Darwin helper artifacts
@@ -216,26 +216,26 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
         registry-url: https://registry.npmjs.org/
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
         go-version: '^1.25.6'
-    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: '3.13'
     - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3  # v4.1.0
+      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
-    - uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3  # v2.0.0
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+    - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
     - run: oras version
     - name: Trim CI agent
       run: |
@@ -345,7 +345,7 @@ jobs:
         - ppc64
     steps:
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
         registry-url: https://registry.npmjs.org/
@@ -383,18 +383,18 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: 25.x
         registry-url: https://registry.npmjs.org/
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
         go-version: '^1.25.6'
-    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: '3.13'
     - name: Build
