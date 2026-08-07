@@ -113,3 +113,7 @@ test/obj
 .vscode/
 sbom-go-postbuild.cdx.json
 thirdparty/golem/build
+
+# Internal development notes are kept outside the repo.
+BLOCKERS.md
+PROGRESS.md
