@@ -1,0 +1,63 @@
+thirdparty/cdxrs/src/validate/semantic.rs
+  s_fbb2fe1a325ad6::t_68aa278b536d6b 340-342,345-349
+  s_fbb2fe1a325ad6::t_efbe800260c3ac 249-253,255
+  s_fbb2fe1a325ad6::t_8d0a25be0cda0d 418,426,428
+  s_fbb2fe1a325ad6::t_18fae2846d4327 455
+thirdparty/cdxrs/tests/validate.rs
+  s_fbb2fe1a325ad6::t_21703582508cda 573-575,586-615
+  s_fbb2fe1a325ad6::t_d994716fda38eb 616-617
+package-lock.json
+  s_fbb2fe1a325ad6::t_cf494d277a7337 3,9
+package.json
+  s_fbb2fe1a325ad6::t_38733cbbae2150 3
+packages/darwin-amd64/package.json
+  s_fbb2fe1a325ad6::t_a3eb5049b3cdf2 3
+packages/darwin-arm64/package.json
+  s_fbb2fe1a325ad6::t_8bc17e3fedf2fa 3
+packages/linux-amd64/package.json
+  s_fbb2fe1a325ad6::t_3c38e0b120e07e 3
+packages/linux-arm/package.json
+  s_fbb2fe1a325ad6::t_beef672607b180 3
+packages/linux-arm64/package.json
+  s_fbb2fe1a325ad6::t_fe36c476c76285 3
+packages/linux-riscv64/package.json
+  s_fbb2fe1a325ad6::t_a19329cf7120d0 3
+packages/linuxmusl-amd64/package.json
+  s_fbb2fe1a325ad6::t_f3ff92f66e8c41 3
+packages/linuxmusl-arm64/package.json
+  s_fbb2fe1a325ad6::t_3c702cf91fe7d6 3
+packages/ppc64/package.json
+  s_fbb2fe1a325ad6::t_b41d972ec28ade 3
+packages/windows-amd64/package.json
+  s_fbb2fe1a325ad6::t_8aabed0f253bbe 3
+packages/windows-arm64/package.json
+  s_fbb2fe1a325ad6::t_72f18317867ab7 3
+thirdparty/cdxrs/Cargo.lock
+  s_fbb2fe1a325ad6::t_0d1f4b1991aacd 196
+thirdparty/cdxrs/Cargo.toml
+  s_fbb2fe1a325ad6::t_2684c0bcf74649 3
+thirdparty/cdxui/Cargo.lock
+  s_fbb2fe1a325ad6::t_295a637a619e10 90
+thirdparty/cdxui/Cargo.toml
+  s_fbb2fe1a325ad6::t_0774ac34051221 3
+thirdparty/rusi/Cargo.lock
+  s_fbb2fe1a325ad6::t_49ab5016483745 290,303,319,337,349
+thirdparty/rusi/Cargo.toml
+  s_fbb2fe1a325ad6::t_6c0b6eed5f875f 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bfff57df788f5bd089d0f86eda5df63d9384bab4",
+  "prompts": {},
+  "sessions": {
+    "s_fbb2fe1a325ad6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "22ecf873-67ef-4209-90e3-4f3c87f888fb",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
