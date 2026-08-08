@@ -246,11 +246,13 @@ pub fn validate_purls(bom: &Value) -> Vec<Finding> {
                     }
                     // Encoded slash without namespace (npm/golang).
                     //
-                    // Test the *raw* purl string, not `parsed.name`: the purl
-                    // parser percent-decodes the name, so `parsed.name` never
-                    // contains a literal "%2F" and this rule could never fire.
+                    // Test `parsed.raw_name`, the undecoded name segment.
+                    // `parsed.name` is percent-decoded and so never holds a
+                    // literal "%2F", while the whole purl string also covers
+                    // qualifiers and subpath, where an encoded slash is ordinary
+                    // — a `vcs_url` value is percent-encoded per the purl spec.
                     if matches!(parsed.purl_type.as_str(), "npm" | "golang")
-                        && purl.contains("%2F")
+                        && parsed.raw_name.contains("%2F")
                         && parsed.namespace.is_empty()
                     {
                         findings.push(Finding {
@@ -335,11 +337,16 @@ struct ParsedPurl {
     purl_type: String,
     namespace: String,
     // Retained for completeness of the parsed form, and because the purl type
-    // table is due to be extended by later deliverables. No rule reads it today:
-    // the encoded-slash check deliberately inspects the raw purl instead, since
-    // the parser percent-decodes this field.
+    // table is due to be extended by later deliverables. No rule reads it today,
+    // since the encoded-slash check needs the undecoded spelling and reads
+    // `raw_name` instead.
     #[allow(dead_code)]
     name: String,
+    /// The name segment exactly as it appeared in the purl, before percent
+    /// decoding. Qualifiers, subpath and version are already excluded here, so a
+    /// rule about the name cannot be triggered by an encoded character elsewhere
+    /// in the purl.
+    raw_name: String,
     #[allow(dead_code)]
     version: String,
     qualifiers: std::collections::BTreeMap<String, String>,
@@ -408,7 +415,7 @@ fn parse_purl(purl: &str) -> Result<ParsedPurl, String> {
     // Each segment is decoded individually: decoding the joined string first
     // would turn an encoded `%2F` inside a segment into a spurious separator.
     let segments: Vec<&str> = name_part.split('/').filter(|s| !s.is_empty()).collect();
-    let (namespace, name) = match segments.split_last() {
+    let (namespace, name, raw_name) = match segments.split_last() {
         Some((last, before)) => (
             before
                 .iter()
@@ -416,8 +423,9 @@ fn parse_purl(purl: &str) -> Result<ParsedPurl, String> {
                 .collect::<Vec<_>>()
                 .join("/"),
             url_decode(last),
+            (*last).to_string(),
         ),
-        None => (String::new(), String::new()),
+        None => (String::new(), String::new(), String::new()),
     };
 
     if name.is_empty() {
@@ -444,6 +452,7 @@ fn parse_purl(purl: &str) -> Result<ParsedPurl, String> {
         purl_type,
         namespace,
         name,
+        raw_name,
         version: version.map(url_decode).unwrap_or_default(),
         qualifiers,
     })

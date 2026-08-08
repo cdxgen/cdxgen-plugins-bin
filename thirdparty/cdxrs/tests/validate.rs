@@ -570,8 +570,9 @@ fn test_purl_empty_path_segments_are_ignored() {
 
 #[test]
 fn test_purl_encoded_slash_rule_survives_parser_changes() {
-    // Regression guard: this rule reads the raw purl, so it must keep firing for
-    // an encoded slash with no namespace, and stay quiet when a namespace exists.
+    // Regression guard: this rule reads the undecoded name segment, so it must
+    // keep firing for an encoded slash with no namespace, and stay quiet when a
+    // namespace exists.
     assert!(has_finding(
         &validate_bom(&bom_with_purl("pkg:npm/%40scope%2Fpkg@1.0.0")).findings,
         "purl.encoded-slash-without-namespace"
@@ -580,6 +581,38 @@ fn test_purl_encoded_slash_rule_survives_parser_changes() {
         &validate_bom(&bom_with_purl("pkg:npm/%40scope/pkg@1.0.0")).findings,
         "purl.encoded-slash-without-namespace"
     ));
+}
+
+/// An encoded slash outside the name is ordinary: the purl spec percent-encodes
+/// qualifier values and subpath segments, so a `vcs_url` pointing at a git
+/// tarball spells its separators `%2F`. Only the name segment may not carry one.
+#[test]
+fn test_purl_encoded_slash_outside_name_is_accepted() {
+    for purl in [
+        "pkg:npm/difflib@0.2.6?vcs_url=https:%2F%2Fcodeload.github.com%2Fpostlight%2Fdifflib.js",
+        "pkg:npm/difflib@0.2.6?foo=a%2Fb",
+        "pkg:golang/mypkg@1.0.0?vcs_url=https:%2F%2Fexample.com%2Fa%2Fb",
+        "pkg:npm/difflib@0.2.6#sub%2Fpath",
+    ] {
+        assert!(
+            !has_finding(
+                &validate_bom(&bom_with_purl(purl)).findings,
+                "purl.encoded-slash-without-namespace"
+            ),
+            "encoded slash outside the name must not be flagged: {purl}"
+        );
+    }
+
+    // The encoded and unencoded spellings of one qualifier value agree.
+    for purl in [
+        "pkg:npm/difflib@0.2.6?vcs_url=https:%2F%2Fexample.com%2Fa",
+        "pkg:npm/difflib@0.2.6?vcs_url=https://example.com/a",
+    ] {
+        assert!(!has_finding(
+            &validate_bom(&bom_with_purl(purl)).findings,
+            "purl.encoded-slash-without-namespace"
+        ));
+    }
 }
 
 // --- CycloneDX 1.7 citations ------------------------------------------------
