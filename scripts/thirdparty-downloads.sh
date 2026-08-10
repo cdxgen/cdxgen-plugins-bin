@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly OSQUERY_VERSION="5.23.1"
 readonly UPX_VERSION="5.2.0"
-readonly DOSAI_VERSION="3.0.5"
+readonly DOSAI_VERSION="3.0.6"
 
 print_usage() {
   cat <<'EOF'
@@ -76,47 +76,47 @@ resolve_asset() {
     dosai-linux-amd64)
       asset_filename="Dosai-linux-amd64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="8963ea7bdb61fed81697ed2a85e6f567d111a2e36f767b8c213f3583196b249d"
+      asset_sha256="3c4eb6758083b92fd80479811e954a5db8e96215c17311d28a5d10d5946c38aa"
       ;;
     dosai-linux-arm)
       asset_filename="Dosai-linux-arm"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="3a73fdada67f52fe43ed8b814f77f6d62144ba07e912148e03a7ef2cc7fe9d2b"
+      asset_sha256="771aa02a2b618497941fafdf1422c7d43980d33cd7d65b96ab79a914a5907bb8"
       ;;
     dosai-linux-arm64)
       asset_filename="Dosai-linux-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="8680960a7707f0a0088ef69ff68e21a06f03d0556f5c9a11c8719880983f32e6"
+      asset_sha256="14aefc7d8c11193d76e4a86d3ab970e98f87dae2a9d6aa85b03c00c489ad4661"
       ;;
     dosai-linuxmusl-amd64)
       asset_filename="Dosai-linux-musl-x64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="c5f0b3dbbfe7c0a9774e7696f0b3514f04d28eecc330ef6b15f19d6104460cc1"
+      asset_sha256="db47b671c9b10477ef05898d36db100921115e8cb14887df61532949dea33468"
       ;;
     dosai-linuxmusl-arm64)
       asset_filename="Dosai-linux-musl-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="c6fdfceb8fbc026ed5ff61ae57debf9b00b98dea00a258e6ae007d4fad546b9a"
+      asset_sha256="6568d13bfbeee591419276257800ed549441fd281bb421e66296a614fd22a780"
       ;;
     dosai-darwin-amd64)
       asset_filename="Dosai-osx-x64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="7ce4e99cbded3ae5456cbdb8a184fb8b95986d710f8237eab2bf575cdcedcb2e"
+      asset_sha256="ca8bf00bd38e629cd9f535ec6e02d9e37daf7d7f087d2604dee51ec83ae1c974"
       ;;
     dosai-darwin-arm64)
       asset_filename="Dosai-osx-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="bd792b63142da9232c281fb8bc6d462cdede62254f4a8f3cf71a5473f10ca393"
+      asset_sha256="6b78df9bb5dd617bf1a39a44a3a7757fdaca644300409938bdd4d0a8ea602bf2"
       ;;
     dosai-windows-amd64)
       asset_filename="Dosai.exe"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="34fbbe401a6d62d127516ff1c1e145923a494698e788c0f0c2088e22a391aabc"
+      asset_sha256="b2c8966e7fcef52a1fc3a57e3b2eeef69311eca9508e6d033e3dd02fe36dd0ec"
       ;;
     dosai-windows-arm64)
       asset_filename="Dosai-windows-arm64.exe"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="394bac8c254bfe3dc84652ed1a769473feb16d6f6e7ec90d56543e9b44f7c62b"
+      asset_sha256="4c162645a9a5e8cd23fd3c67ccc5b6edb213beeabcd9c7baee74f801f2060055"
       ;;
     upx-linux-amd64)
       asset_filename="upx-${UPX_VERSION}-amd64_linux.tar.xz"
