@@ -1,0 +1,27 @@
+thirdparty/cdxui/src/ui/mod.rs
+  s_bf370fab7cc38f::t_d927adfc383074 2358
+  s_bf370fab7cc38f::t_9a73efc15524e7 2252
+  s_bf370fab7cc38f::t_875df12cc40df4 2284,2318,2367
+.github/workflows/cdxui-test.yml
+  s_bf370fab7cc38f::t_cf761467f732ac 1-84
+thirdparty/cdxui/src/bom/schema.rs
+  s_bf370fab7cc38f::t_875df12cc40df4 833
+thirdparty/cdxui/src/app.rs
+  s_bf370fab7cc38f::t_875df12cc40df4 331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a67eb07e8e11785b188eeaf892d0e9926dda64f",
+  "prompts": {},
+  "sessions": {
+    "s_bf370fab7cc38f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a510f05-d4e8-4d90-b8ef-d833597285df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
