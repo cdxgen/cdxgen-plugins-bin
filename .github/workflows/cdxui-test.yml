@@ -1,0 +1,84 @@
+name: cdxui test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "thirdparty/cdxui/**"
+      - ".github/workflows/cdxui-test.yml"
+  pull_request:
+    paths:
+      - "thirdparty/cdxui/**"
+      - ".github/workflows/cdxui-test.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: thirdparty/cdxui
+
+jobs:
+  # cdxui reads cdxgen's trace and thought logs and renders its phase model, so
+  # its tests pin a contract owned by another repository. A cdxgen release that
+  # renames a trace field degrades this UI silently — no error, just an empty
+  # panel — which is exactly how the v13 field rename reached a release. The
+  # fixtures in src/trace.rs are verbatim cdxgen output for that reason.
+  test:
+    name: cargo test (stable)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
+          rustup default stable
+          rustc --version
+      - name: cargo test
+        run: cargo test
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo fmt
+        run: cargo fmt --check
+
+  # The binary is cross-built for eleven targets at release time. Building the
+  # host target here catches a broken build long before the release job, where
+  # it would otherwise surface after the slow bootstrap steps.
+  build:
+    name: cargo build --release (host)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: cargo build --release
+        run: cargo build --release --locked
+      - name: Smoke test the built binary
+        shell: bash
+        run: |
+          bin=target/release/cdxui
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --version
+          "$bin" --help

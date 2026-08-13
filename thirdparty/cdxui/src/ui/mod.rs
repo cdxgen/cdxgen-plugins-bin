@@ -2249,7 +2249,7 @@ mod tests {
         assert!(store.total_vulnerabilities > 0, "{} has no vulns", rel_path);
 
         let log_store = crate::logs::LogStore::new(100);
-        let mut trace_state = crate::trace::TraceState::new();
+        let trace_state = crate::trace::TraceState::new();
 
         for theme in [
             crate::ui::theme::Theme::dark(),
@@ -2281,7 +2281,7 @@ mod tests {
                         let backend = ratatui::backend::TestBackend::new(w, h);
                         let mut terminal = ratatui::Terminal::new(backend).unwrap();
                         terminal
-                            .draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme))
+                            .draw(|f| render(f, &mut app, &log_store, &trace_state, &theme))
                             .unwrap();
                     }
                 }
@@ -2315,7 +2315,7 @@ mod tests {
             let backend = ratatui::backend::TestBackend::new(w, h);
             let mut terminal = ratatui::Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme))
+                .draw(|f| render(f, &mut app, &log_store, &trace_state, &theme))
                 .unwrap();
         }
     }
@@ -2355,7 +2355,7 @@ mod tests {
 
         let theme = crate::ui::theme::Theme::dark();
         let log_store = crate::logs::LogStore::new(100);
-        let mut trace_state = crate::trace::TraceState::new();
+        let trace_state = crate::trace::TraceState::new();
 
         for &tab in Tab::ALL.iter() {
             let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
@@ -2364,7 +2364,7 @@ mod tests {
             let backend = ratatui::backend::TestBackend::new(100, 30);
             let mut terminal = ratatui::Terminal::new(backend).unwrap();
             terminal
-                .draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme))
+                .draw(|f| render(f, &mut app, &log_store, &trace_state, &theme))
                 .unwrap();
         }
     }

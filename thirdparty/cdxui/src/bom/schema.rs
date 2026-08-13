@@ -830,4 +830,4 @@ pub struct ResourceReferenceChoice {
 
 #[cfg(test)]
 #[path = "schema_tests.rs"]
-mod tests;
+mod schema_tests;
