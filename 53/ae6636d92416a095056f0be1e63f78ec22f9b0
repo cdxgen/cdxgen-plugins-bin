@@ -1,0 +1,45 @@
+thirdparty/cdxui/src/trace.rs
+  s_bf370fab7cc38f::t_591d7c11d96641 3-7,13-14,16-50,63-117,126-133,145,153-215,217-233,237-258,261-264,293-301,307,309-311,314-321,325,327,330-387,423-437
+  s_bf370fab7cc38f::t_2fb9c506b013b6 438
+thirdparty/cdxui/src/main.rs
+  s_bf370fab7cc38f::t_c97fa0f7948ec2 44-52
+  s_bf370fab7cc38f::t_47dd479dda9167 185-187
+  s_bf370fab7cc38f::t_5d508f524943eb 10
+thirdparty/cdxui/src/args.rs
+  s_bf370fab7cc38f::t_9718baa5f1fad8 39-58,62,72-94
+  s_bf370fab7cc38f::t_97e2f1c32ea7d4 95
+thirdparty/cdxui/Makefile
+  s_bf370fab7cc38f::t_6cfb2b082a0af2 30
+  s_bf370fab7cc38f::t_2cc6c1bd715b90 164-173
+thirdparty/cdxui/src/ui/mod.rs
+  s_bf370fab7cc38f::t_83f340d48946c4 1704-1716
+  s_bf370fab7cc38f::t_8b900b1cd79ee0 170,173-187
+  s_bf370fab7cc38f::t_ff4e25120e1c87 1818-1847
+  s_bf370fab7cc38f::t_4a7661272bd964 217-294
+  s_bf370fab7cc38f::t_d1932d4db885ba 57,60,154,159,1817
+thirdparty/cdxui/src/process.rs
+  s_bf370fab7cc38f::t_a0c4131d301dba 51
+  s_bf370fab7cc38f::t_30bb2b4bff0853 66
+  s_bf370fab7cc38f::t_514f5da0389264 29-32
+  s_bf370fab7cc38f::t_5846a3c7735db1 175-180,189
+  s_bf370fab7cc38f::t_822513ca93739c 201-224
+thirdparty/cdxui/src/logs.rs
+  s_bf370fab7cc38f::t_a51500962037de 180-197
+  s_bf370fab7cc38f::t_a32a7dafd0ef38 100-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "53ae6636d92416a095056f0be1e63f78ec22f9b0",
+  "prompts": {},
+  "sessions": {
+    "s_bf370fab7cc38f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a510f05-d4e8-4d90-b8ef-d833597285df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
