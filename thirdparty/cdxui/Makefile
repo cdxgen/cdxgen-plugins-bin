@@ -27,7 +27,7 @@ darwin_triples := \
 	x86_64-apple-darwin \
 	aarch64-apple-darwin
 
-.PHONY: all all-supported bootstrap-linux bootstrap-darwin linux linuxmusl windows darwin sbom size clean test
+.PHONY: all all-supported bootstrap-linux bootstrap-darwin linux linuxmusl windows darwin sbom size clean test fmt fmt-check lint
 
 all: all-supported sbom
 
@@ -160,6 +160,16 @@ sbom: | $(build_dir)
 
 test:
 	cargo test
+
+fmt:
+	$(cargo_stable) fmt --all
+
+# Fails without writing, for CI.
+fmt-check:
+	$(cargo_stable) fmt --all -- --check
+
+lint:
+	$(cargo_stable) clippy --all-targets
 
 size:
 	@find "$(build_dir)" -maxdepth 1 -type f -name '$(appname)-*' -print0 2>/dev/null | \

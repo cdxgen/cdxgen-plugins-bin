@@ -54,10 +54,10 @@ pub fn render(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStor
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(content_area);
-        render_main_content(frame, app, log_store, theme, split[0], tab_bg);
+        render_main_content(frame, app, log_store, trace_state, theme, split[0], tab_bg);
         detail::render_detail_panel(frame, app, theme, split[1]);
     } else {
-        render_main_content(frame, app, log_store, theme, content_area, tab_bg);
+        render_main_content(frame, app, log_store, trace_state, theme, content_area, tab_bg);
     }
 
     render_status_bar(frame, app, trace_state, theme, status_area);
@@ -151,12 +151,12 @@ fn render_search_bar(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
+fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, trace_state: &crate::trace::TraceState, theme: &Theme, area: Rect, tab_bg: ratatui::style::Color) {
     if !matches!(app.current_tab, Tab::Logs) {
         app.panel_areas.push((crate::app::PanelFocus::Main, area));
     }
     match app.current_tab {
-        Tab::Logs => render_logs(frame, app, log_store, theme, area, tab_bg),
+        Tab::Logs => render_logs(frame, app, log_store, trace_state, theme, area, tab_bg),
         Tab::Summary => render_summary(frame, app, theme, area, tab_bg),
         Tab::Components => render_component_table(frame, app, theme, area, false, tab_bg),
         Tab::Crypto => render_component_table(frame, app, theme, area, true, tab_bg),
@@ -167,9 +167,24 @@ fn render_main_content(frame: &mut Frame, app: &mut App, log_store: &crate::logs
     }
 }
 
-fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
+fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogStore, trace_state: &crate::trace::TraceState, theme: &Theme, area: Rect, _tab_bg: ratatui::style::Color) {
     let in_gen = app.generating || app.generation_done;
     let has_thoughts = in_gen && !app.thought_text.is_empty();
+
+    // The phase rows sit above everything else during a run: they are the
+    // answer to "what is cdxgen doing right now".
+    let area = if in_gen && !trace_state.phases.is_empty() {
+        let height = (trace_state.phases.len() as u16 + 2).min(area.height.saturating_sub(3));
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(height), Constraint::Min(3)])
+            .split(area);
+        render_phases_panel(frame, trace_state, theme, split[0]);
+        split[1]
+    } else {
+        area
+    };
+
     let expanded = has_thoughts && !app.thoughts_collapsed;
     let collapsed = has_thoughts && app.thoughts_collapsed;
 
@@ -197,6 +212,84 @@ fn render_logs(frame: &mut Frame, app: &mut App, log_store: &crate::logs::LogSto
         app.panel_areas.push((crate::app::PanelFocus::Stdout, panels[0]));
         render_stdout_panel(frame, app, log_store, theme, panels[0]);
     }
+}
+
+/// Render cdxgen's phase model: one row per phase, in start order, with a bar
+/// for the phases that report a determinate total.
+///
+/// cdxgen suppresses its own live region when its output is a pipe, so these
+/// rows are the progress display for a run driven by this UI.
+fn render_phases_panel(
+    frame: &mut Frame,
+    trace_state: &crate::trace::TraceState,
+    theme: &Theme,
+    area: Rect,
+) {
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let rows: Vec<Line> = trace_state
+        .phases
+        .iter()
+        .map(|phase| {
+            let (glyph, color) = match phase.state {
+                crate::trace::PhaseState::Running => {
+                    (trace_state.spinner(), theme.accent)
+                }
+                crate::trace::PhaseState::Succeeded => (phase.state.glyph(), Color::Green),
+                crate::trace::PhaseState::Failed => (phase.state.glyph(), theme.error),
+                crate::trace::PhaseState::Skipped => (phase.state.glyph(), theme.warn),
+            };
+
+            let mut spans = vec![
+                Span::styled(format!(" {} ", glyph), Style::default().fg(color)),
+                Span::styled(phase.name.clone(), Style::default().fg(theme.fg)),
+            ];
+
+            if let Some(ratio) = phase.ratio() {
+                let width = inner_width.saturating_sub(phase.name.len() + 24).clamp(6, 20);
+                let filled = (ratio * width as f64).round() as usize;
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!(
+                        "{}{}",
+                        "█".repeat(filled),
+                        "░".repeat(width.saturating_sub(filled))
+                    ),
+                    Style::default().fg(theme.accent),
+                ));
+                spans.push(Span::styled(
+                    format!(" {}/{}", phase.done, phase.total),
+                    Style::default().fg(theme.status_fg).add_modifier(Modifier::DIM),
+                ));
+            }
+
+            // A finished phase shows its outcome note; a running one shows the
+            // detail cdxgen is currently reporting.
+            let trailing = match phase.state {
+                crate::trace::PhaseState::Running => phase.detail.as_deref(),
+                _ => phase.note.as_deref(),
+            };
+            if let Some(text) = trailing {
+                spans.push(Span::styled(
+                    format!("  {}", truncate_str(text, 40)),
+                    Style::default().fg(theme.crypto_accent),
+                ));
+            }
+            if phase.elapsed_ms > 0 && !phase.state.is_running() {
+                spans.push(Span::styled(
+                    format!("  {:.1}s", phase.elapsed_ms as f64 / 1000.0),
+                    Style::default().fg(theme.status_fg).add_modifier(Modifier::DIM),
+                ));
+            }
+            Line::from(spans)
+        })
+        .collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Progress ")
+        .border_style(Style::default().fg(theme.accent));
+
+    frame.render_widget(Paragraph::new(Text::from(rows)).block(block), area);
 }
 
 fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -1608,6 +1701,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, trace_state: &crate::trace::T
         let activity = &trace_state.activity_label;
         let spinner_style = Style::default().fg(theme.accent);
         spans.push(Span::styled(format!(" {} ", icon), spinner_style));
+        // The running phase is the coarse "where are we" signal, so it precedes
+        // the fine-grained activity label.
+        if let Some(phase) = trace_state.active_phase() {
+            let mut label = phase.name.clone();
+            if let Some(ratio) = phase.ratio() {
+                label.push_str(&format!(" {:.0}%", ratio * 100.0));
+            }
+            spans.push(Span::styled(
+                format!("{} ", label),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw("│ "));
+        }
         if !activity.is_empty() {
             spans.push(Span::styled(
                 format!(" {} ", activity),
@@ -1705,6 +1811,37 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_render_phases_panel_during_generation() {
+        // The progress rows are the whole point of driving cdxgen from here, so
+        // they render at a narrow width and with a determinate bar without
+        // overflowing their area.
+        let mut trace_state = crate::trace::TraceState::new();
+        for line in [
+            r#"{"type":"phase","phase":"Preparing environment","state":"started"}"#,
+            r#"{"type":"phase","phase":"Preparing environment","state":"succeeded","elapsedMs":25}"#,
+            r#"{"type":"phase","phase":"Generating BOM","state":"started"}"#,
+            r#"{"type":"phase","phase":"Generating BOM","state":"progress","done":7,"total":9,"detail":"npm workspaces"}"#,
+        ] {
+            trace_state.process_line(line);
+        }
+        assert_eq!(trace_state.phases.len(), 2);
+
+        let log_store = crate::logs::LogStore::new(100);
+        let theme = crate::ui::theme::Theme::dark();
+        for (w, h) in [(120u16, 40u16), (40, 12), (20, 6)] {
+            let mut app = crate::app::App::new(crate::bom::store::BomStore::new());
+            app.current_tab = Tab::Logs;
+            app.generating = true;
+            app.thought_text = "Let's scan the project.".to_string();
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render(f, &mut app, &log_store, &mut trace_state, &theme))
+                .unwrap();
         }
     }
 

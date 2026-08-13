@@ -97,6 +97,15 @@ impl LogStore {
     pub fn entries(&self) -> &VecDeque<LogEntry> {
         &self.entries
     }
+
+    /// Close any thought block still open.
+    ///
+    /// A run killed mid-thought, or one whose log was truncated, never emits
+    /// the closing `</think>`. Without this, every line logged afterwards is
+    /// folded into that block and rendered as reasoning.
+    pub fn close_open_thought(&mut self) {
+        self.open_thought = None;
+    }
 }
 
 fn classify_line(line: &str) -> (LogLevel, String) {
@@ -167,5 +176,23 @@ mod tests {
     fn test_classify_info() {
         let (level, _text) = classify_line("Collecting packages...");
         assert_eq!(level, LogLevel::Info);
+    }
+
+    #[test]
+    fn test_unterminated_thought_swallows_later_lines() {
+        let mut store = LogStore::new(100);
+        store.push_line("<think>starting up");
+        store.push_line("still reasoning");
+        // Every line after an unclosed block is attributed to that block.
+        assert!(store.entries().back().unwrap().thought_id.is_some());
+    }
+
+    #[test]
+    fn test_close_open_thought_releases_later_lines() {
+        let mut store = LogStore::new(100);
+        store.push_line("<think>starting up");
+        store.close_open_thought();
+        store.push_line("── Process exited with code 0 ──");
+        assert!(store.entries().back().unwrap().thought_id.is_none());
     }
 }

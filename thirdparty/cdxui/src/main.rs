@@ -7,7 +7,7 @@ mod trace;
 mod ui;
 
 use crate::app::{App, InputMode, PanelFocus, Tab};
-use crate::args::{Args, parse_cdxgen_args};
+use crate::args::{Args, parse_cdxgen_args, split_env_args};
 use crate::bom::store::BomStore;
 use crate::logs::LogStore;
 use crate::process::ProcessHandle;
@@ -41,10 +41,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.generate {
         let cdxgen_cmd = std::env::var("CDXGEN_CMD").unwrap_or_else(|_| "cdxgen".to_string());
-        let parts: Vec<&str> = cdxgen_cmd.split_whitespace().collect();
-        let (cmd, pre_args) = parts.split_first().map(|(c, rest)| (*c, rest)).unwrap_or(("cdxgen", &[][..]));
+        // `CDXGEN_CMD` may carry an interpreter ahead of the script, for example
+        // `node<US>/path/to/cdxgen.js`, and either part may contain a space.
+        let parts = split_env_args(&cdxgen_cmd);
+        let (cmd, pre_args) = parts
+            .split_first()
+            .map(|(c, rest)| (c.as_str(), rest))
+            .unwrap_or(("cdxgen", &[][..]));
 
-        let mut cdxgen_args: Vec<String> = pre_args.iter().map(|s| s.to_string()).collect();
+        let mut cdxgen_args: Vec<String> = pre_args.to_vec();
         cdxgen_args.extend(parse_cdxgen_args());
 
         let bom_output = extract_output_path(&cdxgen_args).unwrap_or_else(|| args.output.to_string_lossy().to_string());
@@ -177,6 +182,9 @@ fn drain_logs(app: &mut App, log_store: &mut LogStore, process: &mut Option<Proc
             app.thought_text.push_str(&delta);
         }
         if let Some(code) = proc.try_wait() {
+            // Anything logged from here on is this UI talking, not cdxgen
+            // reasoning, so an unterminated thought block must not swallow it.
+            log_store.close_open_thought();
             log_store.push_line(&format!("── Process exited with code {} ──", code));
             if let Some(full_thoughts) = proc.read_thought_log() {
                 app.thought_text = full_thoughts;
