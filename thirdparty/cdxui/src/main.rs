@@ -628,7 +628,7 @@ fn yank_selection(app: &App) {
                             r.name_display(),
                             r.version_display(),
                             r.purl_display(),
-                            &r.license_display()
+                            r.license_display()
                         )
                     })
                     .collect::<Vec<_>>()
@@ -645,7 +645,7 @@ fn yank_selection(app: &App) {
                     format!(
                         "{}\t{}\t{}\t{}",
                         r.name_display(),
-                        &r.endpoints_display(),
+                        r.endpoints_display(),
                         r.authenticated_display(),
                         r.description_display()
                     )
