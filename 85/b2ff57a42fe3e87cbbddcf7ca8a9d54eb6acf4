@@ -1,0 +1,19 @@
+thirdparty/cdxui/src/main.rs
+  s_bf370fab7cc38f::t_257d27012916ef 631,648
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "85b2ff57a42fe3e87cbbddcf7ca8a9d54eb6acf4",
+  "prompts": {},
+  "sessions": {
+    "s_bf370fab7cc38f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a510f05-d4e8-4d90-b8ef-d833597285df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
