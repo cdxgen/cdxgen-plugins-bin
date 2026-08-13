@@ -35,13 +35,11 @@ impl SortOrder {
     }
 }
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FilterState {
     pub query: String,
     pub component_type: Option<String>,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct ComponentRow {
@@ -89,14 +87,11 @@ impl ComponentRow {
     }
 
     pub fn crypto_algorithm(&self) -> Option<String> {
-        self.component
-            .crypto_properties
-            .as_ref()
-            .and_then(|cp| {
-                cp.algorithm_properties
-                    .as_ref()
-                    .and_then(|ap| ap.primitive.clone())
-            })
+        self.component.crypto_properties.as_ref().and_then(|cp| {
+            cp.algorithm_properties
+                .as_ref()
+                .and_then(|ap| ap.primitive.clone())
+        })
     }
 
     pub fn matches_query(&self, query: &str) -> bool {
@@ -111,7 +106,13 @@ impl ComponentRow {
             || self.license_display().to_lowercase().contains(&q)
             || self.bom_ref_display().to_lowercase().contains(&q)
             || self.description_display().to_lowercase().contains(&q)
-            || self.component.group.as_deref().unwrap_or("").to_lowercase().contains(&q)
+            || self
+                .component
+                .group
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(&q)
             || self
                 .crypto_algorithm()
                 .unwrap_or_default()
@@ -184,7 +185,9 @@ fn strip_rich(s: &str) -> String {
         if c == '[' {
             // skip until matching ]
             for ic in chars.by_ref() {
-                if ic == ']' { break; }
+                if ic == ']' {
+                    break;
+                }
             }
         } else if c == ':' {
             // skip a :token: if it looks like an emoji token
@@ -192,9 +195,13 @@ fn strip_rich(s: &str) -> String {
             if let Some(end) = rest.find(':') {
                 let token = &rest[..end];
                 let is_emoji = !token.is_empty()
-                    && token.chars().all(|t| t.is_alphanumeric() || t == '_' || t == '+' || t == '-');
+                    && token
+                        .chars()
+                        .all(|t| t.is_alphanumeric() || t == '_' || t == '+' || t == '-');
                 if is_emoji {
-                for _ in 0..end { chars.next(); }
+                    for _ in 0..end {
+                        chars.next();
+                    }
                     chars.next(); // consume trailing ':'
                     continue;
                 }
@@ -299,9 +306,9 @@ impl VulnerabilityRow {
             .ratings
             .as_ref()
             .and_then(|rs| {
-                rs.iter().filter_map(|r| r.score).fold(None::<f64>, |acc, s| {
-                    Some(acc.map_or(s, |a: f64| a.max(s)))
-                })
+                rs.iter()
+                    .filter_map(|r| r.score)
+                    .fold(None::<f64>, |acc, s| Some(acc.map_or(s, |a: f64| a.max(s))))
             })
             .unwrap_or(0.0)
     }
@@ -326,11 +333,7 @@ impl VulnerabilityRow {
     pub fn package_name(&self) -> String {
         match self.affects_purl() {
             Some(p) => purl_display_name(p),
-            None => self
-                .vuln
-                .id
-                .clone()
-                .unwrap_or_else(|| "-".to_string()),
+            None => self.vuln.id.clone().unwrap_or_else(|| "-".to_string()),
         }
     }
 
@@ -341,9 +344,10 @@ impl VulnerabilityRow {
                 if let Some(versions) = &a.versions {
                     for v in versions {
                         if v.status.as_deref() == Some("unaffected")
-                            && let Some(ver) = &v.version {
-                                return ver.clone();
-                            }
+                            && let Some(ver) = &v.version
+                        {
+                            return ver.clone();
+                        }
                     }
                 }
             }
@@ -397,12 +401,10 @@ impl VulnerabilityRow {
     }
 
     pub fn is_reachable(&self) -> bool {
-        self.insight_labels()
-            .iter()
-            .any(|l| {
-                let l = l.to_lowercase();
-                l.contains("reachable") && !l.contains("endpoint")
-            })
+        self.insight_labels().iter().any(|l| {
+            let l = l.to_lowercase();
+            l.contains("reachable") && !l.contains("endpoint")
+        })
     }
 
     pub fn any_reachability(&self) -> bool {
@@ -417,8 +419,7 @@ impl VulnerabilityRow {
             if !low.contains("used in") || !low.contains("location") {
                 return None;
             }
-            l.split_whitespace()
-                .find_map(|tok| tok.parse::<u32>().ok())
+            l.split_whitespace().find_map(|tok| tok.parse::<u32>().ok())
         })
     }
 
@@ -488,8 +489,7 @@ impl VulnSortField {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VulnFilter {
     #[default]
     All,
@@ -520,7 +520,6 @@ impl VulnFilter {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct PurlVulnSummary {
@@ -676,9 +675,7 @@ impl BomStore {
             source: e,
         })?;
 
-        let bom_ref = BomFile {
-            bom,
-        };
+        let bom_ref = BomFile { bom };
         self.index_bom(&bom_ref);
         self.bom_files.push(bom_ref);
         self.rebuild_filtered_indices();
@@ -701,12 +698,13 @@ impl BomStore {
             let path = entry.path();
             if path.is_file()
                 && let Some(ext) = path.extension()
-                    && (ext == "json" || ext == "cdx") {
-                        match self.load_file(&path) {
-                            Ok(n) => count += n,
-                            Err(e) => eprintln!("Warning: skipping {}: {}", path.display(), e),
-                        }
-                    }
+                && (ext == "json" || ext == "cdx")
+            {
+                match self.load_file(&path) {
+                    Ok(n) => count += n,
+                    Err(e) => eprintln!("Warning: skipping {}: {}", path.display(), e),
+                }
+            }
         }
 
         if count == 0 {
@@ -756,9 +754,10 @@ impl BomStore {
         let old_crypto: Vec<usize> = self.crypto_assets.clone();
         for &old_idx in &old_crypto {
             if let Some(&new_idx) = old_to_new.get(&old_idx)
-                && !crypto_merged.contains(&new_idx) {
-                    crypto_merged.push(new_idx);
-                }
+                && !crypto_merged.contains(&new_idx)
+            {
+                crypto_merged.push(new_idx);
+            }
         }
 
         self.components = merged;
@@ -822,7 +821,8 @@ impl BomStore {
                 if existing.contains(&key) {
                     continue;
                 }
-                self.vulnerabilities.push(VulnerabilityRow { vuln: v.clone() });
+                self.vulnerabilities
+                    .push(VulnerabilityRow { vuln: v.clone() });
             }
         }
         self.total_vulnerabilities = self.vulnerabilities.len();
@@ -863,10 +863,7 @@ impl BomStore {
             if let Some(purl) = row.affects_purl() {
                 let display = purl_display_name(purl);
                 for key in purl_index_keys(purl) {
-                    let entry = self
-                        .vuln_by_purl
-                        .entry(key)
-                        .or_default();
+                    let entry = self.vuln_by_purl.entry(key).or_default();
                     entry.count += 1;
                     if rank > entry.max_severity_rank {
                         entry.max_severity_rank = rank;
@@ -906,7 +903,11 @@ impl BomStore {
         let sev_score_cmp = |a: &PurlVulnSummary, b: &PurlVulnSummary| {
             b.max_severity_rank
                 .cmp(&a.max_severity_rank)
-                .then_with(|| b.max_score.partial_cmp(&a.max_score).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| {
+                    b.max_score
+                        .partial_cmp(&a.max_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .then_with(|| a.display_name.cmp(&b.display_name))
         };
 
@@ -920,8 +921,10 @@ impl BomStore {
             .collect();
 
         // Top packages by reachable/exploitable vulns.
-        let mut by_reach: Vec<&PurlVulnSummary> =
-            unique.into_iter().filter(|s| s.reachable || s.exploitable).collect();
+        let mut by_reach: Vec<&PurlVulnSummary> = unique
+            .into_iter()
+            .filter(|s| s.reachable || s.exploitable)
+            .collect();
         by_reach.sort_by(|a, b| {
             let a_flags = (a.reachable as u8) + (a.exploitable as u8);
             let b_flags = (b.reachable as u8) + (b.exploitable as u8);
@@ -1163,7 +1166,10 @@ impl BomStore {
                 });
             let primary = match field {
                 VulnSortField::Priority => ra.is_prioritized().cmp(&rb.is_prioritized()),
-                VulnSortField::Id => ra.id_display().to_lowercase().cmp(&rb.id_display().to_lowercase()),
+                VulnSortField::Id => ra
+                    .id_display()
+                    .to_lowercase()
+                    .cmp(&rb.id_display().to_lowercase()),
                 VulnSortField::Severity => rb.severity_rank().cmp(&ra.severity_rank()),
                 VulnSortField::Score => rb
                     .max_score()
@@ -1180,7 +1186,7 @@ impl BomStore {
                     .cmp(&rb.package_name().to_lowercase()),
                 VulnSortField::Fix => ra.fix_version().cmp(&rb.fix_version()),
             };
-            
+
             match field {
                 // For the columns that already encode "higher is riskier",
                 // ascending vs descending flips naturally.
@@ -1279,9 +1285,11 @@ impl BomStore {
             })
             .collect();
         found.sort_by(|a, b| {
-            b.severity_rank()
-                .cmp(&a.severity_rank())
-                .then_with(|| b.max_score().partial_cmp(&a.max_score()).unwrap_or(std::cmp::Ordering::Equal))
+            b.severity_rank().cmp(&a.severity_rank()).then_with(|| {
+                b.max_score()
+                    .partial_cmp(&a.max_score())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         });
         found
     }
@@ -1334,11 +1342,7 @@ impl BomStore {
     pub fn resolve_bom_ref(&self, ref_field: &str) -> String {
         for row in &self.components {
             if row.component.bom_ref.as_deref() == Some(ref_field) {
-                return format!(
-                    "{} {}",
-                    row.name_display(),
-                    row.version_display()
-                );
+                return format!("{} {}", row.name_display(), row.version_display());
             }
         }
         for row in &self.services {
@@ -1351,7 +1355,7 @@ impl BomStore {
         } else {
             ref_field.to_string()
         }
-        }
+    }
 
     pub fn dependency_roots(&self) -> Vec<String> {
         let mut roots = Vec::new();
@@ -1423,9 +1427,9 @@ fn merge_component_properties(existing: &mut Component, duplicate: &Component) {
     if let Some(ref dup_props) = duplicate.properties {
         let existing_props = existing.properties.get_or_insert_with(Vec::new);
         for prop in dup_props {
-            let is_new = !existing_props.iter().any(|p| {
-                p.name == prop.name && p.value == prop.value
-            });
+            let is_new = !existing_props
+                .iter()
+                .any(|p| p.name == prop.name && p.value == prop.value);
             if is_new {
                 existing_props.push(prop.clone());
             }
@@ -1460,9 +1464,9 @@ fn merge_component_properties(existing: &mut Component, duplicate: &Component) {
     if let Some(ref dup_hashes) = duplicate.hashes {
         let existing_hashes = existing.hashes.get_or_insert_with(Vec::new);
         for h in dup_hashes {
-            let is_new = !existing_hashes.iter().any(|eh| {
-                eh.alg == h.alg && eh.content == h.content
-            });
+            let is_new = !existing_hashes
+                .iter()
+                .any(|eh| eh.alg == h.alg && eh.content == h.content);
             if is_new {
                 existing_hashes.push(h.clone());
             }
@@ -1753,7 +1757,11 @@ mod tests {
 
         let crypto_row = &store.components[store.crypto_assets[0]];
         assert_eq!(
-            crypto_row.component.crypto_properties.as_ref().and_then(|cp| cp.asset_type.clone()),
+            crypto_row
+                .component
+                .crypto_properties
+                .as_ref()
+                .and_then(|cp| cp.asset_type.clone()),
             Some("algorithm".to_string())
         );
         assert_eq!(crypto_row.crypto_algorithm().unwrap(), "AES");
@@ -1772,7 +1780,7 @@ mod tests {
         let count = store.load_path(dir.path()).unwrap();
         assert_eq!(count, 2);
         assert_eq!(store.total_components, 3); // merged duplicates
-        assert_eq!(store.total_services, 2);  // services not merged (no purl matching)
+        assert_eq!(store.total_services, 2); // services not merged (no purl matching)
         assert_eq!(store.file_count(), 2);
     }
 
@@ -1875,7 +1883,9 @@ mod tests {
         let mut store = BomStore::new();
         store.load_path(tmp.path()).unwrap();
 
-        let (_idx, row) = store.get_component_by_ref("pkg:npm/express@4.18.0").unwrap();
+        let (_idx, row) = store
+            .get_component_by_ref("pkg:npm/express@4.18.0")
+            .unwrap();
         assert_eq!(row.name_display(), "express");
 
         assert!(store.get_component_by_ref("nonexistent").is_none());
@@ -1907,7 +1917,11 @@ mod tests {
 
         assert_eq!(store.total_components, 3, "express should be merged");
 
-        let express = store.components.iter().find(|r| r.name_display() == "express").unwrap();
+        let express = store
+            .components
+            .iter()
+            .find(|r| r.name_display() == "express")
+            .unwrap();
         let props = express.component.properties.as_ref().unwrap();
         assert_eq!(props.len(), 3, "3 unique properties after merge");
         let lic = express.component.licenses.as_ref().unwrap();
@@ -1969,12 +1983,12 @@ mod tests {
         let s = &store.security_summary;
         assert_eq!(s.total_vulns, 3);
         assert_eq!(s.severity_counts[4], 1, "critical"); // idx 4 = critical
-        assert_eq!(s.severity_counts[3], 1, "high");     // idx 3 = high
-        assert_eq!(s.severity_counts[2], 1, "medium");   // idx 2 = medium
+        assert_eq!(s.severity_counts[3], 1, "high"); // idx 3 = high
+        assert_eq!(s.severity_counts[2], 1, "medium"); // idx 2 = medium
         assert_eq!(s.prioritized_vulns, 2);
-        assert_eq!(s.reachable_vulns, 2);      // CVE-A + CVE-C
+        assert_eq!(s.reachable_vulns, 2); // CVE-A + CVE-C
         assert_eq!(s.endpoint_reachable_vulns, 1); // CVE-C
-        assert_eq!(s.exploitable_vulns, 1);    // CVE-C
+        assert_eq!(s.exploitable_vulns, 1); // CVE-C
         assert_eq!(s.vulnerable_components, 2); // express + socket.io
         assert_eq!(s.total_components, 3);
         assert!(!s.top_by_count.is_empty());
@@ -1988,7 +2002,9 @@ mod tests {
         assert!(!express.exploitable);
 
         // tolerant matching: qualifiers stripped
-        let with_qual = store.vuln_summary_for("pkg:npm/express@4.18.0?foo=bar").unwrap();
+        let with_qual = store
+            .vuln_summary_for("pkg:npm/express@4.18.0?foo=bar")
+            .unwrap();
         assert_eq!(with_qual.count, 2);
 
         // clean package has no vulns
@@ -2011,7 +2027,11 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(names.len(), sorted.len(), "top_by_count has duplicate packages");
+        assert_eq!(
+            names.len(),
+            sorted.len(),
+            "top_by_count has duplicate packages"
+        );
     }
 
     #[test]
@@ -2022,9 +2042,16 @@ mod tests {
         let mut store = BomStore::new();
         store.load_path(tmp.path()).unwrap();
 
-        let cve_a = store.vulnerabilities.iter().find(|r| r.id_display() == "CVE-A").unwrap();
+        let cve_a = store
+            .vulnerabilities
+            .iter()
+            .find(|r| r.id_display() == "CVE-A")
+            .unwrap();
         // literal backslash-n must split into two labels
-        assert_eq!(cve_a.insight_labels(), vec!["Reachable".to_string(), "Used in 3 locations".to_string()]);
+        assert_eq!(
+            cve_a.insight_labels(),
+            vec!["Reachable".to_string(), "Used in 3 locations".to_string()]
+        );
         assert!(cve_a.is_reachable());
         assert!(!cve_a.is_endpoint_reachable());
         assert!(!cve_a.is_exploitable());
@@ -2032,7 +2059,11 @@ mod tests {
         assert_eq!(cve_a.fix_version(), "4.18.1");
         assert_eq!(cve_a.package_name(), "express");
 
-        let cve_c = store.vulnerabilities.iter().find(|r| r.id_display() == "CVE-C").unwrap();
+        let cve_c = store
+            .vulnerabilities
+            .iter()
+            .find(|r| r.id_display() == "CVE-C")
+            .unwrap();
         assert!(cve_c.is_endpoint_reachable());
         assert!(cve_c.is_exploitable()); // analysis.state == exploitable
         assert_eq!(cve_c.severity(), "critical");

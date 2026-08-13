@@ -16,7 +16,12 @@ pub struct ProcessHandle {
 }
 
 impl ProcessHandle {
-    pub fn spawn(cmd: &str, args: &[String], thought_log: &str, trace_log: &str) -> Result<Self, String> {
+    pub fn spawn(
+        cmd: &str,
+        args: &[String],
+        thought_log: &str,
+        trace_log: &str,
+    ) -> Result<Self, String> {
         let mut command = Command::new(cmd);
         command
             .args(args)
@@ -30,9 +35,14 @@ impl ProcessHandle {
             // disables its live region on a pipe; saying so explicitly keeps
             // cursor-control sequences out of the captured log either way.
             .env("CDXGEN_NO_PROGRESS", "true")
-            .env("FETCH_LICENSE", std::env::var("FETCH_LICENSE").unwrap_or_default());
+            .env(
+                "FETCH_LICENSE",
+                std::env::var("FETCH_LICENSE").unwrap_or_default(),
+            );
 
-        let mut child = command.spawn().map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
 
         let stdout = child.stdout.take().ok_or("No stdout")?;
         let stderr = child.stderr.take().ok_or("No stderr")?;
@@ -85,9 +95,10 @@ impl ProcessHandle {
                         if let Ok(content) = std::fs::read_to_string(&thought_path_clone) {
                             let new_content = &content[last_size as usize..];
                             if !new_content.is_empty()
-                                && thought_tx.send(new_content.to_string()).is_err() {
-                                    break;
-                                }
+                                && thought_tx.send(new_content.to_string()).is_err()
+                            {
+                                break;
+                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {
@@ -110,9 +121,10 @@ impl ProcessHandle {
                         if let Ok(content) = std::fs::read_to_string(&trace_path_clone) {
                             let new_content = &content[last_size as usize..];
                             if !new_content.is_empty()
-                                && trace_tx.send(new_content.to_string()).is_err() {
-                                    break;
-                                }
+                                && trace_tx.send(new_content.to_string()).is_err()
+                            {
+                                break;
+                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {

@@ -60,10 +60,8 @@ impl LogStore {
             if is_close_think {
                 self.open_thought = None;
             }
-            self.thought_blocks.push(ThoughtBlock {
-                id,
-                entry_count: 1,
-            });
+            self.thought_blocks
+                .push(ThoughtBlock { id, entry_count: 1 });
             Some(id)
         } else if let Some(id) = self.open_thought {
             if let Some(block) = self.thought_blocks.iter_mut().find(|b| b.id == id) {

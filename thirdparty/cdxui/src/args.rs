@@ -2,7 +2,11 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "cdxui", version, about = "Interactive terminal UI for CycloneDX BOM exploration")]
+#[command(
+    name = "cdxui",
+    version,
+    about = "Interactive terminal UI for CycloneDX BOM exploration"
+)]
 pub struct Args {
     #[arg(help = "Path to a CycloneDX BOM file (.json) or directory.")]
     pub path: Option<PathBuf>,
@@ -76,15 +80,15 @@ mod tests {
     #[test]
     fn test_separator_preserves_spaces_in_paths() {
         let value = format!("-t{}js{}/tmp/my project", ARG_SEPARATOR, ARG_SEPARATOR);
-        assert_eq!(
-            split_env_args(&value),
-            vec!["-t", "js", "/tmp/my project"]
-        );
+        assert_eq!(split_env_args(&value), vec!["-t", "js", "/tmp/my project"]);
     }
 
     #[test]
     fn test_whitespace_fallback_for_older_cdxgen() {
-        assert_eq!(split_env_args("-t js /tmp/app"), vec!["-t", "js", "/tmp/app"]);
+        assert_eq!(
+            split_env_args("-t js /tmp/app"),
+            vec!["-t", "js", "/tmp/app"]
+        );
     }
 
     #[test]
@@ -92,4 +96,3 @@ mod tests {
         assert!(split_env_args("").is_empty());
     }
 }
-

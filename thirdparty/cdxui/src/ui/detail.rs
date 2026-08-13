@@ -3,11 +3,11 @@ use crate::bom::schema::Component;
 use crate::bom::store::BomStore;
 use crate::ui::theme::Theme;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 pub fn render_detail_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -30,19 +30,27 @@ pub fn render_detail_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Re
 pub fn section_header(text: &str, theme: &Theme) -> Line<'static> {
     Line::from(vec![Span::styled(
         format!("── {} ──", text),
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
     )])
 }
 
 fn dim(_s: &str, theme: &Theme) -> Style {
-    Style::default().fg(theme.detail_fg).add_modifier(Modifier::DIM)
+    Style::default()
+        .fg(theme.detail_fg)
+        .add_modifier(Modifier::DIM)
 }
 
 fn accent(theme: &Theme) -> Style {
     Style::default().fg(theme.accent)
 }
 
-fn build_detail_content(app: &App, store: &BomStore, theme: &Theme) -> (Vec<Line<'static>>, String) {
+fn build_detail_content(
+    app: &App,
+    store: &BomStore,
+    theme: &Theme,
+) -> (Vec<Line<'static>>, String) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut title = " Detail ".to_string();
 
@@ -57,7 +65,11 @@ fn build_detail_content(app: &App, store: &BomStore, theme: &Theme) -> (Vec<Line
             }
         }
         crate::app::Tab::Dependencies => {
-            let ref_field = app.dep_tree_refs.get(app.table_selected).cloned().unwrap_or_default();
+            let ref_field = app
+                .dep_tree_refs
+                .get(app.table_selected)
+                .cloned()
+                .unwrap_or_default();
             if let Some((_, row)) = store.get_component_by_ref(&ref_field) {
                 title = format!(" {} {} ", row.name_display(), row.version_display());
                 render_component_detail(&mut lines, &row.component, theme);
@@ -103,42 +115,70 @@ fn build_detail_content(app: &App, store: &BomStore, theme: &Theme) -> (Vec<Line
 
 fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme: &Theme) {
     table_row(lines, theme, "Type", &c.component_type);
-    if let Some(ref s) = c.scope { table_row(lines, theme, "Scope", s); }
-    if let Some(ref s) = c.purl { table_row(lines, theme, "Purl", s); }
-    if let Some(ref s) = c.bom_ref { table_row(lines, theme, "BOM Ref", s); }
-    if let Some(ref s) = c.group { table_row(lines, theme, "Group", s); }
-    if let Some(ref s) = c.description { table_row(lines, theme, "Description", s); }
-    if let Some(ref s) = c.publisher { table_row(lines, theme, "Publisher", s); }
-    if let Some(ref s) = c.copyright { table_row(lines, theme, "Copyright", s); }
+    if let Some(ref s) = c.scope {
+        table_row(lines, theme, "Scope", s);
+    }
+    if let Some(ref s) = c.purl {
+        table_row(lines, theme, "Purl", s);
+    }
+    if let Some(ref s) = c.bom_ref {
+        table_row(lines, theme, "BOM Ref", s);
+    }
+    if let Some(ref s) = c.group {
+        table_row(lines, theme, "Group", s);
+    }
+    if let Some(ref s) = c.description {
+        table_row(lines, theme, "Description", s);
+    }
+    if let Some(ref s) = c.publisher {
+        table_row(lines, theme, "Publisher", s);
+    }
+    if let Some(ref s) = c.copyright {
+        table_row(lines, theme, "Copyright", s);
+    }
     lines.push(Line::from(""));
 
     if let Some(ref licenses) = c.licenses {
-        lines.push(section_header(&format!("Licenses ({})", licenses.len()), theme));
+        lines.push(section_header(
+            &format!("Licenses ({})", licenses.len()),
+            theme,
+        ));
         for lc in licenses {
             let mut parts: Vec<String> = Vec::new();
-            if let Some(ref expr) = lc.expression { parts.push(expr.clone()); }
+            if let Some(ref expr) = lc.expression {
+                parts.push(expr.clone());
+            }
             if let Some(ref lic) = lc.license {
-                if let Some(ref id) = lic.id { parts.push(id.clone()); }
-                if let Some(ref name) = lic.name { parts.push(format!("({})", name)); }
+                if let Some(ref id) = lic.id {
+                    parts.push(id.clone());
+                }
+                if let Some(ref name) = lic.name {
+                    parts.push(format!("({})", name));
+                }
             }
             lines.push(Line::from(vec![Span::styled(
                 format!("  • {}", parts.join(" ")),
                 accent(theme),
             )]));
             if let Some(ref lic) = lc.license
-                && let Some(ref url) = lic.url {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("    {}", url),
-                        Style::default().fg(theme.crypto_accent),
-                    )]));
-                }
+                && let Some(ref url) = lic.url
+            {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("    {}", url),
+                    Style::default().fg(theme.crypto_accent),
+                )]));
+            }
         }
         lines.push(Line::from(""));
     }
 
     if let Some(ref properties) = c.properties {
-        lines.push(section_header(&format!("Properties ({})", properties.len()), theme));
-        let mut sorted: Vec<(&String, &String)> = properties.iter()
+        lines.push(section_header(
+            &format!("Properties ({})", properties.len()),
+            theme,
+        ));
+        let mut sorted: Vec<(&String, &String)> = properties
+            .iter()
             .filter_map(|p| Some((p.name.as_ref()?, p.value.as_ref()?)))
             .collect();
         sorted.sort_by(|a, b| a.0.cmp(b.0));
@@ -148,11 +188,13 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
             } else {
                 Style::default().fg(theme.fg)
             };
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {}:", name), ns),
-            ]));
+            lines.push(Line::from(vec![Span::styled(format!("  {}:", name), ns)]));
             if value.contains("\\n") {
-                for part in value.split("\\n").map(|p| p.trim()).filter(|p| !p.is_empty()) {
+                for part in value
+                    .split("\\n")
+                    .map(|p| p.trim())
+                    .filter(|p| !p.is_empty())
+                {
                     lines.push(Line::from(vec![
                         Span::raw("    • "),
                         Span::styled(part.to_string(), ns),
@@ -191,10 +233,7 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
             if let Some(ref occs) = evidence.occurrences {
                 for o in occs {
                     if let Some(ref loc) = o.location {
-                        lines.push(Line::from(vec![
-                            Span::raw("  📁 "),
-                            Span::raw(loc.clone()),
-                        ]));
+                        lines.push(Line::from(vec![Span::raw("  📁 "), Span::raw(loc.clone())]));
                     }
                 }
             }
@@ -216,7 +255,10 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
     }
 
     if let Some(ref ext_refs) = c.external_references {
-        lines.push(section_header(&format!("External References ({})", ext_refs.len()), theme));
+        lines.push(section_header(
+            &format!("External References ({})", ext_refs.len()),
+            theme,
+        ));
         for eref in ext_refs {
             let rt = eref.ref_type.as_deref().unwrap_or("?");
             let url = eref.url.as_deref().unwrap_or("-");
@@ -235,18 +277,30 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
 
     if let Some(ref crypto) = c.crypto_properties {
         lines.push(section_header("Crypto", theme));
-        if let Some(ref at) = crypto.asset_type { table_row(lines, theme, "Asset Type", at); }
-        if let Some(ref oid) = crypto.oid { table_row(lines, theme, "OID", oid); }
+        if let Some(ref at) = crypto.asset_type {
+            table_row(lines, theme, "Asset Type", at);
+        }
+        if let Some(ref oid) = crypto.oid {
+            table_row(lines, theme, "OID", oid);
+        }
         if let Some(ref cl) = crypto.certification_level {
             lines.push(Line::from(format!("  Certification: {}", cl.join(", "))));
         }
         if let Some(ref algo) = crypto.algorithm_properties {
             lines.push(Line::from(""));
             lines.push(section_header("Algorithm", theme));
-            if let Some(ref p) = algo.primitive { table_row(lines, theme, "Primitive", p); }
-            if let Some(ref m) = algo.mode { table_row(lines, theme, "Mode", m); }
-            if let Some(ref p) = algo.padding { table_row(lines, theme, "Padding", p); }
-            if let Some(ref c) = algo.curve { table_row(lines, theme, "Curve", c); }
+            if let Some(ref p) = algo.primitive {
+                table_row(lines, theme, "Primitive", p);
+            }
+            if let Some(ref m) = algo.mode {
+                table_row(lines, theme, "Mode", m);
+            }
+            if let Some(ref p) = algo.padding {
+                table_row(lines, theme, "Padding", p);
+            }
+            if let Some(ref c) = algo.curve {
+                table_row(lines, theme, "Curve", c);
+            }
             if let Some(ref funcs) = algo.crypto_functions {
                 lines.push(Line::from(format!("  Functions: {}", funcs.join(", "))));
             }
@@ -260,11 +314,21 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
         if let Some(ref cert) = crypto.certificate_properties {
             lines.push(Line::from(""));
             lines.push(section_header("Certificate", theme));
-            if let Some(ref s) = cert.subject_name { table_row(lines, theme, "Subject", s); }
-            if let Some(ref s) = cert.issuer_name { table_row(lines, theme, "Issuer", s); }
-            if let Some(ref s) = cert.not_valid_before { table_row(lines, theme, "Valid From", s); }
-            if let Some(ref s) = cert.not_valid_after { table_row(lines, theme, "Valid To", s); }
-            if let Some(ref s) = cert.certificate_format { table_row(lines, theme, "Format", s); }
+            if let Some(ref s) = cert.subject_name {
+                table_row(lines, theme, "Subject", s);
+            }
+            if let Some(ref s) = cert.issuer_name {
+                table_row(lines, theme, "Issuer", s);
+            }
+            if let Some(ref s) = cert.not_valid_before {
+                table_row(lines, theme, "Valid From", s);
+            }
+            if let Some(ref s) = cert.not_valid_after {
+                table_row(lines, theme, "Valid To", s);
+            }
+            if let Some(ref s) = cert.certificate_format {
+                table_row(lines, theme, "Format", s);
+            }
         }
         lines.push(Line::from(""));
     }
@@ -272,7 +336,10 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
 
 fn table_row(lines: &mut Vec<Line<'static>>, theme: &Theme, key: &str, value: &str) {
     lines.push(Line::from(vec![
-        Span::styled(format!("  {:16}", key), Style::default().fg(theme.detail_fg)),
+        Span::styled(
+            format!("  {:16}", key),
+            Style::default().fg(theme.detail_fg),
+        ),
         Span::raw(value.to_string()),
     ]));
 }
@@ -281,13 +348,28 @@ fn render_service_detail(
     lines: &mut Vec<Line<'static>>,
     service: &crate::bom::schema::Service,
     theme: &Theme,
-) {    if let Some(ref n) = service.name { table_row(lines, theme, "Name", n); }
-    if let Some(ref r) = service.bom_ref { table_row(lines, theme, "BOM Ref", r); }
-    if let Some(ref g) = service.group { table_row(lines, theme, "Group", g); }
-    if let Some(ref v) = service.version { table_row(lines, theme, "Version", v); }
-    if let Some(ref d) = service.description { table_row(lines, theme, "Description", d); }
-    if let Some(a) = service.authenticated { table_row(lines, theme, "Authenticated", if a { "yes" } else { "no" }); }
-    if let Some(t) = service.x_trust_boundary { table_row(lines, theme, "Trust Boundary", if t { "yes" } else { "no" }); }
+) {
+    if let Some(ref n) = service.name {
+        table_row(lines, theme, "Name", n);
+    }
+    if let Some(ref r) = service.bom_ref {
+        table_row(lines, theme, "BOM Ref", r);
+    }
+    if let Some(ref g) = service.group {
+        table_row(lines, theme, "Group", g);
+    }
+    if let Some(ref v) = service.version {
+        table_row(lines, theme, "Version", v);
+    }
+    if let Some(ref d) = service.description {
+        table_row(lines, theme, "Description", d);
+    }
+    if let Some(a) = service.authenticated {
+        table_row(lines, theme, "Authenticated", if a { "yes" } else { "no" });
+    }
+    if let Some(t) = service.x_trust_boundary {
+        table_row(lines, theme, "Trust Boundary", if t { "yes" } else { "no" });
+    }
     lines.push(Line::from(""));
 
     if let Some(ref eps) = service.endpoints {
@@ -303,13 +385,20 @@ fn render_service_detail(
     if let Some(ref data) = service.data {
         lines.push(section_header("Data Flow", theme));
         for d in data {
-            if let Some(ref c) = d.classification { table_row(lines, theme, "Classification", c); }
-            if let Some(ref f) = d.flow { table_row(lines, theme, "Flow", f); }
+            if let Some(ref c) = d.classification {
+                table_row(lines, theme, "Classification", c);
+            }
+            if let Some(ref f) = d.flow {
+                table_row(lines, theme, "Flow", f);
+            }
         }
         lines.push(Line::from(""));
     }
     if let Some(ref props) = service.properties {
-        lines.push(section_header(&format!("Properties ({})", props.len()), theme));
+        lines.push(section_header(
+            &format!("Properties ({})", props.len()),
+            theme,
+        ));
         for p in props {
             let n = p.name.as_deref().unwrap_or("-");
             let v = p.value.as_deref().unwrap_or("-");
@@ -321,7 +410,10 @@ fn render_service_detail(
         lines.push(Line::from(""));
     }
     if let Some(ref erefs) = service.external_references {
-        lines.push(section_header(&format!("External References ({})", erefs.len()), theme));
+        lines.push(section_header(
+            &format!("External References ({})", erefs.len()),
+            theme,
+        ));
         for eref in erefs {
             let rt = eref.ref_type.as_deref().unwrap_or("?");
             let url = eref.url.as_deref().unwrap_or("-");
@@ -348,18 +440,27 @@ fn render_vulnerability_detail(
     // Header / identity
     if row.is_prioritized() {
         lines.push(Line::from(vec![
-            Span::styled("⚑ PRIORITIZED", Style::default().fg(theme.error).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "⚑ PRIORITIZED",
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
         ]));
         lines.push(Line::from(""));
     }
     table_row(lines, theme, "ID", row.id_display());
-    if let Some(ref b) = v.bom_ref { table_row(lines, theme, "BOM Ref", b); }
+    if let Some(ref b) = v.bom_ref {
+        table_row(lines, theme, "BOM Ref", b);
+    }
     table_row(lines, theme, "Severity", sev);
     table_row(lines, theme, "Score", &format!("{:.1}", row.max_score()));
     table_row(lines, theme, "Method", row.method());
     table_row(lines, theme, "Package", &row.package_name());
-    if let Some(p) = row.affects_purl() { table_row(lines, theme, "Affected Purl", p); }
+    if let Some(p) = row.affects_purl() {
+        table_row(lines, theme, "Affected Purl", p);
+    }
     table_row(lines, theme, "Fix", &row.fix_version());
     let reach = if row.is_endpoint_reachable() {
         "Endpoint-reachable"
@@ -369,7 +470,12 @@ fn render_vulnerability_detail(
         "Not reachable"
     };
     let reach_val = match row.used_in_locations() {
-        Some(n) => format!("{} (used in {} location{})", reach, n, if n == 1 { "" } else { "s" }),
+        Some(n) => format!(
+            "{} (used in {} location{})",
+            reach,
+            n,
+            if n == 1 { "" } else { "s" }
+        ),
         None => reach.to_string(),
     };
     table_row(lines, theme, "Reachability", &reach_val);
@@ -379,15 +485,22 @@ fn render_vulnerability_detail(
     // Reachability & insights
     let labels = row.insight_labels();
     if !labels.is_empty() {
-        lines.push(section_header(&format!("Reachability & Insights ({})", labels.len()), theme));
+        lines.push(section_header(
+            &format!("Reachability & Insights ({})", labels.len()),
+            theme,
+        ));
         for label in &labels {
             let low = label.to_lowercase();
             let style = if low.contains("exploit") || low == "exploitable" {
-                Style::default().fg(theme.error).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD)
             } else if low.contains("reachable") || low.contains("endpoint") {
                 Style::default().fg(theme.warn).add_modifier(Modifier::BOLD)
             } else if low.contains("malicious") {
-                Style::default().fg(theme.error).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.detail_fg)
             };
@@ -422,7 +535,10 @@ fn render_vulnerability_detail(
     if !rec.is_empty() {
         lines.push(section_header("Recommendation / Fix", theme));
         for ln in wrap_text(rec, 76) {
-            lines.push(Line::from(vec![Span::styled(format!("  {}", ln), accent(theme))]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  {}", ln),
+                accent(theme),
+            )]));
         }
         // Affected → unaffected version mapping
         if let Some(affects) = &v.affects {
@@ -430,7 +546,11 @@ fn render_vulnerability_detail(
                 if let Some(versions) = &a.versions {
                     for ver in versions {
                         let status = ver.status.as_deref().unwrap_or("-");
-                        let vv = ver.version.as_deref().or(ver.range.as_deref()).unwrap_or("-");
+                        let vv = ver
+                            .version
+                            .as_deref()
+                            .or(ver.range.as_deref())
+                            .unwrap_or("-");
                         let st = if status == "unaffected" {
                             Style::default().fg(theme.accent)
                         } else {
@@ -449,27 +569,37 @@ fn render_vulnerability_detail(
 
     // Ratings
     if let Some(ratings) = &v.ratings
-        && !ratings.is_empty() {
-            lines.push(section_header(&format!("Ratings ({})", ratings.len()), theme));
-            for r in ratings {
-                let method = r.method.as_deref().unwrap_or("-");
-                let score = r.score.map(|s| format!("{:.1}", s)).unwrap_or_else(|| "-".to_string());
-                let sev_r = r.severity.as_deref().unwrap_or("-");
-                let col = theme.severity_color(sev_r);
+        && !ratings.is_empty()
+    {
+        lines.push(section_header(
+            &format!("Ratings ({})", ratings.len()),
+            theme,
+        ));
+        for r in ratings {
+            let method = r.method.as_deref().unwrap_or("-");
+            let score = r
+                .score
+                .map(|s| format!("{:.1}", s))
+                .unwrap_or_else(|| "-".to_string());
+            let sev_r = r.severity.as_deref().unwrap_or("-");
+            let col = theme.severity_color(sev_r);
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:10}", method), dim("", theme)),
+                Span::styled(
+                    format!("{:>5}", score),
+                    Style::default().fg(col).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("  {:9}", sev_r), Style::default().fg(col)),
+            ]));
+            if let Some(vec) = &r.vector {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  {:10}", method), dim("", theme)),
-                    Span::styled(format!("{:>5}", score), Style::default().fg(col).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("  {:9}", sev_r), Style::default().fg(col)),
+                    Span::styled("    vector: ", dim("", theme)),
+                    Span::raw(vec.clone()),
                 ]));
-                if let Some(vec) = &r.vector {
-                    lines.push(Line::from(vec![
-                        Span::styled("    vector: ", dim("", theme)),
-                        Span::raw(vec.clone()),
-                    ]));
-                }
             }
-            lines.push(Line::from(""));
         }
+        lines.push(Line::from(""));
+    }
 
     // VEX analysis
     if let Some(analysis) = &v.analysis {
@@ -478,7 +608,11 @@ fn render_vulnerability_detail(
         if !state.is_empty() || !adetail.is_empty() {
             lines.push(section_header("VEX Analysis", theme));
             if !state.is_empty() {
-                let col = if state.eq_ignore_ascii_case("exploitable") { theme.error } else { theme.warn };
+                let col = if state.eq_ignore_ascii_case("exploitable") {
+                    theme.error
+                } else {
+                    theme.warn
+                };
                 table_row_styled(lines, theme, "State", state, col);
             }
             if !adetail.is_empty() {
@@ -490,9 +624,10 @@ fn render_vulnerability_detail(
                 table_row(lines, theme, "Justification", j);
             }
             if let Some(resp) = &analysis.response
-                && !resp.is_empty() {
-                    table_row(lines, theme, "Response", &resp.join(", "));
-                }
+                && !resp.is_empty()
+            {
+                table_row(lines, theme, "Response", &resp.join(", "));
+            }
             lines.push(Line::from(""));
         }
     }
@@ -506,7 +641,10 @@ fn render_vulnerability_detail(
                 lines.push(Line::from(vec![
                     Span::raw("  • "),
                     Span::styled(format!("CWE-{}", cwe), accent(theme)),
-                    Span::styled(format!("  https://cwe.mitre.org/data/definitions/{}.html", cwe), dim("", theme)),
+                    Span::styled(
+                        format!("  https://cwe.mitre.org/data/definitions/{}.html", cwe),
+                        dim("", theme),
+                    ),
                 ]));
             }
             lines.push(Line::from(""));
@@ -515,68 +653,119 @@ fn render_vulnerability_detail(
 
     // Advisories
     if let Some(advs) = &v.advisories
-        && !advs.is_empty() {
-            lines.push(section_header(&format!("Advisories ({})", advs.len()), theme));
-            for adv in advs {
-                let t = adv.title.as_deref().unwrap_or("-");
-                let u = adv.url.as_deref().unwrap_or("-");
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  • {:30}", truncate(t, 30)), Style::default().fg(theme.detail_fg)),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("    ", dim("", theme)),
-                    Span::styled(u.to_string(), Style::default().fg(theme.crypto_accent)),
-                ]));
-            }
-            lines.push(Line::from(""));
+        && !advs.is_empty()
+    {
+        lines.push(section_header(
+            &format!("Advisories ({})", advs.len()),
+            theme,
+        ));
+        for adv in advs {
+            let t = adv.title.as_deref().unwrap_or("-");
+            let u = adv.url.as_deref().unwrap_or("-");
+            lines.push(Line::from(vec![Span::styled(
+                format!("  • {:30}", truncate(t, 30)),
+                Style::default().fg(theme.detail_fg),
+            )]));
+            lines.push(Line::from(vec![
+                Span::styled("    ", dim("", theme)),
+                Span::styled(u.to_string(), Style::default().fg(theme.crypto_accent)),
+            ]));
         }
+        lines.push(Line::from(""));
+    }
 
     // References
     if let Some(refs) = &v.references
-        && !refs.is_empty() {
-            lines.push(section_header(&format!("References ({})", refs.len()), theme));
-            for rf in refs {
-                let rid = rf.id.as_deref().unwrap_or("-");
-                let src = rf.source.as_ref().and_then(|s| s.name.as_deref()).unwrap_or("");
-                let url = rf.source.as_ref().and_then(|s| s.url.as_deref()).unwrap_or("");
+        && !refs.is_empty()
+    {
+        lines.push(section_header(
+            &format!("References ({})", refs.len()),
+            theme,
+        ));
+        for rf in refs {
+            let rid = rf.id.as_deref().unwrap_or("-");
+            let src = rf
+                .source
+                .as_ref()
+                .and_then(|s| s.name.as_deref())
+                .unwrap_or("");
+            let url = rf
+                .source
+                .as_ref()
+                .and_then(|s| s.url.as_deref())
+                .unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::styled(format!("  • {:18}", truncate(rid, 18)), accent(theme)),
+                Span::styled(src.to_string(), dim("", theme)),
+            ]));
+            if !url.is_empty() {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  • {:18}", truncate(rid, 18)), accent(theme)),
-                    Span::styled(src.to_string(), dim("", theme)),
+                    Span::styled("    ", dim("", theme)),
+                    Span::styled(url.to_string(), Style::default().fg(theme.crypto_accent)),
                 ]));
-                if !url.is_empty() {
-                    lines.push(Line::from(vec![
-                        Span::styled("    ", dim("", theme)),
-                        Span::styled(url.to_string(), Style::default().fg(theme.crypto_accent)),
-                    ]));
-                }
             }
-            lines.push(Line::from(""));
         }
+        lines.push(Line::from(""));
+    }
 
     // Source / timestamps
-    let src_name = v.source.as_ref().and_then(|s| s.name.as_deref()).unwrap_or("");
-    let src_url = v.source.as_ref().and_then(|s| s.url.as_deref()).unwrap_or("");
+    let src_name = v
+        .source
+        .as_ref()
+        .and_then(|s| s.name.as_deref())
+        .unwrap_or("");
+    let src_url = v
+        .source
+        .as_ref()
+        .and_then(|s| s.url.as_deref())
+        .unwrap_or("");
     let published = v.published.as_deref().unwrap_or("");
     let updated = v.updated.as_deref().unwrap_or("");
     if !src_name.is_empty() || !src_url.is_empty() || !published.is_empty() || !updated.is_empty() {
         lines.push(section_header("Source / Timestamps", theme));
-        if !src_name.is_empty() { table_row(lines, theme, "Source", src_name); }
+        if !src_name.is_empty() {
+            table_row(lines, theme, "Source", src_name);
+        }
         if !src_url.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:16}", "URL"), Style::default().fg(theme.detail_fg)),
-                Span::styled(src_url.to_string(), Style::default().fg(theme.crypto_accent)),
+                Span::styled(
+                    format!("  {:16}", "URL"),
+                    Style::default().fg(theme.detail_fg),
+                ),
+                Span::styled(
+                    src_url.to_string(),
+                    Style::default().fg(theme.crypto_accent),
+                ),
             ]));
         }
-        if !published.is_empty() { table_row(lines, theme, "Published", published); }
-        if !updated.is_empty() { table_row(lines, theme, "Updated", updated); }
+        if !published.is_empty() {
+            table_row(lines, theme, "Published", published);
+        }
+        if !updated.is_empty() {
+            table_row(lines, theme, "Updated", updated);
+        }
         lines.push(Line::from(""));
     }
 }
 
-fn table_row_styled(lines: &mut Vec<Line<'static>>, theme: &Theme, key: &str, value: &str, value_style: ratatui::style::Color) {
+fn table_row_styled(
+    lines: &mut Vec<Line<'static>>,
+    theme: &Theme,
+    key: &str,
+    value: &str,
+    value_style: ratatui::style::Color,
+) {
     lines.push(Line::from(vec![
-        Span::styled(format!("  {:16}", key), Style::default().fg(theme.detail_fg)),
-        Span::styled(value.to_string(), Style::default().fg(value_style).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("  {:16}", key),
+            Style::default().fg(theme.detail_fg),
+        ),
+        Span::styled(
+            value.to_string(),
+            Style::default()
+                .fg(value_style)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 }
 
@@ -584,7 +773,12 @@ fn truncate(s: &str, max: usize) -> &str {
     if s.chars().count() <= max {
         s
     } else {
-        let end = s.char_indices().take(max).last().map(|(i, _)| i).unwrap_or(s.len());
+        let end = s
+            .char_indices()
+            .take(max)
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
         &s[..end]
     }
 }
@@ -634,7 +828,10 @@ fn render_component_vulns(
         return;
     }
 
-    lines.push(section_header(&format!("Vulnerabilities ({})", vulns.len()), theme));
+    lines.push(section_header(
+        &format!("Vulnerabilities ({})", vulns.len()),
+        theme,
+    ));
     for v in vulns.iter().take(30) {
         let sev = v.severity();
         let col = theme.severity_color(sev);
@@ -649,12 +846,23 @@ fn render_component_vulns(
             prefix.push(' ');
         }
         let mut spans: Vec<Span<'static>> = vec![
-            Span::styled(format!("  {}{:20}", prefix, v.id_display()), Style::default().fg(col)),
-            Span::styled(format!(" {:9}", sev), Style::default().fg(col).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("  {}{:20}", prefix, v.id_display()),
+                Style::default().fg(col),
+            ),
+            Span::styled(
+                format!(" {:9}", sev),
+                Style::default().fg(col).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!(" {:.1}", v.max_score()), Style::default().fg(col)),
         ];
         if v.is_exploitable() {
-            spans.push(Span::styled(" exploitable", Style::default().fg(theme.error).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                " exploitable",
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
         if let Some(fix) = {
             let f = v.fix_version();

@@ -576,7 +576,9 @@ pub struct IdentityMethod {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-fn deserialize_identity<'de, D>(deserializer: D) -> Result<Option<Vec<ComponentIdentityEvidence>>, D::Error>
+fn deserialize_identity<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<ComponentIdentityEvidence>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -585,13 +587,13 @@ where
     match v {
         None => Ok(None),
         Some(serde_json::Value::Array(arr)) => {
-            let ids: Vec<ComponentIdentityEvidence> = serde_json::from_value(serde_json::Value::Array(arr))
-                .map_err(D::Error::custom)?;
+            let ids: Vec<ComponentIdentityEvidence> =
+                serde_json::from_value(serde_json::Value::Array(arr)).map_err(D::Error::custom)?;
             Ok(Some(ids))
         }
         Some(obj) => {
-            let id: ComponentIdentityEvidence = serde_json::from_value(obj)
-                .map_err(D::Error::custom)?;
+            let id: ComponentIdentityEvidence =
+                serde_json::from_value(obj).map_err(D::Error::custom)?;
             Ok(Some(vec![id]))
         }
     }
