@@ -235,11 +235,10 @@ impl App {
     pub fn exit_type_filter(&mut self, apply: bool) {
         if apply {
             let types = self.store.component_type_counts();
-            let filter = types
-                .get(self.type_filter_selected)
-                .map(|(t, _)| t.clone());
+            let filter = types.get(self.type_filter_selected).map(|(t, _)| t.clone());
             self.component_type_filter = filter;
-            self.store.set_type_filter(self.component_type_filter.clone());
+            self.store
+                .set_type_filter(self.component_type_filter.clone());
         }
         self.input_mode = InputMode::Normal;
         self.scroll_offset = 0;
@@ -257,7 +256,8 @@ impl App {
     }
 
     pub fn toggle_dep_expand(&mut self) {
-        let ref_field = self.dep_tree_refs
+        let ref_field = self
+            .dep_tree_refs
             .get(self.table_selected)
             .cloned()
             .unwrap_or_default();
@@ -328,4 +328,4 @@ impl App {
 
 #[cfg(test)]
 #[path = "app_tests.rs"]
-mod tests;
+mod app_tests;

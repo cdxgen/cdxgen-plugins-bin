@@ -16,7 +16,12 @@ pub struct ProcessHandle {
 }
 
 impl ProcessHandle {
-    pub fn spawn(cmd: &str, args: &[String], thought_log: &str, trace_log: &str) -> Result<Self, String> {
+    pub fn spawn(
+        cmd: &str,
+        args: &[String],
+        thought_log: &str,
+        trace_log: &str,
+    ) -> Result<Self, String> {
         let mut command = Command::new(cmd);
         command
             .args(args)
@@ -26,9 +31,18 @@ impl ProcessHandle {
             .env("CDXGEN_THOUGHT_LOG", thought_log)
             .env("CDXGEN_TRACE_MODE", "true")
             .env("CDXGEN_TRACE_LOG", trace_log)
-            .env("FETCH_LICENSE", std::env::var("FETCH_LICENSE").unwrap_or_default());
+            // Progress belongs to this UI, not to the child. cdxgen already
+            // disables its live region on a pipe; saying so explicitly keeps
+            // cursor-control sequences out of the captured log either way.
+            .env("CDXGEN_NO_PROGRESS", "true")
+            .env(
+                "FETCH_LICENSE",
+                std::env::var("FETCH_LICENSE").unwrap_or_default(),
+            );
 
-        let mut child = command.spawn().map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
 
         let stdout = child.stdout.take().ok_or("No stdout")?;
         let stderr = child.stderr.take().ok_or("No stderr")?;
@@ -44,7 +58,7 @@ impl ProcessHandle {
             for line in reader.lines() {
                 match line {
                     Ok(text) => {
-                        if tx1.send(parse_line(&text, false)).is_err() {
+                        if tx1.send(parse_line(&text)).is_err() {
                             break;
                         }
                     }
@@ -59,7 +73,7 @@ impl ProcessHandle {
             for line in reader.lines() {
                 match line {
                     Ok(text) => {
-                        if log_tx.send(parse_line(&text, true)).is_err() {
+                        if log_tx.send(parse_line(&text)).is_err() {
                             break;
                         }
                     }
@@ -81,9 +95,10 @@ impl ProcessHandle {
                         if let Ok(content) = std::fs::read_to_string(&thought_path_clone) {
                             let new_content = &content[last_size as usize..];
                             if !new_content.is_empty()
-                                && thought_tx.send(new_content.to_string()).is_err() {
-                                    break;
-                                }
+                                && thought_tx.send(new_content.to_string()).is_err()
+                            {
+                                break;
+                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {
@@ -106,9 +121,10 @@ impl ProcessHandle {
                         if let Ok(content) = std::fs::read_to_string(&trace_path_clone) {
                             let new_content = &content[last_size as usize..];
                             if !new_content.is_empty()
-                                && trace_tx.send(new_content.to_string()).is_err() {
-                                    break;
-                                }
+                                && trace_tx.send(new_content.to_string()).is_err()
+                            {
+                                break;
+                            }
                         }
                         last_size = current_size;
                     } else if current_size < last_size {
@@ -168,7 +184,12 @@ impl Drop for ProcessHandle {
     }
 }
 
-fn parse_line(line: &str, is_stderr: bool) -> LogEntry {
+/// Classify one line of child output.
+///
+/// The stream a line arrived on carries no severity: cdxgen v13 writes every
+/// human-readable diagnostic to stderr so that stdout carries only the BOM
+/// payload, so treating stderr as a warning would paint the whole log yellow.
+fn parse_line(line: &str) -> LogEntry {
     let ansi_stripped = {
         let bytes = strip_ansi_escapes::strip(line);
         String::from_utf8_lossy(&bytes).into_owned()
@@ -177,7 +198,7 @@ fn parse_line(line: &str, is_stderr: bool) -> LogEntry {
     let l = ansi_stripped.to_lowercase();
     let level = if l.contains("error") || l.contains("fail") {
         LogLevel::Error
-    } else if l.contains("warn") || is_stderr {
+    } else if l.contains("warn") {
         LogLevel::Warn
     } else {
         LogLevel::Info
@@ -187,5 +208,29 @@ fn parse_line(line: &str, is_stderr: bool) -> LogEntry {
         level,
         text: ansi_stripped,
         thought_id: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stderr_lines_are_not_all_warnings() {
+        // Every v13 diagnostic arrives on stderr, including ordinary progress.
+        let entry = parse_line("✔ Generating BOM  5770 components  3.4s");
+        assert_eq!(entry.level, LogLevel::Info);
+    }
+
+    #[test]
+    fn test_error_and_warning_are_classified_by_content() {
+        assert_eq!(parse_line("ERROR: could not parse").level, LogLevel::Error);
+        assert_eq!(parse_line("Warning: deprecated").level, LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_ansi_is_stripped() {
+        let entry = parse_line("\x1b[32m✔ done\x1b[39m");
+        assert_eq!(entry.text, "✔ done");
     }
 }

@@ -216,7 +216,12 @@ mod tests {
         let cert_props = crypto_cert.crypto_properties.as_ref().unwrap();
         assert_eq!(cert_props.asset_type.as_deref(), Some("certificate"));
         assert_eq!(
-            cert_props.certificate_properties.as_ref().unwrap().subject_name.as_deref(),
+            cert_props
+                .certificate_properties
+                .as_ref()
+                .unwrap()
+                .subject_name
+                .as_deref(),
             Some("CN=example.com")
         );
 
@@ -224,11 +229,21 @@ mod tests {
         let algo_props = crypto_algo.crypto_properties.as_ref().unwrap();
         assert_eq!(algo_props.asset_type.as_deref(), Some("algorithm"));
         assert_eq!(
-            algo_props.algorithm_properties.as_ref().unwrap().primitive.as_deref(),
+            algo_props
+                .algorithm_properties
+                .as_ref()
+                .unwrap()
+                .primitive
+                .as_deref(),
             Some("AES")
         );
         assert_eq!(
-            algo_props.algorithm_properties.as_ref().unwrap().mode.as_deref(),
+            algo_props
+                .algorithm_properties
+                .as_ref()
+                .unwrap()
+                .mode
+                .as_deref(),
             Some("GCM")
         );
 
@@ -239,7 +254,10 @@ mod tests {
         assert_eq!(services[0].x_trust_boundary, Some(true));
         assert_eq!(
             services[0].endpoints.as_ref().unwrap(),
-            &["https://api.example.com", "https://api.internal.example.com"]
+            &[
+                "https://api.example.com",
+                "https://api.internal.example.com"
+            ]
         );
 
         let deps = bom.dependencies.unwrap();
@@ -370,7 +388,10 @@ mod tests {
         let v = &vulns[0];
         assert_eq!(v.id.as_deref(), Some("CVE-2024-38355"));
         assert_eq!(v.source.as_ref().unwrap().name.as_deref(), Some("NVD"));
-        assert_eq!(v.references.as_ref().unwrap()[0].id.as_deref(), Some("GHSA-25hc-qcg6-38wj"));
+        assert_eq!(
+            v.references.as_ref().unwrap()[0].id.as_deref(),
+            Some("GHSA-25hc-qcg6-38wj")
+        );
         assert_eq!(v.cwes.as_ref().unwrap(), &vec![20, 754]);
         let analysis = v.analysis.as_ref().unwrap();
         assert_eq!(analysis.state.as_deref(), Some("exploitable"));
