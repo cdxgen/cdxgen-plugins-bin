@@ -27,6 +27,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	apkVersion "github.com/knqyf263/go-apk-version"
 	"github.com/package-url/packageurl-go"
@@ -42,6 +43,7 @@ import (
 const (
 	analyzerTypeAPK3          = analyzer.Type("apk3-pkg")
 	analyzerTypeAlpaquitaOS   = analyzer.Type("alpaquita-os")
+	analyzerTypeAlpaquitaLibc = analyzer.Type("alpaquita-libc")
 	analyzerVersionAPK3       = 1
 	analyzerVersionAlpaquita  = 1
 	osFamilyAlpaquita         = ftypes.OSType("alpaquita")
@@ -49,9 +51,12 @@ const (
 	apk3InstalledDatabasePath = "var/lib/apk/db/installed"
 )
 
+var osReleaseFiles = []string{"etc/os-release", "usr/lib/os-release"}
+
 func init() {
 	analyzer.RegisterAnalyzer(apk3PkgAnalyzer{})
 	analyzer.RegisterAnalyzer(alpaquitaOSAnalyzer{})
+	analyzer.RegisterAnalyzer(alpaquitaLibcAnalyzer{})
 }
 
 // apkDBPaths returns the installed-package database locations of every apk-tools
@@ -97,8 +102,11 @@ func (a alpaquitaOSAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisI
 	if err != nil {
 		return nil, err
 	}
-	// The file holds the release channel on a single line, e.g. "stream" or
-	// "24.4.0", matching VERSION_ID in os-release.
+	// The file holds the release channel on a single line, matching VERSION_ID
+	// in os-release: "stream" for the rolling channel, or the LTS release
+	// ("23", "25"). Each channel is a separate apk repository
+	// (packages.bell-sw.com/alpaquita/<libc>/<channel>/core) with its own
+	// package versions, so the channel has to reach the purl.
 	version := strings.TrimSpace(string(data))
 	if version == "" {
 		return nil, nil
@@ -120,6 +128,74 @@ func (a alpaquitaOSAnalyzer) Type() analyzer.Type { return analyzerTypeAlpaquita
 func (a alpaquitaOSAnalyzer) Version() int { return analyzerVersionAlpaquita }
 
 func (a alpaquitaOSAnalyzer) StaticPaths() []string { return []string{alpaquitaReleaseFile} }
+
+// Alpaquita publishes every channel twice, once per libc
+// (packages.bell-sw.com/alpaquita/musl/... and .../glibc/...), and the two
+// builds of a package share its name and version — a stream image carries
+// busybox 1.38.0-r2 whether it is the musl or the glibc build. The libc is
+// therefore part of a package's identity, but it is not a release channel and
+// must not be folded into the `distro` qualifier, so it is recorded as a
+// property instead.
+//
+// os-release is the only place the libc is stated, and it has to be read
+// through an analyzer rather than off disk: cdxgen scans images by reference as
+// well as unpacked root filesystems, and only the analyzer sees the applied
+// layers in both cases. Analyzers cannot return anything but OS and package
+// data, hence the process-wide value below; each wrapper invocation scans
+// exactly one target.
+var (
+	alpaquitaLibcMu sync.Mutex
+	alpaquitaLibc   string
+)
+
+type alpaquitaLibcAnalyzer struct{}
+
+func (a alpaquitaLibcAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	data, err := io.ReadAll(input.Content)
+	if err != nil {
+		return nil, err
+	}
+	var id, libc string
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		switch strings.TrimSpace(key) {
+		case "ID":
+			id = value
+		case "LIBC_TYPE":
+			libc = value
+		}
+	}
+	if id != string(osFamilyAlpaquita) || libc == "" {
+		return nil, nil
+	}
+	alpaquitaLibcMu.Lock()
+	alpaquitaLibc = libc
+	alpaquitaLibcMu.Unlock()
+	// The OS itself is reported from etc/alpaquita-release; this analyzer only
+	// contributes the libc variant.
+	return nil, nil
+}
+
+func (a alpaquitaLibcAnalyzer) Required(filePath string, _ os.FileInfo) bool {
+	return slices.Contains(osReleaseFiles, filePath)
+}
+
+func (a alpaquitaLibcAnalyzer) Type() analyzer.Type { return analyzerTypeAlpaquitaLibc }
+
+func (a alpaquitaLibcAnalyzer) Version() int { return analyzerVersionAlpaquita }
+
+func (a alpaquitaLibcAnalyzer) StaticPaths() []string { return osReleaseFiles }
+
+// alpaquitaLibcType returns the libc variant of the scanned target, if known.
+func alpaquitaLibcType() string {
+	alpaquitaLibcMu.Lock()
+	defer alpaquitaLibcMu.Unlock()
+	return alpaquitaLibc
+}
 
 // normalizeAlpaquitaPurl rewrites the purl of an Alpaquita component to the apk
 // purl type. Trivy maps only its own built-in apk families to `pkg:apk`, so a
@@ -148,6 +224,10 @@ func normalizeAlpaquitaPurl(component *core.Component, osName string) {
 	}
 	if component.PkgIdentifier.BOMRef != "" {
 		component.PkgIdentifier.BOMRef = purl.String()
+	}
+	if libc := alpaquitaLibcType(); libc != "" {
+		component.Properties = appendProperties(component.Properties,
+			core.Property{Name: propertyPackageLibc, Value: libc})
 	}
 }
 

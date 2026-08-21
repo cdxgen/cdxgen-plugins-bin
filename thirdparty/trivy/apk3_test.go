@@ -125,7 +125,77 @@ func TestAlpaquitaOSAnalyzerIgnoresEmptyReleaseFile(t *testing.T) {
 	}
 }
 
+func TestAlpaquitaOSAnalyzerDetectsLTSChannel(t *testing.T) {
+	// Stream is the rolling channel; 23 and 25 are LTS channels served from
+	// their own apk repositories, so the channel has to reach the purl.
+	result, err := alpaquitaOSAnalyzer{}.Analyze(context.Background(), analysisInput(alpaquitaReleaseFile, "23\n"))
+	if err != nil {
+		t.Fatalf("analyze alpaquita release: %v", err)
+	}
+	if result.OS.Name != "23" {
+		t.Fatalf("unexpected OS: %#v", result.OS)
+	}
+
+	purl := &packageurl.PackageURL{Type: string(osFamilyAlpaquita), Name: "busybox", Version: "1.38.0-r2"}
+	component := &core.Component{PkgIdentifier: ftypes.PkgIdentifier{PURL: purl}}
+	normalizeAlpaquitaPurl(component, result.OS.Name)
+	if got := purl.String(); got != "pkg:apk/alpaquita/busybox@1.38.0-r2?distro=alpaquita-23" {
+		t.Fatalf("unexpected purl: %s", got)
+	}
+}
+
+func TestAlpaquitaLibcAnalyzerRecordsLibcVariant(t *testing.T) {
+	t.Cleanup(setAlpaquitaLibc(""))
+
+	osRelease := "NAME=\"BellSoft Alpaquita Linux\"\nID=alpaquita\nID_LIKE=alpine\nVERSION_ID=stream\nLIBC_TYPE=glibc\n"
+	if _, err := (alpaquitaLibcAnalyzer{}).Analyze(context.Background(), analysisInput("etc/os-release", osRelease)); err != nil {
+		t.Fatalf("analyze os-release: %v", err)
+	}
+	if got := alpaquitaLibcType(); got != "glibc" {
+		t.Fatalf("unexpected libc: %s", got)
+	}
+
+	// The libc variant is part of a package's identity, but it is not a release
+	// channel: it is recorded as a property and never folded into the purl.
+	purl := &packageurl.PackageURL{Type: string(osFamilyAlpaquita), Name: "busybox", Version: "1.38.0-r2"}
+	component := &core.Component{PkgIdentifier: ftypes.PkgIdentifier{PURL: purl}}
+	normalizeAlpaquitaPurl(component, "stream")
+	if got := purl.String(); got != "pkg:apk/alpaquita/busybox@1.38.0-r2?distro=alpaquita-stream" {
+		t.Fatalf("unexpected purl: %s", got)
+	}
+	if got := propertyValue(component.Properties, propertyPackageLibc); got != "glibc" {
+		t.Fatalf("unexpected libc property: %s", got)
+	}
+}
+
+func TestAlpaquitaLibcAnalyzerIgnoresOtherDistros(t *testing.T) {
+	t.Cleanup(setAlpaquitaLibc(""))
+
+	if _, err := (alpaquitaLibcAnalyzer{}).Analyze(context.Background(), analysisInput("etc/os-release", "ID=alpine\nVERSION_ID=3.22.5\n")); err != nil {
+		t.Fatalf("analyze os-release: %v", err)
+	}
+	if got := alpaquitaLibcType(); got != "" {
+		t.Fatalf("unexpected libc: %s", got)
+	}
+}
+
+// setAlpaquitaLibc sets the recorded libc variant and returns a function
+// restoring the previous value.
+func setAlpaquitaLibc(libc string) func() {
+	alpaquitaLibcMu.Lock()
+	previous := alpaquitaLibc
+	alpaquitaLibc = libc
+	alpaquitaLibcMu.Unlock()
+	return func() {
+		alpaquitaLibcMu.Lock()
+		alpaquitaLibc = previous
+		alpaquitaLibcMu.Unlock()
+	}
+}
+
 func TestNormalizeAlpaquitaPurlRewritesToApkType(t *testing.T) {
+	t.Cleanup(setAlpaquitaLibc(""))
+
 	purl := &packageurl.PackageURL{
 		Type:       string(osFamilyAlpaquita),
 		Name:       "busybox",

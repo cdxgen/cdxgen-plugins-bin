@@ -47,6 +47,7 @@ const (
 	propertyPackageArchitecture   = "PackageArchitecture"
 	propertyPackageOrigin         = "PackageOrigin"
 	propertyPackageSource         = "PackageSource"
+	propertyPackageLibc           = "PackageLibc"
 	propertyPackageStatus         = "PackageStatus"
 	propertyPackageVendor         = "PackageVendor"
 	propertyOSFamily              = "OSFamily"
