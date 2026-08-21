@@ -2687,5 +2687,182 @@
   "receiver": "*Regexp",
   "function": "FindAll",
   "category": "conversion"
+ },
+
+ {
+  "id": "go.encoding-jsonv2-unmarshal.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "Unmarshal",
+  "category": "conversion",
+  "writesToArguments": [
+   1
+  ]
+ },
+ {
+  "id": "go.encoding-jsonv2-unmarshal.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "Unmarshal",
+  "category": "data",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "data"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium",
+  "description": "Untrusted JSON reaching the v2 decoder can be a parser-complexity attack"
+ },
+ {
+  "id": "go.encoding-jsonv2-unmarshalread.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "UnmarshalRead",
+  "category": "conversion",
+  "writesToArguments": [
+   1
+  ]
+ },
+ {
+  "id": "go.encoding-jsonv2-unmarshalread.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "UnmarshalRead",
+  "category": "data",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "reader"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium",
+  "description": "Untrusted reader decoded by encoding/json/v2"
+ },
+ {
+  "id": "go.encoding-jsonv2-unmarshaldecode.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "UnmarshalDecode",
+  "category": "conversion",
+  "writesToArguments": [
+   1
+  ]
+ },
+ {
+  "id": "go.encoding-jsonv2-marshal.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "Marshal",
+  "category": "conversion"
+ },
+ {
+  "id": "go.encoding-jsonv2-marshalwrite.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "MarshalWrite",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "value"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "go.encoding-jsonv2-marshalencode.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/v2",
+  "function": "MarshalEncode",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 1,
+    "role": "value"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "go.encoding-jsontext-newdecoder.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/jsontext",
+  "function": "NewDecoder",
+  "category": "data",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "reader"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+ },
+ {
+  "id": "go.encoding-jsontext-decoder-readvalue.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/jsontext",
+  "receiver": "*Decoder",
+  "function": "ReadValue",
+  "category": "conversion"
+ },
+ {
+  "id": "go.encoding-jsontext-decoder-readtoken.passthrough",
+  "kind": "passthrough",
+  "module": "std",
+  "package": "encoding/json/jsontext",
+  "receiver": "*Decoder",
+  "function": "ReadToken",
+  "category": "conversion"
+ },
+ {
+  "id": "go.encoding-jsontext-encoder-writevalue.sink",
+  "kind": "sink",
+  "module": "std",
+  "package": "encoding/json/jsontext",
+  "receiver": "*Encoder",
+  "function": "WriteValue",
+  "category": "http-response",
+  "taintKinds": [
+   "user-input"
+  ],
+  "arguments": [
+   {
+    "index": 0,
+    "role": "value"
+   }
+  ],
+  "severity": "medium",
+  "confidence": "medium"
  }
 ]

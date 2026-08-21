@@ -522,6 +522,11 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		addWriter("function", "encoding/json.Unmarshal", "conversion", []int{1})
 		addWriter("function", "encoding/json.NewDecoder", "conversion", []int{})
 		addWriter("function", "(*encoding/json.Decoder).Decode", "conversion", []int{1})
+		// encoding/json/v2 is the default JSON implementation from Go 1.27 on.
+		addWriter("function", "encoding/json/v2.Unmarshal", "conversion", []int{1})
+		addWriter("function", "encoding/json/v2.UnmarshalRead", "conversion", []int{1})
+		addWriter("function", "encoding/json/v2.UnmarshalDecode", "conversion", []int{1})
+		addWriter("function", "encoding/json/jsontext.NewDecoder", "conversion", []int{})
 		addWriter("function", "gopkg.in/yaml.v3.Unmarshal", "conversion", []int{1})
 		addWriter("function", "(*strings.Builder).WriteString", "conversion", []int{0})
 		addWriter("function", "(*strings.Builder).Write", "conversion", []int{0})
@@ -557,6 +562,9 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		}
 		addSinkArgs("function", "http.Error", "http-response", []int{1}, "user-input")
 		addSink("function", "encoding/json.(*Encoder).Encode", "http-response", "user-input")
+		addSinkArgs("function", "encoding/json/v2.MarshalWrite", "http-response", []int{1}, "user-input")
+		addSinkArgs("function", "encoding/json/v2.MarshalEncode", "http-response", []int{1}, "user-input")
+		addSink("function", "encoding/json/jsontext.(*Encoder).WriteValue", "http-response", "user-input")
 		addSinkArgs("function", "http.Redirect", "redirect", []int{2}, "url")
 		addSinkArgs("function", "net/http.RedirectHandler", "redirect", []int{0}, "url")
 		addCategorySan("function", "net/url.QueryEscape", "url-encoding", []string{"redirect"}, "url")
@@ -603,7 +611,7 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"database/sql.(*DB).QueryContext", "database/sql.(*DB).ExecContext", "database/sql.(*Tx).QueryContext", "database/sql.(*Tx).ExecContext", "database/sql.(*Conn).QueryContext", "database/sql.(*Conn).ExecContext"} {
 			addSinkArgs("function", name, "data", []int{2}, "user-input")
 		}
-		for _, name := range []string{"github.com/jmoiron/sqlx", "github.com/jmoiron/sqlx.Queryx", "github.com/jmoiron/sqlx.Select", "github.com/jmoiron/sqlx.Get", "github.com/jackc/pgx", "github.com/jackc/pgx.Query", "github.com/jackc/pgx.Exec", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "gorm.io/gorm.(*DB).Where", "go.mongodb.org/mongo-driver/mongo", "github.com/redis/go-redis", "github.com/redis/go-redis/v9", "github.com/segmentio/kafka-go", "github.com/nats-io/nats.go", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "yaml.Unmarshal"} {
+		for _, name := range []string{"github.com/jmoiron/sqlx", "github.com/jmoiron/sqlx.Queryx", "github.com/jmoiron/sqlx.Select", "github.com/jmoiron/sqlx.Get", "github.com/jackc/pgx", "github.com/jackc/pgx.Query", "github.com/jackc/pgx.Exec", "gorm.io/gorm.(*DB).Raw", "gorm.io/gorm.(*DB).Exec", "gorm.io/gorm.(*DB).Where", "go.mongodb.org/mongo-driver/mongo", "github.com/redis/go-redis", "github.com/redis/go-redis/v9", "github.com/segmentio/kafka-go", "github.com/nats-io/nats.go", "encoding/gob.(*Decoder).Decode", "encoding/json.Unmarshal", "encoding/json/v2.Unmarshal", "encoding/json/v2.UnmarshalRead", "yaml.Unmarshal"} {
 			addSink("function", name, "data", "user-input")
 		}
 		addCategorySan("function", "database/sql.(*Stmt).Exec", "sql-parameterization", []string{"data"}, "sql")

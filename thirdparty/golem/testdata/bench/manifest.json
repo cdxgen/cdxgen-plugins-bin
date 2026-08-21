@@ -92,6 +92,11 @@
       "tier": "quick"
     },
     {
+      "name": "generic-method",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "global-var-carrier",
       "type": "corpus",
       "tier": "quick"
@@ -118,6 +123,11 @@
     },
     {
       "name": "json-roundtrip",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "jsonv2-roundtrip",
       "type": "corpus",
       "tier": "quick"
     },
@@ -153,6 +163,11 @@
     },
     {
       "name": "plugin-open",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "promoted-field-literal-key",
       "type": "corpus",
       "tier": "quick"
     },

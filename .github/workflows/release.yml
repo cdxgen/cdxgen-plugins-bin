@@ -233,7 +233,7 @@ jobs:
         package-manager-cache: false
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
-        go-version: '^1.25.6'
+        go-version: '^1.27.0'
         cache: false
     - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
     - name: Set up QEMU

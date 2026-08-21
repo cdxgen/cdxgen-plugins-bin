@@ -76,7 +76,8 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 	case "cha":
 		graph = cha.CallGraph(ctx.program)
 	case "rta":
-		roots := a.resolveRoots(ctx)
+		// A nil root segfaults inside rta.Analyze; see callableFunctions.
+		roots := callableFunctions(a.resolveRoots(ctx))
 		result := rta.Analyze(roots, true)
 		if result != nil {
 			graph = result.CallGraph
@@ -527,6 +528,22 @@ func (a *Analyzer) userRoots(ctx *ssaContext) []*ssa.Function {
 	return roots
 }
 
+// callableFunctions drops roots RTA cannot start from. rta.Analyze puts every
+// root straight on its worklist and reads root.Blocks without a nil check, so a
+// nil root segfaults inside x/tools instead of yielding a smaller graph. A
+// bodyless root is kept: it contributes no edges but is still a graph node, and
+// dropping it would silently shrink the reported call graph.
+func callableFunctions(fns []*ssa.Function) []*ssa.Function {
+	out := make([]*ssa.Function, 0, len(fns))
+	for _, fn := range fns {
+		if fn == nil {
+			continue
+		}
+		out = append(out, fn)
+	}
+	return out
+}
+
 // legacyRtaRoots is the existing heuristic (main+init + synthetic registrations).
 func legacyRtaRoots(ctx *ssaContext) []*ssa.Function {
 	seen := map[*ssa.Function]bool{}
@@ -690,7 +707,7 @@ func (a *Analyzer) buildAutoCallGraph(ctx *ssaContext) (*callgraph.Graph, string
 	diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "seed: cha (" + fmt.Sprintf("%d nodes", len(chaGraph.Nodes)) + ")"})
 
 	// Phase 2: RTA from resolved roots.
-	roots := a.resolveRoots(ctx)
+	roots := callableFunctions(a.resolveRoots(ctx))
 	rtaResult := rta.Analyze(roots, true)
 	if rtaResult == nil || rtaResult.CallGraph == nil {
 		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "rta returned no graph; falling back to cha"})

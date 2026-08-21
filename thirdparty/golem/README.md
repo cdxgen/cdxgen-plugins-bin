@@ -4,6 +4,13 @@ Golem is a static analyzer for Go source trees. It loads a module or workspace w
 
 The analyzer is designed for evidence collection rather than exploit proof. It keeps output small and reviewable: symbols, source locations, package context, module metadata, graph edges, classifications, and summary counts are emitted. Raw secrets, embedded file contents, command output, and generated command execution are not emitted.
 
+## Requirements
+
+Go 1.27 or later. The version that builds Golem is also the newest language
+version Golem can type-check, so a Golem built by an older toolchain reports
+zero sources, sinks and call edges for a module that declares a newer `go`
+directive rather than degrading gracefully. See [GO127.md](GO127.md).
+
 ## Quick Start
 
 Build or run Golem from this directory:
