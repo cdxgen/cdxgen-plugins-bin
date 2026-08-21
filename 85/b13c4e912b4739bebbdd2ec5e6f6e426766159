@@ -1,0 +1,92 @@
+thirdparty/golem/internal/analyzer/vocabulary_test.go
+  s_a248fea33c2cd6::t_d548b4029a8371 312-315
+thirdparty/golem/testdata/corpus/jsonv2-roundtrip/go.mod
+  s_a248fea33c2cd6::t_3a36441c3c128f 1-3
+thirdparty/golem/testdata/corpus/promoted-field-literal-key/go.mod
+  s_a248fea33c2cd6::t_f00e12f05f8826 1-3
+thirdparty/golem/GO127.md
+  s_a248fea33c2cd6::t_328a9c14158e6b 48-89
+  s_a248fea33c2cd6::t_286830fcec89f6 1-47,90-96
+thirdparty/golem/internal/analyzer/callgraph.go
+  s_a248fea33c2cd6::t_e0c8869d35eddc 80
+  s_a248fea33c2cd6::t_bf899f89d5db16 536-538,540-546,710
+  s_a248fea33c2cd6::t_3a4703915e9a7f 79,531-535,539
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 20-21,23,27-29,31-33,35,41-42,47-48,52,55-56,61-62,64,67,70-76,78,81,83-87,89,92,95-96,103,105-109,111,114,116-120,122,125,127-131,133,136,138-140,142,144,147-151,153-164,169-173,177,180-184,191-195,197,202-207,210,213-217,219,224,227-228,235,237-239,246,249,257,259-263,265,268,270-272,279,281-283,290,292-294,301,304-305,312-316,318,323-334,337-338,340
+.github/workflows/test.yml
+  s_a248fea33c2cd6::t_0eeae43ec077ef 229,396
+thirdparty/golem/testdata/corpus/generic-method/go.mod
+  s_a248fea33c2cd6::t_7b156af5ada33d 1-3
+thirdparty/golem/README.md
+  s_a248fea33c2cd6::t_fea74eefe1e2e6 7-13
+.github/workflows/golem-e2e.yml
+  s_a248fea33c2cd6::t_0eeae43ec077ef 74
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 21,26-27,30-31,130,152,163,174,185,196,207,240,251,262,273,307
+thirdparty/golem/internal/analyzer/dataflow.go
+  s_a248fea33c2cd6::t_79ad4a9ee2a575 525-529
+  s_a248fea33c2cd6::t_aaa8317721c6dd 565-567
+  s_a248fea33c2cd6::t_d548b4029a8371 614
+thirdparty/golem/testdata/golden/go-chi-security.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 20-21,23,26-27,30-32,153,164,173,184,195,206
+.github/workflows/native-builds.yml
+  s_a248fea33c2cd6::t_0eeae43ec077ef 39
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 20-21,23,27-29,31-33,35,74,85,107,184,195,206,239,250,261,283,294,316,327
+thirdparty/golem/testdata/corpus/generic-method/main.go
+  s_a248fea33c2cd6::t_be77c4b432f060 11,37
+  s_a248fea33c2cd6::t_48247f756fd688 1-10,12-36,38-42
+thirdparty/golem/go.mod
+  s_a248fea33c2cd6::t_d0465726583080 6-7,10
+  s_a248fea33c2cd6::t_0eeae43ec077ef 3
+thirdparty/trivy/go.mod
+  s_a248fea33c2cd6::t_b90d2d14a2be64 3,6,10-12,16-18,21-23,25-26,28,30-32,34-37,42,45-46,48,53-54,56,59,65-66,70-77,79-90,94,97,100-107,112-116,118,121-123,127,130-132,134-135,137-138,141,143-144,146-147,149-171,173-176,181,184,188-189,191-192,195,199,203-205,209,212-214,220,223-224,226,229-238,243,245,248-249,252,254,260,263,265,268,271,273,275,281-282,284,288,292-293,297-300,303,308-309,313-314,316,319-320,330-333,336-348,350-351,353-372,374,377-389,392-397,399
+.github/workflows/trivy-cdxgen-sbom-e2e.yml
+  s_a248fea33c2cd6::t_0eeae43ec077ef 34
+thirdparty/golem/internal/analyzer/crypto.go
+  s_a248fea33c2cd6::t_7a9eefada79486 86-100
+  s_a248fea33c2cd6::t_916a6d0c3c37b6 37-39,41-42,45-47,49,53,55
+  s_a248fea33c2cd6::t_574913c6bcf156 63-85
+.github/workflows/release.yml
+  s_a248fea33c2cd6::t_0eeae43ec077ef 236
+thirdparty/golem/testdata/golden/shiftleft-go-demo-security.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 21,26-27,30-31,130,152,163,174,185,196,207,240,251,262,273,307
+thirdparty/golem/testdata/corpus/promoted-field-literal-key/main.go
+  s_a248fea33c2cd6::t_be77c4b432f060 13
+  s_a248fea33c2cd6::t_6c8e791848f144 41
+  s_a248fea33c2cd6::t_375e99aece9095 1-12,14-40,42-43
+thirdparty/trustinspector/go.mod
+  s_a248fea33c2cd6::t_4c3939b29d5fd5 5
+  s_a248fea33c2cd6::t_0eeae43ec077ef 3
+thirdparty/golem/testdata/corpus/jsonv2-roundtrip/main.go
+  s_a248fea33c2cd6::t_3a36441c3c128f 1-29
+thirdparty/golem/testdata/golden/go-chi-exported-roots.digest.json
+  s_a248fea33c2cd6::t_78f82f68ce8903 20-21,23,28,31-33,154,165,174,185,196,207
+thirdparty/golem/internal/models/stdlib.json
+  s_a248fea33c2cd6::t_8de7d29cf6c090 2690-2866
+thirdparty/golem/testdata/bench/manifest.json
+  s_a248fea33c2cd6::t_98af8c548553ba 94,131-133,171-173
+  s_a248fea33c2cd6::t_839a94c1dc785a 95-98,129-130,169-170
+thirdparty/golem/go.sum
+  s_a248fea33c2cd6::t_c9f36b6f923d1f 5-6,9-10,13-14
+thirdparty/trivy/go.sum
+  s_a248fea33c2cd6::t_ca156796a3f37f 1-2,4-7,12-23,27-28,31-36,39-40,45-46,48-51,56-65,74-75,81-84,87-88,97-100,103-104,108-109,116-117,127-128,131-136,147-162,165-188,197-198,203-208,213-214,220-221,223-226,228-229,232-239,248-257,264-265,270-273,278-279,285-286,291-296,306-309,319-322,326-331,334-337,340-341,344-345,348-349,358-359,362-363,366-367,370-371,373-374,377-378,381-430,440-441,444-451,456-457,495-496,502-503,508-509,515-518,525-528,534-535,544-545,554-559,566-567,575-576,578-579,584-585,605-606,611-614,618-619,628-647,651-652,661-662,665-666,669-670,673-678,683-684,687-688,701-702,707-708,711-716,721-722,728-731,735-736,739-740,754-755,759-764,767-772,775-778,786-787,794-797,803-804,809-814,816-817,824-825,830-831,837-838,843-844,863-864,867-876,879-880,887-890,913-914,920-921,924-929,934-985,990-993,996-997,1001-1002,1004-1005,1009-1010,1020-1021,1023-1024,1028-1029,1042-1043,1045-1046,1052-1055,1061-1062,1065-1070,1077-1082,1088-1089,1099-1100,1106-1107,1110-1111,1124-1125,1128-1155,1158-1159,1162-1163,1168-1169,1172-1173,1178-1181,1184-1191,1194-1195
+thirdparty/trustinspector/go.sum
+  s_a248fea33c2cd6::t_3c72a7da7afd94 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "85b13c4e912b4739bebbdd2ec5e6f6e426766159",
+  "prompts": {},
+  "sessions": {
+    "s_a248fea33c2cd6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0e992fa-b0f7-414c-ba83-4077ed644491",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
