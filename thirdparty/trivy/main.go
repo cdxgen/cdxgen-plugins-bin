@@ -349,6 +349,10 @@ func enrichReportBOM(report *trivytypes.Report, target string, targetKind artifa
 			)
 		}
 
+		if report.Metadata.OS != nil {
+			normalizeAlpaquitaPurl(component, report.Metadata.OS.Name)
+		}
+
 		pkgID := propertyValue(component.Properties, core.PropertyPkgID)
 		if pkgID == "" {
 			continue
@@ -610,10 +614,7 @@ func mergePackageCapabilities(dst map[string][]string, src map[string][]string) 
 }
 
 func parseAPKCapabilities(rootfsTarget string) map[string][]string {
-	for _, dbPath := range []string{
-		filepath.Join(rootfsTarget, "lib", "apk", "db", "installed"),
-		filepath.Join(rootfsTarget, "usr", "lib", "apk", "db", "installed"),
-	} {
+	for _, dbPath := range apkDBPaths(rootfsTarget) {
 		data, err := os.ReadFile(dbPath)
 		if err != nil {
 			continue
@@ -650,10 +651,7 @@ func parseAPKCapabilities(rootfsTarget string) map[string][]string {
 }
 
 func parseAPKPackageTrust(rootfsTarget string) map[string]packageDecoration {
-	for _, dbPath := range []string{
-		filepath.Join(rootfsTarget, "lib", "apk", "db", "installed"),
-		filepath.Join(rootfsTarget, "usr", "lib", "apk", "db", "installed"),
-	} {
+	for _, dbPath := range apkDBPaths(rootfsTarget) {
 		data, err := os.ReadFile(dbPath)
 		if err != nil {
 			continue

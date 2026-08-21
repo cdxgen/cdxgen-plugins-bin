@@ -49,6 +49,18 @@ OS package components are enriched with additional metadata that cdxgen uses for
 
 When the wrapper output is consumed by cdxgen, maintainer/vendor trust metadata is further promoted into native CycloneDX component fields such as `authors` and `manufacturer` when that can be done without overwriting differing existing values.
 
+### apk-tools 3.x and Alpaquita Linux
+
+Trivy's apk analyzer reads the installed-package database from `lib/apk/db/installed` and `usr/lib/apk/db/installed`, the apk-tools 2.x locations. apk-tools 3.x, shipped by BellSoft Alpaquita Linux, keeps the same paragraph text format at `var/lib/apk/db/installed`, and Alpaquita's os-release `ID` is not one Trivy maps to an OS family, so both its packages and its OS went undetected.
+
+The wrapper adds:
+
+- an apk analyzer for `var/lib/apk/db/installed`, so apk-tools 3.x packages, their licenses, dependencies, installed files and checksums are collected
+- an OS analyzer for `etc/alpaquita-release`, so the OS is reported as family `alpaquita` with the release channel (e.g. `stream`) as its version
+- purl normalization to `pkg:apk/alpaquita/<name>@<version>?arch=<arch>&distro=alpaquita-<channel>`, matching the shape Trivy emits for every other apk distro
+
+The apk-tools 2.x paths are left to Trivy's own analyzer, so an image carrying both layouts is never counted twice.
+
 ## Usage
 
 ### Build a Local Test Binary
