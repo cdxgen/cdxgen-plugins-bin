@@ -1,0 +1,79 @@
+thirdparty/golem/testdata/corpus/func-param-callback/main.go
+  s_a248fea33c2cd6::t_7e4be4358b17cc 5,26-29,33-34
+  s_a248fea33c2cd6::t_f815c789f2a642 1-4,6-25,30-32,35
+thirdparty/golem/testdata/golden/shiftleft-go-demo-all.digest.json
+  s_a248fea33c2cd6::t_02e5ce24dc954b 38-39
+thirdparty/golem/testdata/golden/go-test-bench-security.digest.json
+  s_a248fea33c2cd6::t_02e5ce24dc954b 39-42,49,62,64,278-288
+thirdparty/golem/internal/seam/inter.go
+  s_a248fea33c2cd6::t_12b315a9f26e89 380,427-440
+thirdparty/golem/internal/seam/intra.go
+  s_a248fea33c2cd6::t_ed7a1dbd066b83 839,931-942,944-959,990,1056-1066,1070,1072,1078-1087,1092,1094-1107
+  s_a248fea33c2cd6::t_32cc598327d4bb 126-132,143,305-311,830-838
+  s_a248fea33c2cd6::t_e097d10111359a 381-390
+  s_a248fea33c2cd6::t_41035a1461611a 7
+  s_a248fea33c2cd6::t_55cc82ecf29d3e 283,287-289,293-296,312
+  s_a248fea33c2cd6::t_133b63c381f660 303-304,991-992,1044-1055
+  s_a248fea33c2cd6::t_86999a4b9fa491 352-354,964-989
+  s_a248fea33c2cd6::t_13ad60878a825b 664-677,679-683,689-690,692-696,698-703
+  s_a248fea33c2cd6::t_c0172b2c917596 993-1043
+  s_a248fea33c2cd6::t_6efdad2a73b3e9 447,451-456,462,464-466
+  s_a248fea33c2cd6::t_10358b7db13cf7 284-286,290
+  s_a248fea33c2cd6::t_82e5139cc90d2e 1067-1069,1071,1073-1077,1088-1091,1093
+  s_a248fea33c2cd6::t_64901bfad153d2 1108
+thirdparty/golem/testdata/seam-parity.json
+  s_a248fea33c2cd6::t_7ed97b40abee11 16,20-21,26-27,30-31
+  s_a248fea33c2cd6::t_c8c744c23dc32b 15
+thirdparty/golem/internal/analyzer/report.go
+  s_a248fea33c2cd6::t_b5dfef02cc2047 94-102,155
+thirdparty/golem/testdata/corpus/func-param-callback/go.mod
+  s_a248fea33c2cd6::t_f815c789f2a642 1-3
+thirdparty/golem/internal/model/model.go
+  s_a248fea33c2cd6::t_b5dfef02cc2047 19-31
+thirdparty/golem/testdata/corpus/generic-method/main.go
+  s_a248fea33c2cd6::t_b270735ebac779 10-13
+  s_a248fea33c2cd6::t_7e4be4358b17cc 5,39-41,43-45
+thirdparty/golem/internal/analyzer/langversion.go
+  s_a248fea33c2cd6::t_a575e921beeb77 1-67
+thirdparty/golem/internal/analyzer/langversion_test.go
+  s_a248fea33c2cd6::t_e81388480a662d 1-148
+thirdparty/golem/README.md
+  s_a248fea33c2cd6::t_723ed880599d34 9-20
+thirdparty/golem/internal/seam/summary.go
+  s_a248fea33c2cd6::t_6f4e42dcaac56c 97-100,164-171,174,180,190,192-193
+  s_a248fea33c2cd6::t_f55c8d8da293b3 147-162
+thirdparty/golem/internal/seam/seam.go
+  s_a248fea33c2cd6::t_c0172b2c917596 185-190,192,274,389,405,412,440,447,478,507
+  s_a248fea33c2cd6::t_5afaed06e8a1ca 496
+  s_a248fea33c2cd6::t_f55c8d8da293b3 482,486-487,527-531,538,545
+  s_a248fea33c2cd6::t_f9829809a720cd 237-250,258-270
+  s_a248fea33c2cd6::t_ae932cbd81dae4 271-272
+thirdparty/golem/testdata/corpus/promoted-field-literal-key/main.go
+  s_a248fea33c2cd6::t_b270735ebac779 11-17
+thirdparty/golem/testdata/corpus/value-receiver-field/go.mod
+  s_a248fea33c2cd6::t_f815c789f2a642 1-3
+thirdparty/golem/testdata/golden/go-test-bench-all.digest.json
+  s_a248fea33c2cd6::t_02e5ce24dc954b 39-42,49,62,64,311-321
+thirdparty/golem/testdata/bench/manifest.json
+  s_a248fea33c2cd6::t_d6ec192c333b9a 84-88,254-258
+thirdparty/golem/testdata/corpus/value-receiver-field/main.go
+  s_a248fea33c2cd6::t_f815c789f2a642 1-4,6-26,30-37,41
+  s_a248fea33c2cd6::t_360b1101213759 5
+  s_a248fea33c2cd6::t_ae01e356a481c1 27-29,38-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "331ffcb254dd45be06c51a1f66a31ba091a7f69f",
+  "prompts": {},
+  "sessions": {
+    "s_a248fea33c2cd6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0e992fa-b0f7-414c-ba83-4077ed644491",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
