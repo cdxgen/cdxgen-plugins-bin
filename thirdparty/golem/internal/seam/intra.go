@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"strings"
 
 	"golang.org/x/tools/go/ssa"
 
@@ -122,6 +123,13 @@ type intra struct {
 
 	collectSinks bool
 	diagnostics  []string
+
+	// spills names the memory locations that hold a by-value parameter, which
+	// for a method includes the receiver. A field read from one of these is a
+	// read of a field of that parameter, and has to be attributed to the field
+	// rather than to the whole parameter, or a summary cannot tell a caller
+	// which field it looked at.
+	spills map[string]bool
 }
 
 func newIntra(engine *Engine, fn *ssa.Function) *intra {
@@ -132,6 +140,7 @@ func newIntra(engine *Engine, fn *ssa.Function) *intra {
 		index:  make(map[*ssa.BasicBlock]int, len(fn.Blocks)),
 		in:     make([]taintState, len(fn.Blocks)),
 		out:    make([]taintState, len(fn.Blocks)),
+		spills: map[string]bool{},
 	}
 	for i, block := range fn.Blocks {
 		s.index[block] = i
@@ -271,16 +280,36 @@ type asyncSinkCheck struct {
 func (s *intra) transfer(state taintState, instr ssa.Instruction) {
 	switch x := instr.(type) {
 	case *ssa.Store:
+		aggregate := isAggregate(x.Val.Type())
+		// An aggregate stored by value carries its fields' taint, which is
+		// held under sub-locations rather than on the value itself, so the
+		// copy has to happen even when the value as a whole is clean.
+		copied := false
+		if aggregate {
+			copied = s.copyAggregate(state, s.pathKey(x.Addr), s.pathKey(x.Val))
+		}
 		labels := s.taintOf(state, x.Val)
 		if labels.IsEmpty() {
-			// Storing untainted data kills whatever the location held.
-			delete(state.memory, s.pathKey(x.Addr))
+			if !copied {
+				// Storing untainted data kills whatever the location held.
+				delete(state.memory, s.pathKey(x.Addr))
+			}
 			return
 		}
 		step := s.step("store", "store", valueName(x.Addr), valueSymbol(x.Addr), valueTypeOf(x.Val), s.fieldPathOf(x.Addr), x.Pos())
 		labels = withStep(labels, step)
 		state.memory[s.pathKey(x.Addr)] = labels
 		s.rememberAggregate(state, x.Addr, labels)
+		if aggregate && !copied && isParameterSpill(x) {
+			// A by-value parameter, which for a method includes the receiver, is
+			// spilled into a local before any field of it is read (`*t0 = c`),
+			// so without this a method on a value receiver could not observe
+			// taint in its own receiver's fields. The spill is remembered rather
+			// than widened to the aggregate's `[*]` view: widening says "every
+			// field is tainted" and loses the one thing the caller needs back,
+			// which field was read.
+			s.spills[s.pathKey(x.Addr)] = true
+		}
 
 		// If storing to a package-level global, propagate to the engine's
 		// global taint map so other functions can read it.
@@ -320,7 +349,9 @@ func (s *intra) transfer(state taintState, instr ssa.Instruction) {
 		s.transferSelect(state, x)
 
 	case *ssa.Call:
-		state.setValue(x, s.transferCall(state, x.Common(), x.Pos()))
+		result := s.transferCall(state, x.Common(), x.Pos())
+		state.setValue(x, result)
+		s.rememberResultFields(state, x, result)
 
 	case *ssa.Go:
 		s.transferCall(state, x.Common(), x.Pos())
@@ -346,6 +377,16 @@ func (s *intra) transfer(state taintState, instr ssa.Instruction) {
 				s.returns[i] = s.returns[i].Merge(s.taintOf(state, result))
 			}
 		}
+
+	case *ssa.UnOp:
+		// Loading a whole aggregate out of memory: pathKey names the result
+		// "value:fn:tN", a location with no sub-locations of its own, so the
+		// field-qualified taint has to be carried across explicitly for the
+		// store that follows to find it.
+		if x.Op == token.MUL && isAggregate(x.Type()) {
+			s.copyAggregate(state, s.pathKey(x), s.pathKey(x.X))
+		}
+		state.setValue(x, s.evaluate(state, x, nil))
 
 	default:
 		if value, ok := instr.(ssa.Value); ok {
@@ -403,19 +444,26 @@ func (s *intra) transferCall(state taintState, common *ssa.CallCommon, pos token
 		s.checkSummarySinks(state, common, pos)
 	}
 
-	argAt := func(i int) LabelSet {
+	argAt := argResolver(func(i int, fields []string) LabelSet {
 		if i < 0 || i >= len(common.Args) {
 			return LabelSet{}
 		}
-		return s.taintOf(state, common.Args[i]).Merge(s.variadicElementTaint(state, common.Args[i]))
-	}
+		arg := common.Args[i]
+		if restricted, ok := s.argFieldTaint(state, arg, fields); ok {
+			return restricted
+		}
+		return s.taintOf(state, arg).Merge(s.variadicElementTaint(state, arg))
+	})
 
 	// For MakeClosure calls, extend argAt to map FreeVar positions to bindings.
 	if common.Value != nil {
 		if _, ok := common.Value.(*ssa.MakeClosure); ok {
 			nArgs := len(common.Args)
-			argAt = func(i int) LabelSet {
+			argAt = func(i int, fields []string) LabelSet {
 				if i >= 0 && i < nArgs {
+					if restricted, ok := s.argFieldTaint(state, common.Args[i], fields); ok {
+						return restricted
+					}
 					return s.taintOf(state, common.Args[i])
 				}
 				if mc, ok := common.Value.(*ssa.MakeClosure); ok {
@@ -613,31 +661,46 @@ func (s *intra) checkSummarySinksFor(state taintState, common *ssa.CallCommon, p
 
 	hasReceiver := summary.HasReceiver()
 	for paramIdx, effects := range summary.ParamSink {
-		var labels LabelSet
-		if mc != nil && paramIdx >= nParams {
-			// FreeVar position: map to binding.
-			bi := paramIdx - nParams
-			if bi >= 0 && bi < len(mc.Bindings) {
-				labels = s.taintOf(state, mc.Bindings[bi])
+		// labelsFor answers what the caller's value for this parameter carries,
+		// restricted to the fields the effect was recorded through when the
+		// summary named any and this call site knows the argument field by
+		// field. See argFieldTaint: without the restriction, a sink reached
+		// through one field of a struct parameter fires for every struct that
+		// has any tainted field at all.
+		labelsFor := func(fields []string) LabelSet {
+			if mc != nil && paramIdx >= nParams {
+				// FreeVar position: map to binding.
+				bi := paramIdx - nParams
+				if bi >= 0 && bi < len(mc.Bindings) {
+					return s.taintOf(state, mc.Bindings[bi])
+				}
+				return LabelSet{}
 			}
-		} else if hasReceiver && paramIdx == 0 && common.IsInvoke() {
-			if common.Value != nil {
-				labels = s.taintOf(state, common.Value)
+			if hasReceiver && paramIdx == 0 && common.IsInvoke() {
+				if common.Value != nil {
+					return s.taintOf(state, common.Value)
+				}
+				return LabelSet{}
 			}
-		} else {
 			argIdx := paramIdx
 			if hasReceiver && common.IsInvoke() {
 				argIdx = paramIdx - 1
 			}
-			if argIdx >= 0 && argIdx < len(common.Args) {
-				labels = s.taintOf(state, common.Args[argIdx])
+			if argIdx < 0 || argIdx >= len(common.Args) {
+				return LabelSet{}
 			}
+			arg := common.Args[argIdx]
+			if restricted, ok := s.argFieldTaint(state, arg, fields); ok {
+				return restricted
+			}
+			return s.taintOf(state, arg)
 		}
-		if labels.IsEmpty() {
-			continue
-		}
-		for _, label := range labels.Labels() {
-			for _, effect := range effects {
+		for _, effect := range effects {
+			labels := labelsFor(effect.ParamFieldPaths)
+			if labels.IsEmpty() {
+				continue
+			}
+			for _, label := range labels.Labels() {
 				if !label.AllowsSink(effect.Category) {
 					continue
 				}
@@ -764,6 +827,16 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 		if labels, ok := state.memory[baseKey+"[*]"]; ok && !labels.IsEmpty() {
 			return labels
 		}
+		// A field of a spilled by-value parameter. The parameter's label is
+		// whole-value, so the field name is added as a hop: that is what makes
+		// this function's summary say "parameter N flows to the return through
+		// field F" instead of "parameter N flows to the return", and what lets
+		// the call site answer with only that field.
+		if s.spills[baseKey] {
+			if labels, ok := state.memory[baseKey]; ok && !labels.IsEmpty() {
+				return withStep(labels, s.step("load", "load", valueName(x.X), valueSymbol(x.X), valueTypeOf(x), s.fieldPathOf(x), x.Pos()))
+			}
+		}
 		return s.evaluate(state, x.X, visited)
 
 	case *ssa.Field:
@@ -855,19 +928,182 @@ func unwrapAddr(v ssa.Value) ssa.Value {
 }
 
 // rememberAggregate records a store through a field or index so a later read of
-// the whole aggregate still sees the taint. The aggregate base is also marked,
-// so returning a struct pointer carries taint from any tainted field.
+// the whole aggregate still sees the taint. Every enclosing aggregate is marked,
+// not just the immediate one, so returning a struct pointer carries taint from
+// any tainted field however deeply nested.
+//
+// One level was not enough: a promoted field of an embedded struct — and, from
+// Go 1.27, a promoted key in a composite literal — addresses through a chain of
+// FieldAddrs, so `Wrapper{Cmd: taint}` marked `complit.Mid.Base` and left
+// `complit` itself clean. The whole-struct load that a value-typed literal
+// compiles to then read the base key and found nothing.
+//
+// Marking a base key does not blur fields: the FieldAddr lookup in evaluate
+// deliberately does not fall back to it, reading only the `[*]` view.
 func (s *intra) rememberAggregate(state taintState, addr ssa.Value, labels LabelSet) {
-	switch a := addr.(type) {
-	case *ssa.IndexAddr:
-		baseKey := s.pathKey(a.X)
-		state.memory[baseKey+"[*]"] = labels
-		state.memory[baseKey] = state.memory[baseKey].Merge(labels)
-	case *ssa.FieldAddr:
-		baseKey := s.pathKey(a.X)
-		state.memory[baseKey+fieldSuffix(a)] = labels
+	switch addr.(type) {
+	case *ssa.IndexAddr, *ssa.FieldAddr:
+	default:
+		return
+	}
+	for {
+		var baseKey, suffix string
+		switch a := addr.(type) {
+		case *ssa.IndexAddr:
+			baseKey, suffix, addr = s.pathKey(a.X), "[*]", a.X
+		case *ssa.FieldAddr:
+			baseKey, suffix, addr = s.pathKey(a.X), fieldSuffix(a), a.X
+		default:
+			return
+		}
+		state.memory[baseKey+suffix] = state.memory[baseKey+suffix].Merge(labels)
 		state.memory[baseKey] = state.memory[baseKey].Merge(labels)
 	}
+}
+
+// rememberResultFields records which fields of an aggregate result a call's
+// taint landed in, taken from the fields the labels were routed through.
+//
+// A call that returns a struct returns it by value, and the caller stores it
+// into a variable whose fields are then read one at a time. Whole-value taint on
+// the result does not survive that, because a field read deliberately does not
+// consult the base location — so `out := b.Map(f); use(out.Value)` lost the
+// flow between the call and the read. Depositing the labels at the fields they
+// travelled through keeps the path precise across the copy instead of widening
+// the result to "every field".
+func (s *intra) rememberResultFields(state taintState, call *ssa.Call, result LabelSet) {
+	if result.IsEmpty() || !isAggregate(call.Type()) {
+		return
+	}
+	baseKey := s.pathKey(call)
+	if baseKey == "" {
+		return
+	}
+	for _, label := range result.Labels() {
+		for _, field := range label.FieldPaths {
+			if field == "" {
+				continue
+			}
+			key := baseKey + "." + field
+			state.memory[key] = state.memory[key].Add(label)
+		}
+	}
+}
+
+// argFieldTaint answers what an aggregate argument carries at the specific
+// fields a callee's summary says it reads, and reports whether that answer is
+// usable.
+//
+// A summary is context-insensitive: `func (p pair) Clean() string { return
+// p.clean }` records "parameter 0 flows to the return", because at the time it
+// is computed nothing says which field of p the caller tainted. Applying that
+// with the whole argument's taint makes every field of a struct that has any
+// tainted field tainted in turn, which is how `pair{tainted: input, clean:
+// "static"}` produced a finding on p.Clean().
+//
+// So when the summary names the fields it read and this call site knows the
+// argument field by field, the answer is the union over those fields alone.
+// "Knows" is the condition that keeps this from losing flows: a call site with
+// no field-level record of the argument — the common case, and every case where
+// the struct was filled somewhere else — falls back to the whole-value taint,
+// so restricting can only ever remove a false positive, never a real flow.
+func (s *intra) argFieldTaint(state taintState, arg ssa.Value, fields []string) (LabelSet, bool) {
+	if arg == nil || len(fields) == 0 || !isAggregate(arg.Type()) {
+		return LabelSet{}, false
+	}
+	baseKey := s.pathKey(arg)
+	if baseKey == "" {
+		return LabelSet{}, false
+	}
+	if !s.knowsFields(state, baseKey) {
+		return LabelSet{}, false
+	}
+	var out LabelSet
+	for _, field := range fields {
+		if field == "" {
+			return LabelSet{}, false
+		}
+		out = out.Merge(state.memory[baseKey+"."+field])
+	}
+	return out, true
+}
+
+// knowsFields reports whether this call site has any field-level record of the
+// location, which is what makes a restriction to named fields meaningful rather
+// than merely narrower than the truth.
+func (s *intra) knowsFields(state taintState, baseKey string) bool {
+	prefix := baseKey + "."
+	for key := range state.memory {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isParameterSpill reports whether a store is the copy SSA emits to give a
+// by-value parameter an address, which is the only place a whole-value
+// parameter label can be widened to the aggregate's fields.
+func isParameterSpill(store *ssa.Store) bool {
+	if _, ok := store.Addr.(*ssa.Alloc); !ok {
+		return false
+	}
+	switch store.Val.(type) {
+	case *ssa.Parameter, *ssa.FreeVar:
+		return true
+	}
+	return false
+}
+
+// copyAggregate moves the field-qualified taint under srcKey to dstKey.
+//
+// A struct held by value is copied whole: `w := Wrapper{Cmd: taint}` compiles to
+// a store into a scratch allocation, a load of the entire struct, and a store of
+// that value into w. Whole-value taint alone does not survive the round trip,
+// because the sink reads `w.Mid.Base.Cmd` and a base-key label is deliberately
+// invisible to a field read. Copying the sub-locations keeps the field path
+// intact across the copy, which is what makes a value-typed composite literal
+// behave like the pointer-typed one.
+// It reports whether anything was copied, which tells the caller that the
+// destination's field paths are known and must not be widened.
+func (s *intra) copyAggregate(state taintState, dstKey, srcKey string) bool {
+	if dstKey == "" || srcKey == "" || dstKey == srcKey {
+		return false
+	}
+	type move struct {
+		key    string
+		labels LabelSet
+	}
+	var moves []move
+	for key, labels := range state.memory {
+		if labels.IsEmpty() || !strings.HasPrefix(key, srcKey) || len(key) == len(srcKey) {
+			continue
+		}
+		switch key[len(srcKey)] {
+		case '.', '[':
+		default:
+			// A different location that merely shares a textual prefix.
+			continue
+		}
+		moves = append(moves, move{dstKey + key[len(srcKey):], labels})
+	}
+	for _, m := range moves {
+		state.memory[m.key] = state.memory[m.key].Merge(m.labels)
+	}
+	return len(moves) > 0
+}
+
+// isAggregate reports whether a value of this type is copied field by field,
+// and so needs copyAggregate applied when it is loaded or stored.
+func isAggregate(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch types.Unalias(t).Underlying().(type) {
+	case *types.Struct, *types.Array:
+		return true
+	}
+	return false
 }
 
 func (s *intra) step(kind, edgeKind, name, symbol, typ, fieldPath string, pos token.Pos) *Step {

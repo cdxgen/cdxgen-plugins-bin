@@ -36,17 +36,17 @@
   },
   "dataFlow": {
     "mode": "security",
-    "nodeCount": 333,
-    "edgeCount": 385,
-    "sliceCount": 191,
-    "uniqueFlowCount": 169,
+    "nodeCount": 337,
+    "edgeCount": 388,
+    "sliceCount": 192,
+    "uniqueFlowCount": 170,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003ecommand-execution": 6,
       "http-input-\u003edata": 4,
       "http-input-\u003eexternal-service": 33,
       "http-input-\u003efilesystem": 12,
-      "http-input-\u003eformatted-output": 3,
+      "http-input-\u003eformatted-output": 4,
       "http-input-\u003ehttp-response": 1,
       "http-input-\u003elogging": 28,
       "http-input-\u003epanic": 96,
@@ -59,9 +59,9 @@
     "flowsBySeverity": {
       "critical": 7,
       "high": 48,
-      "medium": 136
+      "medium": 137
     },
-    "flowKeySetHash": "3b9c0d1c12c24656",
+    "flowKeySetHash": "98dee36c89b3d0a4",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
     "dependencyCrossingSlices": 105,
@@ -276,6 +276,17 @@
         "taintKinds": "url,user-input"
       },
       {
+        "flowKey": "df-flow|sha256:2788c295e23797755eb9c06e0ae2deae7e3ce2a43ea93782f4a0a6d6919f21ff",
+        "source": "net/http.(*Request)",
+        "sink": "fmt.Fprint",
+        "sourceAt": "pkg/servestd/servestd.go:44",
+        "sinkAt": "pkg/servestd/servestd.go:56",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
         "flowKey": "df-flow|sha256:27d1515ffa49a964399e079604604f2243a29dc5535975c21baba5fbf4b8254b",
         "source": "net/url.(*URL).Query",
         "sink": "(reflect.Value).Convert",
@@ -325,17 +336,6 @@
         "sink": "(reflect.Value).assignTo",
         "sourceAt": "cmd/go-swagger/restapi/operations/xss/xss_get_query_reflected_xss_parameters.go:51",
         "sinkAt": ".../src/reflect/value.go:3256",
-        "severity": "medium",
-        "pathLength": 3,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:2a4f64019d10f47ca5830805a4c49bc4990c4960d4ddd20546532aa32968df99",
-        "source": "net/http.(*Request)",
-        "sink": "(*github.com/go-openapi/runtime/middleware.Context).Respond",
-        "sourceAt": "cmd/go-swagger/restapi/operations/path_traversal/path_traversal_get_query_write_file.go:42",
-        "sinkAt": ".../runtime@v0.23.3/middleware/context.go:566",
         "severity": "medium",
         "pathLength": 3,
         "connected": true,

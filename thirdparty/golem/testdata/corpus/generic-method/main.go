@@ -2,13 +2,15 @@ package genericmethod
 
 import (
 	"net/http"
+	"os"
 	"os/exec"
 )
 
 // Generic methods (Go 1.27): a method declares its own type parameters, so the
-// method's type parameter list is disjoint from the receiver's. Taint must
-// still cross the method boundary and the SSA instantiation of the method.
-// golem:want flow source=http-input sink=command-execution known-fail=33
+// method's type parameter list is disjoint from the receiver's. Taint has to
+// cross the method boundary, the SSA instantiation, and the call through the
+// method's function-valued parameter.
+// golem:want flow source=http-input sink=command-execution known-fail=legacy:33
 type Box[T any] struct {
 	Value T
 }
@@ -34,9 +36,11 @@ func Handler(r *http.Request) {
 	_ = exec.Command("sh", "-c", out.Value)
 }
 
-// golem:want flow source=http-input sink=command-execution known-fail=33
+// A distinct sink category so this expectation cannot be satisfied by the slice
+// Handler produces.
+// golem:want flow source=http-input sink=filesystem known-fail=legacy:33
 func CarrierHandler(r *http.Request) {
-	c := Carrier{raw: r.FormValue("cmd")}
-	cmd := c.Unwrap(func(s string) string { return s })
-	_ = exec.Command("sh", "-c", cmd)
+	c := Carrier{raw: r.FormValue("path")}
+	path := c.Unwrap(func(s string) string { return s })
+	_, _ = os.ReadFile(path)
 }

@@ -182,8 +182,14 @@ func (e *Engine) Analyze(program *ssa.Program, pkgs []*packages.Package, cg *cal
 	return out
 }
 
+// argResolver answers what taint an argument at a call site carries. The
+// fields argument names the fields of an aggregate argument a callee's summary
+// actually reads; passing nil asks for the whole argument, which is what every
+// caller that has no field information to offer does.
+type argResolver func(index int, fields []string) LabelSet
+
 // resolveCallTaint resolves the taint from a call instruction.
-func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, argLabels LabelSet, recvLabels LabelSet, callPos token.Pos, argAt func(int) LabelSet) LabelSet {
+func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, argLabels LabelSet, recvLabels LabelSet, callPos token.Pos, argAt argResolver) LabelSet {
 	if common == nil {
 		return NewLabelSet()
 	}
@@ -228,6 +234,20 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 					return e.resolveClosureTaint(mc, common, argAt)
 				}
 			}
+			// Higher-order call: the target is a function this function was
+			// handed, so nothing here can name it. Whatever it returns may be
+			// derived from what it was given, and dropping the taint breaks
+			// every callback-shaped API — `func (c Carrier) Unwrap(f func(string) T) T
+			// { return f(c.raw) }` is the whole of Go 1.27's generic-method
+			// idiom, and its pre-generics equivalent is just as common.
+			//
+			// The approximation is deliberately confined to a target the
+			// enclosing function received. A call through anything else that
+			// failed to resolve stays silent rather than blurring every
+			// unresolved dynamic call into a passthrough.
+			if isSuppliedFuncValue(common.Value) {
+				return argLabels
+			}
 			return NewLabelSet()
 		}
 	}
@@ -235,8 +255,23 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 	return e.resolveStaticCallTaint(caller, callee, common, argLabels, recvLabels, callPos, argAt)
 }
 
+// isSuppliedFuncValue reports whether a call target is a function value the
+// enclosing function received — a parameter, a captured variable, or a load of
+// either — rather than one it constructed and which could therefore be resolved.
+func isSuppliedFuncValue(v ssa.Value) bool {
+	switch x := v.(type) {
+	case *ssa.Parameter, *ssa.FreeVar:
+		return true
+	case *ssa.UnOp:
+		if x.Op == token.MUL {
+			return isSuppliedFuncValue(x.X)
+		}
+	}
+	return false
+}
+
 // resolveStaticCallTaint handles a call with a known static callee.
-func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Function, common *ssa.CallCommon, argLabels LabelSet, recvLabels LabelSet, callPos token.Pos, argAt func(int) LabelSet) LabelSet {
+func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Function, common *ssa.CallCommon, argLabels LabelSet, recvLabels LabelSet, callPos token.Pos, argAt argResolver) LabelSet {
 	// A function can match several non-sink entries at once — cgo's
 	// _Cfunc_GoString is simultaneously a passthrough (carrying the C-side
 	// buffer's existing taint back into Go) and a source (a C-returned
@@ -351,7 +386,7 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 // which it almost never does, because the implementations of an interface
 // are an open set. Without this lookup, every flow that crosses an interface
 // method silently dies at the invoke site even when the model is precise.
-func (e *Engine) resolveInvokeTaint(caller *ssa.Function, common *ssa.CallCommon, recvLabels LabelSet, argAt func(int) LabelSet, callPos token.Pos) LabelSet {
+func (e *Engine) resolveInvokeTaint(caller *ssa.Function, common *ssa.CallCommon, recvLabels LabelSet, argAt argResolver, callPos token.Pos) LabelSet {
 	if e.ifaceIdx == nil {
 		return NewLabelSet()
 	}
@@ -367,14 +402,14 @@ func (e *Engine) resolveInvokeTaint(caller *ssa.Function, common *ssa.CallCommon
 			case "passthrough":
 				if argAt != nil {
 					for i := 0; i < len(common.Args); i++ {
-						result = result.Merge(argAt(i))
+						result = result.Merge(argAt(i, nil))
 					}
 				}
 				result = result.Merge(recvLabels)
 			case "sanitizer":
 				if argAt != nil {
 					for i := 0; i < len(common.Args); i++ {
-						result = result.Merge(argAt(i))
+						result = result.Merge(argAt(i, nil))
 					}
 				}
 				result = result.Merge(recvLabels)
@@ -402,14 +437,14 @@ func (e *Engine) resolveInvokeTaint(caller *ssa.Function, common *ssa.CallCommon
 			case "passthrough":
 				if argAt != nil {
 					for i := 0; i < len(common.Args); i++ {
-						result = result.Merge(argAt(i))
+						result = result.Merge(argAt(i, nil))
 					}
 				}
 				result = result.Merge(recvLabels)
 			case "sanitizer":
 				if argAt != nil {
 					for i := 0; i < len(common.Args); i++ {
-						result = result.Merge(argAt(i))
+						result = result.Merge(argAt(i, nil))
 					}
 				}
 				result = result.Merge(recvLabels)
@@ -440,16 +475,16 @@ func (e *Engine) resolveFuncValueCallee(common *ssa.CallCommon) *ssa.Function {
 // resolveClosureTaint handles a call through a MakeClosure value. The closure's
 // bindings' taint is propagated to the call result, and the closure function's
 // summary (if available) maps FreeVars to returns.
-func (e *Engine) resolveClosureTaint(mc *ssa.MakeClosure, common *ssa.CallCommon, argAt func(int) LabelSet) LabelSet {
+func (e *Engine) resolveClosureTaint(mc *ssa.MakeClosure, common *ssa.CallCommon, argAt argResolver) LabelSet {
 	fn := mc.Fn.(*ssa.Function)
 	// The closure value itself carries merged binding taint (from evaluate).
 	// Build an argAt that maps FreeVar positions to their binding taint.
-	freeVarAt := func(i int) LabelSet {
+	freeVarAt := argResolver(func(i int, fields []string) LabelSet {
 		if i < 0 || i >= len(mc.Bindings) {
 			return LabelSet{}
 		}
-		return argAt(i)
-	}
+		return argAt(i, fields)
+	})
 	// Try the closure function's summary first.
 	summary := e.summaryFor(fn)
 	if summary != nil {
@@ -458,7 +493,7 @@ func (e *Engine) resolveClosureTaint(mc *ssa.MakeClosure, common *ssa.CallCommon
 	// Fallback: just merge all binding taint (over-approximate).
 	var result LabelSet
 	for i := range mc.Bindings {
-		result = result.Merge(freeVarAt(i))
+		result = result.Merge(freeVarAt(i, nil))
 	}
 	return result
 }
@@ -469,7 +504,7 @@ func (e *Engine) resolveClosureTaint(mc *ssa.MakeClosure, common *ssa.CallCommon
 // arguments, which is the whole point of a summary: without the caller's
 // argument taint there is nothing to carry across the call, and every
 // interprocedural flow silently disappears.
-func (e *Engine) applySummary(summary *FuncSummary, common *ssa.CallCommon, recvLabels LabelSet, argAt func(int) LabelSet) LabelSet {
+func (e *Engine) applySummary(summary *FuncSummary, common *ssa.CallCommon, recvLabels LabelSet, argAt argResolver) LabelSet {
 	var result LabelSet
 	for _, pattern := range summary.SourceReturns {
 		sourceID := stableID("seam-source", summary.FuncID, pattern.Category, pattern.Pattern)
@@ -489,21 +524,25 @@ func (e *Engine) applySummary(summary *FuncSummary, common *ssa.CallCommon, recv
 		return result
 	}
 	hasReceiver := summary.HasReceiver()
-	for paramIdx := range summary.ParamReturn {
+	for paramIdx, effects := range summary.ParamReturn {
+		// The fields the callee read this parameter through. A summary that
+		// names them lets the call site answer with only those fields, which is
+		// what keeps a value receiver from tainting every field of itself.
+		fields := effectFieldPaths(effects)
 		if hasReceiver && paramIdx == 0 {
 			if common.IsInvoke() {
 				result = result.Merge(recvLabels)
 				continue
 			}
 			// A method call on a concrete receiver passes it as argument zero.
-			result = result.Merge(argAt(0))
+			result = result.Merge(argAt(0, fields))
 			continue
 		}
 		argIdx := paramIdx
 		if hasReceiver && common.IsInvoke() {
 			argIdx = paramIdx - 1
 		}
-		result = result.Merge(argAt(argIdx))
+		result = result.Merge(argAt(argIdx, fields))
 	}
 	return result
 }

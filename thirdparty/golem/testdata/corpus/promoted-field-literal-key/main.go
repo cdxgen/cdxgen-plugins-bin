@@ -8,9 +8,13 @@ import (
 
 // Promoted field keys in struct literals (Go 1.27): a key may be any valid
 // field selector for the struct type, so a composite literal can initialise a
-// field reached through embedding. The key resolves to a field of Base, not of
-// Wrapper, which is the case a depth-0 field lookup misses.
-// golem:want flow source=http-input sink=command-execution known-fail=34
+// field reached through embedding, two levels down here.
+//
+// A value-typed literal compiles to a store into a scratch allocation, a load
+// of the whole struct, and a store of that value into the variable, so the
+// field-qualified taint has to survive a by-value aggregate copy. See
+// value-receiver-field for the same requirement without any 1.27 syntax.
+// golem:want flow source=http-input sink=command-execution known-fail=legacy:34
 type Base struct {
 	Cmd string
 }

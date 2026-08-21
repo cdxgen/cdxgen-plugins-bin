@@ -36,17 +36,17 @@
   },
   "dataFlow": {
     "mode": "all",
-    "nodeCount": 857,
-    "edgeCount": 941,
-    "sliceCount": 204,
-    "uniqueFlowCount": 182,
+    "nodeCount": 885,
+    "edgeCount": 1065,
+    "sliceCount": 205,
+    "uniqueFlowCount": 183,
     "summaryCount": 0,
     "flowsByCategoryPair": {
       "http-input-\u003ecommand-execution": 6,
       "http-input-\u003edata": 4,
       "http-input-\u003eexternal-service": 35,
       "http-input-\u003efilesystem": 15,
-      "http-input-\u003eformatted-output": 3,
+      "http-input-\u003eformatted-output": 4,
       "http-input-\u003ehttp-response": 1,
       "http-input-\u003elogging": 30,
       "http-input-\u003epanic": 102,
@@ -59,9 +59,9 @@
     "flowsBySeverity": {
       "critical": 7,
       "high": 53,
-      "medium": 144
+      "medium": 145
     },
-    "flowKeySetHash": "fa2469e16764dfcd",
+    "flowKeySetHash": "cea9fb541f14ce3d",
     "edgeConnectivity": 1,
     "integrityViolations": 0,
     "dependencyCrossingSlices": 108,
@@ -309,6 +309,17 @@
         "taintKinds": "url,user-input"
       },
       {
+        "flowKey": "df-flow|sha256:2788c295e23797755eb9c06e0ae2deae7e3ce2a43ea93782f4a0a6d6919f21ff",
+        "source": "net/http.(*Request)",
+        "sink": "fmt.Fprint",
+        "sourceAt": "pkg/servestd/servestd.go:44",
+        "sinkAt": "pkg/servestd/servestd.go:56",
+        "severity": "medium",
+        "pathLength": 3,
+        "connected": true,
+        "taintKinds": "user-input"
+      },
+      {
         "flowKey": "df-flow|sha256:27d1515ffa49a964399e079604604f2243a29dc5535975c21baba5fbf4b8254b",
         "source": "net/url.(*URL).Query",
         "sink": "(reflect.Value).Convert",
@@ -327,17 +338,6 @@
         "sinkAt": ".../src/reflect/value.go:3256",
         "severity": "medium",
         "pathLength": 5,
-        "connected": true,
-        "taintKinds": "secret,user-input"
-      },
-      {
-        "flowKey": "df-flow|sha256:28be77b76e62e6fbccb8cdee154ca16775abf804d10d274a0cb84c13c714b2ca",
-        "source": "net/http.(*Request)",
-        "sink": "log.Println",
-        "sourceAt": "pkg/servechi/servechi.go:28",
-        "sinkAt": "internal/ssrf/ssrf.go:60",
-        "severity": "medium",
-        "pathLength": 3,
         "connected": true,
         "taintKinds": "secret,user-input"
       }

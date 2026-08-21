@@ -94,6 +94,10 @@ type SinkEffect struct {
 	Pos token.Pos
 	// ModelID is the model entry identifier that matched the sink.
 	ModelID string
+	// ParamFieldPaths names the fields of the parameter the tainted value was
+	// read through, empty when the parameter was used as a whole. It plays the
+	// same role as TaintEffect.FieldPaths on the return path.
+	ParamFieldPaths []string
 	// Severity, Confidence, RuleID, RuleName, RiskScore mirror the model entry.
 	Severity   string
 	Confidence string
@@ -140,16 +144,40 @@ func (s *FuncSummary) OriginKey() string {
 	return s.FuncID
 }
 
+// effectFieldPaths collects the fields recorded across a parameter's effects.
+// An empty result means the summary has nothing to say about which fields were
+// read, and the call site must use the whole argument.
+func effectFieldPaths(effects []TaintEffect) []string {
+	var out []string
+	for _, effect := range effects {
+		if len(effect.FieldPaths) == 0 {
+			// One effect that names no field makes the whole parameter
+			// relevant, so no restriction is admissible.
+			return nil
+		}
+		out = append(out, effect.FieldPaths...)
+	}
+	return uniqueStringsSorted(out)
+}
+
 // AddParamReturn records that parameter idx flows to the return value.
-func (s *FuncSummary) AddParamReturn(idx int, kinds []string, confidence string) bool {
+//
+// fields names the fields of the parameter the value was read through, empty
+// when the parameter was used as a whole. Recording it is what lets a call site
+// answer with one field of a struct argument rather than all of them; two routes
+// through different fields are distinct effects, so the field set is part of the
+// identity and not merely extra description.
+func (s *FuncSummary) AddParamReturn(idx int, kinds []string, fields []string, confidence string) bool {
+	fields = uniqueStringsSorted(fields)
 	existing := s.ParamReturn[idx]
 	for _, e := range existing {
-		if stringsJoin(e.TaintKinds) == stringsJoin(kinds) {
+		if stringsJoin(e.TaintKinds) == stringsJoin(kinds) && stringsJoin(e.FieldPaths) == stringsJoin(fields) {
 			return false
 		}
 	}
 	s.ParamReturn[idx] = append(existing, TaintEffect{
 		TaintKinds: copyStrings(kinds),
+		FieldPaths: fields,
 		Confidence: firstNonEmptyStr(confidence, "medium"),
 	})
 	return true
@@ -159,8 +187,10 @@ func (s *FuncSummary) AddParamReturn(idx int, kinds []string, confidence string)
 func (s *FuncSummary) AddParamSink(idx int, effect SinkEffect) bool {
 	cat := strings.ToLower(effect.Category)
 	existing := s.ParamSink[idx]
+	effect.ParamFieldPaths = uniqueStringsSorted(effect.ParamFieldPaths)
 	for _, e := range existing {
-		if strings.EqualFold(e.Category, cat) && strings.EqualFold(e.SinkSymbol, effect.SinkSymbol) {
+		if strings.EqualFold(e.Category, cat) && strings.EqualFold(e.SinkSymbol, effect.SinkSymbol) &&
+			stringsJoin(e.ParamFieldPaths) == stringsJoin(effect.ParamFieldPaths) {
 			return false
 		}
 	}

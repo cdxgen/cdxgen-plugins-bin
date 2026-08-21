@@ -82,6 +82,11 @@
       "tier": "quick"
     },
     {
+      "name": "func-param-callback",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "generic-constraint-method",
       "type": "corpus",
       "tier": "quick"
@@ -243,6 +248,11 @@
     },
     {
       "name": "validate-named-but-not-sanitizing",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "value-receiver-field",
       "type": "corpus",
       "tier": "quick"
     },
