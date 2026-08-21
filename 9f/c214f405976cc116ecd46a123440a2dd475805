@@ -1,0 +1,19 @@
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_909512142d01e2::t_656235a37f8a10 515
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9fc214f405976cc116ecd46a123440a2dd475805",
+  "prompts": {},
+  "sessions": {
+    "s_909512142d01e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3011842-123b-43cb-aa74-231b88f76e5a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
