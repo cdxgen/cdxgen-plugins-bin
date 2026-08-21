@@ -66,11 +66,17 @@ This backend is higher fidelity, but it runs Cargo/rustc for the target reposito
 - `--toolchain nightly` runs the compiler backend through `cargo +nightly ...`.
 - A fully named toolchain such as `--toolchain nightly-2026-06-01` or `--toolchain stable` is passed through to Cargo/rustup in the same way.
 
-The embedded MIR/HIR collector requires a nightly toolchain with the `rustc-dev` and `rust-src` components installed. A typical setup is:
+The embedded MIR/HIR collector requires the `rustc-dev` and `rust-src` components, and `rustc` 1.98 or newer. It does **not** require a nightly channel: a stable toolchain carrying those components works, because Rusi builds the wrapper with `RUSTC_BOOTSTRAP=1` to unlock `#![feature(rustc_private)]`. Either of these is a working setup:
 
 ```bash
+# Stable, matching rust-toolchain.toml.
+rustup component add rustc-dev rust-src --toolchain stable
+
+# Or nightly.
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
+
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
 
 When embedded compiler collection is available, Rusi builds its local `rusi-rustc-wrapper` with the resolved toolchain and then runs the target repository with:
 
@@ -398,7 +404,7 @@ Modeled request/response ecosystems include:
 
 - Static analysis is approximate; absence of evidence is not proof of absence.
 - Stable call resolution is text/syntax driven; trait dispatch is limited to known `impl` blocks.
-- Compiler mode is dependent on nightly toolchain availability and Cargo build behavior.
+- Compiler mode depends on the `rustc-dev`/`rust-src` components, the `rustc` version, and Cargo build behavior.
 - Crypto evidence is classification-oriented, not a proof of secure protocol design.
 - Data flow is practical and bounded rather than path-perfect.
 

@@ -1,6 +1,6 @@
 PATH  := $(PATH):/usr/local/go/bin:$HOME/go/bin:
 appname := trivy-cdxgen
-sources := main.go
+sources := $(wildcard *.go)
 docker_cmd := docker
 
 build = GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)

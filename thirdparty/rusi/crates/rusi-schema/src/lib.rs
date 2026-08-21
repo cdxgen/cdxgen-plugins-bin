@@ -1,5 +1,53 @@
+use std::ops::Range;
+use std::path::Path;
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// Build the deterministic identifier used for every entity in a report.
+///
+/// The identifier is `<prefix>-<16 hex chars>`, where the hex is the first
+/// eight bytes of the SHA-256 of `components` joined by a NUL byte. The NUL
+/// separator is what makes the hash unambiguous: without it, the component
+/// lists `["ab", "c"]` and `["a", "bc"]` would collide.
+///
+/// Identifiers are stable across runs and across machines for the same
+/// inputs, so consumers can diff two reports by id. They are *not* stable
+/// across changes to the component list a caller passes in.
+pub fn stable_id(prefix: &str, components: &[&str]) -> String {
+    // Lowercase nibble table. Formatting each byte with `format!("{byte:02x}")`
+    // would allocate a throwaway `String` per byte, and this function runs once
+    // per declaration, usage, signal, node, and edge in the report.
+    const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    let mut hasher = Sha256::new();
+    for component in components {
+        hasher.update(component.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        hex.push(HEX_DIGITS[usize::from(byte >> 4)] as char);
+        hex.push(HEX_DIGITS[usize::from(byte & 0x0f)] as char);
+    }
+    format!("{prefix}-{hex}")
+}
+
+/// Render `path` relative to `root`, always with `/` separators.
+///
+/// Paths in a report are display strings meant to be compared and joined by
+/// consumers, so they are normalized to forward slashes on every platform: a
+/// report produced on Windows names the same file as one produced on Linux.
+/// A `path` that does not live under `root` is returned unchanged rather than
+/// rewritten, so absolute paths outside the analysis root stay recognizable.
+pub fn relative_display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
 
 /// Reduce a qualified Rust function name to a stable canonical form.
 ///
@@ -27,12 +75,7 @@ pub fn canonical_name(qualified_name: &str) -> String {
     work = reduce_qualified_self(&work);
     work = strip_generics(&work);
     work = strip_lifetimes(&work);
-    work = work
-        .replace("&mut ", "")
-        .replace('&', "")
-        .replace('(', "")
-        .replace(')', "")
-        .replace(' ', "");
+    work = work.replace("&mut ", "").replace(['&', '(', ')', ' '], "");
     collapse_separators(&work)
 }
 
@@ -58,13 +101,15 @@ fn strip_llvm_suffix(name: &str) -> String {
     name.to_string()
 }
 
-/// Find a needle outside any `<...>` group, returning its byte index.
-fn find_top_level(name: &str, needle: &str) -> Option<usize> {
+/// Find a needle outside any `<...>` group, returning the byte range it spans.
+///
+/// The range rather than the start index is returned so callers can slice
+/// either side of the match without restating the needle's length.
+fn find_top_level(name: &str, needle: &str) -> Option<Range<usize>> {
     let bytes = name.as_bytes();
-    let needle_bytes = needle.as_bytes();
     let mut depth: i32 = 0;
     let mut idx = 0usize;
-    while idx + needle_bytes.len() <= bytes.len() {
+    while idx + needle.len() <= bytes.len() {
         match bytes[idx] {
             b'<' => depth += 1,
             b'>' => {
@@ -72,7 +117,9 @@ fn find_top_level(name: &str, needle: &str) -> Option<usize> {
                     depth -= 1;
                 }
             }
-            _ if depth == 0 && name[idx..].starts_with(needle) => return Some(idx),
+            _ if depth == 0 && name[idx..].starts_with(needle) => {
+                return Some(idx..idx + needle.len());
+            }
             _ => {}
         }
         idx += 1;
@@ -109,13 +156,15 @@ fn reduce_qualified_self(name: &str) -> String {
         Some((inner, rest)) => {
             let mut implementing = inner.trim().to_string();
             if let Some(body) = implementing.strip_prefix("impl ") {
-                if let Some(for_idx) = find_top_level(body, " for ") {
-                    implementing = body[for_idx + 5..].to_string();
+                // `impl Trait for Type` names the implementing type after `for`.
+                if let Some(separator) = find_top_level(body, " for ") {
+                    implementing = body[separator.end..].to_string();
                 } else {
                     implementing = body.to_string();
                 }
-            } else if let Some(as_idx) = find_top_level(&implementing, " as ") {
-                implementing = implementing[..as_idx].to_string();
+            } else if let Some(separator) = find_top_level(&implementing, " as ") {
+                // `Type as Trait` names the implementing type before `as`.
+                implementing = implementing[..separator.start].to_string();
             }
             format!("{}{}", reduce_qualified_self(implementing.trim()), rest)
         }
@@ -695,5 +744,160 @@ mod canonical_name_tests {
     fn passes_through_plain_names() {
         assert_eq!(canonical_name("wasm_tools::main"), "wasm_tools::main");
         assert_eq!(canonical_name(""), "");
+    }
+
+    #[test]
+    fn finds_the_separator_outside_generic_arguments() {
+        // ` for ` and ` as ` must be located at nesting depth zero. A naive
+        // search would stop at the one inside `HashMap<K, V>`-style arguments
+        // and slice the name in the wrong place.
+        assert_eq!(
+            canonical_name("<impl myapp::Sink<Box<dyn Trait>> for myapp::Widget>::write"),
+            "myapp::Widget::write"
+        );
+        assert_eq!(
+            canonical_name("<myapp::Widget<Box<dyn Trait>> as core::fmt::Debug>::fmt"),
+            "myapp::Widget::fmt"
+        );
+    }
+
+    #[test]
+    fn slices_exactly_at_the_separator_boundaries() {
+        // Regression cover for the offsets around the separator: an off-by-one
+        // would leave a stray space or eat the first character of the type.
+        // Any leakage would survive into the output, since only whitespace
+        // inside the name is stripped later.
+        assert_eq!(
+            canonical_name("<impl Trait for myapp::Widget>::method"),
+            "myapp::Widget::method"
+        );
+        assert_eq!(
+            canonical_name("<myapp::Widget as Trait>::method"),
+            "myapp::Widget::method"
+        );
+    }
+
+    #[test]
+    fn reduces_a_bare_inherent_impl_block() {
+        // `impl Type` with no `for` clause: the whole body is the type.
+        assert_eq!(
+            canonical_name("<impl myapp::Widget>::method"),
+            "myapp::Widget::method"
+        );
+    }
+
+    #[test]
+    fn reduces_nested_qualified_selves() {
+        // The reduction recurses, so a qualifier whose implementing type is
+        // itself qualified collapses all the way down.
+        assert_eq!(
+            canonical_name("<<myapp::Widget as Trait>::Assoc as core::fmt::Debug>::fmt"),
+            "myapp::Widget::Assoc::fmt"
+        );
+    }
+}
+
+/// Tests for the report-identity helpers shared by every backend.
+#[cfg(test)]
+mod stable_id_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{relative_display_path, stable_id};
+
+    #[test]
+    fn has_the_documented_shape() {
+        let id = stable_id("decl", &["demo", "demo::main"]);
+        let (prefix, hex) = id
+            .split_once('-')
+            .expect("prefix and hex are dash-separated");
+        assert_eq!(prefix, "decl");
+        assert_eq!(hex.len(), 16, "eight bytes render as sixteen hex chars");
+        assert!(
+            hex.chars()
+                .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()),
+            "hex must be lowercase: {hex}"
+        );
+    }
+
+    #[test]
+    fn is_deterministic_across_calls() {
+        assert_eq!(
+            stable_id("signal", &["src/lib.rs", "extern-block", "10:5"]),
+            stable_id("signal", &["src/lib.rs", "extern-block", "10:5"])
+        );
+    }
+
+    #[test]
+    fn distinguishes_component_boundaries() {
+        // The NUL separator is what makes this hold. Concatenating the
+        // components without it would hash both lists identically, so two
+        // different declarations would share an id and one would be
+        // deduplicated out of the report.
+        assert_ne!(stable_id("x", &["ab", "c"]), stable_id("x", &["a", "bc"]));
+        assert_ne!(stable_id("x", &["a", ""]), stable_id("x", &["", "a"]));
+        assert_ne!(stable_id("x", &["a"]), stable_id("x", &["a", ""]));
+    }
+
+    #[test]
+    fn distinguishes_prefixes_but_not_by_hash() {
+        // The prefix labels the entity kind; it is not hashed, so the same
+        // components under two prefixes share the hex.
+        let declaration = stable_id("decl", &["a"]);
+        let signal = stable_id("signal", &["a"]);
+        assert_ne!(declaration, signal);
+        assert_eq!(
+            declaration.split_once('-').expect("dash").1,
+            signal.split_once('-').expect("dash").1
+        );
+    }
+
+    #[test]
+    fn empty_components_are_accepted() {
+        assert!(stable_id("decl", &[]).starts_with("decl-"));
+    }
+
+    #[test]
+    fn matches_the_hex_encoding_it_replaced() {
+        // Guards the nibble-table encoding against the `format!("{byte:02x}")`
+        // loop it replaced: zero bytes must still render as two digits.
+        let id = stable_id("t", &["\u{0}"]);
+        let hex = id.split_once('-').expect("dash").1;
+        assert_eq!(hex.len(), 16);
+    }
+
+    #[test]
+    fn renders_a_path_under_the_root_relatively() {
+        let root = PathBuf::from("repo");
+        let file = root.join("src").join("lib.rs");
+        // Forward slashes on every platform, including Windows.
+        assert_eq!(relative_display_path(&root, &file), "src/lib.rs");
+    }
+
+    #[test]
+    fn renders_the_root_itself_as_empty() {
+        let root = PathBuf::from("repo");
+        assert_eq!(relative_display_path(&root, &root), "");
+    }
+
+    #[test]
+    fn leaves_a_path_outside_the_root_unchanged() {
+        // A path that is not under the root stays recognizable rather than
+        // being silently rewritten into a misleading relative path.
+        let root = PathBuf::from("repo");
+        let outside = PathBuf::from("elsewhere").join("main.rs");
+        assert_eq!(relative_display_path(&root, &outside), "elsewhere/main.rs");
+    }
+
+    #[test]
+    fn normalizes_backslashes_to_forward_slashes() {
+        // Windows path separators must not leak into a report, so that the
+        // same file is named identically wherever the analysis ran.
+        assert_eq!(
+            relative_display_path(
+                Path::new("nonexistent-root"),
+                Path::new(r"src\nested\lib.rs")
+            ),
+            "src/nested/lib.rs"
+        );
     }
 }

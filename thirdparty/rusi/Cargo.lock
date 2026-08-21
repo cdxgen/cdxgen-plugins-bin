@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "rusi-cli"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "rusi-core"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -310,13 +310,12 @@ dependencies = [
  "quote",
  "rusi-schema",
  "serde_json",
- "sha2",
  "syn",
 ]
 
 [[package]]
 name = "rusi-driver"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -328,28 +327,27 @@ dependencies = [
  "rusi-schema",
  "serde",
  "serde_json",
- "sha2",
  "syn",
 ]
 
 [[package]]
 name = "rusi-rustc-wrapper"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "anyhow",
  "indexmap",
  "rusi-schema",
  "serde",
  "serde_json",
- "sha2",
 ]
 
 [[package]]
 name = "rusi-schema"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "indexmap",
  "serde",
+ "sha2",
 ]
 
 [[package]]

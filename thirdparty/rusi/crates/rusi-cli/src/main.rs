@@ -3,13 +3,13 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusi_schema::Report;
 use clap::{Args, Parser, Subcommand};
 use rusi_core::{
     AnalysisScope, AnalyzeOptionsInput, BACKEND_COMPILER, BACKEND_STABLE, analyze,
     analyze_with_optional_compiler,
 };
 use rusi_driver::{DriverOptions, run_driver};
+use rusi_schema::Report;
 
 mod export;
 mod modeling;
@@ -196,8 +196,10 @@ mod tests {
 
     #[test]
     fn write_report_json_defaults_to_minified_and_round_trips() {
-        let mut report = Report::default();
-        report.schema_version = "rusi.report/test".to_string();
+        let mut report = Report {
+            schema_version: "rusi.report/test".to_string(),
+            ..Default::default()
+        };
         report.options.backend = "stable".to_string();
 
         let path = temp_report_path("stream-writer");
@@ -218,8 +220,10 @@ mod tests {
 
     #[test]
     fn write_report_json_pretty_flag_indents() {
-        let mut report = Report::default();
-        report.schema_version = "rusi.report/test".to_string();
+        let report = Report {
+            schema_version: "rusi.report/test".to_string(),
+            ..Default::default()
+        };
 
         let path = temp_report_path("stream-writer-pretty");
         write_report_json(&report, Some(path.as_path()), true).expect("streamed write succeeds");
@@ -249,23 +253,26 @@ mod tests {
     #[test]
     fn compiler_backend_cli_smoke_emits_backend_diagnostics() {
         let output_path = temp_report_path("compiler-backend-smoke");
-        run_analysis_command(AnalysisArgs {
-            dir: fixture_path("basic-app"),
-            backend: "compiler".to_string(),
-            toolchain: "auto".to_string(),
-            format: "json".to_string(),
-            out: Some(output_path.clone()),
-            callgraph_out: None,
-            callgraph_export_format: "json".to_string(),
-            dataflow_out: None,
-            dataflow_export_format: "json".to_string(),
-            callgraph: "static".to_string(),
-            dataflow: "security".to_string(),
-            tests: false,
-            debug: false,
-            pretty: false,
-            modeling: ModelingArgs::default(),
-        }, AnalysisScope::Default)
+        run_analysis_command(
+            AnalysisArgs {
+                dir: fixture_path("basic-app"),
+                backend: "compiler".to_string(),
+                toolchain: "auto".to_string(),
+                format: "json".to_string(),
+                out: Some(output_path.clone()),
+                callgraph_out: None,
+                callgraph_export_format: "json".to_string(),
+                dataflow_out: None,
+                dataflow_export_format: "json".to_string(),
+                callgraph: "static".to_string(),
+                dataflow: "security".to_string(),
+                tests: false,
+                debug: false,
+                pretty: false,
+                modeling: ModelingArgs::default(),
+            },
+            AnalysisScope::Default,
+        )
         .expect("compiler backend analyze succeeds");
 
         let report: Report = serde_json::from_str(
@@ -294,23 +301,26 @@ mod tests {
         let callgraph_path = temp_report_path("callgraph-export").with_extension("graphml");
         let dataflow_path = temp_report_path("dataflow-export").with_extension("gexf");
 
-        run_analysis_command(AnalysisArgs {
-            dir: fixture_path("basic-app"),
-            backend: "stable".to_string(),
-            toolchain: "auto".to_string(),
-            format: "json".to_string(),
-            out: Some(report_path.clone()),
-            callgraph_out: Some(callgraph_path.clone()),
-            callgraph_export_format: "graphml".to_string(),
-            dataflow_out: Some(dataflow_path.clone()),
-            dataflow_export_format: "gexf".to_string(),
-            callgraph: "static".to_string(),
-            dataflow: "security".to_string(),
-            tests: false,
-            debug: false,
-            pretty: false,
-            modeling: ModelingArgs::default(),
-        }, AnalysisScope::Default)
+        run_analysis_command(
+            AnalysisArgs {
+                dir: fixture_path("basic-app"),
+                backend: "stable".to_string(),
+                toolchain: "auto".to_string(),
+                format: "json".to_string(),
+                out: Some(report_path.clone()),
+                callgraph_out: Some(callgraph_path.clone()),
+                callgraph_export_format: "graphml".to_string(),
+                dataflow_out: Some(dataflow_path.clone()),
+                dataflow_export_format: "gexf".to_string(),
+                callgraph: "static".to_string(),
+                dataflow: "security".to_string(),
+                tests: false,
+                debug: false,
+                pretty: false,
+                modeling: ModelingArgs::default(),
+            },
+            AnalysisScope::Default,
+        )
         .expect("analysis with exports succeeds");
 
         let callgraph_export =

@@ -44,10 +44,31 @@ OS package components are enriched with additional metadata that cdxgen uses for
 - Installed command names and paths
 - Installed file counts and file paths
 - Package trust-state metadata (architecture, origin, source, status, vendor)
+- Libc variant for distros published per libc (see apk-tools 3.x below)
 - Native CycloneDX supplier population from maintainer metadata when available
 - OS lifecycle metadata (OS family, OS name, end-of-life date, extended support status)
 
 When the wrapper output is consumed by cdxgen, maintainer/vendor trust metadata is further promoted into native CycloneDX component fields such as `authors` and `manufacturer` when that can be done without overwriting differing existing values.
+
+### apk-tools 3.x and Alpaquita Linux
+
+Trivy's apk analyzer reads the installed-package database from `lib/apk/db/installed` and `usr/lib/apk/db/installed`, the apk-tools 2.x locations. apk-tools 3.x, shipped by BellSoft Alpaquita Linux, keeps the same paragraph text format at `var/lib/apk/db/installed`, and Alpaquita's os-release `ID` is not one Trivy maps to an OS family, so both its packages and its OS went undetected.
+
+The wrapper adds:
+
+- an apk analyzer for `var/lib/apk/db/installed`, so apk-tools 3.x packages, their licenses, dependencies, installed files and checksums are collected
+- an OS analyzer for `etc/alpaquita-release`, so the OS is reported as family `alpaquita` with the release channel as its version
+- purl normalization to `pkg:apk/alpaquita/<name>@<version>?arch=<arch>&distro=alpaquita-<channel>`, matching the shape Trivy emits for every other apk distro
+
+The apk-tools 2.x paths are left to Trivy's own analyzer, so an image carrying both layouts is never counted twice.
+
+#### Channels and libc variants
+
+Alpaquita ships a rolling channel (`stream`) and LTS channels (`23`, `25`), each served from its own apk repository at `packages.bell-sw.com/alpaquita/<libc>/<channel>/core`, with its own package versions. The channel is therefore part of the `distro` qualifier — `distro=alpaquita-stream`, `distro=alpaquita-23` — never a flat vendor-only value.
+
+The libc variant is orthogonal to the channel: every channel is published twice, for `musl` and for `glibc`, and the two builds of a package share its name and version (a stream image has `busybox 1.38.0-r2` either way). It is recorded as a `PackageLibc` property read from `LIBC_TYPE` in os-release, and deliberately kept out of the `distro` qualifier, which carries release channels only.
+
+No `distro_name` qualifier is emitted: Alpaquita has no `VERSION_CODENAME`, so there is no codename to name.
 
 ## Usage
 

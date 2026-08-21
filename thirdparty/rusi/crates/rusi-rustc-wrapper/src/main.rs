@@ -18,7 +18,7 @@ use rusi_schema::{
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
     DataFlowMethodSummary, DataFlowNode, DataFlowPattern, DataFlowPatternSet, DataFlowSlice,
     DataFlowStats, Declaration, Diagnostic, FileEvidence, GraphStats, ImportUsage, LibraryUsage,
-    Position, SecuritySignal,
+    Position, SecuritySignal, relative_display_path, stable_id,
 };
 use rustc_driver_impl::{Callbacks, Compilation, run_compiler};
 use rustc_hir::def::DefKind;
@@ -30,14 +30,13 @@ use rustc_hir::{
 };
 use rustc_interface::interface;
 use rustc_middle::hir::nested_filter::OnlyBodies;
-use rustc_middle::mono::MonoItem;
 use rustc_middle::mir::{
     self, BasicBlock, Body as MirBody, Local, Operand, Place, ProjectionElem, Rvalue,
     StatementKind, TerminatorKind, UnwindAction,
 };
+use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
-use sha2::{Digest, Sha256};
 
 const MAX_DATAFLOW_FIXPOINT_ITERS: usize = 64;
 const MAX_DATAFLOW_CANDIDATE_TARGETS: usize = 32;
@@ -512,7 +511,7 @@ impl EmbeddedCollector {
                     let concrete_ty = instance.instantiate_mir_and_normalize_erasing_regions(
                         tcx,
                         typing_env,
-                        EarlyBinder::bind(generic_ty),
+                        EarlyBinder::bind(tcx, generic_ty),
                     );
                     let ty::TyKind::FnDef(callee_def, callee_args) = concrete_ty.kind() else {
                         continue;
@@ -573,7 +572,7 @@ impl EmbeddedCollector {
                 if record.source_id != source_id {
                     continue;
                 }
-                if !hir_symbols(&record.resolved).iter().any(|s| *s == symbol) {
+                if !hir_symbols(&record.resolved).contains(&symbol) {
                     continue;
                 }
                 // Preserve intentionally-modeled async/task boundary calls
@@ -844,9 +843,6 @@ struct HirCallRecord {
     source_name: String,
     file_path: String,
     position: Position,
-    /// `span_key_simple` of the call expression, so the P2 monomorphization
-    /// pass can match and sharpen this record's resolved target.
-    span_key: String,
     resolved: ResolvedCall,
 }
 
@@ -1020,7 +1016,6 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             source_name: self.caller_decl.qualified_name.clone(),
             file_path: file_path.clone(),
             position: position.clone(),
-            span_key: span_key_simple(span),
             resolved: resolved.clone(),
         });
         if let Some(rule) = classify_crypto_symbol(&resolved.callee_display) {
@@ -1840,7 +1835,6 @@ struct TaintPath {
     origin_key: String,
     category: String,
     steps: Vec<TaintStep>,
-    type_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1873,34 +1867,16 @@ impl FunctionSummary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct AbstractState {
     taints: BTreeMap<PlacePath, BTreeSet<AbstractOrigin>>,
     aliases: HashMap<PlacePath, PlacePath>,
 }
 
-impl Default for AbstractState {
-    fn default() -> Self {
-        Self {
-            taints: BTreeMap::new(),
-            aliases: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct ConcreteState {
     taints: BTreeMap<PlacePath, ConcreteTaint>,
     aliases: HashMap<PlacePath, PlacePath>,
-}
-
-impl Default for ConcreteState {
-    fn default() -> Self {
-        Self {
-            taints: BTreeMap::new(),
-            aliases: HashMap::new(),
-        }
-    }
 }
 
 fn build_call_graph(
@@ -2300,7 +2276,10 @@ fn build_data_flow(
         .collect::<HashMap<_, _>>();
     debug_log(
         debug,
-        format_args!("pass=compiler-dataflow-summaries functions={}", functions.len()),
+        format_args!(
+            "pass=compiler-dataflow-summaries functions={}",
+            functions.len()
+        ),
     );
     let summaries = infer_summaries(functions, &patterns, &local_ids, &function_map, debug);
     let mut builder = DataFlowBuilder::new(
@@ -2311,7 +2290,10 @@ fn build_data_flow(
     );
     debug_log(
         debug,
-        format_args!("pass=compiler-dataflow-materialize functions={}", functions.len()),
+        format_args!(
+            "pass=compiler-dataflow-materialize functions={}",
+            functions.len()
+        ),
     );
     builder.materialize(functions, diagnostics, debug);
     debug_log(debug, format_args!("pass=compiler-dataflow-finish"));
@@ -2459,7 +2441,8 @@ fn summarize_function(
                     );
                     apply_source_arguments_abstract(call, &mut state, &mut summary);
                     if call.semantic_tags.iter().any(|tag| tag == "builder")
-                        && let Some(receiver_place) = call.args.first().and_then(|arg| arg.place.as_ref())
+                        && let Some(receiver_place) =
+                            call.args.first().and_then(|arg| arg.place.as_ref())
                     {
                         write_abstract(&mut state, receiver_place, out.clone(), true);
                     }
@@ -2507,7 +2490,11 @@ fn summarize_function(
 }
 
 fn derive_builder_execution_summary(summary: &mut FunctionSummary) {
-    if !summary.semantic_tags.iter().any(|tag| tag == "builder-exec") {
+    if !summary
+        .semantic_tags
+        .iter()
+        .any(|tag| tag == "builder-exec")
+    {
         return;
     }
     let mut configured_parameter_indexes = BTreeSet::new();
@@ -2563,16 +2550,17 @@ fn transfer_abstract(
                 );
                 apply_source_arguments_abstract(call, &mut state, &mut scratch);
                 if call.semantic_tags.iter().any(|tag| tag == "builder")
-                    && let Some(receiver_place) = call.args.first().and_then(|arg| arg.place.as_ref())
+                    && let Some(receiver_place) =
+                        call.args.first().and_then(|arg| arg.place.as_ref())
                 {
                     write_abstract(&mut state, receiver_place, out.clone(), true);
                 }
                 if let Some(slot) = channel_slot_for_call(call, &state.aliases) {
-                    if is_channel_send(call) {
-                        if let Some(place) = call.args.get(1).and_then(|arg| arg.place.as_ref()) {
-                            let value = read_abstract(&state, place);
-                            write_abstract(&mut state, &slot, value, true);
-                        }
+                    if is_channel_send(call)
+                        && let Some(place) = call.args.get(1).and_then(|arg| arg.place.as_ref())
+                    {
+                        let value = read_abstract(&state, place);
+                        write_abstract(&mut state, &slot, value, true);
                     }
                     if is_channel_recv(call) {
                         out.extend(read_abstract(&state, &slot));
@@ -2792,7 +2780,9 @@ fn apply_source_arguments_abstract(
     summary_out: &mut FunctionSummary,
 ) {
     for (category, arg_indexes) in source_argument_matches(call) {
-        summary_out.observed_source_categories.insert(category.clone());
+        summary_out
+            .observed_source_categories
+            .insert(category.clone());
         for arg_index in arg_indexes {
             if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
                 let place = resolve_aliases(&state.aliases, place);
@@ -3058,17 +3048,18 @@ impl<'a> DataFlowBuilder<'a> {
                             builder_taint
                                 .paths
                                 .sort_by(|left, right| left.origin_key.cmp(&right.origin_key));
-                            builder_taint.paths.dedup_by(|left, right| left.origin_key == right.origin_key);
+                            builder_taint
+                                .paths
+                                .dedup_by(|left, right| left.origin_key == right.origin_key);
                             write_concrete(&mut state, receiver_place, builder_taint, true);
                         }
                     }
                     if let Some(slot) = channel_slot_for_call(call, &state.aliases) {
-                        if is_channel_send(call) {
-                            if let Some(place) = call.args.get(1).and_then(|arg| arg.place.as_ref())
-                            {
-                                let taint = read_concrete(&state, place);
-                                write_concrete(&mut state, &slot, taint, true);
-                            }
+                        if is_channel_send(call)
+                            && let Some(place) = call.args.get(1).and_then(|arg| arg.place.as_ref())
+                        {
+                            let taint = read_concrete(&state, place);
+                            write_concrete(&mut state, &slot, taint, true);
                         }
                         if is_channel_recv(call) {
                             paths.extend(read_concrete(&state, &slot).paths);
@@ -3108,9 +3099,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     );
                                     self.emit_sink(
                                         function,
-                                        &ConcreteTaint {
-                                            paths: vec![path],
-                                        },
+                                        &ConcreteTaint { paths: vec![path] },
                                         &callee_name,
                                         &sink_category,
                                         0,
@@ -3150,7 +3139,10 @@ impl<'a> DataFlowBuilder<'a> {
                                             properties: IndexMap::new(),
                                         };
                                         if let Some(last_step) = path.steps.last() {
-                                            let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "call_return"]);
+                                            let edge_id = stable_id(
+                                                "df-edge",
+                                                &[&last_step.node.id, &node_id, "call_return"],
+                                            );
                                             let edge = DataFlowEdge {
                                                 id: edge_id,
                                                 source_id: last_step.node.id.clone(),
@@ -3222,14 +3214,16 @@ impl<'a> DataFlowBuilder<'a> {
                                     }
                                 }
                                 if !field_paths.is_empty() {
-                                    field_paths.sort_by(|left, right| left.origin_key.cmp(&right.origin_key));
-                                    field_paths.dedup_by(|left, right| left.origin_key == right.origin_key);
+                                    field_paths.sort_by(|left, right| {
+                                        left.origin_key.cmp(&right.origin_key)
+                                    });
+                                    field_paths.dedup_by(|left, right| {
+                                        left.origin_key == right.origin_key
+                                    });
                                     write_concrete(
                                         &mut state,
                                         &rebased_field,
-                                        ConcreteTaint {
-                                            paths: field_paths,
-                                        },
+                                        ConcreteTaint { paths: field_paths },
                                         rebased_field.is_indirect(),
                                     );
                                 }
@@ -3306,8 +3300,10 @@ impl<'a> DataFlowBuilder<'a> {
         TaintPath {
             origin_key: format!("{}:{}:{}", function.id, name, category),
             category: category.to_string(),
-            steps: vec![TaintStep { node: node.clone(), edge: None }],
-            type_name,
+            steps: vec![TaintStep {
+                node: node.clone(),
+                edge: None,
+            }],
         }
     }
 
@@ -3324,18 +3320,13 @@ impl<'a> DataFlowBuilder<'a> {
                         function,
                         &call.callee_display,
                         &category,
-                        call.args.get(arg_index).and_then(|arg| arg.type_name.clone()),
+                        call.args
+                            .get(arg_index)
+                            .and_then(|arg| arg.type_name.clone()),
                         Some(arg_index),
                     );
                     let place = resolve_aliases(&state.aliases, place);
-                    write_concrete(
-                        state,
-                        &place,
-                        ConcreteTaint {
-                            paths: vec![path],
-                        },
-                        true,
-                    );
+                    write_concrete(state, &place, ConcreteTaint { paths: vec![path] }, true);
                 }
             }
         }
@@ -3394,7 +3385,10 @@ impl<'a> DataFlowBuilder<'a> {
         for path in &taint.paths {
             let mut final_path = path.clone();
             if let Some(last_step) = final_path.steps.last() {
-                let edge_id = stable_id("df-edge", &[&last_step.node.id, &sink_node_id, sink_category]);
+                let edge_id = stable_id(
+                    "df-edge",
+                    &[&last_step.node.id, &sink_node_id, sink_category],
+                );
                 let mut edge_properties = IndexMap::new();
                 edge_properties.insert(
                     "dispatchConfidence".to_string(),
@@ -3426,7 +3420,10 @@ impl<'a> DataFlowBuilder<'a> {
                 }
             }
 
-            let slice_id = stable_id("df-slice", &[&final_path.origin_key, &sink_node_id, sink_category]);
+            let slice_id = stable_id(
+                "df-slice",
+                &[&final_path.origin_key, &sink_node_id, sink_category],
+            );
             let mut slice_properties = IndexMap::new();
             slice_properties.insert(
                 "specializationKey".to_string(),
@@ -3438,13 +3435,23 @@ impl<'a> DataFlowBuilder<'a> {
             );
             slice_properties.insert("analysisBackend".to_string(), "embedded-mir".to_string());
             add_model_properties(&mut slice_properties, sink_name);
-            if modeled_native_boundary(sink_name) || modeled_native_boundary(&final_path.steps[0].node.name) {
+            if modeled_native_boundary(sink_name)
+                || modeled_native_boundary(&final_path.steps[0].node.name)
+            {
                 slice_properties.insert("nativeBoundary".to_string(), "true".to_string());
             }
 
             let first_node = &final_path.steps[0].node;
-            let node_ids = final_path.steps.iter().map(|s| s.node.id.clone()).collect::<Vec<_>>();
-            let edge_ids = final_path.steps.iter().filter_map(|s| s.edge.as_ref().map(|e| e.id.clone())).collect::<Vec<_>>();
+            let node_ids = final_path
+                .steps
+                .iter()
+                .map(|s| s.node.id.clone())
+                .collect::<Vec<_>>();
+            let edge_ids = final_path
+                .steps
+                .iter()
+                .filter_map(|s| s.edge.as_ref().map(|e| e.id.clone()))
+                .collect::<Vec<_>>();
             let path_length = edge_ids.len();
 
             self.slices
@@ -3693,9 +3700,7 @@ fn apply_assign_concrete(function: &MirFunction, assign: &AssignAction, state: &
     for (field, sources) in &assign.field_sources {
         let mut field_taint = ConcreteTaint::default();
         for source in sources {
-            field_taint
-                .paths
-                .extend(read_concrete(state, source).paths);
+            field_taint.paths.extend(read_concrete(state, source).paths);
         }
         if !field_taint.paths.is_empty() {
             let node_id = stable_id(
@@ -3789,7 +3794,7 @@ fn specialization_key_for_function(function: &MirFunction) -> String {
     specialization_key_from_parts(
         receiver_type_for_function(function).as_deref(),
         &Vec::new(),
-        &[function.qualified_name.clone()],
+        std::slice::from_ref(&function.qualified_name),
     )
 }
 
@@ -4059,7 +4064,7 @@ fn impl_trait_method_parts(symbol: &str) -> Option<(String, String)> {
     if method.is_empty() || !owner.starts_with('<') {
         return None;
     }
-    let owner = owner.strip_prefix('<')?.strip_suffix('>')?;
+    let owner = owner.strip_circumfix('<', '>')?;
     let (_, trait_name) = owner.rsplit_once("as")?;
     let trait_name = last_segment(&strip_generic_arguments(trait_name)).to_string();
     let method = normalize_symbol(method);
@@ -4496,7 +4501,10 @@ fn source_argument_matches(call: &MirCall) -> Vec<(String, Vec<usize>)> {
             if model_allowed_for_call(call, model)
                 && matches!(model.kind, FlowModelKind::SourceArgument)
             {
-                results.push((model.category.to_string(), model.relevant_arguments.to_vec()));
+                results.push((
+                    model.category.to_string(),
+                    model.relevant_arguments.to_vec(),
+                ));
             }
         }
     }
@@ -4534,10 +4542,14 @@ fn sink_matches(
             }
             if call.call_type != "native"
                 && !call.target_ids.is_empty()
-                && matching_flow_models(&pattern.pattern).into_iter().any(|model| {
-                    matches!(model.kind, FlowModelKind::NativeSource | FlowModelKind::NativeSink)
-                        && !model.symbol.contains("::")
-                })
+                && matching_flow_models(&pattern.pattern)
+                    .into_iter()
+                    .any(|model| {
+                        matches!(
+                            model.kind,
+                            FlowModelKind::NativeSource | FlowModelKind::NativeSink
+                        ) && !model.symbol.contains("::")
+                    })
             {
                 continue;
             }
@@ -6894,20 +6906,6 @@ fn span_key_simple(span: Span) -> String {
     format!("{}:{}", span.lo().0, span.hi().0)
 }
 
-fn stable_id(prefix: &str, components: &[&str]) -> String {
-    let mut hasher = Sha256::new();
-    for component in components {
-        hasher.update(component.as_bytes());
-        hasher.update([0]);
-    }
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(16);
-    for byte in digest.iter().take(8) {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    format!("{prefix}-{hex}")
-}
-
 fn debug_log(enabled: bool, args: std::fmt::Arguments<'_>) {
     if enabled {
         eprintln!("rusi debug: {args}");
@@ -6931,9 +6929,12 @@ fn path_is_under_root(root: &Path, path: &Path) -> bool {
 }
 
 fn prepare_emit_dir(analysis_root: &Path, emit_dir: &Path) -> Result<(PathBuf, PathBuf)> {
-    let analysis_root = analysis_root
-        .canonicalize()
-        .with_context(|| format!("failed to resolve analysis root {}", analysis_root.display()))?;
+    let analysis_root = analysis_root.canonicalize().with_context(|| {
+        format!(
+            "failed to resolve analysis root {}",
+            analysis_root.display()
+        )
+    })?;
     let relative = emit_dir.strip_prefix(&analysis_root).with_context(|| {
         format!(
             "refusing to write compiler artifacts outside analysis root {}; got {}",
@@ -6973,8 +6974,12 @@ fn ensure_safe_directory_component(path: &Path) -> Result<()> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to inspect compiler artifact path {}", path.display()))
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect compiler artifact path {}",
+                    path.display()
+                )
+            });
         }
     }
     Ok(())
@@ -6984,9 +6989,12 @@ fn ensure_directory_within_root(root: &Path, path: &Path) -> Result<()> {
     let canonical_root = root
         .canonicalize()
         .with_context(|| format!("failed to resolve analysis root {}", root.display()))?;
-    let canonical_path = path
-        .canonicalize()
-        .with_context(|| format!("failed to resolve compiler artifact directory {}", path.display()))?;
+    let canonical_path = path.canonicalize().with_context(|| {
+        format!(
+            "failed to resolve compiler artifact directory {}",
+            path.display()
+        )
+    })?;
     if !canonical_path.starts_with(&canonical_root) {
         anyhow::bail!(
             "compiler artifact directory {} escapes analysis root {}",
@@ -6999,13 +7007,6 @@ fn ensure_directory_within_root(root: &Path, path: &Path) -> Result<()> {
 
 fn canonical_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn relative_display_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn last_segment(value: &str) -> &str {

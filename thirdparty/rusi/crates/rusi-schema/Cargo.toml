@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 indexmap.workspace = true
 serde.workspace = true
+sha2.workspace = true
