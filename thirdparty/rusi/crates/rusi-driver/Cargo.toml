@@ -12,7 +12,6 @@ proc-macro2.workspace = true
 quote.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 syn.workspace = true
 rusi-core = { path = "../rusi-core" }
 rusi-schema = { path = "../rusi-schema" }

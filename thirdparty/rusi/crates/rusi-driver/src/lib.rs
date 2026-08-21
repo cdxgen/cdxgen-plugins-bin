@@ -13,10 +13,10 @@ use rusi_core::{AnalyzeOptionsInput, CompilerBackendPayload};
 use rusi_schema::{
     CallGraph, CompilerEvidence, CryptoComponent, CryptoEvidence, CryptoFinding, CryptoLibrary,
     CryptoMaterial, DataFlowEvidence, DataFlowStats, Declaration, Diagnostic, FileEvidence,
-    GraphStats, ImportUsage, LibraryUsage, Position, SecuritySignal,
+    GraphStats, ImportUsage, LibraryUsage, Position, SecuritySignal, relative_display_path,
+    stable_id,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
@@ -58,6 +58,20 @@ pub struct DriverCapabilities {
     pub resolved_toolchain: String,
     pub toolchain_available: bool,
     pub nightly_toolchain: bool,
+    /// `rustc` release triple parsed out of `rustc_version`, as
+    /// `major.minor.patch`. `None` when the version string could not be
+    /// parsed, which is treated as "unknown" rather than "too old".
+    #[serde(default)]
+    pub rustc_release: Option<String>,
+    /// Whether the resolved toolchain is at or above
+    /// [`RUSTC_PRIVATE_VERSION_FLOOR`]. `true` when the version is unknown, so
+    /// an unparseable version never silently disables the compiler backend.
+    #[serde(default = "default_true")]
+    pub rustc_version_supported: bool,
+    /// Whether `rustc-dev` and `rust-src` are installed for the resolved
+    /// toolchain. These are what the compiler backend actually links against.
+    #[serde(default)]
+    pub rustc_private_components: bool,
     pub embedded_backend_supported: bool,
     pub source_evidence_collected: bool,
     pub native_interop_collected: bool,
@@ -76,7 +90,7 @@ pub struct DriverProtocolEnvelope {
     pub payload: DriverProtocolPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct DriverProtocolPayload {
     pub diagnostics: Vec<Diagnostic>,
     pub files: Vec<FileEvidence>,
@@ -87,22 +101,6 @@ pub struct DriverProtocolPayload {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
-}
-
-impl Default for DriverProtocolPayload {
-    fn default() -> Self {
-        Self {
-            diagnostics: Vec::new(),
-            files: Vec::new(),
-            imports: Vec::new(),
-            declarations: Vec::new(),
-            usages: Vec::new(),
-            security_signals: Vec::new(),
-            crypto: None,
-            call_graph: None,
-            data_flow: None,
-        }
-    }
 }
 
 impl DriverProtocolEnvelope {
@@ -212,6 +210,9 @@ pub fn run_driver(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
     payload
         .diagnostics
         .push(capability_summary_diagnostic(&analysis_root, &capabilities));
+    if let Some(diagnostic) = toolchain_floor_diagnostic(&analysis_root, &capabilities) {
+        payload.diagnostics.push(diagnostic);
+    }
 
     let mut backend_kind = BACKEND_KIND_STUB;
 
@@ -359,6 +360,102 @@ fn load_metadata(dir: &Path) -> Result<Metadata> {
         .context("cargo metadata failed for compiler backend")
 }
 
+/// Lowest `rustc` release whose `rustc_private` API surface the compiler
+/// backend compiles against.
+///
+/// The backend links `rustc_driver`, `rustc_middle`, and friends, which carry
+/// no stability guarantee and change shape most releases. Rust 1.98 is the
+/// floor because `rustc_type_ir`'s `EarlyBinder::bind` gained a context
+/// parameter there; earlier toolchains fail to build the wrapper.
+///
+/// Raise this whenever the wrapper adopts a newer `rustc_private` signature.
+pub const RUSTC_PRIVATE_VERSION_FLOOR: (u64, u64, u64) = (1, 98, 0);
+
+fn default_true() -> bool {
+    true
+}
+
+/// Parse the release triple out of `rustc -Vv` / `rustc -V` output.
+///
+/// The first line has the shape `rustc 1.98.0 (88d9e12ae 2026-08-18)`, and on
+/// pre-release channels the version carries a suffix — `1.100.0-nightly`,
+/// `1.98.0-beta.3` — which is discarded so the numeric comparison still works.
+/// Returns `None` for anything that does not parse, including the literal
+/// `"unknown"` that [`capture_command_output`] yields when `rustc` is absent.
+fn parse_rustc_release(version_output: &str) -> Option<(u64, u64, u64)> {
+    let first_line = version_output.lines().next()?;
+    let version_token = first_line
+        .strip_prefix("rustc ")?
+        .split_whitespace()
+        .next()?;
+    // Drop any `-nightly` / `-beta.N` pre-release suffix.
+    let numeric = version_token
+        .split_once('-')
+        .map_or(version_token, |(head, _)| head);
+    let mut parts = numeric.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    // A two-component version such as `1.98` is read as `1.98.0`.
+    let patch = match parts.next() {
+        Some(value) => value.parse().ok()?,
+        None => 0,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// Render a release triple the way `rustc` spells it.
+fn format_rustc_release(release: (u64, u64, u64)) -> String {
+    let (major, minor, patch) = release;
+    format!("{major}.{minor}.{patch}")
+}
+
+/// Whether the compiler backend can run, and why not when it cannot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BackendSupport {
+    rustc_release: Option<String>,
+    rustc_version_supported: bool,
+    rustc_private_components: bool,
+    embedded_backend_supported: bool,
+}
+
+/// Decide whether the compiler backend is usable, from probe output alone.
+///
+/// Kept free of process spawning so the decision is testable on every
+/// platform: `installed_components` is verbatim `rustup component list
+/// --installed` output and `rustc_version` is verbatim `rustc -Vv` output.
+///
+/// The backend needs the `rustc_private` libraries, not a nightly *channel*. A
+/// stable toolchain carrying `rustc-dev` and `rust-src` builds the wrapper
+/// fine once `RUSTC_BOOTSTRAP` unlocks `#![feature(rustc_private)]` — and
+/// those two components are exactly what `rust-toolchain.toml` asks rustup to
+/// install for the pinned *stable* channel. Gating on the channel name instead
+/// made the backend unreachable on the very toolchain the repository pins.
+fn evaluate_backend_support(
+    toolchain_available: bool,
+    installed_components: &str,
+    rustc_version: &str,
+) -> BackendSupport {
+    let rustc_private_components =
+        installed_components.contains("rustc-dev") && installed_components.contains("rust-src");
+    let parsed_release = parse_rustc_release(rustc_version);
+    // An unparseable version must not disable the backend: we would rather
+    // attempt the build and surface a real compiler error than silently
+    // degrade to a stable-only analysis that looks like a successful run.
+    let rustc_version_supported =
+        parsed_release.is_none_or(|release| release >= RUSTC_PRIVATE_VERSION_FLOOR);
+    BackendSupport {
+        rustc_release: parsed_release.map(format_rustc_release),
+        rustc_version_supported,
+        rustc_private_components,
+        embedded_backend_supported: toolchain_available
+            && rustc_private_components
+            && rustc_version_supported,
+    }
+}
+
 fn detect_capabilities(options: &DriverOptions, analysis_root: &Path) -> DriverCapabilities {
     let rustup_output = capture_command_output("rustup", &["toolchain", "list"]);
     let rustup_available = !rustup_output.is_empty() && rustup_output != "unknown";
@@ -404,11 +501,9 @@ fn detect_capabilities(options: &DriverOptions, analysis_root: &Path) -> DriverC
     } else {
         String::new()
     };
-    let rustc_private_components =
-        installed_components.contains("rustc-dev") && installed_components.contains("rust-src");
-    let embedded_backend_supported =
-        toolchain_available && nightly_toolchain && rustc_private_components;
     let rustc_version = capture_toolchain_rustc_version(&resolved_toolchain, rustup_available);
+    let support =
+        evaluate_backend_support(toolchain_available, &installed_components, &rustc_version);
     let cargo_version = capture_toolchain_cargo_version(&resolved_toolchain, rustup_available);
     let host = detect_host(analysis_root, &resolved_toolchain, rustup_available);
 
@@ -419,7 +514,10 @@ fn detect_capabilities(options: &DriverOptions, analysis_root: &Path) -> DriverC
         resolved_toolchain,
         toolchain_available,
         nightly_toolchain,
-        embedded_backend_supported,
+        rustc_release: support.rustc_release,
+        rustc_version_supported: support.rustc_version_supported,
+        rustc_private_components: support.rustc_private_components,
+        embedded_backend_supported: support.embedded_backend_supported,
         source_evidence_collected: false,
         native_interop_collected: false,
         mir_evidence_collected: false,
@@ -433,12 +531,15 @@ fn capability_summary_diagnostic(root: &Path, capabilities: &DriverCapabilities)
     Diagnostic {
         kind: "backend-capability".to_string(),
         message: format!(
-            "compiler backend capability detection: requested={}, resolved={}, rustupAvailable={}, toolchainAvailable={}, nightly={}, embeddedBackend={}, host={}",
+            "compiler backend capability detection: requested={}, resolved={}, rustupAvailable={}, toolchainAvailable={}, nightly={}, rustcRelease={}, rustcVersionSupported={}, rustcPrivateComponents={}, embeddedBackend={}, host={}",
             capabilities.requested_toolchain,
             capabilities.resolved_toolchain,
             capabilities.rustup_available,
             capabilities.toolchain_available,
             capabilities.nightly_toolchain,
+            capabilities.rustc_release.as_deref().unwrap_or("unknown"),
+            capabilities.rustc_version_supported,
+            capabilities.rustc_private_components,
             capabilities.embedded_backend_supported,
             capabilities.host
         ),
@@ -450,6 +551,53 @@ fn capability_summary_diagnostic(root: &Path, capabilities: &DriverCapabilities)
             column: 0,
         }),
     }
+}
+
+/// Explain, in the report, why the compiler backend is unavailable.
+///
+/// Without this the only symptom of a too-old toolchain or a missing
+/// `rustc-dev` was a silently stable-only analysis, which looks identical to a
+/// successful run with fewer findings. Returns `None` when the backend is
+/// usable, so a healthy run adds no noise.
+fn toolchain_floor_diagnostic(
+    root: &Path,
+    capabilities: &DriverCapabilities,
+) -> Option<Diagnostic> {
+    if capabilities.embedded_backend_supported {
+        return None;
+    }
+    let floor = format_rustc_release(RUSTC_PRIVATE_VERSION_FLOOR);
+    let reason = if !capabilities.toolchain_available {
+        format!(
+            "toolchain '{}' is not installed",
+            capabilities.resolved_toolchain
+        )
+    } else if !capabilities.rustc_version_supported {
+        format!(
+            "rustc {} is older than the {floor} required by the rustc_private APIs the compiler backend links against; upgrade the '{}' toolchain",
+            capabilities
+                .rustc_release
+                .as_deref()
+                .unwrap_or("(unparseable)"),
+            capabilities.resolved_toolchain
+        )
+    } else {
+        format!(
+            "toolchain '{}' is missing the rustc-dev and rust-src components; install them with: rustup component add rustc-dev rust-src --toolchain {}",
+            capabilities.resolved_toolchain, capabilities.resolved_toolchain
+        )
+    };
+    Some(Diagnostic {
+        kind: "backend-unsupported".to_string(),
+        message: format!("compiler backend unavailable: {reason}"),
+        package_path: None,
+        file_path: None,
+        position: Some(Position {
+            filename: root.display().to_string(),
+            line: 0,
+            column: 0,
+        }),
+    })
 }
 
 fn resolve_toolchain(requested: &str, available_toolchains: &[String]) -> String {
@@ -518,7 +666,11 @@ fn capture_command_output(binary: &str, args: &[&str]) -> String {
 }
 
 fn cargo_check_target_args(include_tests: bool) -> &'static [&'static str] {
-    if include_tests { &["--all-targets"] } else { &[] }
+    if include_tests {
+        &["--all-targets"]
+    } else {
+        &[]
+    }
 }
 
 fn rusi_workspace_root() -> PathBuf {
@@ -528,17 +680,38 @@ fn rusi_workspace_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
 }
 
-fn ensure_embedded_wrapper_built(capabilities: &DriverCapabilities, debug: bool) -> Result<PathBuf> {
+fn ensure_embedded_wrapper_built(
+    capabilities: &DriverCapabilities,
+    debug: bool,
+) -> Result<PathBuf> {
     let workspace_root = rusi_workspace_root();
     let manifest_path = workspace_root.join("Cargo.toml");
+    // Build into a dedicated target directory rather than the workspace's own
+    // `target/`. This build is nested inside whatever cargo invocation is
+    // already running — including `cargo test` on rusi itself — and sharing
+    // `target/` lets it rewrite artifacts the outer build is still using,
+    // which surfaced as a later `cargo test` step failing to load a crate it
+    // had just built. A separate directory also avoids contending for the
+    // outer build's lock.
+    let wrapper_target_dir = workspace_root.join("target/rusi-wrapper");
     let mut command = Command::new("cargo");
     command.current_dir(&workspace_root);
+    command.env("CARGO_TARGET_DIR", &wrapper_target_dir);
     if capabilities.rustup_available && !capabilities.resolved_toolchain.is_empty() {
         command.arg(format!("+{}", capabilities.resolved_toolchain));
     }
     command.args(["build", "--manifest-path"]);
     command.arg(&manifest_path);
     command.args(["-p", "rusi-rustc-wrapper"]);
+    if !capabilities.nightly_toolchain {
+        // The wrapper declares `#![feature(rustc_private)]`, which a stable or
+        // beta compiler rejects outright. `RUSTC_BOOTSTRAP=1` is how the Rust
+        // project itself unlocks unstable features on a release compiler, and
+        // it is what lets the `rustc-dev` component that `rust-toolchain.toml`
+        // installs on *stable* be useful. Nightly needs no such unlocking, so
+        // the variable is only set when it is required.
+        command.env("RUSTC_BOOTSTRAP", "1");
+    }
     debug_log(
         debug,
         format_args!(
@@ -577,7 +750,12 @@ fn ensure_embedded_wrapper_built(capabilities: &DriverCapabilities, debug: bool)
             ));
         }
     }
-    let wrapper = workspace_root.join("target/debug/rusi-rustc-wrapper");
+    // `EXE_SUFFIX` is empty everywhere except Windows, where the binary cargo
+    // produced is `rusi-rustc-wrapper.exe`.
+    let wrapper = wrapper_target_dir.join("debug").join(format!(
+        "rusi-rustc-wrapper{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     if wrapper.exists() {
         Ok(wrapper)
     } else {
@@ -635,7 +813,11 @@ fn collect_embedded_compiler_evidence(
             build_target_dir.display(),
             capabilities.resolved_toolchain,
             options.data_flow_mode,
-            if options.include_tests { "all-targets" } else { "default" },
+            if options.include_tests {
+                "all-targets"
+            } else {
+                "default"
+            },
             wrapper.display()
         ),
     );
@@ -841,7 +1023,8 @@ impl CompilerEvidenceMerger {
             if let Some(crypto) = &file.crypto {
                 seed_crypto_dedup(&mut dedup.crypto, crypto);
             }
-            self.file_index.insert(file.path.clone(), self.evidence.files.len());
+            self.file_index
+                .insert(file.path.clone(), self.evidence.files.len());
             self.evidence.files.push(file);
             self.file_dedup.push(dedup);
         }
@@ -880,11 +1063,14 @@ impl CompilerEvidenceMerger {
         let Some(incoming) = incoming else {
             return;
         };
-        let existing = self.evidence.data_flow.get_or_insert_with(|| DataFlowEvidence {
-            mode: incoming.mode.clone(),
-            patterns: incoming.patterns.clone(),
-            ..DataFlowEvidence::default()
-        });
+        let existing = self
+            .evidence
+            .data_flow
+            .get_or_insert_with(|| DataFlowEvidence {
+                mode: incoming.mode.clone(),
+                patterns: incoming.patterns.clone(),
+                ..DataFlowEvidence::default()
+            });
         merge_mode(&mut existing.mode, &incoming.mode);
         if existing.patterns.sources.is_empty()
             && existing.patterns.sinks.is_empty()
@@ -1043,7 +1229,12 @@ fn diagnostic_key(diagnostic: &Diagnostic) -> String {
     let position = diagnostic
         .position
         .as_ref()
-        .map(|position| format!("{}:{}:{}", position.filename, position.line, position.column))
+        .map(|position| {
+            format!(
+                "{}:{}:{}",
+                position.filename, position.line, position.column
+            )
+        })
         .unwrap_or_default();
     format!(
         "{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
@@ -1378,12 +1569,13 @@ fn collect_native_interop_evidence(
 }
 
 fn package_context(package: &Package) -> Result<PackageContext> {
-    let manifest_path = fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
-        format!(
-            "failed to resolve package manifest {}",
-            package.manifest_path.as_std_path().display()
-        )
-    })?;
+    let manifest_path =
+        fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
+            format!(
+                "failed to resolve package manifest {}",
+                package.manifest_path.as_std_path().display()
+            )
+        })?;
     let root_dir = manifest_path
         .parent()
         .map(Path::to_path_buf)
@@ -1429,8 +1621,8 @@ fn walk_rust_files(
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Ok(());
     }
-    let canonical_dir = fs::canonicalize(dir)
-        .with_context(|| format!("failed to resolve {}", dir.display()))?;
+    let canonical_dir =
+        fs::canonicalize(dir).with_context(|| format!("failed to resolve {}", dir.display()))?;
     if !canonical_dir.starts_with(allowed_root) || !visited_dirs.insert(canonical_dir.clone()) {
         return Ok(());
     }
@@ -1486,8 +1678,12 @@ fn ensure_safe_directory_component(path: &Path) -> Result<()> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to inspect compiler artifact path {}", path.display()))
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect compiler artifact path {}",
+                    path.display()
+                )
+            });
         }
     }
     Ok(())
@@ -1496,8 +1692,12 @@ fn ensure_safe_directory_component(path: &Path) -> Result<()> {
 fn ensure_directory_within_root(root: &Path, path: &Path) -> Result<()> {
     let canonical_root = fs::canonicalize(root)
         .with_context(|| format!("failed to resolve compiler backend root {}", root.display()))?;
-    let canonical_path = fs::canonicalize(path)
-        .with_context(|| format!("failed to resolve compiler artifact directory {}", path.display()))?;
+    let canonical_path = fs::canonicalize(path).with_context(|| {
+        format!(
+            "failed to resolve compiler artifact directory {}",
+            path.display()
+        )
+    })?;
     if !canonical_path.starts_with(&canonical_root) {
         anyhow::bail!(
             "compiler artifact directory {} escapes analysis root {}",
@@ -1615,13 +1815,26 @@ impl NativeInteropCollector {
     }
 
     fn push_signal(&mut self, kind: &str, description: String, span: Span) {
+        self.push_signal_with_severity(kind, "medium", description, span);
+    }
+
+    /// Record a signal whose severity differs from the `medium` default that
+    /// descriptive FFI observations carry. Used for the signals that mirror a
+    /// compiler lint, where the lint's own level is the honest severity.
+    fn push_signal_with_severity(
+        &mut self,
+        kind: &str,
+        severity: &str,
+        description: String,
+        span: Span,
+    ) {
         self.security_signals.push(SecuritySignal {
             id: stable_id(
                 "signal",
                 &[&self.file_ctx.relative_file_path, kind, &span_key(span)],
             ),
             category: "native-interop".to_string(),
-            severity: "medium".to_string(),
+            severity: severity.to_string(),
             confidence: "high".to_string(),
             description,
             package_path: self.file_ctx.package_path.clone(),
@@ -1694,6 +1907,17 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
                         ),
                         function.sig.ident.span(),
                     );
+                    if is_c_void_return(&function.sig.output) {
+                        self.push_signal_with_severity(
+                            "c-void-return",
+                            "low",
+                            format!(
+                                "foreign function {} is declared as returning c_void; a C function returning void has no return value, so the Rust declaration should omit the return type (rustc lint c_void_returns)",
+                                declaration.qualified_name
+                            ),
+                            function.sig.output.span(),
+                        );
+                    }
                     self.foreign_symbols.insert(
                         function.sig.ident.to_string(),
                         ForeignFunctionInfo {
@@ -1735,14 +1959,42 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
     }
 
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+        let ident = node.sig.ident.to_string();
         if node.sig.abi.is_some() || has_export_attribute(&node.attrs) {
             self.push_signal(
                 "native-export",
                 format!(
                     "extern/exported Rust function {} detected",
-                    self.qualify_name(&node.sig.ident.to_string())
+                    self.qualify_name(&ident)
                 ),
                 node.sig.ident.span(),
+            );
+        }
+        // A runtime symbol is only interposed if it is actually exported, so
+        // this is keyed off the export attributes rather than the name alone:
+        // a private `fn memcpy` is a perfectly ordinary helper.
+        if let Some(symbol) = exported_symbol_name(&node.attrs, &ident)
+            && RUNTIME_SYMBOL_NAMES.contains(&symbol.as_str())
+        {
+            self.push_signal_with_severity(
+                "runtime-symbol-definition",
+                "high",
+                format!(
+                    "Rust function {} is exported as the core runtime symbol '{symbol}'; the compiler emits calls to this symbol from code that never names it, so a mismatched definition miscompiles unrelated code and can be interposed at link time (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
+                    self.qualify_name(&ident)
+                ),
+                node.sig.ident.span(),
+            );
+        }
+        if is_c_void_return(&node.sig.output) && node.sig.abi.is_some() {
+            self.push_signal_with_severity(
+                "c-void-return",
+                "low",
+                format!(
+                    "exported Rust function {} returns c_void; C callers expect void, which is `()` in Rust, so the return type should be omitted (rustc lint c_void_returns)",
+                    self.qualify_name(&ident)
+                ),
+                node.sig.output.span(),
             );
         }
         syn::visit::visit_item_fn(self, node);
@@ -1765,6 +2017,103 @@ fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
         }
     }
     None
+}
+
+/// Symbols the compiler and the C runtime assume it owns.
+///
+/// Rust 1.98 added the deny-by-default `invalid_runtime_symbol_definitions`
+/// and warn-by-default `suspicious_runtime_symbol_definitions` lints for
+/// exactly these names. Defining one from Rust replaces the implementation the
+/// compiler emits calls to — LLVM lowers `slice` comparisons to `bcmp`/`memcmp`
+/// and `[u8]` copies to `memcpy` without those calls appearing in the source —
+/// so a wrong or recursive definition miscompiles code far from the definition
+/// site. Because the symbol is exported, it can also be interposed at link
+/// time by a dependency, which makes it a supply-chain concern and not only a
+/// correctness one.
+const RUNTIME_SYMBOL_NAMES: &[&str] = &[
+    "bcmp",
+    "calloc",
+    "free",
+    "malloc",
+    "memcmp",
+    "memcpy",
+    "memmove",
+    "memset",
+    "posix_memalign",
+    "realloc",
+    "strlen",
+];
+
+/// The linker symbol a function is exported under, if it is exported at all.
+///
+/// `#[export_name = "..."]` names the symbol outright; `#[no_mangle]` exports
+/// the function under its own identifier. Both spellings accepted by edition
+/// 2024 are recognized, including the `#[unsafe(...)]` wrapper that edition
+/// requires. Returns `None` for a function that is not exported, which is the
+/// overwhelming majority.
+fn exported_symbol_name(attrs: &[Attribute], ident: &str) -> Option<String> {
+    for attr in attrs {
+        if attr.path().is_ident("export_name") {
+            if let Ok(name) = attr.meta.require_name_value()
+                && let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(value),
+                    ..
+                }) = &name.value
+            {
+                return Some(value.value());
+            }
+            // An `#[export_name]` we cannot read still exports the symbol.
+            return Some(ident.to_string());
+        }
+        if attr.path().is_ident("no_mangle") {
+            return Some(ident.to_string());
+        }
+        if attr.path().is_ident("unsafe") {
+            let mut symbol = None;
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("export_name") {
+                    symbol = Some(
+                        meta.value()
+                            .and_then(|value| value.parse::<LitStr>())
+                            .map(|value| value.value())
+                            .unwrap_or_else(|_| ident.to_string()),
+                    );
+                } else if meta.path.is_ident("no_mangle") {
+                    symbol = Some(ident.to_string());
+                }
+                Ok(())
+            });
+            if symbol.is_some() {
+                return symbol;
+            }
+        }
+    }
+    None
+}
+
+/// Whether a return type is `c_void`, in any of the ways it can be spelled.
+///
+/// Rust 1.98's warn-by-default `c_void_returns` lint flags this. `c_void` is
+/// an opaque type standing for C's `void`, but C's `void` return means "no
+/// value", which in Rust is `()`. A declaration returning `c_void` therefore
+/// claims the callee produces a value of an uninhabited-in-practice opaque
+/// type; reading it is undefined behavior, and the correct signature omits the
+/// return type entirely. Only the final path segment is compared, so
+/// `c_void`, `ffi::c_void`, `core::ffi::c_void`, and `libc::c_void` all match.
+fn is_c_void_return(output: &ReturnType) -> bool {
+    let ReturnType::Type(_, ty) = output else {
+        return false;
+    };
+    // Look through any number of references, e.g. `-> &c_void`, which is a
+    // pointer to void and perfectly legitimate. Only a bare `c_void` is wrong.
+    let syn::Type::Path(type_path) = ty.as_ref() else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "c_void")
 }
 
 fn has_export_attribute(attrs: &[Attribute]) -> bool {
@@ -1828,27 +2177,6 @@ fn position_from_span(file_path: &str, span: Span) -> Position {
 fn span_key(span: Span) -> String {
     let start = span.start();
     format!("{}:{}", start.line, start.column + 1)
-}
-
-fn relative_display_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-fn stable_id(prefix: &str, components: &[&str]) -> String {
-    let mut hasher = Sha256::new();
-    for component in components {
-        hasher.update(component.as_bytes());
-        hasher.update([0]);
-    }
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(16);
-    for byte in digest.iter().take(8) {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    format!("{prefix}-{hex}")
 }
 
 #[cfg(test)]
@@ -1934,9 +2262,13 @@ mod tests {
         let outside = temp_dir("artifact-outside");
         create_dir_symlink(&outside, &root.join("target"));
 
-        let error = scoped_child_dir(&root, &["target", "rusi-embedded"]) 
+        let error = scoped_child_dir(&root, &["target", "rusi-embedded"])
             .expect_err("symlinked artifact path must be rejected");
-        assert!(error.to_string().contains("symlinked compiler artifact path"));
+        assert!(
+            error
+                .to_string()
+                .contains("symlinked compiler artifact path")
+        );
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -1999,20 +2331,39 @@ mod tests {
         };
         let capabilities = detect_capabilities(&options, &options.analysis_root);
         assert!(!capabilities.resolved_toolchain.is_empty());
+
+        // The compiler backend implies the rustc_private prerequisites, and
+        // nothing more. It deliberately does *not* imply a nightly channel:
+        // asserting that here is what made this test pass only on machines
+        // that happened to have nightly installed.
         if capabilities.embedded_backend_supported {
             assert!(capabilities.toolchain_available);
-            assert!(capabilities.nightly_toolchain);
             assert!(capabilities.rustup_available);
+            assert!(capabilities.rustc_private_components);
+            assert!(capabilities.rustc_version_supported);
         }
-        if !capabilities.toolchain_available || !capabilities.nightly_toolchain {
+        // ...and the converse: missing any one prerequisite must disable it.
+        if !capabilities.toolchain_available
+            || !capabilities.rustc_private_components
+            || !capabilities.rustc_version_supported
+        {
             assert!(!capabilities.embedded_backend_supported);
+        }
+        // A parsed release must round-trip into the reported version string,
+        // so the two can never disagree about which compiler was probed.
+        if let Some(release) = &capabilities.rustc_release {
+            assert!(
+                capabilities.rustc_version.contains(release.as_str()),
+                "reported release {release} is absent from {:?}",
+                capabilities.rustc_version
+            );
         }
         assert!(!capabilities.rustc_version.is_empty());
         assert!(!capabilities.cargo_version.is_empty());
     }
 
     #[test]
-    fn stable_toolchain_disables_embedded_backend_capability() {
+    fn stable_toolchain_is_gated_on_components_not_on_the_channel_name() {
         let _guard = test_guard();
         let options = DriverOptions {
             analysis_root: fixture_path("basic-app"),
@@ -2025,13 +2376,41 @@ mod tests {
         let envelope = run_driver(&options).expect("driver run succeeds");
         assert_eq!(envelope.capabilities.requested_toolchain, "stable");
         assert_eq!(envelope.capabilities.resolved_toolchain, "stable");
-        assert!(!envelope.capabilities.embedded_backend_supported);
-        assert!(envelope.payload.call_graph.is_none());
-        assert!(envelope.payload.data_flow.is_none());
+
+        // Explicitly requesting `stable` no longer disables the compiler
+        // backend on its own. Whether it runs depends on the components and
+        // the release, which vary by machine, so this asserts the implication
+        // rather than a fixed outcome. `toolchain_gate_tests` covers the
+        // decision itself against synthetic probe output.
+        let capabilities = &envelope.capabilities;
+        assert!(!capabilities.nightly_toolchain);
+        if capabilities.toolchain_available
+            && capabilities.rustc_private_components
+            && capabilities.rustc_version_supported
+        {
+            assert!(
+                capabilities.embedded_backend_supported,
+                "stable toolchain with rustc-dev must support the compiler backend"
+            );
+        } else {
+            assert!(!capabilities.embedded_backend_supported);
+            // ...and the report must say why, rather than looking like a
+            // successful run that simply found less.
+            assert!(
+                envelope
+                    .payload
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.kind == "backend-unsupported"),
+                "expected a backend-unsupported diagnostic"
+            );
+            assert!(envelope.payload.call_graph.is_none());
+            assert!(envelope.payload.data_flow.is_none());
+        }
     }
 
     #[test]
-    #[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
     fn driver_collects_real_compiler_evidence_when_embedded_backend_is_available() {
         let _guard = test_guard();
         let options = DriverOptions {
@@ -2332,11 +2711,12 @@ mod tests {
             // No edge should target the abstract trait item or a raw generic
             // parameter now that devirtualization succeeded.
             assert!(
-                graph.edges.iter().all(|edge| !(edge
-                    .source_name
-                    .ends_with("run_specific")
-                    && (edge.target_name.contains("<S as Sink")
-                        || edge.target_name == "Sink::submit")))
+                graph
+                    .edges
+                    .iter()
+                    .all(|edge| !(edge.source_name.ends_with("run_specific")
+                        && (edge.target_name.contains("<S as Sink")
+                            || edge.target_name == "Sink::submit")))
             );
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
@@ -2993,7 +3373,10 @@ mod merger_tests {
         let d1 = diagnostic("backend", "ok");
         let d2 = diagnostic("backend", "different");
         assert_ne!(diagnostic_key(&d1), diagnostic_key(&d2));
-        assert_eq!(diagnostic_key(&d1), diagnostic_key(&diagnostic("backend", "ok")));
+        assert_eq!(
+            diagnostic_key(&d1),
+            diagnostic_key(&diagnostic("backend", "ok"))
+        );
     }
 
     #[test]
@@ -3014,5 +3397,553 @@ mod merger_tests {
         // Call-graph diagnostics are deduplicated.
         let call_graph = merged.call_graph.expect("call graph present");
         assert_eq!(call_graph.diagnostics.len(), 1);
+    }
+}
+
+/// Tests for toolchain capability gating.
+///
+/// Deliberately free of process spawning and of any nested `cargo` run: the
+/// probe outputs are supplied as literals, so these assertions hold
+/// identically on Linux, macOS, and Windows, and on a machine with no rustup
+/// installed at all.
+#[cfg(test)]
+mod toolchain_gate_tests {
+    use std::path::Path;
+
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
+        format_rustc_release, parse_rustc_release, toolchain_floor_diagnostic,
+    };
+
+    /// Verbose `rustc -Vv` output, as the driver actually captures it.
+    const VERBOSE_VERSION: &str = "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 21.1.4";
+
+    /// `rustup component list --installed` output for a toolchain that can
+    /// build the compiler backend.
+    const COMPONENTS_WITH_RUSTC_DEV: &str =
+        "cargo\nclippy\nllvm-tools\nrust-src\nrust-std\nrustc\nrustc-dev\nrustfmt";
+
+    /// The same, for the default profile that omits the private libraries.
+    const COMPONENTS_WITHOUT_RUSTC_DEV: &str = "cargo\nclippy\nrust-std\nrustc\nrustfmt";
+
+    #[test]
+    fn parses_a_stable_version_line() {
+        assert_eq!(parse_rustc_release(VERBOSE_VERSION), Some((1, 98, 0)));
+        assert_eq!(
+            parse_rustc_release("rustc 1.98.0 (88d9e12ae 2026-08-18)"),
+            Some((1, 98, 0))
+        );
+    }
+
+    #[test]
+    fn parses_pre_release_channels_by_discarding_the_suffix() {
+        // A nightly or beta compiler must compare as its numeric release, or
+        // every nightly would read as "unparseable".
+        assert_eq!(
+            parse_rustc_release("rustc 1.100.0-nightly (8925ea358 2026-08-20)"),
+            Some((1, 100, 0))
+        );
+        assert_eq!(
+            parse_rustc_release("rustc 1.99.0-beta.3 (abcdef123 2026-08-01)"),
+            Some((1, 99, 0))
+        );
+        assert_eq!(parse_rustc_release("rustc 1.98.0-dev"), Some((1, 98, 0)));
+    }
+
+    #[test]
+    fn treats_a_two_component_version_as_a_zero_patch() {
+        assert_eq!(parse_rustc_release("rustc 1.98"), Some((1, 98, 0)));
+    }
+
+    #[test]
+    fn rejects_output_that_is_not_a_version_line() {
+        // `capture_command_output` yields this when the binary is missing.
+        assert_eq!(parse_rustc_release("unknown"), None);
+        assert_eq!(parse_rustc_release(""), None);
+        assert_eq!(parse_rustc_release("cargo 1.98.0"), None);
+        assert_eq!(parse_rustc_release("rustc"), None);
+        assert_eq!(parse_rustc_release("rustc abc"), None);
+        assert_eq!(parse_rustc_release("rustc 1"), None);
+        assert_eq!(parse_rustc_release("rustc 1.98.0.1"), None);
+    }
+
+    #[test]
+    fn version_ordering_is_numeric_not_lexicographic() {
+        // The bug this guards: "1.100.0" sorts before "1.98.0" as a string.
+        let older = parse_rustc_release("rustc 1.97.0").expect("parses");
+        let floor = parse_rustc_release("rustc 1.98.0").expect("parses");
+        let newer = parse_rustc_release("rustc 1.100.0-nightly").expect("parses");
+        assert!(older < floor);
+        assert!(newer > floor);
+        assert_eq!(floor, RUSTC_PRIVATE_VERSION_FLOOR);
+    }
+
+    #[test]
+    fn formats_a_release_triple_the_way_rustc_spells_it() {
+        assert_eq!(format_rustc_release((1, 98, 0)), "1.98.0");
+        assert_eq!(format_rustc_release((1, 100, 2)), "1.100.2");
+    }
+
+    #[test]
+    fn a_stable_toolchain_with_rustc_dev_supports_the_backend() {
+        // The behavior change: the compiler backend no longer requires a
+        // nightly *channel*, only the rustc_private components and a new
+        // enough release. `rust-toolchain.toml` pins stable and asks for
+        // exactly these components.
+        let support = evaluate_backend_support(true, COMPONENTS_WITH_RUSTC_DEV, VERBOSE_VERSION);
+        assert_eq!(
+            support,
+            BackendSupport {
+                rustc_release: Some("1.98.0".to_string()),
+                rustc_version_supported: true,
+                rustc_private_components: true,
+                embedded_backend_supported: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_nightly_toolchain_with_rustc_dev_still_supports_the_backend() {
+        let support = evaluate_backend_support(
+            true,
+            COMPONENTS_WITH_RUSTC_DEV,
+            "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+        );
+        assert!(support.embedded_backend_supported);
+        assert_eq!(support.rustc_release.as_deref(), Some("1.100.0"));
+    }
+
+    #[test]
+    fn missing_rustc_private_components_disable_the_backend() {
+        let support = evaluate_backend_support(true, COMPONENTS_WITHOUT_RUSTC_DEV, VERBOSE_VERSION);
+        assert!(!support.rustc_private_components);
+        assert!(!support.embedded_backend_supported);
+        // The version itself was fine; only the components were missing.
+        assert!(support.rustc_version_supported);
+    }
+
+    #[test]
+    fn rust_src_alone_is_not_enough() {
+        // Both components are required; `rust-src` without `rustc-dev` gives
+        // sources but no libraries to link against.
+        let support = evaluate_backend_support(true, "cargo\nrust-src\nrustc", VERBOSE_VERSION);
+        assert!(!support.rustc_private_components);
+        assert!(!support.embedded_backend_supported);
+    }
+
+    #[test]
+    fn a_toolchain_below_the_floor_disables_the_backend() {
+        let support = evaluate_backend_support(
+            true,
+            COMPONENTS_WITH_RUSTC_DEV,
+            "rustc 1.96.0 (abcdef123 2026-05-01)",
+        );
+        assert!(!support.rustc_version_supported);
+        assert!(!support.embedded_backend_supported);
+        // The release is still reported, so the diagnostic can name it.
+        assert_eq!(support.rustc_release.as_deref(), Some("1.96.0"));
+    }
+
+    #[test]
+    fn the_floor_itself_is_supported() {
+        // A `>` instead of `>=` here would reject the exact pinned version.
+        let support =
+            evaluate_backend_support(true, COMPONENTS_WITH_RUSTC_DEV, "rustc 1.98.0 (aaa 2026)");
+        assert!(support.rustc_version_supported);
+        assert!(support.embedded_backend_supported);
+    }
+
+    #[test]
+    fn an_unparseable_version_is_treated_as_supported() {
+        // Leniency is deliberate: a real compiler error from the wrapper build
+        // is more useful than a silent downgrade to a stable-only analysis.
+        let support = evaluate_backend_support(true, COMPONENTS_WITH_RUSTC_DEV, "unknown");
+        assert_eq!(support.rustc_release, None);
+        assert!(support.rustc_version_supported);
+        assert!(support.embedded_backend_supported);
+    }
+
+    #[test]
+    fn an_unavailable_toolchain_disables_the_backend() {
+        let support = evaluate_backend_support(false, COMPONENTS_WITH_RUSTC_DEV, VERBOSE_VERSION);
+        assert!(!support.embedded_backend_supported);
+        // ...but the components and version are still reported accurately.
+        assert!(support.rustc_private_components);
+        assert!(support.rustc_version_supported);
+    }
+
+    fn capabilities_for(support: BackendSupport, toolchain_available: bool) -> DriverCapabilities {
+        DriverCapabilities {
+            rustup_available: true,
+            available_toolchains: vec!["stable".to_string()],
+            requested_toolchain: "auto".to_string(),
+            resolved_toolchain: "stable".to_string(),
+            toolchain_available,
+            nightly_toolchain: false,
+            rustc_release: support.rustc_release,
+            rustc_version_supported: support.rustc_version_supported,
+            rustc_private_components: support.rustc_private_components,
+            embedded_backend_supported: support.embedded_backend_supported,
+            source_evidence_collected: false,
+            native_interop_collected: false,
+            mir_evidence_collected: false,
+            rustc_version: "rustc 1.98.0".to_string(),
+            cargo_version: "cargo 1.98.0".to_string(),
+            host: "aarch64-apple-darwin".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_healthy_toolchain_produces_no_diagnostic() {
+        let support = evaluate_backend_support(true, COMPONENTS_WITH_RUSTC_DEV, VERBOSE_VERSION);
+        let capabilities = capabilities_for(support, true);
+        assert!(toolchain_floor_diagnostic(Path::new("/repo"), &capabilities).is_none());
+    }
+
+    #[test]
+    fn a_stale_toolchain_diagnostic_names_the_version_and_the_floor() {
+        let support =
+            evaluate_backend_support(true, COMPONENTS_WITH_RUSTC_DEV, "rustc 1.96.0 (a 2026)");
+        let capabilities = capabilities_for(support, true);
+        let diagnostic =
+            toolchain_floor_diagnostic(Path::new("/repo"), &capabilities).expect("diagnostic");
+        assert_eq!(diagnostic.kind, "backend-unsupported");
+        assert!(
+            diagnostic.message.contains("1.96.0"),
+            "{}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.message.contains("1.98.0"),
+            "{}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.message.contains("upgrade"),
+            "{}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
+    fn a_missing_component_diagnostic_gives_the_rustup_command_to_run() {
+        let support = evaluate_backend_support(true, COMPONENTS_WITHOUT_RUSTC_DEV, VERBOSE_VERSION);
+        let capabilities = capabilities_for(support, true);
+        let diagnostic =
+            toolchain_floor_diagnostic(Path::new("/repo"), &capabilities).expect("diagnostic");
+        assert_eq!(diagnostic.kind, "backend-unsupported");
+        assert!(
+            diagnostic
+                .message
+                .contains("rustup component add rustc-dev rust-src --toolchain stable"),
+            "{}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
+    fn a_missing_toolchain_is_reported_before_components_or_version() {
+        // An absent toolchain makes the component and version probes
+        // meaningless, so it must be the reason given.
+        let support = evaluate_backend_support(false, "", "unknown");
+        let capabilities = capabilities_for(support, false);
+        let diagnostic =
+            toolchain_floor_diagnostic(Path::new("/repo"), &capabilities).expect("diagnostic");
+        assert!(
+            diagnostic.message.contains("is not installed"),
+            "{}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
+    fn capabilities_deserialize_from_a_report_written_before_the_new_fields() {
+        // Older reports have no rustcRelease / rustcVersionSupported /
+        // rustcPrivateComponents keys. They must still load, and must not
+        // claim the toolchain is too old just because the field is absent.
+        let json = r#"{
+            "rustup_available": true,
+            "available_toolchains": ["stable"],
+            "requested_toolchain": "auto",
+            "resolved_toolchain": "stable",
+            "toolchain_available": true,
+            "nightly_toolchain": false,
+            "embedded_backend_supported": false,
+            "source_evidence_collected": false,
+            "native_interop_collected": false,
+            "mir_evidence_collected": false,
+            "rustc_version": "rustc 1.98.0",
+            "cargo_version": "cargo 1.98.0",
+            "host": "x86_64-unknown-linux-gnu"
+        }"#;
+        let capabilities: DriverCapabilities =
+            serde_json::from_str(json).expect("legacy capabilities deserialize");
+        assert_eq!(capabilities.rustc_release, None);
+        assert!(capabilities.rustc_version_supported);
+        assert!(!capabilities.rustc_private_components);
+    }
+}
+
+/// Tests for the FFI signals that mirror the lints Rust 1.98 introduced.
+///
+/// These drive the collector over source text parsed in-memory, so they need
+/// no fixture on disk, no `cargo metadata`, and no particular toolchain.
+#[cfg(test)]
+mod native_lint_signal_tests {
+    use syn::visit::Visit;
+
+    use pretty_assertions::assert_eq;
+
+    use super::{NativeFileContext, NativeInteropCollector};
+
+    /// Collect native-interop signals from Rust source text.
+    fn signals_for(source: &str) -> Vec<(String, String)> {
+        let syntax = syn::parse_file(source).expect("fixture source parses");
+        let mut collector = NativeInteropCollector::new(NativeFileContext {
+            package_name: "demo".to_string(),
+            package_path: "demo".to_string(),
+            // Spelled with forward slashes so the expected values below are
+            // identical on Windows.
+            relative_file_path: "src/lib.rs".to_string(),
+            module_path: Vec::new(),
+        });
+        collector.visit_file(&syntax);
+        collector
+            .security_signals
+            .into_iter()
+            .map(|signal| (signal.id, signal.description))
+            .collect()
+    }
+
+    /// Collect only the signals whose description mentions `needle`.
+    fn descriptions_containing(source: &str, needle: &str) -> Vec<String> {
+        signals_for(source)
+            .into_iter()
+            .map(|(_, description)| description)
+            .filter(|description| description.contains(needle))
+            .collect()
+    }
+
+    fn severities_for_kind(source: &str, needle: &str) -> Vec<String> {
+        let syntax = syn::parse_file(source).expect("fixture source parses");
+        let mut collector = NativeInteropCollector::new(NativeFileContext {
+            package_name: "demo".to_string(),
+            package_path: "demo".to_string(),
+            relative_file_path: "src/lib.rs".to_string(),
+            module_path: Vec::new(),
+        });
+        collector.visit_file(&syntax);
+        collector
+            .security_signals
+            .into_iter()
+            .filter(|signal| signal.description.contains(needle))
+            .map(|signal| signal.severity)
+            .collect()
+    }
+
+    #[test]
+    fn flags_a_foreign_function_returning_c_void() {
+        let found = descriptions_containing(
+            r#"
+            unsafe extern "C" {
+                fn do_work() -> core::ffi::c_void;
+            }
+            "#,
+            "c_void_returns",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("do_work"), "{}", found[0]);
+    }
+
+    #[test]
+    fn recognizes_every_spelling_of_c_void() {
+        for spelling in ["c_void", "ffi::c_void", "core::ffi::c_void", "libc::c_void"] {
+            let source = format!(r#"unsafe extern "C" {{ fn f() -> {spelling}; }}"#);
+            assert_eq!(
+                descriptions_containing(&source, "c_void_returns").len(),
+                1,
+                "expected {spelling} to be flagged"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_flag_a_pointer_to_c_void() {
+        // `-> *mut c_void` is the correct, extremely common way to return an
+        // opaque handle. Only a bare `c_void` value is the mistake.
+        let source = r#"
+            unsafe extern "C" {
+                fn allocate() -> *mut core::ffi::c_void;
+                fn borrow() -> *const c_void;
+            }
+            "#;
+        assert!(descriptions_containing(source, "c_void_returns").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_a_foreign_function_with_no_return_type() {
+        let source = r#"unsafe extern "C" { fn f(); }"#;
+        assert!(descriptions_containing(source, "c_void_returns").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_an_ordinary_rust_return_type() {
+        let source = r#"unsafe extern "C" { fn f() -> i32; }"#;
+        assert!(descriptions_containing(source, "c_void_returns").is_empty());
+    }
+
+    #[test]
+    fn flags_an_exported_rust_function_returning_c_void() {
+        let found = descriptions_containing(
+            r#"
+            #[unsafe(no_mangle)]
+            pub extern "C" fn callback() -> core::ffi::c_void { todo!() }
+            "#,
+            "c_void_returns",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("callback"), "{}", found[0]);
+    }
+
+    #[test]
+    fn does_not_flag_a_plain_rust_function_returning_c_void() {
+        // Without an `extern` ABI there is no C caller to mislead, so this is
+        // out of scope for the lint the signal mirrors.
+        let source = "fn helper() -> core::ffi::c_void { todo!() }";
+        assert!(descriptions_containing(source, "c_void_returns").is_empty());
+    }
+
+    #[test]
+    fn a_c_void_return_is_low_severity() {
+        let severities = severities_for_kind(
+            r#"unsafe extern "C" { fn f() -> c_void; }"#,
+            "c_void_returns",
+        );
+        assert_eq!(severities, vec!["low".to_string()]);
+    }
+
+    #[test]
+    fn flags_a_no_mangle_definition_of_a_runtime_symbol() {
+        let found = descriptions_containing(
+            r#"
+            #[unsafe(no_mangle)]
+            pub extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 { todo!() }
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'memcpy'"), "{}", found[0]);
+    }
+
+    #[test]
+    fn flags_the_pre_2024_spelling_of_no_mangle() {
+        // Edition 2021 crates in a workspace still write the bare attribute.
+        let found = descriptions_containing(
+            r#"
+            #[no_mangle]
+            pub extern "C" fn strlen(s: *const u8) -> usize { todo!() }
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'strlen'"), "{}", found[0]);
+    }
+
+    #[test]
+    fn flags_a_runtime_symbol_reached_through_export_name() {
+        // The Rust identifier is innocuous; only the exported symbol collides.
+        // Matching on the identifier alone would miss this entirely.
+        let found = descriptions_containing(
+            r#"
+            #[unsafe(export_name = "memcmp")]
+            pub extern "C" fn my_compare(a: *const u8, b: *const u8, n: usize) -> i32 { todo!() }
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'memcmp'"), "{}", found[0]);
+        assert!(found[0].contains("my_compare"), "{}", found[0]);
+    }
+
+    #[test]
+    fn flags_the_pre_2024_spelling_of_export_name() {
+        let found = descriptions_containing(
+            r#"
+            #[export_name = "bcmp"]
+            pub extern "C" fn cmp(a: *const u8, b: *const u8, n: usize) -> i32 { todo!() }
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'bcmp'"), "{}", found[0]);
+    }
+
+    #[test]
+    fn does_not_flag_a_private_function_named_after_a_runtime_symbol() {
+        // Not exported, so nothing can be interposed and the compiler's own
+        // calls are unaffected. This is the main false-positive risk.
+        let source = "fn memcpy(d: *mut u8, s: *const u8, n: usize) { todo!() }";
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_an_extern_fn_named_after_a_runtime_symbol_without_export() {
+        // `extern "C"` alone controls the ABI, not the symbol's visibility to
+        // the linker as an overriding definition.
+        let source = r#"pub extern "C" fn malloc(n: usize) -> *mut u8 { todo!() }"#;
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_an_exported_function_with_an_ordinary_name() {
+        let source = r#"
+            #[unsafe(no_mangle)]
+            pub extern "C" fn my_library_init() -> i32 { todo!() }
+            "#;
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_a_foreign_declaration_of_a_runtime_symbol() {
+        // Declaring `memcpy` to call it is normal; defining it is the problem.
+        let source = r#"
+            unsafe extern "C" {
+                fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8;
+            }
+            "#;
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    #[test]
+    fn a_runtime_symbol_definition_is_high_severity() {
+        let severities = severities_for_kind(
+            r#"
+            #[unsafe(no_mangle)]
+            pub extern "C" fn free(p: *mut u8) { todo!() }
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(severities, vec!["high".to_string()]);
+    }
+
+    #[test]
+    fn signal_ids_are_distinct_per_signal() {
+        // Two signals at different spans in one file must not collide, or the
+        // report deduplicates a real finding away.
+        let ids: Vec<String> = signals_for(
+            r#"
+            #[unsafe(no_mangle)]
+            pub extern "C" fn memcpy(d: *mut u8) -> *mut u8 { todo!() }
+            #[unsafe(no_mangle)]
+            pub extern "C" fn memset(d: *mut u8) -> *mut u8 { todo!() }
+            "#,
+        )
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+        let unique: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(ids.len(), unique.len(), "duplicate signal ids: {ids:?}");
     }
 }

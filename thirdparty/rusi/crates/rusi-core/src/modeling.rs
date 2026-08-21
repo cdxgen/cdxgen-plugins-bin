@@ -67,7 +67,10 @@ pub fn retain_crypto_focus(report: &mut Report) {
 pub fn is_crypto_dataflow_category(category: &str) -> bool {
     let normalized = category.to_ascii_lowercase();
     normalized.starts_with("crypto")
-        || matches!(normalized.as_str(), "secret" | "jwt" | "certificate" | "tls")
+        || matches!(
+            normalized.as_str(),
+            "secret" | "jwt" | "certificate" | "tls"
+        )
 }
 
 fn crypto_source_patterns() -> Vec<DataFlowPattern> {
@@ -450,7 +453,9 @@ fn filter_crypto_call_graph(
     }
 
     for edge in &call_graph.edges {
-        if retained_node_ids.contains(&edge.source_id) && retained_node_ids.contains(&edge.target_id) {
+        if retained_node_ids.contains(&edge.source_id)
+            && retained_node_ids.contains(&edge.target_id)
+        {
             retained_edge_ids.insert(edge.id.clone());
         }
         if edge
@@ -464,7 +469,9 @@ fn filter_crypto_call_graph(
         }
     }
 
-    call_graph.nodes.retain(|node| retained_node_ids.contains(&node.id));
+    call_graph
+        .nodes
+        .retain(|node| retained_node_ids.contains(&node.id));
     let surviving_node_ids = call_graph
         .nodes
         .iter()
@@ -500,7 +507,10 @@ fn pattern_is_crypto_related(pattern: &DataFlowPattern) -> bool {
 
 fn pattern_is_crypto_related_passthrough(pattern: &DataFlowPattern) -> bool {
     pattern_is_crypto_related(pattern)
-        || matches!(pattern.category.as_str(), "value-wrapper" | "string-format" | "ffi-wrapper")
+        || matches!(
+            pattern.category.as_str(),
+            "value-wrapper" | "string-format" | "ffi-wrapper"
+        )
 }
 
 fn looks_crypto_symbol(value: &str) -> bool {
@@ -609,9 +619,12 @@ mod tests {
                     purls: vec!["pkg:cargo/demo@0.1.0".to_string()],
                     call_type: "static".to_string(),
                     position: position("src/main.rs"),
-                    properties: [("calleeText".to_string(), "openssl::hash::digest".to_string())]
-                        .into_iter()
-                        .collect(),
+                    properties: [(
+                        "calleeText".to_string(),
+                        "openssl::hash::digest".to_string(),
+                    )]
+                    .into_iter()
+                    .collect(),
                 }],
                 diagnostics: Vec::new(),
                 stats: GraphStats {

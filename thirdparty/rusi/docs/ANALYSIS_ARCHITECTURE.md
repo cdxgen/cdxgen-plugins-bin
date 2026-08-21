@@ -26,11 +26,14 @@ The stable backend parses source with `syn` and performs a syntax and type-hint 
 analysis. It runs on stable Rust, does not execute the target, and is the default. It is
 the fast and safe first pass.
 
-The compiler backend embeds a nightly `rustc` driver through `#![feature(rustc_private)]`
-and analyzes the High-level IR (HIR) and Mid-level IR (MIR) that the real compiler
-produces. It is higher fidelity because it works on type-resolved and monomorphized
-information, at the cost of requiring a nightly toolchain with the `rustc-dev` and
-`rust-src` components, and of running `cargo check` on the target. Because a Cargo check
+The compiler backend embeds a `rustc` driver through `#![feature(rustc_private)]` and
+analyzes the High-level IR (HIR) and Mid-level IR (MIR) that the real compiler produces.
+It is higher fidelity because it works on type-resolved and monomorphized information, at
+the cost of requiring the `rustc-dev` and `rust-src` components and a new enough `rustc`
+(see `RUSTC_PRIVATE_VERSION_FLOOR`), and of running `cargo check` on the target. The
+channel itself does not matter: on a non-nightly toolchain the wrapper is built with
+`RUSTC_BOOTSTRAP=1`, which is how a release compiler is asked to accept an unstable
+feature. Because a Cargo check
 compiles build scripts and procedural macros, the compiler backend inherits Cargo build
 time execution semantics, which is a trust consideration documented separately in the
 threat model.
@@ -176,7 +179,7 @@ independent channels do not cross contaminate.
 
 The compiler backend is a three stage pipeline. A driver detects toolchain capability,
 builds the wrapper binary, and runs `cargo check` on the target under a Rust compiler
-wrapper. The wrapper is a nightly `rustc` driver that, in its after analysis callback,
+wrapper. The wrapper is a `rustc` driver that, in its after analysis callback,
 walks the HIR and MIR of each crate compiled from the analysis root and writes a JSON
 artifact of evidence. The driver then merges the per crate artifacts and reconciles them
 with the stable evidence into a single report.

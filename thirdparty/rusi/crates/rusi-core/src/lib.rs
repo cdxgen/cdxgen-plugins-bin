@@ -15,7 +15,7 @@ use rusi_schema::{
     DataFlowStats, Declaration, Diagnostic, FileEvidence, GraphStats, ImportUsage, LibraryUsage,
     ModuleRef, PackageEvidence, Position, Report, RuntimeInfo, SecuritySignal, Stats, ToolInfo,
 };
-use sha2::{Digest, Sha256};
+pub(crate) use rusi_schema::{relative_display_path, stable_id};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -30,8 +30,8 @@ use syn::{
 mod api_discovery;
 mod modeling;
 
-pub use modeling::{AnalysisScope, load_custom_pattern_set};
 use api_discovery::discover_api_endpoints;
+pub use modeling::{AnalysisScope, load_custom_pattern_set};
 use modeling::{crypto_only_pattern_set, merge_pattern_sets, retain_crypto_focus};
 
 const SCHEMA_VERSION: &str = "https://appthreat.github.io/rusi/schema/report-0.1";
@@ -76,7 +76,7 @@ impl Default for AnalyzeOptionsInput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CompilerBackendPayload {
     pub diagnostics: Vec<Diagnostic>,
     pub files: Vec<FileEvidence>,
@@ -87,22 +87,6 @@ pub struct CompilerBackendPayload {
     pub crypto: Option<CryptoEvidence>,
     pub call_graph: Option<CallGraph>,
     pub data_flow: Option<DataFlowEvidence>,
-}
-
-impl Default for CompilerBackendPayload {
-    fn default() -> Self {
-        Self {
-            diagnostics: Vec::new(),
-            files: Vec::new(),
-            imports: Vec::new(),
-            declarations: Vec::new(),
-            usages: Vec::new(),
-            security_signals: Vec::new(),
-            crypto: None,
-            call_graph: None,
-            data_flow: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -173,8 +157,15 @@ struct FunctionRecord {
 
 #[derive(Debug, Clone)]
 enum Operation {
-    Assign { target: String, value: SimpleExpr },
-    AssignField { target: String, field: String, value: SimpleExpr },
+    Assign {
+        target: String,
+        value: SimpleExpr,
+    },
+    AssignField {
+        target: String,
+        field: String,
+        value: SimpleExpr,
+    },
     Expr(SimpleExpr),
     Return(SimpleExpr),
     // Matched where loop operations are walked, but not yet emitted by the
@@ -275,8 +266,7 @@ impl ConcreteTaint {
             if path.steps.len() > MAX_TAINT_PATH_STEPS {
                 continue;
             }
-            let mut signature =
-                String::with_capacity(path.origin_key.len() + path.steps.len() * 8);
+            let mut signature = String::with_capacity(path.origin_key.len() + path.steps.len() * 8);
             signature.push_str(&path.origin_key);
             for step in &path.steps {
                 signature.push('\u{1}');
@@ -303,24 +293,135 @@ struct TraitImplIndex {
     method_to_impls: HashMap<String, Vec<String>>,
 }
 
+/// Method names that mark a *crate-defined* method as a passthrough.
+///
+/// This list does not itself model the standard library — the built-in pattern
+/// pack in [`built_in_dataflow_patterns`] does that. It is the allowlist that
+/// [`discover_auto_passthroughs`] consults when the analyzed crate defines a
+/// method of its own with one of these names and a `self` receiver: such a
+/// method is following the standard library's naming convention, and by that
+/// convention it returns its receiver's data.
+///
+/// Matching is on the final path segment only, because the stable (syn-only)
+/// backend has no type resolution and so cannot tell `String::as_str` from a
+/// user-defined `as_str`. Treating a same-named user method as a passthrough
+/// is the safe direction of error for taint tracking; omitting a real one is
+/// not, because taint then stops dead at the call and every downstream sink
+/// goes unreported. That asymmetry is why the list is deliberately generous.
+///
+/// Methods returning *indices* into the receiver rather than its data — such
+/// as `substr_range` and `subslice_range` — are deliberately absent: an offset
+/// is not the tainted content.
+///
+/// Entries are grouped by the kind of operation they name.
+const KNOWN_PASSTHROUGH_NAMES: &[&str] = &[
+    // Conversions and borrows.
+    "as_ref",
+    "as_mut",
+    "as_str",
+    "as_bytes",
+    "as_encoded_bytes",
+    "as_os_str",
+    "as_path",
+    "as_slice",
+    "as_mut_slice",
+    "as_deref",
+    "as_deref_mut",
+    "to_str",
+    "to_string",
+    "to_owned",
+    "to_os_string",
+    "to_string_lossy",
+    "to_path_buf",
+    "to_vec",
+    "into_owned",
+    "into_inner",
+    "into_string",
+    "into_bytes",
+    "into_vec",
+    "into_boxed_str",
+    "into_boxed_slice",
+    "clone",
+    "clone_from",
+    "try_into",
+    "deref",
+    "deref_mut",
+    "borrow",
+    "borrow_mut",
+    "leak",
+    // Container and option/result access.
+    "read",
+    "write",
+    "get_mut",
+    "get",
+    "get_or_insert",
+    "get_or_insert_with",
+    "iter",
+    "iter_mut",
+    "into_iter",
+    "keys",
+    "values",
+    "values_mut",
+    "first",
+    "last",
+    "unwrap_or_default",
+    // Predicates and searches (the needle argument flows to the result).
+    "is_empty",
+    "is_none",
+    "is_some",
+    "is_ok",
+    "is_err",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "find",
+    "rfind",
+    // Slicing and splitting.
+    "split",
+    "split_at",
+    "split_whitespace",
+    "split_once",
+    "rsplit_once",
+    "split_terminator",
+    "splitn",
+    "rsplitn",
+    "strip_prefix",
+    "strip_suffix",
+    "strip_circumfix",
+    // Trimming.
+    "trim",
+    "trim_start",
+    "trim_end",
+    "trim_matches",
+    "trim_start_matches",
+    "trim_end_matches",
+    "trim_ascii",
+    "trim_ascii_start",
+    "trim_ascii_end",
+    // Case folding, escaping, and other in-place text transforms.
+    "to_lowercase",
+    "to_uppercase",
+    "to_ascii_lowercase",
+    "to_ascii_uppercase",
+    "escape_debug",
+    "escape_default",
+    "escape_unicode",
+    "chars",
+    "bytes",
+    "lines",
+    "replace",
+    "replacen",
+    "repeat",
+];
+
 fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPattern> {
     let mut method_counts: HashMap<String, usize> = HashMap::new();
     let mut proven_passthrough: HashSet<String> = HashSet::new();
 
-    let known_passthrough_names: HashSet<&str> = [
-        "as_ref", "as_mut", "as_str", "as_bytes", "as_os_str", "as_path",
-        "to_string", "to_owned", "to_os_string", "to_string_lossy",
-        "into_owned", "into_inner", "clone", "clone_from",
-        "try_into", "deref", "deref_mut", "borrow", "borrow_mut",
-        "read", "write", "get_mut", "get", "get_or_insert", "get_or_insert_with",
-        "iter", "iter_mut", "into_iter", "keys", "values", "values_mut",
-        "is_empty", "is_none", "is_some", "is_ok", "is_err",
-        "contains", "starts_with", "ends_with", "find", "rfind",
-        "split", "split_at", "split_whitespace", "strip_prefix", "strip_suffix",
-        "trim", "trim_start", "trim_end", "to_lowercase", "to_uppercase",
-        "to_ascii_lowercase", "to_ascii_uppercase", "chars", "bytes",
-        "lines", "replace", "replacen", "repeat",
-    ].iter().copied().collect::<HashSet<_>>();
+    let known_passthrough_names: HashSet<&str> = KNOWN_PASSTHROUGH_NAMES
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
 
     for function in functions {
         if let Some(receiver_type) = &function.receiver_type {
@@ -342,10 +443,10 @@ fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPatte
     for function in functions {
         for operation in &function.operations {
             let callee = match operation {
-                Operation::Expr(SimpleExpr::Call { callee, .. }) |
-                Operation::Return(SimpleExpr::Call { callee, .. }) => Some(callee.as_str()),
-                Operation::Expr(SimpleExpr::MethodCall { method, .. }) |
-                Operation::Return(SimpleExpr::MethodCall { method, .. }) => Some(method.as_str()),
+                Operation::Expr(SimpleExpr::Call { callee, .. })
+                | Operation::Return(SimpleExpr::Call { callee, .. }) => Some(callee.as_str()),
+                Operation::Expr(SimpleExpr::MethodCall { method, .. })
+                | Operation::Return(SimpleExpr::MethodCall { method, .. }) => Some(method.as_str()),
                 _ => None,
             };
             if let Some(callee) = callee {
@@ -534,19 +635,22 @@ pub fn analyze_with_optional_compiler(
                 );
                 Ok(file)
             }
-            Err(error) => Err(Diagnostic {
+            // Boxed so the per-file result stays small: a parse failure is
+            // the rare path, while every successfully analyzed file would
+            // otherwise carry the unused Diagnostic's footprint.
+            Err(error) => Err(Box::new(Diagnostic {
                 kind: "parse".to_string(),
                 message: error.to_string(),
                 package_path: Some(package_ctx.crate_name.clone()),
                 file_path: Some(relative_display_path(&analysis_root, file_path)),
                 position: None,
-            }),
+            })),
         },
     );
     for result in parse_diagnostics.drain(..) {
         match result {
             Ok(file) => analyzed_files.push(file),
-            Err(diagnostic) => diagnostics.push(diagnostic),
+            Err(diagnostic) => diagnostics.push(*diagnostic),
         }
     }
     analyzed_files.sort_by(|left, right| left.file.path.cmp(&right.file.path));
@@ -784,7 +888,10 @@ fn merge_data_flow_evidence(
         (None, None) => None,
         (Some(flow), None) | (None, Some(flow)) => Some(flow),
         (Some(mut primary), Some(mut fallback)) => {
-            merge_pattern_sets(&mut primary.patterns, std::mem::take(&mut fallback.patterns));
+            merge_pattern_sets(
+                &mut primary.patterns,
+                std::mem::take(&mut fallback.patterns),
+            );
             for node in std::mem::take(&mut fallback.nodes) {
                 if !primary.nodes.iter().any(|entry| entry.id == node.id) {
                     primary.nodes.push(node);
@@ -837,10 +944,7 @@ fn build_framework_purls(metadata: &Metadata) -> BTreeMap<String, String> {
     const SUPPORTED_FRAMEWORK_CRATES: &[&str] = &["axum", "actix-web", "rocket"];
     let mut purls = BTreeMap::new();
     for crate_name in SUPPORTED_FRAMEWORK_CRATES {
-        purls.insert(
-            crate_name.to_string(),
-            format!("pkg:cargo/{}", crate_name),
-        );
+        purls.insert(crate_name.to_string(), format!("pkg:cargo/{}", crate_name));
     }
     for package in &metadata.packages {
         let name = package.name.as_str();
@@ -927,12 +1031,13 @@ fn workspace_package_contexts(metadata: &Metadata) -> Result<Vec<PackageContext>
 }
 
 fn package_context(package: &Package) -> Result<PackageContext> {
-    let manifest_path = fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
-        format!(
-            "failed to resolve package manifest {}",
-            package.manifest_path.as_std_path().display()
-        )
-    })?;
+    let manifest_path =
+        fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
+            format!(
+                "failed to resolve package manifest {}",
+                package.manifest_path.as_std_path().display()
+            )
+        })?;
     let root_dir = manifest_path
         .parent()
         .map(Path::to_path_buf)
@@ -953,7 +1058,10 @@ fn package_context(package: &Package) -> Result<PackageContext> {
     })
 }
 
-pub(crate) fn discover_rust_files(package_ctx: &PackageContext, include_tests: bool) -> Result<Vec<PathBuf>> {
+pub(crate) fn discover_rust_files(
+    package_ctx: &PackageContext,
+    include_tests: bool,
+) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut visited_dirs = HashSet::new();
     let allowed_root = canonical_path(&package_ctx.root_dir);
@@ -986,8 +1094,8 @@ fn walk_rust_files(
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Ok(());
     }
-    let canonical_dir = fs::canonicalize(dir)
-        .with_context(|| format!("failed to resolve {}", dir.display()))?;
+    let canonical_dir =
+        fs::canonicalize(dir).with_context(|| format!("failed to resolve {}", dir.display()))?;
     if !canonical_dir.starts_with(allowed_root) || !visited_dirs.insert(canonical_dir.clone()) {
         return Ok(());
     }
@@ -1430,7 +1538,10 @@ impl<'ast> Visit<'ast> for SourceCollector {
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
         let receiver = node.self_ty.to_token_stream().to_string().replace(' ', "");
-        let trait_name = node.trait_.as_ref().map(|(_, path, _)| path_to_string(path));
+        let trait_name = node
+            .trait_
+            .as_ref()
+            .map(|(_, path, _)| path_to_string(path));
         let mut method_ids = Vec::new();
         let mut method_names = Vec::new();
         for item in &node.items {
@@ -1546,9 +1657,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     .items
                     .iter()
                     .filter_map(|trait_item| match trait_item {
-                        syn::TraitItem::Fn(method) => {
-                            Some(method.sig.ident.to_string())
-                        }
+                        syn::TraitItem::Fn(method) => Some(method.sig.ident.to_string()),
                         _ => None,
                     })
                     .collect();
@@ -1739,18 +1848,22 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                 target: rx_name,
                                 value: simple_expr(&init.expr),
                             });
-                        } else if let Pat::Ident(PatIdent { ident, .. }) = &local.pat
-                        {
+                        } else if let Pat::Ident(PatIdent { ident, .. }) = &local.pat {
                             if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
                                 && let Some(target_var) = extract_path_name(base)
                             {
-                                let target_name = qualified_target_name(&self.struct_field_names, &target_var, &member_from_expr(member));
+                                let target_name = qualified_target_name(
+                                    &self.struct_field_names,
+                                    &target_var,
+                                    &member_from_expr(member),
+                                );
                                 frame.operations.push(Operation::AssignField {
                                     target: ident.to_string(),
                                     field: target_name,
                                     value: simple_expr(&init.expr),
                                 });
-                            } else if let Expr::Struct(syn::ExprStruct { fields, .. }) = &*init.expr {
+                            } else if let Expr::Struct(syn::ExprStruct { fields, .. }) = &*init.expr
+                            {
                                 // P3.5: struct-literal binding. Emit one
                                 // AssignField per named field so access-path-
                                 // aware reads can distinguish `x.tainted`
@@ -1791,7 +1904,10 @@ impl<'ast> Visit<'ast> for SourceCollector {
                         {
                             let field_name = member_from_expr(&field_expr.member);
                             let qualified_field = qualified_target_name(
-                                &self.struct_field_names, &target_var, &field_name);
+                                &self.struct_field_names,
+                                &target_var,
+                                &field_name,
+                            );
                             frame.operations.push(Operation::AssignField {
                                 target: target_var,
                                 field: qualified_field,
@@ -2104,9 +2220,7 @@ fn infer_param_source_categories_with_attrs(
     let route_handler = attrs.iter().any(|attr| {
         let attr_path = path_to_string(attr.path());
         let name = last_segment(&attr_path);
-        http_route_attr_names()
-            .iter()
-            .any(|candidate| name == *candidate)
+        http_route_attr_names().contains(&name)
     });
     if route_handler {
         for (index, ty) in param_types.iter().enumerate() {
@@ -2128,18 +2242,24 @@ fn inline_closure_source_category_for_call(
     index: usize,
 ) -> Option<&'static str> {
     let normalized = normalize_pattern_text(callee_name);
-    if index == 0 && matches!(normalized.as_str(), "Iron::new" | "iron::Iron::new") {
-        Some("http-request")
-    } else if index == 0
-        && matches!(
-            last_segment(&normalized),
-            "get" | "post" | "put" | "delete" | "patch" | "options" | "head" | "route" | "handler"
-        )
-    {
-        Some("http-request")
-    } else {
-        None
-    }
+    // Only the first argument is the handler closure in either shape: the
+    // whole-server form (`Iron::new(handler)`) and the per-route form
+    // (`get(handler)`). Both hand the closure an HTTP request.
+    let is_handler_position = index == 0
+        && (matches!(normalized.as_str(), "Iron::new" | "iron::Iron::new")
+            || matches!(
+                last_segment(&normalized),
+                "get"
+                    | "post"
+                    | "put"
+                    | "delete"
+                    | "patch"
+                    | "options"
+                    | "head"
+                    | "route"
+                    | "handler"
+            ));
+    is_handler_position.then_some("http-request")
 }
 
 fn inline_closure_source_category_for_method_call(
@@ -2610,14 +2730,14 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
                 },
             }
         }
-        Expr::Reference(ExprReference { expr, mutability, .. }) => SimpleExpr::Reference {
+        Expr::Reference(ExprReference {
+            expr, mutability, ..
+        }) => SimpleExpr::Reference {
             expr: Box::new(simple_expr(expr)),
             mutable: mutability.is_some(),
         },
         Expr::Paren(ExprParen { expr, .. }) => simple_expr(expr),
-        Expr::Field(ExprField {
-            base, member, ..
-        }) => SimpleExpr::Field {
+        Expr::Field(ExprField { base, member, .. }) => SimpleExpr::Field {
             base: Box::new(simple_expr(base)),
             field: member_from_expr(member),
         },
@@ -2635,10 +2755,19 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         }
         Expr::Macro(expr_macro) => parse_macro_like_call(expr_macro).unwrap_or(SimpleExpr::Unknown),
         Expr::Lit(_) => SimpleExpr::Literal,
-        Expr::If(syn::ExprIf { cond, then_branch, else_branch, .. }) => {
+        Expr::If(syn::ExprIf {
+            cond,
+            then_branch,
+            else_branch,
+            ..
+        }) => {
             let mut items = vec![
                 simple_expr(cond),
-                then_branch.stmts.last().map(stmt_tail_expr).unwrap_or(SimpleExpr::Unknown)
+                then_branch
+                    .stmts
+                    .last()
+                    .map(stmt_tail_expr)
+                    .unwrap_or(SimpleExpr::Unknown),
             ];
             if let Some((_, else_expr)) = else_branch {
                 items.push(simple_expr(else_expr));
@@ -2656,24 +2785,34 @@ fn simple_expr(expr: &Expr) -> SimpleExpr {
         }
         Expr::Cast(syn::ExprCast { expr, .. }) => simple_expr(expr),
         Expr::Index(syn::ExprIndex { expr, .. }) => simple_expr(expr),
-        Expr::Unary(syn::ExprUnary { op: syn::UnOp::Deref(_), expr, .. }) => simple_expr(expr),
+        Expr::Unary(syn::ExprUnary {
+            op: syn::UnOp::Deref(_),
+            expr,
+            ..
+        }) => simple_expr(expr),
         Expr::Unary(syn::ExprUnary { expr, .. }) => simple_expr(expr),
         Expr::Assign(syn::ExprAssign { left, right, .. }) => {
             if let Expr::Field(field_expr) = &**left
                 && let Some(_base) = extract_path_name(&field_expr.base)
             {
                 let _result = simple_expr(right);
-                SimpleExpr::Compose(vec![SimpleExpr::Field {
-                    base: Box::new(simple_expr(&field_expr.base)),
-                    field: member_from_expr(&field_expr.member),
-                }, simple_expr(right)])
+                SimpleExpr::Compose(vec![
+                    SimpleExpr::Field {
+                        base: Box::new(simple_expr(&field_expr.base)),
+                        field: member_from_expr(&field_expr.member),
+                    },
+                    simple_expr(right),
+                ])
             } else {
                 SimpleExpr::Compose(vec![simple_expr(left), simple_expr(right)])
             }
         }
         Expr::Group(syn::ExprGroup { expr, .. }) => simple_expr(expr),
         Expr::Struct(syn::ExprStruct { fields, .. }) => {
-            let items: Vec<SimpleExpr> = fields.iter().map(|field| simple_expr(&field.expr)).collect();
+            let items: Vec<SimpleExpr> = fields
+                .iter()
+                .map(|field| simple_expr(&field.expr))
+                .collect();
             if items.len() == 1 {
                 items.into_iter().next().unwrap_or(SimpleExpr::Unknown)
             } else {
@@ -2727,12 +2866,10 @@ fn qualified_target_name(
     field: &str,
 ) -> String {
     for (key, fields) in struct_field_names {
-        if key.ends_with(&format!("::{}", target_var))
-            || key == target_var
+        if (key.ends_with(&format!("::{}", target_var)) || key == target_var)
+            && fields.iter().any(|f| f == field)
         {
-            if fields.iter().any(|f| f == field) {
-                return format!("{}:{}", target_var, field);
-            }
+            return format!("{}:{}", target_var, field);
         }
     }
     format!("{}:{}", target_var, field)
@@ -2752,7 +2889,8 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
     for file in analyzed_files {
         for record in &file.trait_impl_records {
             let trait_key = record.trait_name.clone();
-            for (method_id, method_name) in record.method_ids.iter().zip(record.method_names.iter()) {
+            for (method_id, method_name) in record.method_ids.iter().zip(record.method_names.iter())
+            {
                 trait_to_impl_methods
                     .entry(trait_key.clone())
                     .or_default()
@@ -2850,10 +2988,7 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                 }
                 diagnostics.push(Diagnostic {
                     kind: "resolution".to_string(),
-                    message: format!(
-                        "unresolved or external call target {}",
-                        call.callee_text
-                    ),
+                    message: format!("unresolved or external call target {}", call.callee_text),
                     package_path: Some(function.package_path.clone()),
                     file_path: Some(function.file_path.clone()),
                     position: Some(call.position.clone()),
@@ -2909,10 +3044,7 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                     candidate.provenance.call_type().to_string(),
                 );
                 if candidates.len() > 1 {
-                    properties.insert(
-                        "candidateCount".to_string(),
-                        candidates.len().to_string(),
-                    );
+                    properties.insert("candidateCount".to_string(), candidates.len().to_string());
                 }
                 if let Some(receiver) = call.receiver_text.as_deref() {
                     properties.insert("receiver".to_string(), receiver.to_string());
@@ -3093,20 +3225,20 @@ struct ResolvedCall {
 ///
 /// Resolution order (sound-leaning: prefer exact, over-approximate when
 /// ambiguous, filter by receiver type where the binding is known):
-///   1. Fully-qualified / normalized local match (single → Static,
-///      multiple → StaticOverapprox — qualified keys rarely collide, but
-///      two same-named items in different modules can both index under the
-///      same normalized key when the qualifier was elided at the call site).
-///   2. Method call with a receiver (method_name present):
-///        a. If receiver type is known and filters local same-name
-///           candidates to one → ReceiverTyped.
-///        b. Single local same-name match → Static.
-///        c. Multiple local matches → StaticOverapprox.
-///        d. Trait dispatch via method_to_impls, with the same
-///           receiver-type filter attempted first; one impl → TraitImpl,
-///           many → TraitOverapprox.
-///   3. Free function with a bare-name collision (no method_name):
-///      over-approximate via last-segment index.
+/// 1. Fully-qualified / normalized local match (single → Static,
+///    multiple → StaticOverapprox — qualified keys rarely collide, but
+///    two same-named items in different modules can both index under the
+///    same normalized key when the qualifier was elided at the call site).
+/// 2. Method call with a receiver (method_name present), in order:
+///    - If receiver type is known and filters local same-name candidates to
+///      one → ReceiverTyped.
+///    - Single local same-name match → Static.
+///    - Multiple local matches → StaticOverapprox.
+///    - Trait dispatch via method_to_impls, with the same receiver-type
+///      filter attempted first; one impl → TraitImpl, many →
+///      TraitOverapprox.
+/// 3. Free function with a bare-name collision (no method_name):
+///    over-approximate via last-segment index.
 fn resolve_call_targets(
     call: &SimplifiedCall,
     package_path: &str,
@@ -3191,12 +3323,8 @@ fn resolve_call_targets(
                 }
             }
             if !combined.is_empty() {
-                let filtered = filter_by_receiver_type(
-                    &combined,
-                    local_index,
-                    receiver_type,
-                    method,
-                );
+                let filtered =
+                    filter_by_receiver_type(&combined, local_index, receiver_type, method);
                 if !filtered.is_empty() {
                     return resolutions(&filtered, CallProvenance::ReceiverTyped);
                 }
@@ -3294,10 +3422,7 @@ fn find_qualified_name_for_id(
 }
 
 fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> bool {
-    if !qname
-        .split("::")
-        .any(|segment| segment == type_token)
-    {
+    if !qname.split("::").any(|segment| segment == type_token) {
         return false;
     }
     last_segment(qname) == method
@@ -3307,10 +3432,11 @@ fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> b
 ///
 /// Walks the function's operations looking for the small set of patterns
 /// that unambiguously reveal a variable's type without running typeck:
-///   * `let x: T = ...;`                → x:T
-///   * `let x = T::new(...);`           → x:T   (T capitalized, simple ident)
-///   * `let x = path::Type::new(...);`  → x:Type
-///   * `let mut x = ...;` parameters    → x:param_type
+/// * `let x: T = ...;`                → x:T
+/// * `let x = T::new(...);`           → x:T   (T capitalized, simple ident)
+/// * `let x = path::Type::new(...);`  → x:Type
+/// * `let mut x = ...;` parameters    → x:param_type
+///
 /// Plus the function's parameter types seed bindings for `&self`/params.
 ///
 /// Returned map keys are variable names (identifiers, not field accesses),
@@ -3384,10 +3510,7 @@ fn bare_ident(name: &str) -> Option<String> {
         return None;
     }
     // Reject `x.y` / `x[0]` / `&x` — only plain identifiers count as bindings.
-    if trimmed
-        .chars()
-        .any(|c| !(c.is_alphanumeric() || c == '_'))
-    {
+    if trimmed.chars().any(|c| !(c.is_alphanumeric() || c == '_')) {
         return None;
     }
     Some(trimmed.to_string())
@@ -3432,8 +3555,6 @@ fn constructor_type(callee: &str) -> Option<String> {
     bare_type_token(candidate)
 }
 
-
-
 fn normalize_local_path(callee: &str, package_path: &str) -> String {
     if callee.starts_with("crate::") {
         format!("{}::{}", package_path, callee.trim_start_matches("crate::"))
@@ -3472,23 +3593,13 @@ fn build_data_flow(
         .collect();
     let summaries = infer_summaries(functions, &local_index, &patterns);
     let partials = parallel_map_collect(functions, |function| {
-        let mut builder = DataFlowBuilder::new(
-            mode,
-            &patterns,
-            &summaries,
-            &local_index,
-            &function_map,
-        );
+        let mut builder =
+            DataFlowBuilder::new(mode, &patterns, &summaries, &local_index, &function_map);
         builder.materialize_function(function);
         builder
     });
-    let mut builder = DataFlowBuilder::new(
-        mode,
-        &patterns,
-        &summaries,
-        &local_index,
-        &function_map,
-    );
+    let mut builder =
+        DataFlowBuilder::new(mode, &patterns, &summaries, &local_index, &function_map);
     for partial in partials {
         builder.merge_materialized(partial);
     }
@@ -4362,6 +4473,305 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
             },
+            // Standard-library text and container methods that hand their
+            // receiver's data back out. Omitting one is not a missed
+            // convenience: taint stops dead at the call, so every sink
+            // downstream of it goes unreported. Kept in step with the
+            // standard library for that reason.
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "split_once".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "rsplit_once".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "splitn".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "rsplitn".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "split".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "rsplit".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "split_terminator".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "split_whitespace".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "lines".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "chars".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "bytes".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "strip_prefix".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "strip_suffix".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "strip_circumfix".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_start".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_end".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_matches".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_start_matches".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_end_matches".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_ascii".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_ascii_start".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "trim_ascii_end".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "replace".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "replacen".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "repeat".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "escape_debug".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "escape_default".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "join".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "concat".to_string(),
+                category: "string-transform".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_str".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "into_string".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "into_bytes".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "into_vec".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_vec".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_path_buf".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "to_os_string".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_path".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_slice".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_mut_slice".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_deref".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_deref_mut".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "as_encoded_bytes".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "into_boxed_str".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "leak".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "get".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "first".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "last".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "iter".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "into_iter".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+            },
         ],
     }
 }
@@ -4456,7 +4866,11 @@ fn summarize_function(
                 );
                 env.insert(target.clone(), value_taint);
             }
-            Operation::AssignField { target, field, value } => {
+            Operation::AssignField {
+                target,
+                field,
+                value,
+            } => {
                 let value_taint = eval_abstract_expr(
                     value,
                     &env,
@@ -4476,16 +4890,30 @@ fn summarize_function(
                         match op {
                             Operation::Assign { target, value } => {
                                 let value_taint = eval_abstract_expr(
-                                    value, &loop_env, summaries, &function.package_path, local_index, patterns,
+                                    value,
+                                    &loop_env,
+                                    summaries,
+                                    &function.package_path,
+                                    local_index,
+                                    patterns,
                                 );
                                 if loop_env.get(target) != Some(&value_taint) {
                                     changed = true;
                                 }
                                 loop_env.insert(target.clone(), value_taint);
                             }
-                            Operation::AssignField { target, field, value } => {
+                            Operation::AssignField {
+                                target,
+                                field,
+                                value,
+                            } => {
                                 let value_taint = eval_abstract_expr(
-                                    value, &loop_env, summaries, &function.package_path, local_index, patterns,
+                                    value,
+                                    &loop_env,
+                                    summaries,
+                                    &function.package_path,
+                                    local_index,
+                                    patterns,
                                 );
                                 let key = format!("{}.{}", target, field);
                                 loop_env.insert(key, value_taint);
@@ -4689,9 +5117,17 @@ fn eval_abstract_expr(
                 eval_abstract_expr(base, env, summaries, package_path, local_index, patterns)
             }
         }
-        SimpleExpr::MethodCall { method, receiver, args, .. } => {
+        SimpleExpr::MethodCall {
+            method,
+            receiver,
+            args,
+            ..
+        } => {
             let callee = method.clone();
-            let all_args = std::iter::once(receiver.as_ref()).chain(args.iter()).cloned().collect::<Vec<_>>();
+            let all_args = std::iter::once(receiver.as_ref())
+                .chain(args.iter())
+                .cloned()
+                .collect::<Vec<_>>();
             if let Some(source_match) = find_source_pattern(&callee, &patterns.sources) {
                 return BTreeSet::from([AbstractOrigin::Source(source_match.category.to_string())]);
             }
@@ -4701,7 +5137,14 @@ fn eval_abstract_expr(
             if has_passthrough_pattern(&callee, &patterns.passthroughs) {
                 let mut taint = BTreeSet::new();
                 for arg in &all_args {
-                    taint.extend(eval_abstract_expr(arg, env, summaries, package_path, local_index, patterns));
+                    taint.extend(eval_abstract_expr(
+                        arg,
+                        env,
+                        summaries,
+                        package_path,
+                        local_index,
+                        patterns,
+                    ));
                 }
                 return taint;
             }
@@ -4714,7 +5157,14 @@ fn eval_abstract_expr(
                 }
                 for param_index in summary.param_to_return {
                     if let Some(arg) = all_args.get(param_index) {
-                        taint.extend(eval_abstract_expr(arg, env, summaries, package_path, local_index, patterns));
+                        taint.extend(eval_abstract_expr(
+                            arg,
+                            env,
+                            summaries,
+                            package_path,
+                            local_index,
+                            patterns,
+                        ));
                     }
                 }
             }
@@ -4784,12 +5234,7 @@ impl<'a> DataFlowBuilder<'a> {
                 function.declaration.position.clone(),
                 Some(idx),
             );
-            env.insert(
-                param.clone(),
-                ConcreteTaint {
-                    paths: vec![path],
-                },
-            );
+            env.insert(param.clone(), ConcreteTaint { paths: vec![path] });
         }
         for operation in &function.operations {
             match operation {
@@ -4828,7 +5273,8 @@ impl<'a> DataFlowBuilder<'a> {
                         self.nodes.insert(node_id.clone(), target_node.clone());
                         for path in &mut taint.paths {
                             if let Some(last_step) = path.steps.last() {
-                                let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
+                                let edge_id =
+                                    stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
                                 let edge = DataFlowEdge {
                                     id: edge_id.clone(),
                                     source_id: last_step.node.id.clone(),
@@ -4851,7 +5297,11 @@ impl<'a> DataFlowBuilder<'a> {
                         env.insert(target.clone(), taint);
                     }
                 }
-                Operation::AssignField { target, field, value } => {
+                Operation::AssignField {
+                    target,
+                    field,
+                    value,
+                } => {
                     let taint = self.eval_concrete_expr(function, value, &env);
                     if !taint.paths.is_empty() {
                         let key = format!("{}.{}", target, field);
@@ -4867,13 +5317,19 @@ impl<'a> DataFlowBuilder<'a> {
                                 Operation::Assign { target, value } => {
                                     let taint = self.eval_concrete_expr(function, value, &loop_env);
                                     if !taint.paths.is_empty() {
-                                        if loop_env.get(target).is_none_or(|prev| prev.paths.len() != taint.paths.len()) {
+                                        if loop_env.get(target).is_none_or(|prev| {
+                                            prev.paths.len() != taint.paths.len()
+                                        }) {
                                             changed = true;
                                         }
                                         loop_env.insert(target.clone(), taint);
                                     }
                                 }
-                                Operation::AssignField { target, field, value } => {
+                                Operation::AssignField {
+                                    target,
+                                    field,
+                                    value,
+                                } => {
                                     let taint = self.eval_concrete_expr(function, value, &loop_env);
                                     if !taint.paths.is_empty() {
                                         let key = format!("{}.{}", target, field);
@@ -4883,20 +5339,27 @@ impl<'a> DataFlowBuilder<'a> {
                                 _ => {}
                             }
                         }
-                        if !changed { break; }
+                        if !changed {
+                            break;
+                        }
                     }
                     for (key, taint) in loop_env {
-                        if !env.contains_key(&key) {
-                            env.insert(key, taint);
-                        }
+                        env.entry(key).or_insert(taint);
                     }
                 }
                 Operation::Expr(expr) | Operation::Return(expr) => {
                     let (callee, args, position) = match expr {
-                        SimpleExpr::Call { callee, args, position } => {
-                            (callee.clone(), args.clone(), position.clone())
-                        }
-                        SimpleExpr::MethodCall { method, receiver, args, position } => {
+                        SimpleExpr::Call {
+                            callee,
+                            args,
+                            position,
+                        } => (callee.clone(), args.clone(), position.clone()),
+                        SimpleExpr::MethodCall {
+                            method,
+                            receiver,
+                            args,
+                            position,
+                        } => {
                             let all_args = std::iter::once(receiver.as_ref())
                                 .chain(args.iter())
                                 .cloned()
@@ -4925,70 +5388,86 @@ impl<'a> DataFlowBuilder<'a> {
                                 }
                             }
                         }
-                         // P4.1 out-parameter mutation: only propagate
-                         // taint into arguments that are *mutable
-                         // references* (`&mut x`). The previous heuristic
-                         // unioned every call's taint onto every Var arg,
-                         // which manufactured cross-arg FPs whenever a
-                         // tainted value happened to share a callsite
-                         // with an unrelated sink-shaped argument.
-                         // Mutability is detected via the preserved
-                         // SimpleExpr::Reference{mutable:true} marker.
-                         let mut union_taint = ConcreteTaint::default();
-                         for arg in args {
-                             union_taint.paths.extend(self.eval_concrete_expr(function, arg, &env).paths);
-                         }
-                         let union_taint = union_taint.bounded();
-                         if !union_taint.paths.is_empty() {
-                             for arg in args {
-                                 if let SimpleExpr::Reference { expr, mutable: true } = arg
-                                     && let SimpleExpr::Var(var_name) = expr.as_ref()
-                                 {
-                                     // Confirmed &mut arg: the callee may
-                                     // write into it. Conservative union.
-                                     if var_name != "tx" && var_name != "rx" {
-                                         let mut target_taint = env.get(var_name).cloned().unwrap_or_default();
-                                         target_taint.paths.extend(union_taint.paths.clone());
-                                         env.insert(var_name.clone(), target_taint.bounded());
-                                     }
-                                 }
-                             }
-                         }
+                        // P4.1 out-parameter mutation: only propagate
+                        // taint into arguments that are *mutable
+                        // references* (`&mut x`). The previous heuristic
+                        // unioned every call's taint onto every Var arg,
+                        // which manufactured cross-arg FPs whenever a
+                        // tainted value happened to share a callsite
+                        // with an unrelated sink-shaped argument.
+                        // Mutability is detected via the preserved
+                        // SimpleExpr::Reference{mutable:true} marker.
+                        let mut union_taint = ConcreteTaint::default();
+                        for arg in args {
+                            union_taint
+                                .paths
+                                .extend(self.eval_concrete_expr(function, arg, &env).paths);
+                        }
+                        let union_taint = union_taint.bounded();
+                        if !union_taint.paths.is_empty() {
+                            for arg in args {
+                                if let SimpleExpr::Reference {
+                                    expr,
+                                    mutable: true,
+                                } = arg
+                                    && let SimpleExpr::Var(var_name) = expr.as_ref()
+                                {
+                                    // Confirmed &mut arg: the callee may
+                                    // write into it. Conservative union.
+                                    if var_name != "tx" && var_name != "rx" {
+                                        let mut target_taint =
+                                            env.get(var_name).cloned().unwrap_or_default();
+                                        target_taint.paths.extend(union_taint.paths.clone());
+                                        env.insert(var_name.clone(), target_taint.bounded());
+                                    }
+                                }
+                            }
+                        }
 
-                         // P4.2 channel send/recv: per-channel taint slot
-                         // keyed by the paired receiver identity. Falls
-                         // back to a global slot only when no pairing is
-                         // known (e.g. channel constructed outside this
-                         // function). The previous global `__channel_taint`
-                         // slot let an unrelated `rx.recv()` pick up taint
-                         // from a different channel's `tx.send()`.
-                         if callee.ends_with("send") {
-                             if let Some(val_arg) = args.get(1) {
-                                 let val_taint = self.eval_concrete_expr(function, val_arg, &env);
-                                 if !val_taint.paths.is_empty() {
-                                     // Channel identity: prefer the paired
-                                     // receiver name when we know it, so
-                                     // `rx.recv()` can find this taint
-                                     // without consulting the global slot.
-                                     let channel_key = match args.first() {
-                                         Some(SimpleExpr::Var(tx_name)) => {
-                                             match function.channel_pairs.iter().find(|(tx, _)| tx == tx_name) {
-                                                 Some((_, rx_name)) => format!("__channel:{rx_name}"),
-                                                 None => format!("__channel:{tx_name}"),
-                                             }
-                                         }
-                                         _ => "__channel_taint".to_string(),
-                                     };
-                                     let mut channel_taint = env.get(&channel_key).cloned().unwrap_or_default();
-                                     channel_taint.paths.extend(val_taint.paths);
-                                     env.insert(channel_key, channel_taint.bounded());
-                                 }
-                             }
-                         }
+                        // P4.2 channel send/recv: per-channel taint slot
+                        // keyed by the paired receiver identity. Falls
+                        // back to a global slot only when no pairing is
+                        // known (e.g. channel constructed outside this
+                        // function). The previous global `__channel_taint`
+                        // slot let an unrelated `rx.recv()` pick up taint
+                        // from a different channel's `tx.send()`.
+                        if callee.ends_with("send")
+                            && let Some(val_arg) = args.get(1)
+                        {
+                            let val_taint = self.eval_concrete_expr(function, val_arg, &env);
+                            if !val_taint.paths.is_empty() {
+                                // Channel identity: prefer the paired
+                                // receiver name when we know it, so
+                                // `rx.recv()` can find this taint
+                                // without consulting the global slot.
+                                let channel_key = match args.first() {
+                                    Some(SimpleExpr::Var(tx_name)) => {
+                                        match function
+                                            .channel_pairs
+                                            .iter()
+                                            .find(|(tx, _)| tx == tx_name)
+                                        {
+                                            Some((_, rx_name)) => {
+                                                format!("__channel:{rx_name}")
+                                            }
+                                            None => format!("__channel:{tx_name}"),
+                                        }
+                                    }
+                                    _ => "__channel_taint".to_string(),
+                                };
+                                let mut channel_taint =
+                                    env.get(&channel_key).cloned().unwrap_or_default();
+                                channel_taint.paths.extend(val_taint.paths);
+                                env.insert(channel_key, channel_taint.bounded());
+                            }
+                        }
 
-                        if let Some(resolved) =
-                            resolve_call_target(callee, &function.package_path, self.local_index, None)
-                            && let Some(summary) = self.summaries.get(&resolved).cloned()
+                        if let Some(resolved) = resolve_call_target(
+                            callee,
+                            &function.package_path,
+                            self.local_index,
+                            None,
+                        ) && let Some(summary) = self.summaries.get(&resolved).cloned()
                         {
                             for (sink_category, parameter_indexes) in summary.param_to_sink {
                                 for parameter_index in parameter_indexes {
@@ -5050,10 +5529,10 @@ impl<'a> DataFlowBuilder<'a> {
                 args,
                 position,
             } => {
-                if callee.ends_with("recv") {
-                    if let Some(taint) = env.get("__channel_taint") {
-                        return taint.clone();
-                    }
+                if callee.ends_with("recv")
+                    && let Some(taint) = env.get("__channel_taint")
+                {
+                    return taint.clone();
                 }
                 if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources) {
                     let path = self.new_source_path(
@@ -5063,9 +5542,7 @@ impl<'a> DataFlowBuilder<'a> {
                         position.clone(),
                         None,
                     );
-                    return ConcreteTaint {
-                        paths: vec![path],
-                    };
+                    return ConcreteTaint { paths: vec![path] };
                 }
                 if is_sanitizer_call(callee) {
                     return ConcreteTaint { paths: vec![] };
@@ -5106,7 +5583,10 @@ impl<'a> DataFlowBuilder<'a> {
                             };
                             self.nodes.insert(node_id.clone(), passthrough_node.clone());
                             if let Some(last_step) = path.steps.last() {
-                                let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "passthrough"]);
+                                let edge_id = stable_id(
+                                    "df-edge",
+                                    &[&last_step.node.id, &node_id, "passthrough"],
+                                );
                                 let edge = DataFlowEdge {
                                     id: edge_id.clone(),
                                     source_id: last_step.node.id.clone(),
@@ -5184,7 +5664,10 @@ impl<'a> DataFlowBuilder<'a> {
                                 };
                                 self.nodes.insert(node_id.clone(), call_node.clone());
                                 if let Some(last_step) = path.steps.last() {
-                                    let edge_id = stable_id("df-edge", &[&last_step.node.id, &node_id, "call_return"]);
+                                    let edge_id = stable_id(
+                                        "df-edge",
+                                        &[&last_step.node.id, &node_id, "call_return"],
+                                    );
                                     let edge = DataFlowEdge {
                                         id: edge_id.clone(),
                                         source_id: last_step.node.id.clone(),
@@ -5211,14 +5694,20 @@ impl<'a> DataFlowBuilder<'a> {
                     arg_taint_count += arg_paths.len();
                 }
                 if arg_taint_count > 0 {
-                    let entry = self.missing_passthrough_call_counts
+                    let entry = self
+                        .missing_passthrough_call_counts
                         .entry(callee.clone())
                         .or_default();
                     *entry += 1;
                 }
                 ConcreteTaint { paths: vec![] }
             }
-            SimpleExpr::MethodCall { method, receiver, args, position } => {
+            SimpleExpr::MethodCall {
+                method,
+                receiver,
+                args,
+                position,
+            } => {
                 if method.ends_with("recv") {
                     // P4.2: look up the per-channel taint slot keyed by
                     // the receiver variable (e.g. `__channel:rx`). Falls
@@ -5234,13 +5723,22 @@ impl<'a> DataFlowBuilder<'a> {
                     }
                 }
                 if let Some(source_match) = find_source_pattern(method, &self.patterns.sources) {
-                    let path = self.new_source_path(function, method, &source_match.category, position.clone(), None);
+                    let path = self.new_source_path(
+                        function,
+                        method,
+                        &source_match.category,
+                        position.clone(),
+                        None,
+                    );
                     return ConcreteTaint { paths: vec![path] };
                 }
                 if is_sanitizer_call(method) {
                     return ConcreteTaint { paths: vec![] };
                 }
-                let all_args = std::iter::once(receiver.as_ref()).chain(args.iter()).cloned().collect::<Vec<_>>();
+                let all_args = std::iter::once(receiver.as_ref())
+                    .chain(args.iter())
+                    .cloned()
+                    .collect::<Vec<_>>();
                 if has_passthrough_pattern(method, &self.patterns.passthroughs) {
                     let mut paths = Vec::new();
                     for arg in &all_args {
@@ -5249,15 +5747,24 @@ impl<'a> DataFlowBuilder<'a> {
                     }
                     return ConcreteTaint { paths };
                 }
-                if let Some(resolved) = resolve_call_target(method, &function.package_path, self.local_index, None)
+                if let Some(resolved) =
+                    resolve_call_target(method, &function.package_path, self.local_index, None)
                     && let Some(summary) = self.summaries.get(&resolved).cloned()
                 {
                     let mut paths = Vec::new();
                     for category in &summary.returns_source_categories {
-                        let callee_name = self.function_map.get(&resolved)
+                        let callee_name = self
+                            .function_map
+                            .get(&resolved)
                             .map(|f| f.declaration.qualified_name.clone())
                             .unwrap_or_else(|| method.to_string());
-                        paths.push(self.new_source_path(function, &callee_name, category, position.clone(), None));
+                        paths.push(self.new_source_path(
+                            function,
+                            &callee_name,
+                            category,
+                            position.clone(),
+                            None,
+                        ));
                     }
                     for param_index in &summary.param_to_return {
                         if let Some(arg) = all_args.get(*param_index) {
@@ -5273,7 +5780,8 @@ impl<'a> DataFlowBuilder<'a> {
                     arg_taint_count += arg_paths.len();
                 }
                 if arg_taint_count > 0 {
-                    let entry = self.missing_passthrough_call_counts
+                    let entry = self
+                        .missing_passthrough_call_counts
                         .entry(method.clone())
                         .or_default();
                     *entry += 1;
@@ -5401,7 +5909,10 @@ impl<'a> DataFlowBuilder<'a> {
         for path in &taint.paths {
             let mut final_path = path.clone();
             if let Some(last_step) = final_path.steps.last() {
-                let edge_id = stable_id("df-edge", &[&last_step.node.id, &sink_node_id, sink_category]);
+                let edge_id = stable_id(
+                    "df-edge",
+                    &[&last_step.node.id, &sink_node_id, sink_category],
+                );
                 let edge = DataFlowEdge {
                     id: edge_id.clone(),
                     source_id: last_step.node.id.clone(),
@@ -5428,10 +5939,21 @@ impl<'a> DataFlowBuilder<'a> {
                 }
             }
 
-            let slice_id = stable_id("df-slice", &[&final_path.origin_key, &sink_node_id, sink_category]);
+            let slice_id = stable_id(
+                "df-slice",
+                &[&final_path.origin_key, &sink_node_id, sink_category],
+            );
             let first_node = &final_path.steps[0].node;
-            let node_ids = final_path.steps.iter().map(|s| s.node.id.clone()).collect::<Vec<_>>();
-            let edge_ids = final_path.steps.iter().filter_map(|s| s.edge.as_ref().map(|e| e.id.clone())).collect::<Vec<_>>();
+            let node_ids = final_path
+                .steps
+                .iter()
+                .map(|s| s.node.id.clone())
+                .collect::<Vec<_>>();
+            let edge_ids = final_path
+                .steps
+                .iter()
+                .filter_map(|s| s.edge.as_ref().map(|e| e.id.clone()))
+                .collect::<Vec<_>>();
             let path_length = edge_ids.len();
 
             self.slices
@@ -5467,7 +5989,6 @@ impl<'a> DataFlowBuilder<'a> {
                 });
         }
     }
-
 
     fn finish(self) -> DataFlowEvidence {
         let mut summaries = Vec::new();
@@ -5569,7 +6090,10 @@ impl<'a> DataFlowBuilder<'a> {
             self.slices.entry(key).or_insert(value);
         }
         for (callee, count) in other.missing_passthrough_call_counts {
-            *self.missing_passthrough_call_counts.entry(callee).or_default() += count;
+            *self
+                .missing_passthrough_call_counts
+                .entry(callee)
+                .or_default() += count;
         }
     }
 }
@@ -5665,8 +6189,7 @@ fn simple_expr_looks_sqlish(expr: &SimpleExpr) -> bool {
         SimpleExpr::Compose(items) => items.iter().any(simple_expr_looks_sqlish),
         SimpleExpr::Field { base, .. } => simple_expr_looks_sqlish(base),
         SimpleExpr::MethodCall { receiver, args, .. } => {
-            simple_expr_looks_sqlish(receiver)
-                || args.iter().any(simple_expr_looks_sqlish)
+            simple_expr_looks_sqlish(receiver) || args.iter().any(simple_expr_looks_sqlish)
         }
         SimpleExpr::Reference { expr, .. } => simple_expr_looks_sqlish(expr),
         SimpleExpr::Literal | SimpleExpr::Unknown => false,
@@ -5715,27 +6238,6 @@ fn pattern_matches_callee(normalized_callee: &str, pattern: &str) -> bool {
 
 fn normalize_pattern_text(value: &str) -> String {
     value.replace(' ', "")
-}
-
-pub(crate) fn relative_display_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-pub(crate) fn stable_id(prefix: &str, components: &[&str]) -> String {
-    let mut hasher = Sha256::new();
-    for component in components {
-        hasher.update(component.as_bytes());
-        hasher.update([0]);
-    }
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(16);
-    for byte in digest.iter().take(8) {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    format!("{prefix}-{hex}")
 }
 
 fn enrich_graph_component_purls(report: &mut Report) {
@@ -6902,7 +7404,12 @@ mod tests {
 
         assert!(report.files.is_empty());
         assert!(report.declarations.is_empty());
-        assert!(report.packages.iter().all(|package| package.files.is_empty()));
+        assert!(
+            report
+                .packages
+                .iter()
+                .all(|package| package.files.is_empty())
+        );
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -7129,13 +7636,14 @@ mod tests {
                 "axum" => "pkg:cargo/axum",
                 "actix-web" => "pkg:cargo/actix-web",
                 "rocket" => "pkg:cargo/rocket",
-                other => panic!("unexpected framework {} on endpoint {} {}", other, endpoint.method, endpoint.path),
+                other => panic!(
+                    "unexpected framework {} on endpoint {} {}",
+                    other, endpoint.method, endpoint.path
+                ),
             };
             assert!(
                 endpoint.purl == expected_prefix
-                    || endpoint
-                        .purl
-                        .starts_with(&format!("{}@", expected_prefix)),
+                    || endpoint.purl.starts_with(&format!("{}@", expected_prefix)),
                 "endpoint {} {} purl {} should match {} or {}@<version>",
                 endpoint.method,
                 endpoint.path,
@@ -7214,8 +7722,7 @@ mod tests {
 
         assert_eq!(compiler_report.options.backend, BACKEND_COMPILER);
         assert_eq!(
-            compiler_report.stats.api_endpoint_count,
-            stable_report.stats.api_endpoint_count,
+            compiler_report.stats.api_endpoint_count, stable_report.stats.api_endpoint_count,
             "compiler-backend endpoint count should match stable-backend"
         );
         let stable_keys: Vec<_> = stable_report
@@ -7293,8 +7800,7 @@ mod tests {
             .slices
             .iter()
             .filter(|slice| {
-                slice.source_category == "env"
-                    && slice.sink_category.starts_with("crypto")
+                slice.source_category == "env" && slice.sink_category.starts_with("crypto")
             })
             .collect();
         assert!(
@@ -7324,11 +7830,9 @@ mod tests {
 
         let data_flow = report.data_flow.expect("dataflow emitted");
         assert!(
-            data_flow
-                .slices
-                .iter()
-                .any(|slice| slice.source_category == "env"
-                    && slice.sink_category == "process-exec"),
+            data_flow.slices.iter().any(
+                |slice| slice.source_category == "env" && slice.sink_category == "process-exec"
+            ),
             "Expected env-to-process-exec flow through struct field"
         );
         assert!(
@@ -7408,11 +7912,9 @@ mod tests {
 
         let data_flow = report.data_flow.expect("dataflow emitted");
         assert!(
-            data_flow
-                .slices
-                .iter()
-                .any(|slice| slice.source_category == "env"
-                    && slice.sink_category == "process-exec"),
+            data_flow.slices.iter().any(
+                |slice| slice.source_category == "env" && slice.sink_category == "process-exec"
+            ),
             "Expected env-to-process-exec flow through trim().to_lowercase().to_owned() chain"
         );
     }
@@ -7434,18 +7936,28 @@ mod tests {
         let persist_edges: Vec<_> = graph
             .edges
             .iter()
-            .filter(|edge| edge.properties.get("calleeText").is_some_and(|t| t == "persist"))
+            .filter(|edge| {
+                edge.properties
+                    .get("calleeText")
+                    .is_some_and(|t| t == "persist")
+            })
             .collect();
         assert!(
             !persist_edges.is_empty(),
             "Expected persist call in callgraph for dyn-dispatch"
         );
         assert!(
-            graph.nodes.iter().any(|node| node.qualified_name.ends_with("FileStore::persist")),
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.qualified_name.ends_with("FileStore::persist")),
             "Expected FileStore::persist node"
         );
         assert!(
-            graph.nodes.iter().any(|node| node.qualified_name.ends_with("NetStore::persist")),
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.qualified_name.ends_with("NetStore::persist")),
             "Expected NetStore::persist node"
         );
         // The receiver is `&dyn Store` so we can't pin a concrete type —
@@ -7572,7 +8084,10 @@ mod tests {
             2,
             "expected two higher-order edges (map + for_each closures), got {}: {:?}",
             ho_edges.len(),
-            ho_edges.iter().map(|e| e.target_name.clone()).collect::<Vec<_>>()
+            ho_edges
+                .iter()
+                .map(|e| e.target_name.clone())
+                .collect::<Vec<_>>()
         );
         for edge in &ho_edges {
             assert_eq!(
@@ -7628,11 +8143,9 @@ mod tests {
 
         let data_flow = report.data_flow.expect("dataflow emitted");
         assert!(
-            data_flow
-                .slices
-                .iter()
-                .any(|slice| slice.source_category == "env"
-                    && slice.sink_category == "process-exec"),
+            data_flow.slices.iter().any(
+                |slice| slice.source_category == "env" && slice.sink_category == "process-exec"
+            ),
             "Expected env-to-process-exec flow through projection"
         );
         assert!(
@@ -7772,7 +8285,7 @@ mod tests {
 mod taint_bound_tests {
     use rusi_schema::DataFlowNode;
 
-    use super::{ConcreteTaint, MAX_TAINT_PATHS, MAX_TAINT_PATH_STEPS, TaintPath, TaintStep};
+    use super::{ConcreteTaint, MAX_TAINT_PATH_STEPS, MAX_TAINT_PATHS, TaintPath, TaintStep};
 
     fn step(node_id: &str) -> TaintStep {
         TaintStep {
@@ -7818,10 +8331,7 @@ mod taint_bound_tests {
     #[test]
     fn keeps_distinct_sources_separate() {
         let taint = ConcreteTaint {
-            paths: vec![
-                path("env:a", &["n1"]),
-                path("cli:b", &["n1"]),
-            ],
+            paths: vec![path("env:a", &["n1"]), path("cli:b", &["n1"])],
         }
         .bounded();
         // Same node sequence but different origins must not be merged.
@@ -7850,5 +8360,191 @@ mod taint_bound_tests {
         // The over-length witness is dropped; the short one is retained.
         assert_eq!(taint.paths.len(), 1);
         assert_eq!(taint.paths[0].origin_key, "env:a");
+    }
+}
+
+/// Tests for the taint passthrough catalogs.
+///
+/// A missing passthrough is invisible in normal use — the analysis simply
+/// reports fewer findings — so the catalogs are asserted directly rather than
+/// only through end-to-end fixtures.
+#[cfg(test)]
+mod passthrough_catalog_tests {
+    use std::collections::HashSet;
+
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        KNOWN_PASSTHROUGH_NAMES, built_in_dataflow_patterns, is_sanitizer_call, last_segment,
+    };
+
+    fn built_in_passthrough_names() -> HashSet<String> {
+        built_in_dataflow_patterns()
+            .passthroughs
+            .into_iter()
+            .map(|pattern| pattern.pattern)
+            .collect()
+    }
+
+    #[test]
+    fn the_auto_discovery_allowlist_has_no_duplicates() {
+        let unique: HashSet<&&str> = KNOWN_PASSTHROUGH_NAMES.iter().collect();
+        assert_eq!(
+            unique.len(),
+            KNOWN_PASSTHROUGH_NAMES.len(),
+            "duplicate entries in KNOWN_PASSTHROUGH_NAMES"
+        );
+    }
+
+    #[test]
+    fn the_auto_discovery_allowlist_holds_bare_method_names() {
+        // Matching is on the final path segment, so a qualified path here
+        // would never match anything.
+        for name in KNOWN_PASSTHROUGH_NAMES {
+            assert!(!name.is_empty(), "empty entry");
+            assert!(
+                !name.contains("::"),
+                "{name} is a path, but matching uses the final segment only"
+            );
+            assert_eq!(last_segment(name), *name);
+        }
+    }
+
+    #[test]
+    fn the_auto_discovery_allowlist_excludes_index_returning_methods() {
+        // `substr_range` and `subslice_range` return offsets into the
+        // receiver, not the receiver's data. An offset derived from tainted
+        // text is not itself the tainted text, so treating these as
+        // passthroughs would widen taint to plain integers.
+        for name in ["substr_range", "subslice_range", "len", "capacity"] {
+            assert!(
+                !KNOWN_PASSTHROUGH_NAMES.contains(&name),
+                "{name} returns an index or count, not receiver data"
+            );
+        }
+    }
+
+    #[test]
+    fn no_name_is_both_a_sanitizer_and_a_passthrough() {
+        // A method that both clears and propagates taint is self
+        // contradictory, and historically laundered taint past the sanitize
+        // step. `discover_auto_passthroughs` filters these out at use time;
+        // this asserts the catalogs do not disagree in the first place.
+        for name in KNOWN_PASSTHROUGH_NAMES {
+            assert!(
+                !is_sanitizer_call(name),
+                "{name} is listed as both a sanitizer and a passthrough"
+            );
+        }
+    }
+
+    #[test]
+    fn the_built_in_pack_models_directional_and_ascii_trimming() {
+        // `trim` was modelled but its variants were not, so `input.trim_end()`
+        // used to drop taint entirely.
+        let names = built_in_passthrough_names();
+        for name in [
+            "trim",
+            "trim_start",
+            "trim_end",
+            "trim_matches",
+            "trim_start_matches",
+            "trim_end_matches",
+            "trim_ascii",
+            "trim_ascii_start",
+            "trim_ascii_end",
+        ] {
+            assert!(names.contains(name), "missing passthrough: {name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_pack_models_splitting_and_prefix_removal() {
+        let names = built_in_passthrough_names();
+        for name in [
+            "split",
+            "split_once",
+            "rsplit_once",
+            "splitn",
+            "split_whitespace",
+            "lines",
+            "strip_prefix",
+            "strip_suffix",
+            // Stabilized in Rust 1.98; replaces a strip_prefix/strip_suffix pair.
+            "strip_circumfix",
+        ] {
+            assert!(names.contains(name), "missing passthrough: {name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_pack_models_owned_and_borrowed_conversions() {
+        let names = built_in_passthrough_names();
+        for name in [
+            "to_str",
+            "into_string",
+            "into_bytes",
+            "to_vec",
+            "as_slice",
+            "as_deref",
+            "as_encoded_bytes",
+            "leak",
+        ] {
+            assert!(names.contains(name), "missing passthrough: {name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_pack_excludes_index_returning_methods() {
+        let names = built_in_passthrough_names();
+        for name in ["substr_range", "subslice_range", "len"] {
+            assert!(
+                !names.contains(name),
+                "{name} returns an index or count, not receiver data"
+            );
+        }
+    }
+
+    #[test]
+    fn built_in_passthroughs_are_well_formed() {
+        for pattern in built_in_dataflow_patterns().passthroughs {
+            assert_eq!(pattern.target, "passthrough", "{}", pattern.pattern);
+            assert!(!pattern.pattern.is_empty());
+            assert!(
+                !pattern.category.is_empty(),
+                "{} has no category",
+                pattern.pattern
+            );
+            assert!(
+                !pattern.relevant_arguments.is_empty(),
+                "{} names no argument to propagate",
+                pattern.pattern
+            );
+        }
+    }
+
+    #[test]
+    fn built_in_passthroughs_are_not_duplicated() {
+        let patterns = built_in_dataflow_patterns().passthroughs;
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        for pattern in &patterns {
+            assert!(
+                seen.insert((pattern.pattern.clone(), pattern.category.clone())),
+                "duplicate passthrough pattern: {} ({})",
+                pattern.pattern,
+                pattern.category
+            );
+        }
+    }
+
+    #[test]
+    fn no_built_in_passthrough_is_also_a_built_in_sanitizer() {
+        for pattern in built_in_dataflow_patterns().passthroughs {
+            assert!(
+                !is_sanitizer_call(&pattern.pattern),
+                "{} is both a sanitizer and a passthrough",
+                pattern.pattern
+            );
+        }
     }
 }

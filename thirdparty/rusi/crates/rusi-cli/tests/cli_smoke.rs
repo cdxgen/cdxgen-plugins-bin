@@ -87,7 +87,7 @@ fn cli_emits_expanded_pack_flows() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn cli_supports_compiler_backend_capabilities_and_source_evidence() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -130,7 +130,7 @@ fn cli_supports_compiler_backend_capabilities_and_source_evidence() -> Result<()
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_emits_native_model_flow_for_ffi_fixture() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -186,7 +186,7 @@ fn compiler_backend_emits_native_model_flow_for_ffi_fixture() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_expands_trait_and_generic_impl_summaries() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     for fixture in ["dyn-dispatch-app", "generic-specialization-app"] {
@@ -239,7 +239,7 @@ fn compiler_backend_expands_trait_and_generic_impl_summaries() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_lifts_async_task_closure_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -289,7 +289,7 @@ fn compiler_backend_lifts_async_task_closure_flow() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_models_protocol_request_response_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -333,21 +333,28 @@ fn compiler_backend_models_protocol_request_response_flow() -> Result<()> {
         data_flow
             .slices
             .iter()
-            .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
+            .map(|slice| (
+                &slice.source_category,
+                &slice.sink_category,
+                &slice.source_name,
+                &slice.sink_name
+            ))
             .collect::<Vec<_>>()
     );
     Ok(())
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_models_rusi_cli_export_path_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
         .args([
             "analyze",
             "--dir",
-            fixture_path("rusi-self-flow-app").to_string_lossy().as_ref(),
+            fixture_path("rusi-self-flow-app")
+                .to_string_lossy()
+                .as_ref(),
             "--backend",
             "compiler",
             "--callgraph",
@@ -386,21 +393,28 @@ fn compiler_backend_models_rusi_cli_export_path_flow() -> Result<()> {
         data_flow
             .slices
             .iter()
-            .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
+            .map(|slice| (
+                &slice.source_category,
+                &slice.sink_category,
+                &slice.source_name,
+                &slice.sink_name
+            ))
             .collect::<Vec<_>>()
     );
     Ok(())
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_models_rusi_driver_command_builder_flow() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
         .args([
             "analyze",
             "--dir",
-            fixture_path("rusi-driver-flow-app").to_string_lossy().as_ref(),
+            fixture_path("rusi-driver-flow-app")
+                .to_string_lossy()
+                .as_ref(),
             "--backend",
             "compiler",
             "--callgraph",
@@ -460,7 +474,7 @@ fn compiler_backend_models_rusi_driver_command_builder_flow() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_does_not_treat_local_open_as_native_sink() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -503,14 +517,19 @@ fn compiler_backend_does_not_treat_local_open_as_native_sink() -> Result<()> {
         data_flow
             .slices
             .iter()
-            .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
+            .map(|slice| (
+                &slice.source_category,
+                &slice.sink_category,
+                &slice.source_name,
+                &slice.sink_name
+            ))
             .collect::<Vec<_>>()
     );
     Ok(())
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_models_expanded_stdlib_flows() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let output = Command::new(binary)
@@ -563,7 +582,12 @@ fn compiler_backend_models_expanded_stdlib_flows() -> Result<()> {
             data_flow
                 .slices
                 .iter()
-                .map(|slice| (&slice.source_category, &slice.sink_category, &slice.source_name, &slice.sink_name))
+                .map(|slice| (
+                    &slice.source_category,
+                    &slice.sink_category,
+                    &slice.source_name,
+                    &slice.sink_name
+                ))
                 .collect::<Vec<_>>()
         );
     }
@@ -571,7 +595,7 @@ fn compiler_backend_models_expanded_stdlib_flows() -> Result<()> {
 }
 
 #[test]
-#[ignore = "compiler backend: needs nightly rustc-dev and runs nested cargo. Run: cargo +nightly test -- --ignored --test-threads=1"]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
 fn compiler_backend_dependency_bodies_require_security_deps_mode() -> Result<()> {
     let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
     let root = temp_path("external-dependency-mode", "dir");
@@ -894,7 +918,10 @@ fn cli_cryptos_command_filters_to_crypto_flows_and_paths() -> Result<()> {
     assert_eq!(crypto_report.options.analysis_scope, "cryptos");
 
     let data_flow = crypto_report.data_flow.expect("crypto dataflow present");
-    assert!(!data_flow.slices.is_empty(), "expected crypto-focused slices");
+    assert!(
+        !data_flow.slices.is_empty(),
+        "expected crypto-focused slices"
+    );
     assert!(data_flow.slices.iter().all(|slice| {
         slice.sink_category.starts_with("crypto")
             || matches!(slice.sink_category.as_str(), "jwt" | "certificate" | "tls")

@@ -1007,13 +1007,12 @@ mod tests {
         let path = dir.join("call_graph.json");
         let _ = std::fs::remove_dir_all(dir.parent().unwrap_or_else(|| Path::new(".")));
 
-        write_call_graph_export(&call_graph, "json", &path, false).expect("json export creates parents");
+        write_call_graph_export(&call_graph, "json", &path, false)
+            .expect("json export creates parents");
         let written = std::fs::read_to_string(&path).expect("read json export");
         let parsed: CallGraph = serde_json::from_str(&written).expect("json export round-trips");
         assert_eq!(parsed, call_graph);
 
-        let _ = std::fs::remove_dir_all(
-            dir.parent().unwrap_or_else(|| Path::new(".")),
-        );
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or_else(|| Path::new(".")));
     }
 }

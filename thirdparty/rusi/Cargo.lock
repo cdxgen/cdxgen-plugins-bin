@@ -310,7 +310,6 @@ dependencies = [
  "quote",
  "rusi-schema",
  "serde_json",
- "sha2",
  "syn",
 ]
 
@@ -328,7 +327,6 @@ dependencies = [
  "rusi-schema",
  "serde",
  "serde_json",
- "sha2",
  "syn",
 ]
 
@@ -341,7 +339,6 @@ dependencies = [
  "rusi-schema",
  "serde",
  "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -350,6 +347,7 @@ version = "3.0.5"
 dependencies = [
  "indexmap",
  "serde",
+ "sha2",
 ]
 
 [[package]]

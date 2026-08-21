@@ -49,9 +49,9 @@ use rusi_schema::{ApiEndpoint, EndpointParameter, ImportUsage, Position};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    Attribute, Expr, ExprCall, ExprLit, ExprMacro, ExprMethodCall, ExprPath, FnArg, GenericArgument,
-    Item, ItemFn, ItemUse, Lit, Local, Macro, PatType, PathArguments, ReturnType, Stmt, Type,
-    UseTree,
+    Attribute, Expr, ExprCall, ExprLit, ExprMacro, ExprMethodCall, ExprPath, FnArg,
+    GenericArgument, Item, ItemFn, ItemUse, Lit, Local, Macro, PatType, PathArguments, ReturnType,
+    Stmt, Type, UseTree,
 };
 
 use crate::{PackageContext, position_from_span, relative_display_path, stable_id};
@@ -334,8 +334,7 @@ impl BuilderCollector {
             walk_axum_chain(expr, &mut fragments, &self.file_path);
             self.record_chain(key.clone(), FRAMEWORK_AXUM.to_string(), fragments);
         } else if self.frameworks.contains(FRAMEWORK_ACTIX)
-            && (chain_root_matches(expr, "App::new")
-                || chain_root_matches_call(expr, "web::scope"))
+            && (chain_root_matches(expr, "App::new") || chain_root_matches_call(expr, "web::scope"))
         {
             let mut fragments = Vec::new();
             walk_actix_chain(expr, &mut fragments, &self.file_path);
@@ -530,13 +529,12 @@ fn extract_actix_service_expr(
                     // resource. We don't emit it directly; remove placeholder.
                     out.pop();
                 }
-            } else if callee == "web::scope" || callee.ends_with("::web::scope") {
-                if let Some(scope_prefix) = call.args.iter().next().and_then(string_literal_value)
-                {
-                    let _ = join_prefix(prefix, &scope_prefix);
-                    // Scope alone contributes no routes; routes only
-                    // appear when chained with `.service(...)`.
-                }
+            } else if (callee == "web::scope" || callee.ends_with("::web::scope"))
+                && let Some(scope_prefix) = call.args.iter().next().and_then(string_literal_value)
+            {
+                let _ = join_prefix(prefix, &scope_prefix);
+                // Scope alone contributes no routes; routes only
+                // appear when chained with `.service(...)`.
             }
         }
         Expr::MethodCall(method) => {
@@ -1000,8 +998,7 @@ fn extract_handler_signature(
 
         match framework {
             FRAMEWORK_AXUM => {
-                if type_text.starts_with("Path<") || type_text.starts_with("axum::extract::Path<")
-                {
+                if type_text.starts_with("Path<") || type_text.starts_with("axum::extract::Path<") {
                     parameters.extend(synthesize_path_params(
                         route_path,
                         inner.as_deref().unwrap_or(type_text),
@@ -1040,10 +1037,12 @@ fn extract_handler_signature(
                 }
             }
             FRAMEWORK_ROCKET => {
-                if type_text.starts_with("Json<") || type_text.starts_with("rocket::serde::json::Json<")
+                if type_text.starts_with("Json<")
+                    || type_text.starts_with("rocket::serde::json::Json<")
                 {
                     request_body_type = inner.or_else(|| Some(type_text.clone()));
-                } else if type_text.starts_with("Form<") || type_text.starts_with("rocket::form::Form<")
+                } else if type_text.starts_with("Form<")
+                    || type_text.starts_with("rocket::form::Form<")
                 {
                     request_body_type = inner.or_else(|| Some(type_text.clone()));
                 } else {
@@ -1092,8 +1091,12 @@ fn synthesize_path_params(route_path: &str, type_inner: &str) -> Vec<EndpointPar
         return Vec::new();
     }
     let tuple = type_inner.trim();
-    let types: Vec<String> = if tuple.starts_with('(') && tuple.ends_with(')') {
-        tuple[1..tuple.len() - 1]
+    // A multi-segment path extractor is spelled as a tuple, e.g. `Path<(u32,
+    // String)>`; a single-segment one is the bare type. `strip_circumfix`
+    // distinguishes the two without index arithmetic, and correctly declines a
+    // string that only opens or only closes the parenthesis.
+    let types: Vec<String> = if let Some(inner) = tuple.strip_circumfix('(', ')') {
+        inner
             .split(',')
             .map(|piece| piece.trim().to_string())
             .filter(|piece| !piece.is_empty())
@@ -1144,10 +1147,7 @@ fn extract_path_placeholders(route_path: &str) -> Vec<String> {
                     name.push(peek);
                     chars.next();
                 }
-                let trimmed = name
-                    .split(|c: char| c == ':' || c == '.' || c == ' ')
-                    .next()
-                    .unwrap_or("");
+                let trimmed = name.split([':', '.', ' ']).next().unwrap_or("");
                 if !trimmed.is_empty() {
                     out.push(trimmed.to_string());
                 }
@@ -1180,8 +1180,7 @@ fn simplify_return_type(return_type: &str) -> String {
                     None => break 'outer,
                 };
                 // For Result<T, E>, keep only the Ok arm.
-                if wrapper.starts_with("Result<")
-                    || wrapper.starts_with("axum::response::Result<")
+                if wrapper.starts_with("Result<") || wrapper.starts_with("axum::response::Result<")
                 {
                     let ok_arm = ok_arm_of_result(&inner);
                     current = ok_arm.trim().to_string();
@@ -1253,9 +1252,11 @@ fn resolve_endpoints(
     for root in roots {
         let mut visited = BTreeSet::new();
         resolve_from_builder(
-            builders,
-            functions,
-            framework_purls,
+            &ResolveContext {
+                builders,
+                functions,
+                framework_purls,
+            },
             root,
             "",
             &mut visited,
@@ -1266,16 +1267,30 @@ fn resolve_endpoints(
     endpoints
 }
 
+/// The read-only indexes consulted at every step of the router walk.
+///
+/// Grouped into one borrow so the recursive descent through nested routers
+/// threads a single immutable context alongside its mutable accumulators,
+/// rather than repeating three unchanging map references at each call.
+struct ResolveContext<'a> {
+    builders: &'a BTreeMap<String, RouterBuilder>,
+    functions: &'a BTreeMap<String, CapturedFunction>,
+    framework_purls: &'a BTreeMap<String, String>,
+}
+
 fn resolve_from_builder(
-    builders: &BTreeMap<String, RouterBuilder>,
-    functions: &BTreeMap<String, CapturedFunction>,
-    framework_purls: &BTreeMap<String, String>,
+    ctx: &ResolveContext<'_>,
     builder: &RouterBuilder,
     prefix: &str,
     visited: &mut BTreeSet<String>,
     out: &mut Vec<ApiEndpoint>,
     seen_ids: &mut HashMap<String, usize>,
 ) {
+    let &ResolveContext {
+        builders,
+        functions,
+        framework_purls,
+    } = ctx;
     if !visited.insert(builder.key.clone()) {
         return;
     }
@@ -1357,16 +1372,7 @@ fn resolve_from_builder(
                 if let Some(matched_key) = lookup_builder_key(builders, sub_builder)
                     && let Some(sub) = builders.get(&matched_key)
                 {
-                    resolve_from_builder(
-                        builders,
-                        functions,
-                        framework_purls,
-                        sub,
-                        &new_prefix,
-                        visited,
-                        out,
-                        seen_ids,
-                    );
+                    resolve_from_builder(ctx, sub, &new_prefix, visited, out, seen_ids);
                 }
             }
         }
@@ -1439,3 +1445,75 @@ type _UnusedGenericArgument = GenericArgument;
 type _UnusedPathArguments = PathArguments;
 #[allow(dead_code)]
 type _UnusedType = Type;
+
+/// Tests for path-parameter synthesis.
+#[cfg(test)]
+mod path_param_tests {
+    use pretty_assertions::assert_eq;
+
+    use super::synthesize_path_params;
+
+    fn names_and_types(route: &str, type_inner: &str) -> Vec<(String, String)> {
+        synthesize_path_params(route, type_inner)
+            .into_iter()
+            .map(|param| (param.name, param.type_name))
+            .collect()
+    }
+
+    #[test]
+    fn zips_a_tuple_extractor_against_the_placeholders() {
+        assert_eq!(
+            names_and_types("/x/:a/:b", "(i32, String)"),
+            vec![
+                ("a".to_string(), "i32".to_string()),
+                ("b".to_string(), "String".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_a_single_segment_extractor_as_a_bare_type() {
+        assert_eq!(
+            names_and_types("/users/:id", "i32"),
+            vec![("id".to_string(), "i32".to_string())]
+        );
+    }
+
+    #[test]
+    fn tolerates_whitespace_around_the_tuple() {
+        assert_eq!(
+            names_and_types("/x/:a/:b", "  ( i32 , String )  "),
+            vec![
+                ("a".to_string(), "i32".to_string()),
+                ("b".to_string(), "String".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_treat_a_half_open_parenthesis_as_a_tuple() {
+        // `strip_circumfix` requires both delimiters. Slicing on
+        // `starts_with('(')` alone would drop the leading character of a type
+        // that merely begins with a parenthesis, or panic on a one-character
+        // string.
+        let params = names_and_types("/x/:a", "(i32");
+        assert_eq!(params, vec![("a".to_string(), "(i32".to_string())]);
+        let params = names_and_types("/x/:a", ")");
+        assert_eq!(params, vec![("a".to_string(), ")".to_string())]);
+        let params = names_and_types("/x/:a", "(");
+        assert_eq!(params, vec![("a".to_string(), "(".to_string())]);
+    }
+
+    #[test]
+    fn yields_nothing_for_a_route_without_placeholders() {
+        assert!(names_and_types("/health", "()").is_empty());
+    }
+
+    #[test]
+    fn handles_the_unit_tuple_without_panicking() {
+        // `()` strips to an empty inner, which contributes no types.
+        let params = synthesize_path_params("/x/:a", "()");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "a");
+    }
+}
