@@ -1,0 +1,30 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_3e4dfbacde9382::t_f622fbbdcdd963 2145-2152
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_3e4dfbacde9382::t_c25b5eca901754 2017
+  s_3e4dfbacde9382::t_954b67ae5bf126 2013-2016,2018-2019
+  s_3e4dfbacde9382::t_b90982438f800d 1541
+  s_3e4dfbacde9382::t_2be1f41a0a6fe2 2012
+  s_3e4dfbacde9382::t_dff472c4efafb6 1482,1491,1548
+thirdparty/rusi/Cargo.toml
+  s_3e4dfbacde9382::t_3d3a3ae4bc64cb 37
+  s_3e4dfbacde9382::t_b32e753f411f58 38
+thirdparty/rusi/Cargo.lock
+  s_3e4dfbacde9382::t_17bfb2245b4f67 57,59,63,65,67,72,74,111,113,121,123,133,135,155-160,163,165,172,174,176,187,189,192,214-222,249,251,255,257,277,279,286,288,370,372,380,382,389,391,400,402,413,415,430,432,441,443,450,452,500,502
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3dbd70afb344658733d1c5d3ff6d7e33ea66370d",
+  "prompts": {},
+  "sessions": {
+    "s_3e4dfbacde9382": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4da2c93ffe36J5oA6dDB5OrJ",
+        "model": "glm-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
