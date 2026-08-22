@@ -7,7 +7,7 @@ import (
 )
 
 // JSON roundtrip: taint flows through json.Unmarshal into a struct field.
-// encoding/json is not in the shouldPropagate allowlist.
+// json.Unmarshal is a writes-to-argument model, so the field read finds the write.
 // golem:want flow source=http-input sink=data
 // golem:want flow source=http-input sink=command-execution
 type Payload struct {

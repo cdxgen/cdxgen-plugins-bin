@@ -6,7 +6,7 @@ import (
 )
 
 // Generic container: taint flows through a generic type.
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:22
+// golem:want flow source=http-input sink=command-execution
 type Container[T any] struct {
 	Value T
 }

@@ -91,14 +91,15 @@ func Analyze(options Options) (*model.Report, error) {
 			Description: "Go Library Evidence Mapper: semantic Go source evidence and call graph analyzer",
 		},
 		Runtime: model.RuntimeInfo{
-			GOOS:       runtime.GOOS,
-			GOARCH:     runtime.GOARCH,
-			GoVersion:  runtime.Version(),
-			Goroot:     build.Default.GOROOT,
-			WorkingDir: absDir,
-			Patterns:   append([]string{}, options.Patterns...),
-			BuildTags:  append([]string{}, options.BuildTags...),
-			Tests:      options.Tests,
+			GOOS:            runtime.GOOS,
+			GOARCH:          runtime.GOARCH,
+			GoVersion:       runtime.Version(),
+			LanguageVersion: languageVersion(),
+			Goroot:          build.Default.GOROOT,
+			WorkingDir:      absDir,
+			Patterns:        append([]string{}, options.Patterns...),
+			BuildTags:       append([]string{}, options.BuildTags...),
+			Tests:           options.Tests,
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,
@@ -151,6 +152,7 @@ func Analyze(options Options) (*model.Report, error) {
 	report.RootModules = sortedModules(a.rootModules)
 	report.Modules = sortedModules(a.moduleByPath)
 	report.SupplyChain = a.supplyChainEvidence(report.Modules)
+	report.Diagnostics = append(report.Diagnostics, languageVersionDiagnostics(report.Modules)...)
 	var ssaCtx *ssaContext
 	if options.CallGraphMode != "none" || options.DataFlowMode != "none" {
 		ssaCtx = a.buildSSA(pkgs, progress)

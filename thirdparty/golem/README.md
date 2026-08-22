@@ -4,6 +4,21 @@ Golem is a static analyzer for Go source trees. It loads a module or workspace w
 
 The analyzer is designed for evidence collection rather than exploit proof. It keeps output small and reviewable: symbols, source locations, package context, module metadata, graph edges, classifications, and summary counts are emitted. Raw secrets, embedded file contents, command output, and generated command execution are not emitted.
 
+## Requirements
+
+Go 1.27 or later to build. Golem analyzes modules declaring any `go` directive
+up to that, which `TestFlowFoundAcrossGoDirectiveRange` holds it to: the same
+flow must be reported at go1.16, 1.18, 1.21, 1.23, 1.25 and 1.27.
+
+The version that builds Golem is also the newest language version Golem can
+type-check — `go/types` applies the rules of the release it was compiled from,
+whatever `go` command is on PATH. A module declaring a newer directive than that
+is not analyzed correctly, so the report carries the ceiling as
+`runtime.languageVersion` and a `go-version` diagnostic names any module that
+exceeds it. Without that the failure is silent in the worst way: a cascade of
+type errors that read like defects in the code under analysis, and an empty call
+graph and data flow with no explanation.
+
 ## Quick Start
 
 Build or run Golem from this directory:
@@ -251,7 +266,8 @@ trigger. `golem bench --tier full` reproduces this.
 ```bash
 go test ./... -short   # ~15s: everything except the corpus suites
 go test ./...          # ~3.5min: adds the corpus and engine-parity suites
-go test ./... -golem.full   # ~8min: the above over every data-flow mode
+# ~10min, past go test's default 10min per-package limit, hence -timeout:
+GOLEM_FULL=1 go test -timeout 40m ./...   # the above over every data-flow mode
 go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
 ```
 

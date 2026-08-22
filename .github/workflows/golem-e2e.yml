@@ -71,7 +71,7 @@ jobs:
 
     - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
-        go-version: '^1.25.6'
+        go-version: '^1.27.0'
         cache-dependency-path: thirdparty/golem/go.sum
 
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -85,7 +85,21 @@ jobs:
 
     - name: Unit tests
       working-directory: thirdparty/golem
-      run: go test ./...
+      # The wide tier runs every corpus and parity case over every data-flow
+      # mode. It is the only suite that exercises --dataflow all, and it was
+      # never run here: the command the README gave was `go test ./...
+      # -golem.full`, which fails because a test flag is registered per test
+      # binary and only internal/analyzer declares it. GOLEM_FULL works
+      # module-wide. Thirteen unrecorded engine-parity differences accumulated
+      # behind that gap, so the tier is a gate now.
+      #
+      # -timeout is not optional: the wide tier already runs the analyzer
+      # package for around ten minutes on a developer machine, and go test's
+      # default per-package limit is exactly ten. Without it a green suite
+      # turns into a goroutine dump the moment a fixture is added.
+      env:
+        GOLEM_FULL: '1'
+      run: go test -timeout 40m ./...
 
     - name: Build golem
       working-directory: thirdparty/golem

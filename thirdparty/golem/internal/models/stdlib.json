@@ -1,2691 +1,4035 @@
 [
- {
-  "id": "go.http-request-type.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "HTTP request carries user-controlled data"
- },
- {
-  "id": "go.parameter-name.source",
-  "kind": "source",
-  "module": "std",
-  "parameterName": "^(input|query|command|cmd|path|file|filename|url|uri|token|key|secret|password)$",
-  "category": "parameter",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "low",
-  "confidence": "low",
-  "description": "Parameter whose name conventionally carries untrusted input"
- },
- {
-  "id": "go.os-args.source",
-  "kind": "source",
-  "module": "std",
-  "package": "os",
-  "function": "Args",
-  "category": "cli",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "description": "Command-line arguments"
- },
- {
-  "id": "go.os-getenv.source",
-  "kind": "source",
-  "module": "std",
-  "package": "os",
-  "function": "Getenv",
-  "category": "environment",
-  "taintKinds": [
-   "environment",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "description": "Environment variable read"
- },
- {
-  "id": "go.os-lookupenv.source",
-  "kind": "source",
-  "module": "std",
-  "package": "os",
-  "function": "LookupEnv",
-  "category": "environment",
-  "taintKinds": [
-   "environment",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.os-exec-command.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os/exec",
-  "function": "Command",
-  "category": "command-execution",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "program"
-   },
-   {
-    "index": 1,
-    "variadic": true,
-    "role": "argument"
-   }
-  ],
-  "cwe": [
-   "CWE-78"
-  ],
-  "severity": "critical",
-  "confidence": "high",
-  "ruleId": "GOLEM-SEAM-COMMAND-INJECTION",
-  "ruleName": "User input reaches command execution",
-  "riskScore": 95
- },
- {
-  "id": "go.os-exec-commandcontext.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os/exec",
-  "function": "CommandContext",
-  "category": "command-execution",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "program"
-   },
-   {
-    "index": 2,
-    "variadic": true,
-    "role": "argument"
-   }
-  ],
-  "cwe": [
-   "CWE-78"
-  ],
-  "severity": "critical",
-  "confidence": "high",
-  "ruleId": "GOLEM-SEAM-COMMAND-INJECTION",
-  "ruleName": "User input reaches command execution",
-  "riskScore": 95
- },
- {
-  "id": "go.plugin-open.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "plugin",
-  "function": "Open",
-  "category": "dynamic-loading",
-  "taintKinds": [
-   "user-input",
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-912",
-   "CWE-915"
-  ],
-  "severity": "critical",
-  "confidence": "high",
-  "description": "Loading a plugin whose path is attacker-controlled is arbitrary code execution"
- },
- {
-  "id": "go.plugin-lookup.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "plugin",
-  "function": "Lookup",
-  "category": "dynamic-loading"
- },
- {
-  "id": "go.os-open.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "Open",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-openfile.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "OpenFile",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-writefile.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "WriteFile",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-readfile.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "ReadFile",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-create.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "Create",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-mkdir.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "Mkdir",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-mkdirall.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "MkdirAll",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-remove.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "Remove",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.os-removeall.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "os",
-  "function": "RemoveAll",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.db-query.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*DB",
-  "function": "Query",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "ruleId": "GOLEM-SEAM-SQL-INJECTION",
-  "ruleName": "User input reaches SQL query",
-  "riskScore": 80
- },
- {
-  "id": "go.db-querycontext.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*DB",
-  "function": "QueryContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.db-exec.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*DB",
-  "function": "Exec",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.db-execcontext.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*DB",
-  "function": "ExecContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.tx-query.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*Tx",
-  "function": "Query",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.tx-exec.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "receiver": "*Tx",
-  "function": "Exec",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.http-request.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "FormValue",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "HTTP form value"
- },
- {
-  "id": "go.http-postformvalue.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "PostFormValue",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.http-cookie.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "Cookie",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.http-header.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "Header",
-  "function": "Get",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.http-url-query.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/url",
-  "receiver": "*URL",
-  "function": "Query",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-parseform.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "ParseForm",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-multipartreader.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "MultipartReader",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-formfile.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Request",
-  "function": "FormFile",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-responsewriter-write.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "ResponseWriter",
-  "function": "Write",
-  "category": "http-response",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "body"
-   }
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "receiverRelevant": true
- },
- {
-  "id": "go.http-redirect.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "Redirect",
-  "category": "redirect",
-  "taintKinds": [
-   "url"
-  ],
-  "arguments": [
-   {
-    "index": 2,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-601"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-error.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "Error",
-  "category": "http-response",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "body"
-   }
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.http-servefile.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "ServeFile",
-  "category": "filesystem",
-  "taintKinds": [
-   "path"
-  ],
-  "arguments": [
-   {
-    "index": 2,
-    "role": "path"
-   }
-  ],
-  "cwe": [
-   "CWE-22"
-  ],
-  "severity": "high",
-  "confidence": "medium"
- },
- {
-  "id": "go.http-client-do.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Client",
-  "function": "Do",
-  "category": "external-service",
-  "taintKinds": [
-   "user-input",
-   "url"
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "description": "HTTP client request may indicate SSRF"
- },
- {
-  "id": "go.http-client-get.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "receiver": "*Client",
-  "function": "Get",
-  "category": "external-service",
-  "taintKinds": [
-   "user-input",
-   "url"
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ]
- },
- {
-  "id": "go.http-newrequest.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "NewRequest",
-  "category": "external-service",
-  "taintKinds": [
-   "user-input",
-   "url"
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "arguments": [
-   {
-    "index": 1,
-    "role": "url"
-   }
-  ]
- },
- {
-  "id": "go.http-newrequestwithcontext.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "NewRequestWithContext",
-  "category": "external-service",
-  "taintKinds": [
-   "user-input",
-   "url"
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "medium",
-  "confidence": "high",
-  "arguments": [
-   {
-    "index": 2,
-    "role": "url"
-   }
-  ]
- },
- {
-  "id": "go.io-copy.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "Copy",
-  "category": "io",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.io-copyn.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "CopyN",
-  "category": "io",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.io-copybuffer.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "CopyBuffer",
-  "category": "io",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.io-readall.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "ReadAll",
-  "category": "io"
- },
- {
-  "id": "go.io-readfull.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "ReadFull",
-  "category": "io",
-  "writesToArguments": [
-   1
-  ]
- },
- {
-  "id": "go.io-writestring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "io",
-  "function": "WriteString",
-  "category": "io",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.bufio-scanner-text.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bufio",
-  "receiver": "*Scanner",
-  "function": "Text",
-  "category": "io"
- },
- {
-  "id": "go.bufio-scanner-bytes.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bufio",
-  "receiver": "*Scanner",
-  "function": "Bytes",
-  "category": "io"
- },
- {
-  "id": "go.bufio-reader-readstring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bufio",
-  "receiver": "*Reader",
-  "function": "ReadString",
-  "category": "io"
- },
- {
-  "id": "go.bufio-reader-readbytes.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bufio",
-  "receiver": "*Reader",
-  "function": "ReadBytes",
-  "category": "io"
- },
- {
-  "id": "go.strings-builder-write.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "receiver": "*Builder",
-  "function": "Write",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.strings-builder-writestring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "receiver": "*Builder",
-  "function": "WriteString",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.strings-builder-writebyte.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "receiver": "*Builder",
-  "function": "WriteByte",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.strings-builder-writerune.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "receiver": "*Builder",
-  "function": "WriteRune",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.strings-builder-string.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "receiver": "*Builder",
-  "function": "String",
-  "category": "conversion"
- },
- {
-  "id": "go.strings-join.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "function": "Join",
-  "category": "conversion"
- },
- {
-  "id": "go.strings-trim.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "function": "Trim",
-  "category": "conversion"
- },
- {
-  "id": "go.strings-trimspace.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "function": "TrimSpace",
-  "category": "conversion"
- },
- {
-  "id": "go.strings-replace.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "function": "Replace",
-  "category": "conversion"
- },
- {
-  "id": "go.strings-replaceall.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strings",
-  "function": "ReplaceAll",
-  "category": "conversion"
- },
- {
-  "id": "go.bytes-buffer-write.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bytes",
-  "receiver": "*Buffer",
-  "function": "Write",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.bytes-buffer-writestring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bytes",
-  "receiver": "*Buffer",
-  "function": "WriteString",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.bytes-buffer-string.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bytes",
-  "receiver": "*Buffer",
-  "function": "String",
-  "category": "conversion"
- },
- {
-  "id": "go.bytes-buffer-bytes.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "bytes",
-  "receiver": "*Buffer",
-  "function": "Bytes",
-  "category": "conversion"
- },
- {
-  "id": "go.fmt-sprintf.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "fmt",
-  "function": "Sprintf",
-  "category": "conversion"
- },
- {
-  "id": "go.fmt-sprint.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "fmt",
-  "function": "Sprint",
-  "category": "conversion"
- },
- {
-  "id": "go.fmt-sprintln.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "fmt",
-  "function": "Sprintln",
-  "category": "conversion"
- },
- {
-  "id": "go.fmt-fprintf.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Fprintf",
-  "category": "formatted-output",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "variadic": true,
-    "role": "format-args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.fmt-fprint.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Fprint",
-  "category": "formatted-output",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.fmt-fprintln.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Fprintln",
-  "category": "formatted-output",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.strconv-itoa.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strconv",
-  "function": "Itoa",
-  "category": "conversion"
- },
- {
-  "id": "go.strconv-format.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "strconv",
-  "function": "FormatInt",
-  "category": "conversion"
- },
- {
-  "id": "go.encoding-json-unmarshal.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/json",
-  "function": "Unmarshal",
-  "category": "conversion",
-  "writesToArguments": [
-   1
-  ]
- },
- {
-  "id": "go.encoding-json-unmarshal.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "encoding/json",
-  "function": "Unmarshal",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "data"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "description": "Untrusted JSON reaching the decoder can be a parser-complexity attack"
- },
- {
-  "id": "go.encoding-json-marshal.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/json",
-  "function": "Marshal",
-  "category": "conversion"
- },
- {
-  "id": "go.encoding-json-newdecoder.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "encoding/json",
-  "function": "NewDecoder",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "reader"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.encoding-json-encoder-encode.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "encoding/json",
-  "receiver": "*Encoder",
-  "function": "Encode",
-  "category": "http-response",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "value"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.encoding-xml-unmarshal.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/xml",
-  "function": "Unmarshal",
-  "category": "conversion",
-  "writesToArguments": [
-   1
-  ]
- },
- {
-  "id": "go.encoding-csv-reader-read.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/csv",
-  "receiver": "*Reader",
-  "function": "Read",
-  "category": "conversion"
- },
- {
-  "id": "go.encoding-gob-decoder-decode.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/gob",
-  "receiver": "*Decoder",
-  "function": "Decode",
-  "category": "conversion",
-  "writesToArguments": [
-   0
-  ]
- },
- {
-  "id": "go.encoding-base64-std-decoding.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "encoding/base64",
-  "function": "StdEncoding",
-  "category": "conversion"
- },
- {
-  "id": "go.path-filepath-join.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "path/filepath",
-  "function": "Join",
-  "category": "path"
- },
- {
-  "id": "go.path-join.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "path",
-  "function": "Join",
-  "category": "path"
- },
- {
-  "id": "go.path-filepath-clean.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "path/filepath",
-  "function": "Clean",
-  "category": "path"
- },
- {
-  "id": "go.path-filepath-base.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "path/filepath",
-  "function": "Base",
-  "category": "path-validation",
-  "sanitizesCategories": [
-   "filesystem"
-  ],
-  "removesTaintKinds": [
-   "path"
-  ]
- },
- {
-  "id": "go.path-filepath-dir.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "path/filepath",
-  "function": "Dir",
-  "category": "path-validation",
-  "sanitizesCategories": [
-   "filesystem"
-  ]
- },
- {
-  "id": "go.net-url-queryescape.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "net/url",
-  "function": "QueryEscape",
-  "category": "url-encoding",
-  "sanitizesCategories": [
-   "redirect"
-  ],
-  "removesTaintKinds": [
-   "url"
-  ]
- },
- {
-  "id": "go.net-url-pathescape.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "net/url",
-  "function": "PathEscape",
-  "category": "url-encoding",
-  "sanitizesCategories": [
-   "redirect"
-  ],
-  "removesTaintKinds": [
-   "url"
-  ]
- },
- {
-  "id": "go.net-url-joinpath.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "net/url",
-  "function": "JoinPath",
-  "category": "path"
- },
- {
-  "id": "go.net-url-parse.source",
-  "kind": "source",
-  "module": "std",
-  "package": "net/url",
-  "function": "Parse",
-  "category": "http-input",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.net-url-parse.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "net/url",
-  "function": "Parse",
-  "category": "http-input"
- },
- {
-  "id": "go.net-url-string.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "net/url",
-  "receiver": "*URL",
-  "function": "String",
-  "category": "http-input"
- },
- {
-  "id": "go.net-url-escapedpath.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "net/url",
-  "receiver": "*URL",
-  "function": "EscapedPath",
-  "category": "http-input"
- },
- {
-  "id": "go.net-url-requesturi.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "net/url",
-  "receiver": "*URL",
-  "function": "RequestURI",
-  "category": "http-input"
- },
- {
-  "id": "go.html-template-htmlescapestring.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "html/template",
-  "function": "HTMLEscapeString",
-  "category": "html-escaping",
-  "sanitizesCategories": [
-   "http-response",
-   "formatted-output"
-  ]
- },
- {
-  "id": "go.html-template-htmlescaper.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "html/template",
-  "function": "HTMLEscaper",
-  "category": "html-escaping",
-  "sanitizesCategories": [
-   "http-response",
-   "formatted-output"
-  ]
- },
- {
-  "id": "go.html-template-html.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "HTML",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "description": "template.HTML marks a string as safe HTML; tainted input must not reach this",
-  "match": "conversion"
- },
- {
-  "id": "go.html-template-js.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "JS",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "match": "conversion"
- },
- {
-  "id": "go.html-template-url.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "URL",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "match": "conversion"
- },
- {
-  "id": "go.text-template-execute.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "text/template",
-  "receiver": "*Template",
-  "function": "Execute",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "template"
-   },
-   {
-    "index": 1,
-    "role": "data"
-   }
-  ],
-  "cwe": [
-   "CWE-1336"
-  ],
-  "severity": "high",
-  "confidence": "medium"
- },
- {
-  "id": "go.html-template-execute.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "receiver": "*Template",
-  "function": "Execute",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "template"
-   },
-   {
-    "index": 1,
-    "role": "data"
-   }
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium"
- },
- {
-  "id": "go.html-template-parse.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "html/template",
-  "receiver": "*Template",
-  "function": "Parse",
-  "category": "template-injection"
- },
- {
-  "id": "go.text-template-parse.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "text/template",
-  "receiver": "*Template",
-  "function": "Parse",
-  "category": "template-injection"
- },
- {
-  "id": "go.context-withvalue.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "context",
-  "function": "WithValue",
-  "category": "context"
- },
- {
-  "id": "go.context-value.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "context",
-  "receiver": "Context",
-  "function": "Value",
-  "category": "context"
- },
- {
-  "id": "go.errors-wrap.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "fmt",
-  "function": "Errorf",
-  "category": "error-wrapping"
- },
- {
-  "id": "go.errors-new.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "errors",
-  "function": "New",
-  "category": "error-wrapping"
- },
- {
-  "id": "go.errors-unwrap.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "errors",
-  "function": "Unwrap",
-  "category": "error-wrapping"
- },
- {
-  "id": "go.errors-join.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "errors",
-  "function": "Join",
-  "category": "error-wrapping"
- },
- {
-  "id": "go.error-error.passthrough",
-  "kind": "passthrough",
-  "function": "Error",
-  "category": "conversion",
-  "description": "The error interface's Error method returns the wrapped message; taint on the error flows to the returned string"
- },
- {
-  "id": "go.crypto-aes-newcipher.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/aes",
-  "function": "NewCipher",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-des-newcipher.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/des",
-  "function": "NewCipher",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-hmac-new.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/hmac",
-  "function": "New",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-tls-loadx509keypair.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/tls",
-  "function": "LoadX509KeyPair",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "cert"
-   },
-   {
-    "index": 1,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-x509-parsepkcs1.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/x509",
-  "function": "ParsePKCS1PrivateKey",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-x509-parsepkcs8.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/x509",
-  "function": "ParsePKCS8PrivateKey",
-  "category": "crypto",
-  "taintKinds": [
-   "secret",
-   "crypto-key"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "key"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-x509-parsecert.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "crypto/x509",
-  "function": "ParseCertificate",
-  "category": "crypto",
-  "taintKinds": [
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "cert"
-   }
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.crypto-rand-read.sanitizer",
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "crypto/rand",
-  "function": "Read",
-  "category": "secure-random",
-  "removesTaintKinds": [
-   "insecure-random"
-  ]
- },
- {
-  "id": "go.flag-arg.source",
-  "kind": "source",
-  "module": "std",
-  "package": "flag",
-  "function": "Arg",
-  "category": "cli",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.flag-args.source",
-  "kind": "source",
-  "module": "std",
-  "package": "flag",
-  "function": "Args",
-  "category": "cli",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.log-print.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Print",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.log-printf.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Printf",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 1,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.log-println.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Println",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.log-fatal.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Fatal",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.log-panic.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Panic",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "severity": "medium",
-  "confidence": "medium"
- },
- {
-  "id": "go.http-redirect-handler.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "RedirectHandler",
-  "category": "redirect",
-  "taintKinds": [
-   "url",
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-601"
-  ],
-  "severity": "medium",
-  "confidence": "high"
- },
- {
-  "id": "go.reflect-valueof.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "reflect",
-  "function": "ValueOf",
-  "category": "conversion"
- },
- {
-  "id": "go.reflect-value-interface.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "reflect",
-  "receiver": "Value",
-  "function": "Interface",
-  "category": "conversion"
- },
- {
-  "id": "go.reflect-value-string.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "reflect",
-  "receiver": "Value",
-  "function": "String",
-  "category": "conversion"
- },
- {
-  "id": "go.reflect-value-bytes.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "reflect",
-  "receiver": "Value",
-  "function": "Bytes",
-  "category": "conversion"
- },
- {
-  "id": "go.reflect-value-call.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "reflect",
-  "receiver": "Value",
-  "function": "Call",
-  "category": "conversion"
- },
- {
-  "id": "go.unsafe-string.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "unsafe",
-  "function": "String",
-  "category": "unsafe",
-  "taintKinds": [
-   "native"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.unsafe-slice.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "unsafe",
-  "function": "Slice",
-  "category": "unsafe",
-  "taintKinds": [
-   "native"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "id": "go.syscall.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "syscall",
-  "function": "",
-  "category": "syscall",
-  "taintKinds": [
-   "native"
-  ],
-  "severity": "high",
-  "confidence": "high"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Fatalf",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.log-fatalf.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Fatalln",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.log-fatalln.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Panicf",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.log-panicf.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log",
-  "function": "Panicln",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.log-panicln.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log/slog",
-  "function": "Debug",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.slog-debug.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log/slog",
-  "function": "Info",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.slog-info.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log/slog",
-  "function": "Warn",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.slog-warn.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "log/slog",
-  "function": "Error",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.slog-error.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Print",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.fmt-print.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Printf",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.fmt-printf.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "fmt",
-  "function": "Println",
-  "category": "logging",
-  "taintKinds": [
-   "user-input",
-   "secret"
-  ],
-  "severity": "medium",
-  "confidence": "medium",
-  "arguments": [
-   {
-    "index": 0,
-    "variadic": true,
-    "role": "args"
-   }
-  ],
-  "id": "go.fmt-println.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "Query",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Conn",
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.conn-query.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "QueryContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Conn",
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.conn-querycontext.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "Exec",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Conn",
-  "arguments": [
-   {
-    "index": 1,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.conn-exec.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "ExecContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Conn",
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.conn-execcontext.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "QueryContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Tx",
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.tx-querycontext.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "database/sql",
-  "function": "ExecContext",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "receiver": "*Tx",
-  "arguments": [
-   {
-    "index": 2,
-    "role": "query"
-   }
-  ],
-  "cwe": [
-   "CWE-89"
-  ],
-  "id": "go.tx-execcontext.sink"
- },
- {
-  "kind": "sanitizer",
-  "module": "std",
-  "package": "database/sql",
-  "function": "Exec",
-  "category": "sql-parameterization",
-  "taintKinds": [],
-  "severity": "medium",
-  "confidence": "medium",
-  "receiver": "*Stmt",
-  "id": "go.stmt-exec.sanitizer",
-  "sanitizesCategories": [
-   "data"
-  ]
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "encoding/gob",
-  "function": "Decode",
-  "category": "data",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "receiver": "*Decoder",
-  "cwe": [
-   "CWE-502"
-  ],
-  "id": "go.gob-decoder-decode.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "reflect",
-  "function": "Call",
-  "category": "unsafe",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "receiver": "Value",
-  "cwe": [
-   "CWE-470"
-  ],
-  "id": "go.reflect-value-call.sink"
- },
- {
-  "kind": "sink",
-  "module": "std",
-  "package": "reflect",
-  "function": "CallSlice",
-  "category": "unsafe",
-  "taintKinds": [
-   "user-input"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "receiver": "Value",
-  "cwe": [
-   "CWE-470"
-  ],
-  "id": "go.reflect-value-callslice.sink"
- },
- {
-  "id": "go.http-get.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "Get",
-  "category": "external-service",
-  "taintKinds": [
-   "url",
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "Package-level HTTP request with a caller-supplied URL"
- },
- {
-  "id": "go.http-head.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "Head",
-  "category": "external-service",
-  "taintKinds": [
-   "url",
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "Package-level HTTP request with a caller-supplied URL"
- },
- {
-  "id": "go.http-post.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "Post",
-  "category": "external-service",
-  "taintKinds": [
-   "url",
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "Package-level HTTP request with a caller-supplied URL"
- },
- {
-  "id": "go.http-postform.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "net/http",
-  "function": "PostForm",
-  "category": "external-service",
-  "taintKinds": [
-   "url",
-   "user-input"
-  ],
-  "arguments": [
-   {
-    "index": 0,
-    "role": "url"
-   }
-  ],
-  "cwe": [
-   "CWE-918"
-  ],
-  "severity": "high",
-  "confidence": "high",
-  "description": "Package-level HTTP request with a caller-supplied URL"
- },
- {
-  "id": "go.html-template-css.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "CSS",
-  "match": "conversion",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "description": "template.CSS marks a string as safe CSS; tainted input must not reach this"
- },
- {
-  "id": "go.html-template-htmlattr.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "HTMLAttr",
-  "match": "conversion",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "description": "template.HTMLAttr marks a string as a safe HTML attribute; tainted input must not reach this"
- },
- {
-  "id": "go.html-template-jsstr.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "JSStr",
-  "match": "conversion",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "description": "template.JSStr marks a string as a safe JavaScript string; tainted input must not reach this"
- },
- {
-  "id": "go.html-template-srcset.sink",
-  "kind": "sink",
-  "module": "std",
-  "package": "html/template",
-  "function": "Srcset",
-  "match": "conversion",
-  "category": "template-injection",
-  "taintKinds": [
-   "user-input"
-  ],
-  "cwe": [
-   "CWE-79"
-  ],
-  "severity": "high",
-  "confidence": "medium",
-  "description": "template.Srcset marks a string as a safe image srcset; tainted input must not reach this"
- },
- {
-  "id": "go.regexp-replaceallstring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "ReplaceAllString",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-replaceallliteralstring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "ReplaceAllLiteralString",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-replaceallstringfunc.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "ReplaceAllStringFunc",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findstring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindString",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findstringsubmatch.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindStringSubmatch",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findallstring.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindAllString",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findallstringsubmatch.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindAllStringSubmatch",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-split.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "Split",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-replaceall.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "ReplaceAll",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-find.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "Find",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findsubmatch.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindSubmatch",
-  "category": "conversion"
- },
- {
-  "id": "go.regexp-findall.passthrough",
-  "kind": "passthrough",
-  "module": "std",
-  "package": "regexp",
-  "receiver": "*Regexp",
-  "function": "FindAll",
-  "category": "conversion"
- }
+  {
+    "id": "go.http-request-type.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "HTTP request carries user-controlled data"
+  },
+  {
+    "id": "go.parameter-name.source",
+    "kind": "source",
+    "module": "std",
+    "parameterName": "^(input|query|command|cmd|path|file|filename|url|uri|token|key|secret|password)$",
+    "category": "parameter",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "low",
+    "confidence": "low",
+    "description": "Parameter whose name conventionally carries untrusted input"
+  },
+  {
+    "id": "go.os-args.source",
+    "kind": "source",
+    "module": "std",
+    "package": "os",
+    "function": "Args",
+    "category": "cli",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "Command-line arguments"
+  },
+  {
+    "id": "go.os-getenv.source",
+    "kind": "source",
+    "module": "std",
+    "package": "os",
+    "function": "Getenv",
+    "category": "environment",
+    "taintKinds": [
+      "environment",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "Environment variable read"
+  },
+  {
+    "id": "go.os-lookupenv.source",
+    "kind": "source",
+    "module": "std",
+    "package": "os",
+    "function": "LookupEnv",
+    "category": "environment",
+    "taintKinds": [
+      "environment",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-exec-command.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os/exec",
+    "function": "Command",
+    "category": "command-execution",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "program"
+      },
+      {
+        "index": 1,
+        "variadic": true,
+        "role": "argument"
+      }
+    ],
+    "cwe": [
+      "CWE-78"
+    ],
+    "severity": "critical",
+    "confidence": "high",
+    "ruleId": "GOLEM-SEAM-COMMAND-INJECTION",
+    "ruleName": "User input reaches command execution",
+    "riskScore": 95
+  },
+  {
+    "id": "go.os-exec-commandcontext.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os/exec",
+    "function": "CommandContext",
+    "category": "command-execution",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "program"
+      },
+      {
+        "index": 2,
+        "variadic": true,
+        "role": "argument"
+      }
+    ],
+    "cwe": [
+      "CWE-78"
+    ],
+    "severity": "critical",
+    "confidence": "high",
+    "ruleId": "GOLEM-SEAM-COMMAND-INJECTION",
+    "ruleName": "User input reaches command execution",
+    "riskScore": 95
+  },
+  {
+    "id": "go.plugin-open.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "plugin",
+    "function": "Open",
+    "category": "dynamic-loading",
+    "taintKinds": [
+      "user-input",
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-912",
+      "CWE-915"
+    ],
+    "severity": "critical",
+    "confidence": "high",
+    "description": "Loading a plugin whose path is attacker-controlled is arbitrary code execution"
+  },
+  {
+    "id": "go.plugin-lookup.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "plugin",
+    "function": "Lookup",
+    "category": "dynamic-loading"
+  },
+  {
+    "id": "go.os-open.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "Open",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-openfile.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "OpenFile",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-writefile.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "WriteFile",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-readfile.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "ReadFile",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-create.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "Create",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-mkdir.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "Mkdir",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-mkdirall.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "MkdirAll",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-remove.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "Remove",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.os-removeall.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "os",
+    "function": "RemoveAll",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.db-query.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*DB",
+    "function": "Query",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "ruleId": "GOLEM-SEAM-SQL-INJECTION",
+    "ruleName": "User input reaches SQL query",
+    "riskScore": 80
+  },
+  {
+    "id": "go.db-querycontext.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*DB",
+    "function": "QueryContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.db-exec.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*DB",
+    "function": "Exec",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.db-execcontext.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*DB",
+    "function": "ExecContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.tx-query.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*Tx",
+    "function": "Query",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.tx-exec.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "receiver": "*Tx",
+    "function": "Exec",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-request.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "FormValue",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "HTTP form value"
+  },
+  {
+    "id": "go.http-postformvalue.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "PostFormValue",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-cookie.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "Cookie",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-header.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "Header",
+    "function": "Get",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-url-query.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/url",
+    "receiver": "*URL",
+    "function": "Query",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-parseform.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "ParseForm",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-multipartreader.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "MultipartReader",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-formfile.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Request",
+    "function": "FormFile",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-responsewriter-write.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "ResponseWriter",
+    "function": "Write",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "body"
+      }
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "receiverRelevant": true
+  },
+  {
+    "id": "go.http-redirect.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "Redirect",
+    "category": "redirect",
+    "taintKinds": [
+      "url"
+    ],
+    "arguments": [
+      {
+        "index": 2,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-601"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-error.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "Error",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "body"
+      }
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.http-servefile.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "ServeFile",
+    "category": "filesystem",
+    "taintKinds": [
+      "path"
+    ],
+    "arguments": [
+      {
+        "index": 2,
+        "role": "path"
+      }
+    ],
+    "cwe": [
+      "CWE-22"
+    ],
+    "severity": "high",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.http-client-do.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Client",
+    "function": "Do",
+    "category": "external-service",
+    "taintKinds": [
+      "user-input",
+      "url"
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "HTTP client request may indicate SSRF"
+  },
+  {
+    "id": "go.http-client-get.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "receiver": "*Client",
+    "function": "Get",
+    "category": "external-service",
+    "taintKinds": [
+      "user-input",
+      "url"
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ]
+  },
+  {
+    "id": "go.http-newrequest.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "NewRequest",
+    "category": "external-service",
+    "taintKinds": [
+      "user-input",
+      "url"
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "arguments": [
+      {
+        "index": 1,
+        "role": "url"
+      }
+    ]
+  },
+  {
+    "id": "go.http-newrequestwithcontext.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "NewRequestWithContext",
+    "category": "external-service",
+    "taintKinds": [
+      "user-input",
+      "url"
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "arguments": [
+      {
+        "index": 2,
+        "role": "url"
+      }
+    ]
+  },
+  {
+    "id": "go.io-copy.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "Copy",
+    "category": "io",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.io-copyn.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "CopyN",
+    "category": "io",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.io-copybuffer.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "CopyBuffer",
+    "category": "io",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.io-readall.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "ReadAll",
+    "category": "io"
+  },
+  {
+    "id": "go.io-readfull.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "ReadFull",
+    "category": "io",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.io-writestring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "io",
+    "function": "WriteString",
+    "category": "io",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.bufio-scanner-text.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bufio",
+    "receiver": "*Scanner",
+    "function": "Text",
+    "category": "io"
+  },
+  {
+    "id": "go.bufio-scanner-bytes.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bufio",
+    "receiver": "*Scanner",
+    "function": "Bytes",
+    "category": "io"
+  },
+  {
+    "id": "go.bufio-reader-readstring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bufio",
+    "receiver": "*Reader",
+    "function": "ReadString",
+    "category": "io"
+  },
+  {
+    "id": "go.bufio-reader-readbytes.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bufio",
+    "receiver": "*Reader",
+    "function": "ReadBytes",
+    "category": "io"
+  },
+  {
+    "id": "go.strings-builder-write.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "receiver": "*Builder",
+    "function": "Write",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.strings-builder-writestring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "receiver": "*Builder",
+    "function": "WriteString",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.strings-builder-writebyte.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "receiver": "*Builder",
+    "function": "WriteByte",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.strings-builder-writerune.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "receiver": "*Builder",
+    "function": "WriteRune",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.strings-builder-string.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "receiver": "*Builder",
+    "function": "String",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strings-join.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "function": "Join",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strings-trim.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "function": "Trim",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strings-trimspace.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "function": "TrimSpace",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strings-replace.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "function": "Replace",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strings-replaceall.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strings",
+    "function": "ReplaceAll",
+    "category": "conversion"
+  },
+  {
+    "id": "go.bytes-buffer-write.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bytes",
+    "receiver": "*Buffer",
+    "function": "Write",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.bytes-buffer-writestring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bytes",
+    "receiver": "*Buffer",
+    "function": "WriteString",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.bytes-buffer-string.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bytes",
+    "receiver": "*Buffer",
+    "function": "String",
+    "category": "conversion"
+  },
+  {
+    "id": "go.bytes-buffer-bytes.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "bytes",
+    "receiver": "*Buffer",
+    "function": "Bytes",
+    "category": "conversion"
+  },
+  {
+    "id": "go.fmt-sprintf.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "fmt",
+    "function": "Sprintf",
+    "category": "conversion"
+  },
+  {
+    "id": "go.fmt-sprint.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "fmt",
+    "function": "Sprint",
+    "category": "conversion"
+  },
+  {
+    "id": "go.fmt-sprintln.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "fmt",
+    "function": "Sprintln",
+    "category": "conversion"
+  },
+  {
+    "id": "go.fmt-fprintf.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Fprintf",
+    "category": "formatted-output",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "variadic": true,
+        "role": "format-args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.fmt-fprint.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Fprint",
+    "category": "formatted-output",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.fmt-fprintln.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Fprintln",
+    "category": "formatted-output",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.strconv-itoa.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strconv",
+    "function": "Itoa",
+    "category": "conversion"
+  },
+  {
+    "id": "go.strconv-format.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "strconv",
+    "function": "FormatInt",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-json-unmarshal.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json",
+    "function": "Unmarshal",
+    "category": "conversion",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.encoding-json-unmarshal.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json",
+    "function": "Unmarshal",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "data"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "description": "Untrusted JSON reaching the decoder can be a parser-complexity attack"
+  },
+  {
+    "id": "go.encoding-json-marshal.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json",
+    "function": "Marshal",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-json-newdecoder.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json",
+    "function": "NewDecoder",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "reader"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.encoding-json-encoder-encode.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json",
+    "receiver": "*Encoder",
+    "function": "Encode",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "value"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.encoding-xml-unmarshal.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/xml",
+    "function": "Unmarshal",
+    "category": "conversion",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.encoding-csv-reader-read.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/csv",
+    "receiver": "*Reader",
+    "function": "Read",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-gob-decoder-decode.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/gob",
+    "receiver": "*Decoder",
+    "function": "Decode",
+    "category": "conversion",
+    "writesToArguments": [
+      0
+    ]
+  },
+  {
+    "id": "go.encoding-base64-std-decoding.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/base64",
+    "function": "StdEncoding",
+    "category": "conversion"
+  },
+  {
+    "id": "go.path-filepath-join.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "path/filepath",
+    "function": "Join",
+    "category": "path"
+  },
+  {
+    "id": "go.path-join.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "path",
+    "function": "Join",
+    "category": "path"
+  },
+  {
+    "id": "go.path-filepath-clean.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "path/filepath",
+    "function": "Clean",
+    "category": "path"
+  },
+  {
+    "id": "go.path-filepath-base.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "path/filepath",
+    "function": "Base",
+    "category": "path-validation",
+    "sanitizesCategories": [
+      "filesystem"
+    ],
+    "removesTaintKinds": [
+      "path"
+    ]
+  },
+  {
+    "id": "go.path-filepath-dir.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "path/filepath",
+    "function": "Dir",
+    "category": "path-validation",
+    "sanitizesCategories": [
+      "filesystem"
+    ]
+  },
+  {
+    "id": "go.net-url-queryescape.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "net/url",
+    "function": "QueryEscape",
+    "category": "url-encoding",
+    "sanitizesCategories": [
+      "redirect"
+    ],
+    "removesTaintKinds": [
+      "url"
+    ]
+  },
+  {
+    "id": "go.net-url-pathescape.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "net/url",
+    "function": "PathEscape",
+    "category": "url-encoding",
+    "sanitizesCategories": [
+      "redirect"
+    ],
+    "removesTaintKinds": [
+      "url"
+    ]
+  },
+  {
+    "id": "go.net-url-joinpath.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "net/url",
+    "function": "JoinPath",
+    "category": "path"
+  },
+  {
+    "id": "go.net-url-parse.source",
+    "kind": "source",
+    "module": "std",
+    "package": "net/url",
+    "function": "Parse",
+    "category": "http-input",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.net-url-parse.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "net/url",
+    "function": "Parse",
+    "category": "http-input"
+  },
+  {
+    "id": "go.net-url-string.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "net/url",
+    "receiver": "*URL",
+    "function": "String",
+    "category": "http-input"
+  },
+  {
+    "id": "go.net-url-escapedpath.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "net/url",
+    "receiver": "*URL",
+    "function": "EscapedPath",
+    "category": "http-input"
+  },
+  {
+    "id": "go.net-url-requesturi.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "net/url",
+    "receiver": "*URL",
+    "function": "RequestURI",
+    "category": "http-input"
+  },
+  {
+    "id": "go.html-template-htmlescapestring.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "html/template",
+    "function": "HTMLEscapeString",
+    "category": "html-escaping",
+    "sanitizesCategories": [
+      "http-response",
+      "formatted-output"
+    ]
+  },
+  {
+    "id": "go.html-template-htmlescaper.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "html/template",
+    "function": "HTMLEscaper",
+    "category": "html-escaping",
+    "sanitizesCategories": [
+      "http-response",
+      "formatted-output"
+    ]
+  },
+  {
+    "id": "go.html-template-html.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "HTML",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "description": "template.HTML marks a string as safe HTML; tainted input must not reach this",
+    "match": "conversion"
+  },
+  {
+    "id": "go.html-template-js.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "JS",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "match": "conversion"
+  },
+  {
+    "id": "go.html-template-url.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "URL",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "match": "conversion"
+  },
+  {
+    "id": "go.text-template-execute.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "text/template",
+    "receiver": "*Template",
+    "function": "Execute",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "template"
+      },
+      {
+        "index": 1,
+        "role": "data"
+      }
+    ],
+    "cwe": [
+      "CWE-1336"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "receiverRelevant": true
+  },
+  {
+    "id": "go.html-template-execute.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "receiver": "*Template",
+    "function": "Execute",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "template"
+      },
+      {
+        "index": 1,
+        "role": "data"
+      }
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "receiverRelevant": true
+  },
+  {
+    "id": "go.html-template-parse.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "html/template",
+    "receiver": "*Template",
+    "function": "Parse",
+    "category": "template-injection"
+  },
+  {
+    "id": "go.text-template-parse.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "text/template",
+    "receiver": "*Template",
+    "function": "Parse",
+    "category": "template-injection"
+  },
+  {
+    "id": "go.context-withvalue.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "context",
+    "function": "WithValue",
+    "category": "context"
+  },
+  {
+    "id": "go.context-value.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "context",
+    "receiver": "Context",
+    "function": "Value",
+    "category": "context"
+  },
+  {
+    "id": "go.errors-wrap.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "fmt",
+    "function": "Errorf",
+    "category": "error-wrapping"
+  },
+  {
+    "id": "go.errors-new.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "errors",
+    "function": "New",
+    "category": "error-wrapping"
+  },
+  {
+    "id": "go.errors-unwrap.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "errors",
+    "function": "Unwrap",
+    "category": "error-wrapping"
+  },
+  {
+    "id": "go.errors-join.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "errors",
+    "function": "Join",
+    "category": "error-wrapping"
+  },
+  {
+    "id": "go.error-error.passthrough",
+    "kind": "passthrough",
+    "function": "Error",
+    "category": "conversion",
+    "description": "The error interface's Error method returns the wrapped message; taint on the error flows to the returned string"
+  },
+  {
+    "id": "go.crypto-aes-newcipher.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/aes",
+    "function": "NewCipher",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-des-newcipher.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/des",
+    "function": "NewCipher",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-hmac-new.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/hmac",
+    "function": "New",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-tls-loadx509keypair.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/tls",
+    "function": "LoadX509KeyPair",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "cert"
+      },
+      {
+        "index": 1,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-x509-parsepkcs1.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/x509",
+    "function": "ParsePKCS1PrivateKey",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-x509-parsepkcs8.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/x509",
+    "function": "ParsePKCS8PrivateKey",
+    "category": "crypto",
+    "taintKinds": [
+      "secret",
+      "crypto-key"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "key"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-x509-parsecert.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "crypto/x509",
+    "function": "ParseCertificate",
+    "category": "crypto",
+    "taintKinds": [
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "cert"
+      }
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.crypto-rand-read.sanitizer",
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "crypto/rand",
+    "function": "Read",
+    "category": "secure-random",
+    "removesTaintKinds": [
+      "insecure-random"
+    ]
+  },
+  {
+    "id": "go.flag-arg.source",
+    "kind": "source",
+    "module": "std",
+    "package": "flag",
+    "function": "Arg",
+    "category": "cli",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.flag-args.source",
+    "kind": "source",
+    "module": "std",
+    "package": "flag",
+    "function": "Args",
+    "category": "cli",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.log-print.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Print",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.log-printf.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Printf",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.log-println.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Println",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.log-fatal.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Fatal",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.log-panic.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Panic",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.http-redirect-handler.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "RedirectHandler",
+    "category": "redirect",
+    "taintKinds": [
+      "url",
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-601"
+    ],
+    "severity": "medium",
+    "confidence": "high"
+  },
+  {
+    "id": "go.reflect-valueof.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "reflect",
+    "function": "ValueOf",
+    "category": "conversion"
+  },
+  {
+    "id": "go.reflect-value-interface.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "reflect",
+    "receiver": "Value",
+    "function": "Interface",
+    "category": "conversion"
+  },
+  {
+    "id": "go.reflect-value-string.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "reflect",
+    "receiver": "Value",
+    "function": "String",
+    "category": "conversion"
+  },
+  {
+    "id": "go.reflect-value-bytes.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "reflect",
+    "receiver": "Value",
+    "function": "Bytes",
+    "category": "conversion"
+  },
+  {
+    "id": "go.reflect-value-call.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "reflect",
+    "receiver": "Value",
+    "function": "Call",
+    "category": "conversion"
+  },
+  {
+    "id": "go.unsafe-string.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "unsafe",
+    "function": "String",
+    "category": "unsafe",
+    "taintKinds": [
+      "native"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.unsafe-slice.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "unsafe",
+    "function": "Slice",
+    "category": "unsafe",
+    "taintKinds": [
+      "native"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "id": "go.syscall.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "syscall",
+    "function": "",
+    "category": "syscall",
+    "taintKinds": [
+      "native"
+    ],
+    "severity": "high",
+    "confidence": "high"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Fatalf",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.log-fatalf.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Fatalln",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.log-fatalln.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Panicf",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.log-panicf.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log",
+    "function": "Panicln",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.log-panicln.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log/slog",
+    "function": "Debug",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.slog-debug.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log/slog",
+    "function": "Info",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.slog-info.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log/slog",
+    "function": "Warn",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.slog-warn.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "log/slog",
+    "function": "Error",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.slog-error.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Print",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.fmt-print.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Printf",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.fmt-printf.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "fmt",
+    "function": "Println",
+    "category": "logging",
+    "taintKinds": [
+      "user-input",
+      "secret"
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "arguments": [
+      {
+        "index": 0,
+        "variadic": true,
+        "role": "args"
+      }
+    ],
+    "id": "go.fmt-println.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "Query",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Conn",
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.conn-query.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "QueryContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Conn",
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.conn-querycontext.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "Exec",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Conn",
+    "arguments": [
+      {
+        "index": 0,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.conn-exec.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "ExecContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Conn",
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.conn-execcontext.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "QueryContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Tx",
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.tx-querycontext.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "database/sql",
+    "function": "ExecContext",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "receiver": "*Tx",
+    "arguments": [
+      {
+        "index": 1,
+        "role": "query"
+      }
+    ],
+    "cwe": [
+      "CWE-89"
+    ],
+    "id": "go.tx-execcontext.sink"
+  },
+  {
+    "kind": "sanitizer",
+    "module": "std",
+    "package": "database/sql",
+    "function": "Exec",
+    "category": "sql-parameterization",
+    "taintKinds": [],
+    "severity": "medium",
+    "confidence": "medium",
+    "receiver": "*Stmt",
+    "id": "go.stmt-exec.sanitizer",
+    "sanitizesCategories": [
+      "data"
+    ]
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/gob",
+    "function": "Decode",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "receiver": "*Decoder",
+    "cwe": [
+      "CWE-502"
+    ],
+    "id": "go.gob-decoder-decode.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "reflect",
+    "function": "Call",
+    "category": "unsafe",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "receiver": "Value",
+    "cwe": [
+      "CWE-470"
+    ],
+    "id": "go.reflect-value-call.sink"
+  },
+  {
+    "kind": "sink",
+    "module": "std",
+    "package": "reflect",
+    "function": "CallSlice",
+    "category": "unsafe",
+    "taintKinds": [
+      "user-input"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "receiver": "Value",
+    "cwe": [
+      "CWE-470"
+    ],
+    "id": "go.reflect-value-callslice.sink"
+  },
+  {
+    "id": "go.http-get.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "Get",
+    "category": "external-service",
+    "taintKinds": [
+      "url",
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "Package-level HTTP request with a caller-supplied URL"
+  },
+  {
+    "id": "go.http-head.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "Head",
+    "category": "external-service",
+    "taintKinds": [
+      "url",
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "Package-level HTTP request with a caller-supplied URL"
+  },
+  {
+    "id": "go.http-post.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "Post",
+    "category": "external-service",
+    "taintKinds": [
+      "url",
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "Package-level HTTP request with a caller-supplied URL"
+  },
+  {
+    "id": "go.http-postform.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "net/http",
+    "function": "PostForm",
+    "category": "external-service",
+    "taintKinds": [
+      "url",
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "url"
+      }
+    ],
+    "cwe": [
+      "CWE-918"
+    ],
+    "severity": "high",
+    "confidence": "high",
+    "description": "Package-level HTTP request with a caller-supplied URL"
+  },
+  {
+    "id": "go.html-template-css.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "CSS",
+    "match": "conversion",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "description": "template.CSS marks a string as safe CSS; tainted input must not reach this"
+  },
+  {
+    "id": "go.html-template-htmlattr.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "HTMLAttr",
+    "match": "conversion",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "description": "template.HTMLAttr marks a string as a safe HTML attribute; tainted input must not reach this"
+  },
+  {
+    "id": "go.html-template-jsstr.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "JSStr",
+    "match": "conversion",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "description": "template.JSStr marks a string as a safe JavaScript string; tainted input must not reach this"
+  },
+  {
+    "id": "go.html-template-srcset.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "html/template",
+    "function": "Srcset",
+    "match": "conversion",
+    "category": "template-injection",
+    "taintKinds": [
+      "user-input"
+    ],
+    "cwe": [
+      "CWE-79"
+    ],
+    "severity": "high",
+    "confidence": "medium",
+    "description": "template.Srcset marks a string as a safe image srcset; tainted input must not reach this"
+  },
+  {
+    "id": "go.regexp-replaceallstring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "ReplaceAllString",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-replaceallliteralstring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "ReplaceAllLiteralString",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-replaceallstringfunc.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "ReplaceAllStringFunc",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findstring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindString",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findstringsubmatch.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindStringSubmatch",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findallstring.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindAllString",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findallstringsubmatch.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindAllStringSubmatch",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-split.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "Split",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-replaceall.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "ReplaceAll",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-find.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "Find",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findsubmatch.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindSubmatch",
+    "category": "conversion"
+  },
+  {
+    "id": "go.regexp-findall.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "regexp",
+    "receiver": "*Regexp",
+    "function": "FindAll",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-jsonv2-unmarshal.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "Unmarshal",
+    "category": "conversion",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.encoding-jsonv2-unmarshal.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "Unmarshal",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "data"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "description": "Untrusted JSON reaching the v2 decoder can be a parser-complexity attack"
+  },
+  {
+    "id": "go.encoding-jsonv2-unmarshalread.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "UnmarshalRead",
+    "category": "conversion",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.encoding-jsonv2-unmarshalread.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "UnmarshalRead",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "reader"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium",
+    "description": "Untrusted reader decoded by encoding/json/v2"
+  },
+  {
+    "id": "go.encoding-jsonv2-unmarshaldecode.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "UnmarshalDecode",
+    "category": "conversion",
+    "writesToArguments": [
+      1
+    ]
+  },
+  {
+    "id": "go.encoding-jsonv2-marshal.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "Marshal",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-jsonv2-marshalwrite.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "MarshalWrite",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "value"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.encoding-jsonv2-marshalencode.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/v2",
+    "function": "MarshalEncode",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 1,
+        "role": "value"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.encoding-jsontext-newdecoder.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/jsontext",
+    "function": "NewDecoder",
+    "category": "data",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "reader"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.encoding-jsontext-decoder-readvalue.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/jsontext",
+    "receiver": "*Decoder",
+    "function": "ReadValue",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-jsontext-decoder-readtoken.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "encoding/json/jsontext",
+    "receiver": "*Decoder",
+    "function": "ReadToken",
+    "category": "conversion"
+  },
+  {
+    "id": "go.encoding-jsontext-encoder-writevalue.sink",
+    "kind": "sink",
+    "module": "std",
+    "package": "encoding/json/jsontext",
+    "receiver": "*Encoder",
+    "function": "WriteValue",
+    "category": "http-response",
+    "taintKinds": [
+      "user-input"
+    ],
+    "arguments": [
+      {
+        "index": 0,
+        "role": "value"
+      }
+    ],
+    "severity": "medium",
+    "confidence": "medium"
+  },
+  {
+    "id": "go.uuid-parse.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "function": "Parse",
+    "category": "conversion",
+    "description": "Parsing carries the input's taint into the UUID"
+  },
+  {
+    "id": "go.uuid-mustparse.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "function": "MustParse",
+    "category": "conversion",
+    "description": "Parsing carries the input's taint into the UUID"
+  },
+  {
+    "id": "go.uuid-string.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "receiver": "UUID",
+    "function": "String",
+    "category": "conversion",
+    "description": "Rendering or decoding carries the UUID's taint"
+  },
+  {
+    "id": "go.uuid-appendtext.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "receiver": "UUID",
+    "function": "AppendText",
+    "category": "conversion",
+    "description": "Rendering or decoding carries the UUID's taint"
+  },
+  {
+    "id": "go.uuid-marshaltext.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "receiver": "UUID",
+    "function": "MarshalText",
+    "category": "conversion",
+    "description": "Rendering or decoding carries the UUID's taint"
+  },
+  {
+    "id": "go.uuid-unmarshaltext.passthrough",
+    "kind": "passthrough",
+    "module": "std",
+    "package": "uuid",
+    "receiver": "UUID",
+    "function": "UnmarshalText",
+    "category": "conversion",
+    "description": "Rendering or decoding carries the UUID's taint"
+  },
+  {
+    "id": "go.math-rand-int.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Int",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-int.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Int",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-int31.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Int31",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-int31.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Int31",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-int31n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Int31n",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-int31n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Int31n",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-int63.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Int63",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-int63.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Int63",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-int63n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Int63n",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-int63n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Int63n",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-intn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Intn",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-intn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Intn",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-uint32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Uint32",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-uint32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Uint32",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-uint64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Uint64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-uint64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Uint64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-float32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Float32",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-float32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Float32",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-float64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Float64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-float64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Float64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-normfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "NormFloat64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-normfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "NormFloat64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-expfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "ExpFloat64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-expfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "ExpFloat64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-perm.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Perm",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-perm.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Perm",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-read.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "function": "Read",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-rand-read.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand",
+    "receiver": "*Rand",
+    "function": "Read",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-int.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Int",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-int.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Int",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-intn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "IntN",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-intn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "IntN",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-int32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Int32",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-int32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Int32",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-int32n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Int32N",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-int32n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Int32N",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-int64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Int64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-int64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Int64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-int64n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Int64N",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-int64n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Int64N",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uint.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Uint",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uint.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Uint",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uintn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "UintN",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uintn.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "UintN",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uint32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Uint32",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uint32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Uint32",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uint32n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Uint32N",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uint32n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Uint32N",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uint64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Uint64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uint64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Uint64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-uint64n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Uint64N",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-uint64n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Uint64N",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "N",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-n.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "N",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-float32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Float32",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-float32.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Float32",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-float64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Float64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-float64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Float64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-normfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "NormFloat64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-normfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "NormFloat64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-expfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "ExpFloat64",
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-expfloat64.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "ExpFloat64",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-perm.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "function": "Perm",
+    "arity": {
+      "min": 1,
+      "max": 1
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  },
+  {
+    "id": "go.math-rand-v2-rand-perm.source",
+    "kind": "source",
+    "module": "std",
+    "package": "math/rand/v2",
+    "receiver": "*Rand",
+    "function": "Perm",
+    "arity": {
+      "min": 2,
+      "max": 2
+    },
+    "category": "insecure-random",
+    "taintKinds": [
+      "insecure-random"
+    ],
+    "severity": "medium",
+    "confidence": "high",
+    "description": "math/rand draws are predictable; not for tokens, keys or nonces"
+  }
 ]

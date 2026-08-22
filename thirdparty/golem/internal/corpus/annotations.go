@@ -379,7 +379,7 @@ var categories = func() map[string]bool {
 		"crypto-material", "custom-helper", "custom-sanitizer", "data", "dynamic-loading",
 		"environment", "external-service", "filesystem", "formatted-output", "framework",
 		"framework-context", "html-escaping", "http-endpoint", "http-input",
-		"http-response", "logging", "native-conversion", "native-interop", "panic", "parameter",
+		"http-response", "insecure-random", "logging", "native-conversion", "native-interop", "panic", "parameter",
 		"path", "path-validation", "queue-message", "queue-send", "redirect", "secure-random",
 		"sink", "sql-parameterization", "syscall", "unsafe", "url-encoding",
 	} {

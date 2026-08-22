@@ -16,14 +16,19 @@ type ToolInfo struct {
 	Description string `json:"description"`
 }
 type RuntimeInfo struct {
-	GOOS       string   `json:"goos"`
-	GOARCH     string   `json:"goarch"`
-	GoVersion  string   `json:"goVersion"`
-	Goroot     string   `json:"goroot,omitempty"`
-	WorkingDir string   `json:"workingDir,omitempty"`
-	Patterns   []string `json:"patterns,omitempty"`
-	BuildTags  []string `json:"buildTags,omitempty"`
-	Tests      bool     `json:"tests"`
+	GOOS      string `json:"goos"`
+	GOARCH    string `json:"goarch"`
+	GoVersion string `json:"goVersion"`
+	// LanguageVersion is the newest Go language version this build can
+	// type-check, which is set by the toolchain that compiled golem and not by
+	// the go command on PATH. A module declaring a newer `go` directive is not
+	// analysed correctly, so the ceiling belongs in the report.
+	LanguageVersion string   `json:"languageVersion,omitempty"`
+	Goroot          string   `json:"goroot,omitempty"`
+	WorkingDir      string   `json:"workingDir,omitempty"`
+	Patterns        []string `json:"patterns,omitempty"`
+	BuildTags       []string `json:"buildTags,omitempty"`
+	Tests           bool     `json:"tests"`
 }
 type AnalysisOptions struct {
 	Directory                       string   `json:"directory"`

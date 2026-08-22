@@ -377,7 +377,7 @@ func (e *Engine) computeFuncSummary(fn *ssa.Function) {
 			for paramIdx, pls := range paramLabels {
 				for _, pl := range pls.Labels() {
 					if label.ID == pl.ID {
-						summary.AddParamReturn(paramIdx, label.TaintKinds, label.Confidence)
+						summary.AddParamReturn(paramIdx, label.TaintKinds, label.FieldPaths, label.Confidence)
 					}
 				}
 			}
@@ -424,19 +424,20 @@ func (e *Engine) computeFuncSummary(fn *ssa.Function) {
 			}
 		}
 		summary.AddParamSink(paramIdx, SinkEffect{
-			Category:      hit.entry.Category,
-			TaintKinds:    hit.entry.TaintKinds,
-			ArgumentIndex: hit.argIndex,
-			SinkSymbol:    sinkSym,
-			SinkName:      sinkNm,
-			SinkType:      "",
-			Pos:           sinkPos,
-			ModelID:       hit.entry.ID,
-			Severity:      hit.entry.Severity,
-			Confidence:    hit.entry.Confidence,
-			RuleID:        hit.entry.RuleID,
-			RuleName:      hit.entry.RuleName,
-			RiskScore:     hit.entry.RiskScore,
+			Category:        hit.entry.Category,
+			TaintKinds:      hit.entry.TaintKinds,
+			ArgumentIndex:   hit.argIndex,
+			ParamFieldPaths: hit.label.FieldPaths,
+			SinkSymbol:      sinkSym,
+			SinkName:        sinkNm,
+			SinkType:        "",
+			Pos:             sinkPos,
+			ModelID:         hit.entry.ID,
+			Severity:        hit.entry.Severity,
+			Confidence:      hit.entry.Confidence,
+			RuleID:          hit.entry.RuleID,
+			RuleName:        hit.entry.RuleName,
+			RiskScore:       hit.entry.RiskScore,
 		})
 	}
 
@@ -486,7 +487,7 @@ func (e *Engine) detectSummarySinks(fn *ssa.Function, summary *FuncSummary) {
 					continue
 				}
 				for argIdx, arg := range common.Args {
-					if !entry.ArgumentRelevant(argIdx) {
+					if !entry.ArgumentRelevantAt(common, argIdx) {
 						continue
 					}
 					paramIdx := e.traceToParam(arg, fn)

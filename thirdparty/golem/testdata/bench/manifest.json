@@ -82,12 +82,22 @@
       "tier": "quick"
     },
     {
+      "name": "func-param-callback",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "generic-constraint-method",
       "type": "corpus",
       "tier": "quick"
     },
     {
       "name": "generic-container",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "generic-method",
       "type": "corpus",
       "tier": "quick"
     },
@@ -107,6 +117,16 @@
       "tier": "quick"
     },
     {
+      "name": "http-client-ssrf",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "insecure-random",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "interface-dispatch",
       "type": "corpus",
       "tier": "quick"
@@ -118,6 +138,11 @@
     },
     {
       "name": "json-roundtrip",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "jsonv2-roundtrip",
       "type": "corpus",
       "tier": "quick"
     },
@@ -153,6 +178,11 @@
     },
     {
       "name": "plugin-open",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "promoted-field-literal-key",
       "type": "corpus",
       "tier": "quick"
     },
@@ -227,7 +257,17 @@
       "tier": "quick"
     },
     {
+      "name": "uuid-roundtrip",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "validate-named-but-not-sanitizing",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "value-receiver-field",
       "type": "corpus",
       "tier": "quick"
     },

@@ -11,12 +11,15 @@ import (
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
-	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
 	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
+	// rta is the vendored x/tools v0.49.0 copy with the Go 1.27
+	// generic-method nil crash fixed (golang/go#80973); upstream
+	// rta.Analyze still segfaults on such programs. See internal/rta.
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/rta"
 )
 
 func (a *Analyzer) buildCallGraph(ctx *ssaContext) *model.CallGraph {
@@ -72,26 +75,85 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 	case "", "none":
 		return nil, mode, nil
 	case "static":
-		graph = static.CallGraph(ctx.program)
+		graph, diagnostics = guardAlgorithm("static", func() *callgraph.Graph { return static.CallGraph(ctx.program) })
 	case "cha":
-		graph = cha.CallGraph(ctx.program)
+		graph, diagnostics = guardAlgorithm("cha", func() *callgraph.Graph { return cha.CallGraph(ctx.program) })
 	case "rta":
-		roots := a.resolveRoots(ctx)
-		result := rta.Analyze(roots, true)
-		if result != nil {
-			graph = result.CallGraph
-		} else {
+		graph, diagnostics = guardAlgorithm("rta", func() *callgraph.Graph {
+			// A nil root segfaults inside rta.Analyze; see callableFunctions.
+			result := rta.Analyze(callableFunctions(a.resolveRoots(ctx)), true)
+			if result == nil {
+				return nil
+			}
+			return result.CallGraph
+		})
+		if graph == nil && len(diagnostics) == 0 {
 			diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: "RTA requires at least one reachable root function"})
 		}
 	case "vta":
-		initial := static.CallGraph(ctx.program)
-		graph = vta.CallGraph(reachableFunctions(initial), initial)
+		graph, diagnostics = guardAlgorithm("vta", func() *callgraph.Graph {
+			initial := static.CallGraph(ctx.program)
+			return vta.CallGraph(reachableFunctions(initial), initial)
+		})
 	case "auto":
 		graph, algorithm, diagnostics = a.buildAutoCallGraph(ctx)
 	default:
 		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph", Message: fmt.Sprintf("unsupported callgraph mode %q", mode)})
 	}
+	// A panicking algorithm leaves no graph. CHA is the conservative fallback:
+	// it needs no roots and no type-flow reasoning, so the shapes that break RTA
+	// and VTA do not reach it. A report with a coarser graph and a diagnostic
+	// saying so is worth more than no report.
+	if graph == nil && algorithm != "cha" && panicked(diagnostics) {
+		fallback, fallbackDiags := guardAlgorithm("cha", func() *callgraph.Graph { return cha.CallGraph(ctx.program) })
+		diagnostics = append(diagnostics, fallbackDiags...)
+		if fallback != nil {
+			graph, algorithm = fallback, "cha"
+			diagnostics = append(diagnostics, model.Diagnostic{
+				Kind:    "callgraph",
+				Message: fmt.Sprintf("%s did not complete; fell back to cha, so the graph is coarser than requested", mode),
+			})
+		}
+	}
 	return graph, algorithm, diagnostics
+}
+
+// guardAlgorithm runs one call-graph algorithm and converts a panic inside it
+// into a diagnostic.
+//
+// The algorithms live in x/tools and are not defensive about the programs golem
+// hands them: `rta.(*rta).visitFunc` read `f.Blocks` with no nil check and
+// segfaulted on a nil function reaching its worklist (golang/go#80973, Go 1.27
+// generic methods; fixed in the vendored internal/rta). That trigger is gone,
+// but the guard stays: x/tools has produced more than one such defect, and
+// letting one abort the process throws away a complete source-evidence report
+// — declarations, imports, crypto, security signals, supply chain, all already
+// computed — because one optional graph could not be built. Recovering keeps
+// the report and says plainly what was lost. The panic is never swallowed: it
+// is reported verbatim, since a silent degradation is worse than a crash.
+func guardAlgorithm(name string, build func() *callgraph.Graph) (graph *callgraph.Graph, diagnostics []model.Diagnostic) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			graph = nil
+			diagnostics = append(diagnostics, model.Diagnostic{
+				Kind:    "callgraph",
+				Message: fmt.Sprintf("%s call-graph construction panicked in x/tools and was recovered: %v", name, recovered),
+			})
+		}
+	}()
+	return build(), nil
+}
+
+// panicked reports whether any diagnostic records a recovered panic, which is
+// what distinguishes "the algorithm broke" from "the algorithm legitimately
+// produced nothing".
+func panicked(diagnostics []model.Diagnostic) bool {
+	for _, d := range diagnostics {
+		if strings.Contains(d.Message, "panicked in x/tools") {
+			return true
+		}
+	}
+	return false
 }
 
 func reachableFunctions(graph *callgraph.Graph) map[*ssa.Function]bool {
@@ -527,6 +589,22 @@ func (a *Analyzer) userRoots(ctx *ssaContext) []*ssa.Function {
 	return roots
 }
 
+// callableFunctions drops roots RTA cannot start from. rta.Analyze puts every
+// root straight on its worklist and reads root.Blocks without a nil check, so a
+// nil root segfaults inside x/tools instead of yielding a smaller graph. A
+// bodyless root is kept: it contributes no edges but is still a graph node, and
+// dropping it would silently shrink the reported call graph.
+func callableFunctions(fns []*ssa.Function) []*ssa.Function {
+	out := make([]*ssa.Function, 0, len(fns))
+	for _, fn := range fns {
+		if fn == nil {
+			continue
+		}
+		out = append(out, fn)
+	}
+	return out
+}
+
 // legacyRtaRoots is the existing heuristic (main+init + synthetic registrations).
 func legacyRtaRoots(ctx *ssaContext) []*ssa.Function {
 	seen := map[*ssa.Function]bool{}
@@ -685,24 +763,46 @@ func mainAndInitRoots(pkgs []*ssa.Package) []*ssa.Function {
 func (a *Analyzer) buildAutoCallGraph(ctx *ssaContext) (*callgraph.Graph, string, []model.Diagnostic) {
 	var diagnostics []model.Diagnostic
 
+	// Every phase is guarded: this pipeline already falls back down the chain,
+	// and a panic inside one algorithm is one more reason to fall back rather
+	// than a reason to abandon the report.
+
 	// Phase 1: CHA as seed.
-	chaGraph := cha.CallGraph(ctx.program)
+	chaGraph, chaDiags := guardAlgorithm("cha", func() *callgraph.Graph { return cha.CallGraph(ctx.program) })
+	diagnostics = append(diagnostics, chaDiags...)
+	if chaGraph == nil {
+		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "cha produced no graph; no call graph is available"})
+		return nil, "auto", diagnostics
+	}
 	diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "seed: cha (" + fmt.Sprintf("%d nodes", len(chaGraph.Nodes)) + ")"})
 
 	// Phase 2: RTA from resolved roots.
-	roots := a.resolveRoots(ctx)
-	rtaResult := rta.Analyze(roots, true)
-	if rtaResult == nil || rtaResult.CallGraph == nil {
+	roots := callableFunctions(a.resolveRoots(ctx))
+	rtaGraph, rtaDiags := guardAlgorithm("rta", func() *callgraph.Graph {
+		result := rta.Analyze(roots, true)
+		if result == nil {
+			return nil
+		}
+		return result.CallGraph
+	})
+	diagnostics = append(diagnostics, rtaDiags...)
+	if rtaGraph == nil {
 		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "rta returned no graph; falling back to cha"})
 		return chaGraph, "cha", diagnostics
 	}
-	rtaGraph := rtaResult.CallGraph
 	diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "rta: " + fmt.Sprintf("%d nodes", len(rtaGraph.Nodes)) + " from " + fmt.Sprintf("%d roots", len(roots))})
 
 	// Phase 3: VTA twice over RTA result.
-	vta1 := vta.CallGraph(reachableFunctions(rtaGraph), rtaGraph)
-	vta2 := vta.CallGraph(reachableFunctions(vta1), vta1)
-	diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: fmt.Sprintf("vta×2: %d → %d nodes", len(vta1.Nodes), len(vta2.Nodes))})
+	vta2, vtaDiags := guardAlgorithm("vta", func() *callgraph.Graph {
+		vta1 := vta.CallGraph(reachableFunctions(rtaGraph), rtaGraph)
+		return vta.CallGraph(reachableFunctions(vta1), vta1)
+	})
+	diagnostics = append(diagnostics, vtaDiags...)
+	if vta2 == nil {
+		diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: "vta returned no graph; falling back to rta"})
+		return rtaGraph, "rta", diagnostics
+	}
+	diagnostics = append(diagnostics, model.Diagnostic{Kind: "callgraph-auto", Message: fmt.Sprintf("vta×2: %d nodes", len(vta2.Nodes))})
 
 	return vta2, "auto", diagnostics
 }

@@ -309,9 +309,10 @@ var coverageAllowlist = map[string]string{
 
 	// Disagreements of substance rather than coverage, left as they are until
 	// someone decides which reading is right:
-	"source net/url.Parse":          "models treat parsing as a source; legacy treats it as propagation only",
-	"sink encoding/json.NewDecoder": "legacy models it as a writer (passthrough with argument writes), the models as a sink",
-	"sanitizer path/filepath.Dir":   "filepath.Dir strips the final element but not \"..\"; the model entry is unreviewed",
+	"source net/url.Parse":                   "models treat parsing as a source; legacy treats it as propagation only",
+	"sink encoding/json.NewDecoder":          "legacy models it as a writer (passthrough with argument writes), the models as a sink",
+	"sink encoding/json/jsontext.NewDecoder": "legacy models it as a writer (passthrough with argument writes), the models as a sink",
+	"sanitizer path/filepath.Dir":            "filepath.Dir strips the final element but not \"..\"; the model entry is unreviewed",
 }
 
 // TestEnginesCoverTheSameSymbols compares the two vocabularies symbol by symbol

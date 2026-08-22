@@ -17,19 +17,19 @@
   },
   "callGraph": {
     "algorithm": "rta",
-    "nodeCount": 90,
-    "edgeCount": 305,
+    "nodeCount": 84,
+    "edgeCount": 234,
     "nodesByKind": {
-      "function": 90
+      "function": 84
     },
     "edgesByCallType": {
-      "func-value": 4,
-      "interface": 219,
+      "func-value": 1,
+      "interface": 151,
       "static": 82
     },
-    "nodeSetHash": "501b2879c3b46668",
-    "edgeSetHash": "3b86152a83a6aff2",
-    "syntheticNodes": 53,
+    "nodeSetHash": "e1e637c242809a55",
+    "edgeSetHash": "d64979beafa5b463",
+    "syntheticNodes": 47,
     "stdlibNodes": 0,
     "externalNodes": 2
   },
@@ -150,7 +150,7 @@
         "sourceAt": "middleware/logger.go:98",
         "sinkAt": "middleware/terminal.go:59",
         "severity": "medium",
-        "pathLength": 5,
+        "pathLength": 3,
         "connected": true,
         "taintKinds": "user-input"
       },
@@ -161,7 +161,7 @@
         "sourceAt": "middleware/logger.go:98",
         "sinkAt": "middleware/terminal.go:59",
         "severity": "medium",
-        "pathLength": 3,
+        "pathLength": 5,
         "connected": true,
         "taintKinds": "user-input"
       },
@@ -170,7 +170,7 @@
         "source": "net/http.(*Request)",
         "sink": "internal/abi.NewName",
         "sourceAt": "middleware/strip.go:41",
-        "sinkAt": ".../internal/abi/type.go:679",
+        "sinkAt": ".../internal/abi/type.go:704",
         "severity": "medium",
         "pathLength": 3,
         "connected": true,
@@ -181,7 +181,7 @@
         "source": "net/http.(*Request)",
         "sink": "internal/abi.NewName",
         "sourceAt": "middleware/strip.go:41",
-        "sinkAt": ".../internal/abi/type.go:679",
+        "sinkAt": ".../internal/abi/type.go:704",
         "severity": "medium",
         "pathLength": 3,
         "connected": true,
@@ -192,7 +192,7 @@
         "source": "net/http.(*Request)",
         "sink": "reflect.funcLayout",
         "sourceAt": "middleware/strip.go:41",
-        "sinkAt": ".../src/reflect/type.go:2834",
+        "sinkAt": ".../src/reflect/type.go:2851",
         "severity": "medium",
         "pathLength": 3,
         "connected": true,
@@ -203,7 +203,7 @@
         "source": "net/http.(*Request)",
         "sink": "reflect.funcLayout",
         "sourceAt": "middleware/strip.go:41",
-        "sinkAt": ".../src/reflect/type.go:2834",
+        "sinkAt": ".../src/reflect/type.go:2851",
         "severity": "medium",
         "pathLength": 3,
         "connected": true,

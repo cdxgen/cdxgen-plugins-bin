@@ -7,7 +7,7 @@ import (
 )
 
 // Context value: taint flows through context.WithValue/Value.
-// context is not in the shouldPropagate allowlist.
+// context.WithValue/Value are explicit passthrough models, not blanket carriers.
 // golem:want flow source=http-input sink=command-execution
 type ctxKey string
 

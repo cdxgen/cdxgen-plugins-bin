@@ -7,7 +7,7 @@ import (
 )
 
 // Strings builder: taint flows through strings.Builder, which is a very common pattern
-// in Go code but not in the stdlib allowlist for shouldPropagate.
+// in Go code, carried by the writes-to-argument models on its methods.
 // golem:want flow source=http-input sink=command-execution
 func Handler(r *http.Request) {
 	var b strings.Builder
