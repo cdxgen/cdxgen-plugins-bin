@@ -151,21 +151,19 @@ fn extract_bom_ref(bom: &Value, instance_path_str: &str) -> Option<String> {
         .collect();
     let mut current = bom;
     for seg in &segments {
-        if let Some(v) = current.get(*seg) {
-            current = v;
-        } else if let Ok(idx) = seg.parse::<usize>() {
-            let arr = current.as_array()?;
-            if idx < arr.len() {
-                current = &arr[idx];
-            } else {
-                return None;
+        // A segment is either an object key or an array index; anything else
+        // means the error path does not point at a node we can attribute.
+        match current.get(*seg) {
+            Some(v) => current = v,
+            None => {
+                let arr = current.as_array()?;
+                let idx = seg.parse::<usize>().ok()?;
+                current = arr.get(idx)?;
             }
-        } else {
-            return None;
         }
     }
     current
         .get("bom-ref")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(str::to_string)
 }

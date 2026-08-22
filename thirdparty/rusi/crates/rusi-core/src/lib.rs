@@ -1479,7 +1479,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
         let declaration = self.push_declaration(
             &node.sig.ident.to_string(),
-            if node.sig.unsafety.is_some() {
+            if matches!(node.sig.safety, syn::Safety::Unsafe(_)) {
                 "unsafe-function"
             } else {
                 "function"
@@ -1488,7 +1488,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             None,
             node.sig.ident.span(),
         );
-        if node.sig.unsafety.is_some() {
+        if matches!(node.sig.safety, syn::Safety::Unsafe(_)) {
             self.security_signals.push(SecuritySignal {
                 id: stable_id("signal", &[&declaration.id, "unsafe-fn"]),
                 category: "unsafe-code".to_string(),
@@ -1538,17 +1538,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
 
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
         let receiver = node.self_ty.to_token_stream().to_string().replace(' ', "");
-        let trait_name = node
-            .trait_
-            .as_ref()
-            .map(|(_, path, _)| path_to_string(path));
+        let trait_name = node.trait_.as_ref().map(|(path, _)| path_to_string(path));
         let mut method_ids = Vec::new();
         let mut method_names = Vec::new();
         for item in &node.items {
             if let ImplItem::Fn(method) = item {
                 let declaration = self.push_declaration(
                     &method.sig.ident.to_string(),
-                    if method.sig.unsafety.is_some() {
+                    if matches!(method.sig.safety, syn::Safety::Unsafe(_)) {
                         "unsafe-method"
                     } else {
                         "method"
@@ -2012,17 +2009,14 @@ fn function_parameter_types(sig: &Signature) -> Vec<String> {
         .iter()
         .map(|input| match input {
             FnArg::Typed(pat_type) => pat_type.ty.to_token_stream().to_string(),
-            FnArg::Receiver(receiver) => {
-                let mut text = String::from("Self");
-                if receiver.reference.is_some() {
-                    text = if receiver.mutability.is_some() {
-                        "&mut Self".to_string()
-                    } else {
-                        "&Self".to_string()
-                    };
-                }
-                text
-            }
+            FnArg::Receiver(receiver) => match &receiver.kind {
+                // `&self` / `&mut self`; the `mut` lives inside the variant,
+                // while `Receiver::mutability` only covers by-value `mut self`.
+                syn::ReceiverKind::Reference(.., Some(_)) => "&mut Self".to_string(),
+                syn::ReceiverKind::Reference(.., None) => "&Self".to_string(),
+                // `self`, `mut self`, and explicit `self: Box<Self>` receivers.
+                _ => "Self".to_string(),
+            },
         })
         .collect()
 }

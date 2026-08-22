@@ -53,18 +53,15 @@ fn compute_info(bom: &Value) -> Value {
     let dependency_count = bom
         .get("dependencies")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, |a| a.len());
     let service_count = bom
         .get("services")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, |a| a.len());
     let vulnerability_count = bom
         .get("vulnerabilities")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, |a| a.len());
     let has_evidence = detect_evidence(bom);
 
     json!({

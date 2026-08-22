@@ -16,7 +16,7 @@
 //! documents. Rust supplies the one thing JS is bad at: 2000 concurrent HTTP
 //! requests.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -87,8 +87,10 @@ pub struct BatchStats {
     pub elapsed_ms: u64,
     #[serde(rename = "peakConcurrency")]
     pub peak_concurrency: usize,
-    /// Per-host request counts and server-imposed back-offs.
-    pub hosts: HashMap<String, HostStats>,
+    /// Per-host request counts and server-imposed back-offs. Ordered so the
+    /// serialized envelope is deterministic across runs: cdxgen diffs batch
+    /// outputs when diagnosing fetch behaviour.
+    pub hosts: BTreeMap<String, HostStats>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -237,7 +239,7 @@ pub async fn run_batch(
         }
     }
 
-    stats.elapsed_ms = started.elapsed().as_millis() as u64;
+    stats.elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     // The client counts this after its permits are held, so it is real HTTP
     // concurrency and not the number of tasks parked behind a semaphore.
     stats.peak_concurrency = client.peak_in_flight();

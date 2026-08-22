@@ -42,7 +42,7 @@ impl LogStore {
     }
 
     pub fn push_line(&mut self, raw_line: &str) {
-        let line = raw_line.trim_end_matches(&['\n', '\r'][..]);
+        let line = raw_line.trim_end_matches(['\n', '\r']);
         if line.is_empty() {
             return;
         }
@@ -106,21 +106,53 @@ impl LogStore {
     }
 }
 
+/// Strip `<think>` / `</think>` markup from a line in a single pass.
+///
+/// The naive form — chained `str::replace` calls — rescans and reallocates the
+/// line once per pattern, and this runs for every line of a live log stream.
+/// Lines without a `<` are returned borrowed without allocating.
+pub(crate) fn strip_think_tags(line: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    if !line.contains('<') {
+        return Cow::Borrowed(line);
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(idx) = rest.find('<') {
+        out.push_str(&rest[..idx]);
+        let tag = &rest[idx..];
+        // Order mirrors the original replace chain: the full open tag wins over
+        // the bare prefix so `<think>` never leaves a stray `>` behind.
+        if let Some(tail) = tag.strip_prefix("<think>") {
+            rest = tail;
+        } else if let Some(tail) = tag.strip_prefix("</think>") {
+            rest = tail;
+        } else if let Some(tail) = tag.strip_prefix("<think") {
+            rest = tail;
+        } else {
+            out.push('<');
+            rest = &tag[1..];
+        }
+    }
+    out.push_str(rest);
+    Cow::Owned(out)
+}
+
 fn classify_line(line: &str) -> (LogLevel, String) {
     let trimmed = line.trim();
 
     if trimmed.contains("<think>") || trimmed.starts_with("<think") {
-        let text = trimmed
-            .replace("<think>", "")
-            .replace("<think", "")
-            .trim()
-            .to_string();
-        return (LogLevel::Thought, text);
+        return (
+            LogLevel::Thought,
+            strip_think_tags(trimmed).trim().to_string(),
+        );
     }
 
     if trimmed.ends_with("</think>") {
-        let text = trimmed.replace("</think>", "").trim().to_string();
-        return (LogLevel::Thought, text);
+        return (
+            LogLevel::Thought,
+            strip_think_tags(trimmed).trim().to_string(),
+        );
     }
 
     let lower = trimmed.to_lowercase();
@@ -150,6 +182,24 @@ mod tests {
     fn test_classify_thought_open() {
         let (level, _text) = classify_line("<think>Let me analyze this project");
         assert_eq!(level, LogLevel::Thought);
+    }
+
+    #[test]
+    fn test_strip_think_tags_matches_replace_chain() {
+        for line in [
+            "no markup here",
+            "<think>reasoning",
+            "done</think>",
+            "<think>full cycle</think>",
+            "a<think>b</think>c<think",
+            "<everything-else stays",
+        ] {
+            let expected = line
+                .replace("<think>", "")
+                .replace("</think>", "")
+                .replace("<think", "");
+            assert_eq!(crate::logs::strip_think_tags(line).as_ref(), expected);
+        }
     }
 
     #[test]

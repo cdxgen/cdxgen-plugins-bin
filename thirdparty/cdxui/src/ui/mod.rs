@@ -346,12 +346,7 @@ fn render_thoughts_panel(frame: &mut Frame, app: &App, theme: &Theme, area: Rect
         .lines()
         .map(|line| {
             let trimmed = line.trim();
-            let stripped = trimmed
-                .replace("<think>", "")
-                .replace("</think>", "")
-                .replace("<think", "")
-                .trim()
-                .to_string();
+            let stripped = crate::logs::strip_think_tags(trimmed).trim().to_string();
             if stripped.is_empty() {
                 Line::from("")
             } else {
@@ -1757,7 +1752,6 @@ fn render_formulation(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_vulnerabilities(
     frame: &mut Frame,
     app: &mut App,

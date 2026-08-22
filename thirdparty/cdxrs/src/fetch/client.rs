@@ -164,7 +164,7 @@ pub struct FetchClient {
 }
 
 impl FetchClient {
-    pub fn new(config: FetchClientConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: FetchClientConfig) -> Result<Self, reqwest::Error> {
         let mut builder = Client::builder()
             .use_rustls_tls()
             .user_agent(&config.user_agent)
@@ -539,7 +539,7 @@ fn header_string(resp: &Response, name: reqwest::header::HeaderName) -> Option<S
     resp.headers()
         .get(name)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
+        .map(str::to_string)
 }
 
 fn within_deadline(deadline: Instant, delay: Duration) -> bool {
@@ -627,8 +627,7 @@ fn jitter_ms(base_ms: u64) -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| u64::from(d.subsec_nanos()));
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     // splitmix64-style avalanche so neighbouring inputs do not give
     // neighbouring outputs.

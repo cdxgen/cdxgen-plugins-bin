@@ -91,18 +91,20 @@ impl ProcessHandle {
                 thread::sleep(Duration::from_millis(500));
                 if let Ok(meta) = std::fs::metadata(&thought_path_clone) {
                     let current_size = meta.len();
-                    if current_size > last_size {
-                        if let Ok(content) = std::fs::read_to_string(&thought_path_clone) {
-                            let new_content = &content[last_size as usize..];
-                            if !new_content.is_empty()
-                                && thought_tx.send(new_content.to_string()).is_err()
-                            {
-                                break;
-                            }
+                    // A shrink means a fresh log file (new cdxgen run): restart
+                    // from the top on the next poll.
+                    if current_size < last_size {
+                        last_size = 0;
+                    } else if current_size > last_size
+                        && let Ok(content) = std::fs::read_to_string(&thought_path_clone)
+                    {
+                        let new_content = &content[last_size as usize..];
+                        if !new_content.is_empty()
+                            && thought_tx.send(new_content.to_string()).is_err()
+                        {
+                            break;
                         }
                         last_size = current_size;
-                    } else if current_size < last_size {
-                        last_size = 0;
                     }
                 }
             }
@@ -117,18 +119,18 @@ impl ProcessHandle {
                 thread::sleep(Duration::from_millis(250));
                 if let Ok(meta) = std::fs::metadata(&trace_path_clone) {
                     let current_size = meta.len();
-                    if current_size > last_size {
-                        if let Ok(content) = std::fs::read_to_string(&trace_path_clone) {
-                            let new_content = &content[last_size as usize..];
-                            if !new_content.is_empty()
-                                && trace_tx.send(new_content.to_string()).is_err()
-                            {
-                                break;
-                            }
+                    if current_size < last_size {
+                        last_size = 0;
+                    } else if current_size > last_size
+                        && let Ok(content) = std::fs::read_to_string(&trace_path_clone)
+                    {
+                        let new_content = &content[last_size as usize..];
+                        if !new_content.is_empty()
+                            && trace_tx.send(new_content.to_string()).is_err()
+                        {
+                            break;
                         }
                         last_size = current_size;
-                    } else if current_size < last_size {
-                        last_size = 0;
                     }
                 }
             }
@@ -163,11 +165,9 @@ impl ProcessHandle {
     }
 
     pub fn read_thought_log(&self) -> Option<String> {
-        if let Some(ref path) = self.thought_log_path {
-            std::fs::read_to_string(path).ok()
-        } else {
-            None
-        }
+        self.thought_log_path
+            .as_deref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
     }
 
     pub fn kill(&mut self) {

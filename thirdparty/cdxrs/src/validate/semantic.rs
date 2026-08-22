@@ -168,7 +168,7 @@ pub fn validate_purls(bom: &Value) -> Vec<Finding> {
         let bom_ref = comp
             .get("bom-ref")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(str::to_string);
         let version = comp.get("version").and_then(|v| v.as_str()).unwrap_or("");
 
         if comp_type == "cryptographic-asset" {
@@ -340,14 +340,17 @@ struct ParsedPurl {
     // table is due to be extended by later deliverables. No rule reads it today,
     // since the encoded-slash check needs the undecoded spelling and reads
     // `raw_name` instead.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "the purl type table is due to be extended by later deliverables"
+    )]
     name: String,
     /// The name segment exactly as it appeared in the purl, before percent
     /// decoding. Qualifiers, subpath and version are already excluded here, so a
     /// rule about the name cannot be triggered by an encoded character elsewhere
     /// in the purl.
     raw_name: String,
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "retained for completeness of the parsed form")]
     version: String,
     qualifiers: std::collections::BTreeMap<String, String>,
 }
@@ -453,7 +456,7 @@ fn parse_purl(purl: &str) -> Result<ParsedPurl, String> {
         namespace,
         name,
         raw_name,
-        version: version.map(url_decode).unwrap_or_default(),
+        version: version.map_or_default(url_decode),
         qualifiers,
     })
 }
@@ -587,7 +590,7 @@ pub fn validate_refs(bom: &Value) -> Vec<Finding> {
         .and_then(|m| m.get("component"))
         .and_then(|c| c.get("bom-ref"))
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(str::to_string);
 
     if is_partial_tree(dependencies, components_count) {
         findings.push(warning(

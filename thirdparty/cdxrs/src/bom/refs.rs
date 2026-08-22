@@ -51,11 +51,11 @@ pub fn build_dep_graph(bom: &Value) -> std::collections::BTreeMap<String, Vec<St
     let mut graph = std::collections::BTreeMap::new();
     if let Some(deps) = bom.get("dependencies").and_then(|v| v.as_array()) {
         for dep in deps {
-            let r#ref = dep
+            let r#ref: String = dep
                 .get("ref")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+                .unwrap_or_default()
+                .into();
             let depends_on: Vec<String> = dep
                 .get("dependsOn")
                 .and_then(|v| v.as_array())
