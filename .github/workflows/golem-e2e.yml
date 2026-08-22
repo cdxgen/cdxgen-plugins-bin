@@ -92,9 +92,14 @@ jobs:
       # binary and only internal/analyzer declares it. GOLEM_FULL works
       # module-wide. Thirteen unrecorded engine-parity differences accumulated
       # behind that gap, so the tier is a gate now.
+      #
+      # -timeout is not optional: the wide tier already runs the analyzer
+      # package for around ten minutes on a developer machine, and go test's
+      # default per-package limit is exactly ten. Without it a green suite
+      # turns into a goroutine dump the moment a fixture is added.
       env:
         GOLEM_FULL: '1'
-      run: go test ./...
+      run: go test -timeout 40m ./...
 
     - name: Build golem
       working-directory: thirdparty/golem

@@ -1,9 +1,9 @@
 module trivy-cdxgen
 
-go 1.27.0
+go 1.26.3
 
 require (
-	github.com/aquasecurity/trivy v0.74.1-0.20260821131025-dc3c56eed58a
+	github.com/aquasecurity/trivy v0.74.0
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23
 	github.com/knqyf263/go-rpmdb v0.1.1

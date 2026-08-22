@@ -1141,13 +1141,38 @@ func isStdlibPropagate(fn *ssa.Function) bool {
 	if fn.Pkg == nil || fn.Pkg.Pkg == nil {
 		return false
 	}
-	p := fn.Pkg.Pkg.Path()
-	return strings.HasPrefix(p, "strings") || strings.HasPrefix(p, "bytes") ||
-		strings.HasPrefix(p, "fmt") || strings.HasPrefix(p, "strconv") ||
-		strings.HasPrefix(p, "path") || strings.HasPrefix(p, "net/url") ||
-		strings.HasPrefix(p, "io") || strings.HasPrefix(p, "bufio") ||
-		strings.HasPrefix(p, "encoding") || strings.HasPrefix(p, "context") ||
-		strings.HasPrefix(p, "reflect")
+	return IsStdlibCarrierPackage(fn.Pkg.Pkg.Path())
+}
+
+// IsStdlibCarrierPackage reports whether a package path names a standard
+// library "carrier": a package whose functions move values around without
+// introducing or cleaning them, so an unmodelled call into one propagates its
+// arguments' taint rather than dropping it.
+//
+// This list is shared with the legacy engine (internal/analyzer's
+// shouldPropagate calls it), so the two engines cannot silently disagree
+// about which carriers exist. They did for a long time: the legacy list had
+// six prefixes and this one eleven, and the legacy list had no "encoding"
+// prefix, so a json.Marshal in the middle of a flow kept taint under one
+// engine and dropped it under the other.
+// Matching is on whole path elements: "path" covers path/filepath and
+// "encoding" covers encoding/json, but neither covers a module package that
+// merely starts with those letters.
+func IsStdlibCarrierPackage(pkgPath string) bool {
+	for _, prefix := range stdlibCarrierPrefixes {
+		if pkgPath == prefix || strings.HasPrefix(pkgPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// stdlibCarrierPrefixes are the carrier package path prefixes, in the order
+// the original six-entry legacy list spelled them, followed by the five the
+// SEAM list had already added.
+var stdlibCarrierPrefixes = []string{
+	"strings", "bytes", "fmt", "strconv", "path", "net/url",
+	"io", "bufio", "encoding", "context", "reflect",
 }
 
 func isWorkspacePkg(path string) bool {

@@ -12,7 +12,7 @@ import (
 // call — and SSA spills the receiver into a local before reading the field, so
 // the taint has to survive two by-value aggregate copies.
 //
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:34
+// golem:want flow source=http-input sink=command-execution
 type Carrier struct {
 	raw string
 }

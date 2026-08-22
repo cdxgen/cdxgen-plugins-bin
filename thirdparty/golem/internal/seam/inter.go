@@ -487,7 +487,7 @@ func (e *Engine) detectSummarySinks(fn *ssa.Function, summary *FuncSummary) {
 					continue
 				}
 				for argIdx, arg := range common.Args {
-					if !entry.ArgumentRelevant(argIdx) {
+					if !entry.ArgumentRelevantAt(common, argIdx) {
 						continue
 					}
 					paramIdx := e.traceToParam(arg, fn)

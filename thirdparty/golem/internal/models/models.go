@@ -35,8 +35,11 @@ type ModelEntry struct {
 	// than by type or provenance, and it is the only evidence available at the
 	// boundary of a library whose callers are not in the analysed module.
 	// Entries carrying it name no Package or Function and match no call site.
-	ParameterName       string         `json:"parameterName,omitempty"`
-	Arity               *AritySpec     `json:"arity,omitempty"`
+	ParameterName string     `json:"parameterName,omitempty"`
+	Arity         *AritySpec `json:"arity,omitempty"`
+	// Arguments names the parameters that carry the value this entry is
+	// about, by source-level position: the receiver of a method is not
+	// one of them, whatever SSA does with it. See ArgumentRelevantAt.
 	Arguments           []ArgumentRole `json:"arguments,omitempty"`
 	ReceiverRelevant    bool           `json:"receiverRelevant,omitempty"`
 	Category            string         `json:"category,omitempty"`
@@ -87,6 +90,33 @@ func (e ModelEntry) QualifiedName() string {
 		return e.Package + "." + name
 	}
 	return name
+}
+
+// ArgumentRelevantAt reports whether the argument at SSA position argIdx of
+// this call is relevant, translating SSA positions into the source-level
+// positions Arguments is written in.
+//
+// The two differ by the receiver. SSA passes it as the first argument of a
+// static method call — `c.Get(url)` becomes `(*http.Client).Get(c, url)` —
+// but not of an interface call, where it travels separately. Comparing a
+// declared index against the SSA position directly therefore reads the
+// receiver as the first argument of every concrete method: the url of
+// (*http.Client).Get was never checked, and the request-supplied URL that
+// makes it an SSRF sink went unreported.
+//
+// The receiver itself is relevant only when the entry says so, or when it
+// names no argument roles at all and so claims the whole call.
+func (e *ModelEntry) ArgumentRelevantAt(common *ssa.CallCommon, argIdx int) bool {
+	offset := 0
+	if common != nil && !common.IsInvoke() {
+		if callee := common.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+			offset = 1
+		}
+	}
+	if argIdx < offset {
+		return len(e.Arguments) == 0 || e.ReceiverRelevant
+	}
+	return e.ArgumentRelevant(argIdx - offset)
 }
 
 func (e *ModelEntry) ArgumentRelevant(argIdx int) bool {
@@ -317,14 +347,23 @@ func (db *DB) MatchFunction(fn *ssa.Function) []ModelEntry {
 
 	seen := make(map[string]bool)
 	for _, key := range keys {
-		for _, e := range db.byPackageFunc[key] {
-			if seen[e.ID] {
-				continue
-			}
-			seen[e.ID] = true
-			if db.matchArity(e, fn) {
-				results = append(results, *e)
-				db.matchedSymbols[e.ID] = true
+		// A method is not the package-level function of the same name.
+		// math/rand has both a func Int63 and a (*Rand).Int63, and the
+		// unqualified "math/rand.Int63" key reaches the first from a call
+		// on the second: the call matched two entries and reported the same
+		// weak draw twice. byPackageFunc only holds receiver-less entries,
+		// so a method's own entry is unaffected — it is indexed, and found,
+		// under byReceiver.
+		if recvTypeName == "" {
+			for _, e := range db.byPackageFunc[key] {
+				if seen[e.ID] {
+					continue
+				}
+				seen[e.ID] = true
+				if db.matchArity(e, fn) {
+					results = append(results, *e)
+					db.matchedSymbols[e.ID] = true
+				}
 			}
 		}
 		for _, e := range db.byReceiver[key] {

@@ -8,7 +8,7 @@ import (
 )
 
 // Error wrapping: taint flows through fmt.Errorf with %w.
-// errors/fmt.Errorf are not in the shouldPropagate allowlist.
+// errors.New is an explicit passthrough model; error wrapping is not a carrier.
 // golem:want flow source=http-input sink=command-execution
 func buildErr(input string) error {
 	return fmt.Errorf("input was: %w", errors.New(input))

@@ -166,7 +166,11 @@ func (e *Engine) sinkAcceptsLabel(_ models_pkg.ModelEntry, label TaintLabel) boo
 		// params reach sinks; kind filtering happens at materialisation.
 		return true
 	}
-	return labelContainsAnyKind(label, []string{"user-input", "secret", "environment", "crypto-key", "path", "url", "native"})
+	// "insecure-random" pairs with the crypto/rand.Read sanitizer, which
+	// removes exactly that kind: a math/rand draw reaching a sink is a
+	// weak-randomness finding, and a value re-read through crypto/rand is
+	// clean.
+	return labelContainsAnyKind(label, []string{"user-input", "secret", "environment", "crypto-key", "path", "url", "native", "insecure-random"})
 }
 
 // crossesDependency reports whether a call leaves the module under analysis.
@@ -256,7 +260,9 @@ func (e *Engine) sinkAcceptsLabelKind(category string, label TaintLabel) bool {
 	if e.duringSummary {
 		return true
 	}
-	return labelContainsAnyKind(label, []string{"user-input", "secret", "environment", "crypto-key", "path", "url", "native"})
+	// Same kind set as sinkAcceptsLabel; see the note there on
+	// "insecure-random".
+	return labelContainsAnyKind(label, []string{"user-input", "secret", "environment", "crypto-key", "path", "url", "native", "insecure-random"})
 }
 
 // modelEntryFromEffect builds a ModelEntry from a summary SinkEffect, so a

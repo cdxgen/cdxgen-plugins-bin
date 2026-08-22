@@ -61,6 +61,24 @@ type dataFlowState struct {
 	memory   map[string]dataFlowTrace
 	chans    map[string]dataFlowTrace
 	visiting map[ssa.Value]bool
+	// spills names the memory locations that hold a by-value parameter,
+	// which for a method includes the receiver. A field read from one of
+	// these is a read of a field of that parameter: the whole-value trace
+	// is visible to it (with the field recorded as a hop), while a field
+	// read of an ordinary aggregate deliberately does not consult the
+	// base location, or one tainted field would taint every other.
+	spills map[string]bool
+	// subKeys indexes the sub-locations of an aggregate: for a location's
+	// key, the memory keys recorded beneath it (".field0", "[*]", and
+	// their own sub-locations), kept sorted and deduplicated.
+	//
+	// Whole-aggregate reads and copies need every sub-location of one
+	// address. Finding them by scanning memory costs a pass over every
+	// location the function has recorded, per store and per load, which on
+	// a large function is quadratic — and it yields them in map order, so
+	// combineTraces would pick a different route between two runs on the
+	// same input. The index answers in one lookup, in a fixed order.
+	subKeys map[string][]string
 }
 
 type internalSummary struct {
@@ -70,6 +88,13 @@ type internalSummary struct {
 	sourceReturns []model.DataFlowPattern
 	fieldWrites   map[string]map[int]bool
 	returnFields  map[string]bool
+	// paramReturnFields records, per parameter, the field paths a
+	// parameter-to-return flow travelled through inside the callee. A summary
+	// is context-insensitive, so "parameter 0 flows to the return" is all it
+	// can say at record time; the fields let the call site answer with only
+	// the fields it actually tainted, which is what keeps field
+	// discrimination (defect 34's negative half) intact across the call.
+	paramReturnFields map[int]map[string]bool
 }
 
 type dataFlowBuilder struct {
@@ -137,7 +162,7 @@ func (a *Analyzer) buildDataFlow(pkgs []*packages.Package, ctx *ssaContext, prog
 	dynamicCallees := a.dataFlowDynamicCallees(ctx, out)
 	b := &dataFlowBuilder{analyzer: a, out: out, patterns: patterns, regexps: regexps, summaries: map[*ssa.Function]*internalSummary{}, endpoints: endpointHandlersForPackages(a, pkgs), dynamicCallees: dynamicCallees, nodeSeen: map[string]bool{}, edgeSeen: map[string]bool{}, edgeByID: map[string]model.DataFlowEdge{}, sliceSeen: map[string]bool{}, diagnosticSeen: map[string]bool{}, sliceBudget: newDataFlowBudget(a.options.DataFlowMax), maxSlices: a.options.DataFlowMax, maxTraceNodes: dataFlowMaxTraceNodes(a.options), maxTraceEdges: dataFlowMaxTraceEdges(a.options)}
 	progress.Memoryf("data-flow inferring summaries")
-	b.inferSummaries(funcs)
+	b.inferSummaries(ctx.filteredFunctions(a.includeDataFlowSummary))
 	progress.Memoryf("data-flow summaries inferred")
 	if skippedFuncs > 0 {
 		b.addDiagnosticOnce("dataflow-budget", fmt.Sprintf("skipped %d very large functions above %d SSA instructions during slice materialization; summaries were still inferred", skippedFuncs, dataFlowMaxFunctionInstructions(a.options)))
@@ -368,6 +393,27 @@ func (a *Analyzer) includeDataFlowFunction(fn *ssa.Function) bool {
 	return true
 }
 
+// includeDataFlowSummary is the wider function set summaries are computed
+// over: the analysis set plus generic instantiations.
+//
+// An instantiation carries no package of its own (fn.Pkg is nil), so it is
+// excluded from the analysis set — and with it, in a Go 1.27 generic method,
+// from every set, because a generic method has no uninstantiated SSA body at
+// all: the instantiation is the only form with instructions. Nothing static
+// names the callee either; the call site references the instantiation
+// directly, so a summary keyed on it is the only way taint crosses the call.
+// Materialisation stays in the analysis set, so an instantiation never
+// reports a finding under its own name.
+func (a *Analyzer) includeDataFlowSummary(fn *ssa.Function) bool {
+	if a.includeDataFlowFunction(fn) {
+		return true
+	}
+	if origin := fn.Origin(); origin != nil {
+		return a.includeDataFlowFunction(origin)
+	}
+	return false
+}
+
 func loadDataFlowPatterns(packs []string, path string) (*model.DataFlowPatternSet, []model.Diagnostic) {
 	set := builtinDataFlowPatterns(packs)
 	var diagnostics []model.Diagnostic
@@ -454,6 +500,14 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 	addSink := func(kind, pattern, category string, taints ...string) {
 		set.Sinks = append(set.Sinks, dfPattern("sink", kind, pattern, category, taints...))
 	}
+	// addSinkExact is for symbols that are complete on their own, where a
+	// substring match would also catch every longer symbol they happen to be
+	// a prefix of.
+	addSinkExact := func(kind, pattern, category string, taints ...string) {
+		p := dfPattern("sink", kind, pattern, category, taints...)
+		p.Match = "exact"
+		set.Sinks = append(set.Sinks, p)
+	}
 	addSinkArgs := func(kind, pattern, category string, args []int, taints ...string) {
 		p := dfPattern("sink", kind, pattern, category, taints...)
 		p.RelevantArguments = args
@@ -505,6 +559,22 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 			"(*bufio.Scanner).Text", "(*bufio.Scanner).Bytes", "(*bufio.Reader).ReadString", "(*bufio.Reader).ReadBytes",
 			"(*strings.Builder).String", "(*bytes.Buffer).String", "(*bytes.Buffer).Bytes",
 			"(*strings.Reader).ReadString", "(*net/url.URL).String",
+		} {
+			addPass("function", name, "conversion")
+		}
+		// uuid joined the standard library in Go 1.27. Its generators are
+		// crypto/rand-backed and are deliberately not insecure-random sources;
+		// parsing and rendering are taint carriers, the same shape as the
+		// json round-trip models. The methods are written in the notation
+		// the SSA printer uses, receiver and all: normalizeSSASymbolNotation
+		// rewrites source notation only for pointer receivers, so a value
+		// receiver spelled "uuid.UUID.String" would match nothing.
+		for _, name := range []string{
+			"uuid.Parse", "uuid.MustParse",
+			"(uuid.UUID).String",
+			"(uuid.UUID).AppendText",
+			"(uuid.UUID).MarshalText",
+			"(*uuid.UUID).UnmarshalText",
 		} {
 			addPass("function", name, "conversion")
 		}
@@ -630,6 +700,24 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		}
 		addSource("name", "(?i)(private.*key|secret|password|token|nonce|iv|salt)", "crypto-material", "secret", "crypto-key")
 		addSan("function", "crypto/rand.Read", "secure-random", "insecure-random")
+		// math/rand and math/rand/v2 draw from predictable sources. Both are
+		// sources of the "insecure-random" taint kind the crypto/rand.Read
+		// sanitizer above removes, so a token that passes through a secure
+		// re-read is cleaned while a math/rand draw stays flagged.
+		// Every drawing function of each package, and no others: Shuffle and
+		// Seed return nothing, so a source model on them could never taint
+		// anything. The two lists are the ones models/stdlib.json carries,
+		// entry for entry — the vocabulary test compares them.
+		randV1 := []string{"Int", "Int31", "Int31n", "Int63", "Int63n", "Intn", "Uint32", "Uint64", "Float32", "Float64", "NormFloat64", "ExpFloat64", "Perm", "Read"}
+		randV2 := []string{"Int", "IntN", "Int32", "Int32N", "Int64", "Int64N", "Uint", "UintN", "Uint32", "Uint32N", "Uint64", "Uint64N", "N", "Float32", "Float64", "NormFloat64", "ExpFloat64", "Perm"}
+		for _, fn := range randV1 {
+			addSource("function", "math/rand."+fn, "insecure-random", "insecure-random")
+			addSource("function", "math/rand.(*Rand)."+fn, "insecure-random", "insecure-random")
+		}
+		for _, fn := range randV2 {
+			addSource("function", "math/rand/v2."+fn, "insecure-random", "insecure-random")
+			addSource("function", "math/rand/v2.(*Rand)."+fn, "insecure-random", "insecure-random")
+		}
 	}
 	if selected["native"] {
 		addSink("function", "_Cfunc_", "native-interop", "native")
@@ -658,7 +746,15 @@ func builtinDataFlowPatterns(packs []string) *model.DataFlowPatternSet {
 		for _, name := range []string{"github.com/aws/aws-sdk-go", "github.com/aws/aws-sdk-go-v2", "cloud.google.com/go", "google.golang.org/api", "github.com/Azure/azure-sdk-for-go"} {
 			addSink("package", name, "external-service", "user-input", "secret")
 		}
-		for _, name := range []string{"net/http.(*Client).Do", "net/http.(*Client).Get", "net/http.Get", "net/http.Head", "net/http.Post", "net/http.PostForm", "net/http.NewRequest", "net/http.NewRequestWithContext", "google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg", "connectrpc.com/connect.Client.CallUnary", "cloud.google.com/go/storage.(*Client).Bucket", "cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage"} {
+		// The standard library's client calls are matched exactly. Under a
+		// substring match "net/http.Head" is a prefix of the symbol
+		// "(net/http.Header).Get", so reading a request header counted as a
+		// call out to an external service — a false positive on any handler
+		// that reads a header.
+		for _, name := range []string{"net/http.(*Client).Do", "net/http.(*Client).Get", "net/http.Get", "net/http.Head", "net/http.Post", "net/http.PostForm", "net/http.NewRequest", "net/http.NewRequestWithContext"} {
+			addSinkExact("function", name, "external-service", "user-input", "secret")
+		}
+		for _, name := range []string{"google.golang.org/grpc.(*ClientConn).Invoke", "google.golang.org/grpc.(*ClientConn).NewStream", "google.golang.org/grpc.ClientStream.SendMsg", "google.golang.org/grpc.ClientStream.RecvMsg", "connectrpc.com/connect.Client.CallUnary", "cloud.google.com/go/storage.(*Client).Bucket", "cloud.google.com/go/pubsub.(*Topic).Publish", "github.com/aws/aws-sdk-go-v2/service/sqs.(*Client).SendMessage"} {
 			addSink("function", name, "external-service", "user-input", "secret")
 		}
 	}
@@ -723,7 +819,9 @@ func normalizePatterns(target string, in []model.DataFlowPattern) []model.DataFl
 		if p.Confidence == "" {
 			p.Confidence = "medium"
 		}
-		if p.Match == "contains" && (p.Kind == "function" || p.Kind == "method" || p.Kind == "symbol") {
+		// Exact patterns need the rewrite as much as substring ones: an
+		// unrewritten "net/http.(*Client).Get" matches no symbol at all.
+		if (p.Match == "contains" || p.Match == "exact") && (p.Kind == "function" || p.Kind == "method" || p.Kind == "symbol") {
 			p.Pattern = normalizeSSASymbolNotation(p.Pattern)
 		}
 		p = enrichDataFlowPatternDefaults(p)
@@ -792,7 +890,7 @@ func dataFlowRuleForCategory(category string) (id, name, severity string, score 
 
 func (b *dataFlowBuilder) inferSummaries(funcs []*ssa.Function) {
 	for _, fn := range funcs {
-		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}, fieldWrites: map[string]map[int]bool{}, returnFields: map[string]bool{}}
+		b.summaries[fn] = &internalSummary{model: b.newSummary(fn), paramReturn: map[int]bool{}, paramSink: map[int]map[string]bool{}, fieldWrites: map[string]map[int]bool{}, returnFields: map[string]bool{}, paramReturnFields: map[int]map[string]bool{}}
 	}
 	for i := 0; i < 4; i++ {
 		changed := false
@@ -826,13 +924,17 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 			switch x := instr.(type) {
 			case *ssa.Store:
 				if tr, ok := b.summaryTaintOf(state, x.Val); ok {
-					state.memory[addrKey(x.Addr)] = tr
+					state.setMemory(addrKey(x.Addr), x.Addr, tr)
 					b.rememberAggregateStore(state, x.Addr, tr)
 					changed = b.recordSummaryFieldWrite(fn, state, x.Addr, tr) || changed
 				}
+				if isParameterSpill(x) {
+					state.spills[addrKey(x.Addr)] = true
+				}
+				b.copyAggregateTaint(state, x.Addr, x.Val)
 			case *ssa.MapUpdate:
 				if tr, ok := b.summaryTaintOf(state, x.Value); ok {
-					state.memory[addrKey(x.Map)+"[*]"] = tr
+					state.setMemory(addrKey(x.Map)+"[*]", x.Map, tr)
 				}
 			case *ssa.Send:
 				if tr, ok := b.summaryTaintOf(state, x.X); ok {
@@ -868,6 +970,11 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 						}
 						for idx := range tr.params {
 							changed = b.addParamReturn(fn, idx) || changed
+							for _, field := range tr.fieldPaths {
+								if strings.HasPrefix(field, "field") {
+									changed = b.addParamReturnField(fn, idx, field) || changed
+								}
+							}
 						}
 						if tr.generated {
 							for _, p := range tr.sourcePatterns {
@@ -889,7 +996,72 @@ func (b *dataFlowBuilder) summarizeFunction(fn *ssa.Function) bool {
 }
 
 func newDataFlowState() dataFlowState {
-	return dataFlowState{values: map[ssa.Value]dataFlowTrace{}, memory: map[string]dataFlowTrace{}, chans: map[string]dataFlowTrace{}, visiting: map[ssa.Value]bool{}}
+	return dataFlowState{values: map[ssa.Value]dataFlowTrace{}, memory: map[string]dataFlowTrace{}, chans: map[string]dataFlowTrace{}, visiting: map[ssa.Value]bool{}, spills: map[string]bool{}, subKeys: map[string][]string{}}
+}
+
+// setMemory records tr at key, replacing whatever was there, and indexes key
+// as a sub-location of base if it is one. base is the location the key was
+// derived from — the address of the aggregate, not of the field — and may be
+// nil for a key that names a whole location.
+func (s dataFlowState) setMemory(key string, base ssa.Value, tr dataFlowTrace) {
+	s.memory[key] = tr
+	s.indexSubKey(key, base)
+}
+
+// mergeMemory combines tr into whatever key already holds. Same indexing as
+// setMemory.
+func (s dataFlowState) mergeMemory(key string, base ssa.Value, tr dataFlowTrace) {
+	s.memory[key] = combineTraces(s.memory[key], tr)
+	s.indexSubKey(key, base)
+}
+
+// indexSubKey records key under every location it is a sub-location of.
+//
+// It walks up from base through the field and index selections that produced
+// it, because a key is a sub-location of each of its ancestors, not just its
+// immediate parent: a whole-struct read of `a` has to see `a.field0.field1`
+// as readily as `a.field0`.
+func (s dataFlowState) indexSubKey(key string, base ssa.Value) {
+	for v := base; v != nil; {
+		if prefix := addrKey(v); isSubLocationKey(key, prefix) {
+			s.addSubKey(prefix, key)
+		}
+		switch x := v.(type) {
+		case *ssa.FieldAddr:
+			v = x.X
+		case *ssa.IndexAddr:
+			v = x.X
+		default:
+			v = nil
+		}
+	}
+}
+
+func (s dataFlowState) addSubKey(base, key string) {
+	keys := s.subKeys[base]
+	at := sort.SearchStrings(keys, key)
+	if at < len(keys) && keys[at] == key {
+		return
+	}
+	keys = append(keys, "")
+	copy(keys[at+1:], keys[at:])
+	keys[at] = key
+	s.subKeys[base] = keys
+}
+
+// isSubLocationKey reports whether key names a field or element of the
+// location named by base, at any depth. A bare prefix match is not enough:
+// two unrelated locations can share a prefix, so the character that follows
+// has to be a selection.
+func isSubLocationKey(key, base string) bool {
+	if base == "" || len(key) <= len(base) || !strings.HasPrefix(key, base) {
+		return false
+	}
+	switch key[len(base)] {
+	case '.', '[':
+		return true
+	}
+	return false
 }
 
 func newDataFlowBudget(max int) *dataFlowBudget {
@@ -936,10 +1108,107 @@ func (b *dataFlowBudget) exhausted() bool {
 func (b *dataFlowBuilder) rememberAggregateStore(state dataFlowState, addr ssa.Value, tr dataFlowTrace) {
 	switch a := addr.(type) {
 	case *ssa.IndexAddr:
-		state.memory[addrKey(a.X)+"[*]"] = tr.withFieldPath("[*]")
+		state.setMemory(addrKey(a.X)+"[*]", a.X, tr.withFieldPath("[*]"))
 	case *ssa.FieldAddr:
-		state.memory[fieldMemoryKey(a.X, a.Field)] = tr.withFieldPath(fmt.Sprintf("field%d", a.Field))
+		state.setMemory(fieldMemoryKey(a.X, a.Field), a.X, tr.withFieldPath(fmt.Sprintf("field%d", a.Field)))
 	}
+}
+
+// isAggregateType reports whether a value of this type is copied field by
+// field, so field-qualified sub-locations have to be carried across a
+// whole-value load or store.
+func isAggregateType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch types.Unalias(t).Underlying().(type) {
+	case *types.Struct, *types.Array:
+		return true
+	}
+	return false
+}
+
+// isParameterSpill reports whether a store is the copy SSA emits to give a
+// by-value parameter an address: `*t0 = c`. Reading a field of a spilled
+// parameter is the only context in which a whole-value trace may be widened to
+// the aggregate's fields, because it is the parameter itself being read
+// field by field, and the field name is recorded as a hop.
+func isParameterSpill(store *ssa.Store) bool {
+	if store == nil {
+		return false
+	}
+	if _, ok := store.Addr.(*ssa.Alloc); !ok {
+		return false
+	}
+	switch store.Val.(type) {
+	case *ssa.Parameter, *ssa.FreeVar:
+		return true
+	}
+	return false
+}
+
+// aggregateSourcePrefix names the key space a whole aggregate value's
+// field-qualified sub-locations live under. A value loaded out of memory is a
+// fresh SSA register whose own key holds nothing; its fields were recorded
+// under the address it was loaded from.
+func aggregateSourcePrefix(v ssa.Value) string {
+	if op, ok := v.(*ssa.UnOp); ok && op.Op == token.MUL {
+		return addrKey(op.X)
+	}
+	return addrKey(v)
+}
+
+// copyAggregateTaint moves the field-qualified sub-locations under srcPrefix
+// to dstPrefix, keeping the field paths intact across a by-value aggregate
+// copy (defect 34).
+//
+// `w := Wrapper{Cmd: taint}` compiles to a store into a scratch allocation, a
+// load of the entire struct, and a store of that value into w. The whole-value
+// trace alone does not survive the round trip, because a field read consults
+// the field's own key first and the copy never wrote it. Moving the
+// sub-locations makes a value-typed literal behave like the pointer-typed one.
+func (b *dataFlowBuilder) copyAggregateTaint(state dataFlowState, dst, src ssa.Value) bool {
+	// dst is the address receiving the copy, so only the stored value has to
+	// be an aggregate; the destination's own type is a pointer to one.
+	if src == nil || dst == nil || !isAggregateType(src.Type()) {
+		return false
+	}
+	dstPrefix, srcPrefix := addrKey(dst), aggregateSourcePrefix(src)
+	if dstPrefix == "" || srcPrefix == "" || dstPrefix == srcPrefix {
+		return false
+	}
+	type move struct {
+		key   string
+		trace dataFlowTrace
+	}
+	var moves []move
+	for _, key := range state.subKeys[srcPrefix] {
+		if tr := state.memory[key]; !tr.empty() {
+			moves = append(moves, move{dstPrefix + key[len(srcPrefix):], tr})
+		}
+	}
+	for _, m := range moves {
+		state.mergeMemory(m.key, dst, m.trace)
+	}
+	return len(moves) > 0
+}
+
+// aggregateLoadTaint gathers the field-qualified sub-locations recorded under
+// base, for a load of the whole aggregate. Without it a whole-struct load
+// returns only what the base key holds and drops every field-qualified store
+// made through the address (defect 34).
+func (b *dataFlowBuilder) aggregateLoadTaint(state dataFlowState, base ssa.Value) (dataFlowTrace, bool) {
+	baseKey := addrKey(base)
+	if baseKey == "" {
+		return dataFlowTrace{}, false
+	}
+	var traces []dataFlowTrace
+	for _, key := range state.subKeys[baseKey] {
+		if tr := state.memory[key]; !tr.empty() {
+			traces = append(traces, tr)
+		}
+	}
+	return combineTraceList(traces)
 }
 
 type dataFlowFunctionResult struct {
@@ -1065,14 +1334,18 @@ func (b *dataFlowBuilder) analyzeFunction(fn *ssa.Function) {
 				if tr, ok := b.taintOf(state, x.Val); ok {
 					n := b.addNode("store", valueName(x.Addr), valueSymbol(x.Addr), valueType(x.Val), fn, x.Pos(), false, false, "", tr.taintKinds, strings.Join(tr.fieldPaths, "."), tr.confidence, nil)
 					tr = b.connectTrace(tr, n, "store", x.Pos(), valueName(x.Addr))
-					state.memory[addrKey(x.Addr)] = tr
+					state.setMemory(addrKey(x.Addr), x.Addr, tr)
 					b.rememberAggregateStore(state, x.Addr, tr)
 				}
+				if isParameterSpill(x) {
+					state.spills[addrKey(x.Addr)] = true
+				}
+				b.copyAggregateTaint(state, x.Addr, x.Val)
 			case *ssa.MapUpdate:
 				if tr, ok := b.taintOf(state, x.Value); ok {
 					n := b.addNode("map-store", valueName(x.Map), valueSymbol(x.Map), valueType(x.Value), fn, x.Pos(), false, false, "", tr.taintKinds, "[*]", tr.confidence, nil)
 					tr = b.connectTrace(tr, n, "map-store", x.Pos(), valueName(x.Map))
-					state.memory[addrKey(x.Map)+"[*]"] = tr.withFieldPath("[*]")
+					state.setMemory(addrKey(x.Map)+"[*]", x.Map, tr.withFieldPath("[*]"))
 				}
 			case *ssa.Send:
 				if tr, ok := b.taintOf(state, x.X); ok {
@@ -1156,7 +1429,35 @@ func (b *dataFlowBuilder) processCall(fn *ssa.Function, state dataFlowState, cal
 			b.replaySummary(fn, state, call, common, callee, "interface-summary")
 		}
 	}
+	b.rememberResultFields(state, call)
 	b.applyArgumentWrites(fn, state, common, call.Pos())
+}
+
+// rememberResultFields deposits an aggregate call result's taint at the fields
+// it travelled through, so a caller that stores the result and reads one field
+// (`out := b.Map(f); use(out.Value)`) still finds the flow. The result is
+// returned by value and copied into a local, so whole-value taint alone does
+// not survive to a field read; depositing at the named fields keeps the path
+// precise instead of widening the result to every field.
+func (b *dataFlowBuilder) rememberResultFields(state dataFlowState, call ssa.Value) {
+	if call == nil || !isAggregateType(call.Type()) {
+		return
+	}
+	tr, ok := state.values[call]
+	if !ok || tr.empty() || len(tr.fieldPaths) == 0 {
+		return
+	}
+	baseKey := addrKey(call)
+	if baseKey == "" {
+		return
+	}
+	for _, field := range tr.fieldPaths {
+		if !strings.HasPrefix(field, "field") {
+			continue
+		}
+		key := baseKey + "." + field
+		state.mergeMemory(key, call, tr)
+	}
 }
 
 // unwrapWriteTarget looks through the conversions a destination argument passes
@@ -1213,13 +1514,13 @@ func (b *dataFlowBuilder) applyArgumentWrites(fn *ssa.Function, state dataFlowSt
 			n := b.addNode("argument-write", valueName(target), callSymbol(common), valueType(target), fn, pos, false, false, "", incoming.taintKinds, "", incoming.confidence, map[string]string{"writesArgument": fmt.Sprint(idx)})
 			written := b.connectTrace(incoming, n, "argument-write", pos, valueName(target))
 			key := addrKey(target)
-			state.memory[key] = combineTraces(state.memory[key], written)
+			state.mergeMemory(key, target, written)
 			// A destination is usually a pointer to an aggregate, so record the
 			// element and field views a later read will look through.
-			state.memory[key+"[*]"] = combineTraces(state.memory[key+"[*]"], written)
+			state.mergeMemory(key+"[*]", target, written)
 			if load, isLoad := target.(*ssa.UnOp); isLoad && load.Op == token.MUL {
 				inner := addrKey(load.X)
-				state.memory[inner] = combineTraces(state.memory[inner], written)
+				state.mergeMemory(inner, load.X, written)
 			}
 		}
 	}
@@ -1389,7 +1690,7 @@ func (b *dataFlowBuilder) replaySummary(fn *ssa.Function, state dataFlowState, c
 		if tr, ok := combineTraceList(traces); ok {
 			n := b.addNode("call-summary", callName(common), callSymbol(common), valueType(recv), fn, call.Pos(), false, false, "", tr.taintKinds, field, tr.confidence, map[string]string{"summaryFunction": callee.String(), "summaryKind": edgeKind, "receiverField": field})
 			fieldTrace := b.connectTrace(tr, n, edgeKind+"-field", call.Pos(), field).withFieldPath(field)
-			state.memory[addrKey(recv)+"."+field] = fieldTrace
+			state.setMemory(addrKey(recv)+"."+field, recv, fieldTrace)
 		}
 	}
 }
@@ -1631,6 +1932,15 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 			if tr, ok := state.memory[addrKey(x.X)]; ok {
 				return tr, true
 			}
+			// Loading a whole aggregate out of memory: the field-qualified
+			// taint lives under sub-locations of the address, not on the
+			// base key, and has to be gathered explicitly for the store
+			// that follows to find it (defect 34).
+			if isAggregateType(x.Type()) {
+				if tr, ok := b.aggregateLoadTaint(state, x.X); ok {
+					return tr, true
+				}
+			}
 		}
 		if x.Op == token.ARROW {
 			if tr, ok := state.chans[addrKey(x.X)]; ok {
@@ -1639,14 +1949,38 @@ func (b *dataFlowBuilder) valueTaint(state dataFlowState, v ssa.Value) (dataFlow
 		}
 		return b.taintOf(state, x.X)
 	case *ssa.FieldAddr:
+		fieldPath := fmt.Sprintf("field%d", x.Field)
 		if tr, ok := state.memory[addrKey(x)]; ok {
-			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+			return tr.withFieldPath(fieldPath), true
 		}
 		if tr, ok := state.memory[fieldMemoryKey(x.X, x.Field)]; ok {
-			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+			return tr.withFieldPath(fieldPath), true
 		}
-		if tr, ok := b.taintOf(state, x.X); ok {
-			return tr.withFieldPath(fmt.Sprintf("field%d", x.Field)), true
+		// The element view a whole-destination write sets (io.Copy, the
+		// json.Unmarshal family): a field of a struct that was filled
+		// through a pointer must pick up that write, or every flow crossing
+		// one of those calls dies between the write and the field read.
+		if tr, ok := state.memory[addrKey(x.X)+"[*]"]; ok {
+			return tr.withFieldPath(fieldPath), true
+		}
+		// A field of a spilled by-value parameter (which for a method
+		// includes the receiver). The parameter's trace is whole-value, so
+		// the field name is recorded as a hop: that is what lets this
+		// function's summary say "parameter N flows out through field F"
+		// and the call site answer with only that field.
+		if state.spills[addrKey(x.X)] {
+			if tr, ok := state.memory[addrKey(x.X)]; ok {
+				return tr.withFieldPath(fieldPath), true
+			}
+		}
+		// A field read on a value that itself carries taint — a parameter
+		// with a source label (r.URL on the *http.Request parameter), a
+		// call result. The base *location's* whole-value trace is
+		// deliberately not consulted: widening every field read to the
+		// aggregate's taint is how a tainted field leaks onto its clean
+		// siblings (defect 34's negative half).
+		if tr, ok := state.values[x.X]; ok && !tr.empty() {
+			return tr.withFieldPath(fieldPath), true
 		}
 		return dataFlowTrace{}, false
 	case *ssa.IndexAddr:
@@ -1809,6 +2143,21 @@ func (b *dataFlowBuilder) addParamReturn(fn *ssa.Function, idx int) bool {
 	return true
 }
 
+func (b *dataFlowBuilder) addParamReturnField(fn *ssa.Function, idx int, field string) bool {
+	s := b.summaries[fn]
+	if s == nil {
+		return false
+	}
+	if s.paramReturnFields[idx] == nil {
+		s.paramReturnFields[idx] = map[string]bool{}
+	}
+	if s.paramReturnFields[idx][field] {
+		return false
+	}
+	s.paramReturnFields[idx][field] = true
+	return true
+}
+
 func (b *dataFlowBuilder) addParamSink(fn *ssa.Function, idx int, cat string) bool {
 	s := b.summaries[fn]
 	if s.paramSink[idx] == nil {
@@ -1898,6 +2247,21 @@ func summaryReceiverField(addr ssa.Value) (string, bool) {
 }
 
 func (b *dataFlowBuilder) summaryReturnTrace(state dataFlowState, arg ssa.Value, idx int, summary *internalSummary) (dataFlowTrace, bool) {
+	// When the summary names the fields a parameter-to-return flow travelled
+	// through and this call site knows the argument field by field, answer
+	// with only those fields. Applying an unqualified "parameter N flows to
+	// the return" with the whole argument's taint makes every field of a
+	// struct with any tainted field tainted in turn, which is how
+	// pair{tainted: input, clean: "static"}.Clean() produced a finding. A
+	// call site with no field-level record falls back to the whole-value
+	// taint, so restricting can only ever remove a false positive.
+	if summary != nil {
+		if fields := summary.paramReturnFields[idx]; len(fields) > 0 {
+			if tr, ok, applicable := b.argFieldTaint(state, arg, fields); applicable {
+				return tr, ok
+			}
+		}
+	}
 	var traces []dataFlowTrace
 	if tr, ok := b.taintOf(state, arg); ok {
 		traces = append(traces, tr)
@@ -1910,6 +2274,42 @@ func (b *dataFlowBuilder) summaryReturnTrace(state dataFlowState, arg ssa.Value,
 		}
 	}
 	return combineTraceList(traces)
+}
+
+// argFieldTaint answers what an aggregate argument carries at the specific
+// fields a callee's summary says it reads. applicable reports whether the
+// restriction is meaningful: the argument is an aggregate and this call site
+// holds at least one field-level record for it. When it does not — the common
+// case, and every case where the struct was filled somewhere else — the caller
+// must fall back to the whole-value taint rather than answer "nothing".
+func (b *dataFlowBuilder) argFieldTaint(state dataFlowState, arg ssa.Value, fields map[string]bool) (dataFlowTrace, bool, bool) {
+	if arg == nil || len(fields) == 0 || !isAggregateType(arg.Type()) {
+		return dataFlowTrace{}, false, false
+	}
+	base := aggregateSourcePrefix(arg)
+	if base == "" {
+		return dataFlowTrace{}, false, false
+	}
+	knowsFields := false
+	for _, key := range state.subKeys[base] {
+		if strings.HasPrefix(key, base+".") {
+			knowsFields = true
+			break
+		}
+	}
+	if !knowsFields {
+		return dataFlowTrace{}, false, false
+	}
+	var traces []dataFlowTrace
+	// Sorted, because combineTraces keeps one route out of several and a map
+	// iteration would pick a different one between runs on the same input.
+	for _, field := range sortedMapKeys(fields) {
+		if tr, ok := state.memory[base+"."+field]; ok {
+			traces = append(traces, tr)
+		}
+	}
+	tr, ok := combineTraceList(traces)
+	return tr, ok, true
 }
 
 func (b *dataFlowBuilder) combineCallArgTaints(state dataFlowState, common *ssa.CallCommon) (dataFlowTrace, bool) {
@@ -1948,8 +2348,10 @@ func (b *dataFlowBuilder) shouldPropagate(common *ssa.CallCommon) bool {
 	if callee == nil || callee.Pkg == nil || callee.Pkg.Pkg == nil {
 		return false
 	}
-	p := callee.Pkg.Pkg.Path()
-	return strings.HasPrefix(p, "strings") || strings.HasPrefix(p, "bytes") || strings.HasPrefix(p, "fmt") || strings.HasPrefix(p, "strconv") || strings.HasPrefix(p, "path") || strings.HasPrefix(p, "net/url")
+	// The carrier list is the one the SEAM engine uses
+	// (seam.IsStdlibCarrierPackage); sharing it is what keeps the two engines
+	// from disagreeing about which standard library calls preserve taint.
+	return seam.IsStdlibCarrierPackage(callee.Pkg.Pkg.Path())
 }
 
 func (b *dataFlowBuilder) matchCall(common *ssa.CallCommon, patterns []model.DataFlowPattern) []model.DataFlowPattern {

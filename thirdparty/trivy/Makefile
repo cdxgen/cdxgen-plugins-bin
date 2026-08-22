@@ -3,9 +3,18 @@ appname := trivy-cdxgen
 sources := $(wildcard *.go)
 docker_cmd := docker
 
-build = GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
+# The toolchain is pinned, not merely floored. github.com/aquasecurity/trivy
+# v0.74.0 — the newest release — is written against encoding/json/v2 as Go 1.26
+# exposes it under GOEXPERIMENT=jsonv2, and Go 1.27 stabilised that package
+# with a changed API (json.SkipFunc is gone), so 1.27 cannot compile it. go.mod
+# can only state a minimum, so the ceiling lives here: every recipe builds with
+# the same toolchain whatever the host or CI has installed. Drop both settings
+# once a trivy release supports Go 1.27.
+GOPIN := GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2
+
+build = $(GOPIN) CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
 sha = cd build && sha256sum $(appname)-$(1)-$(2)$(3) > $(appname)-$(1)-$(2)$(3).sha256
-generate_sbom = GOEXPERIMENT=jsonv2 cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json
+generate_sbom = $(GOPIN) cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json
 
 .PHONY: all windows darwin linux clean
 
@@ -42,8 +51,8 @@ build/linuxmusl_%: $(sources)
 		--platform=linux/$* \
 		-v "$(PWD)":/src \
 		-w /src \
-		golang:1.25-alpine \
-		sh -c 'GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
+		golang:1.26-alpine \
+		sh -c 'GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
 
 build/linux_ppc64le: $(sources)
 	$(call build,linux,ppc64le,)

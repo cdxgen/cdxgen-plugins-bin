@@ -14,7 +14,7 @@ import (
 // by preferring an instantiation's own summary over its origin's. Legacy keys
 // summaries per instantiation and never finds one at all.
 //
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:22
+// golem:want flow source=http-input sink=command-execution
 
 type Commander[T any] interface {
 	Run(T)

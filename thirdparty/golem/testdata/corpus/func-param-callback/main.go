@@ -11,7 +11,7 @@ import (
 // taint of what was passed in, or every callback-shaped API drops taint. This
 // is the pre-generics form of the shape generic-method exercises.
 //
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:33
+// golem:want flow source=http-input sink=command-execution
 type Carrier struct {
 	raw string
 }
@@ -26,7 +26,7 @@ func Handler(r *http.Request) {
 // Same shape through a generic top-level function, legal since Go 1.18. A
 // distinct sink category so this expectation cannot be satisfied by Handler's
 // slice.
-// golem:want flow source=http-input sink=filesystem known-fail=legacy:33
+// golem:want flow source=http-input sink=filesystem
 func Unwrap[T any](c Carrier, f func(string) T) T { return f(c.raw) }
 
 func GenericHandler(r *http.Request) {

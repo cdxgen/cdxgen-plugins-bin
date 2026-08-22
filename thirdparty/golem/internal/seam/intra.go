@@ -571,7 +571,7 @@ func (s *intra) checkSinks(state taintState, common *ssa.CallCommon, pos token.P
 	}
 	for _, entry := range targets {
 		for argIdx, arg := range common.Args {
-			if !entry.ArgumentRelevant(argIdx) {
+			if !entry.ArgumentRelevantAt(common, argIdx) {
 				continue
 			}
 			labels := s.taintOf(state, arg).Merge(s.variadicElementTaint(state, arg))

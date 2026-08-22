@@ -10,7 +10,7 @@ import (
 // method's type parameter list is disjoint from the receiver's. Taint has to
 // cross the method boundary, the SSA instantiation, and the call through the
 // method's function-valued parameter.
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:33
+// golem:want flow source=http-input sink=command-execution
 type Box[T any] struct {
 	Value T
 }
@@ -38,7 +38,7 @@ func Handler(r *http.Request) {
 
 // A distinct sink category so this expectation cannot be satisfied by the slice
 // Handler produces.
-// golem:want flow source=http-input sink=filesystem known-fail=legacy:33
+// golem:want flow source=http-input sink=filesystem
 func CarrierHandler(r *http.Request) {
 	c := Carrier{raw: r.FormValue("path")}
 	path := c.Unwrap(func(s string) string { return s })

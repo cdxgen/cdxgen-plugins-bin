@@ -77,7 +77,7 @@ No `distro_name` qualifier is emitted: Alpaquita has no `VERSION_CODENAME`, so t
 Build a local test binary from this directory:
 
 ```bash
-GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ```
 
 ### Generate a CycloneDX SBOM from an Unpacked Root Filesystem
@@ -140,10 +140,18 @@ Emits one `InstalledFile` property per file installed by each OS package. This c
 
 ## Build Notes
 
-The wrapper requires Go 1.24+ with the `jsonv2` experiment enabled. The build command is:
+The wrapper builds with Go 1.26 and the `jsonv2` experiment enabled — a
+pinned toolchain, not a floor:
 
 ```bash
-GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ```
 
-The `jsonv2` experiment is required for the JSON marshaling of enriched package metadata.
+The `jsonv2` experiment is required for the JSON marshaling of enriched
+package metadata. Go 1.27 stabilised `encoding/json/v2` with a changed API
+(`json.SkipFunc` is gone), and the newest trivy release,
+`github.com/aquasecurity/trivy v0.74.0`, is still written against the
+experiment — so 1.27 cannot compile it. `go.mod` can only state a minimum
+version, which is why the ceiling is set by `GOTOOLCHAIN` here and in the
+Makefile. The rest of this repository's Go helpers are on 1.27; when a trivy
+release supports it, drop `GOTOOLCHAIN` and `GOEXPERIMENT` together.

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// IO copy: taint flows through io.Copy. io is not in the shouldPropagate allowlist.
+// IO copy: taint flows through io.Copy's writes-to-argument model.
 // golem:want flow source=http-input sink=command-execution
 func Handler(r *http.Request) {
 	src := strings.NewReader(r.FormValue("cmd"))

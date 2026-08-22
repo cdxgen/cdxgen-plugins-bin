@@ -117,6 +117,16 @@
       "tier": "quick"
     },
     {
+      "name": "http-client-ssrf",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "insecure-random",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
       "name": "interface-dispatch",
       "type": "corpus",
       "tier": "quick"
@@ -243,6 +253,11 @@
     },
     {
       "name": "unrelated-value-negative",
+      "type": "corpus",
+      "tier": "quick"
+    },
+    {
+      "name": "uuid-roundtrip",
       "type": "corpus",
       "tier": "quick"
     },

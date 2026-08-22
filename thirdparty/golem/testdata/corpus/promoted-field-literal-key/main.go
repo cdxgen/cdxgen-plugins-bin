@@ -14,7 +14,7 @@ import (
 // of the whole struct, and a store of that value into the variable, so the
 // field-qualified taint has to survive a by-value aggregate copy. See
 // value-receiver-field for the same requirement without any 1.27 syntax.
-// golem:want flow source=http-input sink=command-execution known-fail=legacy:34
+// golem:want flow source=http-input sink=command-execution
 type Base struct {
 	Cmd string
 }
