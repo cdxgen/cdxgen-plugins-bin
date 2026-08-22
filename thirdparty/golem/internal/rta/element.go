@@ -2,13 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Vendored from golang.org/x/tools v0.49.0
-// internal/typesinternal/element.go (unmodified except for the package
-// clause and the ForEachElement -> forEachElement rename), because the
-// rta copy in this directory needs it and x/tools' internal packages
-// cannot be imported. See rta.go for the provenance of this directory.
-
-package rta
+package rta // golem: vendored; see vendor.go
 
 import (
 	"fmt"

@@ -2,24 +2,40 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// This package is a vendored copy of golang.org/x/tools/go/callgraph/rta
-// from x/tools v0.49.0, with one bug fixed ahead of upstream:
+// This package provides Rapid Type Analysis (RTA) for Go, a fast
+// algorithm for call graph construction and discovery of reachable code
+// (and hence dead code) and runtime types.  The algorithm was first
+// described in:
 //
-//	rta.Analyze put a nil *ssa.Function on its worklist — and
-//	visitFunc then dereferenced f.Blocks — whenever a runtime type's
-//	method set contained a Go 1.27 generic method (a method declaring
-//	its own type parameters), because ssa.Program.MethodValue returns
-//	nil for methods it cannot lower to SSA. static and rta's
-//	fingerprint gained guards against generic methods in CL 788520
-//	(golang/go#77549) and vta already nil-checked; the two rta call
-//	sites fixed here were missed (golang/go#80973).
+// David F. Bacon and Peter F. Sweeney. 1996.
+// Fast static analysis of C++ virtual function calls. (OOPSLA '96)
+// http://doi.acm.org/10.1145/236337.236371
 //
-// The delta from upstream is exactly three nil guards — in
-// addReachable, addInvokeEdge and addRuntimeType — marked with
-// "#80973" comments. Everything else is byte-for-byte upstream so the
-// copy can be diffed against it, and deleted in favour of the real
-// import once x/tools ships the fix.
-package rta // golem: vendored from golang.org/x/tools/go/callgraph/rta
+// The algorithm uses dynamic programming to tabulate the cross-product
+// of the set of known "address-taken" functions with the set of known
+// dynamic calls of the same type.  As each new address-taken function
+// is discovered, call graph edges are added from each known callsite,
+// and as each new call site is discovered, call graph edges are added
+// from it to each known address-taken function.
+//
+// A similar approach is used for dynamic calls via interfaces: it
+// tabulates the cross-product of the set of known "runtime types",
+// i.e. types that may appear in an interface value, or may be derived from
+// one via reflection, with the set of known "invoke"-mode dynamic
+// calls.  As each new runtime type is discovered, call edges are
+// added from the known call sites, and as each new call site is
+// discovered, call graph edges are added to each compatible
+// method.
+//
+// In addition, we must consider as reachable all address-taken
+// functions and all exported methods of any runtime type, since they
+// may be called via reflection.
+//
+// Each time a newly added call edge causes a new function to become
+// reachable, the code of that function is analyzed for more call sites,
+// address-taken functions, and runtime types.  The process continues
+// until a fixed point is reached.
+package rta // golem: vendored; see vendor.go
 
 import (
 	"fmt"
@@ -430,17 +446,15 @@ func (r *rta) addRuntimeType(T types.Type) {
 			// Exported methods are always potentially callable via reflection.
 			for sel := range methodSetOf(T).Methods() {
 				if sel.Obj().Exported() {
-					// #80973: MethodValue returns nil for methods with
-					// no SSA form — a Go 1.27 generic method (a method
-					// declaring its own type parameters) cannot be
-					// lowered. Passing nil to addReachable would put a
-					// nil function on the worklist and segfault
-					// visitFunc. The method simply has no body to
-					// analyze, so skip it, as the static call graph
-					// (CL 788520) and vta already do.
-					if fn := r.prog.MethodValue(sel); fn != nil {
-						r.addReachable(fn, true)
-					}
+					// #80973: this is the call that crashed. MethodValue
+					// answers nil for a method with no SSA form — a Go
+					// 1.27 generic method, declaring its own type
+					// parameters, cannot be lowered — and the nil went
+					// onto the worklist for visitFunc to dereference.
+					// addReachable drops it now; the method has no body
+					// to analyze, as the static call graph (CL 788520)
+					// and vta already assume.
+					r.addReachable(r.prog.MethodValue(sel), true)
 				}
 			}
 
