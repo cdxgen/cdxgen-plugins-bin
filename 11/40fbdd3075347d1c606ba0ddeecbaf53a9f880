@@ -1,0 +1,23 @@
+thirdparty/golem/internal/analyzer/callgraph_guard_test.go
+  s_a248fea33c2cd6::t_79d0490e3b55fa 1-90
+thirdparty/golem/internal/analyzer/callgraph.go
+  s_a248fea33c2cd6::t_f879d28f35ae86 75,77,79-87,91-94,100-114,118-153
+  s_a248fea33c2cd6::t_d74375e77519f6 762-765,767-772,777-785,792-801
+  s_a248fea33c2cd6::t_de7de389da212b 154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1140fbdd3075347d1c606ba0ddeecbaf53a9f880",
+  "prompts": {},
+  "sessions": {
+    "s_a248fea33c2cd6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0e992fa-b0f7-414c-ba83-4077ed644491",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
