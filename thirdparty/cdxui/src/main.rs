@@ -25,7 +25,7 @@ use crossterm::{
 use ratatui::backend::{Backend, CrosstermBackend};
 use std::io;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> io::Result<()> {
     let args = Args::parse();
 
     let theme = match args.theme.as_str() {
@@ -49,8 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let parts = split_env_args(&cdxgen_cmd);
         let (cmd, pre_args) = parts
             .split_first()
-            .map(|(c, rest)| (c.as_str(), rest))
-            .unwrap_or(("cdxgen", &[][..]));
+            .map_or(("cdxgen", &[][..]), |(c, rest)| (c.as_str(), rest));
 
         let mut cdxgen_args: Vec<String> = pre_args.to_vec();
         cdxgen_args.extend(parse_cdxgen_args());
@@ -131,10 +130,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
-    result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    result
 }
 
-fn run_app<B: Backend>(
+fn run_app<B: Backend<Error = std::io::Error>>(
     terminal: &mut ratatui::Terminal<B>,
     app: &mut App,
     log_store: &mut LogStore,
@@ -477,12 +476,9 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 let ref_field = app.dep_tree_refs.get(row).cloned().unwrap_or_default();
                 if !ref_field.is_empty() {
                     let now = std::time::Instant::now();
-                    let is_double = app
-                        .last_click_time
-                        .map(|t| {
-                            now.duration_since(t).as_millis() < 400 && row == app.last_click_row
-                        })
-                        .unwrap_or(false);
+                    let is_double = app.last_click_time.is_some_and(|t| {
+                        now.duration_since(t).as_millis() < 400 && row == app.last_click_row
+                    });
                     app.table_selected = row;
                     if is_double {
                         let is_leaf = app.store.dependency_children(&ref_field).is_empty();
@@ -520,12 +516,9 @@ fn handle_mouse_event(app: &mut App, mouse: crossterm::event::MouseEvent) {
                     Tab::Components | Tab::Crypto | Tab::Services | Tab::Vulnerabilities
                 ) {
                     let now = std::time::Instant::now();
-                    let is_double = app
-                        .last_click_time
-                        .map(|t| {
-                            now.duration_since(t).as_millis() < 400 && row == app.last_click_row
-                        })
-                        .unwrap_or(false);
+                    let is_double = app.last_click_time.is_some_and(|t| {
+                        now.duration_since(t).as_millis() < 400 && row == app.last_click_row
+                    });
                     app.table_selected = row;
                     app.last_click_time = Some(now);
                     app.last_click_row = row;

@@ -43,8 +43,7 @@ impl TraceEvent {
         let scheme = self
             .protocol
             .as_deref()
-            .map(|p| p.trim_end_matches(':'))
-            .unwrap_or("https");
+            .map_or("https", |p| p.trim_end_matches(':'));
         let path = self.pathname.as_deref().unwrap_or("");
         Some(format!("{}://{}{}", scheme, host, path))
     }

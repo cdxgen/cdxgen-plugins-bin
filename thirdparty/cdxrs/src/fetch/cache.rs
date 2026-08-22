@@ -95,12 +95,12 @@ impl CacheKey {
     }
 
     pub fn with_accept(mut self, accept: Option<&str>) -> Self {
-        self.accept = accept.map(|s| s.to_string());
+        self.accept = accept.map(str::to_string);
         self
     }
 
     pub fn with_auth_realm(mut self, realm: Option<&str>) -> Self {
-        self.auth_realm = realm.map(|s| s.to_string());
+        self.auth_realm = realm.map(str::to_string);
         self
     }
 
@@ -231,7 +231,6 @@ impl HttpCache {
     /// because the inputs are parameters — not `#[cfg]` gates on the tests.
     /// `xdg_cache_home` must be absolute (per the XDG spec); a relative value
     /// is ignored so it cannot point inside the current working directory.
-    #[allow(clippy::too_many_arguments)]
     pub fn resolve_cache_for(
         platform: CachePlatform,
         cdxgen_cache_dir: Option<&str>,
@@ -574,8 +573,7 @@ impl HttpCache {
                     .modified()
                     .ok()
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                    .map_or(0, |d| d.as_secs());
                 total = total.saturating_add(size);
                 entries.push(EntryInfo {
                     path,
@@ -626,8 +624,7 @@ fn file_age_secs(meta: &fs::Metadata, now: u64) -> u64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| now.saturating_sub(d.as_secs()))
-        .unwrap_or(0)
+        .map_or(0, |d| now.saturating_sub(d.as_secs()))
 }
 
 fn extract_host(url: &str) -> Option<String> {

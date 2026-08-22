@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bom {
@@ -24,7 +24,7 @@ pub struct Bom {
     pub definitions: Option<Definitions>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ pub struct Metadata {
     pub lifecycles: Option<Vec<Lifecycle>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub struct Tools {
     pub services: Option<Vec<Service>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -85,7 +85,7 @@ pub struct Component {
     pub external_references: Option<Vec<ExternalReference>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +114,7 @@ pub struct CryptoProperties {
     pub certification_level: Option<Vec<String>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,7 +153,7 @@ pub struct AlgorithmProperties {
     pub nist_quantum_security_level: Option<i32>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,7 +183,7 @@ pub struct CertificateProperties {
     pub certificate_extension: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,7 +211,7 @@ pub struct RelatedCryptoMaterialProperties {
     pub size: Option<i32>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,7 +240,7 @@ pub struct Service {
     pub external_references: Option<Vec<ExternalReference>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,7 +249,7 @@ pub struct ServiceData {
     pub flow: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,7 +261,7 @@ pub struct Dependency {
     pub depends_on: Option<Vec<String>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,7 +278,7 @@ pub struct Formula {
     pub properties: Option<Vec<Property>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,7 +295,7 @@ pub struct Workflow {
     pub task_dependencies: Option<Vec<TaskDependency>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,7 +312,7 @@ pub struct Task {
     pub properties: Option<Vec<Property>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,7 +321,7 @@ pub struct TaskDependency {
     pub ref_field: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,7 +332,7 @@ pub struct Step {
     pub properties: Option<Vec<Property>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,7 +341,7 @@ pub struct Command {
     pub properties: Option<Vec<Property>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,7 +353,7 @@ pub struct InputOutput {
     pub properties: Option<Vec<Property>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,7 +367,7 @@ pub struct Composition {
     pub dependencies: Option<Vec<String>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,7 +384,7 @@ pub struct Annotation {
     pub timestamp: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -414,7 +414,7 @@ pub struct Vulnerability {
     pub updated: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,7 +423,7 @@ pub struct VulnSource {
     pub url: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -433,7 +433,7 @@ pub struct VulnReference {
     pub source: Option<VulnSource>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -448,7 +448,7 @@ pub struct Analysis {
     pub response: Option<Vec<String>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,7 +457,7 @@ pub struct Advisory {
     pub url: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -469,7 +469,7 @@ pub struct Rating {
     pub vector: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,7 +478,7 @@ pub struct RatingSource {
     pub url: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,7 +489,7 @@ pub struct Affect {
     pub versions: Option<Vec<AffectedVersion>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,7 +499,7 @@ pub struct AffectedVersion {
     pub status: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -507,7 +507,7 @@ pub struct Definitions {
     pub standards: Option<Vec<Standard>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -522,7 +522,7 @@ pub struct Standard {
     pub requirements: Option<Vec<Requirement>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -539,7 +539,7 @@ pub struct Requirement {
     pub open_cre: Option<Vec<String>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -551,7 +551,7 @@ pub struct ComponentEvidence {
     pub occurrences: Option<Vec<Occurrence>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -563,7 +563,7 @@ pub struct ComponentIdentityEvidence {
     pub methods: Option<Vec<IdentityMethod>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -573,7 +573,7 @@ pub struct IdentityMethod {
     pub value: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn deserialize_identity<'de, D>(
@@ -618,15 +618,12 @@ where
             let mut components: Vec<Component> = Vec::new();
             for item in arr {
                 if let serde_json::Value::Object(map) = item {
-                    let name = map
-                        .get("name")
-                        .and_then(|x| x.as_str())
-                        .map(|s| s.to_string());
+                    let name = map.get("name").and_then(|x| x.as_str()).map(str::to_string);
                     let version = map
                         .get("version")
                         .and_then(|x| x.as_str())
-                        .map(|s| s.to_string());
-                    let mut extra: HashMap<String, serde_json::Value> = HashMap::new();
+                        .map(str::to_string);
+                    let mut extra: BTreeMap<String, serde_json::Value> = BTreeMap::new();
                     for (k, val) in map {
                         if k != "name" && k != "version" {
                             extra.insert(k, val);
@@ -644,7 +641,7 @@ where
             Ok(Some(Tools {
                 components: Some(components),
                 services: None,
-                extra: HashMap::new(),
+                extra: BTreeMap::new(),
             }))
         }
         Some(_) => Ok(None),
@@ -656,7 +653,7 @@ pub struct Copyright {
     pub text: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -664,7 +661,7 @@ pub struct Occurrence {
     pub location: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -676,7 +673,7 @@ pub struct Pedigree {
     pub patches: Option<Vec<Patch>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -687,7 +684,7 @@ pub struct Commit {
     pub message: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -699,7 +696,7 @@ pub struct Patch {
     pub resolves: Option<Vec<Issue>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -712,7 +709,7 @@ pub struct Issue {
     pub description: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -722,7 +719,7 @@ pub struct ComponentData {
     pub classification: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -731,7 +728,7 @@ pub struct LicenseChoice {
     pub expression: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -742,7 +739,7 @@ pub struct License {
     pub text: Option<Attachment>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -754,7 +751,7 @@ pub struct Attachment {
     pub content: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -763,7 +760,7 @@ pub struct Hash {
     pub content: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -776,7 +773,7 @@ pub struct ExternalReference {
     pub hashes: Option<Vec<Hash>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -785,7 +782,7 @@ pub struct Property {
     pub value: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -795,7 +792,7 @@ pub struct OrganizationalEntity {
     pub contact: Option<Vec<OrganizationalContact>>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -805,7 +802,7 @@ pub struct OrganizationalContact {
     pub phone: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -813,7 +810,7 @@ pub struct Lifecycle {
     pub phase: Option<String>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -825,7 +822,7 @@ pub struct ResourceReferenceChoice {
     pub external_reference: Option<ExternalReference>,
 
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]

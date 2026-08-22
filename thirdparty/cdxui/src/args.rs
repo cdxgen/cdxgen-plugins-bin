@@ -54,10 +54,10 @@ pub fn split_env_args(value: &str) -> Vec<String> {
         return value
             .split(ARG_SEPARATOR)
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .map(str::to_string)
             .collect();
     }
-    value.split_whitespace().map(|s| s.to_string()).collect()
+    value.split_whitespace().map(str::to_string).collect()
 }
 
 pub fn parse_cdxgen_args() -> Vec<String> {
@@ -66,11 +66,10 @@ pub fn parse_cdxgen_args() -> Vec<String> {
         return split_env_args(&cdgenv);
     }
     let args: Vec<String> = std::env::args().collect();
-    if let Some(pos) = args.iter().position(|a| a == "--") {
-        args[pos + 1..].to_vec()
-    } else {
-        Vec::new()
-    }
+    args.iter()
+        .position(|a| a == "--")
+        .map(|pos| args[pos + 1..].to_vec())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

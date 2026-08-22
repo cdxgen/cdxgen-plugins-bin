@@ -2,6 +2,7 @@
 name = "cdxui"
 version = "3.0.5"
 edition = "2024"
+rust-version = "1.98"
 description = "Interactive terminal UI for CycloneDX BOM exploration"
 license = "MIT"
 repository = "https://github.com/CycloneDX/cdxgen-plugins-bin"
@@ -11,9 +12,9 @@ name = "cdxui"
 path = "src/main.rs"
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-clap = { version = "4", features = ["derive"] }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

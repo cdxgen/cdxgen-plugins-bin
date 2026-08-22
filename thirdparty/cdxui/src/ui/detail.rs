@@ -153,7 +153,7 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
                     parts.push(id.clone());
                 }
                 if let Some(ref name) = lic.name {
-                    parts.push(format!("({})", name));
+                    parts.push(format!("({name})"));
                 }
             }
             lines.push(Line::from(vec![Span::styled(
@@ -225,7 +225,7 @@ fn render_component_detail(lines: &mut Vec<Line<'static>>, c: &Component, theme:
                     for (k, v) in &ident.extra {
                         lines.push(Line::from(vec![
                             Span::styled(format!("    {}: ", k), dim("", theme)),
-                            Span::raw(format!("{}", v)),
+                            Span::raw(format!("{v}")),
                         ]));
                     }
                 }

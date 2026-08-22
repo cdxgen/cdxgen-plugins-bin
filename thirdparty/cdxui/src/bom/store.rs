@@ -475,7 +475,10 @@ pub enum VulnSortField {
 }
 
 impl VulnSortField {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "kept beside sort_field_to_str for parity; the UI renders its own labels"
+    )]
     pub fn label(self) -> &'static str {
         match self {
             VulnSortField::Priority => "Priority",
