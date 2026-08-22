@@ -85,6 +85,15 @@ jobs:
 
     - name: Unit tests
       working-directory: thirdparty/golem
+      # The wide tier runs every corpus and parity case over every data-flow
+      # mode. It is the only suite that exercises --dataflow all, and it was
+      # never run here: the command the README gave was `go test ./...
+      # -golem.full`, which fails because a test flag is registered per test
+      # binary and only internal/analyzer declares it. GOLEM_FULL works
+      # module-wide. Thirteen unrecorded engine-parity differences accumulated
+      # behind that gap, so the tier is a gate now.
+      env:
+        GOLEM_FULL: '1'
       run: go test ./...
 
     - name: Build golem

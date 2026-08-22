@@ -266,7 +266,7 @@ trigger. `golem bench --tier full` reproduces this.
 ```bash
 go test ./... -short   # ~15s: everything except the corpus suites
 go test ./...          # ~3.5min: adds the corpus and engine-parity suites
-go test ./... -golem.full   # ~8min: the above over every data-flow mode
+GOLEM_FULL=1 go test ./...   # ~10min: the above over every data-flow mode
 go build -trimpath -ldflags "-s -w" -o build/golem ./cmd/golem
 ```
 
