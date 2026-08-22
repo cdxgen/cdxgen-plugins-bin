@@ -42,6 +42,10 @@ Invoke-WebRequest -Uri "https://github.com/owasp-dep-scan/dosai/releases/downloa
 Assert-Sha256 -Path plugins/dosai/dosai-windows-amd64.exe -ExpectedHash $dosaiArchiveSha256
 
 cd thirdparty\trivy
+# Mirror the Makefile's GOPIN: trivy v0.74.0 targets encoding/json/v2 as Go
+# 1.26 exposed it under GOEXPERIMENT=jsonv2. Go 1.27 stabilised the package
+# with a changed API (json.SkipFunc is gone), so pin the toolchain here too.
+$env:GOTOOLCHAIN = "go1.26.5"
 $env:GOEXPERIMENT = "jsonv2"
 $env:CGO_ENABLED = "0"
 go build -ldflags "-s -w" -o build\trivy-windows-amd64.exe
@@ -49,6 +53,10 @@ go build -ldflags "-s -w" -o build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
 Remove-Item build -Recurse -Force
 cd ..\..
+
+# golem and trustinspector require Go 1.27; drop the trivy-only pins.
+Remove-Item Env:GOTOOLCHAIN -ErrorAction SilentlyContinue
+Remove-Item Env:GOEXPERIMENT -ErrorAction SilentlyContinue
 
 
 cd thirdparty\golem
