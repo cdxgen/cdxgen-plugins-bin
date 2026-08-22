@@ -11,12 +11,15 @@ import (
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
-	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/callgraph/static"
 	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
+	// rta is the vendored x/tools v0.49.0 copy with the Go 1.27
+	// generic-method nil crash fixed (golang/go#80973); upstream
+	// rta.Analyze still segfaults on such programs. See internal/rta.
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/rta"
 )
 
 func (a *Analyzer) buildCallGraph(ctx *ssaContext) *model.CallGraph {
@@ -119,14 +122,15 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 // into a diagnostic.
 //
 // The algorithms live in x/tools and are not defensive about the programs golem
-// hands them: `rta.(*rta).visitFunc` reads `f.Blocks` with no nil check and
-// segfaults on a nil function reaching its worklist, which happens on at least
-// one large repository in the benchmark. Letting that abort the process throws
-// away a complete source-evidence report — declarations, imports, crypto,
-// security signals, supply chain, all already computed — because one optional
-// graph could not be built. Recovering keeps the report and says plainly what
-// was lost. The panic is never swallowed: it is reported verbatim, since a
-// silent degradation is worse than a crash.
+// hands them: `rta.(*rta).visitFunc` read `f.Blocks` with no nil check and
+// segfaulted on a nil function reaching its worklist (golang/go#80973, Go 1.27
+// generic methods; fixed in the vendored internal/rta). That trigger is gone,
+// but the guard stays: x/tools has produced more than one such defect, and
+// letting one abort the process throws away a complete source-evidence report
+// — declarations, imports, crypto, security signals, supply chain, all already
+// computed — because one optional graph could not be built. Recovering keeps
+// the report and says plainly what was lost. The panic is never swallowed: it
+// is reported verbatim, since a silent degradation is worse than a crash.
 func guardAlgorithm(name string, build func() *callgraph.Graph) (graph *callgraph.Graph, diagnostics []model.Diagnostic) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
