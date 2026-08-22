@@ -2142,17 +2142,14 @@ fn function_parameter_types(sig: &Signature) -> Vec<String> {
         .iter()
         .map(|input| match input {
             syn::FnArg::Typed(pat_type) => pat_type.ty.to_token_stream().to_string(),
-            syn::FnArg::Receiver(receiver) => {
-                if receiver.reference.is_some() {
-                    if receiver.mutability.is_some() {
-                        "&mut Self".to_string()
-                    } else {
-                        "&Self".to_string()
-                    }
-                } else {
-                    "Self".to_string()
-                }
-            }
+            syn::FnArg::Receiver(receiver) => match &receiver.kind {
+                // `&self` / `&mut self`; the `mut` lives inside the variant,
+                // while `Receiver::mutability` only covers by-value `mut self`.
+                syn::ReceiverKind::Reference(.., Some(_)) => "&mut Self".to_string(),
+                syn::ReceiverKind::Reference(.., None) => "&Self".to_string(),
+                // `self`, `mut self`, and explicit `self: Box<Self>` receivers.
+                _ => "Self".to_string(),
+            },
         })
         .collect()
 }
