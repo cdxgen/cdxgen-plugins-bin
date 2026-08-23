@@ -1,6 +1,6 @@
 {
   "name": "@cdxgen/cdxgen-plugins-bin-darwin-arm64",
-  "version": "3.0.5",
+  "version": "3.1.0",
   "description": "Arm64 binary plugins to supercharge @cdxgen/cdxgen npm package",
   "main": "index.js",
   "repository": {

@@ -336,6 +336,7 @@ impl EmbeddedCollector {
             };
             let declaration = self.push_decl(tcx, item.owner_id.def_id, kind, None)?;
             self.push_security_signal(SecuritySignal {
+                cfg_gate: None,
                 id: stable_id("signal", &[&declaration.id, "native-interop"]),
                 category: "native-interop".to_string(),
                 severity: "medium".to_string(),
@@ -742,6 +743,8 @@ impl EmbeddedCollector {
             .map(|symbol| symbol.to_string())
             .unwrap_or_else(|| last_segment(&qualified_name).to_string());
         let declaration = Declaration {
+            // The compiler backend only sees code that survived cfg expansion.
+            cfg_gate: None,
             id: stable_id("decl", &[&self.crate_name, &qualified_name]),
             name,
             canonical_name: rusi_schema::canonical_name(&qualified_name),
@@ -771,6 +774,7 @@ impl EmbeddedCollector {
         }
         if kind == "unsafe-function" || kind == "unsafe-method" {
             self.push_security_signal(SecuritySignal {
+                cfg_gate: None,
                 id: stable_id("signal", &[&declaration.id, "unsafe-fn"]),
                 category: "unsafe-code".to_string(),
                 severity: "medium".to_string(),
@@ -840,7 +844,6 @@ struct BodyVisitor<'tcx, 'a> {
 #[derive(Debug, Clone)]
 struct HirCallRecord {
     source_id: String,
-    source_name: String,
     file_path: String,
     position: Position,
     resolved: ResolvedCall,
@@ -1013,7 +1016,6 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             .insert((self.caller, span_key_simple(span)), resolved.clone());
         self.hir_calls.push(HirCallRecord {
             source_id: self.caller_decl.id.clone(),
-            source_name: self.caller_decl.qualified_name.clone(),
             file_path: file_path.clone(),
             position: position.clone(),
             resolved: resolved.clone(),
@@ -1036,6 +1038,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
     fn push_signal(&mut self, span: Span, category: &str, description: &str) {
         let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
         let signal = SecuritySignal {
+            cfg_gate: None,
             id: stable_id("signal", &[&file_path, category, &span_key(self.tcx, span)]),
             category: category.to_string(),
             severity: "medium".to_string(),
@@ -2019,13 +2022,14 @@ fn build_call_graph(
                             id: edge_id,
                             source_id: function.id.clone(),
                             target_id: target_id.clone(),
-                            source_name: function.qualified_name.clone(),
-                            target_name: target_name.clone(),
-                            source_purl: String::new(),
-                            target_purl: String::new(),
-                            purls: Vec::new(),
                             call_type: callgraph_call_type(call),
-                            position: function.position.clone(),
+                            line: function.position.line,
+                            column: function.position.column,
+                            callee_text: Some(call.callee_display.clone()),
+                            receiver: call.receiver_type.clone(),
+                            method: None,
+                            candidate_count: None,
+                            emitted_candidate_count: None,
                             properties,
                         });
                 }
@@ -2145,11 +2149,6 @@ fn build_call_graph(
                     id: edge_id,
                     source_id: call.source_id.clone(),
                     target_id: target_id.clone(),
-                    source_name: call.source_name.clone(),
-                    target_name: target_name.clone(),
-                    source_purl: String::new(),
-                    target_purl: String::new(),
-                    purls: Vec::new(),
                     call_type: if call.resolved.async_boundary || call.resolved.task_boundary {
                         "async-logical".to_string()
                     } else if call.resolved.target_ids.is_empty() {
@@ -2159,13 +2158,25 @@ fn build_call_graph(
                     } else {
                         format!("{}-bounded", call.resolved.call_type)
                     },
-                    position: call.position.clone(),
+                    line: call.position.line,
+                    column: call.position.column,
+                    callee_text: Some(call.resolved.callee_display.clone()),
+                    receiver: call.resolved.receiver_type.clone(),
+                    method: None,
+                    candidate_count: None,
+                    emitted_candidate_count: None,
                     properties,
                 });
         }
     }
     let nodes = nodes.into_values().collect::<Vec<_>>();
-    let edges = reconcile_edges(edges.into_values().collect::<Vec<_>>());
+    // Edges name their endpoints by node id, so reconciliation needs the node
+    // table to reason about what a target actually is.
+    let target_names: HashMap<String, String> = nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.qualified_name.clone()))
+        .collect();
+    let edges = reconcile_edges(edges.into_values().collect::<Vec<_>>(), &target_names);
     CallGraph {
         mode: "embedded-hir-mir".to_string(),
         stats: GraphStats {
@@ -2189,7 +2200,16 @@ fn build_call_graph(
 ///      as an external node) is dropped when the same source already has a
 ///      concrete edge to an impl of that same method (`<Type as Trait>::method`),
 ///      i.e. the P2 devirtualization result.
-fn reconcile_edges(edges: Vec<CallGraphEdge>) -> Vec<CallGraphEdge> {
+fn reconcile_edges(
+    edges: Vec<CallGraphEdge>,
+    target_names: &HashMap<String, String>,
+) -> Vec<CallGraphEdge> {
+    let target_name = |edge: &CallGraphEdge| {
+        target_names
+            .get(&edge.target_id)
+            .cloned()
+            .unwrap_or_default()
+    };
     // Pass 1: collapse (source_id, target_id) duplicates.
     let mut collapsed: IndexMap<(String, String), CallGraphEdge> = IndexMap::new();
     for edge in edges {
@@ -2212,16 +2232,16 @@ fn reconcile_edges(edges: Vec<CallGraphEdge>) -> Vec<CallGraphEdge> {
     // to the same method from the same source.
     let concrete: HashSet<(String, String)> = collapsed
         .values()
-        .filter(|edge| target_is_concrete_impl(&edge.target_name))
-        .map(|edge| (edge.source_id.clone(), method_suffix(&edge.target_name)))
+        .filter(|edge| target_is_concrete_impl(&target_name(edge)))
+        .map(|edge| (edge.source_id.clone(), method_suffix(&target_name(edge))))
         .collect();
     collapsed
         .into_values()
         .filter(|edge| {
-            if target_is_concrete_impl(&edge.target_name) {
+            if target_is_concrete_impl(&target_name(edge)) {
                 return true;
             }
-            !concrete.contains(&(edge.source_id.clone(), method_suffix(&edge.target_name)))
+            !concrete.contains(&(edge.source_id.clone(), method_suffix(&target_name(edge))))
         })
         .collect()
 }
@@ -6265,6 +6285,10 @@ fn pattern(
         pattern: symbol.to_string(),
         category: category.to_string(),
         relevant_arguments,
+        // The compiler backend matches on type-resolved symbols, so it never
+        // needs the receiver-type restriction the stable backend uses to
+        // disambiguate a bare method name.
+        receiver_type: None,
     }
 }
 

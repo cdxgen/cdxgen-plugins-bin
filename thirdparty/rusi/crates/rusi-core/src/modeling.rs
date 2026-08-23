@@ -80,30 +80,35 @@ fn crypto_source_patterns() -> Vec<DataFlowPattern> {
             pattern: "std::env::var".to_string(),
             category: "secret".to_string(),
             relevant_arguments: vec![],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "source".to_string(),
             pattern: "std::env::var_os".to_string(),
             category: "secret".to_string(),
             relevant_arguments: vec![],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "source".to_string(),
             pattern: "env::var".to_string(),
             category: "secret".to_string(),
             relevant_arguments: vec![],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "source".to_string(),
             pattern: "std::fs::read_to_string".to_string(),
             category: "crypto-material".to_string(),
             relevant_arguments: vec![],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "source".to_string(),
             pattern: "fs::read_to_string".to_string(),
             category: "crypto-material".to_string(),
             relevant_arguments: vec![],
+            receiver_type: None,
         },
     ]
 }
@@ -115,132 +120,154 @@ fn crypto_sink_patterns() -> Vec<DataFlowPattern> {
             pattern: "sha2::Sha256::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "Sha256::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "sha2::Sha512::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "Sha512::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "sha1::Sha1::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "Sha1::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "md5::compute".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "blake3::hash".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "ring::digest::digest".to_string(),
             category: "crypto-digest".to_string(),
             relevant_arguments: vec![1],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "aes_gcm::aead::KeyInit::new_from_slice".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "Aes256Gcm::new_from_slice".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "chacha20poly1305::aead::KeyInit::new_from_slice".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "ChaCha20Poly1305::new_from_slice".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "ring::aead::UnboundKey::new".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![1],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "hmac::Mac::new_from_slice".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "pbkdf2::pbkdf2_hmac".to_string(),
             category: "crypto-kdf".to_string(),
             relevant_arguments: vec![1],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "argon2::Argon2::hash_password".to_string(),
             category: "crypto-kdf".to_string(),
             relevant_arguments: vec![1],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "jsonwebtoken::EncodingKey::from_secret".to_string(),
             category: "jwt".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "rustls::ClientConfig::builder".to_string(),
             category: "tls".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "rustls::ServerConfig::builder".to_string(),
             category: "tls".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "rsa::RsaPrivateKey::new".to_string(),
             category: "crypto-keygen".to_string(),
             relevant_arguments: vec![1],
+            receiver_type: None,
         },
         DataFlowPattern {
             target: "sink".to_string(),
             pattern: "ed25519_dalek::SigningKey::from_bytes".to_string(),
             category: "crypto-key".to_string(),
             relevant_arguments: vec![0],
+            receiver_type: None,
         },
     ]
 }
@@ -420,11 +447,7 @@ fn filter_crypto_call_graph(
     let crypto_edge_sources = call_graph
         .edges
         .iter()
-        .filter(|edge| {
-            edge.properties
-                .get("calleeText")
-                .is_some_and(|callee| looks_crypto_symbol(callee))
-        })
+        .filter(|edge| edge.callee_text.as_deref().is_some_and(looks_crypto_symbol))
         .map(|edge| edge.source_id.clone())
         .collect::<HashSet<_>>();
     for node in &call_graph.nodes {
@@ -458,11 +481,7 @@ fn filter_crypto_call_graph(
         {
             retained_edge_ids.insert(edge.id.clone());
         }
-        if edge
-            .properties
-            .get("calleeText")
-            .is_some_and(|callee| looks_crypto_symbol(callee))
-        {
+        if edge.callee_text.as_deref().is_some_and(looks_crypto_symbol) {
             retained_node_ids.insert(edge.source_id.clone());
             retained_node_ids.insert(edge.target_id.clone());
             retained_edge_ids.insert(edge.id.clone());
@@ -558,6 +577,7 @@ fn looks_crypto_symbol(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use indexmap::IndexMap;
     use rusi_schema::{
         CallGraph, CallGraphEdge, CallGraphNode, CryptoEvidence, DataFlowEvidence, GraphStats,
         Position,
@@ -612,19 +632,15 @@ mod tests {
                     id: "edge-1".to_string(),
                     source_id: "caller".to_string(),
                     target_id: "callee".to_string(),
-                    source_name: "demo::run".to_string(),
-                    target_name: "demo::dispatch".to_string(),
-                    source_purl: "pkg:cargo/demo@0.1.0".to_string(),
-                    target_purl: "pkg:cargo/demo@0.1.0".to_string(),
-                    purls: vec!["pkg:cargo/demo@0.1.0".to_string()],
                     call_type: "static".to_string(),
-                    position: position("src/main.rs"),
-                    properties: [(
-                        "calleeText".to_string(),
-                        "openssl::hash::digest".to_string(),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    line: 1,
+                    column: 1,
+                    callee_text: Some("openssl::hash::digest".to_string()),
+                    receiver: None,
+                    method: None,
+                    candidate_count: None,
+                    emitted_candidate_count: None,
+                    properties: IndexMap::new(),
                 }],
                 diagnostics: Vec::new(),
                 stats: GraphStats {

@@ -50,11 +50,15 @@ struct AnalysisArgs {
     dataflow_out: Option<PathBuf>,
     #[arg(long, default_value = "json", requires = "dataflow_out", value_parser = EXPORT_FORMATS)]
     dataflow_export_format: String,
-    #[arg(long, default_value = "static")]
+    #[arg(long, default_value = "static", value_parser = ["static", "none"])]
     callgraph: String,
+    // Validated rather than free-form: an unrecognized mode used to fall
+    // through to plain `security` silently, so a typo in `security-deps`
+    // produced a quietly narrower analysis instead of an error.
     #[arg(
         long,
-        default_value = "security",
+        default_value = rusi_core::DATAFLOW_SECURITY,
+        value_parser = [rusi_core::DATAFLOW_SECURITY, rusi_core::DATAFLOW_SECURITY_DEPS, "none"],
         help = "Data-flow mode: security, security-deps, or none. security-deps opts compiler mode into full dependency/external crate body analysis"
     )]
     dataflow: String,
@@ -64,6 +68,18 @@ struct AnalysisArgs {
         help = "Include test sources/targets. In compiler mode this runs cargo check --all-targets; by default test targets are skipped"
     )]
     tests: bool,
+    #[arg(
+        long,
+        default_value_t = rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
+        help = "Maximum call-graph edges emitted per ambiguous call site. An unresolved bare method name matches every same-named candidate in the workspace; capping the fan-out keeps the report and peak memory bounded. Capped edges carry candidateCount and candidatesTruncated. Use 0 for the full candidate set"
+    )]
+    max_call_candidates: usize,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Also analyze the resolved dependency crates, so a call into a dependency resolves instead of being reported as merely external. Dependencies are analyzed at a lighter tier (library target only, no function bodies) unless --dataflow security-deps is also given, because a dependency closure is usually far larger than the workspace"
+    )]
+    deps: bool,
     #[arg(
         long,
         default_value_t = false,
@@ -112,6 +128,8 @@ fn run_analysis_command(args: AnalysisArgs, scope: AnalysisScope) -> Result<()> 
         custom_data_flow_patterns: None,
         include_tests: args.tests,
         debug: args.debug,
+        max_call_candidates: args.max_call_candidates,
+        include_dependencies: args.deps,
     };
     apply_modeling(&mut options, scope, &args.modeling)?;
     let report = if options.backend == BACKEND_COMPILER {
@@ -255,6 +273,8 @@ mod tests {
         let output_path = temp_report_path("compiler-backend-smoke");
         run_analysis_command(
             AnalysisArgs {
+                deps: false,
+                max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
                 dir: fixture_path("basic-app"),
                 backend: "compiler".to_string(),
                 toolchain: "auto".to_string(),
@@ -303,6 +323,8 @@ mod tests {
 
         run_analysis_command(
             AnalysisArgs {
+                deps: false,
+                max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
                 dir: fixture_path("basic-app"),
                 backend: "stable".to_string(),
                 toolchain: "auto".to_string(),

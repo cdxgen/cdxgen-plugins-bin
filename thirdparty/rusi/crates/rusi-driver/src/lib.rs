@@ -1310,28 +1310,17 @@ fn enrich_payload_purls(metadata: &Metadata, payload: &mut DriverProtocolPayload
         signal.purl = resolve_package_purl(&signal.package_path, &package_purls);
     }
     if let Some(call_graph) = &mut payload.call_graph {
-        let mut node_purls = HashMap::new();
         for node in &mut call_graph.nodes {
             node.purl = resolve_package_purl(&node.package_path, &package_purls);
-            node_purls.insert(node.id.clone(), node.purl.clone());
+            if node.purl.is_empty() {
+                node.purl = resolve_package_purl(
+                    &inferred_package_path(&node.qualified_name),
+                    &package_purls,
+                );
+            }
         }
-        for edge in &mut call_graph.edges {
-            edge.source_purl = node_purls
-                .get(&edge.source_id)
-                .cloned()
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| {
-                    resolve_package_purl(&inferred_package_path(&edge.source_name), &package_purls)
-                });
-            edge.target_purl = node_purls
-                .get(&edge.target_id)
-                .cloned()
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| {
-                    resolve_package_purl(&inferred_package_path(&edge.target_name), &package_purls)
-                });
-            edge.purls = combined_purls(&edge.source_purl, &edge.target_purl);
-        }
+        // Edges carry no purls of their own: both endpoints' purls live on the
+        // nodes the edge references.
     }
     if let Some(data_flow) = &mut payload.data_flow {
         for node in &mut data_flow.nodes {
@@ -1809,6 +1798,9 @@ impl NativeInteropCollector {
             signature,
             receiver: None,
             position: position_from_span(&self.file_ctx.relative_file_path, span),
+            // The compiler backend sees post-cfg code, so anything it reports is
+            // already active in the current configuration.
+            cfg_gate: None,
         };
         self.declarations.push(declaration.clone());
         declaration
@@ -1841,6 +1833,7 @@ impl NativeInteropCollector {
             purl: String::new(),
             file_path: self.file_ctx.relative_file_path.clone(),
             position: position_from_span(&self.file_ctx.relative_file_path, span),
+            cfg_gate: None,
         });
     }
 }
@@ -2275,6 +2268,8 @@ mod tests {
     fn driver_options_can_be_derived_from_analyze_options() {
         let _guard = test_guard();
         let options = AnalyzeOptionsInput {
+            include_dependencies: false,
+            max_call_candidates: rusi_core::DEFAULT_MAX_CALL_CANDIDATES,
             dir: fixture_path("basic-app"),
             backend: "compiler".to_string(),
             analysis_scope: AnalysisScope::Default,
@@ -2434,8 +2429,8 @@ mod tests {
                 graph
                     .edges
                     .iter()
-                    .any(|edge| edge.source_name.ends_with("main")
-                        && edge.target_name.ends_with("run_command"))
+                    .any(|edge| graph.source_name(edge).ends_with("main")
+                        && graph.target_name(edge).ends_with("run_command"))
             );
             let has_direct_slice = flow.slices.iter().any(|slice| {
                 slice.source_category == "env"
@@ -2671,25 +2666,25 @@ mod tests {
                 .edges
                 .iter()
                 .filter(|edge| {
-                    edge.source_name.ends_with("run_specific")
-                        && edge.target_name.contains("Sink<")
-                        && edge.target_name.contains(">::submit")
+                    graph.source_name(edge).ends_with("run_specific")
+                        && graph.target_name(edge).contains("Sink<")
+                        && graph.target_name(edge).contains(">::submit")
                 })
                 .collect::<Vec<_>>();
             assert!(
                 devirt_edges
                     .iter()
-                    .any(|edge| edge.target_name.contains("FileSink")),
+                    .any(|edge| graph.target_name(edge).contains("FileSink")),
                 "expected devirtualized edge to FileSink::submit, got {:?}",
                 devirt_edges
                     .iter()
-                    .map(|e| &e.target_name)
+                    .map(|e| graph.target_name(e))
                     .collect::<Vec<_>>()
             );
             assert!(
                 devirt_edges
                     .iter()
-                    .any(|edge| edge.target_name.contains("NetSink")),
+                    .any(|edge| graph.target_name(edge).contains("NetSink")),
                 "expected devirtualized edge to NetSink::submit"
             );
             for edge in &devirt_edges {
@@ -2698,23 +2693,27 @@ mod tests {
                     edge.properties.get("edgePrecision").map(String::as_str),
                     Some("bounded")
                 );
+                // Endpoint purls live on the nodes the edge references.
+                let endpoint_purl = |id: &str| {
+                    graph
+                        .node(id)
+                        .map(|node| node.purl.clone())
+                        .unwrap_or_default()
+                };
                 assert!(
-                    edge.source_purl.starts_with("pkg:cargo/")
-                        || edge.target_purl.starts_with("pkg:cargo/"),
+                    endpoint_purl(&edge.source_id).starts_with("pkg:cargo/")
+                        || endpoint_purl(&edge.target_id).starts_with("pkg:cargo/"),
                     "expected at least one callgraph endpoint PURL"
                 );
             }
 
             // No edge should target the abstract trait item or a raw generic
             // parameter now that devirtualization succeeded.
-            assert!(
-                graph
-                    .edges
-                    .iter()
-                    .all(|edge| !(edge.source_name.ends_with("run_specific")
-                        && (edge.target_name.contains("<S as Sink")
-                            || edge.target_name == "Sink::submit")))
-            );
+            assert!(graph.edges.iter().all(|edge| {
+                !(graph.source_name(edge).ends_with("run_specific")
+                    && (graph.target_name(edge).contains("<S as Sink")
+                        || graph.target_name(edge) == "Sink::submit"))
+            }));
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
         }
@@ -3080,7 +3079,7 @@ mod tests {
                 .as_ref()
                 .expect("callgraph emitted");
             assert!(graph.edges.iter().any(|edge| {
-                edge.target_name == "std::thread::spawn"
+                graph.target_name(edge) == "std::thread::spawn"
                     && edge.call_type == "async-logical"
                     && edge
                         .properties
@@ -3092,7 +3091,7 @@ mod tests {
                         .is_some_and(|value| value == "true")
             }));
             assert!(graph.edges.iter().any(|edge| {
-                edge.target_name == "block_on"
+                graph.target_name(edge) == "block_on"
                     && edge.call_type == "async-logical"
                     && edge
                         .properties
@@ -3100,7 +3099,7 @@ mod tests {
                         .is_some_and(|value| value == "true")
             }));
             assert!(graph.edges.iter().any(|edge| {
-                edge.target_name == "std::future::Future::poll"
+                graph.target_name(edge) == "std::future::Future::poll"
                     && edge.call_type == "async-logical"
                     && edge
                         .properties

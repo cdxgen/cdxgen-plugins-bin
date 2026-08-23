@@ -28,9 +28,14 @@ use syn::{
 };
 
 mod api_discovery;
+mod cfg;
+mod import_resolution;
 mod modeling;
+mod module_tree;
 
 use api_discovery::discover_api_endpoints;
+use cfg::{CfgEvaluator, CfgExpr, CfgOptions};
+use import_resolution::{ImportResolution, ItemTable, UseRecord, collect_use_records};
 pub use modeling::{AnalysisScope, load_custom_pattern_set};
 use modeling::{crypto_only_pattern_set, merge_pattern_sets, retain_crypto_focus};
 
@@ -59,7 +64,35 @@ pub struct AnalyzeOptionsInput {
     pub custom_data_flow_patterns: Option<DataFlowPatternSet>,
     pub include_tests: bool,
     pub debug: bool,
+    /// Maximum call-graph edges emitted for one ambiguous call site.
+    ///
+    /// An unresolved bare method name matches every same-named candidate in
+    /// the workspace, and emitting the full cross product dominates both the
+    /// report size and peak memory (on wasm-tools: 97% of 1.15M edges, 785 MB
+    /// of a 790 MB report) without telling a consumer anything a candidate
+    /// count would not. Over-approximated sites are truncated to this many
+    /// edges, ordered so the most plausible targets survive, and the surviving
+    /// edges carry the true `candidateCount` plus `candidatesTruncated`.
+    ///
+    /// `0` disables the cap and restores the full cross product. Exactly
+    /// resolved sites (`static`, `trait-impl`, `receiver-typed`,
+    /// `higher-order`, `external`) are never capped.
+    pub max_call_candidates: usize,
+    /// Also analyze the resolved dependency crates, not just the workspace.
+    ///
+    /// Dependencies are analyzed at a lighter tier by default: their `lib`
+    /// target only, and declarations/imports/impls/usage evidence without
+    /// function bodies. That is enough to resolve a workspace call *into* a
+    /// dependency, which is otherwise reported as merely external. Bodies —
+    /// needed for taint to flow *through* a dependency — are collected only
+    /// under the `security-deps` data-flow mode, because a dependency closure is
+    /// typically an order of magnitude larger than the workspace (283 packages
+    /// and 5,913 files against 28 and 375, on wasm-tools 1.247.0).
+    pub include_dependencies: bool,
 }
+
+/// Default ceiling on edges emitted per ambiguous call site.
+pub const DEFAULT_MAX_CALL_CANDIDATES: usize = 8;
 
 impl Default for AnalyzeOptionsInput {
     fn default() -> Self {
@@ -72,6 +105,8 @@ impl Default for AnalyzeOptionsInput {
             custom_data_flow_patterns: None,
             include_tests: false,
             debug: false,
+            max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
+            include_dependencies: false,
         }
     }
 }
@@ -104,12 +139,25 @@ pub(crate) struct PackageContext {
     pub(crate) root_dir: PathBuf,
     pub(crate) src_dir: PathBuf,
     pub(crate) module_ref: ModuleRef,
+    /// False for a resolved dependency: it gets the lighter analysis tier.
+    pub(crate) workspace_member: bool,
 }
 
 #[derive(Debug, Clone)]
 struct FileContext {
     package_name: String,
+    /// Owning package's crate name. Used for grouping and purl resolution, so
+    /// it stays the package identity even for files that belong to a
+    /// non-library target.
     package_path: String,
+    /// Crate name of the Cargo target that owns this file, and therefore the
+    /// root of every qualified name in it.
+    ///
+    /// Each `bin`/`example`/`test` target is its own crate, so `src/bin/a.rs`
+    /// and `src/bin/b.rs` must not share a qualified-name root: they both
+    /// define a crate-root `main`, and a shared root would give the two the
+    /// same declaration id.
+    crate_path: String,
     relative_file_path: String,
     module_path: Vec<String>,
 }
@@ -122,6 +170,10 @@ struct SimplifiedCall {
     /// Populated for `ExprMethodCall` so the resolver can apply
     /// receiver-type inference (P1.2) and trait-impl filtering (P1.3).
     receiver_text: Option<String>,
+    /// The receiver as a simplified expression, so its type can be inferred
+    /// structurally. The text form cannot express a call result, which is what
+    /// a method chain's receiver usually is (`builder().build().run()`).
+    receiver_expr: Option<SimpleExpr>,
     /// Bare method name for method calls (last segment only, no qualifier).
     /// None for free-function `ExprCall`. Used by the trait/method resolver.
     method_name: Option<String>,
@@ -153,6 +205,16 @@ struct FunctionRecord {
     // Reserved for loop-aware analysis; populated but not yet consumed.
     #[allow(dead_code)]
     is_loop_body: bool,
+    /// Types written explicitly on `let` bindings, which outrank anything
+    /// inferred.
+    declared_types: BTreeMap<String, String>,
+    /// Whether this record's body was analyzed.
+    ///
+    /// False for a dependency at the lighter tier. Data flow must skip such a
+    /// record entirely: an empty operation list is indistinguishable from "this
+    /// function does nothing", so summarizing it would conclude that taint stops
+    /// there and silently drop real flows through it.
+    has_body: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -291,6 +353,9 @@ struct TraitImplIndex {
     #[allow(dead_code)]
     trait_to_impl_methods: HashMap<String, Vec<String>>,
     method_to_impls: HashMap<String, Vec<String>>,
+    /// Methods from blanket impls, by bare name. These are the only local
+    /// methods that can apply to a receiver whose type has no local impl.
+    blanket_method_to_impls: HashMap<String, Vec<String>>,
 }
 
 /// Method names that mark a *crate-defined* method as a passthrough.
@@ -415,6 +480,14 @@ const KNOWN_PASSTHROUGH_NAMES: &[&str] = &[
 ];
 
 fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPattern> {
+    // Same reason data flow skips them: a body-less record cannot be read as
+    // "does not pass its argument through".
+    let functions: Vec<FunctionRecord> = functions
+        .iter()
+        .filter(|function| function.has_body)
+        .cloned()
+        .collect();
+    let functions = functions.as_slice();
     let mut method_counts: HashMap<String, usize> = HashMap::new();
     let mut proven_passthrough: HashSet<String> = HashSet::new();
 
@@ -484,6 +557,7 @@ fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPatte
                 pattern: short_name.to_string(),
                 category: "auto-discovered-passthrough".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             });
             if short_name != *method_name {
                 patterns.push(DataFlowPattern {
@@ -491,6 +565,7 @@ fn discover_auto_passthroughs(functions: &[FunctionRecord]) -> Vec<DataFlowPatte
                     pattern: method_name.clone(),
                     category: "auto-discovered-passthrough".to_string(),
                     relevant_arguments: vec![],
+                    receiver_type: None,
                 });
             }
         }
@@ -511,6 +586,18 @@ struct AnalyzedFile {
     security_signals: Vec<SecuritySignal>,
     functions: Vec<FunctionRecord>,
     trait_impl_records: Vec<TraitImplRecord>,
+    /// Module path this file occupies, resolved by following `mod`
+    /// declarations from the crate root.
+    module_path: Vec<String>,
+    /// Crate name of the owning Cargo target: the root of this file's
+    /// qualified names, and the unit import resolution groups by.
+    crate_path: String,
+    /// Every `use` in the file, consumed by package-wide import resolution.
+    use_records: Vec<UseRecord>,
+    /// Struct field types, for typing `self.field`-shaped receivers.
+    field_types: HashMap<String, String>,
+    /// Macro paths in this file whose bodies could not be recovered as Rust.
+    unanalyzed_macros: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -557,7 +644,15 @@ pub fn analyze_with_optional_compiler(
     let mut diagnostics = Vec::new();
 
     debug_log(options.debug, format_args!("pass=workspace-discovery"));
-    let package_contexts = workspace_package_contexts(&metadata)?;
+    let package_plans = plan_packages(
+        &metadata,
+        options.include_tests,
+        options.include_dependencies,
+    )?;
+    let package_contexts: Vec<PackageContext> = package_plans
+        .iter()
+        .map(|plan| plan.package_ctx.clone())
+        .collect();
     let mut report = Report {
         schema_version: SCHEMA_VERSION.to_string(),
         tool: ToolInfo {
@@ -578,6 +673,7 @@ pub fn analyze_with_optional_compiler(
             call_graph_mode: options.call_graph_mode.clone(),
             data_flow_mode: options.data_flow_mode.clone(),
             include_tests: options.include_tests,
+            max_call_candidates: options.max_call_candidates,
         },
         modules: package_contexts
             .iter()
@@ -587,12 +683,33 @@ pub fn analyze_with_optional_compiler(
     };
 
     let mut analysis_tasks = Vec::new();
-    for package_ctx in &package_contexts {
+    for plan in &package_plans {
+        let package_ctx = &plan.package_ctx;
         debug_log(
             options.debug,
             format_args!("pass=file-discovery package={}", package_ctx.crate_name),
         );
-        let files = discover_rust_files(package_ctx, options.include_tests)?;
+        // Module discovery follows `mod` declarations from each Cargo target's
+        // crate root, so every file carries the module path it actually
+        // occupies rather than one derived from its location on disk.
+        for note in &plan.module_tree.notes {
+            diagnostics.push(Diagnostic {
+                kind: "module-resolution".to_string(),
+                message: note.message.clone(),
+                package_path: Some(package_ctx.crate_name.clone()),
+                file_path: note
+                    .file_path
+                    .as_ref()
+                    .map(|path| relative_display_path(&analysis_root, path)),
+                position: None,
+            });
+        }
+        let files: Vec<PathBuf> = plan
+            .module_tree
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect();
         report.packages.push(PackageEvidence {
             id: stable_id(
                 "pkg",
@@ -612,8 +729,19 @@ pub fn analyze_with_optional_compiler(
                 .collect(),
         });
 
-        for file_path in files {
-            analysis_tasks.push((package_ctx.clone(), file_path));
+        // Workspace code always gets bodies. A dependency gets them only in
+        // `security-deps` mode, where taint is meant to flow through it.
+        let collect_bodies =
+            plan.package_ctx.workspace_member || options.data_flow_mode == DATAFLOW_SECURITY_DEPS;
+        for file in &plan.module_tree.files {
+            analysis_tasks.push(FileAnalysisTask {
+                package_ctx: package_ctx.clone(),
+                evaluator: plan.evaluator.clone(),
+                path: file.path.clone(),
+                module_path: file.module_path.clone(),
+                crate_path: module_tree::crate_path(package_ctx, file),
+                collect_bodies,
+            });
         }
     }
 
@@ -622,15 +750,22 @@ pub fn analyze_with_optional_compiler(
         options.debug,
         format_args!("pass=stable-file-analysis files={}", analysis_tasks.len()),
     );
-    let mut parse_diagnostics = parallel_map_collect(
-        &analysis_tasks,
-        |(package_ctx, file_path)| match analyze_file(package_ctx, &analysis_root, file_path) {
+    let mut parse_diagnostics = parallel_map_collect(&analysis_tasks, |task| {
+        match analyze_file(
+            &task.package_ctx,
+            &analysis_root,
+            &task.path,
+            &task.module_path,
+            &task.crate_path,
+            &task.evaluator,
+            task.collect_bodies,
+        ) {
             Ok(file) => {
                 debug_log(
                     options.debug,
                     format_args!(
                         "pass=stable-file-analysis file={}",
-                        relative_display_path(&analysis_root, file_path)
+                        relative_display_path(&analysis_root, &task.path)
                     ),
                 );
                 Ok(file)
@@ -641,12 +776,12 @@ pub fn analyze_with_optional_compiler(
             Err(error) => Err(Box::new(Diagnostic {
                 kind: "parse".to_string(),
                 message: error.to_string(),
-                package_path: Some(package_ctx.crate_name.clone()),
-                file_path: Some(relative_display_path(&analysis_root, file_path)),
+                package_path: Some(task.package_ctx.crate_name.clone()),
+                file_path: Some(relative_display_path(&analysis_root, &task.path)),
                 position: None,
             })),
-        },
-    );
+        }
+    });
     for result in parse_diagnostics.drain(..) {
         match result {
             Ok(file) => analyzed_files.push(file),
@@ -655,17 +790,87 @@ pub fn analyze_with_optional_compiler(
     }
     analyzed_files.sort_by(|left, right| left.file.path.cmp(&right.file.path));
 
-    let mut all_functions = Vec::new();
+    debug_log(options.debug, format_args!("pass=import-resolution"));
+    for glob in resolve_imports(&mut analyzed_files) {
+        diagnostics.push(Diagnostic {
+            kind: "import-resolution".to_string(),
+            message: format!(
+                "glob import `{glob}` targets a module outside this workspace; names imported \
+                 through it stay unresolved"
+            ),
+            package_path: None,
+            file_path: None,
+            position: None,
+        });
+    }
+
+    // Everything that needs the whole set of analyzed files is derived first, so
+    // the per-file evidence can then be *moved* into the report instead of
+    // cloned. Cloning held two copies of every declaration, usage, signal, and
+    // function record at once — on a large workspace, hundreds of megabytes.
+    let trait_index = build_trait_impl_index(&analyzed_files);
+    // Struct field types, workspace-wide: a receiver written `self.sink` needs
+    // the declaring type's field table, which may live in another file.
+    let mut field_types: HashMap<String, String> = HashMap::new();
     for analyzed in &analyzed_files {
-        report.files.push(analyzed.file.clone());
-        report.imports.extend(analyzed.imports.clone());
-        report.declarations.extend(analyzed.declarations.clone());
-        report.usages.extend(analyzed.usages.clone());
+        for (key, value) in &analyzed.field_types {
+            field_types.insert(key.clone(), value.clone());
+        }
+    }
+
+    // Report the macro bodies that could not be recovered as Rust, aggregated by
+    // macro path: a consumer can then see exactly which blind spots this scan
+    // has, instead of the evidence simply being absent.
+    let mut unanalyzed_macros: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for analyzed in &analyzed_files {
+        for macro_path in &analyzed.unanalyzed_macros {
+            unanalyzed_macros
+                .entry(macro_path.clone())
+                .or_default()
+                .insert(analyzed.file.path.clone());
+        }
+    }
+    for (macro_path, files) in unanalyzed_macros {
+        let sample: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
+        diagnostics.push(Diagnostic {
+            kind: "macro".to_string(),
+            message: format!(
+                "{macro_path} bodies were not analyzed in {} file(s) (for example {}); calls \
+                 inside them are not in the call graph",
+                files.len(),
+                sample.join(", ")
+            ),
+            package_path: None,
+            file_path: None,
+            position: None,
+        });
+    }
+
+    // Type names declared in the analyzed code, so a method missing from one of
+    // them can be read as leaving the analyzed code rather than as unknown.
+    let local_types: HashSet<String> = analyzed_files
+        .iter()
+        .flat_map(|analyzed| analyzed.declarations.iter())
+        .filter(|declaration| {
+            matches!(
+                declaration.kind.as_str(),
+                "struct" | "enum" | "union" | "trait" | "type"
+            )
+        })
+        .map(|declaration| declaration.name.clone())
+        .collect();
+
+    let mut all_functions = Vec::new();
+    for mut analyzed in analyzed_files {
+        merge_crypto_evidence(&mut report.crypto, analyzed.file.crypto.clone());
+        report.files.push(analyzed.file);
+        report.imports.append(&mut analyzed.imports);
+        report.declarations.append(&mut analyzed.declarations);
+        report.usages.append(&mut analyzed.usages);
         report
             .security_signals
-            .extend(analyzed.security_signals.clone());
-        merge_crypto_evidence(&mut report.crypto, analyzed.file.crypto.clone());
-        all_functions.extend(analyzed.functions.clone());
+            .append(&mut analyzed.security_signals);
+        all_functions.append(&mut analyzed.functions);
     }
 
     let fallback_call_graph = if options.call_graph_mode != "none" {
@@ -673,8 +878,13 @@ pub fn analyze_with_optional_compiler(
             options.debug,
             format_args!("pass=stable-callgraph functions={}", all_functions.len()),
         );
-        let trait_index = build_trait_impl_index(&analyzed_files);
-        Some(build_call_graph(&all_functions, &trait_index))
+        Some(build_call_graph(
+            &all_functions,
+            &trait_index,
+            &field_types,
+            &local_types,
+            options.max_call_candidates,
+        ))
     } else {
         None
     };
@@ -705,6 +915,7 @@ pub fn analyze_with_optional_compiler(
             &options.data_flow_mode,
             &all_functions,
             dataflow_patterns,
+            &field_types,
         ))
     } else {
         None
@@ -1021,16 +1232,200 @@ where
     flattened
 }
 
+/// One workspace package plus everything discovery resolved for it: the active
+/// cfg environment and the module tree reached from its crate roots.
+struct PackageAnalysisPlan {
+    package_ctx: PackageContext,
+    evaluator: CfgEvaluator,
+    module_tree: module_tree::ModuleTree,
+}
+
+/// One file to analyze, with its resolved module path and the cfg environment
+/// of the package that owns it.
+struct FileAnalysisTask {
+    package_ctx: PackageContext,
+    evaluator: CfgEvaluator,
+    path: PathBuf,
+    module_path: Vec<String>,
+    crate_path: String,
+    collect_bodies: bool,
+}
+
+/// Resolves cfg options and the module tree for every package to analyze.
+///
+/// The target atoms are shared across packages (one host, one `rustc`), while
+/// the feature set is per package, taken from the resolved dependency graph.
+///
+/// With `include_dependencies`, the resolved dependency packages are planned
+/// too, but only their library targets: a dependency's binaries, tests, and
+/// examples are not part of the artifact being analyzed.
+fn plan_packages(
+    metadata: &Metadata,
+    include_tests: bool,
+    include_dependencies: bool,
+) -> Result<Vec<PackageAnalysisPlan>> {
+    let host_cfg = CfgOptions::from_host();
+    let workspace_members: HashSet<&cargo_metadata::PackageId> =
+        metadata.workspace_members.iter().collect();
+    let packages: Vec<(&Package, bool)> = if include_dependencies {
+        metadata
+            .packages
+            .iter()
+            .map(|package| (package, workspace_members.contains(&package.id)))
+            .collect()
+    } else {
+        metadata
+            .workspace_packages()
+            .into_iter()
+            .map(|package| (package, true))
+            .collect()
+    };
+    // Module discovery parses every module file to read its `mod` declarations,
+    // so it is worth spreading across packages the same way file analysis is.
+    let planned = parallel_map_collect(&packages, |(package, workspace_member)| {
+        let package_ctx = package_context(package, *workspace_member)?;
+        let mut cfg_options = host_cfg.clone();
+        cfg_options.insert_package_features(metadata, package);
+        let evaluator = CfgEvaluator::new(cfg_options, include_tests);
+        // A dependency contributes only its library; test targets of a
+        // dependency are never built here either.
+        let roots = module_tree::crate_roots(
+            package,
+            include_tests && *workspace_member,
+            !*workspace_member,
+        );
+        let module_tree = module_tree::discover(&package_ctx, &roots, &evaluator, include_tests)?;
+        Ok(PackageAnalysisPlan {
+            package_ctx,
+            evaluator,
+            module_tree,
+        })
+    });
+    let mut plans = planned.into_iter().collect::<Result<Vec<_>>>()?;
+    plans.sort_by(|left, right| {
+        left.package_ctx
+            .package_name
+            .cmp(&right.package_ctx.package_name)
+    });
+    Ok(plans)
+}
+
+/// Resolves imports per package and rewrites call targets through the resulting
+/// alias table, so calls made through glob imports, renamed imports, and
+/// `pub use` facades name the module that actually declares the callee.
+fn resolve_imports(analyzed_files: &mut [AnalyzedFile]) -> Vec<String> {
+    let mut declarations_by_package: HashMap<String, Vec<Declaration>> = HashMap::new();
+    let mut use_records_by_package: HashMap<String, Vec<UseRecord>> = HashMap::new();
+    for analyzed in analyzed_files.iter() {
+        // Grouped per crate, not per package: each Cargo target is its own
+        // crate, so a `bin`'s `crate::` paths must not resolve against the
+        // library's item table.
+        let crate_path = analyzed.crate_path.clone();
+        declarations_by_package
+            .entry(crate_path.clone())
+            .or_default()
+            .extend(analyzed.declarations.iter().cloned());
+        use_records_by_package
+            .entry(crate_path)
+            .or_default()
+            .extend(analyzed.use_records.iter().cloned());
+    }
+
+    let mut resolutions: HashMap<String, ImportResolution> = HashMap::new();
+    let mut unexpanded_globs = BTreeSet::new();
+    for (package_path, declarations) in &declarations_by_package {
+        let items = ItemTable::from_declarations(declarations);
+        let records = use_records_by_package
+            .get(package_path)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let resolution = ImportResolution::build(package_path, &items, records);
+        for glob in resolution.unexpanded_globs() {
+            unexpanded_globs.insert(glob.to_string());
+        }
+        resolutions.insert(package_path.clone(), resolution);
+    }
+
+    for analyzed in analyzed_files.iter_mut() {
+        let Some(resolution) = resolutions.get(&analyzed.crate_path) else {
+            continue;
+        };
+        let module_path = analyzed.module_path.clone();
+        for function in &mut analyzed.functions {
+            for call in &mut function.direct_calls {
+                if let Some(resolved) = resolution.resolve_path(&module_path, &call.callee_text) {
+                    call.callee_text = resolved;
+                }
+            }
+            for operation in &mut function.operations {
+                rewrite_operation_paths(operation, resolution, &module_path);
+            }
+        }
+    }
+
+    unexpanded_globs.into_iter().collect()
+}
+
+fn rewrite_operation_paths(
+    operation: &mut Operation,
+    resolution: &ImportResolution,
+    module_path: &[String],
+) {
+    match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => rewrite_expr_paths(value, resolution, module_path),
+        Operation::LoopBody(operations) => {
+            for nested in operations {
+                rewrite_operation_paths(nested, resolution, module_path);
+            }
+        }
+    }
+}
+
+fn rewrite_expr_paths(
+    expr: &mut SimpleExpr,
+    resolution: &ImportResolution,
+    module_path: &[String],
+) {
+    match expr {
+        SimpleExpr::Call { callee, args, .. } => {
+            if let Some(resolved) = resolution.resolve_path(module_path, callee) {
+                *callee = resolved;
+            }
+            for arg in args {
+                rewrite_expr_paths(arg, resolution, module_path);
+            }
+        }
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            rewrite_expr_paths(receiver, resolution, module_path);
+            for arg in args {
+                rewrite_expr_paths(arg, resolution, module_path);
+            }
+        }
+        SimpleExpr::Compose(parts) => {
+            for part in parts {
+                rewrite_expr_paths(part, resolution, module_path);
+            }
+        }
+        SimpleExpr::Field { base, .. } => rewrite_expr_paths(base, resolution, module_path),
+        SimpleExpr::Reference { expr, .. } => rewrite_expr_paths(expr, resolution, module_path),
+        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+    }
+}
+
+#[allow(dead_code)]
 fn workspace_package_contexts(metadata: &Metadata) -> Result<Vec<PackageContext>> {
     let mut packages = Vec::new();
     for package in metadata.workspace_packages() {
-        packages.push(package_context(package)?);
+        packages.push(package_context(package, true)?);
     }
     packages.sort_by(|left, right| left.package_name.cmp(&right.package_name));
     Ok(packages)
 }
 
-fn package_context(package: &Package) -> Result<PackageContext> {
+fn package_context(package: &Package, workspace_member: bool) -> Result<PackageContext> {
     let manifest_path =
         fs::canonicalize(package.manifest_path.as_std_path()).with_context(|| {
             format!(
@@ -1053,8 +1448,9 @@ fn package_context(package: &Package) -> Result<PackageContext> {
             name: package.name.to_string(),
             version: package.version.to_string(),
             manifest_path: manifest_path.display().to_string(),
-            workspace_member: true,
+            workspace_member,
         },
+        workspace_member,
     })
 }
 
@@ -1130,32 +1526,42 @@ fn analyze_file(
     package_ctx: &PackageContext,
     root: &Path,
     file_path: &Path,
+    module_path: &[String],
+    crate_path: &str,
+    evaluator: &CfgEvaluator,
+    collect_bodies: bool,
 ) -> Result<AnalyzedFile> {
     let source = fs::read_to_string(file_path)
         .with_context(|| format!("failed to read {}", file_path.display()))?;
     let syntax = syn::parse_file(&source)
         .with_context(|| format!("failed to parse {}", file_path.display()))?;
     let relative_file_path = relative_display_path(root, file_path);
-    let module_path = module_path_for_file(package_ctx, file_path);
     let file_ctx = FileContext {
         package_name: package_ctx.package_name.clone(),
         package_path: package_ctx.crate_name.clone(),
+        crate_path: crate_path.to_string(),
         relative_file_path: relative_file_path.clone(),
-        module_path,
+        module_path: module_path.to_vec(),
     };
 
-    let mut collector = SourceCollector::new(file_ctx.clone());
+    let mut collector = SourceCollector::new(file_ctx.clone(), evaluator.clone(), collect_bodies);
     collector.visit_file(&syntax);
 
+    // The per-file `imports`/`declarations`/`usages`/`security_signals` are
+    // deliberately left empty: the canonical copies are the flattened top-level
+    // report collections (each item carries its `file_path`), and the report
+    // finalizer clears these anyway. Populating them held a second copy of all
+    // per-file evidence for the whole run. The compiler backend still fills them
+    // on its own path, which merges into the same top-level arrays.
     let file = FileEvidence {
         path: relative_file_path,
         package_name: file_ctx.package_name.clone(),
         package_path: file_ctx.package_path.clone(),
         purl: String::new(),
-        imports: collector.imports.clone(),
-        declarations: collector.declarations.clone(),
-        usages: collector.usages.clone(),
-        security_signals: collector.security_signals.clone(),
+        imports: Vec::new(),
+        declarations: Vec::new(),
+        usages: Vec::new(),
+        security_signals: Vec::new(),
         crypto: optional_crypto_evidence(&collector.crypto),
     };
 
@@ -1167,6 +1573,11 @@ fn analyze_file(
         security_signals: collector.security_signals,
         functions: collector.functions,
         trait_impl_records: collector.trait_impl_records,
+        module_path: module_path.to_vec(),
+        crate_path: crate_path.to_string(),
+        use_records: collector.use_records,
+        field_types: collector.field_types,
+        unanalyzed_macros: collector.unanalyzed_macros,
     })
 }
 
@@ -1204,6 +1615,30 @@ struct SourceCollector {
     current_function: Option<FunctionFrame>,
     trait_impl_records: Vec<TraitImplRecord>,
     struct_field_names: HashMap<String, Vec<String>>,
+    /// `"<TypeToken>::<field>" -> <TypeToken of the field>`, so a receiver
+    /// written `self.sink` can be typed once `self`'s type is known.
+    field_types: HashMap<String, String>,
+    /// Macro invocations whose token stream could not be recovered as Rust, so
+    /// the gap is reported instead of silently swallowed.
+    unanalyzed_macros: BTreeSet<String>,
+    /// Whether to record function bodies (operations and direct calls).
+    ///
+    /// Off for a dependency at the lighter tier: its declarations, imports,
+    /// impls, and usage evidence are cheap and useful, while its bodies are the
+    /// bulk of the memory and are only needed for taint to flow *through* the
+    /// dependency.
+    collect_bodies: bool,
+    /// Every `use` in the file, kept for package-wide import resolution.
+    use_records: Vec<UseRecord>,
+    evaluator: CfgEvaluator,
+    /// Trait being implemented by the enclosing `impl` block, if any. Part of a
+    /// method's identity: `impl Section for T` and `impl ComponentSection for T`
+    /// can both define `fn id(&self) -> u8`, identical in name and signature.
+    current_impl_trait: Option<String>,
+    /// The `#[cfg(...)]` gates of the enclosing items, innermost last. Only
+    /// enabled items are visited, so this describes evidence that is real but
+    /// conditional.
+    cfg_gates: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1213,6 +1648,13 @@ struct TraitImplRecord {
     impl_type: String,
     method_ids: Vec<String>,
     method_names: Vec<String>,
+    /// True for a blanket impl (`impl<T: Read> MyExt for T`), where the self
+    /// type is one of the impl's own generic parameters.
+    ///
+    /// Such a method applies to receivers of *any* type, including types from
+    /// other crates, so it cannot be matched by comparing the receiver's type
+    /// against the impl's self type.
+    is_blanket: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1229,12 +1671,44 @@ struct FunctionFrame {
     /// Channel transmitter/receiver pairs declared inside this frame.
     /// Populated by visit_stmt when it sees `let (tx, rx) = ... channel()`.
     channel_pairs: Vec<(String, String)>,
+    /// Types written explicitly on `let` bindings in this frame.
+    declared_types: BTreeMap<String, String>,
+    /// Whether body detail is kept. A dependency at the lighter tier is still
+    /// walked — its imports, usages, crypto, and signals are cheap and useful —
+    /// but the per-statement trees, which are the bulk of the memory, are not
+    /// retained.
+    collect_bodies: bool,
+}
+
+impl FunctionFrame {
+    fn record_operation(&mut self, operation: Operation) {
+        if self.collect_bodies {
+            self.operations.push(operation);
+        }
+    }
+
+    fn record_call(&mut self, call: SimplifiedCall) {
+        if self.collect_bodies {
+            self.direct_calls.push(call);
+        }
+    }
+
+    fn record_channel_pair(&mut self, pair: (String, String)) {
+        if self.collect_bodies {
+            self.channel_pairs.push(pair);
+        }
+    }
 }
 
 impl SourceCollector {
-    fn new(file_ctx: FileContext) -> Self {
+    fn new(file_ctx: FileContext, evaluator: CfgEvaluator, collect_bodies: bool) -> Self {
         Self {
             file_ctx,
+            collect_bodies,
+            use_records: Vec::new(),
+            evaluator,
+            current_impl_trait: None,
+            cfg_gates: Vec::new(),
             imports: Vec::new(),
             declarations: Vec::new(),
             usages: Vec::new(),
@@ -1244,6 +1718,8 @@ impl SourceCollector {
             current_function: None,
             trait_impl_records: Vec::new(),
             struct_field_names: HashMap::new(),
+            field_types: HashMap::new(),
+            unanalyzed_macros: BTreeSet::new(),
         }
     }
 
@@ -1257,7 +1733,24 @@ impl SourceCollector {
     ) -> Declaration {
         let qualified_name = qualify_name(&self.file_ctx, receiver.as_deref(), name);
         let declaration = Declaration {
-            id: stable_id("decl", &[&self.file_ctx.package_path, &qualified_name]),
+            // The signature is part of the identity: two trait impls for the
+            // same type produce the same qualified name (`impl From<A> for
+            // String` and `impl From<B> for String` are both `String::from`),
+            // and without it they collapse onto one id.
+            id: stable_id(
+                "decl",
+                &[
+                    &self.file_ctx.package_path,
+                    &qualified_name,
+                    // The signature and the implemented trait complete the
+                    // identity: two trait impls for one type can share both the
+                    // qualified name (`impl From<A>/<B> for String` are both
+                    // `String::from`) and, for a trait with a fixed method
+                    // shape, the signature too.
+                    &signature,
+                    self.current_impl_trait.as_deref().unwrap_or_default(),
+                ],
+            ),
             name: name.to_string(),
             canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
@@ -1268,9 +1761,79 @@ impl SourceCollector {
             signature,
             receiver,
             position: position_from_span(&self.file_ctx.relative_file_path, span),
+            cfg_gate: self.current_cfg_gate(),
         };
         self.declarations.push(declaration.clone());
         declaration
+    }
+
+    /// Recovers the Rust inside a macro invocation and visits it.
+    ///
+    /// This is **not** macro expansion: no matcher is run and no transcriber is
+    /// applied. It parses the invocation's token stream as Rust and walks
+    /// whatever comes out, which is what makes the calls inside `write!`,
+    /// `println!`, `assert!`, `vec![]`, and `lazy_static!` visible at all —
+    /// previously every one of them was invisible to the call graph, so a sink
+    /// reached only through a macro argument produced no evidence.
+    ///
+    /// The recovery is deliberately conservative:
+    ///
+    /// * `macro_rules!` definitions are skipped. A definition body is a matcher
+    ///   and a transcriber, not code that runs at that location, so walking it
+    ///   would attribute calls to the defining module that never happen there.
+    /// * Anything that does not parse is recorded in `unanalyzed_macros` rather
+    ///   than guessed at, so the blind spot is reported.
+    fn visit_macro_body(&mut self, mac: &syn::Macro) {
+        let path = path_to_string(&mac.path);
+        // A `macro_rules!` body is a template, not code in this position.
+        if path == "macro_rules" {
+            self.unanalyzed_macros.insert(format!("{path}!"));
+            return;
+        }
+        let tokens = mac.tokens.clone();
+        if tokens.is_empty() {
+            return;
+        }
+
+        // Comma-separated expressions: the shape of `write!`, `println!`,
+        // `assert_eq!`, and most argument-taking macros.
+        if let Ok(arguments) =
+            Punctuated::<Expr, Token![,]>::parse_terminated.parse2(tokens.clone())
+        {
+            for argument in &arguments {
+                syn::visit::visit_expr(self, argument);
+            }
+            return;
+        }
+        // A single expression: `assert!(cond)` with a comma inside a call, and
+        // similar.
+        if let Ok(expression) = syn::parse2::<Expr>(tokens.clone()) {
+            syn::visit::visit_expr(self, &expression);
+            return;
+        }
+        // Statements: a block-bodied macro such as `lazy_static!`, once the
+        // `static ref` spelling is normalized to something Rust can parse.
+        let statement_tokens = rewrite_static_ref_tokens(tokens.clone());
+        if let Ok(block) = syn::parse2::<syn::Block>(quote::quote! { { #statement_tokens } }) {
+            syn::visit::visit_block(self, &block);
+            return;
+        }
+        // Items: a macro that declares functions or types.
+        if let Ok(file) = syn::parse2::<syn::File>(statement_tokens) {
+            for item in &file.items {
+                syn::visit::visit_item(self, item);
+            }
+            return;
+        }
+        self.unanalyzed_macros.insert(format!("{path}!"));
+    }
+
+    /// The conjunction of the `#[cfg(...)]` gates currently in scope.
+    fn current_cfg_gate(&self) -> Option<String> {
+        if self.cfg_gates.is_empty() {
+            return None;
+        }
+        Some(self.cfg_gates.join(" && "))
     }
 
     fn current_declaration_id(&self) -> Option<String> {
@@ -1408,10 +1971,11 @@ impl SourceCollector {
         );
         let position = position_from_span(&self.file_ctx.relative_file_path, closure.span());
         if let Some(parent) = self.current_function.as_mut() {
-            parent.direct_calls.push(SimplifiedCall {
+            parent.record_call(SimplifiedCall {
                 callee_text: declaration.qualified_name.clone(),
                 position,
                 receiver_text: None,
+                receiver_expr: None,
                 method_name: None,
                 is_higher_order: true,
             });
@@ -1424,6 +1988,8 @@ impl SourceCollector {
             receiver_type: None,
             is_loop_body: false,
             channel_pairs: Vec::new(),
+            declared_types: BTreeMap::new(),
+            collect_bodies: self.collect_bodies,
         });
         visit_callable_body(self, &closure.body);
         let mut finished = self.current_function.take().expect("closure frame exists");
@@ -1448,6 +2014,8 @@ impl SourceCollector {
             receiver_type: None,
             is_loop_body: false,
             channel_pairs: finished.channel_pairs.clone(),
+            declared_types: finished.declared_types.clone(),
+            has_body: self.collect_bodies,
         });
         self.current_function = previous;
     }
@@ -1455,6 +2023,7 @@ impl SourceCollector {
 
 impl<'ast> Visit<'ast> for SourceCollector {
     fn visit_item_use(&mut self, item_use: &'ast syn::ItemUse) {
+        collect_use_records(item_use, &self.file_ctx.module_path, &mut self.use_records);
         let before = self.imports.len();
         flatten_use_tree(
             &item_use.tree,
@@ -1499,6 +2068,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 purl: String::new(),
                 file_path: declaration.file_path.clone(),
                 position: declaration.position.clone(),
+                cfg_gate: self.current_cfg_gate(),
             });
         }
 
@@ -1509,6 +2079,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
             receiver_type: None,
             is_loop_body: false,
             channel_pairs: Vec::new(),
+            declared_types: BTreeMap::new(),
+            collect_bodies: self.collect_bodies,
         });
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
@@ -1532,6 +2104,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
             receiver_type: None,
             is_loop_body: false,
             channel_pairs: finished.channel_pairs.clone(),
+            declared_types: finished.declared_types.clone(),
+            has_body: self.collect_bodies,
         });
         self.current_function = previous;
     }
@@ -1539,10 +2113,22 @@ impl<'ast> Visit<'ast> for SourceCollector {
     fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
         let receiver = node.self_ty.to_token_stream().to_string().replace(' ', "");
         let trait_name = node.trait_.as_ref().map(|(path, _)| path_to_string(path));
+        let previous_impl_trait = self
+            .current_impl_trait
+            .replace(trait_name.clone().unwrap_or_default());
         let mut method_ids = Vec::new();
         let mut method_names = Vec::new();
         for item in &node.items {
             if let ImplItem::Fn(method) = item {
+                // A method can carry its own gate on top of the impl block's.
+                let method_gate = CfgExpr::from_attrs(&method.attrs);
+                if !self.evaluator.is_enabled(&method_gate) {
+                    continue;
+                }
+                let method_gate = method_gate.display();
+                if let Some(gate) = method_gate.clone() {
+                    self.cfg_gates.push(gate);
+                }
                 let declaration = self.push_declaration(
                     &method.sig.ident.to_string(),
                     if matches!(method.sig.safety, syn::Safety::Unsafe(_)) {
@@ -1563,6 +2149,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     receiver_type: Some(receiver.clone()),
                     is_loop_body: false,
                     channel_pairs: Vec::new(),
+                    declared_types: BTreeMap::new(),
+                    collect_bodies: self.collect_bodies,
                 });
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
@@ -1586,19 +2174,35 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     receiver_type: Some(receiver.clone()),
                     is_loop_body: false,
                     channel_pairs: finished.channel_pairs.clone(),
+                    declared_types: finished.declared_types.clone(),
+                    has_body: self.collect_bodies,
                 });
                 self.current_function = previous;
+                if method_gate.is_some() {
+                    self.cfg_gates.pop();
+                }
             }
         }
         if let Some(trait_name) = trait_name {
             self.trait_impl_records.push(TraitImplRecord {
                 trait_name,
+                is_blanket: impl_is_blanket(node),
                 impl_type: receiver,
                 method_ids,
                 method_names,
             });
         }
-        syn::visit::visit_item_impl(self, node);
+        // The method bodies were walked above. Delegating to the default
+        // visitor here would walk them a second time, which duplicated every
+        // item declared inside a body — and for a nested `fn`, re-emitted its
+        // whole call set under the same declaration id. Visit only the impl
+        // items the loop above skipped.
+        for item in &node.items {
+            if !matches!(item, ImplItem::Fn(_)) {
+                syn::visit::visit_impl_item(self, item);
+            }
+        }
+        self.current_impl_trait = previous_impl_trait;
     }
 
     fn visit_item_mod(&mut self, node: &'ast ItemMod) {
@@ -1609,10 +2213,30 @@ impl<'ast> Visit<'ast> for SourceCollector {
             None,
             node.ident.span(),
         );
-        syn::visit::visit_item_mod(self, node);
+        // Items inside an inline module live one level deeper, so the module
+        // segment has to be in scope while they are collected; otherwise they
+        // are qualified as if they sat at file level.
+        if node.content.is_some() {
+            self.file_ctx.module_path.push(node.ident.to_string());
+            syn::visit::visit_item_mod(self, node);
+            self.file_ctx.module_path.pop();
+        } else {
+            syn::visit::visit_item_mod(self, node);
+        }
     }
 
     fn visit_item(&mut self, node: &'ast Item) {
+        // Single choke point for conditional compilation: `syn` routes every
+        // item — in a file, an inline module, or a block — through here before
+        // the kind-specific visitors, so a disabled item is never collected.
+        let gate = CfgExpr::from_attrs(item_attrs(node));
+        if !self.evaluator.is_enabled(&gate) {
+            return;
+        }
+        let gate = gate.display();
+        if let Some(gate) = gate.clone() {
+            self.cfg_gates.push(gate);
+        }
         match node {
             Item::Struct(item) => {
                 self.push_declaration(
@@ -1627,6 +2251,15 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     .iter()
                     .filter_map(|field| field.ident.as_ref().map(|ident| ident.to_string()))
                     .collect();
+                for field in &item.fields {
+                    if let Some(ident) = field.ident.as_ref()
+                        && let Some(field_type) =
+                            bare_type_token(&field.ty.to_token_stream().to_string())
+                    {
+                        self.field_types
+                            .insert(format!("{}::{}", item.ident, ident), field_type);
+                    }
+                }
                 if !field_names.is_empty() {
                     let key = qualify_name(&self.file_ctx, None, &item.ident.to_string());
                     self.struct_field_names.insert(key, field_names);
@@ -1666,6 +2299,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             _ => {}
         }
         syn::visit::visit_item(self, node);
+        if gate.is_some() {
+            self.cfg_gates.pop();
+        }
     }
 
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
@@ -1699,11 +2335,12 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 args: args.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
             };
-            frame.operations.push(Operation::Expr(call.clone()));
-            frame.direct_calls.push(SimplifiedCall {
+            frame.record_operation(Operation::Expr(call.clone()));
+            frame.record_call(SimplifiedCall {
                 callee_text: callee_name.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
                 receiver_text: None,
+                receiver_expr: None,
                 method_name: None,
                 is_higher_order: false,
             });
@@ -1756,11 +2393,12 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 args: args.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
             };
-            frame.operations.push(Operation::Expr(call.clone()));
-            frame.direct_calls.push(SimplifiedCall {
+            frame.record_operation(Operation::Expr(call.clone()));
+            frame.record_call(SimplifiedCall {
                 callee_text: callee_name.clone(),
                 position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
                 receiver_text: Some(receiver_text.clone()),
+                receiver_expr: Some(simple_expr(&node.receiver)),
                 method_name: Some(node.method.to_string()),
                 is_higher_order: false,
             });
@@ -1782,6 +2420,26 @@ impl<'ast> Visit<'ast> for SourceCollector {
         }
     }
 
+    fn visit_expr_macro(&mut self, node: &'ast ExprMacro) {
+        self.visit_macro_body(&node.mac);
+    }
+
+    fn visit_stmt_macro(&mut self, node: &'ast syn::StmtMacro) {
+        self.visit_macro_body(&node.mac);
+    }
+
+    fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
+        self.visit_macro_body(&node.mac);
+    }
+
+    fn visit_impl_item_macro(&mut self, node: &'ast syn::ImplItemMacro) {
+        self.visit_macro_body(&node.mac);
+    }
+
+    fn visit_trait_item_macro(&mut self, node: &'ast syn::TraitItemMacro) {
+        self.visit_macro_body(&node.mac);
+    }
+
     fn visit_expr_unsafe(&mut self, node: &'ast syn::ExprUnsafe) {
         self.security_signals.push(SecuritySignal {
             id: stable_id(
@@ -1800,6 +2458,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             purl: String::new(),
             file_path: self.file_ctx.relative_file_path.clone(),
             position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+            cfg_gate: self.current_cfg_gate(),
         });
         syn::visit::visit_expr_unsafe(self, node);
     }
@@ -1825,27 +2484,47 @@ impl<'ast> Visit<'ast> for SourceCollector {
         if let Some(frame) = self.current_function.as_mut() {
             match node {
                 Stmt::Local(local) => {
+                    // `let x: T = ..` wraps the pattern in `Pat::Type`. Matching
+                    // only on the inner shapes below meant an annotated binding
+                    // recorded no assignment at all, so taint stopped dead at
+                    // it — `let secret: String = env::var(..)` propagated
+                    // nothing, while the identical unannotated line did.
+                    let (pattern, declared_type) = match &local.pat {
+                        Pat::Type(pat_type) => (
+                            pat_type.pat.as_ref(),
+                            Some(pat_type.ty.to_token_stream().to_string()),
+                        ),
+                        other => (other, None),
+                    };
+                    // An annotation is the most reliable type information
+                    // available, so it is kept verbatim rather than re-derived.
+                    if let (Some(declared_type), Pat::Ident(PatIdent { ident, .. })) =
+                        (declared_type.as_deref(), pattern)
+                        && let Some(token) = bare_type_token(declared_type)
+                    {
+                        frame.declared_types.insert(ident.to_string(), token);
+                    }
                     if let Some(init) = &local.init {
                         // P4.2: detect `let (tx, rx) = ... channel()`-style
                         // tuple bindings so the concrete pass can unify
                         // per-channel taint slots across the two endpoints.
-                        if let Pat::Tuple(pat_tuple) = &local.pat
+                        if let Pat::Tuple(pat_tuple) = pattern
                             && pat_tuple.elems.len() == 2
                             && let Some((tx_name, rx_name)) = channel_pair_names(pat_tuple)
                             && channel_construction(init)
                         {
-                            frame.channel_pairs.push((tx_name.clone(), rx_name.clone()));
+                            frame.record_channel_pair((tx_name.clone(), rx_name.clone()));
                             // Bind both names so the rest of the visitor
                             // treats them like ordinary locals.
-                            frame.operations.push(Operation::Assign {
+                            frame.record_operation(Operation::Assign {
                                 target: tx_name,
                                 value: simple_expr(&init.expr),
                             });
-                            frame.operations.push(Operation::Assign {
+                            frame.record_operation(Operation::Assign {
                                 target: rx_name,
                                 value: simple_expr(&init.expr),
                             });
-                        } else if let Pat::Ident(PatIdent { ident, .. }) = &local.pat {
+                        } else if let Pat::Ident(PatIdent { ident, .. }) = pattern {
                             if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
                                 && let Some(target_var) = extract_path_name(base)
                             {
@@ -1854,7 +2533,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                     &target_var,
                                     &member_from_expr(member),
                                 );
-                                frame.operations.push(Operation::AssignField {
+                                frame.record_operation(Operation::AssignField {
                                     target: ident.to_string(),
                                     field: target_name,
                                     value: simple_expr(&init.expr),
@@ -1874,14 +2553,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                 let target = ident.to_string();
                                 for field in fields {
                                     let field_name = member_from_expr(&field.member);
-                                    frame.operations.push(Operation::AssignField {
+                                    frame.record_operation(Operation::AssignField {
                                         target: target.clone(),
                                         field: field_name,
                                         value: simple_expr(&field.expr),
                                     });
                                 }
                             } else {
-                                frame.operations.push(Operation::Assign {
+                                frame.record_operation(Operation::Assign {
                                     target: ident.to_string(),
                                     value: simple_expr(&init.expr),
                                 });
@@ -1894,7 +2573,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                         expr: Some(value), ..
                     }) = expr
                     {
-                        frame.operations.push(Operation::Return(simple_expr(value)));
+                        frame.record_operation(Operation::Return(simple_expr(value)));
                     } else if let Expr::Assign(assign) = expr {
                         if let Expr::Field(field_expr) = &*assign.left
                             && let Some(target_var) = extract_path_name(&field_expr.base)
@@ -1905,22 +2584,57 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                 &target_var,
                                 &field_name,
                             );
-                            frame.operations.push(Operation::AssignField {
+                            frame.record_operation(Operation::AssignField {
                                 target: target_var,
                                 field: qualified_field,
                                 value: simple_expr(&assign.right),
                             });
                         } else {
-                            frame.operations.push(Operation::Expr(simple_expr(expr)));
+                            frame.record_operation(Operation::Expr(simple_expr(expr)));
                         }
                     } else {
-                        frame.operations.push(Operation::Expr(simple_expr(expr)));
+                        frame.record_operation(Operation::Expr(simple_expr(expr)));
                     }
                 }
                 _ => {}
             }
         }
         syn::visit::visit_stmt(self, node);
+    }
+}
+
+/// Whether an impl block is a blanket impl: its self type is one of its own
+/// generic type parameters, so it applies to every type that satisfies the
+/// bounds rather than to one named type.
+fn impl_is_blanket(node: &ItemImpl) -> bool {
+    let self_type = node.self_ty.to_token_stream().to_string().replace(' ', "");
+    node.generics.params.iter().any(|param| match param {
+        syn::GenericParam::Type(type_param) => type_param.ident == self_type,
+        _ => false,
+    })
+}
+
+/// Attributes written on any item, for cfg evaluation.
+fn item_attrs(item: &Item) -> &[syn::Attribute] {
+    match item {
+        Item::Const(item) => &item.attrs,
+        Item::Enum(item) => &item.attrs,
+        Item::ExternCrate(item) => &item.attrs,
+        Item::Fn(item) => &item.attrs,
+        Item::ForeignMod(item) => &item.attrs,
+        Item::Impl(item) => &item.attrs,
+        Item::Macro(item) => &item.attrs,
+        Item::Mod(item) => &item.attrs,
+        Item::Static(item) => &item.attrs,
+        Item::Struct(item) => &item.attrs,
+        Item::Trait(item) => &item.attrs,
+        Item::TraitAlias(item) => &item.attrs,
+        Item::Type(item) => &item.attrs,
+        Item::Union(item) => &item.attrs,
+        Item::Use(item) => &item.attrs,
+        // `Item` is non-exhaustive; an unrecognized shape carries no gate we
+        // can evaluate, so it stays enabled.
+        _ => &[],
     }
 }
 
@@ -2279,6 +2993,41 @@ fn inline_closure_source_category_for_method_call(
     } else {
         None
     }
+}
+
+/// Rewrites `static ref NAME: T = ...` to `static NAME: T = ...`.
+///
+/// `lazy_static!` and its relatives spell their bodies with a `ref` that is not
+/// valid Rust, so the body cannot be parsed as-is. Dropping that one token
+/// makes the initializer — usually where the interesting call lives, such as
+/// `Regex::new` or a client constructor — recoverable.
+fn rewrite_static_ref_tokens(tokens: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let mut output = proc_macro2::TokenStream::new();
+    let mut after_static = false;
+    for token in tokens {
+        match &token {
+            proc_macro2::TokenTree::Ident(ident) if after_static && ident == "ref" => {
+                // Drop it, and stay out of `after_static` so `static ref ref`
+                // (which cannot occur) is not treated specially.
+                after_static = false;
+                continue;
+            }
+            proc_macro2::TokenTree::Ident(ident) => {
+                after_static = ident == "static";
+            }
+            proc_macro2::TokenTree::Group(group) => {
+                after_static = false;
+                let inner = rewrite_static_ref_tokens(group.stream());
+                let mut rewritten = proc_macro2::Group::new(group.delimiter(), inner);
+                rewritten.set_span(group.span());
+                output.extend(std::iter::once(proc_macro2::TokenTree::Group(rewritten)));
+                continue;
+            }
+            _ => after_static = false,
+        }
+        output.extend(std::iter::once(token));
+    }
+    output
 }
 
 fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
@@ -2664,7 +3413,7 @@ fn signature_text(sig: &Signature) -> String {
 }
 
 fn qualify_name(file_ctx: &FileContext, receiver: Option<&str>, name: &str) -> String {
-    let mut segments = vec![file_ctx.package_path.clone()];
+    let mut segments = vec![file_ctx.crate_path.clone()];
     segments.extend(file_ctx.module_path.clone());
     if let Some(receiver) = receiver {
         segments.push(receiver.to_string());
@@ -2879,6 +3628,7 @@ fn member_from_expr(member: &syn::Member) -> String {
 fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
     let mut trait_to_impl_methods: HashMap<String, Vec<String>> = HashMap::new();
     let mut method_to_impls: HashMap<String, Vec<String>> = HashMap::new();
+    let mut blanket_method_to_impls: HashMap<String, Vec<String>> = HashMap::new();
 
     for file in analyzed_files {
         for record in &file.trait_impl_records {
@@ -2897,6 +3647,12 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
                     .entry(method_name.clone())
                     .or_default()
                     .push(method_id.clone());
+                if record.is_blanket {
+                    blanket_method_to_impls
+                        .entry(last_segment(method_name).to_string())
+                        .or_default()
+                        .push(method_id.clone());
+                }
             }
         }
     }
@@ -2904,14 +3660,27 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
     TraitImplIndex {
         trait_to_impl_methods,
         method_to_impls,
+        blanket_method_to_impls,
     }
 }
 
-fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) -> CallGraph {
+fn build_call_graph(
+    functions: &[FunctionRecord],
+    trait_index: &TraitImplIndex,
+    field_types: &HashMap<String, String>,
+    local_types: &HashSet<String>,
+    max_call_candidates: usize,
+) -> CallGraph {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut diagnostics = Vec::new();
+    // Ambiguous call sites whose candidate list was truncated, reported once in
+    // aggregate: one diagnostic per site would itself be tens of thousands of
+    // records on a large workspace.
+    let mut truncated_sites = 0usize;
+    let mut truncated_candidates = 0usize;
     let local_index = build_local_function_index(functions);
+    let return_types = ReturnTypeIndex::build(functions);
     let mut seen_nodes = HashSet::new();
     // Per-function receiver-type bindings cache (P1.2). Computed lazily inside
     // the loop because most functions never benefit (no method calls).
@@ -2927,6 +3696,14 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
             )
         })
         .collect();
+    let context = ResolutionContext {
+        local_index: &local_index,
+        trait_index,
+        id_to_qualified: &id_to_qualified,
+        field_types,
+        return_types: &return_types,
+        local_types,
+    };
 
     // Helper closures borrow `nodes`/`seen_nodes` mutably, so they live inline.
     for function in functions {
@@ -2949,16 +3726,10 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
 
         let bindings = type_bindings_cache
             .entry(function.declaration.id.clone())
-            .or_insert_with(|| infer_type_bindings(function));
+            .or_insert_with(|| infer_type_bindings(function, field_types, &return_types));
 
         for call in &function.direct_calls {
-            let candidates = resolve_call_targets(
-                call,
-                &function.package_path,
-                &local_index,
-                trait_index,
-                bindings,
-            );
+            let candidates = resolve_call_targets(call, &function.package_path, &context, bindings);
 
             if candidates.is_empty() {
                 // Truly external — preserve the legacy synthetic node + diagnostic
@@ -2987,19 +3758,6 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                     file_path: Some(function.file_path.clone()),
                     position: Some(call.position.clone()),
                 });
-                let mut properties = IndexMap::new();
-                properties.insert("calleeText".to_string(), call.callee_text.clone());
-                properties.insert(
-                    "confidence".to_string(),
-                    CallProvenance::External.confidence().to_string(),
-                );
-                properties.insert(
-                    "provenance".to_string(),
-                    CallProvenance::External.call_type().to_string(),
-                );
-                if let Some(receiver) = call.receiver_text.as_deref() {
-                    properties.insert("receiver".to_string(), receiver.to_string());
-                }
                 edges.push(CallGraphEdge {
                     id: stable_id(
                         "cg-edge",
@@ -3008,44 +3766,40 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                             &synthetic_id,
                             &call.position.line.to_string(),
                             &call.position.column.to_string(),
+                            call.receiver_text.as_deref().unwrap_or_default(),
                         ],
                     ),
                     source_id: function.declaration.id.clone(),
                     target_id: synthetic_id,
-                    source_name: function.declaration.qualified_name.clone(),
-                    target_name: call.callee_text.clone(),
-                    source_purl: String::new(),
-                    target_purl: String::new(),
-                    purls: Vec::new(),
                     call_type: CallProvenance::External.call_type().to_string(),
-                    position: call.position.clone(),
-                    properties,
+                    line: call.position.line,
+                    column: call.position.column,
+                    callee_text: Some(call.callee_text.clone()),
+                    receiver: call.receiver_text.clone(),
+                    method: call.method_name.clone(),
+                    candidate_count: None,
+                    emitted_candidate_count: None,
+                    properties: IndexMap::new(),
                 });
                 continue;
             }
 
-            // Over-approx path: emit one edge per candidate. The edge id is
-            // disambiguated by the candidate id so duplicates don't collapse.
-            for candidate in &candidates {
-                let mut properties = IndexMap::new();
-                properties.insert("calleeText".to_string(), call.callee_text.clone());
-                properties.insert(
-                    "confidence".to_string(),
-                    candidate.provenance.confidence().to_string(),
-                );
-                properties.insert(
-                    "provenance".to_string(),
-                    candidate.provenance.call_type().to_string(),
-                );
-                if candidates.len() > 1 {
-                    properties.insert("candidateCount".to_string(), candidates.len().to_string());
-                }
-                if let Some(receiver) = call.receiver_text.as_deref() {
-                    properties.insert("receiver".to_string(), receiver.to_string());
-                }
-                if let Some(method) = call.method_name.as_deref() {
-                    properties.insert("method".to_string(), method.to_string());
-                }
+            // Over-approx path: emit one edge per candidate, capped for
+            // ambiguous sites. The edge id is disambiguated by the candidate id
+            // so duplicates don't collapse.
+            let candidate_count = candidates.len();
+            let emitted = truncate_candidates(
+                &candidates,
+                max_call_candidates,
+                &function.declaration.qualified_name,
+                &id_to_qualified,
+            );
+            let emitted_count = emitted.len();
+            if emitted_count < candidate_count {
+                truncated_sites += 1;
+                truncated_candidates += candidate_count - emitted_count;
+            }
+            for candidate in emitted {
                 edges.push(CallGraphEdge {
                     id: stable_id(
                         "cg-edge",
@@ -3054,28 +3808,54 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
                             &candidate.target_id,
                             &call.position.line.to_string(),
                             &call.position.column.to_string(),
+                            // Every link of a method chain shares the chain's
+                            // start position; the receiver text is what tells
+                            // `a.f(..).f(..)`'s two calls apart.
+                            call.receiver_text.as_deref().unwrap_or_default(),
                         ],
                     ),
                     source_id: function.declaration.id.clone(),
                     target_id: candidate.target_id.clone(),
-                    source_name: function.declaration.qualified_name.clone(),
-                    target_name: id_to_qualified
-                        .get(candidate.target_id.as_str())
-                        .map(|q| q.to_string())
-                        .unwrap_or_else(|| call.callee_text.clone()),
-                    source_purl: String::new(),
-                    target_purl: String::new(),
-                    purls: Vec::new(),
                     call_type: candidate.provenance.call_type().to_string(),
-                    position: call.position.clone(),
-                    properties,
+                    line: call.position.line,
+                    column: call.position.column,
+                    callee_text: Some(call.callee_text.clone()),
+                    receiver: call.receiver_text.clone(),
+                    method: call.method_name.clone(),
+                    candidate_count: (candidate_count > 1).then_some(candidate_count),
+                    // Present only for a truncated site, so its presence marks
+                    // the emitted edges as a sample.
+                    emitted_candidate_count: (emitted_count < candidate_count)
+                        .then_some(emitted_count),
+                    properties: IndexMap::new(),
                 });
             }
         }
     }
 
+    if truncated_sites > 0 {
+        diagnostics.push(Diagnostic {
+            kind: "resolution".to_string(),
+            message: format!(
+                "{truncated_sites} ambiguous call sites were truncated to at most \
+                 {max_call_candidates} candidate edges each, dropping {truncated_candidates} \
+                 over-approximated edges; affected edges carry candidateCount and \
+                 candidatesTruncated. Raise --max-call-candidates (0 disables the cap) to emit \
+                 the full candidate set"
+            ),
+            package_path: None,
+            file_path: None,
+            position: None,
+        });
+    }
+
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
     edges.sort_by(|left, right| left.id.cmp(&right.id));
+    // Collapse edges that are identical in every field. A repeated identical
+    // edge carries no information, and some source shapes (a closure body
+    // reachable by more than one traversal path) still emit one call twice.
+    // Sorting by id first puts any duplicates adjacent.
+    edges.dedup_by(|left, right| left == right);
     diagnostics.sort_by(|left, right| left.message.cmp(&right.message));
 
     CallGraph {
@@ -3088,6 +3868,60 @@ fn build_call_graph(functions: &[FunctionRecord], trait_index: &TraitImplIndex) 
         edges,
         diagnostics,
     }
+}
+
+/// Picks which candidates of an ambiguous call site to emit edges for.
+///
+/// Exactly-resolved sites (a single candidate, or any provenance other than the
+/// over-approximating ones) are returned untouched: the cap exists to bound
+/// guesswork, not to drop resolved calls. For an over-approximated site the
+/// candidates are ordered most-plausible-first and truncated:
+///
+/// 1. targets in the caller's own crate before targets elsewhere — a bare
+///    method name is far more likely to mean something in the same crate,
+/// 2. then by qualified name, so the surviving sample is stable across runs and
+///    independent of file iteration order.
+///
+/// The caller is identified by its own qualified name rather than its package
+/// path, because qualified names are rooted at the crate (target) a file
+/// belongs to: inside a `bin` or `example` target the package path is not a
+/// prefix of any qualified name, and every candidate then ranked as "elsewhere".
+fn truncate_candidates<'a>(
+    candidates: &'a [ResolvedCall],
+    max_call_candidates: usize,
+    caller_qualified_name: &str,
+    id_to_qualified: &HashMap<&str, &str>,
+) -> Vec<&'a ResolvedCall> {
+    let uncapped = max_call_candidates == 0 || candidates.len() <= max_call_candidates;
+    let over_approximated = candidates.iter().any(|candidate| {
+        matches!(
+            candidate.provenance,
+            CallProvenance::StaticOverapprox | CallProvenance::TraitOverapprox
+        )
+    });
+    if uncapped || !over_approximated {
+        return candidates.iter().collect();
+    }
+
+    let crate_prefix = format!(
+        "{}::",
+        caller_qualified_name
+            .split("::")
+            .next()
+            .unwrap_or(caller_qualified_name)
+    );
+    let mut ordered: Vec<&ResolvedCall> = candidates.iter().collect();
+    ordered.sort_by_cached_key(|candidate| {
+        let qualified = id_to_qualified
+            .get(candidate.target_id.as_str())
+            .copied()
+            .unwrap_or_default();
+        // `false` sorts first, so same-crate candidates lead.
+        let other_crate = !qualified.starts_with(&crate_prefix);
+        (other_crate, qualified.to_string())
+    });
+    ordered.truncate(max_call_candidates);
+    ordered
 }
 
 fn build_local_function_index(functions: &[FunctionRecord]) -> HashMap<String, Vec<String>> {
@@ -3191,15 +4025,6 @@ impl CallProvenance {
             Self::External => "external",
         }
     }
-
-    fn confidence(self) -> &'static str {
-        match self {
-            Self::Static | Self::TraitImpl | Self::HigherOrder => "high",
-            Self::ReceiverTyped => "medium",
-            Self::StaticOverapprox | Self::TraitOverapprox => "low",
-            Self::External => "low",
-        }
-    }
 }
 
 /// A single resolved target for a callsite, tagged with how it was resolved.
@@ -3207,6 +4032,25 @@ impl CallProvenance {
 struct ResolvedCall {
     target_id: String,
     provenance: CallProvenance,
+}
+
+/// The workspace-wide indexes call resolution consults.
+///
+/// Grouped because they are always used together and always live as long as one
+/// call-graph build: a resolver needs all of them to answer a single call site.
+struct ResolutionContext<'a> {
+    /// Function name (qualified, stripped, and bare) -> declaration ids.
+    local_index: &'a HashMap<String, Vec<String>>,
+    trait_index: &'a TraitImplIndex,
+    /// Declaration id -> qualified name.
+    id_to_qualified: &'a HashMap<&'a str, &'a str>,
+    /// `"<TypeToken>::<field>" -> field's type token`.
+    field_types: &'a HashMap<String, String>,
+    return_types: &'a ReturnTypeIndex,
+    /// Type names declared in the analyzed code. Membership is what lets a
+    /// missing method be read as "this call leaves the analyzed code" rather
+    /// than "we do not know".
+    local_types: &'a HashSet<String>,
 }
 
 /// Receiver-type-aware multi-candidate resolver (P1.1 + P1.2 + P1.3).
@@ -3236,10 +4080,17 @@ struct ResolvedCall {
 fn resolve_call_targets(
     call: &SimplifiedCall,
     package_path: &str,
-    local_index: &HashMap<String, Vec<String>>,
-    trait_index: &TraitImplIndex,
+    context: &ResolutionContext<'_>,
     type_bindings: &HashMap<String, String>,
 ) -> Vec<ResolvedCall> {
+    let ResolutionContext {
+        local_index,
+        trait_index,
+        id_to_qualified,
+        field_types,
+        return_types,
+        local_types,
+    } = context;
     let callee = call.callee_text.as_str();
     let normalized = normalize_local_path(callee, package_path);
 
@@ -3303,11 +4154,16 @@ fn resolve_call_targets(
 
         // Try to filter by the receiver's inferred type. This is the
         // highest-leverage disambiguator we have without typeck.
-        if let Some(receiver_type) = call
-            .receiver_text
-            .as_deref()
-            .and_then(|r| type_bindings.get(r.trim()))
-        {
+        if let Some(receiver_type) = call.receiver_text.as_deref().and_then(|receiver| {
+            resolve_receiver_type(
+                receiver,
+                call.receiver_expr.as_ref(),
+                type_bindings,
+                field_types,
+                return_types,
+            )
+        }) {
+            let receiver_type = &receiver_type;
             // Combine local + trait candidates so the filter sees every
             // possible impl of this method, regardless of where it lives.
             let mut combined: Vec<String> = local_candidates.clone();
@@ -3318,17 +4174,68 @@ fn resolve_call_targets(
             }
             if !combined.is_empty() {
                 let filtered =
-                    filter_by_receiver_type(&combined, local_index, receiver_type, method);
+                    filter_by_receiver_type(&combined, id_to_qualified, receiver_type, method);
                 if !filtered.is_empty() {
                     return resolutions(&filtered, CallProvenance::ReceiverTyped);
                 }
             }
+
+            // A `&dyn Trait` / `impl Trait` receiver reduces to the trait's
+            // name, and such a call dispatches to that trait's impls — not to
+            // an impl of a type called `Trait`.
+            if let Some(trait_method_ids) = trait_index.trait_to_impl_methods.get(receiver_type) {
+                let dispatched: Vec<String> = trait_candidates
+                    .iter()
+                    .filter(|id| trait_method_ids.contains(id))
+                    .cloned()
+                    .collect();
+                match dispatched.len() {
+                    0 => {}
+                    1 => return resolutions(&dispatched, CallProvenance::TraitImpl),
+                    _ => return resolutions(&dispatched, CallProvenance::TraitOverapprox),
+                }
+            }
+
+            // A blanket impl (`impl<T> Ext for T`) applies to a receiver of any
+            // type, so it stays a candidate whatever the receiver turned out to
+            // be.
+            let blanket_candidates = trait_index
+                .blanket_method_to_impls
+                .get(method)
+                .cloned()
+                .unwrap_or_default();
+            if !blanket_candidates.is_empty() {
+                return match blanket_candidates.len() {
+                    1 => resolutions(&blanket_candidates, CallProvenance::TraitImpl),
+                    _ => resolutions(&blanket_candidates, CallProvenance::TraitOverapprox),
+                };
+            }
+
+            // Now the decisive question: do we *know* this receiver's type is a
+            // concrete type with no local method of this name? Only two things
+            // count as evidence. A locally declared type: we have seen all of
+            // its impls, so if none carries the method, the call leaves the
+            // analyzed code. Or a standard-library type, whose impls are never
+            // local by definition.
+            //
+            // Over-approximating in those cases is not conservative, it is
+            // wrong: `nodes.push(..)` on a `Vec` cannot reach a local
+            // `Remap::push`, and claiming it can asserts a call the program
+            // cannot make. That single fallback produced 19,592 `push` edges on
+            // wasm-tools 1.247.0 — 14% of the whole graph — none of them real.
+            //
+            // Anything else (a generic parameter, a type alias, a foreign type
+            // we have not modelled) is genuinely unknown, so those keep the
+            // over-approximation below.
+            if local_types.contains(receiver_type) || is_std_type(receiver_type) {
+                return Vec::new();
+            }
         }
 
-        // No receiver type (or filter was empty). Emit one edge per
-        // candidate, preferring local statics over trait impls when both
-        // exist (a local method is more likely the intended target than a
-        // trait-method-family explosion).
+        // The receiver's type is unknown, so every same-named candidate is
+        // still possible. Emit one edge per candidate, preferring local statics
+        // over trait impls when both exist (a local method is more likely the
+        // intended target than a trait-method-family explosion).
         if local_candidates.len() == 1 {
             return resolutions(&local_candidates, CallProvenance::Static);
         }
@@ -3345,7 +4252,14 @@ fn resolve_call_targets(
     }
 
     // 3. Free function with a bare-name collision (no method_name).
-    if let Some(ids) = local_index.get(last_segment(callee))
+    //
+    // Only for a callee written as a bare name. A qualified path that reached
+    // this point failed both exact lookups above, which means it names something
+    // outside this workspace — matching it on its last segment alone let
+    // `std::process::Command::new` resolve to any local `new`, inventing an edge
+    // to an unrelated type.
+    if !callee.contains("::")
+        && let Some(ids) = local_index.get(last_segment(callee))
         && !ids.is_empty()
     {
         return match ids.len() {
@@ -3374,28 +4288,298 @@ fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> 
         .collect()
 }
 
-/// Filter a list of candidate target ids by whether the resolved function's
-/// qualified name is rooted at the given receiver type.
+/// Methods that yield their receiver's type.
 ///
-/// e.g. receiver_type=`FileStore`, method=`persist`, candidates=
-/// `[…::FileStore::persist, …::NetStore::persist]` → returns only the
-/// FileStore impl.
+/// Typing a binding through them is what makes `connect()?.query(..)` and
+/// `make().unwrap().run()` resolve. `?` itself is not represented — `syn`'s
+/// `Expr::Try` is flattened to the inner call — which is the other half of why
+/// return types are indexed already unwrapped.
+const TYPE_PRESERVING_METHODS: &[&str] = &[
+    "as_mut",
+    "as_ref",
+    "borrow",
+    "borrow_mut",
+    "clone",
+    "to_owned",
+];
+
+/// Methods that yield their receiver's type *with one `Result`/`Option` layer
+/// removed.
 ///
-/// Returns an empty Vec when no candidate's qualified name contains the
-/// type as a path segment, so the caller knows the filter was useless
-/// and can fall through to over-approximation rather than mislabel
-/// an unfiltered list as ReceiverTyped.
+/// Kept apart from [`TYPE_PRESERVING_METHODS`] because the distinction matters
+/// whenever the receiver is bound as the wrapper itself — a parameter or an
+/// annotated `let` of type `Option<Client>`, where treating `x.unwrap()` as an
+/// `Option` types the call site wrong and, since `Option` is a known std type,
+/// then concludes the following call leaves the crate.
+const UNWRAPPING_METHODS: &[&str] = &[
+    "expect",
+    "into_inner",
+    "unwrap",
+    "unwrap_or_default",
+    "unwrap_or_else",
+];
+
+/// Standard-library constructors whose result type is worth knowing, since the
+/// value they produce is often what a sink is called on.
+///
+/// The second element is the type produced *after* unwrapping any `Result` or
+/// `Option`, matching how return types are indexed.
+const STD_CONSTRUCTOR_RETURNS: &[(&str, &str)] = &[
+    ("Command::new", "Command"),
+    ("File::create", "File"),
+    ("File::open", "File"),
+    ("OsString::from", "OsString"),
+    ("PathBuf::from", "PathBuf"),
+    ("String::from", "String"),
+    ("String::new", "String"),
+    ("TcpListener::bind", "TcpListener"),
+    ("TcpStream::connect", "TcpStream"),
+    ("Vec::new", "Vec"),
+    ("Vec::with_capacity", "Vec"),
+];
+
+/// Reduce a return type to the type a caller actually goes on to use.
+///
+/// A function returning `Result<Client, Error>` gives its caller a `Client`:
+/// the wrapper is removed by `?` or `unwrap` before any method is called on the
+/// value. Indexing the unwrapped type is what lets `let c = connect()?;` type
+/// `c`, and costs nothing when the wrapper is kept, because `Result` and
+/// `Option` are standard types whose own methods never resolve locally anyway.
+/// Whether a type token is one of the wrappers [`unwrap_typing_wrapper`] peels.
+fn is_typing_wrapper(token: &str) -> bool {
+    matches!(last_segment_of_path(token), "Result" | "Option")
+}
+
+fn unwrap_typing_wrapper(return_type: &str) -> Option<String> {
+    let trimmed = return_type.trim();
+    let open = trimmed.find('<')?;
+    if !trimmed.trim_end().ends_with('>') {
+        return None;
+    }
+    let head = last_segment_of_path(&trimmed[..open]);
+    if !matches!(head, "Result" | "Option") {
+        return None;
+    }
+    let inner = &trimmed[open + 1..trimmed.trim_end().len() - 1];
+    let first = split_generic_arguments(inner)
+        .into_iter()
+        .find(|argument| !argument.trim_start().starts_with('\''))?;
+    // The inner type may itself be wrapped (`Result<Option<T>, E>`).
+    unwrap_typing_wrapper(first).or_else(|| bare_type_token(first))
+}
+
+/// Return types of the workspace's own functions, for propagating a type
+/// through `let x = f()` and through a method chain.
+///
+/// A key is dropped when candidates disagree: guessing between two same-named
+/// functions with different return types would type a binding wrongly, which is
+/// worse than leaving it unknown.
+#[derive(Debug, Default)]
+struct ReturnTypeIndex {
+    /// `(receiver type token, method name) -> return type token`.
+    by_type_method: HashMap<(String, String), String>,
+    /// Free function, by bare name.
+    by_name: HashMap<String, String>,
+    /// Free function, by qualified name.
+    by_qualified: HashMap<String, String>,
+}
+
+impl ReturnTypeIndex {
+    fn build(functions: &[FunctionRecord]) -> Self {
+        let mut index = Self::default();
+        // Keys seen with conflicting return types, tracked so a later agreeing
+        // entry cannot resurrect them.
+        let mut poisoned_type_method: HashSet<(String, String)> = HashSet::new();
+        let mut poisoned_name: HashSet<String> = HashSet::new();
+
+        for function in functions {
+            let Some(returns) = unwrap_typing_wrapper(&function.return_type)
+                .or_else(|| bare_type_token(&function.return_type))
+            else {
+                continue;
+            };
+            let name = function.declaration.name.clone();
+            match function
+                .receiver_type
+                .as_deref()
+                .and_then(bare_type_token)
+                .filter(|token| token != "Self")
+            {
+                Some(receiver) => {
+                    let key = (receiver, name);
+                    if poisoned_type_method.contains(&key) {
+                        continue;
+                    }
+                    match index.by_type_method.get(&key) {
+                        Some(existing) if existing != &returns => {
+                            index.by_type_method.remove(&key);
+                            poisoned_type_method.insert(key);
+                        }
+                        Some(_) => {}
+                        None => {
+                            index.by_type_method.insert(key, returns);
+                        }
+                    }
+                }
+                None => {
+                    index
+                        .by_qualified
+                        .insert(function.declaration.qualified_name.clone(), returns.clone());
+                    if poisoned_name.contains(&name) {
+                        continue;
+                    }
+                    match index.by_name.get(&name) {
+                        Some(existing) if existing != &returns => {
+                            index.by_name.remove(&name);
+                            poisoned_name.insert(name);
+                        }
+                        Some(_) => {}
+                        None => {
+                            index.by_name.insert(name, returns);
+                        }
+                    }
+                }
+            }
+        }
+        index
+    }
+
+    fn free_function(&self, callee: &str) -> Option<&str> {
+        self.by_qualified
+            .get(callee)
+            .or_else(|| self.by_name.get(last_segment(callee)))
+            .map(String::as_str)
+    }
+
+    fn method(&self, receiver_type: &str, method: &str) -> Option<&str> {
+        self.by_type_method
+            .get(&(receiver_type.to_string(), method.to_string()))
+            .map(String::as_str)
+    }
+}
+
+/// Infers the type of a simplified expression.
+///
+/// This is the structural counterpart to the name-keyed bindings: it follows
+/// field accesses, references, constructor calls, local function returns, and
+/// method-call returns, which is what types the receiver of a chained call.
+fn infer_expr_type(
+    expr: &SimpleExpr,
+    bindings: &HashMap<String, String>,
+    field_types: &HashMap<String, String>,
+    return_types: &ReturnTypeIndex,
+) -> Option<String> {
+    match expr {
+        SimpleExpr::Var(name) => bindings
+            .get(name.as_str())
+            .cloned()
+            // A bare capitalized path is a type, not a binding (`Config::load`
+            // arrives here as `Config`).
+            .or_else(|| bare_type_token(name)),
+        SimpleExpr::Reference { expr, .. } => {
+            infer_expr_type(expr, bindings, field_types, return_types)
+        }
+        SimpleExpr::Field { base, field } => {
+            let base_type = infer_expr_type(base, bindings, field_types, return_types)?;
+            field_types.get(&format!("{base_type}::{field}")).cloned()
+        }
+        SimpleExpr::Call { callee, .. } => std_constructor_return(callee)
+            .map(str::to_string)
+            .or_else(|| constructor_type(callee))
+            .or_else(|| return_types.free_function(callee).map(str::to_string)),
+        SimpleExpr::MethodCall {
+            receiver, method, ..
+        } => {
+            let receiver_type = infer_expr_type(receiver, bindings, field_types, return_types)?;
+            // A pass-through method hands back what it was called on, so the
+            // receiver's type carries through the call.
+            let method_name = last_segment(method);
+            if TYPE_PRESERVING_METHODS.contains(&method_name) {
+                return Some(receiver_type);
+            }
+            // Unwrapping peels one `Result`/`Option` layer.
+            if UNWRAPPING_METHODS.contains(&method_name) {
+                return match unwrap_typing_wrapper(&receiver_type) {
+                    Some(inner) => Some(inner),
+                    // The receiver is a bare `Option`/`Result` token: it was
+                    // bound from a type whose argument the binding table does
+                    // not keep, so the unwrapped type is genuinely unknown.
+                    // Reporting the wrapper instead would name a std type and
+                    // so conclude — wrongly — that the next call leaves the
+                    // crate; unknown over-approximates instead.
+                    None if is_typing_wrapper(&receiver_type) => None,
+                    // Anything else is already unwrapped (return types are
+                    // indexed that way) and carries through.
+                    None => Some(receiver_type),
+                };
+            }
+            return_types
+                .method(&receiver_type, method)
+                .map(str::to_string)
+        }
+        SimpleExpr::Compose(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+    }
+}
+
+/// Type of the expression a method is called on.
+///
+/// Handles the two shapes the collector produces as plain token text: a bare
+/// binding (`store`, `self`) and a field access chain (`self . sink`,
+/// `self . inner . cache`). A chain walks the field table one hop at a time, so
+/// it resolves only while every hop's owning type is known.
+fn resolve_receiver_type(
+    receiver: &str,
+    receiver_expr: Option<&SimpleExpr>,
+    type_bindings: &HashMap<String, String>,
+    field_types: &HashMap<String, String>,
+    return_types: &ReturnTypeIndex,
+) -> Option<String> {
+    // The structured form can express a call result, which the text form
+    // cannot, so it is tried first.
+    if let Some(expr) = receiver_expr
+        && let Some(inferred) = infer_expr_type(expr, type_bindings, field_types, return_types)
+    {
+        return Some(inferred);
+    }
+    let receiver = receiver.trim();
+    if let Some(direct) = type_bindings.get(receiver) {
+        return Some(direct.clone());
+    }
+    // Only a pure dotted path of identifiers can be walked; anything with a
+    // call, index, or operator in it is out of scope here.
+    let mut hops = receiver.split('.').map(str::trim);
+    let base = hops.next()?;
+    if base.is_empty() {
+        return None;
+    }
+    let mut current = type_bindings.get(base)?.clone();
+    for field in hops {
+        if field.is_empty() || !field.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return None;
+        }
+        current = field_types.get(&format!("{current}::{field}"))?.clone();
+    }
+    Some(current)
+}
+
+/// Keeps the candidates whose declaring type matches the receiver's type.
+///
+/// The id -> qualified-name lookup is passed in rather than searched for. It
+/// used to be recovered by scanning the whole local function index per
+/// candidate, which made call-graph construction quadratic in the workspace
+/// size: on wasm-tools 1.247.0 that single scan was 24 of the 28 seconds a full
+/// run took.
 fn filter_by_receiver_type(
     candidates: &[String],
-    local_index: &HashMap<String, Vec<String>>,
+    id_to_qualified: &HashMap<&str, &str>,
     receiver_type: &str,
     method: &str,
 ) -> Vec<String> {
     let target_token = last_segment(receiver_type);
     let mut kept: Vec<String> = Vec::new();
     for id in candidates {
-        if let Some(qname) = find_qualified_name_for_id(local_index, id)
-            && type_qualified_name_matches(&qname, target_token, method)
+        if let Some(qname) = id_to_qualified.get(id.as_str())
+            && type_qualified_name_matches(qname, target_token, method)
         {
             kept.push(id.clone());
         }
@@ -3403,23 +4587,47 @@ fn filter_by_receiver_type(
     kept
 }
 
-fn find_qualified_name_for_id(
-    local_index: &HashMap<String, Vec<String>>,
-    id: &str,
-) -> Option<String> {
-    for (name, ids) in local_index {
-        if ids.iter().any(|c| c == id) && name.contains("::") {
-            return Some(name.clone());
-        }
-    }
-    None
-}
-
 fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> bool {
-    if !qname.split("::").any(|segment| segment == type_token) {
+    // Compare generic-free segments: a method on a generic type is qualified
+    // `Expander<'a>::expand`, and matching that raw against the receiver token
+    // `Expander` failed, which sent every `self.method()` on a generic type
+    // back to over-approximation.
+    if !split_qualified_segments(qname).any(|segment| segment == type_token) {
         return false;
     }
     last_segment(qname) == method
+}
+
+/// Split a qualified name on `::` that sit outside generic arguments, yielding
+/// each segment with its generic arguments and lifetimes removed.
+fn split_qualified_segments(qname: &str) -> impl Iterator<Item = &str> {
+    let mut segments = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let bytes = qname.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && qname[index..].starts_with("::") => {
+                segments.push(&qname[start..index]);
+                index += 2;
+                start = index;
+                continue;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    segments.push(&qname[start..]);
+    segments
+        .into_iter()
+        .map(|segment| match segment.find('<') {
+            Some(open) => segment[..open].trim(),
+            None => segment.trim(),
+        })
+        .filter(|segment| !segment.is_empty())
 }
 
 /// Best-effort, function-local receiver-type inference (P1.2).
@@ -3436,35 +4644,81 @@ fn type_qualified_name_matches(qname: &str, type_token: &str, method: &str) -> b
 /// Returned map keys are variable names (identifiers, not field accesses),
 /// values are bare type tokens (e.g. `FileStore`, `Config`) suitable for the
 /// resolver's path-segment match in [`filter_by_receiver_type`].
-fn infer_type_bindings(function: &FunctionRecord) -> HashMap<String, String> {
+fn infer_type_bindings(
+    function: &FunctionRecord,
+    field_types: &HashMap<String, String>,
+    return_types: &ReturnTypeIndex,
+) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
+
+    // `self` is the impl's own type, known exactly. Without this, every
+    // `self.method()` inside an impl fell back to over-approximation even
+    // though its receiver type was never in doubt.
+    let self_type = function
+        .receiver_type
+        .as_deref()
+        .and_then(bare_type_token)
+        .filter(|token| token != "Self");
 
     // Parameters: name -> declared type (last segment, stripped of & / mut).
     for (name, ty) in function.params.iter().zip(function.param_types.iter()) {
         if name.is_empty() || ty.is_empty() {
             continue;
         }
+        // The receiver parameter's type renders as `Self`, which would shadow
+        // the impl type resolved above with a token that matches no impl.
+        if name == "self" {
+            continue;
+        }
         if let Some(token) = bare_type_token(ty) {
+            // A parameter written `Self` means the impl type.
+            let token = match (token.as_str(), self_type.as_deref()) {
+                ("Self", Some(self_type)) => self_type.to_string(),
+                _ => token,
+            };
             bindings.insert(name.clone(), token);
         }
     }
 
-    // Walk simple assignments to harvest `let x: T = ...` and
-    // `let x = T::new(...)` / `let x = path::Type::new(...)`.
-    for op in &function.operations {
-        match op {
-            Operation::Assign { target, value } => {
-                if let Some((var, ty)) = binding_from_simple_expr(target, value) {
-                    bindings.insert(var, ty);
-                }
+    if let Some(self_type) = self_type {
+        bindings.insert("self".to_string(), self_type);
+    }
+
+    // An explicit annotation outranks every inference above it.
+    for (name, declared) in &function.declared_types {
+        bindings.insert(name.clone(), declared.clone());
+    }
+
+    // Walk assignments to harvest `let x: T = ...`, `let x = T::new(...)`, and
+    // — via the return-type index — `let x = f()` and `let x = a.b().c()`.
+    //
+    // Repeated because a binding can depend on an earlier one that is itself
+    // inferred (`let a = make(); let b = a.next();`), and the operations are in
+    // source order but a type can also flow backwards through a later
+    // reassignment. Three passes settle every chain we can type at all; a
+    // longer chain gains nothing from more passes because each pass resolves at
+    // least one more hop.
+    for _ in 0..3 {
+        let mut changed = false;
+        for op in &function.operations {
+            let Operation::Assign { target, value } = op else {
+                continue;
+            };
+            let Some(var) = bare_ident(target) else {
+                continue;
+            };
+            let inferred = binding_from_simple_expr(target, value)
+                .map(|(_, ty)| ty)
+                .or_else(|| infer_expr_type(value, &bindings, field_types, return_types));
+            if let Some(ty) = inferred
+                && bindings.get(&var) != Some(&ty)
+            {
+                bindings.insert(var, ty);
+                changed = true;
             }
-            Operation::AssignField { target, .. } => {
-                // Field writes don't establish a binding for the base; skip.
-                if let Some(_var) = bare_ident(target) {
-                    // No type info from a bare field assign.
-                }
-            }
-            _ => {}
+        }
+        if !changed {
+            break;
         }
     }
 
@@ -3510,24 +4764,184 @@ fn bare_ident(name: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn bare_type_token(ty: &str) -> Option<String> {
-    let cleaned: String = ty
-        .chars()
-        .filter(|&c| c.is_alphanumeric() || c == '_' || c == ':')
-        .collect();
-    let last = cleaned.rsplit("::").next()?;
-    if last.is_empty() {
+/// Wrappers a method call sees through by `Deref` coercion.
+///
+/// `arc.method()` can mean `Arc::method` or, far more often, a method of the
+/// pointee, so resolving the receiver type has to look inside these. Containers
+/// with methods of their own (`Vec`, `Option`, `HashMap`, ...) are deliberately
+/// absent: `vec.push(..)` means `Vec::push`, not a method of the element type.
+const DEREF_TRANSPARENT_WRAPPERS: &[&str] = &[
+    "Arc",
+    "Box",
+    "Cow",
+    "MappedMutexGuard",
+    "MappedRwLockReadGuard",
+    "MappedRwLockWriteGuard",
+    "MutexGuard",
+    "Pin",
+    "Rc",
+    "Ref",
+    "RefMut",
+    "RwLockReadGuard",
+    "RwLockWriteGuard",
+];
+
+/// Standard-library and core types rusi models by name.
+///
+/// Used as positive evidence that a receiver's impls are *not* local: a method
+/// call on a `Vec` cannot land on a local `push`. The list only needs the types
+/// that commonly receive method calls; anything absent simply stays unknown,
+/// which is the conservative direction.
+const KNOWN_STD_TYPES: &[&str] = &[
+    "Arc",
+    "BTreeMap",
+    "BTreeSet",
+    "BinaryHeap",
+    "Box",
+    "Cell",
+    "Command",
+    "Cow",
+    "Duration",
+    "File",
+    "HashMap",
+    "HashSet",
+    "Instant",
+    "IpAddr",
+    "Mutex",
+    "OsStr",
+    "OsString",
+    "Option",
+    "Path",
+    "PathBuf",
+    "RefCell",
+    "Result",
+    "Rc",
+    "RwLock",
+    "SocketAddr",
+    "String",
+    "TcpListener",
+    "TcpStream",
+    "Vec",
+    "VecDeque",
+    "str",
+];
+
+/// Whether `token` names a type from the standard library.
+fn is_std_type(token: &str) -> bool {
+    KNOWN_STD_TYPES.contains(&token)
+}
+
+/// The type a known standard-library constructor produces, already unwrapped.
+fn std_constructor_return(callee: &str) -> Option<&'static str> {
+    // Match on the last two path segments so `std::fs::File::open` and `File::open`
+    // both hit.
+    let segments: Vec<&str> = callee.rsplit("::").take(2).collect();
+    if segments.len() < 2 {
         return None;
     }
+    let suffix = format!("{}::{}", segments[1], segments[0]);
+    STD_CONSTRUCTOR_RETURNS
+        .iter()
+        .find(|(pattern, _)| *pattern == suffix)
+        .map(|(_, returns)| *returns)
+}
+
+/// Reduce a type as written to the bare type token a method call dispatches on.
+///
+/// Strips references and `mut`, then peels `Deref`-transparent wrappers so
+/// `&mut Arc<db::Client>` resolves to `Client`. Returns `None` for primitives
+/// and anything that does not look like a user-defined type; the resolver only
+/// uses this to disambiguate between same-named methods.
+fn bare_type_token(ty: &str) -> Option<String> {
+    let mut current = ty.trim();
+    loop {
+        // Peel references, `mut`, `dyn`, and `impl` markers.
+        let peeled = current
+            .trim()
+            .trim_start_matches('&')
+            .trim()
+            .strip_prefix("mut ")
+            .unwrap_or_else(|| {
+                current
+                    .trim()
+                    .trim_start_matches('&')
+                    .trim()
+                    .strip_prefix("dyn ")
+                    .or_else(|| {
+                        current
+                            .trim()
+                            .trim_start_matches('&')
+                            .trim()
+                            .strip_prefix("impl ")
+                    })
+                    .unwrap_or_else(|| current.trim().trim_start_matches('&').trim())
+            })
+            .trim();
+        if peeled == current {
+            break;
+        }
+        current = peeled;
+    }
+
+    // A generic application: decide whether to look inside it.
+    if let Some(open) = current.find('<')
+        && current.trim_end().ends_with('>')
+    {
+        let head = last_segment_of_path(&current[..open]);
+        if DEREF_TRANSPARENT_WRAPPERS.contains(&head) {
+            let inner = &current[open + 1..current.trim_end().len() - 1];
+            // `Cow<'a, T>` and `Pin<Box<T>>`: the pointee is the last argument
+            // that is not a lifetime.
+            let argument = split_generic_arguments(inner)
+                .into_iter()
+                .rev()
+                .find(|argument| !argument.trim_start().starts_with('\''))?;
+            return bare_type_token(argument);
+        }
+        current = &current[..open];
+    }
+
+    let last = last_segment_of_path(current);
     let first = last.chars().next()?;
     // Capitalized = conventionally a type name. This intentionally misses
     // primitive types (lowercase) — we only need it to disambiguate
     // user-defined types in method dispatch.
-    if first.is_uppercase() {
+    if first.is_uppercase() && last.chars().all(|c| c.is_alphanumeric() || c == '_') {
         Some(last.to_string())
     } else {
         None
     }
+}
+
+/// Last `::` segment of a path, ignoring whitespace the token stream inserts.
+fn last_segment_of_path(path: &str) -> &str {
+    path.trim()
+        .rsplit("::")
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_end_matches(|c: char| c == '>' || c.is_whitespace())
+        .trim()
+}
+
+/// Split generic arguments on top-level commas.
+fn split_generic_arguments(inner: &str) -> Vec<&str> {
+    let mut arguments = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (index, ch) in inner.char_indices() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                arguments.push(&inner[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    arguments.push(&inner[start..]);
+    arguments
 }
 
 fn constructor_type(callee: &str) -> Option<String> {
@@ -3579,21 +4993,53 @@ fn build_data_flow(
     mode: &str,
     functions: &[FunctionRecord],
     patterns: DataFlowPatternSet,
+    field_types: &HashMap<String, String>,
 ) -> DataFlowEvidence {
+    // Body-less records (a dependency at the lighter tier) are excluded: their
+    // empty operation lists would summarize as "taint stops here" and delete
+    // real flows through them. A call to one stays unresolved for data-flow
+    // purposes, which is the conservative reading.
+    let functions: Vec<FunctionRecord> = functions
+        .iter()
+        .filter(|function| function.has_body)
+        .cloned()
+        .collect();
+    let functions = functions.as_slice();
     let local_index = build_local_function_index(functions);
     let function_map: HashMap<String, &FunctionRecord> = functions
         .iter()
         .map(|function| (function.declaration.id.clone(), function))
         .collect();
-    let summaries = infer_summaries(functions, &local_index, &patterns);
+    let return_types = ReturnTypeIndex::build(functions);
+    let summaries = infer_summaries(
+        functions,
+        &local_index,
+        &patterns,
+        field_types,
+        &return_types,
+    );
     let partials = parallel_map_collect(functions, |function| {
-        let mut builder =
-            DataFlowBuilder::new(mode, &patterns, &summaries, &local_index, &function_map);
+        let mut builder = DataFlowBuilder::new(
+            mode,
+            &patterns,
+            &summaries,
+            &local_index,
+            &function_map,
+            field_types,
+            &return_types,
+        );
         builder.materialize_function(function);
         builder
     });
-    let mut builder =
-        DataFlowBuilder::new(mode, &patterns, &summaries, &local_index, &function_map);
+    let mut builder = DataFlowBuilder::new(
+        mode,
+        &patterns,
+        &summaries,
+        &local_index,
+        &function_map,
+        field_types,
+        &return_types,
+    );
     for partial in partials {
         builder.merge_materialized(partial);
     }
@@ -3610,78 +5056,91 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 pattern: "std::env::var".to_string(),
                 category: "env".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::env::var_os".to_string(),
                 category: "env".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "env::var".to_string(),
                 category: "env".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::env::args".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "env::args".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::env::args_os".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "env::args_os".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::fs::read_to_string".to_string(),
                 category: "file".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "fs::read_to_string".to_string(),
                 category: "file".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::fs::read".to_string(),
                 category: "file".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "fs::read".to_string(),
                 category: "file".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "std::io::stdin".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "source".to_string(),
                 pattern: "stdin".to_string(),
                 category: "cli".to_string(),
                 relevant_arguments: vec![],
+                receiver_type: None,
             },
         ],
         sinks: vec![
@@ -3690,354 +5149,455 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 pattern: "std::process::Command::new".to_string(),
                 category: "process-exec".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "Command::new".to_string(),
                 category: "process-exec".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            // Receiver-typed sinks. `Command::new(x)` was already a sink, but
+            // `Command::new("sh").arg(tainted)` — the more common injection
+            // shape — was not, because the tainted value never reaches the
+            // constructor. Matching on the bare method name alone would fire on
+            // every builder in the workspace that happens to have an `arg`, so
+            // these are restricted to the receiver's resolved type. Argument 0
+            // of a method call is the receiver, so the first real argument is 1.
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "arg".to_string(),
+                category: "process-exec".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Command".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "args".to_string(),
+                category: "process-exec".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Command".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "env".to_string(),
+                category: "process-exec".to_string(),
+                relevant_arguments: vec![1, 2],
+                receiver_type: Some("Command".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "write_all".to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("File".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "write_all".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("TcpStream".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "std::fs::write".to_string(),
                 category: "filesystem-write".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fs::write".to_string(),
                 category: "filesystem-write".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "std::fs::remove_file".to_string(),
                 category: "filesystem-delete".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fs::remove_file".to_string(),
                 category: "filesystem-delete".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "std::net::TcpStream::connect".to_string(),
                 category: "network-connect".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "TcpStream::connect".to_string(),
                 category: "network-connect".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fetch_one".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fetch_all".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fetch_optional".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "fetch".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "load".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "load_iter".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "get_result".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "get_results".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "first".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_one".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_opt".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_map".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_row".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_and_then".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_drop".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_first".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "query_iter".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "simple_query".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "batch_execute".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "execute".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "execute_batch".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "execute_unprepared".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "prepare".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "prepare_cached".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "exec".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "exec_drop".to_string(),
                 category: "sql-query".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "reqwest::blocking::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "reqwest::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "post".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "put".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "patch".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "delete".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "request".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![2],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "send".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "surf::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "surf::post".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "ureq::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "ureq::post".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "isahc::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "isahc::post".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "hyper::Client::get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "hyper::Client::request".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "format!#html".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "Response::with".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "warp::reply::html".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "HttpResponse::body".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "Response::body".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "Html".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "RawHtml".to_string(),
                 category: "html-response".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
         ],
         passthroughs: vec![
@@ -4046,426 +5606,497 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 pattern: "Ok".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "Some".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "unwrap_or_else".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "unwrap_or".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "unwrap".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "unwrap_or_default".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "expect".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "nth".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "next".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "map".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "and_then".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_string".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_owned".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_owned".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "clone".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_inner".to_string(),
                 category: "extractor-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_str".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_ref".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "query".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "path".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "uri".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "param".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "query_string".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "match_info".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "format!".to_string(),
                 category: "string-format".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "format!#html".to_string(),
                 category: "string-format".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "CString::new".to_string(),
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sqlx::query".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sqlx::query_as".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sqlx::query_scalar".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "diesel::dsl::sql_query".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sql_query".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sea_orm::Statement::from_sql_and_values".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sea_query::Query::from_string".to_string(),
                 category: "sql-builder".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "std::ffi::CString::new".to_string(),
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_ptr".to_string(),
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "deref".to_string(),
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_raw".to_string(),
                 category: "ffi-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "offset".to_string(),
                 category: "pointer-arithmetic".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "add".to_string(),
                 category: "pointer-arithmetic".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "sub".to_string(),
                 category: "pointer-arithmetic".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "wrapping_add".to_string(),
                 category: "pointer-arithmetic".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "wrapping_offset".to_string(),
                 category: "pointer-arithmetic".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "lock".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "borrow".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "borrow_mut".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "get_mut".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "read".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "write".to_string(),
                 category: "lock-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "Arc::new".to_string(),
                 category: "smart-pointer".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "Rc::new".to_string(),
                 category: "smart-pointer".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "Mutex::new".to_string(),
                 category: "smart-pointer".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "RefCell::new".to_string(),
                 category: "smart-pointer".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "send".to_string(),
                 category: "channel-io".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "recv".to_string(),
                 category: "channel-io".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_bytes".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_os_str".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_string_lossy".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "encode_b64".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "url".to_string(),
                 category: "http-request-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_token_stream".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "collect".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "filter".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "fold".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0, 1],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "flat_map".to_string(),
                 category: "iterator-adapter".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_lowercase".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_uppercase".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_ascii_lowercase".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_ascii_uppercase".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             // Standard-library text and container methods that hand their
             // receiver's data back out. Omitting one is not a missed
@@ -4477,294 +6108,343 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 pattern: "split_once".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "rsplit_once".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "splitn".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "rsplitn".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "split".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "rsplit".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "split_terminator".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "split_whitespace".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "lines".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "chars".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "bytes".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "strip_prefix".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "strip_suffix".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "strip_circumfix".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_start".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_end".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_matches".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_start_matches".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_end_matches".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_ascii".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_ascii_start".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "trim_ascii_end".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "replace".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "replacen".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "repeat".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "escape_debug".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "escape_default".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "join".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "concat".to_string(),
                 category: "string-transform".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_str".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_string".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_bytes".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_vec".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_vec".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_path_buf".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "to_os_string".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_path".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_slice".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_mut_slice".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_deref".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_deref_mut".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "as_encoded_bytes".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_boxed_str".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "leak".to_string(),
                 category: "value-wrapper".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "get".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "first".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "last".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "iter".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "into_iter".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
+                receiver_type: None,
             },
         ],
     }
@@ -4774,6 +6454,8 @@ fn infer_summaries(
     functions: &[FunctionRecord],
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
+    field_types: &HashMap<String, String>,
+    return_types: &ReturnTypeIndex,
 ) -> BTreeMap<String, FunctionSummary> {
     let mut summaries = BTreeMap::<String, FunctionSummary>::new();
     for function in functions {
@@ -4807,7 +6489,14 @@ fn infer_summaries(
         let next_entries = parallel_map_collect(&funcs_to_update, |function| {
             (
                 function.declaration.id.clone(),
-                summarize_function(function, &summaries, local_index, patterns),
+                summarize_function(
+                    function,
+                    &summaries,
+                    local_index,
+                    patterns,
+                    field_types,
+                    return_types,
+                ),
             )
         });
         for (function_id, next) in next_entries {
@@ -4836,7 +6525,14 @@ fn summarize_function(
     summaries: &BTreeMap<String, FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
+    field_types: &HashMap<String, String>,
+    return_types: &ReturnTypeIndex,
 ) -> FunctionSummary {
+    // Same type bindings the concrete pass uses, so a receiver-typed sink
+    // pattern (`Command::arg`) is visible here too. Without them a wrapper
+    // function whose whole body is `cmd.arg(value)` summarized as reaching no
+    // sink, and taint flowing into it through a parameter was lost.
+    let type_bindings = infer_type_bindings(function, field_types, return_types);
     let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
     for (idx, param) in function.params.iter().enumerate() {
         let mut origins = BTreeSet::from([AbstractOrigin::Param(idx)]);
@@ -4946,8 +6642,35 @@ fn summarize_function(
                         }
                     }
                 }
-                if let SimpleExpr::Call { callee, args, .. } = expr {
-                    if let Some(sink_match) = find_sink_pattern(callee, args, &patterns.sinks) {
+                // A method call is a sink candidate too. Its receiver is
+                // argument 0, matching how the concrete pass and the pattern
+                // set's `relevant_arguments` index them.
+                let call_parts = match expr {
+                    SimpleExpr::Call { callee, args, .. } => {
+                        Some((callee.clone(), args.clone(), None))
+                    }
+                    SimpleExpr::MethodCall {
+                        method,
+                        receiver,
+                        args,
+                        ..
+                    } => {
+                        let all_args = std::iter::once(receiver.as_ref())
+                            .chain(args.iter())
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let receiver_type =
+                            infer_expr_type(receiver, &type_bindings, field_types, return_types);
+                        Some((method.clone(), all_args, receiver_type))
+                    }
+                    _ => None,
+                };
+                if let Some((callee, args, receiver_type)) = call_parts {
+                    let callee = &callee;
+                    let args = args.as_slice();
+                    if let Some(sink_match) =
+                        find_sink_pattern(callee, args, receiver_type.as_deref(), &patterns.sinks)
+                    {
                         for index in &sink_match.relevant_arguments {
                             if let Some(arg) = args.get(*index) {
                                 let arg_taint = eval_abstract_expr(
@@ -4971,8 +6694,12 @@ fn summarize_function(
                         }
                     }
 
-                    if let Some(resolved) =
-                        resolve_call_target(callee, &function.package_path, local_index, None)
+                    // Free calls only: a method's parameter indexes are shifted
+                    // by the receiver, and resolving a bare method name here
+                    // would propagate through any same-named function.
+                    if matches!(expr, SimpleExpr::Call { .. })
+                        && let Some(resolved) =
+                            resolve_call_target(callee, &function.package_path, local_index, None)
                         && let Some(callee_summary) = summaries.get(&resolved).cloned()
                     {
                         for (sink_category, parameter_indexes) in callee_summary.param_to_sink {
@@ -5186,6 +6913,12 @@ struct DataFlowBuilder<'a> {
     summaries: &'a BTreeMap<String, FunctionSummary>,
     local_index: &'a HashMap<String, Vec<String>>,
     function_map: &'a HashMap<String, &'a FunctionRecord>,
+    /// Type indexes, so a receiver-typed sink pattern can be evaluated: a
+    /// pattern restricted to `Command::arg` must know what `cmd` is.
+    field_types: &'a HashMap<String, String>,
+    return_types: &'a ReturnTypeIndex,
+    /// Type bindings of the function currently being materialized.
+    current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
     edges: IndexMap<String, DataFlowEdge>,
     slices: IndexMap<String, DataFlowSlice>,
@@ -5199,6 +6932,8 @@ impl<'a> DataFlowBuilder<'a> {
         summaries: &'a BTreeMap<String, FunctionSummary>,
         local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
+        field_types: &'a HashMap<String, String>,
+        return_types: &'a ReturnTypeIndex,
     ) -> Self {
         Self {
             mode,
@@ -5206,6 +6941,9 @@ impl<'a> DataFlowBuilder<'a> {
             summaries,
             local_index,
             function_map,
+            field_types,
+            return_types,
+            current_bindings: HashMap::new(),
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
             slices: IndexMap::new(),
@@ -5214,6 +6952,7 @@ impl<'a> DataFlowBuilder<'a> {
     }
 
     fn materialize_function(&mut self, function: &FunctionRecord) {
+        self.current_bindings = infer_type_bindings(function, self.field_types, self.return_types);
         let mut env: HashMap<String, ConcreteTaint> = HashMap::new();
         for (idx, param) in function.params.iter().enumerate() {
             let category = function
@@ -5342,12 +7081,12 @@ impl<'a> DataFlowBuilder<'a> {
                     }
                 }
                 Operation::Expr(expr) | Operation::Return(expr) => {
-                    let (callee, args, position) = match expr {
+                    let (callee, args, position, receiver_type) = match expr {
                         SimpleExpr::Call {
                             callee,
                             args,
                             position,
-                        } => (callee.clone(), args.clone(), position.clone()),
+                        } => (callee.clone(), args.clone(), position.clone(), None),
                         SimpleExpr::MethodCall {
                             method,
                             receiver,
@@ -5358,7 +7097,13 @@ impl<'a> DataFlowBuilder<'a> {
                                 .chain(args.iter())
                                 .cloned()
                                 .collect::<Vec<_>>();
-                            (method.clone(), all_args, position.clone())
+                            let receiver_type = infer_expr_type(
+                                receiver,
+                                &self.current_bindings,
+                                self.field_types,
+                                self.return_types,
+                            );
+                            (method.clone(), all_args, position.clone(), receiver_type)
                         }
                         _ => continue,
                     };
@@ -5366,9 +7111,12 @@ impl<'a> DataFlowBuilder<'a> {
                     let args = &args;
                     let position = &position;
                     {
-                        if let Some(sink_match) =
-                            find_sink_pattern(callee, args, &self.patterns.sinks)
-                        {
+                        if let Some(sink_match) = find_sink_pattern(
+                            callee,
+                            args,
+                            receiver_type.as_deref(),
+                            &self.patterns.sinks,
+                        ) {
                             for index in &sink_match.relevant_arguments {
                                 if let Some(arg) = args.get(*index) {
                                     let taint = self.eval_concrete_expr(function, arg, &env);
@@ -6105,6 +7853,7 @@ fn find_source_pattern(callee: &str, patterns: &[DataFlowPattern]) -> Option<Sou
 fn find_sink_pattern(
     callee: &str,
     args: &[SimpleExpr],
+    receiver_type: Option<&str>,
     patterns: &[DataFlowPattern],
 ) -> Option<SinkPatternMatch> {
     let normalized = normalize_pattern_text(callee);
@@ -6112,12 +7861,26 @@ fn find_sink_pattern(
         .iter()
         .find(|pattern| {
             pattern_matches_callee(&normalized, &pattern.pattern)
+                && receiver_type_matches(pattern, receiver_type)
                 && sink_pattern_context_confident(&normalized, args, pattern)
         })
         .map(|pattern| SinkPatternMatch {
             category: pattern.category.clone(),
             relevant_arguments: pattern.relevant_arguments.clone(),
         })
+}
+
+/// Whether a pattern's receiver-type restriction is satisfied.
+///
+/// A pattern without one matches on the callee alone, as before. A pattern with
+/// one matches only when the receiver's type was actually resolved to it —
+/// never when the type is unknown, because a sink that fires on an unresolved
+/// receiver is exactly the false positive the restriction exists to prevent.
+fn receiver_type_matches(pattern: &DataFlowPattern, receiver_type: Option<&str>) -> bool {
+    match pattern.receiver_type.as_deref() {
+        None => true,
+        Some(required) => receiver_type == Some(required),
+    }
 }
 
 fn sink_pattern_context_confident(
@@ -6265,28 +8028,20 @@ fn enrich_graph_component_purls(report: &mut Report) {
     }
 
     if let Some(call_graph) = &mut report.call_graph {
-        let mut node_purls = HashMap::new();
         for node in &mut call_graph.nodes {
             node.purl = resolve_package_purl(&node.package_path, &package_purls);
-            node_purls.insert(node.id.clone(), node.purl.clone());
+            if node.purl.is_empty() {
+                // A synthetic external node has no package of its own; infer the
+                // owning crate from its qualified name so consumers can still
+                // attribute the call.
+                node.purl = resolve_package_purl(
+                    &inferred_package_path(&node.qualified_name),
+                    &package_purls,
+                );
+            }
         }
-        for edge in &mut call_graph.edges {
-            edge.source_purl = node_purls
-                .get(&edge.source_id)
-                .cloned()
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| {
-                    resolve_package_purl(&inferred_package_path(&edge.source_name), &package_purls)
-                });
-            edge.target_purl = node_purls
-                .get(&edge.target_id)
-                .cloned()
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| {
-                    resolve_package_purl(&inferred_package_path(&edge.target_name), &package_purls)
-                });
-            edge.purls = combined_purls(&edge.source_purl, &edge.target_purl);
-        }
+        // Edges deliberately carry no purls: both endpoints' purls live on the
+        // nodes the edge references.
     }
 
     if let Some(data_flow) = &mut report.data_flow {
@@ -6701,16 +8456,14 @@ mod tests {
             call_graph
                 .edges
                 .iter()
-                .any(|edge| edge.source_name.ends_with("main")
-                    && edge.properties.get("calleeText")
-                        == Some(&"helper::read_secret".to_string()))
+                .any(|edge| call_graph.source_name(edge).ends_with("main")
+                    && edge.callee_text.as_deref() == Some("basic_app::helper::read_secret"))
         );
         assert!(
             call_graph
                 .edges
                 .iter()
-                .any(|edge| edge.properties.get("calleeText")
-                    == Some(&"helper::run_command".to_string()))
+                .any(|edge| edge.callee_text.as_deref() == Some("basic_app::helper::run_command"))
         );
 
         let data_flow = report.data_flow.expect("dataflow emitted");
@@ -6743,15 +8496,1461 @@ mod tests {
             graph
                 .edges
                 .iter()
-                .any(|edge| edge.properties.get("calleeText")
-                    == Some(&"crate::util::compute".to_string()))
+                .any(|edge| edge.callee_text.as_deref() == Some("multi_file_app::util::compute"))
         );
         assert!(
             graph
                 .edges
                 .iter()
-                .any(|edge| edge.properties.get("calleeText") == Some(&"render".to_string()))
+                .any(|edge| edge.callee_text.as_deref() == Some("render"))
         );
+    }
+
+    /// Builds an ambiguous call site: `count` same-named methods on distinct
+    /// types, called through a bare method name the resolver cannot pin down.
+    fn ambiguous_workspace(count: usize) -> PathBuf {
+        let root = temp_dir("fanout");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"fanout-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        // The receiver must be genuinely untypeable for the site to stay
+        // ambiguous: it comes from a call rusi cannot see the return type of.
+        // `pick()` is kept as a locally-resolved call for the companion test.
+        let mut source = String::from(
+            "fn main() {\n    let _ready = pick();\n    let value = elsewhere::unknown_source();\n    value.render();\n}\n\nfn pick() -> Widget0 {\n    Widget0\n}\n",
+        );
+        for index in 0..count {
+            source.push_str(&format!(
+                "pub struct Widget{index};\nimpl Widget{index} {{\n    pub fn render(&self) {{}}\n}}\n"
+            ));
+        }
+        fs::write(root.join("src").join("main.rs"), source).expect("write main.rs");
+        root
+    }
+
+    fn render_edges(report: &rusi_schema::Report) -> Vec<rusi_schema::CallGraphEdge> {
+        report
+            .call_graph
+            .as_ref()
+            .expect("callgraph emitted")
+            .edges
+            .iter()
+            .filter(|edge| edge.method.as_deref() == Some("render"))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn ambiguous_call_sites_are_capped_and_marked() {
+        let root = ambiguous_workspace(40);
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            max_call_candidates: 8,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let edges = render_edges(&report);
+        assert_eq!(
+            edges.len(),
+            8,
+            "fan-out is capped at the configured ceiling"
+        );
+        for edge in &edges {
+            // The true ambiguity is still reported, so a consumer can tell this
+            // is a sample rather than the whole candidate set.
+            assert_eq!(edge.candidate_count, Some(40));
+            // Presence of the emitted count is what marks the site truncated.
+            assert_eq!(edge.emitted_candidate_count, Some(8));
+        }
+        assert!(
+            report
+                .call_graph
+                .as_ref()
+                .expect("callgraph emitted")
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic
+                    .message
+                    .contains("ambiguous call sites were truncated"))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn zero_disables_the_cap() {
+        let root = ambiguous_workspace(40);
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            max_call_candidates: 0,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let edges = render_edges(&report);
+        assert_eq!(edges.len(), 40);
+        assert!(
+            edges
+                .iter()
+                .all(|edge| edge.emitted_candidate_count.is_none())
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn capping_is_deterministic_and_does_not_touch_resolved_sites() {
+        let root = ambiguous_workspace(40);
+        let options = || AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            max_call_candidates: 8,
+            ..AnalyzeOptionsInput::default()
+        };
+        let first = analyze(options()).expect("analysis succeeds");
+        let second = analyze(options()).expect("analysis succeeds");
+
+        let names = |report: &rusi_schema::Report| {
+            let mut names: Vec<String> = render_edges(report)
+                .iter()
+                .map(|edge| {
+                    report
+                        .call_graph
+                        .as_ref()
+                        .map(|graph| graph.target_name(edge).to_string())
+                        .unwrap_or_default()
+                })
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(
+            names(&first),
+            names(&second),
+            "the surviving sample is stable across runs"
+        );
+
+        // `pick()` resolves to exactly one target, so it keeps its single
+        // uncapped, untruncated edge.
+        let pick_edges: Vec<&rusi_schema::CallGraphEdge> = first
+            .call_graph
+            .as_ref()
+            .expect("callgraph emitted")
+            .edges
+            .iter()
+            .filter(|edge| edge.callee_text.as_deref() == Some("pick"))
+            .collect();
+        assert_eq!(pick_edges.len(), 1);
+        assert!(pick_edges[0].emitted_candidate_count.is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cfg_evaluation_drops_inactive_code_and_records_active_gates() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("cfg-modtree-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let names: Vec<&str> = report
+            .declarations
+            .iter()
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect();
+
+        // Behind a feature Cargo did not resolve: not part of this build.
+        assert!(!names.contains(&"cfg_modtree_app::ldap_sink"));
+        // `#[cfg(test)]` modules are excluded unless tests are requested.
+        assert!(
+            !names
+                .iter()
+                .any(|name| name.contains("tests::") || name.ends_with("::tests"))
+        );
+        // Behind an enabled feature: kept, and the gate is reported so consumers
+        // can qualify the finding.
+        let tls_sink = report
+            .declarations
+            .iter()
+            .find(|declaration| declaration.qualified_name == "cfg_modtree_app::tls_sink")
+            .expect("enabled feature-gated function is collected");
+        assert_eq!(tls_sink.cfg_gate.as_deref(), Some("feature = \"tls\""));
+        // An unconditional declaration carries no gate.
+        assert!(
+            report
+                .declarations
+                .iter()
+                .find(|declaration| declaration.qualified_name == "cfg_modtree_app::main")
+                .expect("main is collected")
+                .cfg_gate
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn module_paths_follow_mod_declarations_rather_than_the_file_layout() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("cfg-modtree-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `#[path = "generated/handlers_v2.rs"] mod handlers;`: the module path
+        // is `handlers`, not the `generated::handlers_v2` the file layout
+        // suggests.
+        assert!(
+            report.declarations.iter().any(
+                |declaration| declaration.qualified_name == "cfg_modtree_app::handlers::handle"
+            )
+        );
+        assert!(
+            !report
+                .declarations
+                .iter()
+                .any(|declaration| declaration.qualified_name.contains("handlers_v2"))
+        );
+
+        // A file only a cfg-disabled `mod` declaration would have reached is
+        // still reported, but flagged as unreachable rather than silently
+        // attributed to an active module path.
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == "module-resolution"
+                && diagnostic.file_path.as_deref() == Some("src/platform.rs")
+        }));
+    }
+
+    /// Writes a fixture crate and returns its root.
+    fn fixture_crate(name: &str, source: &str) -> PathBuf {
+        let root = temp_dir(name);
+        fs::write(
+            root.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n"
+            ),
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src").join("lib.rs"), source).expect("write lib.rs");
+        root
+    }
+
+    fn resolved_edges(
+        report: &rusi_schema::Report,
+        method: &str,
+    ) -> Vec<rusi_schema::CallGraphEdge> {
+        report
+            .call_graph
+            .as_ref()
+            .expect("callgraph emitted")
+            .edges
+            .iter()
+            .filter(|edge| edge.method.as_deref() == Some(method))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn self_calls_resolve_to_the_impl_type() {
+        // Two types define `helper`; a `self.helper()` inside one impl can only
+        // mean that impl's method.
+        let root = fixture_crate(
+            "self-receiver",
+            r#"
+pub struct Expander<'a> { pub name: &'a str }
+
+impl<'a> Expander<'a> {
+    pub fn expand(&mut self) { self.helper(); }
+    pub fn helper(&mut self) {}
+}
+
+pub struct Other;
+impl Other {
+    pub fn helper(&self) {}
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "helper");
+        assert_eq!(edges.len(), 1, "self.helper() must resolve to one target");
+        assert_eq!(edges[0].call_type, "receiver-typed");
+        assert!(
+            graph.target_name(&edges[0]).contains("Expander"),
+            "resolved to {}",
+            graph.target_name(&edges[0])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn field_receivers_resolve_through_declared_field_types() {
+        let root = fixture_crate(
+            "field-receiver",
+            r#"
+pub struct Sink;
+impl Sink {
+    pub fn emit(&self) {}
+}
+
+pub struct Decoy;
+impl Decoy {
+    pub fn emit(&self) {}
+}
+
+pub struct Holder { pub sink: Sink }
+
+impl Holder {
+    pub fn run(&self) { self.sink.emit(); }
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "emit");
+        assert_eq!(
+            edges.len(),
+            1,
+            "self.sink.emit() must resolve to one target"
+        );
+        assert!(graph.target_name(&edges[0]).contains("Sink::emit"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dependency_call_is_external_until_dependencies_are_analyzed() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edge = graph
+            .edges
+            .iter()
+            .find(|edge| edge.callee_text.as_deref() == Some("dep_helper_lib::run_command"))
+            .expect("the dependency call is recorded");
+        assert_eq!(edge.call_type, "external");
+        assert_eq!(report.packages.len(), 1, "only the workspace is analyzed");
+    }
+
+    #[test]
+    fn dependency_analysis_resolves_calls_into_dependencies() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_dependencies: true,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edge = graph
+            .edges
+            .iter()
+            .find(|edge| edge.callee_text.as_deref() == Some("dep_helper_lib::run_command"))
+            .expect("the dependency call is recorded");
+        assert_eq!(
+            edge.call_type, "static",
+            "the call should resolve into the dependency"
+        );
+        assert!(graph.target_name(edge).ends_with("::run_command"));
+
+        // The dependency is reported as a package, marked as not a workspace
+        // member so a consumer can tell whose code it is.
+        let dependency = report
+            .packages
+            .iter()
+            .find(|package| package.name == "dep-helper-lib")
+            .expect("the dependency package is reported");
+        assert!(!dependency.module.workspace_member);
+
+        // At this tier the dependency contributes declarations but no bodies, so
+        // workspace taint findings are unchanged rather than swallowed by a
+        // body-less summary.
+        let workspace_only = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("workspace analysis succeeds");
+        assert_eq!(
+            report.data_flow.as_ref().map(|flow| flow.slices.len()),
+            workspace_only
+                .data_flow
+                .as_ref()
+                .map(|flow| flow.slices.len()),
+            "the lighter dependency tier must not change workspace flows"
+        );
+    }
+
+    #[test]
+    fn security_deps_carries_taint_through_a_dependency() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: crate::DATAFLOW_SECURITY_DEPS.to_string(),
+            include_dependencies: true,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        // `main` reads an env var and hands it to a function that lives in the
+        // dependency, which execs it. The flow only exists if the dependency's
+        // body was analyzed and summarized.
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "process-exec"
+            }),
+            "expected an env -> process-exec flow through the dependency, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            data_flow.summaries.iter().any(|summary| {
+                summary.function.starts_with("dep_helper_lib::")
+                    && summary.param_to_sink.contains_key("process-exec")
+            }),
+            "expected a dependency-side sink summary"
+        );
+    }
+
+    #[test]
+    fn dependency_bins_and_tests_are_not_analyzed() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deps-app"),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            include_dependencies: true,
+            include_tests: true,
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // A dependency ships only its library into this build.
+        let dependency_files: Vec<&str> = report
+            .packages
+            .iter()
+            .filter(|package| !package.module.workspace_member)
+            .flat_map(|package| package.files.iter().map(String::as_str))
+            .collect();
+        assert!(
+            !dependency_files.is_empty(),
+            "the dependency should contribute files"
+        );
+        assert!(
+            dependency_files
+                .iter()
+                .all(|path| !path.contains("/bin/") && !path.contains("tests/")),
+            "dependency bins and tests must be skipped, got {dependency_files:?}"
+        );
+    }
+
+    #[test]
+    fn a_type_annotated_let_still_propagates_taint() {
+        let root = fixture_crate(
+            "annotated-let",
+            r#"
+pub fn annotated() {
+    let secret: String = std::env::var("TOKEN").unwrap_or_default();
+    let _ = std::process::Command::new(secret);
+}
+pub fn unannotated() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let _ = std::process::Command::new(secret);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `let x: T = ..` wraps the pattern in `Pat::Type`, which used to match
+        // no branch at all: the binding recorded nothing and taint stopped
+        // there, so only the unannotated twin was reported.
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let functions: std::collections::BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category == "process-exec")
+            .map(|slice| slice.sink_function.as_str())
+            .collect();
+        assert!(
+            functions.iter().any(|name| name.ends_with("::annotated")),
+            "an annotated binding must propagate taint, got {functions:?}"
+        );
+        assert!(functions.iter().any(|name| name.ends_with("::unannotated")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_annotation_outranks_inference() {
+        let root = fixture_crate(
+            "annotation-priority",
+            r#"
+pub struct Real;
+impl Real { pub fn act(&self) {} }
+pub struct Other;
+impl Other { pub fn act(&self) {} }
+
+pub fn make() -> Other { Other }
+
+pub fn run() {
+    // The annotation contradicts what the initializer would suggest; the
+    // written type is the one that holds.
+    let value: Real = unsafe { std::mem::transmute(make()) };
+    value.act();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "act");
+        assert_eq!(edges.len(), 1);
+        assert!(
+            graph.target_name(&edges[0]).ends_with("Real::act"),
+            "resolved to {}",
+            graph.target_name(&edges[0])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_known_receiver_type_with_no_local_impl_is_external() {
+        let root = fixture_crate(
+            "std-receiver",
+            r#"
+pub struct Remap;
+impl Remap { pub fn push(&mut self, value: u32) { let _ = value; } }
+pub struct TypeList;
+impl TypeList { pub fn push(&mut self, value: u32) { let _ = value; } }
+
+pub fn run() {
+    let mut nodes = Vec::new();
+    nodes.push(1u32);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let push_edges: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.method.as_deref() == Some("push"))
+            .collect();
+        // `Vec::push` cannot reach a local `push`; claiming it can asserts a
+        // call the program cannot make.
+        assert_eq!(push_edges.len(), 1, "expected a single external edge");
+        assert_eq!(push_edges[0].call_type, "external");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_blanket_impl_still_applies_to_a_std_receiver() {
+        let root = fixture_crate(
+            "blanket-impl",
+            r#"
+pub trait Ext { fn shout(&self); }
+impl<T> Ext for T { fn shout(&self) {} }
+
+pub fn run() {
+    let nodes: Vec<u32> = Vec::new();
+    nodes.shout();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // A blanket impl's self type is a generic parameter, so it applies to
+        // any receiver — including one whose type has no local impl.
+        let edges = resolved_edges(&report, "shout");
+        assert_eq!(edges.len(), 1, "the blanket impl must still resolve");
+        assert_eq!(edges[0].call_type, "trait-impl");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dyn_trait_receiver_dispatches_to_the_traits_impls() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-dispatch-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `&dyn Store` reduces to the trait name; the call dispatches to the
+        // trait's impls, not to an impl of a type named `Store`.
+        let edges = resolved_edges(&report, "persist");
+        assert_eq!(edges.len(), 2, "expected both Store impls");
+        for edge in &edges {
+            assert_eq!(edge.call_type, "trait-overapprox");
+        }
+    }
+
+    #[test]
+    fn result_and_option_returns_are_typed_through_the_wrapper() {
+        let root = fixture_crate(
+            "wrapper-typing",
+            r#"
+pub struct Client;
+impl Client { pub fn query(&self, sql: &str) { let _ = sql; } }
+pub struct Decoy;
+impl Decoy { pub fn query(&self, sql: &str) { let _ = sql; } }
+
+pub fn connect() -> Result<Client, std::io::Error> { Ok(Client) }
+pub fn maybe() -> Option<Client> { Some(Client) }
+
+pub fn via_question() -> Result<(), std::io::Error> {
+    let client = connect()?;
+    client.query("a");
+    Ok(())
+}
+pub fn via_unwrap() {
+    connect().unwrap().query("b");
+}
+pub fn via_expect() {
+    maybe().expect("present").query("c");
+}
+pub fn via_clone() {
+    let client = connect().unwrap().clone();
+    client.query("d");
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "query");
+        assert_eq!(edges.len(), 4, "every wrapper shape should resolve");
+        for edge in &edges {
+            assert_eq!(edge.call_type, "receiver-typed");
+            assert!(
+                graph.target_name(edge).ends_with("Client::query"),
+                "resolved to {}",
+                graph.target_name(edge)
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn receiver_typed_sinks_are_reached_through_a_wrapper_function() {
+        let root = fixture_crate(
+            "receiver-typed-sink-summary",
+            r#"
+use std::process::Command;
+
+// The sink is a method call in a callee, so it is only found if the
+// interprocedural summary pass evaluates receiver-typed patterns too.
+pub fn add_argument(command: &mut Command, value: String) {
+    command.arg(value);
+}
+
+pub fn exec_tainted() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut command = Command::new("sh");
+    add_argument(&mut command, secret);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(
+                |slice| slice.source_category == "env" && slice.sink_category == "process-exec"
+            ),
+            "expected env -> process-exec through the wrapper, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unwrapping_an_option_binding_does_not_type_the_call_as_option() {
+        // `Option` is a known std type, so typing `held.unwrap()` as `Option`
+        // used to conclude that the following call left the crate entirely.
+        assert_eq!(
+            crate::infer_expr_type(
+                &crate::SimpleExpr::MethodCall {
+                    method: "unwrap".to_string(),
+                    receiver: Box::new(crate::SimpleExpr::Var("held".to_string())),
+                    args: Vec::new(),
+                    position: Position::default(),
+                },
+                &std::collections::HashMap::from([("held".to_string(), "Option".to_string())]),
+                &std::collections::HashMap::new(),
+                &crate::ReturnTypeIndex::default(),
+            ),
+            None
+        );
+        // An already-unwrapped receiver type still carries through.
+        assert_eq!(
+            crate::infer_expr_type(
+                &crate::SimpleExpr::MethodCall {
+                    method: "unwrap".to_string(),
+                    receiver: Box::new(crate::SimpleExpr::Var("held".to_string())),
+                    args: Vec::new(),
+                    position: Position::default(),
+                },
+                &std::collections::HashMap::from([("held".to_string(), "Client".to_string())]),
+                &std::collections::HashMap::new(),
+                &crate::ReturnTypeIndex::default(),
+            )
+            .as_deref(),
+            Some("Client")
+        );
+    }
+
+    #[test]
+    fn receiver_typed_sinks_fire_only_for_the_right_receiver() {
+        let root = fixture_crate(
+            "receiver-typed-sink",
+            r#"
+use std::process::Command;
+
+// Our own builder that also has `arg`.
+pub struct Query;
+impl Query { pub fn arg(&self, value: String) -> &Self { let _ = value; self } }
+
+pub fn exec_tainted() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut command = Command::new("sh");
+    command.arg(secret);
+}
+
+pub fn unrelated_builder() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let query = Query;
+    query.arg(secret);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let exec_slices: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category == "process-exec")
+            .collect();
+        // `Command::new(x).arg(tainted)` is the common injection shape and used
+        // to be missed entirely, because only the constructor argument matched.
+        assert_eq!(
+            exec_slices.len(),
+            1,
+            "expected exactly one process-exec flow"
+        );
+        assert!(exec_slices[0].sink_function.ends_with("exec_tainted"));
+        // Matching on the bare method name would have flagged our own builder
+        // too; the receiver-type restriction is what prevents that.
+        assert!(
+            !data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.sink_function.ends_with("unrelated_builder")),
+            "a same-named method on another type must not be a sink"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_typed_file_handle_is_a_filesystem_sink() {
+        let root = fixture_crate(
+            "file-sink",
+            r#"
+use std::io::Write;
+
+pub fn write_tainted() -> std::io::Result<()> {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut file = std::fs::File::create("/tmp/rusi-test")?;
+    file.write_all(secret.as_bytes())?;
+    Ok(())
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // Requires `File::create` to be typed through its `Result`, so the
+        // receiver-typed `File::write_all` sink can match.
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            }),
+            "expected env -> filesystem-write, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn calls_inside_macro_arguments_are_visible() {
+        let root = fixture_crate(
+            "macro-arguments",
+            r#"
+pub struct Secrets;
+impl Secrets {
+    pub fn token(&self) -> String { String::new() }
+}
+
+pub fn run() {
+    use std::fmt::Write as _;
+    let secrets = Secrets;
+    let mut buffer = String::new();
+    let _ = write!(buffer, "{}", secrets.token());
+    println!("{}", secrets.token());
+    assert!(!secrets.token().is_empty());
+    let _items = vec![secrets.token()];
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // Four macro invocations each call `token()`; every one of them used to
+        // be invisible, because a macro's token stream was never walked.
+        let edges = resolved_edges(&report, "token");
+        assert_eq!(
+            edges.len(),
+            4,
+            "expected one edge per macro argument call, got {}",
+            edges.len()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn macro_rules_definitions_are_not_treated_as_code() {
+        let root = fixture_crate(
+            "macro-rules-skip",
+            r#"
+macro_rules! never_here {
+    () => { danger() };
+}
+
+pub fn danger() {}
+
+pub fn run() {}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // A definition body is a transcriber, not code at that location, so it
+        // must not produce a call attributed to the defining module.
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        assert!(
+            graph
+                .edges
+                .iter()
+                .all(|edge| !graph.target_name(edge).ends_with("::danger")),
+            "a macro_rules body must not become a call"
+        );
+        // The blind spot is reported rather than left silent.
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "macro"
+                    && diagnostic.message.contains("macro_rules!"))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn static_ref_macro_bodies_are_recovered() {
+        let root = fixture_crate(
+            "static-ref-macro",
+            r#"
+pub struct Client;
+impl Client {
+    pub fn new(url: &str) -> Self { let _ = url; Client }
+}
+
+lazy_static::lazy_static! {
+    static ref SHARED: Client = Client::new("https://example.invalid");
+}
+
+pub fn run() { let _ = &*SHARED; }
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `static ref` is not valid Rust, so the body only parses after that one
+        // token is normalized away. The initializer's call is then evidence.
+        assert!(
+            report
+                .usages
+                .iter()
+                .any(|usage| usage.name == "Client::new"),
+            "the static initializer's call should be recorded"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_qualified_external_path_does_not_match_a_local_name() {
+        let root = fixture_crate(
+            "qualified-external",
+            r#"
+pub struct Holder;
+impl Holder {
+    pub fn new() -> Self { Holder }
+}
+
+pub fn run() {
+    // Two external constructors that share their last segment with the local
+    // `Holder::new`.
+    let _values: Vec<u8> = Vec::new();
+    let _boxed = Box::new(1u8);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        for edge in &graph.edges {
+            let callee = edge.callee_text.as_deref().unwrap_or_default();
+            if callee == "Vec::new" || callee == "Box::new" {
+                assert_eq!(
+                    edge.call_type,
+                    "external",
+                    "{callee} must stay external, resolved to {}",
+                    graph.target_name(edge)
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_bindings_take_the_callee_return_type() {
+        let root = fixture_crate(
+            "return-type-binding",
+            r#"
+pub struct Client;
+impl Client {
+    pub fn send(&self) {}
+}
+
+pub struct Decoy;
+impl Decoy {
+    pub fn send(&self) {}
+}
+
+pub fn connect() -> Client { Client }
+
+pub fn run() {
+    let client = connect();
+    client.send();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "send");
+        assert_eq!(
+            edges.len(),
+            1,
+            "`let client = connect()` must type `client`"
+        );
+        assert!(graph.target_name(&edges[0]).contains("Client::send"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn method_chains_resolve_through_return_types() {
+        let root = fixture_crate(
+            "return-type-chain",
+            r#"
+pub struct Builder;
+pub struct Request;
+pub struct Decoy;
+
+impl Builder {
+    pub fn build(&self) -> Request { Request }
+}
+
+impl Request {
+    pub fn dispatch(&self) {}
+}
+
+impl Decoy {
+    pub fn dispatch(&self) {}
+}
+
+pub fn start() -> Builder { Builder }
+
+pub fn run() {
+    start().build().dispatch();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        // `start()` -> Builder, `.build()` -> Request, so `.dispatch()` is
+        // Request's, not the same-named method on `Decoy`.
+        let edges = resolved_edges(&report, "dispatch");
+        assert_eq!(edges.len(), 1, "the chain's receiver must be typed");
+        assert!(
+            graph.target_name(&edges[0]).contains("Request::dispatch"),
+            "resolved to {}",
+            graph.target_name(&edges[0])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn conflicting_return_types_stay_unresolved() {
+        let root = fixture_crate(
+            "return-type-conflict",
+            r#"
+pub struct Left;
+pub struct Right;
+
+impl Left {
+    pub fn act(&self) {}
+}
+impl Right {
+    pub fn act(&self) {}
+}
+
+pub mod first {
+    pub fn make() -> crate::Left { crate::Left }
+}
+pub mod second {
+    pub fn make() -> crate::Right { crate::Right }
+}
+
+pub fn run() {
+    let value = make();
+    value.act();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // Two `make`s with different return types: guessing one would type the
+        // binding wrongly, so the bare name is not indexed and the call site
+        // stays an honest over-approximation.
+        let edges = resolved_edges(&report, "act");
+        assert_eq!(
+            edges.len(),
+            2,
+            "an ambiguous return type must not be guessed"
+        );
+        for edge in &edges {
+            assert!(edge.call_type.ends_with("overapprox"));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn smart_pointer_receivers_resolve_to_the_pointee() {
+        let root = fixture_crate(
+            "autoderef-receiver",
+            r#"
+use std::sync::Arc;
+
+pub struct Client;
+impl Client {
+    pub fn send(&self) {}
+}
+
+pub struct Decoy;
+impl Decoy {
+    pub fn send(&self) {}
+}
+
+pub fn dispatch(client: &Arc<Client>) {
+    client.send();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let edges = resolved_edges(&report, "send");
+        assert_eq!(
+            edges.len(),
+            1,
+            "&Arc<Client> receiver must resolve through the wrapper"
+        );
+        assert!(graph.target_name(&edges[0]).contains("Client::send"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn edges_are_normalized_against_their_nodes() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("basic-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.expect("callgraph emitted");
+        assert!(!graph.edges.is_empty());
+        for edge in &graph.edges {
+            // Every endpoint must exist as a node: that is what makes dropping
+            // the duplicated name/purl/file fields from edges lossless.
+            let source = graph
+                .node(&edge.source_id)
+                .unwrap_or_else(|| panic!("source node missing for edge {}", edge.id));
+            assert!(
+                graph.node(&edge.target_id).is_some(),
+                "target node missing for edge {}",
+                edge.id
+            );
+            assert_eq!(graph.source_name(edge), source.qualified_name);
+            // The call site is in the caller's file.
+            assert_eq!(graph.call_site_file(edge), source.file_path);
+            assert!(edge.line > 0 && edge.column > 0);
+        }
+    }
+
+    #[test]
+    fn identities_are_unique_within_a_report() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-dispatch-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.as_ref().expect("callgraph emitted");
+        let mut edge_ids = std::collections::HashSet::new();
+        for edge in &graph.edges {
+            assert!(
+                edge_ids.insert(edge.id.as_str()),
+                "duplicate call-graph edge id {}",
+                edge.id
+            );
+        }
+        let mut declaration_ids = std::collections::HashSet::new();
+        for declaration in &report.declarations {
+            assert!(
+                declaration_ids.insert(declaration.id.as_str()),
+                "duplicate declaration id {} ({})",
+                declaration.id,
+                declaration.qualified_name
+            );
+        }
+    }
+
+    #[test]
+    fn impl_method_bodies_are_analyzed_once() {
+        let root = temp_dir("impl-body-once");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"impl-body\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        // A nested item and a nested `fn` inside an impl method body: walking
+        // the body twice used to record both again, and re-emit the nested
+        // function's calls under the same declaration id.
+        fs::write(
+            root.join("src").join("lib.rs"),
+            r#"
+pub struct Holder;
+
+impl Holder {
+    pub fn work(&self) -> u32 {
+        enum Inner { A }
+        fn nested(value: u32) -> u32 {
+            value.count_ones()
+        }
+        let _ = Inner::A;
+        nested(7)
+    }
+}
+"#,
+        )
+        .expect("write lib.rs");
+
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let inner_count = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.qualified_name.ends_with("::Inner"))
+            .count();
+        assert_eq!(inner_count, 1, "item in an impl method body recorded twice");
+        let nested_count = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.qualified_name.ends_with("::nested"))
+            .count();
+        assert_eq!(nested_count, 1, "fn in an impl method body recorded twice");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trait_impls_of_one_type_get_distinct_identities() {
+        let root = temp_dir("trait-impl-identity");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"trait-identity\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\n",
+        )
+        .expect("write Cargo.toml");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        // Same type, same method name, same signature — only the trait differs.
+        fs::write(
+            root.join("src").join("lib.rs"),
+            r#"
+pub trait Section { fn id(&self) -> u8; }
+pub trait ComponentSection { fn id(&self) -> u8; }
+
+pub struct Holder;
+
+impl Section for Holder {
+    fn id(&self) -> u8 { 1 }
+}
+
+impl ComponentSection for Holder {
+    fn id(&self) -> u8 { 2 }
+}
+"#,
+        )
+        .expect("write lib.rs");
+
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let ids: std::collections::HashSet<&str> = report
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "method")
+            .map(|declaration| declaration.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 2, "the two trait impls must not share one id");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn each_cargo_target_roots_its_own_qualified_names() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("multi-target-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // Every bin target is a separate crate, so the two crate-root `main`s
+        // and `run`s must not share qualified names — and therefore must not
+        // share declaration ids.
+        let names: std::collections::BTreeSet<&str> = report
+            .declarations
+            .iter()
+            .map(|declaration| declaration.qualified_name.as_str())
+            .collect();
+        assert!(names.contains("first::main"), "got {names:?}");
+        assert!(names.contains("second::main"), "got {names:?}");
+        assert!(names.contains("first::run"));
+        assert!(names.contains("second::run"));
+        assert!(names.contains("multi_target_app::shared_helper"));
+
+        let mut files_per_id: std::collections::HashMap<&str, std::collections::BTreeSet<&str>> =
+            std::collections::HashMap::new();
+        for declaration in &report.declarations {
+            files_per_id
+                .entry(declaration.id.as_str())
+                .or_default()
+                .insert(declaration.file_path.as_str());
+        }
+        let colliding: Vec<_> = files_per_id
+            .iter()
+            .filter(|(_, files)| files.len() > 1)
+            .collect();
+        assert!(
+            colliding.is_empty(),
+            "declaration ids must not span files: {colliding:?}"
+        );
+
+        // The owning package is still the package, so purl resolution and
+        // grouping are unaffected by the per-target crate root.
+        for declaration in &report.declarations {
+            assert_eq!(declaration.package_path, "multi_target_app");
+        }
+    }
+
+    #[test]
+    fn glob_and_reexport_imports_resolve_to_the_declaring_module() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("cfg-modtree-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let graph = report.call_graph.expect("callgraph emitted");
+        let callee_texts: Vec<&str> = graph
+            .edges
+            .iter()
+            .filter(|edge| graph.source_name(edge) == "cfg_modtree_app::main")
+            .filter_map(|edge| edge.callee_text.as_deref())
+            .collect();
+
+        // Called through `use crate::sinks::*`.
+        assert!(callee_texts.contains(&"cfg_modtree_app::sinks::glob_sink"));
+        // Called through `pub use crate::facade::inner::run_facade_sink`, and
+        // resolved past the facade to the module that declares it.
+        assert!(callee_texts.contains(&"cfg_modtree_app::facade::inner::run_facade_sink"));
     }
 
     #[test]
@@ -6830,13 +10029,13 @@ mod tests {
             graph
                 .edges
                 .iter()
-                .any(|edge| edge.properties.get("calleeText") == Some(&"sqlx::query".to_string()))
+                .any(|edge| edge.callee_text.as_deref() == Some("sqlx::query"))
         );
         assert!(
             graph
                 .edges
                 .iter()
-                .any(|edge| edge.properties.get("calleeText") == Some(&"post".to_string()))
+                .any(|edge| edge.callee_text.as_deref() == Some("post"))
         );
 
         let data_flow = report.data_flow.expect("dataflow emitted");
@@ -7173,18 +10372,20 @@ mod tests {
             .find(|node| node.qualified_name.ends_with("main"))
             .expect("callgraph node exists");
         assert!(node.purl.starts_with("pkg:cargo/"));
+        // An edge's endpoint purls live on the nodes it references.
         let edge = graph
             .edges
             .iter()
-            .find(|edge| edge.source_name.ends_with("main"))
+            .find(|edge| graph.source_name(edge).ends_with("main"))
             .expect("callgraph edge exists");
-        assert!(edge.source_purl.starts_with("pkg:cargo/"));
-        assert!(!edge.purls.is_empty());
         assert!(
-            edge.purls
-                .iter()
-                .any(|purl| purl == &edge.source_purl || purl == &edge.target_purl)
+            graph
+                .node(&edge.source_id)
+                .expect("source node exists")
+                .purl
+                .starts_with("pkg:cargo/")
         );
+        assert!(graph.node(&edge.target_id).is_some());
 
         let data_flow = report.data_flow.expect("dataflow emitted");
         let source_node = data_flow
@@ -7241,6 +10442,8 @@ mod tests {
 
         let report = analyze_with_optional_compiler(
             AnalyzeOptionsInput {
+                include_dependencies: false,
+                max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
                 dir: fixture_path("basic-app"),
                 backend: BACKEND_COMPILER.to_string(),
                 analysis_scope: AnalysisScope::Default,
@@ -7282,6 +10485,7 @@ mod tests {
             }],
             imports: Vec::new(),
             declarations: vec![Declaration {
+                cfg_gate: None,
                 id: "decl-compiler-test".to_string(),
                 name: "read_secret".to_string(),
                 qualified_name: "basic_app::helper::read_secret".to_string(),
@@ -7300,6 +10504,7 @@ mod tests {
             }],
             usages: Vec::new(),
             security_signals: vec![SecuritySignal {
+                cfg_gate: None,
                 id: "signal-compiler-test".to_string(),
                 category: "unsafe-code".to_string(),
                 severity: "medium".to_string(),
@@ -7339,6 +10544,8 @@ mod tests {
 
         let report = analyze_with_optional_compiler(
             AnalyzeOptionsInput {
+                include_dependencies: false,
+                max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
                 dir: fixture_path("basic-app"),
                 backend: BACKEND_COMPILER.to_string(),
                 analysis_scope: AnalysisScope::Default,
@@ -7421,12 +10628,14 @@ mod tests {
                     pattern: "helper::read_secret".to_string(),
                     category: "custom-source".to_string(),
                     relevant_arguments: vec![],
+                    receiver_type: None,
                 }],
                 sinks: vec![DataFlowPattern {
                     target: String::new(),
                     pattern: "helper::run_command".to_string(),
                     category: "custom-command".to_string(),
                     relevant_arguments: vec![0],
+                    receiver_type: None,
                 }],
                 passthroughs: Vec::new(),
             }),
@@ -7701,6 +10910,8 @@ mod tests {
 
         let compiler_report = analyze_with_optional_compiler(
             AnalyzeOptionsInput {
+                include_dependencies: false,
+                max_call_candidates: crate::DEFAULT_MAX_CALL_CANDIDATES,
                 dir: fixture_path("api-discovery-app"),
                 backend: BACKEND_COMPILER.to_string(),
                 analysis_scope: AnalysisScope::Default,
@@ -7930,11 +11141,7 @@ mod tests {
         let persist_edges: Vec<_> = graph
             .edges
             .iter()
-            .filter(|edge| {
-                edge.properties
-                    .get("calleeText")
-                    .is_some_and(|t| t == "persist")
-            })
+            .filter(|edge| edge.callee_text.as_deref() == Some("persist"))
             .collect();
         assert!(
             !persist_edges.is_empty(),
@@ -7968,28 +11175,27 @@ mod tests {
                 "expected over-approx call_type, got {}",
                 edge.call_type
             );
+            // Confidence is derived from the call type rather than stored.
             assert_eq!(
-                edge.properties.get("confidence"),
-                Some(&"low".to_string()),
-                "over-approx edge must carry confidence=low"
+                rusi_schema::call_type_confidence(&edge.call_type),
+                "low",
+                "over-approx edge must be low confidence"
             );
             assert_eq!(
-                edge.properties.get("candidateCount"),
-                Some(&"2".to_string()),
-                "over-approx edge must report candidateCount=2"
+                edge.candidate_count,
+                Some(2),
+                "over-approx edge must report candidate_count=2"
             );
-            // Regression: resolved edges must carry the target's qualified name,
-            // never the raw `decl-*` id. A prior refactor leaked the id here,
-            // which also broke downstream purl inference keyed off target_name.
+            // Regression: an edge's target must resolve to the target's
+            // qualified name, never leak the raw `decl-*` id.
+            let target_name = graph.target_name(edge);
             assert!(
-                !edge.target_name.starts_with("decl-"),
-                "edge target_name must be a qualified name, got {}",
-                edge.target_name
+                !target_name.starts_with("decl-"),
+                "edge target must resolve to a qualified name, got {target_name}"
             );
             assert!(
-                edge.target_name.ends_with("::persist"),
-                "edge target_name should be the resolved impl method, got {}",
-                edge.target_name
+                target_name.ends_with("::persist"),
+                "edge target should be the resolved impl method, got {target_name}"
             );
         }
     }
@@ -8039,18 +11245,15 @@ mod tests {
             "cache.get should resolve via receiver-type inference"
         );
         assert_eq!(
-            cache_edge.properties.get("receiver"),
-            Some(&"cache".to_string()),
+            cache_edge.receiver.as_deref(),
+            Some("cache"),
             "cache.get edge should record the receiver binding name"
         );
         assert_eq!(
             store_edge.call_type, "receiver-typed",
             "store.get should resolve via receiver-type inference"
         );
-        assert_eq!(
-            store_edge.properties.get("receiver"),
-            Some(&"store".to_string()),
-        );
+        assert_eq!(store_edge.receiver.as_deref(), Some("store"));
         // Distinct targets — the entire point of P1.2.
         assert_ne!(cache_get_id, store_get_id);
     }
@@ -8080,20 +11283,20 @@ mod tests {
             ho_edges.len(),
             ho_edges
                 .iter()
-                .map(|e| e.target_name.clone())
+                .map(|e| graph.target_name(e).to_string())
                 .collect::<Vec<_>>()
         );
         for edge in &ho_edges {
             assert_eq!(
-                edge.properties.get("confidence"),
-                Some(&"high".to_string()),
+                rusi_schema::call_type_confidence(&edge.call_type),
+                "high",
                 "higher-order edge confidence must be high (single target)"
             );
             // The edge's calleeText carries the closure's qualified name
             // (e.g. `higher_order_app::closure_16_50`).
             let callee = edge
-                .properties
-                .get("calleeText")
+                .callee_text
+                .as_deref()
                 .expect("higher-order edge carries calleeText");
             assert!(
                 callee.contains("closure_"),
@@ -8272,6 +11475,85 @@ mod tests {
                 slice.path_length
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod receiver_type_tests {
+    use super::bare_type_token;
+
+    #[test]
+    fn plain_paths_reduce_to_the_last_segment() {
+        assert_eq!(bare_type_token("Client").as_deref(), Some("Client"));
+        assert_eq!(bare_type_token("db::Client").as_deref(), Some("Client"));
+    }
+
+    #[test]
+    fn references_and_mut_are_stripped() {
+        assert_eq!(bare_type_token("&Client").as_deref(), Some("Client"));
+        assert_eq!(bare_type_token("&mut Client").as_deref(), Some("Client"));
+        // The token stream renders types with spaces around punctuation.
+        assert_eq!(
+            bare_type_token("& mut db :: Client").as_deref(),
+            Some("Client")
+        );
+    }
+
+    #[test]
+    fn deref_transparent_wrappers_are_peeled() {
+        // Previously these produced a concatenated nonsense token like
+        // `ArcClient`, which matched no impl at all.
+        assert_eq!(bare_type_token("Arc<Client>").as_deref(), Some("Client"));
+        assert_eq!(
+            bare_type_token("Box<db::Client>").as_deref(),
+            Some("Client")
+        );
+        // `Arc` is peeled, `Mutex` is not: `arc_mutex.lock()` is
+        // `Mutex::lock`, not a method of the guarded type.
+        assert_eq!(
+            bare_type_token("&mut Arc<Mutex<Client>>").as_deref(),
+            Some("Mutex")
+        );
+        assert_eq!(
+            bare_type_token("Pin<Box<Client>>").as_deref(),
+            Some("Client")
+        );
+        // `Cow<'a, T>`: the pointee is the last non-lifetime argument.
+        assert_eq!(
+            bare_type_token("Cow<'a, Client>").as_deref(),
+            Some("Client")
+        );
+    }
+
+    #[test]
+    fn containers_with_their_own_methods_are_not_peeled() {
+        // `vec.push(..)` is `Vec::push`, not a method of the element type.
+        assert_eq!(bare_type_token("Vec<Client>").as_deref(), Some("Vec"));
+        assert_eq!(bare_type_token("Option<Client>").as_deref(), Some("Option"));
+        assert_eq!(
+            bare_type_token("HashMap<String, Client>").as_deref(),
+            Some("HashMap")
+        );
+    }
+
+    #[test]
+    fn generic_types_keep_their_head() {
+        assert_eq!(bare_type_token("Sink<String>").as_deref(), Some("Sink"));
+        assert_eq!(bare_type_token("Wrapper<'a>").as_deref(), Some("Wrapper"));
+    }
+
+    #[test]
+    fn primitives_and_non_types_are_rejected() {
+        assert_eq!(bare_type_token("u32"), None);
+        assert_eq!(bare_type_token("bool"), None);
+        assert_eq!(bare_type_token(""), None);
+        assert_eq!(bare_type_token("&str"), None);
+    }
+
+    #[test]
+    fn trait_objects_reduce_to_the_trait() {
+        assert_eq!(bare_type_token("&dyn Store").as_deref(), Some("Store"));
+        assert_eq!(bare_type_token("impl Store").as_deref(), Some("Store"));
     }
 }
 
