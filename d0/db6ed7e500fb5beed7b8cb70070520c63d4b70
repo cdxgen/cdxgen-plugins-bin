@@ -1,0 +1,55 @@
+thirdparty/rusi/fixtures/deps-app/src/main.rs
+  s_4ecfbdcce50d18::t_b1be438e6b839e 3
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-2,4
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_4ecfbdcce50d18::t_c4370e5c93943e 208-214,1983,2071,2139,4688-4697
+  s_4ecfbdcce50d18::t_2e2950d61165cb 726-727,1523,8210,8231,8260-8263
+  s_4ecfbdcce50d18::t_4aa74e18b7dcda 1643-1667,1941,1958,2047,2115,2298-2299,2356-2357,2456,2459,2463,2476,2496,2503,2516,2527,2533,2536
+  s_4ecfbdcce50d18::t_c20e112a17f2b4 724-725
+  s_4ecfbdcce50d18::t_75951c40286634 477-484
+  s_4ecfbdcce50d18::t_f13da0520a6811 8196-8209,8211-8230,8232-8259,8264-8272,8274-8333
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 9402,9504,9868
+  s_4ecfbdcce50d18::t_5f25ab66d22778 639-643,1230,1234-1242,1244-1258,1261-1262,1266-1272,1398
+  s_4ecfbdcce50d18::t_0d60076044096e 735,753,1227,1508
+  s_4ecfbdcce50d18::t_d564907d2fdf0d 8273
+  s_4ecfbdcce50d18::t_d2dfe1bd892fa1 82,1600-1606,1671,1674
+  s_4ecfbdcce50d18::t_e9ef8dc832597c 81,83-91,109,142-143,1404,1427,1429
+thirdparty/rusi/fixtures/dep-helper-lib/src/lib.rs
+  s_4ecfbdcce50d18::t_b1be438e6b839e 2-5,15-16
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1,6-14,17-24
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 2271
+thirdparty/rusi/fixtures/deps-app/Cargo.toml
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-9
+thirdparty/rusi/README.md
+  s_4ecfbdcce50d18::t_9b9f85b5864f39 31-32,48-49,57-74
+  s_4ecfbdcce50d18::t_56abdcee0e817f 75
+thirdparty/rusi/crates/rusi-core/src/module_tree.rs
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 401
+  s_4ecfbdcce50d18::t_5f25ab66d22778 75-79,88-90
+thirdparty/rusi/fixtures/dep-helper-lib/Cargo.toml
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-8
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_4ecfbdcce50d18::t_9b9f85b5864f39 78-83,533
+thirdparty/rusi/crates/rusi-cli/src/main.rs
+  s_4ecfbdcce50d18::t_d2dfe1bd892fa1 76-78,128,272,322
+  s_4ecfbdcce50d18::t_62c7475e8f6d4b 73-75
+thirdparty/rusi/fixtures/deps-app/Cargo.lock
+  s_4ecfbdcce50d18::t_a5c879dc4f8828 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d0db6ed7e500fb5beed7b8cb70070520c63d4b70",
+  "prompts": {},
+  "sessions": {
+    "s_4ecfbdcce50d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea4eae95-00f5-4799-975e-771c6a818c65",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
