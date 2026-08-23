@@ -65,15 +65,15 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ### `AnalysisOptions`
 
-| Field             | Type      | Meaning                                                        |
-| ----------------- | --------- | -------------------------------------------------------------- |
-| `directory`       | `string`  | Analyzed root directory.                                       |
-| `backend`         | `string`  | `stable` or `compiler`.                                        |
-| `analysis_scope`  | `string`  | Report scope, currently `default` or `cryptos`.                |
-| `call_graph_mode` | `string`  | Requested call-graph mode.                                     |
-| `data_flow_mode`  | `string`  | Requested data-flow mode.                                      |
-| `include_tests`   | `boolean` | Whether tests were included in file discovery / compiler runs. |
-| `max_call_candidates` | `number` | Ceiling on call-graph edges emitted per ambiguous call site (`0` means no cap). Default `8`. |
+| Field                 | Type      | Meaning                                                                                      |
+| --------------------- | --------- | -------------------------------------------------------------------------------------------- |
+| `directory`           | `string`  | Analyzed root directory.                                                                     |
+| `backend`             | `string`  | `stable` or `compiler`.                                                                      |
+| `analysis_scope`      | `string`  | Report scope, currently `default` or `cryptos`.                                              |
+| `call_graph_mode`     | `string`  | Requested call-graph mode.                                                                   |
+| `data_flow_mode`      | `string`  | Requested data-flow mode.                                                                    |
+| `include_tests`       | `boolean` | Whether tests were included in file discovery / compiler runs.                               |
+| `max_call_candidates` | `number`  | Ceiling on call-graph edges emitted per ambiguous call site (`0` means no cap). Default `8`. |
 
 > When dependency analysis is on (`--deps`), `packages` and `modules` include the
 > resolved dependency crates, each with `module.workspace_member: false`. Their
@@ -148,19 +148,19 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ### `Declaration`
 
-| Field            | Type             | Meaning                                                                        |
-| ---------------- | ---------------- | ------------------------------------------------------------------------------ |
-| `id`             | `string`         | Stable declaration ID.                                                         |
-| `name`           | `string`         | Short declaration name.                                                        |
-| `qualified_name` | `string`         | Fully qualified symbol name.                                                   |
-| `canonical_name` | `string`         | Normalized, generic-free, hash-free join key (`crate::module::Type::method`).  |
-| `kind`           | `string`         | Declaration kind such as `function`, `method`, `module`, `struct`, or `trait`. |
-| `package_path`   | `string`         | Owning package path.                                                           |
-| `purl`           | `string`         | Package URL of the owning package.                                             |
-| `file_path`      | `string`         | Relative file containing the declaration.                                      |
-| `signature`      | `string`         | Captured signature or declaration text.                                        |
-| `receiver`       | `string \| null` | Receiver type for methods when known.                                          |
-| `position`       | `Position`       | Declaration location.                                                          |
+| Field            | Type             | Meaning                                                                                                                                                                                                                                    |
+| ---------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`             | `string`         | Stable declaration ID.                                                                                                                                                                                                                     |
+| `name`           | `string`         | Short declaration name.                                                                                                                                                                                                                    |
+| `qualified_name` | `string`         | Fully qualified symbol name.                                                                                                                                                                                                               |
+| `canonical_name` | `string`         | Normalized, generic-free, hash-free join key (`crate::module::Type::method`).                                                                                                                                                              |
+| `kind`           | `string`         | Declaration kind such as `function`, `method`, `module`, `struct`, or `trait`.                                                                                                                                                             |
+| `package_path`   | `string`         | Owning package path.                                                                                                                                                                                                                       |
+| `purl`           | `string`         | Package URL of the owning package.                                                                                                                                                                                                         |
+| `file_path`      | `string`         | Relative file containing the declaration.                                                                                                                                                                                                  |
+| `signature`      | `string`         | Captured signature or declaration text.                                                                                                                                                                                                    |
+| `receiver`       | `string \| null` | Receiver type for methods when known.                                                                                                                                                                                                      |
+| `position`       | `Position`       | Declaration location.                                                                                                                                                                                                                      |
 | `cfg_gate`       | `string \| null` | `#[cfg(...)]` predicate this declaration sits behind, as written (for example `feature = "tls"`). Omitted when the declaration is unconditional. Declarations whose gate is inactive in the analyzed configuration are not emitted at all. |
 
 > `qualified_name` is rooted at the **Cargo target's** crate, not the package:
@@ -187,17 +187,17 @@ This document describes the report emitted by `rusi`. Field names map directly t
 
 ### `SecuritySignal`
 
-| Field          | Type       | Meaning                                                                       |
-| -------------- | ---------- | ----------------------------------------------------------------------------- |
-| `id`           | `string`   | Stable signal ID.                                                             |
-| `category`     | `string`   | Signal family, for example `unsafe-code`, `async-model`, or `native-interop`. |
-| `severity`     | `string`   | Coarse severity label.                                                        |
-| `confidence`   | `string`   | Coarse confidence label.                                                      |
-| `description`  | `string`   | Human-readable explanation.                                                   |
-| `package_path` | `string`   | Owning package path.                                                          |
-| `purl`         | `string`   | PURL associated with the signal package when derivable.                       |
-| `file_path`    | `string`   | Relative file path.                                                           |
-| `position`     | `Position` | Signal location.                                                              |
+| Field          | Type             | Meaning                                                                                                              |
+| -------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `id`           | `string`         | Stable signal ID.                                                                                                    |
+| `category`     | `string`         | Signal family, for example `unsafe-code`, `async-model`, or `native-interop`.                                        |
+| `severity`     | `string`         | Coarse severity label.                                                                                               |
+| `confidence`   | `string`         | Coarse confidence label.                                                                                             |
+| `description`  | `string`         | Human-readable explanation.                                                                                          |
+| `package_path` | `string`         | Owning package path.                                                                                                 |
+| `purl`         | `string`         | PURL associated with the signal package when derivable.                                                              |
+| `file_path`    | `string`         | Relative file path.                                                                                                  |
+| `position`     | `Position`       | Signal location.                                                                                                     |
 | `cfg_gate`     | `string \| null` | `#[cfg(...)]` predicate this signal sits behind, as written. Omitted when unconditional. See `Declaration.cfg_gate`. |
 
 ## Crypto / CBOM evidence
@@ -304,29 +304,29 @@ Those repeated fields were the single largest part of a report — 61 MB of 132 
 of edge bytes on wasm-tools 1.247.0 — and each was byte-identical to a field
 already present on the node.
 
-| Field                     | Type             | Meaning                                                                                                          |
-| ------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `id`                      | `string`         | Stable edge ID, unique within a report.                                                                          |
-| `source_id`               | `string`         | Source node ID.                                                                                                  |
-| `target_id`               | `string`         | Target node ID.                                                                                                  |
-| `call_type`               | `string`         | How the target was resolved (see below). `confidence` is a function of this and is not stored per edge.           |
-| `line`                    | `number`         | Call-site line, 1-based, within the **source** node's `file_path`.                                               |
-| `column`                  | `number`         | Call-site column, 1-based.                                                                                       |
-| `callee_text`             | `string?`        | Callee path as written at the call site, after import resolution. Omitted when unknown.                          |
-| `receiver`                | `string?`        | Receiver expression text, for method calls.                                                                      |
-| `method`                  | `string?`        | Bare method name, for method calls.                                                                              |
-| `candidate_count`         | `number?`        | Total local candidates the call site resolved to, when more than one. Always the true count, even when capped.    |
-| `emitted_candidate_count` | `number?`        | Edges actually emitted for this site. **Present only when the site was capped**, so its presence means these edges are a sample of `candidate_count`. |
-| `properties`              | `object?`        | Backend-specific extras (compiler-backend dispatch metadata). Omitted when empty.                                |
+| Field                     | Type      | Meaning                                                                                                                                               |
+| ------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | `string`  | Stable edge ID, unique within a report.                                                                                                               |
+| `source_id`               | `string`  | Source node ID.                                                                                                                                       |
+| `target_id`               | `string`  | Target node ID.                                                                                                                                       |
+| `call_type`               | `string`  | How the target was resolved (see below). `confidence` is a function of this and is not stored per edge.                                               |
+| `line`                    | `number`  | Call-site line, 1-based, within the **source** node's `file_path`.                                                                                    |
+| `column`                  | `number`  | Call-site column, 1-based.                                                                                                                            |
+| `callee_text`             | `string?` | Callee path as written at the call site, after import resolution. Omitted when unknown.                                                               |
+| `receiver`                | `string?` | Receiver expression text, for method calls.                                                                                                           |
+| `method`                  | `string?` | Bare method name, for method calls.                                                                                                                   |
+| `candidate_count`         | `number?` | Total local candidates the call site resolved to, when more than one. Always the true count, even when capped.                                        |
+| `emitted_candidate_count` | `number?` | Edges actually emitted for this site. **Present only when the site was capped**, so its presence means these edges are a sample of `candidate_count`. |
+| `properties`              | `object?` | Backend-specific extras (compiler-backend dispatch metadata). Omitted when empty.                                                                     |
 
 **Reading an edge.** Index `call_graph.nodes` by `source_id` / `target_id`:
 
-| You want            | Read                                                     |
-| ------------------- | -------------------------------------------------------- |
-| source symbol name  | source node's `qualified_name`                            |
-| target symbol name  | target node's `qualified_name`                            |
-| source/target purl  | the nodes' `purl`                                         |
-| call-site file      | **source** node's `file_path` (with the edge's `line`/`column`) |
+| You want           | Read                                                            |
+| ------------------ | --------------------------------------------------------------- |
+| source symbol name | source node's `qualified_name`                                  |
+| target symbol name | target node's `qualified_name`                                  |
+| source/target purl | the nodes' `purl`                                               |
+| call-site file     | **source** node's `file_path` (with the edge's `line`/`column`) |
 
 `call_type` values: `static`, `receiver-typed`, `trait-impl`, `static-overapprox`,
 `trait-overapprox`, `higher-order`, `external`, plus compiler-backend dispatch
@@ -366,8 +366,8 @@ suffix, and that suffix decides: `-exact` is `high`, `-bounded` is `medium`,
 | `target`             | `string`   | Pattern role: `source`, `sink`, or `passthrough`. When reading custom JSON it may be omitted and inferred from the containing array.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pattern`            | `string`   | Pattern text used for matching.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `category`           | `string`   | Category assigned when the pattern matches. Common categories for sources: `env`, `cli`, `file`, `http-request`, `secret`, `crypto-material`. For sinks: `process-exec`, `filesystem-write`, `filesystem-delete`, `network-connect`, `network-request`, `sql-query`, `html-response`. For passthroughs: `value-wrapper`, `smart-pointer`, `lock-accessor`, `iterator-adapter`, `channel-io`, `linker-accessor`, `string-format`, `ffi-wrapper`, `sql-builder`, `pointer-arithmetic`, `auto-discovered-passthrough`. Crypto-specific: `crypto-digest`, `crypto-key`, `crypto-keygen`, `tls`, `jwt`. |
-| `relevant_arguments` | `number[]` | Argument indexes used by the rule. Defaults to `[]` for custom JSON. For a method call, index 0 is the receiver, so the first real argument is 1.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `receiver_type`      | `string?`  | Restricts the rule to a method call whose receiver resolves to this type, so a rule named after a common method (`arg`, `write_all`) does not fire on every type that has one. Omitted when the rule matches on the callee alone; a rule that has it never fires on an unresolved receiver.                                                                                                                                                                                                                                                                                            |
+| `relevant_arguments` | `number[]` | Argument indexes used by the rule. Defaults to `[]` for custom JSON. For a method call, index 0 is the receiver, so the first real argument is 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `receiver_type`      | `string?`  | Restricts the rule to a method call whose receiver resolves to this type, so a rule named after a common method (`arg`, `write_all`) does not fire on every type that has one. Omitted when the rule matches on the callee alone; a rule that has it never fires on an unresolved receiver.                                                                                                                                                                                                                                                                                                        |
 
 ### `DataFlowPatternSet`
 
@@ -532,13 +532,13 @@ would call.
 
 ### `Diagnostic`
 
-| Field          | Type               | Meaning                                                                                                                                                                                                                                           |
-| -------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field          | Type               | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kind`         | `string`           | Diagnostic class. Common values: `parse`, `resolution`, `backend`, `missing-passthrough`, `module-resolution`, `import-resolution`. `missing-passthrough` diagnostics indicate method calls where taint tracking was lost; the message suggests adding the method as a passthrough pattern. `module-resolution` reports a `mod` declaration that could not be resolved, or a file no crate root reaches (analyzed with a module path derived from its file path). `import-resolution` reports a glob import whose target module is outside the workspace, so names imported through it stay unresolved. `macro` reports a macro whose body could not be recovered as Rust (including every `macro_rules!` definition, which is deliberately not walked), naming the files it appears in so the blind spot is visible. |
-| `message`      | `string`           | Human-readable diagnostic text.                                                                                                                                                                                                                   |
-| `package_path` | `string \| null`   | Package path if the diagnostic is package-scoped.                                                                                                                                                                                                 |
-| `file_path`    | `string \| null`   | File path if file-scoped.                                                                                                                                                                                                                         |
-| `position`     | `Position \| null` | Position when available.                                                                                                                                                                                                                          |
+| `message`      | `string`           | Human-readable diagnostic text.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `package_path` | `string \| null`   | Package path if the diagnostic is package-scoped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `file_path`    | `string \| null`   | File path if file-scoped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `position`     | `Position \| null` | Position when available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### `Stats`
 

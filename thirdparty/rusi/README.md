@@ -65,7 +65,7 @@ instead of being reported as merely external.
 Dependencies are analyzed at a lighter tier: their library target only (a
 dependency's binaries, tests, and examples are not part of your build), and
 declarations, imports, trait impls, and usage evidence without function bodies.
-Bodies — what taint needs to flow *through* a dependency — are collected only
+Bodies — what taint needs to flow _through_ a dependency — are collected only
 when `--dataflow security-deps` is also given, because a dependency closure is
 typically far larger than the workspace: 283 packages and 5,913 files against 28
 and 375, on wasm-tools 1.247.0, where `--deps` takes a 3s scan to roughly 13s.
