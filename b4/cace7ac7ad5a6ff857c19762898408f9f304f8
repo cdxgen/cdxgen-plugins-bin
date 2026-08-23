@@ -1,0 +1,29 @@
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_4ecfbdcce50d18::t_153c3aeeabe7fc 4060-4087,4089-4134,4136-4137,4142,4149-4177
+  s_4ecfbdcce50d18::t_5c55ca987b53ca 767-775
+  s_4ecfbdcce50d18::t_8def9bb1bee786 9550-9551,9554
+  s_4ecfbdcce50d18::t_57989e82a32629 3947,3997,4178,9521-9534,9539-9545,9552-9553,9555,9560,9565-9598
+  s_4ecfbdcce50d18::t_45fa9522430b00 785,3314,3372,3696,3764,3766,3844-3875,3966-3968
+  s_4ecfbdcce50d18::t_84abcfda13e8ab 7614-7628,7633-7715,7721-7765
+  s_4ecfbdcce50d18::t_602ca0840c9655 556-557,1441,1479-1481,1537,1994-1998,2001-2002
+  s_4ecfbdcce50d18::t_e60cebb351f8fc 1999-2000,7629-7632,7716-7720,9535-9538,9546-9549,9556-9559,9561-9564
+  s_4ecfbdcce50d18::t_9f895d49b20050 3969-3974,3980-3984,3986-3990,3995-3996
+  s_4ecfbdcce50d18::t_7e7f3278da4497 3907-3911,3917-3946
+  s_4ecfbdcce50d18::t_c344bdbb36bcf2 3948,3998,4179,9520
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4cace7ac7ad5a6ff857c19762898408f9f304f8",
+  "prompts": {},
+  "sessions": {
+    "s_4ecfbdcce50d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea4eae95-00f5-4799-975e-771c6a818c65",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
