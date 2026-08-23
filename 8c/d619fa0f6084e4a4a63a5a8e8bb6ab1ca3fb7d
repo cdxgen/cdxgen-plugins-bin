@@ -1,0 +1,35 @@
+thirdparty/rusi/fixtures/multi-target-app/src/bin/first.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-7
+thirdparty/rusi/fixtures/multi-target-app/src/bin/second.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-7
+thirdparty/rusi/crates/rusi-core/src/module_tree.rs
+  s_4ecfbdcce50d18::t_84b02d2889f273 45-46,348-361
+  s_4ecfbdcce50d18::t_8aae6890a7e3d5 362-363
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_4ecfbdcce50d18::t_a90f88699cfa49 135-137,139-146,551-553,689,705,1137,1178-1181,1183,1187,1208,1387,1398,1427,3007
+  s_4ecfbdcce50d18::t_ee6d7f9d6663e0 7415-7426,7428-7437,7440-7461
+  s_4ecfbdcce50d18::t_0316a3d52541fa 7427,7438-7439
+  s_4ecfbdcce50d18::t_382522fa812883 7414
+thirdparty/rusi/fixtures/multi-target-app/src/lib.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-3
+thirdparty/rusi/fixtures/multi-target-app/Cargo.toml
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-8
+thirdparty/rusi/fixtures/multi-target-app/Cargo.lock
+  s_4ecfbdcce50d18::t_d87d087218a4ce 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8cd619fa0f6084e4a4a63a5a8e8bb6ab1ca3fb7d",
+  "prompts": {},
+  "sessions": {
+    "s_4ecfbdcce50d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea4eae95-00f5-4799-975e-771c6a818c65",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
