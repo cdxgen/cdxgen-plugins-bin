@@ -1,0 +1,19 @@
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_4ecfbdcce50d18::t_e9485d29549c6b 556
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dcc24a44f861227da540d40708207e64f908f156",
+  "prompts": {},
+  "sessions": {
+    "s_4ecfbdcce50d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea4eae95-00f5-4799-975e-771c6a818c65",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
