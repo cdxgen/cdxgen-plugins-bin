@@ -1,0 +1,13 @@
+[package]
+name = "cfg-modtree-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[features]
+default = ["tls"]
+tls = []
+ldap = []
+
+[dependencies]

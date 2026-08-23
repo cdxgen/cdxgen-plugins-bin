@@ -263,6 +263,16 @@ pub struct AnalysisOptions {
     pub call_graph_mode: String,
     pub data_flow_mode: String,
     pub include_tests: bool,
+    /// Ceiling on call-graph edges emitted per ambiguous call site (`0` means
+    /// no cap). Edges at a site that hit the ceiling carry `candidateCount` and
+    /// `candidatesTruncated`, so a consumer can tell a sampled site from a
+    /// fully enumerated one.
+    #[serde(default = "default_max_call_candidates")]
+    pub max_call_candidates: usize,
+}
+
+fn default_max_call_candidates() -> usize {
+    8
 }
 
 fn default_analysis_scope() -> String {
@@ -300,6 +310,11 @@ pub struct Declaration {
     pub signature: String,
     pub receiver: Option<String>,
     pub position: Position,
+    /// The `#[cfg(...)]` gate this declaration sits behind, as written, when it
+    /// is conditional. Absent for unconditional declarations. Consumers can use
+    /// it to report a finding as reachable only under a given feature or target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_gate: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -385,6 +400,10 @@ pub struct SecuritySignal {
     pub purl: String,
     pub file_path: String,
     pub position: Position,
+    /// The `#[cfg(...)]` gate this signal sits behind, as written, when it is
+    /// conditional. See [`Declaration::cfg_gate`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_gate: Option<String>,
 }
 
 /// One parameter to an HTTP endpoint, extracted from the handler's
@@ -489,20 +508,110 @@ pub struct CallGraphNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// One call-site edge.
+///
+/// Edges are normalized against [`CallGraphNode`]: the endpoints' names, purls,
+/// and file are read from the referenced nodes rather than repeated here. On a
+/// large workspace those repeated fields were the single largest part of the
+/// report (61 MB of 132 MB of edge bytes on wasm-tools 1.247.0), and every one
+/// of them was byte-identical to a field already on the node.
+///
+/// To read an edge, index `CallGraph::nodes` by `source_id`/`target_id`:
+///
+/// - source symbol -> source node's `qualified_name`
+/// - target symbol -> target node's `qualified_name`
+/// - source/target purl -> the nodes' `purl`
+/// - call-site file -> the **source** node's `file_path`; `line`/`column` on the
+///   edge locate the call within it.
 pub struct CallGraphEdge {
     pub id: String,
     pub source_id: String,
     pub target_id: String,
-    pub source_name: String,
-    pub target_name: String,
-    #[serde(rename = "sourcePurl")]
-    pub source_purl: String,
-    #[serde(rename = "targetPurl")]
-    pub target_purl: String,
-    pub purls: Vec<String>,
+    /// How the target was resolved: `static`, `receiver-typed`, `trait-impl`,
+    /// `static-overapprox`, `trait-overapprox`, `higher-order`, `external`, or a
+    /// compiler-backend dispatch label. `confidence` is a function of this (see
+    /// [`call_type_confidence`]) and is therefore not stored per edge.
     pub call_type: String,
-    pub position: Position,
+    /// Call-site line within the source node's file, 1-based.
+    pub line: usize,
+    /// Call-site column within the source node's file, 1-based.
+    pub column: usize,
+    /// Callee path as written at the call site, after import resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee_text: Option<String>,
+    /// Receiver expression text, for method calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<String>,
+    /// Bare method name, for method calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// Total local candidates this call site resolved to, when more than one.
+    /// Always the true count, even when the emitted edges were capped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<usize>,
+    /// Edges actually emitted for this call site. Present only when the site hit
+    /// the `max_call_candidates` ceiling, so its presence means "these edges are
+    /// a sample of `candidate_count`, not the whole set".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emitted_candidate_count: Option<usize>,
+    /// Backend-specific extras (compiler-backend dispatch metadata). Empty for
+    /// everything the stable backend models with the typed fields above.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
+}
+
+impl CallGraph {
+    /// Looks up a node by id. Edges reference their endpoints this way.
+    pub fn node(&self, id: &str) -> Option<&CallGraphNode> {
+        self.nodes.iter().find(|node| node.id == id)
+    }
+
+    /// Qualified name of an edge's source symbol.
+    pub fn source_name(&self, edge: &CallGraphEdge) -> &str {
+        self.node(&edge.source_id)
+            .map(|node| node.qualified_name.as_str())
+            .unwrap_or_default()
+    }
+
+    /// Qualified name of an edge's target symbol.
+    pub fn target_name(&self, edge: &CallGraphEdge) -> &str {
+        self.node(&edge.target_id)
+            .map(|node| node.qualified_name.as_str())
+            .unwrap_or_default()
+    }
+
+    /// File the call site sits in: the source node's file.
+    pub fn call_site_file(&self, edge: &CallGraphEdge) -> &str {
+        self.node(&edge.source_id)
+            .map(|node| node.file_path.as_str())
+            .unwrap_or_default()
+    }
+}
+
+/// Coarse confidence implied by an edge's `call_type`.
+///
+/// Stored as a function rather than a per-edge string: it never carried
+/// information the `call_type` did not.
+/// Covers both backends. The stable backend emits a bare provenance name; the
+/// compiler backend suffixes it with how many targets the call resolved to
+/// (`static-exact`, `dyn-dispatch-bounded`, `…-unknown`), and that suffix is
+/// the more informative half — without reading it, an exactly resolved
+/// compiler-backend edge fell through to `low`.
+pub fn call_type_confidence(call_type: &str) -> &'static str {
+    if let Some(base) = call_type.strip_suffix("-exact") {
+        return if base.is_empty() { "low" } else { "high" };
+    }
+    if call_type.ends_with("-bounded") {
+        return "medium";
+    }
+    if call_type.ends_with("-unknown") {
+        return "low";
+    }
+    match call_type {
+        "static" | "trait-impl" | "higher-order" => "high",
+        "receiver-typed" => "medium",
+        _ => "low",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -528,6 +637,18 @@ pub struct DataFlowPattern {
     pub category: String,
     #[serde(default)]
     pub relevant_arguments: Vec<usize>,
+    /// Restricts the pattern to a method call whose receiver has this type.
+    ///
+    /// Without it, a sink named after a common builder method would fire on
+    /// every type that happens to share the name: `arg` is `Command::arg` on a
+    /// `Command`, and something else entirely on any other builder. With it,
+    /// `Command::new(x).arg(tainted)` is a process-exec sink while
+    /// `some_other_builder.arg(x)` is not.
+    ///
+    /// For a method call, argument 0 is the receiver, so the first real argument
+    /// is index 1 in `relevant_arguments`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

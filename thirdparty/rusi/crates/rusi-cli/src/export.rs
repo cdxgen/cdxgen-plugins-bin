@@ -4,10 +4,97 @@ use std::io::{BufWriter, Write as _};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusi_schema::{CallGraph, CallGraphNode, DataFlowEvidence, DataFlowNode, DataFlowSlice};
+use indexmap::IndexMap;
+use rusi_schema::{
+    CallGraph, CallGraphEdge, CallGraphNode, DataFlowEvidence, DataFlowNode, DataFlowSlice,
+    call_type_confidence,
+};
 use serde::Serialize;
 
 pub const EXPORT_FORMATS: [&str; 3] = ["json", "graphml", "gexf"];
+
+/// Edge attributes as the graph formats want them.
+///
+/// A report edge is normalized against its nodes, but GraphML and GEXF are
+/// consumed by graph tools that read edge attributes directly and cannot join
+/// to a node table, so the export re-attaches the endpoint facts here.
+struct ExportedEdge<'a> {
+    source_name: &'a str,
+    target_name: &'a str,
+    source_purl: &'a str,
+    target_purl: &'a str,
+    purls: Vec<&'a str>,
+    position_filename: &'a str,
+    properties: IndexMap<&'a str, String>,
+}
+
+impl<'a> ExportedEdge<'a> {
+    fn build(edge: &'a CallGraphEdge, nodes: &IndexMap<&'a str, &'a CallGraphNode>) -> Self {
+        let source = nodes.get(edge.source_id.as_str());
+        let target = nodes.get(edge.target_id.as_str());
+        let source_purl = source.map(|node| node.purl.as_str()).unwrap_or_default();
+        let target_purl = target.map(|node| node.purl.as_str()).unwrap_or_default();
+        let mut purls: Vec<&str> = [source_purl, target_purl]
+            .into_iter()
+            .filter(|purl| !purl.is_empty())
+            .collect();
+        purls.sort_unstable();
+        purls.dedup();
+
+        let mut properties = IndexMap::new();
+        if let Some(callee_text) = edge.callee_text.as_deref() {
+            properties.insert("calleeText", callee_text.to_string());
+        }
+        // `confidence` and `provenance` are derived rather than stored on the
+        // edge; graph tools still expect to see them.
+        properties.insert(
+            "confidence",
+            call_type_confidence(&edge.call_type).to_string(),
+        );
+        properties.insert("provenance", edge.call_type.clone());
+        if let Some(receiver) = edge.receiver.as_deref() {
+            properties.insert("receiver", receiver.to_string());
+        }
+        if let Some(method) = edge.method.as_deref() {
+            properties.insert("method", method.to_string());
+        }
+        if let Some(candidate_count) = edge.candidate_count {
+            properties.insert("candidateCount", candidate_count.to_string());
+        }
+        if let Some(emitted) = edge.emitted_candidate_count {
+            properties.insert("candidatesTruncated", "true".to_string());
+            properties.insert("emittedCandidateCount", emitted.to_string());
+        }
+        for (key, value) in &edge.properties {
+            properties.insert(key.as_str(), value.clone());
+        }
+
+        Self {
+            source_name: source
+                .map(|node| node.qualified_name.as_str())
+                .unwrap_or_default(),
+            target_name: target
+                .map(|node| node.qualified_name.as_str())
+                .unwrap_or_default(),
+            source_purl,
+            target_purl,
+            purls,
+            // The call site is in the caller's file.
+            position_filename: source
+                .map(|node| node.file_path.as_str())
+                .unwrap_or_default(),
+            properties,
+        }
+    }
+}
+
+fn call_graph_node_index(call_graph: &CallGraph) -> IndexMap<&str, &CallGraphNode> {
+    call_graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect()
+}
 
 pub fn write_call_graph_export(
     call_graph: &CallGraph,
@@ -135,7 +222,9 @@ fn render_call_graph_graphml(call_graph: &CallGraph) -> String {
         render_call_graph_node_graphml(&mut xml, node);
         xml.push_str("    </node>\n");
     }
+    let nodes = call_graph_node_index(call_graph);
     for edge in &call_graph.edges {
+        let exported = ExportedEdge::build(edge, &nodes);
         let _ = writeln!(
             xml,
             "    <edge id=\"{}\" source=\"{}\" target=\"{}\">",
@@ -143,31 +232,31 @@ fn render_call_graph_graphml(call_graph: &CallGraph) -> String {
             xml_escape(&edge.source_id),
             xml_escape(&edge.target_id)
         );
-        push_graphml_data(&mut xml, "edge_source_name", &edge.source_name, 3);
-        push_graphml_data(&mut xml, "edge_target_name", &edge.target_name, 3);
-        push_graphml_data(&mut xml, "edge_source_purl", &edge.source_purl, 3);
-        push_graphml_data(&mut xml, "edge_target_purl", &edge.target_purl, 3);
-        push_graphml_data(&mut xml, "edge_purls", &json_text(&edge.purls), 3);
+        push_graphml_data(&mut xml, "edge_source_name", exported.source_name, 3);
+        push_graphml_data(&mut xml, "edge_target_name", exported.target_name, 3);
+        push_graphml_data(&mut xml, "edge_source_purl", exported.source_purl, 3);
+        push_graphml_data(&mut xml, "edge_target_purl", exported.target_purl, 3);
+        push_graphml_data(&mut xml, "edge_purls", &json_text(&exported.purls), 3);
         push_graphml_data(&mut xml, "edge_call_type", &edge.call_type, 3);
         push_graphml_data(
             &mut xml,
             "edge_position_filename",
-            &edge.position.filename,
+            exported.position_filename,
             3,
         );
-        push_graphml_data(
-            &mut xml,
-            "edge_position_line",
-            &edge.position.line.to_string(),
-            3,
-        );
+        push_graphml_data(&mut xml, "edge_position_line", &edge.line.to_string(), 3);
         push_graphml_data(
             &mut xml,
             "edge_position_column",
-            &edge.position.column.to_string(),
+            &edge.column.to_string(),
             3,
         );
-        push_graphml_data(&mut xml, "edge_properties", &json_text(&edge.properties), 3);
+        push_graphml_data(
+            &mut xml,
+            "edge_properties",
+            &json_text(&exported.properties),
+            3,
+        );
         xml.push_str("    </edge>\n");
     }
     xml.push_str("  </graph>\n</graphml>\n");
@@ -291,6 +380,7 @@ fn render_call_graph_gexf(call_graph: &CallGraph) -> String {
         xml.push_str("      </node>\n");
     }
     xml.push_str("    </nodes>\n    <edges>\n");
+    let nodes = call_graph_node_index(call_graph);
     for edge in &call_graph.edges {
         let _ = writeln!(
             xml,
@@ -301,26 +391,17 @@ fn render_call_graph_gexf(call_graph: &CallGraph) -> String {
             xml_escape(&edge.call_type)
         );
         xml.push_str("        <attvalues>\n");
-        push_gexf_attvalue(&mut xml, "source_name", &edge.source_name, 5);
-        push_gexf_attvalue(&mut xml, "target_name", &edge.target_name, 5);
-        push_gexf_attvalue(&mut xml, "source_purl", &edge.source_purl, 5);
-        push_gexf_attvalue(&mut xml, "target_purl", &edge.target_purl, 5);
-        push_gexf_attvalue(&mut xml, "purls", &json_text(&edge.purls), 5);
+        let exported = ExportedEdge::build(edge, &nodes);
+        push_gexf_attvalue(&mut xml, "source_name", exported.source_name, 5);
+        push_gexf_attvalue(&mut xml, "target_name", exported.target_name, 5);
+        push_gexf_attvalue(&mut xml, "source_purl", exported.source_purl, 5);
+        push_gexf_attvalue(&mut xml, "target_purl", exported.target_purl, 5);
+        push_gexf_attvalue(&mut xml, "purls", &json_text(&exported.purls), 5);
         push_gexf_attvalue(&mut xml, "call_type", &edge.call_type, 5);
-        push_gexf_attvalue(&mut xml, "position_filename", &edge.position.filename, 5);
-        push_gexf_attvalue(
-            &mut xml,
-            "position_line",
-            &edge.position.line.to_string(),
-            5,
-        );
-        push_gexf_attvalue(
-            &mut xml,
-            "position_column",
-            &edge.position.column.to_string(),
-            5,
-        );
-        push_gexf_attvalue(&mut xml, "properties", &json_text(&edge.properties), 5);
+        push_gexf_attvalue(&mut xml, "position_filename", exported.position_filename, 5);
+        push_gexf_attvalue(&mut xml, "position_line", &edge.line.to_string(), 5);
+        push_gexf_attvalue(&mut xml, "position_column", &edge.column.to_string(), 5);
+        push_gexf_attvalue(&mut xml, "properties", &json_text(&exported.properties), 5);
         xml.push_str("        </attvalues>\n");
         xml.push_str("      </edge>\n");
     }
@@ -848,17 +929,14 @@ mod tests {
                 id: "edge-1".to_string(),
                 source_id: "src".to_string(),
                 target_id: "dst".to_string(),
-                source_name: "demo::main".to_string(),
-                target_name: "demo::helper".to_string(),
-                source_purl: "pkg:cargo/demo@0.1.0".to_string(),
-                target_purl: "pkg:cargo/demo@0.1.0".to_string(),
-                purls: vec!["pkg:cargo/demo@0.1.0".to_string()],
                 call_type: "static".to_string(),
-                position: Position {
-                    filename: "src/main.rs".to_string(),
-                    line: 3,
-                    column: 5,
-                },
+                line: 3,
+                column: 5,
+                callee_text: Some("helper".to_string()),
+                receiver: None,
+                method: None,
+                candidate_count: None,
+                emitted_candidate_count: None,
                 properties: Default::default(),
             }],
             diagnostics: vec![Diagnostic {

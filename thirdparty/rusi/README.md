@@ -27,6 +27,9 @@ cargo run -p rusi-cli -- analyze --dir . --dataflow security --dataflow-out data
 cargo run -p rusi-cli -- cryptos --dir . --callgraph static --dataflow security --out rusi-cryptos.json
 cargo run -p rusi-cli -- analyze --dir . --callgraph none --dataflow none --out rusi-structure.json
 cargo run -p rusi-cli -- analyze --dir . --pretty --out rusi-pretty.json   # indented JSON (default is minified)
+cargo run -p rusi-cli -- analyze --dir . --max-call-candidates 0 --out rusi-full-callgraph.json   # no fan-out cap
+cargo run -p rusi-cli -- analyze --dir . --deps --out rusi-deps.json                              # also analyze dependency crates
+cargo run -p rusi-cli -- analyze --dir . --deps --dataflow security-deps --out rusi-deps-taint.json  # + dependency bodies, for taint through a dependency
 ```
 
 ## What Rusi reads
@@ -37,14 +40,45 @@ Rusi always starts from Cargo workspace/package discovery via `cargo metadata`.
 
 The default `stable` backend:
 
-- discovers Rust files from the workspace/package layout
+- discovers Rust files by following `mod` declarations out from each Cargo target's crate root, honouring `#[path = "..."]` and inline modules
+- evaluates `#[cfg(...)]` against the active target and the features Cargo resolved, so code that is not part of this build is not reported (and code that is conditional carries its gate in `cfg_gate`)
 - parses source with `syn`
 - records imports, declarations, library/API usage clues, and security signals
-- constructs a deterministic source-level call graph
+- resolves imports across the package, including glob imports and `pub use` re-export chains
+- resolves method receivers through `self`, struct fields, smart pointers, `let` annotations, function return types (including through `Result`/`Option`), and method chains, so a call resolves instead of fanning out across every same-named method
+- treats a call on a known receiver type with no matching local impl as external, rather than guessing at every same-named local method
+- matches sinks on the receiver's type where the method name alone would be ambiguous, so `Command::new(..).arg(tainted)` is a process-exec sink while another builder's `arg` is not
+- recovers the Rust inside macro invocations, so calls in `write!`/`println!`/`assert!`/`vec![]`/`lazy_static!` arguments are visible
+- constructs a deterministic source-level call graph, capping the edge fan-out of ambiguous call sites (see `--max-call-candidates`)
+- emits a call graph whose edges are normalized against its nodes: an endpoint's name, purl, and file live on the node the edge references, not on every edge
 - performs a lightweight interprocedural data-flow analysis
 - emits heuristic crypto/CBOM evidence from imports, syntax-level API usage, and secret-looking identifiers
 
 This mode is the safest and fastest option for most first-pass analysis.
+
+### Dependency crates
+
+`--deps` extends analysis beyond the workspace to the resolved dependency
+crates, so a call into a dependency resolves to that dependency's function
+instead of being reported as merely external.
+
+Dependencies are analyzed at a lighter tier: their library target only (a
+dependency's binaries, tests, and examples are not part of your build), and
+declarations, imports, trait impls, and usage evidence without function bodies.
+Bodies — what taint needs to flow _through_ a dependency — are collected only
+when `--dataflow security-deps` is also given, because a dependency closure is
+typically far larger than the workspace: 283 packages and 5,913 files against 28
+and 375, on wasm-tools 1.247.0, where `--deps` takes a 3s scan to roughly 13s.
+
+Data flow ignores body-less records entirely. An empty body is indistinguishable
+from a function that does nothing, so summarizing one would conclude that taint
+stops there; skipping them keeps workspace findings identical to a
+workspace-only scan.
+
+Files that no crate root reaches are still analyzed, with a module path derived
+from the file path and a `module-resolution` diagnostic, so nothing is silently
+dropped. Module files are only followed inside the package directory: a
+`#[path]` attribute or symlink pointing outside it is skipped and reported.
 
 ### Compiler backend
 
@@ -241,7 +275,16 @@ The file is a JSON object with optional `sources`, `sinks`, and `passthroughs` a
 - `pattern` — symbol/callee text to match
 - `category` — category emitted in nodes, slices, and summaries
 - `relevant_arguments` — argument indexes used by a sink or passthrough rule
+- `receiver_type` — optional; restricts the rule to a method call whose receiver resolves to this type
 - `target` — optional; if omitted, Rusi infers it from the containing array
+
+`receiver_type` is what makes a rule named after a common method safe. `arg` on
+its own would match every builder in the workspace; `arg` with
+`"receiver_type": "Command"` matches `Command::new("sh").arg(tainted)` and
+nothing else. A rule with a `receiver_type` never fires when the receiver's type
+could not be resolved, since a sink that fires on an unknown receiver is exactly
+the false positive the restriction exists to prevent. For a method call argument
+0 is the receiver, so the first real argument is index 1.
 
 Minimal example:
 
@@ -258,6 +301,12 @@ Minimal example:
       "pattern": "mycrate::shell::run",
       "category": "custom-command",
       "relevant_arguments": [0]
+    },
+    {
+      "pattern": "run_query",
+      "category": "custom-sql",
+      "receiver_type": "MyConnection",
+      "relevant_arguments": [1]
     }
   ]
 }

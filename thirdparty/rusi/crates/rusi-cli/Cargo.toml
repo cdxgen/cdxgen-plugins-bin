@@ -9,6 +9,7 @@ name = "rusi"
 path = "src/main.rs"
 
 [dependencies]
+indexmap.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true
