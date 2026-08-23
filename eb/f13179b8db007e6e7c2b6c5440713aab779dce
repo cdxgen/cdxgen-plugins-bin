@@ -1,0 +1,267 @@
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_4ecfbdcce50d18::t_e9485d29549c6b 562
+  s_4ecfbdcce50d18::t_9b9f85b5864f39 78-82,533
+  s_4ecfbdcce50d18::t_0078416acf5060 166-173,301-335,340-345
+  s_4ecfbdcce50d18::t_d09b0e09f80980 164,201
+  s_4ecfbdcce50d18::t_0396fef012f2b4 76,336-339,346-348
+  s_4ecfbdcce50d18::t_0eeff036fbde6f 77,165
+thirdparty/rusi/fixtures/cfg-modtree-app/src/generated/handlers_v2.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-3
+thirdparty/rusi/fixtures/multi-target-app/src/bin/first.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-7
+thirdparty/rusi/fixtures/cfg-modtree-app/src/sinks.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-3
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_4ecfbdcce50d18::t_5b52ef5c6805c0 2026-2032,2161-2167
+  s_4ecfbdcce50d18::t_4804cfd1fe8c0f 339,746-747,777,1041
+  s_4ecfbdcce50d18::t_f59d55743728e7 2173-2178,2203-2212,2235-2236,2241,2244
+  s_4ecfbdcce50d18::t_9059e547cf5db4 2179
+thirdparty/rusi/fixtures/dep-helper-lib/Cargo.toml
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-8
+thirdparty/rusi/fixtures/deps-app/Cargo.toml
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-9
+thirdparty/rusi/crates/rusi-core/src/lib.rs
+  s_4ecfbdcce50d18::t_b8ebc93f338461 2421
+  s_4ecfbdcce50d18::t_6a6ef8a7e77f00 8695,8986,9332,9336,9339-9343,9345
+  s_4ecfbdcce50d18::t_c530816e5f7a5b 4106-4113
+  s_4ecfbdcce50d18::t_ac0e9abbdeb0a0 2546-2569
+  s_4ecfbdcce50d18::t_e3024cc20ce410 7874,7876,7911-7914,7930-7932,7986-7989
+  s_4ecfbdcce50d18::t_9f895d49b20050 4413-4418,4424-4428,4430-4434,4439-4440
+  s_4ecfbdcce50d18::t_d97de45933ab25 10099
+  s_4ecfbdcce50d18::t_483624baade3ac 1675-1676,1678
+  s_4ecfbdcce50d18::t_4b3ec19ee3ba81 728-733,736
+  s_4ecfbdcce50d18::t_498397933e288b 644-647
+  s_4ecfbdcce50d18::t_64b9ba0a10045b 1731,1798-1805
+  s_4ecfbdcce50d18::t_ec7a41f926e14a 1991
+  s_4ecfbdcce50d18::t_f2972d7769e9d5 1552,1554
+  s_4ecfbdcce50d18::t_c901c9bdd6ae0a 1607-1609,1614-1617
+  s_4ecfbdcce50d18::t_8def9bb1bee786 10466-10467,10470
+  s_4ecfbdcce50d18::t_57989e82a32629 4342,4344,4387,4441,4636,8679,8888,8911,8913,8930,8937,8944,8951,8961,8972,8974,8996,9004,9011,9018-9019,9021,9037-9038,9040,10437-10450,10455-10461,10468-10469,10471,10476,10481-10514
+  s_4ecfbdcce50d18::t_16b4abeafc034a 678-679,684-704
+  s_4ecfbdcce50d18::t_5668b487f4ed1d 2192-2194,2196-2199
+  s_4ecfbdcce50d18::t_e60cebb351f8fc 2219-2220,8100-8103,8187-8191,10451-10454,10462-10465,10472-10475,10477-10480
+  s_4ecfbdcce50d18::t_ee6d7f9d6663e0 4341,8681,8683-8687,8841-8852,8854-8863,8866-8887,8890,8892-8896,8901,8904,8915,8917,8919-8921,8924,8931,8938,8945,8955,8976,8978,8980-8982,8985,8999,9005,9012,9023,9025,9027-9029,9032,9042,9044
+  s_4ecfbdcce50d18::t_0316a3d52541fa 8853,8864-8865
+  s_4ecfbdcce50d18::t_496784d352779c 1520
+  s_4ecfbdcce50d18::t_1704943656be0c 31-32,34,37-38
+  s_4ecfbdcce50d18::t_382522fa812883 8840
+  s_4ecfbdcce50d18::t_0d60076044096e 735,753,1227,1508
+  s_4ecfbdcce50d18::t_e9ef8dc832597c 81,83-91,109,142-143,1404,1427,1429
+  s_4ecfbdcce50d18::t_f5c2050ecc42e5 8631,8633,8635-8636
+  s_4ecfbdcce50d18::t_c344bdbb36bcf2 4388,4442,4637,10436
+  s_4ecfbdcce50d18::t_34fef8561c9f08 1720,3688
+  s_4ecfbdcce50d18::t_c4370e5c93943e 208-214,1983,2071,2139,4688-4697
+  s_4ecfbdcce50d18::t_272b73368054c4 1539-1540
+  s_4ecfbdcce50d18::t_3cae1cf99da3ea 67-80,92-95,668,859-861,863-864,3588-3590,3592-3593,3597-3601,3832
+  s_4ecfbdcce50d18::t_2e2950d61165cb 726-727,1523,8210,8231,8260-8263
+  s_4ecfbdcce50d18::t_6d6e4faac95113 108,9403,9505,9869
+  s_4ecfbdcce50d18::t_e050e3f1973417 2383-2402
+  s_4ecfbdcce50d18::t_8a663927cc3dc9 7811-7812,7857,7893,7954,7975-7981,8000,8003,8902-8903
+  s_4ecfbdcce50d18::t_c20e112a17f2b4 724-725
+  s_4ecfbdcce50d18::t_c33b9621ac5772 1505,1507
+  s_4ecfbdcce50d18::t_5667ff79aa2b08 8989-8995
+  s_4ecfbdcce50d18::t_f8543433465dae 3619-3625
+  s_4ecfbdcce50d18::t_d3cf41db6125c3 581-583,587-588
+  s_4ecfbdcce50d18::t_3a319757b94ca8 8008,8010,8012,8017-8025,8027,8029-8047,8052,8054-8064,8068-8084,8891,8971
+  s_4ecfbdcce50d18::t_1ac5e0461e8548 591-592,1556,1597-1599,1689
+  s_4ecfbdcce50d18::t_075fb935946f29 3770,3833
+  s_4ecfbdcce50d18::t_f9c54510e71b89 2036
+  s_4ecfbdcce50d18::t_cf60032d429b78 10203-10204,10211
+  s_4ecfbdcce50d18::t_7e7f3278da4497 4347-4386
+  s_4ecfbdcce50d18::t_9a019111be2c16 173-176
+  s_4ecfbdcce50d18::t_394aec45694b85 3773-3777
+  s_4ecfbdcce50d18::t_8c07167bb07c62 7919-7921
+  s_4ecfbdcce50d18::t_1f7cfb0664e1a5 3716-3717,3719,3792-3831
+  s_4ecfbdcce50d18::t_c7f5e382954d21 2176-2185,2189-2191,2195
+  s_4ecfbdcce50d18::t_a13e9b2b69b1d5 4079,4321-4338
+  s_4ecfbdcce50d18::t_4aa74e18b7dcda 1643-1667,1941,1958,2047,2115,2298-2299,2356-2357,2456,2459,2463,2476,2496,2503,2516,2527,2533,2536
+  s_4ecfbdcce50d18::t_d2dfe1bd892fa1 82,1600-1606,1671,1674
+  s_4ecfbdcce50d18::t_75951c40286634 477-484
+  s_4ecfbdcce50d18::t_a730a483541e62 8496-8630,8632,8634,8637
+  s_4ecfbdcce50d18::t_052aa0b2507fb5 4153-4222,4224,4227-4231,4234-4237,4241,4243-4279
+  s_4ecfbdcce50d18::t_b523ba6f191f33 813-816,818-840
+  s_4ecfbdcce50d18::t_9059e547cf5db4 7818,7851,10253-10254
+  s_4ecfbdcce50d18::t_b282933eef3c27 745-750,752,754,760,771-772,775-776
+  s_4ecfbdcce50d18::t_70ae0c44d21c27 3651,3944-3958,3986,3989-3995
+  s_4ecfbdcce50d18::t_153c3aeeabe7fc 4390,4518-4545,4547-4592,4594-4595,4600,4607-4635
+  s_4ecfbdcce50d18::t_74d6a90ff38731 2960,8334-8495,8928,8935,8942,8949,8958,8987-8988,9002,9008,9015,9035
+  s_4ecfbdcce50d18::t_6032a8906b8538 2961
+  s_4ecfbdcce50d18::t_d564907d2fdf0d 8273
+  s_4ecfbdcce50d18::t_45fa9522430b00 862,3591,4068,4280-4287,4289-4290,4292,4300-4320,4410-4412
+  s_4ecfbdcce50d18::t_e7d599c850064e 10133,10135-10137,10140-10142,10144-10146,10148-10149,10152-10153,10241,10246-10247
+  s_4ecfbdcce50d18::t_f4bb70d800751b 2142-2144
+  s_4ecfbdcce50d18::t_44ec432fbe10fe 3706-3715,3718,3720-3721,3755-3768
+  s_4ecfbdcce50d18::t_8872a9d887c00c 8065-8067
+  s_4ecfbdcce50d18::t_1e7efabcd59a43 2262-2264
+  s_4ecfbdcce50d18::t_60c011106d3cd0 2086,2089,2094
+  s_4ecfbdcce50d18::t_81f1819c67beee 1610-1613,1677,1703-1719,2165
+  s_4ecfbdcce50d18::t_5f25ab66d22778 639-643,1230,1234-1242,1244-1258,1261-1262,1266-1272,1398
+  s_4ecfbdcce50d18::t_c8c59ceaf0726a 2087-2088,2090-2093
+  s_4ecfbdcce50d18::t_fe0a3106796a80 2155-2164
+  s_4ecfbdcce50d18::t_7064e7522a1f43 9445,9464
+  s_4ecfbdcce50d18::t_94d37058c93ffe 1211-1225,1228-1229,1231-1233,1243,1263-1265,1273,1275-1277,1281-1295,1300,1302-1304,1306-1325,1327-1394
+  s_4ecfbdcce50d18::t_90d242c5b22721 3694-3701,3730-3733,3739-3749,7385-7393,7395-7396
+  s_4ecfbdcce50d18::t_50d3e00e2bb4f7 1259-1260,1274,1278-1280
+  s_4ecfbdcce50d18::t_5c55ca987b53ca 804-812
+  s_4ecfbdcce50d18::t_432e22455a4bc9 1737-1797,2927-2959,4339
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 9402,9504,9868
+  s_4ecfbdcce50d18::t_f13da0520a6811 8196-8209,8211-8230,8232-8259,8264-8272,8274-8333,8900,8918,8923,8925,8932,8939,8946,8956-8957,8979,8998,9000-9001,9006-9007,9013-9014,9026,9031,9034,9045
+  s_4ecfbdcce50d18::t_37569c0fa76b2a 3603,3648,4059-4067,4288,4291,4293-4299,4403-4407,4443-4468,4470-4472
+  s_4ecfbdcce50d18::t_a90f88699cfa49 149-151,153-160,584-586,734,751,1226,1296-1299,1301,1305,1326,1506,1518,1553,3345
+  s_4ecfbdcce50d18::t_87da791d89b2fa 785-798
+  s_4ecfbdcce50d18::t_e639f5c7d78b28 8691,8697,8699-8839
+  s_4ecfbdcce50d18::t_8ad4249f413707 7886,7972,7994
+  s_4ecfbdcce50d18::t_b0e8d2e1764a90 1945,2303,2361
+  s_4ecfbdcce50d18::t_9890271818a677 3769,7861-7870,7877-7885,7887-7892,7894-7897,7899-7900,7902,7904-7905,7910,7916-7918,7922,7924-7928,7934,7938-7939,7941,7943-7944,7949-7950,7952,7956-7957,7959-7971,7973,7982-7985,7991-7993,7995-7999,8001-8002,8004
+  s_4ecfbdcce50d18::t_bbbe92088301d3 799-803,841-847,850-851,1526-1531,1537-1538
+  s_4ecfbdcce50d18::t_84abcfda13e8ab 8085-8099,8104-8186,8192-8195,8638-8678
+  s_4ecfbdcce50d18::t_b8091e93db9b3d 2079-2081
+  s_4ecfbdcce50d18::t_f8fd905df6a4a3 7871-7873,7875
+  s_4ecfbdcce50d18::t_602ca0840c9655 589-590,1555,1594-1596,1688,2214-2218,2221-2222
+  s_4ecfbdcce50d18::t_459a229e3607d1 4340,4343,4345-4346,4389,4391-4392,8680,8682,8688-8690,8692-8694,8696,8698,8889,8897-8899,8905-8910,8912,8914,8916,8922,8926-8927,8929,8933-8934,8936,8940-8941,8943,8947-8948,8950,8952-8954,8959-8960,8962-8970,8973,8975,8977,8983-8984,8997,9003,9009-9010,9016-9017,9020,9022,9024,9030,9033,9036,9039,9041,9043
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_4ecfbdcce50d18::t_612bca0785c0b8 1801-1803,1836
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 2271
+  s_4ecfbdcce50d18::t_ea598e2a0f9379 2272
+  s_4ecfbdcce50d18::t_60e9fddbaaf15f 2696-2702,2704-2705
+  s_4ecfbdcce50d18::t_c41a1ba5847229 1315-1320,1322-1323
+  s_4ecfbdcce50d18::t_9059e547cf5db4 2712-2716
+  s_4ecfbdcce50d18::t_368091918e4556 2432-2433,2669-2671,2677,2681,2687,3082,3094,3102
+thirdparty/rusi/fixtures/deps-app/Cargo.lock
+  s_4ecfbdcce50d18::t_a5c879dc4f8828 1-14
+thirdparty/rusi/fixtures/cfg-modtree-app/Cargo.toml
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-13
+thirdparty/rusi/fixtures/multi-target-app/src/lib.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-3
+thirdparty/rusi/crates/rusi-core/src/cfg.rs
+  s_4ecfbdcce50d18::t_3f262e28c336ea 1-71,81-103,110-325,327-444,449-493,495-529
+  s_4ecfbdcce50d18::t_efa11c7e9817dc 72
+  s_4ecfbdcce50d18::t_b1a36c4e8bf83c 326
+  s_4ecfbdcce50d18::t_ec7a41f926e14a 73-80,445-448,494
+  s_4ecfbdcce50d18::t_de8279d01951c6 104-109
+thirdparty/rusi/fixtures/dep-helper-lib/src/lib.rs
+  s_4ecfbdcce50d18::t_b1be438e6b839e 2-5,15-16
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1,6-14,17-24
+thirdparty/rusi/fixtures/multi-target-app/Cargo.lock
+  s_4ecfbdcce50d18::t_d87d087218a4ce 1-7
+thirdparty/rusi/Cargo.lock
+  s_4ecfbdcce50d18::t_b199ae45b09081 299
+  s_4ecfbdcce50d18::t_eb739136a5d670 295,309,324,341,352
+thirdparty/rusi/fixtures/cfg-modtree-app/Cargo.lock
+  s_4ecfbdcce50d18::t_f07312afefcbd2 1-7
+thirdparty/rusi/crates/rusi-core/src/module_tree.rs
+  s_4ecfbdcce50d18::t_ec7a41f926e14a 381-382,483-486,522-523,561-565
+  s_4ecfbdcce50d18::t_50c91d50b9a0ca 124-128,144,177,186-197,199-208,297,299-300,302
+  s_4ecfbdcce50d18::t_b1a36c4e8bf83c 19,51
+  s_4ecfbdcce50d18::t_feb6a39a8cd115 401
+  s_4ecfbdcce50d18::t_8aae6890a7e3d5 367-368
+  s_4ecfbdcce50d18::t_84b02d2889f273 45-46,353-366
+  s_4ecfbdcce50d18::t_ab01ad16d31842 1-18,20-44,47-50,52-74,80-87,91-123,129-143,145-176,178-185,198,212-296,298,301,303-352,369-380,383-400,402-482,487-521,524-560,566-586
+  s_4ecfbdcce50d18::t_8872a9d887c00c 209-211
+  s_4ecfbdcce50d18::t_5f25ab66d22778 75-79,88-90
+thirdparty/rusi/README.md
+  s_4ecfbdcce50d18::t_9b9f85b5864f39 31-32,48-49,57-74
+  s_4ecfbdcce50d18::t_56abdcee0e817f 75
+  s_4ecfbdcce50d18::t_0396fef012f2b4 30,50
+  s_4ecfbdcce50d18::t_8872a9d887c00c 43-44,47,76-79
+  s_4ecfbdcce50d18::t_fae6eb2274ae88 80
+  s_4ecfbdcce50d18::t_b8091e93db9b3d 51
+thirdparty/rusi/crates/rusi-core/src/import_resolution.rs
+  s_4ecfbdcce50d18::t_3fdd183908e12e 147-149,200,295-307
+  s_4ecfbdcce50d18::t_4804cfd1fe8c0f 213
+  s_4ecfbdcce50d18::t_7192744c36cebd 478-488
+  s_4ecfbdcce50d18::t_3455558590bfa4 1-134,136-146,150-199,201-212,214-294,308-477,489-523
+  s_4ecfbdcce50d18::t_ec7a41f926e14a 135
+thirdparty/rusi/fixtures/multi-target-app/src/bin/second.rs
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-7
+thirdparty/rusi/fixtures/cfg-modtree-app/src/facade/inner.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-3
+thirdparty/rusi/fixtures/cfg-modtree-app/src/facade.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-3
+thirdparty/rusi/fixtures/deps-app/src/main.rs
+  s_4ecfbdcce50d18::t_b1be438e6b839e 3
+  s_4ecfbdcce50d18::t_4de120e9c1f93e 1-2,4
+thirdparty/rusi/crates/rusi-cli/Cargo.toml
+  s_4ecfbdcce50d18::t_de9d55a5f071f4 12
+thirdparty/rusi/crates/rusi-core/src/modeling.rs
+  s_4ecfbdcce50d18::t_8a663927cc3dc9 553
+  s_4ecfbdcce50d18::t_7bbaa23a52c84c 609-610,612-615
+  s_4ecfbdcce50d18::t_290ae7cbbc84d5 611,616
+  s_4ecfbdcce50d18::t_9059e547cf5db4 423,457
+thirdparty/rusi/crates/rusi-schema/src/lib.rs
+  s_4ecfbdcce50d18::t_555d9cb083714e 403-406
+  s_4ecfbdcce50d18::t_51bd757653ce79 511-525,530-533,535-559,591-600
+  s_4ecfbdcce50d18::t_e94df03c3cedba 266-275
+  s_4ecfbdcce50d18::t_1aedaa26b1d974 563-590,601
+  s_4ecfbdcce50d18::t_207d9f801dc36b 313-317
+  s_4ecfbdcce50d18::t_e1ef64b9631720 602
+thirdparty/rusi/crates/rusi-cli/src/main.rs
+  s_4ecfbdcce50d18::t_ea598e2a0f9379 273,323
+  s_4ecfbdcce50d18::t_d2dfe1bd892fa1 76-78,128,272,322
+  s_4ecfbdcce50d18::t_fed4109051d950 69-72,127
+  s_4ecfbdcce50d18::t_6d5e29287a97e4 67-68
+  s_4ecfbdcce50d18::t_62c7475e8f6d4b 73-75
+thirdparty/rusi/fixtures/cfg-modtree-app/src/main.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-39
+thirdparty/rusi/fixtures/multi-target-app/Cargo.toml
+  s_4ecfbdcce50d18::t_e3ed29ff5085e6 1-8
+thirdparty/rusi/crates/rusi-cli/src/export.rs
+  s_4ecfbdcce50d18::t_f28da54d6514cf 933-939
+  s_4ecfbdcce50d18::t_9059e547cf5db4 73-78,83-85,250-251,401
+  s_4ecfbdcce50d18::t_4494fa4b89b7b5 7-11,16-72,79-82,86-98,225,227,235-239,244,247,256-257
+  s_4ecfbdcce50d18::t_c742cfb2888585 383,394-399,402-404
+thirdparty/rusi/fixtures/cfg-modtree-app/src/platform.rs
+  s_4ecfbdcce50d18::t_b3736d4f66d3f6 1-3
+package-lock.json
+  s_4ecfbdcce50d18::t_4c0b2a57d75de9 3,9
+package.json
+  s_4ecfbdcce50d18::t_07e6ca5f96518a 3
+packages/darwin-amd64/package.json
+  s_4ecfbdcce50d18::t_0350314a11f49f 3
+packages/darwin-arm64/package.json
+  s_4ecfbdcce50d18::t_db6a9cd5c4d85c 3
+packages/linux-amd64/package.json
+  s_4ecfbdcce50d18::t_c7d737452f20af 3
+packages/linux-arm/package.json
+  s_4ecfbdcce50d18::t_b2521fc4cf38ac 3
+packages/linux-arm64/package.json
+  s_4ecfbdcce50d18::t_015d9033c0ecfc 3
+packages/linux-riscv64/package.json
+  s_4ecfbdcce50d18::t_a9fead25cd05d0 3
+packages/linuxmusl-amd64/package.json
+  s_4ecfbdcce50d18::t_446308fb6a4d4f 3
+packages/linuxmusl-arm64/package.json
+  s_4ecfbdcce50d18::t_52f12c4fe10fc8 3
+packages/ppc64/package.json
+  s_4ecfbdcce50d18::t_44d01e114af5c3 3
+packages/windows-amd64/package.json
+  s_4ecfbdcce50d18::t_33cfbddf049e1d 3
+packages/windows-arm64/package.json
+  s_4ecfbdcce50d18::t_04ef87674d6acc 3
+thirdparty/cdxrs/Cargo.lock
+  s_4ecfbdcce50d18::t_57038e68a6adc8 221
+thirdparty/cdxrs/Cargo.toml
+  s_4ecfbdcce50d18::t_2aad71bf86f9c3 3
+thirdparty/cdxui/Cargo.lock
+  s_4ecfbdcce50d18::t_cefcf5da90c6b7 171
+thirdparty/cdxui/Cargo.toml
+  s_4ecfbdcce50d18::t_4e1ca18ad7af79 3
+thirdparty/rusi/Cargo.toml
+  s_4ecfbdcce50d18::t_6679f884549905 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ebf13179b8db007e6e7c2b6c5440713aab779dce",
+  "prompts": {},
+  "sessions": {
+    "s_4ecfbdcce50d18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea4eae95-00f5-4799-975e-771c6a818c65",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
