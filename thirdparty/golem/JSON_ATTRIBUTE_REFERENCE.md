@@ -38,6 +38,9 @@ The top-level `Report` carries metadata plus optional analysis sections.
 | `crypto`                                                 | object, optional           | Crypto-focused evidence extracted from source.  | CBOM-like enrichment and crypto policy checks.   |
 | `callGraph`                                              | object, optional           | Call graph section when enabled.                | Reachability and blast radius analysis.          |
 | `dataFlow`                                               | object, optional           | Data-flow section when enabled.                 | Source-to-sink triage and exploitability review. |
+| `apiEndpoints[]`                                         | array of `APIEndpoint`     | HTTP/RPC routes registered in the source.       | OpenAPI generation and attack-surface mapping.   |
+| `services[]`                                             | array of `ServiceEvidence` | Server-side services rolled up per framework.   | Group endpoints by owning service for review.    |
+| `externalUrls[]`                                         | array of `ExternalURL`     | Literal URLs referenced by source code.         | Egress inventory and third-party dependency map. |
 | `diagnostics`                                            | array                      | Global diagnostic messages.                     | Handling partial analysis gracefully.            |
 | `nativeBoundary[]`                                       | array of `NativeCall`      | cgo Go↔C boundary records.                      | Hybrid-project boundary auditing.                |
 | `buildShapeDeltas[]`                                     | array of `BuildShapeDelta` | Files excluded by build constraints.            | Diagnose CGO_ENABLED skew.                       |
@@ -389,6 +392,86 @@ The `crypto` section is populated from core analysis and does not require `--dat
 | `assetId`, `operationId`, `materialId` | strings | Links to crypto evidence records.      | Graph-based triage workflows.          |
 | `range.*`                              | object  | Source range.                          | Editor jump links.                     |
 | `properties`                           | object  | Optional metadata.                     | Extended pipeline integrations.        |
+
+## API endpoint reference
+
+Every HTTP or RPC route registration observed in the source lands in
+`apiEndpoints[]`. Endpoints are grouped into a `services[]` roll-up per
+framework so a consumer can render an inventory by owning service.
+
+### `APIEndpoint` fields
+
+| JSON path               | Type              | Purpose                                                                                                                                                        | Typical use case                                          |
+| ----------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `id`                    | string            | Stable identifier composed from package, kind, method, path, handler, and source position.                                                                     | Join key across incremental scans.                        |
+| `kind`                  | string            | `http-route`, `http-listener`, or `rpc-service`.                                                                                                               | Filter service-side records from listeners.               |
+| `framework`             | string            | Detected framework: `gin`, `chi`, `echo`, `net/http`, `grpc`, `grpc-gateway`, `connectrpc`, `fiber`, `iris`, `beego`, `buffalo`, etc.                          | Group endpoints by owning framework.                      |
+| `method`                | string            | Uppercase HTTP verb; `ANY`/`RPC`/`MIDDLEWARE` for non-verb registrations.                                                                                      | Route filtering per verb.                                 |
+| `path`                  | string            | Fully-composed route path with any group / router-nest prefixes already merged in, including group-root registrations (`users.GET("", h)` → the group prefix). Framework-native placeholders (`:id`, `{id}`) are preserved. | OpenAPI path generation. |
+| `host`, `scheme`, `url` | strings           | Address parts when the registration named an absolute URL.                                                                                                     | External-service inventory.                               |
+| `handler`               | string            | Handler function's short name as written at the registration site.                                                                                             | Cross-reference against `declarations[]`.                 |
+| `packagePath`           | string            | Go package that registered the route.                                                                                                                          | Ownership and blast radius.                               |
+| `usageScope`            | string            | `runtime`, `test`, `benchmark`, or `example`, derived from the enclosing file.                                                                                 | Suppress non-runtime routes when gating deployments.      |
+| `range.*`               | object            | Source range for the registration call.                                                                                                                        | Editor jump links.                                        |
+| `parameters[]`          | array, optional   | Path and query parameters the handler reads through a recognized framework helper — `c.Param("id")`, `c.Query("name")`, `chi.URLParam(r, "name")`, `r.PathValue("id")`, `r.URL.Query().Get("q")`. Best-effort; absent when no helper is recognized. | OpenAPI parameter generation. |
+| `requestBodyType`       | string, optional  | Named type of the value bound by `c.ShouldBindJSON(&x)`, `c.Bind(&x)`, `render.DecodeJSON(r.Body, &x)`, `json.NewDecoder(r.Body).Decode(&x)`, etc. Framework ad-hoc map aliases (`gin.H`, `echo.Map`) and plain maps collapse to `object`. | OpenAPI request-body schema. |
+| `responseType`          | string, optional  | Named type of the value passed to the primary response emitter (`c.JSON(status, expr)`, `render.JSON(w, r, expr)`, `json.NewEncoder(w).Encode(expr)`). Slice multiplicity is preserved (`[]User`). | OpenAPI response-body schema. |
+| `properties`            | object, optional  | Extension map for detector hints such as `{"listener": "true", "tls": "true"}` on `ListenAndServeTLS`. The enrichment extractor never writes scratch data here. | Downstream tooling extension without schema churn.        |
+
+### `EndpointParameter` fields
+
+| JSON path  | Type   | Purpose                                                            |
+| ---------- | ------ | ------------------------------------------------------------------ |
+| `name`     | string | Parameter name as written in the framework helper call.            |
+| `location` | string | `path` or `query`.                                                 |
+| `typeName` | string | Go type the handler binds the value to; `string` for the helper-based extractors today. |
+
+### How handler signatures are extracted
+
+Enrichment runs after route detection by walking each handler's function
+body. Helper calls are matched by **resolved package path and parameter
+type** (via the type checker), not by identifier spelling, so import
+aliases and renamed context parameters keep working.
+
+Supported patterns per framework:
+
+- **Gin** — `c.Param("name")` for path params; `c.Query("name")`,
+  `c.DefaultQuery`, `c.GetQuery` for query params; `c.ShouldBindJSON(&x)`,
+  `c.BindJSON(&x)`, `c.Bind(&x)`, `c.ShouldBind`, `c.ShouldBindWith`,
+  `c.ShouldBindBodyWith`, and the XML/YAML variants for the request body;
+  `c.JSON(status, expr)` and friends (`JSONP`, `IndentedJSON`, `SecureJSON`,
+  `PureJSON`, `AsciiJSON`) for the response. `AbortWithStatusJSON` payloads
+  are treated as error shapes, never as the primary response body.
+  `c.ShouldBindQuery` is deliberately skipped: it reads no request body and
+  its struct's `form:` tags are a separate extraction problem.
+- **chi** — `chi.URLParam(r, "name")` for path params; `render.DecodeJSON(r.Body, &x)`
+  and `render.Bind(r, &x)` for the request body; `render.JSON(w, r, expr)` /
+  `render.Respond` for the response; plus the stdlib codec pair
+  `json.NewDecoder(r.Body).Decode(&x)` / `json.NewEncoder(w).Encode(expr)`.
+- **Echo** — `c.Param("name")` for path params; `c.QueryParam("name")` for
+  query params; `c.Bind(&x)` / `c.BindJSON(&x)` for the request body;
+  `c.JSON(status, expr)` / `c.JSONPretty` for the response.
+- **net/http** — `r.PathValue("id")` (Go 1.22+ wildcards) for path params;
+  `r.URL.Query().Get("q")` for query params; `json.NewDecoder` /
+  `json.NewEncoder` for the request and response bodies.
+
+Error-status handling: when a handler's response emitter carries a 4xx/5xx
+status (an integer literal or any integer constant the type checker
+resolves, e.g. `http.StatusBadRequest`), that payload is remembered as the
+error shape. It is only promoted to `responseType` when the handler never
+emits a successful response — an error-only handler still gets a schema,
+but an error path never displaces the happy-path payload.
+
+Enrichment is deliberately best-effort:
+
+- Handlers defined in a different package than the one that registered the
+  route, calls routed through package-level helper functions, closures
+  captured through interfaces, and unrecognized binding APIs contribute no
+  enriched fields; the endpoint still ships with its method / path /
+  handler / framework as before.
+- A wrong parameter type is worse than a missing one, since downstream
+  tools will happily generate the wrong schema — when a pattern cannot be
+  matched with confidence, the field stays empty.
 
 ## Practical consumption patterns
 

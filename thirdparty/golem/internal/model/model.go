@@ -144,19 +144,33 @@ type BuildShapeDelta struct {
 }
 
 type APIEndpoint struct {
-	ID          string            `json:"id"`
-	Kind        string            `json:"kind"`
-	Framework   string            `json:"framework,omitempty"`
-	Method      string            `json:"method,omitempty"`
-	Path        string            `json:"path,omitempty"`
-	Host        string            `json:"host,omitempty"`
-	Scheme      string            `json:"scheme,omitempty"`
-	URL         string            `json:"url,omitempty"`
-	Handler     string            `json:"handler,omitempty"`
-	PackagePath string            `json:"packagePath,omitempty"`
-	UsageScope  string            `json:"usageScope,omitempty"`
-	Range       Range             `json:"range"`
-	Properties  map[string]string `json:"properties,omitempty"`
+	ID              string              `json:"id"`
+	Kind            string              `json:"kind"`
+	Framework       string              `json:"framework,omitempty"`
+	Method          string              `json:"method,omitempty"`
+	Path            string              `json:"path,omitempty"`
+	Host            string              `json:"host,omitempty"`
+	Scheme          string              `json:"scheme,omitempty"`
+	URL             string              `json:"url,omitempty"`
+	Handler         string              `json:"handler,omitempty"`
+	PackagePath     string              `json:"packagePath,omitempty"`
+	UsageScope      string              `json:"usageScope,omitempty"`
+	Range           Range               `json:"range"`
+	Parameters      []EndpointParameter `json:"parameters,omitempty"`
+	RequestBodyType string              `json:"requestBodyType,omitempty"`
+	ResponseType    string              `json:"responseType,omitempty"`
+	Properties      map[string]string   `json:"properties,omitempty"`
+}
+
+// EndpointParameter describes one path or query parameter an HTTP handler
+// reads through a recognized framework helper. TypeName is the Go type the
+// handler binds the value to — "string" for every helper-based extractor
+// today. Extraction is best-effort; parameters a handler reads through
+// unrecognized helpers are simply absent.
+type EndpointParameter struct {
+	Name     string `json:"name"`
+	Location string `json:"location"`
+	TypeName string `json:"typeName,omitempty"`
 }
 type ExternalURL struct {
 	ID          string            `json:"id"`
