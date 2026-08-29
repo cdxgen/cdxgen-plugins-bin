@@ -22,11 +22,11 @@ trustinspector-cdxgen host                    # host trust posture
 
 A single JSON object with three optional top-level keys, depending on mode:
 
-| Key             | Contents                                                                                      |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `materials`     | trust material: keyrings and certificates with SHA-1, SHA-256, algorithm, key strength, fingerprint, and trust domain |
-| `inspections`   | per-path signing state with properties like `cdx:darwin:codesign:*` and `cdx:windows:authenticode:*` |
-| `hostFindings`  | host posture with properties like `cdx:windows:wdac:activePolicyCount` and `cdx:darwin:gatekeeper:*` |
+| Key            | Contents                                                                                                              |
+| -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `materials`    | trust material: keyrings and certificates with SHA-1, SHA-256, algorithm, key strength, fingerprint, and trust domain |
+| `inspections`  | per-path signing state with properties like `cdx:darwin:codesign:*` and `cdx:windows:authenticode:*`                  |
+| `hostFindings` | host posture with properties like `cdx:windows:wdac:activePolicyCount` and `cdx:darwin:gatekeeper:*`                  |
 
 ## What belongs in a trust review
 

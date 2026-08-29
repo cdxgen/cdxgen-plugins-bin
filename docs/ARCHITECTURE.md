@@ -103,11 +103,11 @@ cdxgen reads the manifest when present so the generated BOM can record precise h
 
 ## Distribution channels
 
-| Channel                     | Artifact                                            | Consumer                       |
-| --------------------------- | --------------------------------------------------- | ------------------------------ |
-| npm                         | `@cdxgen/cdxgen-plugins-bin` plus per-platform pkgs | cdxgen's optional dependencies |
-| GitHub Releases             | raw binaries with `.sha256` sidecars                | scripts, air-gapped installs   |
-| GHCR via ORAS               | one tag per binary, plus SBOM and checksum files    | `oras pull` in CI and images   |
+| Channel         | Artifact                                            | Consumer                       |
+| --------------- | --------------------------------------------------- | ------------------------------ |
+| npm             | `@cdxgen/cdxgen-plugins-bin` plus per-platform pkgs | cdxgen's optional dependencies |
+| GitHub Releases | raw binaries with `.sha256` sidecars                | scripts, air-gapped installs   |
+| GHCR via ORAS   | one tag per binary, plus SBOM and checksum files    | `oras pull` in CI and images   |
 
 cdxgen pins cdxrs by major version and logs once before falling back to JavaScript on a mismatch, so when a cdxrs release changes the major, the plugins release must land first.
 

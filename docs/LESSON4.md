@@ -22,14 +22,14 @@ thirdparty/cdxui/target/release/cdxui /tmp/bom.json
 
 Eight tabs cover the document: Logs, Summary, Vulnerabilities, Components, Crypto, Services, Formulation, and Dependencies. A few minutes with the arrow keys teaches the layout faster than any prose, but here is the map of where questions live:
 
-| Question                                          | Tab             |
-| ------------------------------------------------- | --------------- |
-| What is in this BOM, at a glance?                  | Summary         |
-| Which components carry licenses, hashes, evidence? | Components      |
-| What cryptographic assets did the scan find?       | Crypto          |
-| What services does the application expose?         | Services        |
-| How was this artifact built?                       | Formulation     |
-| Where does this component sit in the tree?         | Dependencies    |
+| Question                                           | Tab          |
+| -------------------------------------------------- | ------------ |
+| What is in this BOM, at a glance?                  | Summary      |
+| Which components carry licenses, hashes, evidence? | Components   |
+| What cryptographic assets did the scan find?       | Crypto       |
+| What services does the application expose?         | Services     |
+| How was this artifact built?                       | Formulation  |
+| Where does this component sit in the tree?         | Dependencies |
 
 Search is full-text across component fields, with type filters and column sorting. The detail panel shows licenses, properties, evidence, hashes, and external references for whatever row is selected. Dependency trees expand and collapse and flag cycles instead of recursing into them forever.
 

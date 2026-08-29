@@ -60,14 +60,14 @@ The report schema is versioned and documented field by field in [JSON_ATTRIBUTE_
 
 ## Call graphs
 
-| Mode   | Implementation   | Practical behavior                                                              |
-| ------ | ---------------- | ------------------------------------------------------------------------------- |
-| none   | no graph         | fastest; source evidence only                                                   |
-| static | static.CallGraph | fast and deterministic; direct calls only                                       |
-| cha    | cha.CallGraph    | conservative for interface dispatch; more edges                                 |
-| rta    | rta.Analyze      | roots-driven reachability; useful for executables                               |
-| vta    | vta.CallGraph    | variable type analysis over the reachable set; often the most precise           |
-| auto   | CHA to RTA to VTA| iterates down the chain on timeout; records which algorithm ran in diagnostics  |
+| Mode   | Implementation    | Practical behavior                                                             |
+| ------ | ----------------- | ------------------------------------------------------------------------------ |
+| none   | no graph          | fastest; source evidence only                                                  |
+| static | static.CallGraph  | fast and deterministic; direct calls only                                      |
+| cha    | cha.CallGraph     | conservative for interface dispatch; more edges                                |
+| rta    | rta.Analyze       | roots-driven reachability; useful for executables                              |
+| vta    | vta.CallGraph     | variable type analysis over the reachable set; often the most precise          |
+| auto   | CHA to RTA to VTA | iterates down the chain on timeout; records which algorithm ran in diagnostics |
 
 Two ideas matter when you read golem graphs.
 

@@ -4,13 +4,13 @@ This page is the reference for the build system. For a guided walkthrough with e
 
 ## Prerequisites
 
-| Tool                    | Needed for                              |
-| ----------------------- | --------------------------------------- |
-| Go 1.27+                | golem, trustinspector, trivy-cdxgen     |
-| Rust stable toolchain   | rusi, cdxui, cdxrs                      |
-| Swift 5.9+ (macOS/Linux)| sourcekitten                            |
-| Node.js 20+             | metadata generation and check scripts   |
-| upx                     | optional compression in `build.sh`      |
+| Tool                     | Needed for                            |
+| ------------------------ | ------------------------------------- |
+| Go 1.27+                 | golem, trustinspector, trivy-cdxgen   |
+| Rust stable toolchain    | rusi, cdxui, cdxrs                    |
+| Swift 5.9+ (macOS/Linux) | sourcekitten                          |
+| Node.js 20+              | metadata generation and check scripts |
+| upx                      | optional compression in `build.sh`    |
 
 ## Full local build
 
@@ -85,16 +85,16 @@ bash scripts/publish-helper-oras.sh <helper> <platform-tuple>
 
 ## CI workflows
 
-| Workflow                 | Job                                                            |
-| ------------------------ | -------------------------------------------------------------- |
-| `test.yml`               | repository-level checks, script tests                          |
-| `native-builds.yml`      | cross-platform builds of the custom helpers                    |
-| `release.yml`            | staged release: packaging, coverage, size, npm, releases, ORAS |
-| `golem-e2e.yml`          | end-to-end golem analysis against sample Go projects           |
-| `cdxrs-test.yml`         | cdxrs unit and integration tests                               |
-| `cdxui-test.yml`         | cdxui checks                                                   |
-| `rusi-test.yml`          | rusi test suite                                                |
-| `trivy-cdxgen-sbom-e2e.yml` | trivy-cdxgen SBOM assertions against sample images and rootfs |
+| Workflow                    | Job                                                            |
+| --------------------------- | -------------------------------------------------------------- |
+| `test.yml`                  | repository-level checks, script tests                          |
+| `native-builds.yml`         | cross-platform builds of the custom helpers                    |
+| `release.yml`               | staged release: packaging, coverage, size, npm, releases, ORAS |
+| `golem-e2e.yml`             | end-to-end golem analysis against sample Go projects           |
+| `cdxrs-test.yml`            | cdxrs unit and integration tests                               |
+| `cdxui-test.yml`            | cdxui checks                                                   |
+| `rusi-test.yml`             | rusi test suite                                                |
+| `trivy-cdxgen-sbom-e2e.yml` | trivy-cdxgen SBOM assertions against sample images and rootfs  |
 
 ## Troubleshooting builds
 

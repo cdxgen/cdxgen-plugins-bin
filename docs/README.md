@@ -8,17 +8,17 @@ Every binary in this repository exists because cdxgen, a Node.js application, me
 
 ## What lives here
 
-| Helper           | Language | Job                                                            |
-| ---------------- | -------- | -------------------------------------------------------------- |
-| golem            | Go       | Go source evidence, call graphs, data flow, API endpoints, CBOM |
-| rusi             | Rust     | Rust source evidence, call graphs, data flow, crypto inventory  |
-| cdxrs            | Rust     | Fast BOM validation and registry metadata fetch                 |
-| cdxui            | Rust     | Terminal UI for exploring and generating BOMs                   |
-| trustinspector   | Go       | Trust anchors, code signing, notarization, WDAC, Gatekeeper     |
-| trivy-cdxgen     | Go       | Container and rootfs OS package inventory                       |
-| sourcekitten     | Swift    | Swift semantic analysis via SourceKit                           |
-| dosai            | C#       | .NET assembly and source inspection                             |
-| osquery          | C++      | Live operating system instrumentation for OBOM                  |
+| Helper         | Language | Job                                                             |
+| -------------- | -------- | --------------------------------------------------------------- |
+| golem          | Go       | Go source evidence, call graphs, data flow, API endpoints, CBOM |
+| rusi           | Rust     | Rust source evidence, call graphs, data flow, crypto inventory  |
+| cdxrs          | Rust     | Fast BOM validation and registry metadata fetch                 |
+| cdxui          | Rust     | Terminal UI for exploring and generating BOMs                   |
+| trustinspector | Go       | Trust anchors, code signing, notarization, WDAC, Gatekeeper     |
+| trivy-cdxgen   | Go       | Container and rootfs OS package inventory                       |
+| sourcekitten   | Swift    | Swift semantic analysis via SourceKit                           |
+| dosai          | C#       | .NET assembly and source inspection                             |
+| osquery        | C++      | Live operating system instrumentation for OBOM                  |
 
 ## Start here
 

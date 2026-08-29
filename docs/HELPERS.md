@@ -16,11 +16,11 @@ What the wrapper does:
 
 Environment controls, all defaulting to on:
 
-| Variable                            | Emits                                                        |
-| ----------------------------------- | ------------------------------------------------------------ |
+| Variable                               | Emits                                                     |
+| -------------------------------------- | --------------------------------------------------------- |
 | `TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES` | Capability properties for supported APK, DPKG, RPM scans  |
-| `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS`  | InstalledCommand and InstalledCommandPath properties         |
-| `TRIVY_CDXGEN_INCLUDE_OS_FILES`     | one InstalledFile property per installed file per package    |
+| `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS`     | InstalledCommand and InstalledCommandPath properties      |
+| `TRIVY_CDXGEN_INCLUDE_OS_FILES`        | one InstalledFile property per installed file per package |
 
 The file inventory can produce large BOMs on desktop images; that is the intended behavior, and the switch exists for the scans where it is not.
 
