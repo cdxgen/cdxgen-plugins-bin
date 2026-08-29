@@ -113,6 +113,9 @@ func TestEndpointsEnrichedForGin(t *testing.T) {
 		"GET /api/v1/orders/:id",
 		"GET /api/v1/ping",
 		"DELETE /api/v1/admin/users/:id",
+		"GET /api/v1/repos/users",
+		"GET /api/v1/repos/orders",
+		"GET /api/v1/inline",
 	}
 	for _, key := range wantRoutes {
 		requireEndpoint(t, byKey, key)
@@ -189,6 +192,26 @@ func TestEndpointsEnrichedForGin(t *testing.T) {
 	if admin.ResponseType != "object" {
 		t.Fatalf("deleteAdminUser: expected responseType 'object' (from g.H), got %q", admin.ResponseType)
 	}
+
+	// userRepo.Find and orderRepo.Find share a short name across receiver
+	// types. The registration strings carry no receiver, so both endpoints
+	// must stay unenriched rather than one being enriched from the other's
+	// body — UserRepo.Find reads a query param, OrderRepo.Find a path param.
+	for _, key := range []string{"GET /api/v1/repos/users", "GET /api/v1/repos/orders"} {
+		repo := requireEndpoint(t, byKey, key)
+		requireParams(t, repo, nil)
+		if repo.RequestBodyType != "" || repo.ResponseType != "" {
+			t.Fatalf("%s: ambiguous handler must not be enriched, got body=%q resp=%q", key, repo.RequestBodyType, repo.ResponseType)
+		}
+	}
+
+	// The inline func-literal handler is enriched straight from the closure
+	// at the registration site.
+	inline := requireEndpoint(t, byKey, "GET /api/v1/inline")
+	requireParams(t, inline, []model.EndpointParameter{{Name: "verbose", Location: "query", TypeName: "string"}})
+	if inline.ResponseType != "object" {
+		t.Fatalf("inline: expected responseType 'object' (from gin.H), got %q", inline.ResponseType)
+	}
 }
 
 // TestEndpointsEnrichedForChi covers the chi handler shapes: chi.URLParam,
@@ -250,6 +273,7 @@ func TestEndpointsEnrichedForEcho(t *testing.T) {
 		"GET /items",
 		"POST /items",
 		"GET /items/:id",
+		"GET /items/:id/archive",
 		"GET /gone",
 	}
 	for _, key := range wantRoutes {
@@ -286,6 +310,16 @@ func TestEndpointsEnrichedForEcho(t *testing.T) {
 	if gone.ResponseType != "object" {
 		t.Fatalf("gone: expected promoted responseType 'object', got %q", gone.ResponseType)
 	}
+
+	// archiveItem (endpoints-echo/admin.go) reaches the framework through an
+	// aliased, versioned import (e "github.com/labstack/echo/v4"): the
+	// extractor must normalize the /v4 suffix and resolve roles by type —
+	// the source spelling "e.Context" matches no text fallback.
+	archive := requireEndpoint(t, byKey, "GET /items/:id/archive")
+	requireParams(t, archive, []model.EndpointParameter{{Name: "id", Location: "path", TypeName: "string"}})
+	if archive.ResponseType != "object" {
+		t.Fatalf("archiveItem: expected responseType 'object' (from aliased e.Map), got %q", archive.ResponseType)
+	}
 }
 
 // TestEndpointsEnrichedForNetHTTP covers the stdlib-only service: named
@@ -312,6 +346,14 @@ func TestEndpointsEnrichedForNetHTTP(t *testing.T) {
 	}
 	if create.ResponseType != "Ticket" {
 		t.Fatalf("createTicket: expected responseType 'Ticket', got %q", create.ResponseType)
+	}
+
+	// The inline HandleFunc closure is enriched directly from the func
+	// literal at the registration site.
+	reports := requireEndpoint(t, byKey, " /reports")
+	requireParams(t, reports, []model.EndpointParameter{{Name: "format", Location: "query", TypeName: "string"}})
+	if reports.ResponseType != "Report" {
+		t.Fatalf("reports: expected responseType 'Report', got %q", reports.ResponseType)
 	}
 }
 

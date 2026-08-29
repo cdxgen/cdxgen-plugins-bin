@@ -14,8 +14,10 @@ import (
 )
 
 // Framework import paths the handler-signature extractor is phrased
-// against. Matching on resolved package paths (via the type checker) keeps
-// the extractor working under aliased or renamed imports.
+// against, in their canonical (major-version-stripped) spelling. Matching
+// always goes through normalizeModulePath, so the versioned module paths
+// real projects import — github.com/go-chi/chi/v5, github.com/labstack/echo/v4,
+// github.com/gofiber/fiber/v2 — compare equal to these constants.
 const (
 	ginImportPath     = "github.com/gin-gonic/gin"
 	chiImportPath     = "github.com/go-chi/chi"
@@ -25,7 +27,30 @@ const (
 	jsonImportPath    = "encoding/json"
 )
 
-// handlerSignatureExtractor walks HTTP-handler function bodies and lifts
+// normalizeModulePath strips a trailing major-version segment (/v2 … /v999,
+// per the Go module path spec) so versioned import paths compare equal to
+// their unversioned spelling. Anything else — gopkg.in/yaml.v2,
+// example.com/v2api — is returned unchanged.
+func normalizeModulePath(path string) string {
+	if idx := strings.LastIndex(path, "/v"); idx >= 0 {
+		rest := path[idx+2:]
+		if rest != "" && len(rest) <= 3 && isAllDigits(rest) {
+			return path[:idx]
+		}
+	}
+	return path
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// handlerSignatureExtractor walks HTTP-handler bodies and lifts
 // framework-specific helper calls into structured [model.EndpointParameter]
 // values plus request-body and response types. It turns what the endpoint
 // detector recorded (framework + method + path + handler name) into the
@@ -50,20 +75,31 @@ const (
 //     .Decode(&x)` for the request body; `json.NewEncoder(w).Encode(expr)`
 //     for the response.
 //
-// Known limitations, all deliberate: handlers defined in a different package
-// than the one that registered the route contribute no enrichment (the
-// handler index is per package); calls routed through package-level helper
-// functions are not followed; response emitters behind unrecognized wrappers
-// are missed. Extraction is best-effort — a wrong parameter type is worse
-// than a missing one, since downstream tools will happily generate the wrong
-// schema.
+// Handlers may be named functions, method expressions (`svc.Ping`), or
+// inline func literals at the registration site.
+//
+// Known limitations, all deliberate: a short name declared more than once
+// in the registering package (methods on different receiver types, or a
+// method and a free function) is left unenriched, because the handler
+// string does not carry the receiver and enriching from the wrong body
+// would yield confidently wrong schemas; handlers defined in a different
+// package than the one that registered the route contribute no enrichment;
+// calls routed through package-level helper functions are not followed;
+// response emitters behind unrecognized wrappers are missed; generic named
+// types surface as their bare name (List[T] → "List"). Extraction is
+// best-effort — a wrong parameter type is worse than a missing one, since
+// downstream tools will happily generate the wrong schema.
 type handlerSignatureExtractor struct {
 	pkg      *packages.Package
 	handlers map[string]*ast.FuncDecl
+	// literals maps an endpoint's registration-site position to an inline
+	// handler closure, covering the dominant `r.GET("/x", func(c
+	// *gin.Context) {...})` idiom that never resolves to a named function.
+	literals map[string]*ast.FuncLit
 }
 
-func newHandlerSignatureExtractor(pkg *packages.Package) *handlerSignatureExtractor {
-	e := &handlerSignatureExtractor{pkg: pkg, handlers: map[string]*ast.FuncDecl{}}
+func newHandlerSignatureExtractor(pkg *packages.Package, literals map[string]*ast.FuncLit) *handlerSignatureExtractor {
+	e := &handlerSignatureExtractor{pkg: pkg, handlers: map[string]*ast.FuncDecl{}, literals: literals}
 	if pkg == nil {
 		return e
 	}
@@ -71,9 +107,14 @@ func newHandlerSignatureExtractor(pkg *packages.Package) *handlerSignatureExtrac
 	// can resolve endpoint.handler back to a *ast.FuncDecl without
 	// re-walking the AST per endpoint. Endpoint handlers only carry the
 	// short name (method expressions surface as "svc.Ping"), so the
-	// short-name key is the join column that matches. Collisions across
-	// declarations are resolved last-wins; the enrichment still errs on the
-	// side of omission when the chosen body matches no known pattern.
+	// short-name key is the join column that matches.
+	//
+	// A short name declared more than once in the package — methods on
+	// different receiver types, or a method and a free function sharing a
+	// name — is deliberately left unindexed: the handler string does not
+	// carry the receiver, so resolving it would be a guess, and enriching
+	// from the wrong body yields confidently wrong schemas.
+	counts := map[string]int{}
 	for _, file := range pkg.Syntax {
 		if file == nil {
 			continue
@@ -81,6 +122,21 @@ func newHandlerSignatureExtractor(pkg *packages.Package) *handlerSignatureExtrac
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name == nil || fn.Body == nil {
+				continue
+			}
+			counts[fn.Name.Name]++
+		}
+	}
+	for _, file := range pkg.Syntax {
+		if file == nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name == nil || fn.Body == nil {
+				continue
+			}
+			if counts[fn.Name.Name] > 1 {
 				continue
 			}
 			e.handlers[fn.Name.Name] = fn
@@ -127,22 +183,38 @@ func (sig *endpointSignature) addParam(name, location, typeName string) {
 }
 
 // enrich populates [model.APIEndpoint.Parameters], RequestBodyType, and
-// ResponseType by walking the handler's function body. Called once per
-// endpoint after endpointForCall has done the framework/method/path work.
+// ResponseType by walking the handler's body. The body comes from either
+// the inline func literal at the registration site or, for named and
+// method-expression handlers, the package-wide short-name index. Called
+// once per endpoint after endpointForCall has done the framework/method/
+// path work.
 func (e *handlerSignatureExtractor) enrich(endpoint *model.APIEndpoint) {
-	if endpoint == nil || endpoint.Kind != "http-route" || endpoint.Handler == "" || e.pkg == nil || e.pkg.TypesInfo == nil {
+	if endpoint == nil || endpoint.Kind != "http-route" || e.pkg == nil || e.pkg.TypesInfo == nil {
 		return
 	}
-	fn, ok := e.handlers[handlerShortName(endpoint.Handler)]
-	if !ok || fn.Body == nil {
+	// Resolve the handler body: an inline func literal at the registration
+	// site wins; otherwise fall back to the short-name index for named and
+	// method-expression handlers.
+	var (
+		body   ast.Node
+		params *ast.FieldList
+	)
+	if lit, ok := e.literals[endpointPositionKey(endpoint.Range)]; ok && lit != nil {
+		body, params = lit.Body, lit.Type.Params
+	} else if endpoint.Handler != "" {
+		if fn := e.handlers[handlerShortName(endpoint.Handler)]; fn != nil && fn.Body != nil {
+			body, params = fn.Body, fn.Type.Params
+		}
+	}
+	if body == nil {
 		return
 	}
-	roles := e.handlerRolesFor(fn, endpoint.Framework)
+	roles := e.rolesForParams(params, endpoint.Framework)
 	if roles.empty() {
 		return
 	}
 	sig := &endpointSignature{seenPath: map[string]bool{}, seenQuery: map[string]bool{}}
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -161,16 +233,23 @@ func (e *handlerSignatureExtractor) enrich(endpoint *model.APIEndpoint) {
 	endpoint.ResponseType = sig.responseType
 }
 
-// handlerRolesFor classifies the handler's parameters by resolved type:
+// endpointPositionKey identifies a registration call site by source
+// position, joining endpoints collected during route detection to the
+// inline handler literal written at that site.
+func endpointPositionKey(r model.Range) string {
+	return r.Start.Filename + ":" + strconv.Itoa(r.Start.Line) + ":" + strconv.Itoa(r.Start.Column)
+}
+
+// rolesForParams classifies a handler's parameter list by resolved type:
 // the framework context objects for gin/echo, and *http.Request /
 // http.ResponseWriter for chi and net/http handlers. Falls back to source
 // text when the type checker has no entry for the parameter.
-func (e *handlerSignatureExtractor) handlerRolesFor(fn *ast.FuncDecl, framework string) handlerRoles {
+func (e *handlerSignatureExtractor) rolesForParams(params *ast.FieldList, framework string) handlerRoles {
 	roles := handlerRoles{ctx: map[string]bool{}, request: map[string]bool{}, response: map[string]bool{}}
-	if fn.Type == nil || fn.Type.Params == nil {
+	if params == nil {
 		return roles
 	}
-	for _, field := range fn.Type.Params.List {
+	for _, field := range params.List {
 		if len(field.Names) == 0 {
 			continue
 		}
@@ -202,7 +281,7 @@ func roleForNamedType(named *types.Named) string {
 	if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return ""
 	}
-	path := named.Obj().Pkg().Path()
+	path := normalizeModulePath(named.Obj().Pkg().Path())
 	name := named.Obj().Name()
 	switch {
 	case path == ginImportPath && name == "Context", path == echoImportPath && name == "Context":
@@ -350,12 +429,12 @@ func (e *handlerSignatureExtractor) inspectRequestMethod(call *ast.CallExpr, met
 // paramNameAt extracts the string-literal parameter name at args[nameArg] of
 // a helper like chi.URLParam(r, "id"), and only trusts it when the receiver
 // argument at args[receiverArg] is one of the handler's request parameters.
-// When no request parameter could be resolved at all, the check is lenient.
 func (e *handlerSignatureExtractor) paramNameAt(call *ast.CallExpr, allowed map[string]bool, receiverArg, nameArg int) (string, bool) {
 	if nameArg >= len(call.Args) || receiverArg >= len(call.Args) {
 		return "", false
 	}
-	if ident, ok := call.Args[receiverArg].(*ast.Ident); ok && len(allowed) > 0 && !allowed[ident.Name] {
+	ident, ok := call.Args[receiverArg].(*ast.Ident)
+	if !ok || !allowed[ident.Name] {
 		return "", false
 	}
 	return stringLiteral(call.Args[nameArg])
@@ -414,15 +493,15 @@ func (e *handlerSignatureExtractor) isRequestValuesExpr(expr ast.Expr, roles han
 }
 
 // packageSelector resolves a selector whose receiver is a package name to
-// the imported package's path, so `chi.URLParam` and `c "github.com/go-chi/chi"`
-// aliased references both resolve to github.com/go-chi/chi.
+// the imported package's path, so `chi.URLParam` and `c "github.com/go-chi/chi/v5"`
+// aliased references both resolve to the framework's canonical path.
 func (e *handlerSignatureExtractor) packageSelector(sel *ast.SelectorExpr) (string, string) {
 	ident, ok := sel.X.(*ast.Ident)
 	if !ok {
 		return "", ""
 	}
 	if obj, ok := e.pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && obj.Imported() != nil {
-		return obj.Imported().Path(), sel.Sel.Name
+		return normalizeModulePath(obj.Imported().Path()), sel.Sel.Name
 	}
 	return "", ""
 }
@@ -516,14 +595,15 @@ func (e *handlerSignatureExtractor) typeNameOf(expr ast.Expr) string {
 }
 
 // freeFormObjectTypePaths lists framework-provided ad-hoc map aliases by
-// package path and type name. They carry no schema beyond "object" — they
-// are map[string]any under a friendlier name — and matching on the package
-// path (not the identifier spelled at the callsite) keeps a user's own type
-// named H or Map from collapsing.
+// package path and type name, with paths in normalized (major-version-
+// stripped) spelling. They carry no schema beyond "object" — they are
+// map[string]any under a friendlier name — and matching on the package
+// path (not the identifier spelled at the callsite) keeps a user's own
+// type named H or Map from collapsing.
 var freeFormObjectTypePaths = map[string]bool{
-	"github.com/gin-gonic/gin.H":      true,
-	"github.com/labstack/echo.Map":    true,
-	"github.com/gofiber/fiber/v2.Map": true,
+	"github.com/gin-gonic/gin.H":   true,
+	"github.com/labstack/echo.Map": true,
+	"github.com/gofiber/fiber.Map": true,
 }
 
 // shortTypeName strips package qualifiers so the emitted name is what
@@ -556,9 +636,11 @@ func shortTypeName(t types.Type) string {
 		if obj == nil {
 			return ""
 		}
-		if obj.Pkg() != nil && freeFormObjectTypePaths[obj.Pkg().Path()+"."+obj.Name()] {
+		if obj.Pkg() != nil && freeFormObjectTypePaths[normalizeModulePath(obj.Pkg().Path())+"."+obj.Name()] {
 			return "object"
 		}
+		// Generic instantiations (List[T]) surface as their bare name; the
+		// type arguments' shapes are not inspected.
 		return obj.Name()
 	case *types.Basic:
 		return typ.Name()
@@ -589,10 +671,10 @@ func handlerShortName(handler string) string {
 // ─── status classification ───────────────────────────────────────────────
 
 // isErrorStatusExpr reports whether a response-emitter status argument names
-// a 4xx or 5xx code: integer literals, any integer constant the type checker
-// resolved (covering http.StatusBadRequest and framework status wrappers),
-// and, when no constant value is available, the well-known net/http status
-// names.
+// a 4xx or 5xx code: integer literals, or any integer constant the type
+// checker resolved — which covers every named net/http status constant and
+// framework status wrappers. Anything else (a computed variable, an unknown
+// name) is treated as a successful response, the safe default.
 func (e *handlerSignatureExtractor) isErrorStatusExpr(expr ast.Expr) bool {
 	if lit, ok := expr.(*ast.BasicLit); ok {
 		if value, err := strconv.Atoi(lit.Value); err == nil {
@@ -606,39 +688,6 @@ func (e *handlerSignatureExtractor) isErrorStatusExpr(expr ast.Expr) bool {
 				return value >= 400 && value < 600
 			}
 		}
-	}
-	switch v := expr.(type) {
-	case *ast.SelectorExpr:
-		return isErrorStatusName(v.Sel.Name)
-	case *ast.Ident:
-		return isErrorStatusName(v.Name)
-	}
-	return false
-}
-
-func isErrorStatusName(name string) bool {
-	// Only names known for certain to be 4xx/5xx; anything else falls
-	// through, which is the safe default (assume success).
-	switch name {
-	case "StatusBadRequest", "StatusUnauthorized", "StatusPaymentRequired",
-		"StatusForbidden", "StatusNotFound", "StatusMethodNotAllowed",
-		"StatusNotAcceptable", "StatusProxyAuthRequired", "StatusRequestTimeout",
-		"StatusConflict", "StatusGone", "StatusLengthRequired",
-		"StatusPreconditionFailed", "StatusRequestEntityTooLarge",
-		"StatusRequestURITooLong", "StatusUnsupportedMediaType",
-		"StatusRequestedRangeNotSatisfiable", "StatusExpectationFailed",
-		"StatusTeapot", "StatusMisdirectedRequest", "StatusUnprocessableEntity",
-		"StatusLocked", "StatusFailedDependency", "StatusTooEarly",
-		"StatusUpgradeRequired", "StatusPreconditionRequired",
-		"StatusTooManyRequests", "StatusRequestHeaderFieldsTooLarge",
-		"StatusUnavailableForLegalReasons",
-		"StatusInternalServerError", "StatusNotImplemented",
-		"StatusBadGateway", "StatusServiceUnavailable",
-		"StatusGatewayTimeout", "StatusHTTPVersionNotSupported",
-		"StatusVariantAlsoNegotiates", "StatusInsufficientStorage",
-		"StatusLoopDetected", "StatusNotExtended",
-		"StatusNetworkAuthenticationRequired":
-		return true
 	}
 	return false
 }

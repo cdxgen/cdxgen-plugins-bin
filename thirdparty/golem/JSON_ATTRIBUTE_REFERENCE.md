@@ -428,10 +428,15 @@ framework so a consumer can render an inventory by owning service.
 
 ### How handler signatures are extracted
 
-Enrichment runs after route detection by walking each handler's function
-body. Helper calls are matched by **resolved package path and parameter
-type** (via the type checker), not by identifier spelling, so import
-aliases and renamed context parameters keep working.
+Enrichment runs after route detection by walking each handler's body.
+Helper calls are matched by **resolved package path and parameter type**
+(via the type checker), not by identifier spelling, so import aliases and
+renamed context parameters keep working. Package paths are compared after
+stripping the major-version suffix, so the `github.com/go-chi/chi/v5` and
+`github.com/labstack/echo/v4` modules real projects import match the same
+rules as their unversioned spelling. Handlers may be named functions,
+method expressions (`svc.Ping`), or inline func literals written directly
+at the registration site.
 
 Supported patterns per framework:
 
@@ -444,13 +449,15 @@ Supported patterns per framework:
   are treated as error shapes, never as the primary response body.
   `c.ShouldBindQuery` is deliberately skipped: it reads no request body and
   its struct's `form:` tags are a separate extraction problem.
-- **chi** — `chi.URLParam(r, "name")` for path params; `render.DecodeJSON(r.Body, &x)`
-  and `render.Bind(r, &x)` for the request body; `render.JSON(w, r, expr)` /
-  `render.Respond` for the response; plus the stdlib codec pair
-  `json.NewDecoder(r.Body).Decode(&x)` / `json.NewEncoder(w).Encode(expr)`.
-- **Echo** — `c.Param("name")` for path params; `c.QueryParam("name")` for
-  query params; `c.Bind(&x)` / `c.BindJSON(&x)` for the request body;
-  `c.JSON(status, expr)` / `c.JSONPretty` for the response.
+- **chi** (`github.com/go-chi/chi/v5`) — `chi.URLParam(r, "name")` for path
+  params; `render.DecodeJSON(r.Body, &x)` and `render.Bind(r, &x)` for the
+  request body; `render.JSON(w, r, expr)` / `render.Respond` for the
+  response; plus the stdlib codec pair `json.NewDecoder(r.Body).Decode(&x)` /
+  `json.NewEncoder(w).Encode(expr)`.
+- **Echo** (`github.com/labstack/echo/v4`) — `c.Param("name")` for path
+  params; `c.QueryParam("name")` for query params; `c.Bind(&x)` /
+  `c.BindJSON(&x)` for the request body; `c.JSON(status, expr)` /
+  `c.JSONPretty` for the response.
 - **net/http** — `r.PathValue("id")` (Go 1.22+ wildcards) for path params;
   `r.URL.Query().Get("q")` for query params; `json.NewDecoder` /
   `json.NewEncoder` for the request and response bodies.
@@ -464,11 +471,19 @@ but an error path never displaces the happy-path payload.
 
 Enrichment is deliberately best-effort:
 
+- A short name declared more than once in the registering package — methods
+  on different receiver types, or a method and a free function — is left
+  unenriched: the registration string (`userRepo.Find`) carries no receiver
+  type, so enriching would be a guess that risks one handler's schema
+  being generated from another's body.
 - Handlers defined in a different package than the one that registered the
   route, calls routed through package-level helper functions, closures
   captured through interfaces, and unrecognized binding APIs contribute no
   enriched fields; the endpoint still ships with its method / path /
   handler / framework as before.
+- Schema names describe the source shape: generic instantiations surface as
+  their bare name (`List[T]` → `List`) without inspecting type arguments,
+  and fixed-size arrays surface as arrays without their length.
 - A wrong parameter type is worse than a missing one, since downstream
   tools will happily generate the wrong schema — when a pattern cannot be
   matched with confidence, the field stays empty.

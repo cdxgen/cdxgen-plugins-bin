@@ -11,6 +11,9 @@
 //   - an error-only handler whose only response is a 4xx status,
 //   - a handler registered as a method expression (svc.Ping) that emits no
 //     body at all,
+//   - two same-named methods on different receiver types (userRepo.Find /
+//     orderRepo.Find) that must both stay unenriched,
+//   - an inline func-literal handler, and
 //   - a handler in admin.go reached through an import alias with a renamed
 //     context parameter.
 package main
@@ -92,6 +95,8 @@ func main() {
 	api := r.Group("/api/v1")
 	{
 		svc := &Service{}
+		userRepo := &UserRepo{}
+		orderRepo := &OrderRepo{}
 		users := api.Group("/users")
 		{
 			users.GET("", listUsers)
@@ -107,6 +112,16 @@ func main() {
 
 		api.GET("/ping", svc.Ping)
 		api.DELETE("/admin/users/:id", deleteAdminUser)
+		api.GET("/repos/users", userRepo.Find)
+		api.GET("/repos/orders", orderRepo.Find)
+		api.GET("/inline", func(c *gin.Context) {
+			verbose := c.Query("verbose")
+			if verbose != "" {
+				c.JSON(http.StatusOK, gin.H{"verbose": true})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"inline": true})
+		})
 	}
 
 	_ = r.Run(":8080")

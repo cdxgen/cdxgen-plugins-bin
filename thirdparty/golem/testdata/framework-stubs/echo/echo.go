@@ -1,8 +1,9 @@
-// A hermetic stub of github.com/labstack/echo covering the surface golem's
-// endpoint detector and handler-signature extractor recognize. Fixtures
-// depend on it through a filesystem `replace` so the import path stays
-// github.com/labstack/echo. Echo's Context is an interface and handlers
-// receive it by value, matching the real library.
+// A hermetic stub of github.com/labstack/echo/v4 covering the surface
+// golem's endpoint detector and handler-signature extractor recognize.
+// Fixtures depend on it through a filesystem `replace` so the import path
+// stays github.com/labstack/echo/v4 — the versioned module path real echo
+// projects import. Echo's Context is an interface and handlers receive it
+// by value, matching the real library.
 package echo
 
 // Map is echo's ad-hoc JSON map alias. shortTypeName collapses it to

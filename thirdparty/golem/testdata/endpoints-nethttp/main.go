@@ -22,6 +22,10 @@ type CreateTicketRequest struct {
 	Subject string `json:"subject"`
 }
 
+type Report struct {
+	Format string `json:"format"`
+}
+
 func listTickets(w http.ResponseWriter, r *http.Request) {
 	limit := r.URL.Query().Get("limit")
 	_ = limit
@@ -49,5 +53,10 @@ func main() {
 	mux.HandleFunc("/tickets", listTickets)
 	mux.HandleFunc("/tickets/{id}", getTicket)
 	mux.HandleFunc("/tickets/new", createTicket)
+	mux.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
+		format := r.URL.Query().Get("format")
+		_ = format
+		_ = json.NewEncoder(w).Encode(Report{Format: format})
+	})
 	_ = http.ListenAndServe(":8080", mux)
 }

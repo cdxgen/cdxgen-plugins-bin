@@ -1,7 +1,8 @@
 // A hermetic stub of github.com/go-chi/chi covering the surface golem's
 // endpoint detector and handler-signature extractor recognize. Fixtures
 // depend on it through a filesystem `replace` so the import path stays
-// github.com/go-chi/chi.
+// github.com/go-chi/chi/v5 — the versioned module path real chi projects
+// import, which pins down the extractor's version-suffix normalization.
 package chi
 
 import "net/http"

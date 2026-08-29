@@ -10,7 +10,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/labstack/echo"
+	"github.com/labstack/echo/v4"
 )
 
 type Item struct {
@@ -58,6 +58,7 @@ func main() {
 	e.GET("/items", listItems)
 	e.POST("/items", createItem)
 	e.GET("/items/:id", getItem)
+	e.GET("/items/:id/archive", archiveItem)
 	e.GET("/gone", gone)
 	_ = e.Start(":8080")
 }
