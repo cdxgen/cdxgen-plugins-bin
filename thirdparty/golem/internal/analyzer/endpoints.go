@@ -27,6 +27,10 @@ var httpMethodNames = map[string]string{
 type endpointFacts struct {
 	endpoints []model.APIEndpoint
 	urls      []model.ExternalURL
+	// handlerLiterals joins a registration call site's position to an
+	// inline func-literal handler written there, so the signature extractor
+	// can enrich endpoints that resolve to no named function.
+	handlerLiterals map[string]*ast.FuncLit
 }
 
 type endpointCallClassification struct {
@@ -48,9 +52,22 @@ func (a *Analyzer) endpointFactsForPackage(pkg *packages.Package) endpointFacts 
 		fileFacts := a.endpointFactsForFile(pkg, file)
 		facts.endpoints = append(facts.endpoints, fileFacts.endpoints...)
 		facts.urls = append(facts.urls, fileFacts.urls...)
+		for key, lit := range fileFacts.handlerLiterals {
+			if facts.handlerLiterals == nil {
+				facts.handlerLiterals = map[string]*ast.FuncLit{}
+			}
+			facts.handlerLiterals[key] = lit
+		}
 	}
 	facts.endpoints = dedupeEndpoints(facts.endpoints)
 	facts.urls = dedupeExternalURLs(facts.urls)
+	// Enrich each endpoint with handler-signature evidence (path/query
+	// parameters, request body, response type). This runs after dedup so
+	// the handler body walk happens once per distinct endpoint.
+	extractor := newHandlerSignatureExtractor(pkg, facts.handlerLiterals)
+	for idx := range facts.endpoints {
+		extractor.enrich(&facts.endpoints[idx])
+	}
 	return facts
 }
 
@@ -64,8 +81,14 @@ func (a *Analyzer) endpointFactsForFile(pkg *packages.Package, file *ast.File) e
 		case *ast.ValueSpec:
 			a.recordRouteGroupValues(x, prefixByIdent)
 		case *ast.CallExpr:
-			if ep, ok := a.endpointForCall(pkg, x, prefixByIdent); ok {
+			if ep, handlerExpr, ok := a.endpointForCall(pkg, x, prefixByIdent); ok {
 				facts.endpoints = append(facts.endpoints, ep)
+				if lit, ok := handlerExpr.(*ast.FuncLit); ok {
+					if facts.handlerLiterals == nil {
+						facts.handlerLiterals = map[string]*ast.FuncLit{}
+					}
+					facts.handlerLiterals[endpointPositionKey(ep.Range)] = lit
+				}
 			}
 		case *ast.BasicLit:
 			if x.Kind == token.STRING {
@@ -124,16 +147,19 @@ func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]stri
 	return joinRoutePath(base, prefix), true
 }
 
-func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, groups map[string]string) (model.APIEndpoint, bool) {
+// endpointForCall recognizes one route-registration (or listener / RPC
+// registration) call. It returns the call's handler argument expression so
+// inline func literals can be joined back to the endpoint by position.
+func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, groups map[string]string) (model.APIEndpoint, ast.Expr, bool) {
 	name, receiver := callSelectorName(call)
 	if name == "" {
-		return model.APIEndpoint{}, false
+		return model.APIEndpoint{}, nil, false
 	}
 	symbol := a.endpointCallSymbol(pkg, call)
 	framework := endpointFramework(symbol, name)
 	classification, ok := classifyEndpointCall(symbol, name, framework, len(call.Args))
 	if !ok {
-		return model.APIEndpoint{}, false
+		return model.APIEndpoint{}, nil, false
 	}
 	framework = classification.framework
 	method := classification.method
@@ -146,22 +172,29 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 	if path == "" && pathArg >= 0 && len(call.Args) > pathArg {
 		path, _ = stringLiteral(call.Args[pathArg])
 	}
-	if path == "" && kind != "http-listener" && kind != "rpc-service" {
-		return model.APIEndpoint{}, false
-	}
+	// Compose the group prefix before the empty-path guard so idiomatic
+	// group-root registrations like `users.GET("", handler)` resolve to the
+	// group's prefix instead of being dropped as pathless. Gin, chi, echo,
+	// iris, and fiber all support this pattern. Receivers with no known
+	// group still yield an empty path and are filtered below.
 	if receiver != "" {
 		path = joinRoutePath(groups[receiver], path)
 	}
+	if path == "" && kind != "http-listener" && kind != "rpc-service" {
+		return model.APIEndpoint{}, nil, false
+	}
 	handler := ""
+	var handlerExpr ast.Expr
 	if len(call.Args) > handlerArg {
-		handler = exprEndpointName(call.Args[handlerArg])
+		handlerExpr = call.Args[handlerArg]
+		handler = exprEndpointName(handlerExpr)
 	}
 	r := a.nodeRange(call)
 	scheme, host, cleanPath, cleanURL := endpointAddressParts(kind, path)
 	if cleanPath != "" {
 		path = cleanPath
 	}
-	return model.APIEndpoint{ID: stableID(pkg.ID, "endpoint", kind, method, path, handler, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Kind: kind, Framework: framework, Method: method, Path: path, Host: host, Scheme: scheme, URL: cleanURL, Handler: handler, PackagePath: pkg.PkgPath, UsageScope: fileRole(r.Start.Filename), Range: r, Properties: cleanProperties(props)}, true
+	return model.APIEndpoint{ID: stableID(pkg.ID, "endpoint", kind, method, path, handler, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Kind: kind, Framework: framework, Method: method, Path: path, Host: host, Scheme: scheme, URL: cleanURL, Handler: handler, PackagePath: pkg.PkgPath, UsageScope: fileRole(r.Start.Filename), Range: r, Properties: cleanProperties(props)}, handlerExpr, true
 }
 
 func classifyEndpointCall(symbol, name, framework string, argCount int) (endpointCallClassification, bool) {
