@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>cdxgen-plugins-bin documentation</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="Native helper binaries that extend cdxgen: golem, rusi, cdxrs, cdxui, trustinspector, and friends.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  <link rel="stylesheet" media="(prefers-color-scheme: dark)" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple-dark.css">
+  <link rel="stylesheet" media="(prefers-color-scheme: light)" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;700&display=swap');
+    :root {
+      --theme-hue      : 199;
+      --base-font-size : 15px;
+      --theme-color    : #0e7490;
+      --modular-scale  : 1.333;
+      --cover-max-width: 78em;
+      --content-max-width: 82em;
+    }
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(14, 116, 144, 0.10), transparent 32%),
+        radial-gradient(circle at top right, rgba(143, 92, 255, 0.06), transparent 28%);
+    }
+    section.cover.show { background: transparent; }
+    section.cover .cover-main {
+      max-width: min(72rem, calc(100vw - 2rem));
+      margin: 2rem auto 0;
+      padding: 3rem 3.25rem 3.5rem;
+      text-align: left;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 24px 80px rgba(17, 24, 39, 0.14);
+    }
+    @media (prefers-color-scheme: dark) {
+      section.cover .cover-main {
+        background: rgba(17, 24, 39, 0.88);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      }
+    }
+    section.cover .cover-main > h1 {
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      line-height: 1.05;
+      margin-bottom: 1rem;
+      letter-spacing: -0.03em;
+    }
+    section.cover .cover-main > blockquote {
+      margin: 0 0 1.5rem;
+      padding-left: 1rem;
+      border-left: 4px solid var(--theme-color);
+      color: var(--theme-color);
+      font-size: 1.08rem;
+      font-weight: 600;
+    }
+    section.cover .cover-main > p:last-of-type a {
+      margin: 0 0.85rem 0 0;
+      padding: 0.7rem 1.1rem;
+      border-radius: 999px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .markdown-section { line-height: 1.65; }
+    pre { overflow: auto; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+  window.$docsify = {
+    name: 'cdxgen-plugins-bin documentation',
+    repo: 'https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/docs',
+    loadSidebar: true,
+    subMaxLevel: 3,
+    coverpage: '_coverpage.md',
+    auto2top: true,
+    onlyCover: false,
+    themeColor: '#0e7490',
+    search: {
+      noData: {
+        '/': 'No results!'
+      },
+      paths: 'auto',
+      placeholder: {
+        '/': 'Search'
+      }
+    }
+  }
+</script>
+<!-- Docsify v4 -->
+<script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/zoom-image.min.js"></script>
+<script src="https://unpkg.com/mermaid/dist/mermaid.js"></script>
+<script src="https://unpkg.com/docsify-mermaid@2.0.0/dist/docsify-mermaid.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    suppressErrors: true,
+    theme: 'default'
+  });
+</script>
+</body>
+</html>

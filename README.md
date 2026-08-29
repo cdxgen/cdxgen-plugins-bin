@@ -2,6 +2,8 @@
 
 Binary plugins that extend the capabilities of [cdxgen](https://github.com/cdxgen/cdxgen), the open-source BOM (Bill of Materials) generator. This repository builds, packages, and distributes native helper binaries that cdxgen invokes to perform deep analysis tasks that require language-specific tooling, operating system instrumentation, or cryptographic inspection.
 
+> **Documentation**: the guides and tutorials in this README are expanded in the [documentation site](https://cdxgen.github.io/cdxgen-plugins-bin/), with tool guides for golem, rusi, cdxrs, cdxui, and trustinspector, an architecture overview, and seven hands-on lessons. The site source lives in [docs/](./docs/).
+
 ## Purpose
 
 cdxgen generates BOMs in CycloneDX format by analyzing project source code, container images, and host environments. However, certain analysis domains require specialized native binaries that go beyond what a pure Node.js application can provide:
