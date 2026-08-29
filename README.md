@@ -2,7 +2,7 @@
 
 Binary plugins that extend the capabilities of [cdxgen](https://github.com/cdxgen/cdxgen), the open-source BOM (Bill of Materials) generator. This repository builds, packages, and distributes native helper binaries that cdxgen invokes to perform deep analysis tasks that require language-specific tooling, operating system instrumentation, or cryptographic inspection.
 
-> **Documentation**: the guides and tutorials in this README are expanded in the [documentation site](https://cdxgen.github.io/cdxgen-plugins-bin/), with tool guides for golem, rusi, cdxrs, cdxui, and trustinspector, an architecture overview, and seven hands-on lessons. The site source lives in [docs/](./docs/).
+> **Documentation**: the guides and tutorials in this README are expanded in the [documentation site](https://cdxgen.github.io/cdxgen-plugins-bin/), with a dedicated guide for each helper: golem, rusi, cdxrs, cdxui, trustinspector, trivy-cdxgen, sourcekitten, dosai, and osquery, plus an architecture overview, a build reference, and seven hands-on lessons. The site source lives in [docs/](./docs/).
 
 ## Purpose
 
@@ -204,8 +204,8 @@ be silent.
 - Round-trips BOMs byte-identically: the I/O path uses untyped JSON values, so
   unknown fields survive and key order is deterministic
 
-cdxgen pins cdxrs by **major** version. A mismatch is not an error — the bridge
-logs once and uses the JavaScript path — so release this package before cdxgen
+cdxgen pins cdxrs by **major** version. A mismatch is not an error: the bridge
+logs once and uses the JavaScript path, so release this package before cdxgen
 when that major changes.
 
 See [thirdparty/cdxrs/README.md](thirdparty/cdxrs/README.md) for the command

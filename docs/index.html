@@ -4,47 +4,111 @@
   <meta charset="UTF-8">
   <title>cdxgen-plugins-bin documentation</title>
   <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
-  <meta name="description" content="Native helper binaries that extend cdxgen: golem, rusi, cdxrs, cdxui, trustinspector, and friends.">
+  <meta name="description" content="Native helper binaries that extend cdxgen: golem, rusi, cdxrs, cdxui, trustinspector, trivy-cdxgen, sourcekitten, dosai, and osquery.">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
   <link rel="stylesheet" media="(prefers-color-scheme: dark)" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple-dark.css">
   <link rel="stylesheet" media="(prefers-color-scheme: light)" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
+  <link rel="icon" href="_media/cdxgen.png">
+  <!-- Custom Styles -->
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;700&display=swap');
     :root {
       --theme-hue      : 199;
       --base-font-size : 15px;
       --theme-color    : #0e7490;
-      --modular-scale  : 1.333;
-      --cover-max-width: 78em;
+      /* Typography
+    ------------------------------------------------------------------------- */
+      /* Modular Scale */
+      --modular-scale    : 1.333;
+
+      /* Module Scale Calculations (do not edit these) */
+      --modular-scale--2 : calc(var(--modular-scale--1) / var(--modular-scale));
+      --modular-scale--1 : calc(var(--modular-scale-1) / var(--modular-scale));
+      --modular-scale-1  : 1rem;
+      --modular-scale-2  : calc(var(--modular-scale-1) * var(--modular-scale));
+      --modular-scale-3  : calc(var(--modular-scale-2) * var(--modular-scale));
+      --modular-scale-4  : calc(var(--modular-scale-3) * var(--modular-scale));
+      --modular-scale-5  : calc(var(--modular-scale-4) * var(--modular-scale));
+
+      /* Font size */
+      --font-size-xxxl   : var(--modular-scale-5);
+      --font-size-xxl    : var(--modular-scale-4);
+      --font-size-xl     : var(--modular-scale-3);
+      --font-size-l      : var(--modular-scale-2);
+      --font-size-m      : var(--modular-scale-1);
+      --font-size-s      : var(--modular-scale--1);
+      --font-size-xs     : var(--modular-scale--2);
+
+      /* Utility
+      ------------------------------------------------------------------------- */
+      /* Borders */
+      --border-radius-s  : ;
+      --border-radius-m  : ;
+      --border-radius-l  : ;
+
+      /* Animations and transitions */
+      --duration-slow    : 1s;
+      --duration-medium  : 0.5s;
+      --duration-fast    : 0.25s;
+
+      --cover-max-width  : 78em;
       --content-max-width: 82em;
+
+      --sidebar-nav-link-text-decoration--active: none;
     }
+
     body {
       background:
-        radial-gradient(circle at top left, rgba(14, 116, 144, 0.10), transparent 32%),
-        radial-gradient(circle at top right, rgba(143, 92, 255, 0.06), transparent 28%);
+        radial-gradient(circle at top left, rgba(14, 116, 144, 0.12), transparent 32%),
+        radial-gradient(circle at top right, rgba(143, 92, 255, 0.08), transparent 28%);
     }
-    section.cover.show { background: transparent; }
+
+    section.cover.show {
+      background: transparent;
+    }
+
     section.cover .cover-main {
-      max-width: min(72rem, calc(100vw - 2rem));
+      max-width: min(76rem, calc(100vw - 2rem));
       margin: 2rem auto 0;
       padding: 3rem 3.25rem 3.5rem;
       text-align: left;
-      border-radius: 24px;
+      border-radius: 28px;
       background: rgba(255, 255, 255, 0.92);
       box-shadow: 0 24px 80px rgba(17, 24, 39, 0.14);
     }
+
     @media (prefers-color-scheme: dark) {
       section.cover .cover-main {
         background: rgba(17, 24, 39, 0.88);
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
       }
     }
+
     section.cover .cover-main > h1 {
-      font-size: clamp(2.4rem, 5vw, 4rem);
-      line-height: 1.05;
+      font-size: clamp(2.8rem, 6vw, 4.8rem);
+      line-height: 1.02;
       margin-bottom: 1rem;
-      letter-spacing: -0.03em;
+      letter-spacing: -0.04em;
     }
+
+    section.cover .cover-main > p:first-of-type img {
+      max-width: 180px;
+    }
+
+    body .sidebar > h1 img {
+      max-width: 120px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body section.cover .cover-main > p:first-of-type img,
+      body .sidebar > h1 img {
+        background: rgba(255, 255, 255, 0.94);
+        border-radius: 14px;
+        padding: 6px;
+      }
+    }
+
     section.cover .cover-main > blockquote {
       margin: 0 0 1.5rem;
       padding-left: 1rem;
@@ -53,19 +117,71 @@
       font-size: 1.08rem;
       font-weight: 600;
     }
-    section.cover .cover-main > p:last-of-type a {
-      margin: 0 0.85rem 0 0;
-      padding: 0.7rem 1.1rem;
+
+    section.cover .cover-main > blockquote + p {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      justify-content: flex-start;
+      margin-top: 1.5rem;
+    }
+
+    section.cover .cover-main > blockquote + p a {
+      margin: 0;
+      padding: 0.55rem 1rem;
       border-radius: 999px;
       font-weight: 700;
       text-decoration: none;
+      box-shadow: none;
     }
-    .markdown-section { line-height: 1.65; }
-    pre { overflow: auto; }
+
+    section.cover .cover-main ul {
+      column-gap: 2rem;
+    }
+
+    .markdown-section {
+      line-height: 1.65;
+    }
+
+    .markdown-section h1,
+    .markdown-section h2,
+    .markdown-section h3 {
+      letter-spacing: -0.02em;
+    }
+
+    pre {
+      overflow: auto;
+    }
+
+    @media (max-width: 960px) {
+      section.cover .cover-main {
+        margin-top: 1rem;
+        padding: 2.25rem 1.5rem 2.5rem;
+        text-align: center;
+      }
+
+      section.cover .cover-main > blockquote {
+        padding-left: 0;
+        border-left: 0;
+      }
+
+      section.cover .cover-main > blockquote + p {
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
 <div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: false,
+    suppressErrors: true,
+    theme: prefersDark ? 'dark' : 'default'
+  });
+</script>
 <script>
   window.$docsify = {
     name: 'cdxgen-plugins-bin documentation',
@@ -74,6 +190,8 @@
     subMaxLevel: 3,
     coverpage: '_coverpage.md',
     auto2top: true,
+    autoHeader: true,
+    logo: '/_media/cdxgen.png',
     onlyCover: false,
     themeColor: '#0e7490',
     search: {
@@ -84,22 +202,31 @@
       placeholder: {
         '/': 'Search'
       }
-    }
+    },
+    plugins: [
+      function (hook) {
+        hook.doneEach(function () {
+          document.querySelectorAll('code.language-mermaid, code.lang-mermaid').forEach(function (code) {
+            var div = document.createElement('div');
+            div.className = 'mermaid';
+            div.textContent = code.textContent;
+            (code.closest('pre') || code.parentElement).replaceWith(div);
+          });
+          if (document.querySelector('.mermaid')) {
+            window.mermaid.run({ querySelector: '.mermaid' }).catch(function () {});
+          }
+        });
+      }
+    ]
   }
 </script>
 <!-- Docsify v4 -->
+<!-- Required -->
 <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
+<!-- Recommended -->
+<script src="https://cdn.jsdelivr.net/npm/docsify-tabs@1"></script>
 <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/zoom-image.min.js"></script>
-<script src="https://unpkg.com/mermaid/dist/mermaid.js"></script>
-<script src="https://unpkg.com/docsify-mermaid@2.0.0/dist/docsify-mermaid.js"></script>
-<script>
-  mermaid.initialize({
-    startOnLoad: true,
-    suppressErrors: true,
-    theme: 'default'
-  });
-</script>
 </body>
 </html>
