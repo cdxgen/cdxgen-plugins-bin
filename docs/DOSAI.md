@@ -1,6 +1,6 @@
 # dosai: .NET source and assembly inspection
 
-[dosai](https://github.com/owasp-dep-scan/dosai), the Dotnet Source and Assembly Inspector from the OWASP dep-scan project, lists namespaces and methods from .NET sources and compiled assemblies. It is the .NET counterpart of sourcekitten: a native inspector that gives cdxgen language semantics the JavaScript runtime cannot provide.
+[dosai](https://github.com/owasp-dep-scan/dosai), the Dotnet Source and Assembly Inspector from the OWASP dep-scan project, lists namespaces and methods from .NET sources and compiled assemblies. It is the .NET counterpart of sourcekitten: a native inspector that gives cdxgen language semantics the JavaScript runtime cannot provide. The [official dosai documentation](https://owasp-dep-scan.github.io/dosai/) covers the tool in full, including its CLI and release notes.
 
 The binaries are repackaged upstream release artifacts, downloaded and hashed by `scripts/thirdparty-downloads.sh`. cdxgen invokes dosai for .NET project scans when the binary is present; a custom build can be wired in with `DOSAI_CMD`.
 
@@ -12,7 +12,7 @@ For cdxgen this means .NET BOMs can enumerate dependencies through source analys
 
 ## Direct usage
 
-The upstream README documents the full CLI. The typical shapes:
+The [official documentation](https://owasp-dep-scan.github.io/dosai/) documents the full CLI. The typical shapes:
 
 ```bash
 dosai --dirs ./src
