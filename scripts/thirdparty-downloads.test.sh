@@ -12,12 +12,12 @@ asset_sha256=""
 resolve_asset dosai-linux-amd64
 [[ "$asset_filename" == "Dosai-linux-amd64" ]]
 [[ "$asset_url" == "https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/Dosai-linux-amd64" ]]
-[[ "$asset_sha256" == "3c4eb6758083b92fd80479811e954a5db8e96215c17311d28a5d10d5946c38aa" ]]
+[[ "$asset_sha256" == "304f9d41cc1585a774c057a89220318bb8c9dcef1f674bef6ee5dbf4002af68f" ]]
 
 resolve_asset dosai-windows-amd64
 [[ "$asset_filename" == "Dosai.exe" ]]
 [[ "$asset_url" == "https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/Dosai.exe" ]]
-[[ "$asset_sha256" == "b2c8966e7fcef52a1fc3a57e3b2eeef69311eca9508e6d033e3dd02fe36dd0ec" ]]
+[[ "$asset_sha256" == "8d4ed9585068cf2df6975e75fa981c39ea35a597e6b79572137dfa0dab28d31d" ]]
 
 zig_index_fixture="$(mktemp "${TMPDIR:-/tmp}/zig-index.XXXXXX.json")"
 trap 'rm -f "$zig_index_fixture"' EXIT
