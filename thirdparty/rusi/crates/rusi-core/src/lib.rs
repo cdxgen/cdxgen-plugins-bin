@@ -208,6 +208,14 @@ struct FunctionRecord {
     /// Types written explicitly on `let` bindings, which outrank anything
     /// inferred.
     declared_types: BTreeMap<String, String>,
+    /// The type text as written for each annotated `let` binding. Reduced
+    /// tokens cannot tell `dyn Store` from `impl Store`; the written text can.
+    declared_type_texts: BTreeMap<String, String>,
+    /// Element type of each binding whose written type is a container.
+    declared_element_types: BTreeMap<String, String>,
+    /// `(loop variable, iterable receiver path)` pairs from this function's
+    /// `for` loops.
+    loop_iterables: Vec<(String, String)>,
     /// Whether this record's body was analyzed.
     ///
     /// False for a dependency at the lighter tier. Data flow must skip such a
@@ -356,6 +364,11 @@ struct TraitImplIndex {
     /// Methods from blanket impls, by bare name. These are the only local
     /// methods that can apply to a receiver whose type has no local impl.
     blanket_method_to_impls: HashMap<String, Vec<String>>,
+    /// Local traits that are clearly not object safe, by bare name, with the
+    /// reasons. A trait object of such a trait cannot exist in a program that
+    /// compiles, so a receiver reducing to one of these names is either
+    /// non-compiling source or a misparse.
+    non_object_safe: HashMap<String, Vec<String>>,
 }
 
 /// Method names that mark a *crate-defined* method as a passthrough.
@@ -586,6 +599,7 @@ struct AnalyzedFile {
     security_signals: Vec<SecuritySignal>,
     functions: Vec<FunctionRecord>,
     trait_impl_records: Vec<TraitImplRecord>,
+    trait_def_records: Vec<TraitDefRecord>,
     /// Module path this file occupies, resolved by following `mod`
     /// declarations from the crate root.
     module_path: Vec<String>,
@@ -596,6 +610,9 @@ struct AnalyzedFile {
     use_records: Vec<UseRecord>,
     /// Struct field types, for typing `self.field`-shaped receivers.
     field_types: HashMap<String, String>,
+    /// Element type of each container-typed struct field, for typing indexed
+    /// and iterated receivers (`self.handlers[i]`).
+    field_element_types: HashMap<String, String>,
     /// Macro paths in this file whose bodies could not be recovered as Rust.
     unanalyzed_macros: BTreeSet<String>,
 }
@@ -812,9 +829,13 @@ pub fn analyze_with_optional_compiler(
     // Struct field types, workspace-wide: a receiver written `self.sink` needs
     // the declaring type's field table, which may live in another file.
     let mut field_types: HashMap<String, String> = HashMap::new();
+    let mut field_element_types: HashMap<String, String> = HashMap::new();
     for analyzed in &analyzed_files {
         for (key, value) in &analyzed.field_types {
             field_types.insert(key.clone(), value.clone());
+        }
+        for (key, value) in &analyzed.field_element_types {
+            field_element_types.insert(key.clone(), value.clone());
         }
     }
 
@@ -882,6 +903,7 @@ pub fn analyze_with_optional_compiler(
             &all_functions,
             &trait_index,
             &field_types,
+            &field_element_types,
             &local_types,
             options.max_call_candidates,
         ))
@@ -916,6 +938,7 @@ pub fn analyze_with_optional_compiler(
             &all_functions,
             dataflow_patterns,
             &field_types,
+            &field_element_types,
         ))
     } else {
         None
@@ -1573,10 +1596,12 @@ fn analyze_file(
         security_signals: collector.security_signals,
         functions: collector.functions,
         trait_impl_records: collector.trait_impl_records,
+        trait_def_records: collector.trait_def_records,
         module_path: module_path.to_vec(),
         crate_path: crate_path.to_string(),
         use_records: collector.use_records,
         field_types: collector.field_types,
+        field_element_types: collector.field_element_types,
         unanalyzed_macros: collector.unanalyzed_macros,
     })
 }
@@ -1614,10 +1639,14 @@ struct SourceCollector {
     functions: Vec<FunctionRecord>,
     current_function: Option<FunctionFrame>,
     trait_impl_records: Vec<TraitImplRecord>,
+    trait_def_records: Vec<TraitDefRecord>,
     struct_field_names: HashMap<String, Vec<String>>,
     /// `"<TypeToken>::<field>" -> <TypeToken of the field>`, so a receiver
     /// written `self.sink` can be typed once `self`'s type is known.
     field_types: HashMap<String, String>,
+    /// Element type of each container-typed struct field, keyed like
+    /// [`SourceCollector::field_types`].
+    field_element_types: HashMap<String, String>,
     /// Macro invocations whose token stream could not be recovered as Rust, so
     /// the gap is reported instead of silently swallowed.
     unanalyzed_macros: BTreeSet<String>,
@@ -1651,10 +1680,145 @@ struct TraitImplRecord {
     /// True for a blanket impl (`impl<T: Read> MyExt for T`), where the self
     /// type is one of the impl's own generic parameters.
     ///
-    /// Such a method applies to receivers of *any* type, including types from
+    /// Such a method applies to *any* receiver type, including types from
     /// other crates, so it cannot be matched by comparing the receiver's type
     /// against the impl's self type.
     is_blanket: bool,
+}
+
+/// A trait *definition*, kept only for what object safety says about dispatch.
+///
+/// A trait that is not object safe cannot appear behind `dyn` in a program
+/// that compiles: a `-> Self` return has a size the caller could not know, a
+/// generic method would need infinitely many vtable entries, and by-value
+/// `self` cannot be dispatched through a pointer. So when a receiver reduces
+/// to such a trait's name, the call site either does not compile as written or
+/// was misparsed — and dispatching to the trait's impls would assert calls the
+/// program cannot make.
+#[derive(Debug, Clone)]
+struct TraitDefRecord {
+    name: String,
+    /// Why the trait is *clearly* not object safe, one entry per violating
+    /// method. Empty for an object-safe trait. Deliberately conservative:
+    /// only unambiguous violations are reported, and a `where Self: Sized`
+    /// bound excuses its method (such methods are simply excluded from the
+    /// vtable).
+    non_object_safety_reasons: Vec<String>,
+}
+
+/// Reads a trait definition and reports why it is clearly not object safe.
+///
+/// A method is exempt when it carries `where Self: Sized`; rustc excludes such
+/// methods from the vtable, so they say nothing about object safety. Lifetime
+/// generics are fine; only type and const parameters are violations.
+fn non_object_safety_reasons(trait_item: &syn::ItemTrait) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if supertrait_requires_sized(trait_item) {
+        reasons.push("the trait declares `Self: Sized`".to_string());
+    }
+    for item in &trait_item.items {
+        let syn::TraitItem::Fn(method) = item else {
+            continue;
+        };
+        let name = method.sig.ident.to_string();
+        if where_clause_requires_sized(&method.sig.generics.where_clause) {
+            continue;
+        }
+        if method.sig.generics.params.iter().any(|param| {
+            matches!(
+                param,
+                syn::GenericParam::Type(_) | syn::GenericParam::Const(_)
+            )
+        }) {
+            reasons.push(format!(
+                "method `{name}` has generic type or const parameters"
+            ));
+        }
+        if receiver_takes_self_by_value(&method.sig) {
+            reasons.push(format!("method `{name}` takes `self` by value"));
+        }
+        if let syn::ReturnType::Type(_, output) = &method.sig.output
+            && output.to_token_stream().to_string().contains("Self")
+        {
+            reasons.push(format!("method `{name}` returns `Self`"));
+        }
+    }
+    reasons
+}
+
+fn supertrait_requires_sized(trait_item: &syn::ItemTrait) -> bool {
+    trait_item.supertraits.iter().any(|bound| {
+        matches!(bound, syn::TypeParamBound::Trait(path_bound)
+            if path_bound.path.get_ident().map(|ident| ident == "Sized").unwrap_or(false))
+    })
+}
+
+fn where_clause_requires_sized(where_clause: &Option<syn::WhereClause>) -> bool {
+    where_clause
+        .as_ref()
+        .map(|clause| {
+            clause.predicates.iter().any(|predicate| {
+                let syn::WherePredicate::Type(predicate_type) = predicate else {
+                    return false;
+                };
+                predicate_type.bounded_ty.to_token_stream().to_string() == "Self"
+                    && predicate_type.bounds.iter().any(|bound| {
+                        matches!(bound, syn::TypeParamBound::Trait(path_bound)
+                            if path_bound.path.get_ident().map(|ident| ident == "Sized").unwrap_or(false))
+                    })
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn receiver_takes_self_by_value(sig: &syn::Signature) -> bool {
+    match sig.inputs.first() {
+        Some(syn::FnArg::Receiver(receiver)) => matches!(receiver.kind, syn::ReceiverKind::Value),
+        // `self: Self` written as a typed argument.
+        Some(syn::FnArg::Typed(argument)) => {
+            argument.pat.to_token_stream().to_string() == "self"
+                && argument.ty.to_token_stream().to_string() == "Self"
+        }
+        _ => false,
+    }
+}
+
+/// True when the token-stream text of a type uses `dyn`: the type (or the
+/// object one of its wrappers peels down to) is a trait object.
+///
+/// `Box<dyn Error + Send>` renders as `Box < dyn Error + Send >`, so a
+/// whitespace-delimited `dyn` token is the test. An `impl Trait` parameter
+/// reduces to the same trait name under [`bare_type_token`] but dispatches
+/// statically, so it must not read as a trait object — and it does not: its
+/// text has no `dyn`.
+fn type_text_is_trait_object(type_text: &str) -> bool {
+    type_text.split_whitespace().any(|token| token == "dyn")
+}
+
+/// Function parameters and annotated `let` bindings whose written type is a
+/// trait object, by binding name.
+///
+/// This is the dyn-ness evidence the resolver cannot recover later: bindings
+/// store reduced type tokens, and `dyn Store` and `impl Store` reduce to the
+/// same `Store`, while only the former dispatches through a vtable.
+fn trait_object_binding_names(function: &FunctionRecord) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for (name, _type_text) in function
+        .params
+        .iter()
+        .zip(function.param_types.iter())
+        .filter(|(_, type_text)| type_text_is_trait_object(type_text))
+    {
+        if !name.is_empty() {
+            names.insert(name.clone());
+        }
+    }
+    for (name, type_text) in &function.declared_type_texts {
+        if type_text_is_trait_object(type_text) {
+            names.insert(name.clone());
+        }
+    }
+    names
 }
 
 #[derive(Debug, Clone)]
@@ -1673,8 +1837,19 @@ struct FunctionFrame {
     channel_pairs: Vec<(String, String)>,
     /// Types written explicitly on `let` bindings in this frame.
     declared_types: BTreeMap<String, String>,
+    /// The type text as written for each annotated `let` binding, alongside
+    /// [`FunctionFrame::declared_types`]' reduced tokens. `dyn Store` and
+    /// `impl Store` reduce to the same token; only the written text says which
+    /// one it was.
+    declared_type_texts: BTreeMap<String, String>,
+    /// Element type of each binding whose written type is a container
+    /// (`Vec<Box<dyn Store>>` → `Store`), from the same annotations.
+    declared_element_types: BTreeMap<String, String>,
+    /// `(loop variable, iterable receiver path)` pairs from `for` loops in this
+    /// frame, so the loop variable can be typed as the iterable's element.
+    loop_iterables: Vec<(String, String)>,
     /// Whether body detail is kept. A dependency at the lighter tier is still
-    /// walked — its imports, usages, crypto, and signals are cheap and useful —
+    /// walked — its imports, usages, crypto, and signals are cheap and useful,
     /// but the per-statement trees, which are the bulk of the memory, are not
     /// retained.
     collect_bodies: bool,
@@ -1717,8 +1892,10 @@ impl SourceCollector {
             functions: Vec::new(),
             current_function: None,
             trait_impl_records: Vec::new(),
+            trait_def_records: Vec::new(),
             struct_field_names: HashMap::new(),
             field_types: HashMap::new(),
+            field_element_types: HashMap::new(),
             unanalyzed_macros: BTreeSet::new(),
         }
     }
@@ -1989,6 +2166,9 @@ impl SourceCollector {
             is_loop_body: false,
             channel_pairs: Vec::new(),
             declared_types: BTreeMap::new(),
+            declared_type_texts: BTreeMap::new(),
+            declared_element_types: BTreeMap::new(),
+            loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
         });
         visit_callable_body(self, &closure.body);
@@ -2015,6 +2195,9 @@ impl SourceCollector {
             is_loop_body: false,
             channel_pairs: finished.channel_pairs.clone(),
             declared_types: finished.declared_types.clone(),
+            declared_type_texts: finished.declared_type_texts.clone(),
+            declared_element_types: finished.declared_element_types.clone(),
+            loop_iterables: finished.loop_iterables.clone(),
             has_body: self.collect_bodies,
         });
         self.current_function = previous;
@@ -2080,6 +2263,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             is_loop_body: false,
             channel_pairs: Vec::new(),
             declared_types: BTreeMap::new(),
+            declared_type_texts: BTreeMap::new(),
+            declared_element_types: BTreeMap::new(),
+            loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
         });
         syn::visit::visit_block(self, &node.block);
@@ -2105,6 +2291,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
             is_loop_body: false,
             channel_pairs: finished.channel_pairs.clone(),
             declared_types: finished.declared_types.clone(),
+            declared_type_texts: finished.declared_type_texts.clone(),
+            declared_element_types: finished.declared_element_types.clone(),
+            loop_iterables: finished.loop_iterables.clone(),
             has_body: self.collect_bodies,
         });
         self.current_function = previous;
@@ -2150,6 +2339,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     is_loop_body: false,
                     channel_pairs: Vec::new(),
                     declared_types: BTreeMap::new(),
+                    declared_type_texts: BTreeMap::new(),
+                    declared_element_types: BTreeMap::new(),
+                    loop_iterables: Vec::new(),
                     collect_bodies: self.collect_bodies,
                 });
                 syn::visit::visit_block(self, &method.block);
@@ -2175,6 +2367,9 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     is_loop_body: false,
                     channel_pairs: finished.channel_pairs.clone(),
                     declared_types: finished.declared_types.clone(),
+                    declared_type_texts: finished.declared_type_texts.clone(),
+                    declared_element_types: finished.declared_element_types.clone(),
+                    loop_iterables: finished.loop_iterables.clone(),
                     has_body: self.collect_bodies,
                 });
                 self.current_function = previous;
@@ -2252,12 +2447,20 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     .filter_map(|field| field.ident.as_ref().map(|ident| ident.to_string()))
                     .collect();
                 for field in &item.fields {
-                    if let Some(ident) = field.ident.as_ref()
-                        && let Some(field_type) =
-                            bare_type_token(&field.ty.to_token_stream().to_string())
-                    {
-                        self.field_types
-                            .insert(format!("{}::{}", item.ident, ident), field_type);
+                    if let Some(ident) = field.ident.as_ref() {
+                        let field_text = field.ty.to_token_stream().to_string();
+                        if let Some(field_type) = bare_type_token(&field_text) {
+                            self.field_types
+                                .insert(format!("{}::{}", item.ident, ident), field_type);
+                        }
+                        // A container field's element type is what an indexed
+                        // or iterated receiver dispatches on:
+                        // `self.handlers[i].handle()` is a `Handler` call, not
+                        // a `Vec` call.
+                        if let Some(element_type) = container_element_type_of(&field_text) {
+                            self.field_element_types
+                                .insert(format!("{}::{}", item.ident, ident), element_type);
+                        }
                     }
                 }
                 if !field_names.is_empty() {
@@ -2295,6 +2498,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     let key = format!("trait:{}", trait_name);
                     self.struct_field_names.insert(key, method_names);
                 }
+                // Object safety is a fact about the trait definition, so it is
+                // recorded where the definition is visited. The name stored is
+                // the bare identifier — the same key the type token reducer
+                // produces for a `dyn Trait` receiver.
+                self.trait_def_records.push(TraitDefRecord {
+                    name: item.ident.to_string(),
+                    non_object_safety_reasons: non_object_safety_reasons(item),
+                });
             }
             _ => {}
         }
@@ -2440,6 +2651,21 @@ impl<'ast> Visit<'ast> for SourceCollector {
         self.visit_macro_body(&node.mac);
     }
 
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        // Record (loop variable, iterable) so typing can bind the variable to
+        // the iterable's element type: `for s in &shapes` over a
+        // `Vec<Box<dyn Store>>` makes `s` a `Store` receiver. Only the last
+        // binding-level variable is kept for tuple patterns — a map yields its
+        // values, which are the dispatching half.
+        if let Some(frame) = self.current_function.as_mut()
+            && let Some(var) = loop_pattern_ident(&node.pat)
+            && let Some(iterable) = for_loop_iterable_path(&node.expr)
+        {
+            frame.loop_iterables.push((var, iterable));
+        }
+        syn::visit::visit_expr_for_loop(self, node);
+    }
+
     fn visit_expr_unsafe(&mut self, node: &'ast syn::ExprUnsafe) {
         self.security_signals.push(SecuritySignal {
             id: stable_id(
@@ -2500,9 +2726,23 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     // available, so it is kept verbatim rather than re-derived.
                     if let (Some(declared_type), Pat::Ident(PatIdent { ident, .. })) =
                         (declared_type.as_deref(), pattern)
-                        && let Some(token) = bare_type_token(declared_type)
                     {
-                        frame.declared_types.insert(ident.to_string(), token);
+                        if let Some(token) = bare_type_token(declared_type) {
+                            frame.declared_types.insert(ident.to_string(), token);
+                        }
+                        // The written text is kept beside the reduced token:
+                        // `dyn Store` and `impl Store` reduce identically, and
+                        // only the text says which one dispatches through a
+                        // vtable. The element view feeds loop-variable and
+                        // indexed-receiver typing.
+                        frame
+                            .declared_type_texts
+                            .insert(ident.to_string(), declared_type.to_string());
+                        if let Some(element) = container_element_type_of(declared_type) {
+                            frame
+                                .declared_element_types
+                                .insert(ident.to_string(), element);
+                        }
                     }
                     if let Some(init) = &local.init {
                         // P4.2: detect `let (tx, rx) = ... channel()`-style
@@ -3629,8 +3869,17 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
     let mut trait_to_impl_methods: HashMap<String, Vec<String>> = HashMap::new();
     let mut method_to_impls: HashMap<String, Vec<String>> = HashMap::new();
     let mut blanket_method_to_impls: HashMap<String, Vec<String>> = HashMap::new();
+    let mut non_object_safe: HashMap<String, Vec<String>> = HashMap::new();
 
     for file in analyzed_files {
+        for record in &file.trait_def_records {
+            if !record.non_object_safety_reasons.is_empty() {
+                non_object_safe
+                    .entry(record.name.clone())
+                    .or_default()
+                    .extend(record.non_object_safety_reasons.iter().cloned());
+            }
+        }
         for record in &file.trait_impl_records {
             let trait_key = record.trait_name.clone();
             for (method_id, method_name) in record.method_ids.iter().zip(record.method_names.iter())
@@ -3661,6 +3910,7 @@ fn build_trait_impl_index(analyzed_files: &[AnalyzedFile]) -> TraitImplIndex {
         trait_to_impl_methods,
         method_to_impls,
         blanket_method_to_impls,
+        non_object_safe,
     }
 }
 
@@ -3668,6 +3918,7 @@ fn build_call_graph(
     functions: &[FunctionRecord],
     trait_index: &TraitImplIndex,
     field_types: &HashMap<String, String>,
+    field_element_types: &HashMap<String, String>,
     local_types: &HashSet<String>,
     max_call_candidates: usize,
 ) -> CallGraph {
@@ -3685,6 +3936,14 @@ fn build_call_graph(
     // Per-function receiver-type bindings cache (P1.2). Computed lazily inside
     // the loop because most functions never benefit (no method calls).
     let mut type_bindings_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
+    // Element types of a function's own bindings, consulted when an indexed
+    // receiver (`stores[i]`) dispatches on the element rather than the
+    // container.
+    let mut element_bindings_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
+    // Bindings whose written type is a trait object, per function. Only these
+    // may take the `dyn` dispatch path — the same reduced token also stands for
+    // an `impl Trait` parameter, which dispatches statically.
+    let mut dyn_bindings_cache: HashMap<String, HashSet<String>> = HashMap::new();
     // Resolve a candidate's decl id back to its qualified name so edges carry
     // human-readable `target_name`s (not raw `decl-*` ids). Built once.
     let id_to_qualified: HashMap<&str, &str> = functions
@@ -3701,6 +3960,7 @@ fn build_call_graph(
         trait_index,
         id_to_qualified: &id_to_qualified,
         field_types,
+        field_element_types,
         return_types: &return_types,
         local_types,
     };
@@ -3726,12 +3986,52 @@ fn build_call_graph(
 
         let bindings = type_bindings_cache
             .entry(function.declaration.id.clone())
-            .or_insert_with(|| infer_type_bindings(function, field_types, &return_types));
+            .or_insert_with(|| {
+                infer_type_bindings(function, field_types, field_element_types, &return_types)
+            });
+        let element_bindings = element_bindings_cache
+            .entry(function.declaration.id.clone())
+            .or_insert_with(|| infer_element_bindings(function));
+        let dyn_bindings = dyn_bindings_cache
+            .entry(function.declaration.id.clone())
+            .or_insert_with(|| trait_object_binding_names(function));
 
         for call in &function.direct_calls {
-            let candidates = resolve_call_targets(call, &function.package_path, &context, bindings);
+            let candidates = resolve_call_targets(
+                call,
+                &function.package_path,
+                &context,
+                bindings,
+                element_bindings,
+                dyn_bindings,
+            );
 
             if candidates.is_empty() {
+                // An empty resolution from a `dyn` receiver on a local trait
+                // that is clearly not object safe is not "unknown target" — it
+                // is a site that cannot compile as written (or a misparse).
+                // Say so, next to the legacy unresolved-call diagnostic.
+                if let Some((trait_name, reasons)) = object_safety_violation(
+                    call,
+                    &context,
+                    bindings,
+                    element_bindings,
+                    dyn_bindings,
+                ) {
+                    diagnostics.push(Diagnostic {
+                        kind: "object-safety".to_string(),
+                        message: format!(
+                            "receiver of trait `{trait_name}` is not object safe ({}); the \
+                             trait cannot appear behind `dyn`, so this call site does not \
+                             compile as written or was misparsed and no dispatch target was \
+                             asserted",
+                            reasons.join("; ")
+                        ),
+                        package_path: Some(function.package_path.clone()),
+                        file_path: Some(function.file_path.clone()),
+                        position: Some(call.position.clone()),
+                    });
+                }
                 // Truly external — preserve the legacy synthetic node + diagnostic
                 // so consumers still see the call (e.g. for reachability matching).
                 let synthetic_id = stable_id("cg-node", &["external", &call.callee_text]);
@@ -3779,6 +4079,7 @@ fn build_call_graph(
                     method: call.method_name.clone(),
                     candidate_count: None,
                     emitted_candidate_count: None,
+                    dispatch_trait: None,
                     properties: IndexMap::new(),
                 });
                 continue;
@@ -3827,6 +4128,7 @@ fn build_call_graph(
                     // the emitted edges as a sample.
                     emitted_candidate_count: (emitted_count < candidate_count)
                         .then_some(emitted_count),
+                    dispatch_trait: candidate.dispatch_trait.clone(),
                     properties: IndexMap::new(),
                 });
             }
@@ -4032,6 +4334,10 @@ impl CallProvenance {
 struct ResolvedCall {
     target_id: String,
     provenance: CallProvenance,
+    /// Trait whose vtable dispatches the call, when the receiver is a trait
+    /// object resolved through that trait's impls. `None` for every other
+    /// resolution shape.
+    dispatch_trait: Option<String>,
 }
 
 /// The workspace-wide indexes call resolution consults.
@@ -4046,6 +4352,9 @@ struct ResolutionContext<'a> {
     id_to_qualified: &'a HashMap<&'a str, &'a str>,
     /// `"<TypeToken>::<field>" -> field's type token`.
     field_types: &'a HashMap<String, String>,
+    /// `"<TypeToken>::<field>" -> field's element type token`, for container
+    /// fields whose elements dispatch (`handlers: Vec<Box<dyn Handler>>`).
+    field_element_types: &'a HashMap<String, String>,
     return_types: &'a ReturnTypeIndex,
     /// Type names declared in the analyzed code. Membership is what lets a
     /// missing method be read as "this call leaves the analyzed code" rather
@@ -4082,12 +4391,15 @@ fn resolve_call_targets(
     package_path: &str,
     context: &ResolutionContext<'_>,
     type_bindings: &HashMap<String, String>,
+    element_bindings: &HashMap<String, String>,
+    dyn_bindings: &HashSet<String>,
 ) -> Vec<ResolvedCall> {
     let ResolutionContext {
         local_index,
         trait_index,
         id_to_qualified,
         field_types,
+        field_element_types,
         return_types,
         local_types,
     } = context;
@@ -4159,7 +4471,9 @@ fn resolve_call_targets(
                 receiver,
                 call.receiver_expr.as_ref(),
                 type_bindings,
+                element_bindings,
                 field_types,
+                field_element_types,
                 return_types,
             )
         }) {
@@ -4183,6 +4497,23 @@ fn resolve_call_targets(
             // A `&dyn Trait` / `impl Trait` receiver reduces to the trait's
             // name, and such a call dispatches to that trait's impls — not to
             // an impl of a type called `Trait`.
+            //
+            // Unless the trait is *clearly* not object safe: a trait object of
+            // such a trait cannot exist in a program that compiles (a `Self`
+            // return has a size the caller could not know; a generic method
+            // would need infinitely many vtable entries), so dispatching to its
+            // impls would assert calls the program cannot make. An `impl
+            // Trait` receiver dispatches statically and stays eligible, which
+            // is why dyn-ness is decided on the written type text rather than
+            // the reduced token — both reduce to the same name.
+            if receiver_names_trait_object(call.receiver_text.as_deref(), dyn_bindings)
+                && let Some(reasons) = trait_index.non_object_safe.get(receiver_type)
+                && !reasons.is_empty()
+            {
+                // The caller records an `object-safety` diagnostic alongside
+                // the usual unresolved-call one.
+                return Vec::new();
+            }
             if let Some(trait_method_ids) = trait_index.trait_to_impl_methods.get(receiver_type) {
                 let dispatched: Vec<String> = trait_candidates
                     .iter()
@@ -4191,8 +4522,20 @@ fn resolve_call_targets(
                     .collect();
                 match dispatched.len() {
                     0 => {}
-                    1 => return resolutions(&dispatched, CallProvenance::TraitImpl),
-                    _ => return resolutions(&dispatched, CallProvenance::TraitOverapprox),
+                    1 => {
+                        return resolutions_via_trait(
+                            &dispatched,
+                            CallProvenance::TraitImpl,
+                            receiver_type,
+                        );
+                    }
+                    _ => {
+                        return resolutions_via_trait(
+                            &dispatched,
+                            CallProvenance::TraitOverapprox,
+                            receiver_type,
+                        );
+                    }
                 }
             }
 
@@ -4284,6 +4627,24 @@ fn resolutions(ids: &[String], provenance: CallProvenance) -> Vec<ResolvedCall> 
         .map(|id| ResolvedCall {
             target_id: id.clone(),
             provenance,
+            dispatch_trait: None,
+        })
+        .collect()
+}
+
+/// Like [`resolutions`], but records the trait dispatching the call: a trait
+/// object's single vtable belongs to its principal trait, so the trait names
+/// exactly which set of impls the call can reach.
+fn resolutions_via_trait(
+    ids: &[String],
+    provenance: CallProvenance,
+    dispatch_trait: &str,
+) -> Vec<ResolvedCall> {
+    ids.iter()
+        .map(|id| ResolvedCall {
+            target_id: id.clone(),
+            provenance,
+            dispatch_trait: Some(dispatch_trait.to_string()),
         })
         .collect()
 }
@@ -4531,9 +4892,28 @@ fn resolve_receiver_type(
     receiver: &str,
     receiver_expr: Option<&SimpleExpr>,
     type_bindings: &HashMap<String, String>,
+    element_bindings: &HashMap<String, String>,
     field_types: &HashMap<String, String>,
+    field_element_types: &HashMap<String, String>,
     return_types: &ReturnTypeIndex,
 ) -> Option<String> {
+    // An indexed receiver (`stores[i]`, `self.handlers[0]`) dispatches on the
+    // container's *element*, not the container. The structured form has
+    // already collapsed the index onto its base, which would type the receiver
+    // as the container — a `Vec`, and thence "leaves the crate" — so the
+    // element view runs first, on the text form.
+    if receiver.trim_end().ends_with(']')
+        && let Some(base) = strip_index_suffix(receiver)
+        && let Some(element) = element_of_dotted_path(
+            base,
+            type_bindings,
+            element_bindings,
+            field_types,
+            field_element_types,
+        )
+    {
+        return Some(element);
+    }
     // The structured form can express a call result, which the text form
     // cannot, so it is tried first.
     if let Some(expr) = receiver_expr
@@ -4647,6 +5027,7 @@ fn split_qualified_segments(qname: &str) -> impl Iterator<Item = &str> {
 fn infer_type_bindings(
     function: &FunctionRecord,
     field_types: &HashMap<String, String>,
+    field_element_types: &HashMap<String, String>,
     return_types: &ReturnTypeIndex,
 ) -> HashMap<String, String> {
     let mut bindings = HashMap::new();
@@ -4689,6 +5070,30 @@ fn infer_type_bindings(
         bindings.insert(name.clone(), declared.clone());
     }
 
+    // A `for` loop variable takes the element type of what it iterates:
+    // `for s in &shapes` over a `Vec<Box<dyn Store>>` makes `s` a `Store`
+    // receiver, which is how heterogeneous collections dispatch at all. The
+    // iterable's element is resolved the same way an indexed receiver's is;
+    // bindings recorded above keep precedence, so an explicit annotation never
+    // loses to a loop.
+    if !function.loop_iterables.is_empty() {
+        let element_bindings = infer_element_bindings(function);
+        for (var, iterable) in &function.loop_iterables {
+            if bindings.contains_key(var) {
+                continue;
+            }
+            if let Some(element) = element_of_dotted_path(
+                iterable,
+                &bindings,
+                &element_bindings,
+                field_types,
+                field_element_types,
+            ) {
+                bindings.insert(var.clone(), element);
+            }
+        }
+    }
+
     // Walk assignments to harvest `let x: T = ...`, `let x = T::new(...)`, and
     // — via the return-type index — `let x = f()` and `let x = a.b().c()`.
     //
@@ -4723,6 +5128,142 @@ fn infer_type_bindings(
     }
 
     bindings
+}
+
+/// Element types of a function's own bindings: parameters and annotated `let`
+/// bindings whose written type is a container (`stores: Vec<Box<dyn Store>>`
+/// → `stores` dispatches as `Store` when indexed or iterated).
+fn infer_element_bindings(function: &FunctionRecord) -> HashMap<String, String> {
+    let mut element_bindings = HashMap::new();
+    for (name, type_text) in function.params.iter().zip(function.param_types.iter()) {
+        if name.is_empty() || name == "self" {
+            continue;
+        }
+        if let Some(element) = container_element_type_of(type_text) {
+            element_bindings.insert(name.clone(), element);
+        }
+    }
+    for (name, element) in &function.declared_element_types {
+        element_bindings.insert(name.clone(), element.clone());
+    }
+    element_bindings
+}
+
+/// Element type that a dotted receiver path dispatches on, if known.
+///
+/// A bare name resolves through the function's own element bindings (a
+/// parameter or annotated `let` of container type). A dotted path walks the
+/// field table hop by hop and takes the *last* hop's element:
+/// `self.handlers` on a `Vec<Box<dyn Handler>>` field is a `Handler`. An
+/// intermediate hop whose type is a container dead-ends — typing through the
+/// element of a mid-path index is not modelled, and guessing would be wrong.
+fn element_of_dotted_path(
+    path: &str,
+    type_bindings: &HashMap<String, String>,
+    element_bindings: &HashMap<String, String>,
+    field_types: &HashMap<String, String>,
+    field_element_types: &HashMap<String, String>,
+) -> Option<String> {
+    let mut hops = path.split('.').map(str::trim);
+    let base = hops.next()?;
+    if base.is_empty() || !base.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let fields: Vec<&str> = hops.collect();
+    if fields.is_empty() {
+        return element_bindings.get(base).cloned();
+    }
+    let mut current = type_bindings.get(base)?.clone();
+    let (&last, parents) = fields.split_last()?;
+    for field in parents {
+        if field.is_empty() || !field.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return None;
+        }
+        current = field_types.get(&format!("{current}::{field}"))?.clone();
+    }
+    if last.is_empty() || !last.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    field_element_types
+        .get(&format!("{current}::{last}"))
+        .cloned()
+}
+
+/// Drop one trailing index suffix from receiver text: `stores [ i ]` →
+/// `stores`. `None` when the text does not end in a balanced `[…]` group.
+fn strip_index_suffix(receiver: &str) -> Option<&str> {
+    let trimmed = receiver.trim_end();
+    if !trimmed.ends_with(']') {
+        return None;
+    }
+    let mut depth = 0i32;
+    for (index, ch) in trimmed.char_indices().rev() {
+        match ch {
+            ']' => depth += 1,
+            '[' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(trimmed[..index].trim());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether this receiver dispatches through a vtable: either the receiver text
+/// itself spells `dyn`, or it is (rooted at) a binding whose written type did.
+///
+/// The written-type check matters because `dyn Store` and `impl Store` reduce
+/// to the same token; only the former is a trait object, and the latter must
+/// keep its static-dispatch treatment.
+fn receiver_names_trait_object(
+    receiver_text: Option<&str>,
+    dyn_bindings: &HashSet<String>,
+) -> bool {
+    let Some(text) = receiver_text else {
+        return false;
+    };
+    if type_text_is_trait_object(text) {
+        return true;
+    }
+    let base = text
+        .trim()
+        .split('.')
+        .next()
+        .map(str::trim)
+        .unwrap_or_default();
+    !base.is_empty() && dyn_bindings.contains(base)
+}
+
+/// The non-object-safe local trait this call site would dispatch through, if
+/// it is one: `(trait name, reasons)`.
+fn object_safety_violation(
+    call: &SimplifiedCall,
+    context: &ResolutionContext<'_>,
+    type_bindings: &HashMap<String, String>,
+    element_bindings: &HashMap<String, String>,
+    dyn_bindings: &HashSet<String>,
+) -> Option<(String, Vec<String>)> {
+    call.method_name.as_ref()?;
+    if !receiver_names_trait_object(call.receiver_text.as_deref(), dyn_bindings) {
+        return None;
+    }
+    let receiver_type = resolve_receiver_type(
+        call.receiver_text.as_deref()?,
+        call.receiver_expr.as_ref(),
+        type_bindings,
+        element_bindings,
+        context.field_types,
+        context.field_element_types,
+        context.return_types,
+    )?;
+    let reasons = context.trait_index.non_object_safe.get(&receiver_type)?;
+    if reasons.is_empty() {
+        return None;
+    }
+    Some((receiver_type, reasons.clone()))
 }
 
 fn binding_from_simple_expr(target: &str, value: &SimpleExpr) -> Option<(String, String)> {
@@ -4855,32 +5396,34 @@ fn std_constructor_return(callee: &str) -> Option<&'static str> {
 fn bare_type_token(ty: &str) -> Option<String> {
     let mut current = ty.trim();
     loop {
-        // Peel references, `mut`, `dyn`, and `impl` markers.
-        let peeled = current
-            .trim()
-            .trim_start_matches('&')
-            .trim()
+        // Peel parentheses (the token stream wraps parenthesized types:
+        // `&(dyn Store + Send)` renders as `& (dyn Store + Send)`), then
+        // references, then `mut`, `dyn`, and `impl` markers. The loop runs
+        // until nothing peels, so the order the markers appear in resolves
+        // itself.
+        let candidate = strip_matched_parens(current.trim()).unwrap_or_else(|| current.trim());
+        let candidate = candidate.trim_start_matches('&').trim();
+        let peeled = candidate
             .strip_prefix("mut ")
-            .unwrap_or_else(|| {
-                current
-                    .trim()
-                    .trim_start_matches('&')
-                    .trim()
-                    .strip_prefix("dyn ")
-                    .or_else(|| {
-                        current
-                            .trim()
-                            .trim_start_matches('&')
-                            .trim()
-                            .strip_prefix("impl ")
-                    })
-                    .unwrap_or_else(|| current.trim().trim_start_matches('&').trim())
-            })
+            .or_else(|| candidate.strip_prefix("dyn "))
+            .or_else(|| candidate.strip_prefix("impl "))
+            .unwrap_or(candidate)
             .trim();
         if peeled == current {
             break;
         }
         current = peeled;
+    }
+
+    // A trait object carries one vtable — the principal trait's. The bounds
+    // after `+` are auto traits and lifetimes, which add no vtable entries, so
+    // `dyn Error + Send + Sync` dispatches exactly like `dyn Error`. Cut them
+    // off; the cut is top-level, so a nested object such as
+    // `Box<dyn Fn() -> Box<dyn E + Send>>` keeps its inner bounds intact. The
+    // remainder re-enters the reduction, because cutting usually exposes a
+    // parenthesized object (`(dyn Store + Send)`) that still needs peeling.
+    if let Some(plus) = top_level_plus(current) {
+        return bare_type_token(&current[..plus]);
     }
 
     // A generic application: decide whether to look inside it.
@@ -4910,6 +5453,203 @@ fn bare_type_token(ty: &str) -> Option<String> {
         Some(last.to_string())
     } else {
         None
+    }
+}
+
+/// Byte offset of the first `+` outside any bracket, or `None`.
+///
+/// The token stream text of `Box<dyn Error + Send>` is
+/// `Box < dyn Error + Send >`; a `+` between `<` and `>` is a bound of the
+/// *inner* object, not of the type being reduced. The `>` of a `->` return
+/// arrow is not a bracket, or `Fn() -> Box<dyn E + Send>` would unbalance.
+fn top_level_plus(text: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (index, ch) in text.char_indices() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' if !text[..index].ends_with('-') => depth -= 1,
+            ')' | ']' => depth -= 1,
+            '+' if depth == 0 => return Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The text inside a leading `(…)` group, when the opening parenthesis at the
+/// start is the one closed at the end.
+fn strip_matched_parens(text: &str) -> Option<&str> {
+    if !text.starts_with('(') || !text.ends_with(')') {
+        return None;
+    }
+    let mut depth = 0i32;
+    for (index, ch) in text.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    // The opening parenthesis closes here; only a match at
+                    // the very end makes the pair strippable.
+                    return (index == text.len() - 1).then_some(&text[1..text.len() - 1]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Reduce a container type as written to the token its *element* dispatches on.
+///
+/// `bare_type_token` stops at the container on purpose — `shapes.push(..)` means
+/// `Vec::push`, not a method of the element — so iterating or indexing the
+/// container needs this inverse view: `Vec<Box<dyn Store>>`,
+/// `HashMap<String, Box<dyn Store>>`, and `&[Box<dyn Store>]` all reduce to
+/// `Store`. Requires the top-level type to actually be a container (generic
+/// application, slice, or array); a bare `Grid` has no statically visible
+/// element, and returning the type itself would mistype every loop variable
+/// drawn from it.
+fn container_element_type_of(ty: &str) -> Option<String> {
+    let mut current = ty.trim();
+    loop {
+        let peeled = current
+            .trim()
+            .trim_start_matches('&')
+            .trim()
+            .strip_prefix("mut ")
+            .unwrap_or_else(|| current.trim().trim_start_matches('&').trim())
+            .trim();
+        if peeled == current {
+            break;
+        }
+        current = peeled;
+    }
+
+    // Slices `[T]` and arrays `[T; N]`.
+    if current.starts_with('[') && current.trim_end().ends_with(']') {
+        let inner = &current[1..current.trim_end().len() - 1];
+        let element = match inner.find(';') {
+            Some(separator) => &inner[..separator],
+            None => inner,
+        };
+        return bare_type_token(last_tuple_member(element));
+    }
+
+    let open = current.find('<')?;
+    if !current.trim_end().ends_with('>') {
+        return None;
+    }
+    let head = last_segment_of_path(&current[..open]);
+    // Deref-transparent wrappers are containers here too: the element of
+    // `Box<dyn Store>` is the trait object itself.
+    let is_container =
+        CONTAINER_TYPES.contains(&head) || DEREF_TRANSPARENT_WRAPPERS.contains(&head);
+    if !is_container {
+        return None;
+    }
+    let inner = &current[open + 1..current.trim_end().len() - 1];
+    // A map's element for iteration and indexing is its *value*: the last
+    // argument. Lifetimes are not types an element can dispatch on.
+    let argument = split_generic_arguments(inner)
+        .into_iter()
+        .rev()
+        .find(|argument| !argument.trim_start().starts_with('\''))?;
+    // A collection of pairs (`Vec<(String, Box<dyn Handler>)>`, the id-keyed
+    // subscriber-list shape) dispatches on the value half: the last member.
+    bare_type_token(last_tuple_member(argument))
+}
+
+/// The last top-level member of a tuple type, or the text itself when it is
+/// not a tuple: `(String, Box<dyn Store>)` → `Box<dyn Store>`.
+fn last_tuple_member(text: &str) -> &str {
+    let Some(inner) = strip_matched_parens(text.trim()) else {
+        return text;
+    };
+    split_generic_arguments(inner)
+        .split_last()
+        .map(|(member, _)| *member)
+        .unwrap_or(inner)
+}
+
+/// Container types whose elements this analysis can type.
+///
+/// Not every generic type is a container: `PhantomData<T>` owns no `T`, and a
+/// user collection custom-`Deref`ing to a slice is not modelled. The list is
+/// the standard library's owning containers plus the pointer wrappers that
+/// hold their element whole.
+const CONTAINER_TYPES: &[&str] = &[
+    "BTreeMap",
+    "BTreeSet",
+    "BinaryHeap",
+    "HashMap",
+    "HashSet",
+    "LinkedList",
+    "Vec",
+    "VecDeque",
+];
+
+/// The single binding a `for` loop introduces, for typing purposes.
+///
+/// `for &item in &slice` still names its variable `item`; `for (k, v) in &map`
+/// binds the *value* — the dispatching half — as `v`.
+fn loop_pattern_ident(pat: &Pat) -> Option<String> {
+    match pat {
+        Pat::Ident(pat_ident) => Some(pat_ident.ident.to_string()),
+        Pat::Reference(pat_ref) => loop_pattern_ident(&pat_ref.pat),
+        Pat::Type(pat_type) => loop_pattern_ident(&pat_type.pat),
+        Pat::Tuple(pat_tuple) => pat_tuple.elems.last().and_then(loop_pattern_ident),
+        _ => None,
+    }
+}
+
+/// The dotted receiver path a `for` loop's iterable draws from, when it has one.
+///
+/// Recognized shapes: a plain path (`shapes`, `self.handlers`), optionally
+/// behind `&`/parentheses, optionally through the standard iterator
+/// constructors (`shapes.iter()`, `self.handlers().into_iter()`). Anything
+/// else — `a.chain(b)`, `xs.map(f)`, a range — has no element type this
+/// analysis can name, and returning one would mistype the loop variable.
+fn for_loop_iterable_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Reference(reference) => for_loop_iterable_path(&reference.expr),
+        Expr::Paren(paren) => for_loop_iterable_path(&paren.expr),
+        Expr::MethodCall(call) => {
+            let method = call.method.to_string();
+            if matches!(method.as_str(), "iter" | "iter_mut" | "into_iter") {
+                dotted_ident_path(&call.receiver)
+            } else {
+                None
+            }
+        }
+        Expr::Path(_) | Expr::Field(_) => dotted_ident_path(expr),
+        _ => None,
+    }
+}
+
+/// Dotted identifier path of an expression: `shapes`, `self.handlers`.
+///
+/// Index and call expressions end the walk — `xs[i].inner` stays untyped
+/// rather than being typed as if the index were not there.
+fn dotted_ident_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(path) if path.qself.is_none() && path.path.leading_colon.is_none() => {
+            let mut segments = Vec::new();
+            for segment in &path.path.segments {
+                if !segment.arguments.is_none() {
+                    return None;
+                }
+                segments.push(segment.ident.to_string());
+            }
+            Some(segments.join("."))
+        }
+        Expr::Field(field) => match &field.member {
+            syn::Member::Named(ident) => {
+                Some(format!("{}.{}", dotted_ident_path(&field.base)?, ident))
+            }
+            syn::Member::Unnamed(_) => None,
+        },
+        _ => None,
     }
 }
 
@@ -4994,6 +5734,7 @@ fn build_data_flow(
     functions: &[FunctionRecord],
     patterns: DataFlowPatternSet,
     field_types: &HashMap<String, String>,
+    field_element_types: &HashMap<String, String>,
 ) -> DataFlowEvidence {
     // Body-less records (a dependency at the lighter tier) are excluded: their
     // empty operation lists would summarize as "taint stops here" and delete
@@ -5010,14 +5751,12 @@ fn build_data_flow(
         .iter()
         .map(|function| (function.declaration.id.clone(), function))
         .collect();
-    let return_types = ReturnTypeIndex::build(functions);
-    let summaries = infer_summaries(
-        functions,
-        &local_index,
-        &patterns,
+    let indexes = TypeIndexes {
         field_types,
-        &return_types,
-    );
+        field_element_types,
+        return_types: &ReturnTypeIndex::build(functions),
+    };
+    let summaries = infer_summaries(functions, &local_index, &patterns, &indexes);
     let partials = parallel_map_collect(functions, |function| {
         let mut builder = DataFlowBuilder::new(
             mode,
@@ -5025,8 +5764,7 @@ fn build_data_flow(
             &summaries,
             &local_index,
             &function_map,
-            field_types,
-            &return_types,
+            &indexes,
         );
         builder.materialize_function(function);
         builder
@@ -5037,8 +5775,7 @@ fn build_data_flow(
         &summaries,
         &local_index,
         &function_map,
-        field_types,
-        &return_types,
+        &indexes,
     );
     for partial in partials {
         builder.merge_materialized(partial);
@@ -6454,8 +7191,7 @@ fn infer_summaries(
     functions: &[FunctionRecord],
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
-    field_types: &HashMap<String, String>,
-    return_types: &ReturnTypeIndex,
+    indexes: &TypeIndexes<'_>,
 ) -> BTreeMap<String, FunctionSummary> {
     let mut summaries = BTreeMap::<String, FunctionSummary>::new();
     for function in functions {
@@ -6489,14 +7225,7 @@ fn infer_summaries(
         let next_entries = parallel_map_collect(&funcs_to_update, |function| {
             (
                 function.declaration.id.clone(),
-                summarize_function(
-                    function,
-                    &summaries,
-                    local_index,
-                    patterns,
-                    field_types,
-                    return_types,
-                ),
+                summarize_function(function, &summaries, local_index, patterns, indexes),
             )
         });
         for (function_id, next) in next_entries {
@@ -6525,14 +7254,18 @@ fn summarize_function(
     summaries: &BTreeMap<String, FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
-    field_types: &HashMap<String, String>,
-    return_types: &ReturnTypeIndex,
+    indexes: &TypeIndexes<'_>,
 ) -> FunctionSummary {
     // Same type bindings the concrete pass uses, so a receiver-typed sink
     // pattern (`Command::arg`) is visible here too. Without them a wrapper
     // function whose whole body is `cmd.arg(value)` summarized as reaching no
     // sink, and taint flowing into it through a parameter was lost.
-    let type_bindings = infer_type_bindings(function, field_types, return_types);
+    let type_bindings = infer_type_bindings(
+        function,
+        indexes.field_types,
+        indexes.field_element_types,
+        indexes.return_types,
+    );
     let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
     for (idx, param) in function.params.iter().enumerate() {
         let mut origins = BTreeSet::from([AbstractOrigin::Param(idx)]);
@@ -6659,8 +7392,12 @@ fn summarize_function(
                             .chain(args.iter())
                             .cloned()
                             .collect::<Vec<_>>();
-                        let receiver_type =
-                            infer_expr_type(receiver, &type_bindings, field_types, return_types);
+                        let receiver_type = infer_expr_type(
+                            receiver,
+                            &type_bindings,
+                            indexes.field_types,
+                            indexes.return_types,
+                        );
                         Some((method.clone(), all_args, receiver_type))
                     }
                     _ => None,
@@ -6902,6 +7639,19 @@ fn eval_abstract_expr(
     }
 }
 
+/// The workspace-wide type indexes the passes consult, grouped so builder
+/// signatures stay readable.
+struct TypeIndexes<'a> {
+    /// `"<TypeToken>::<field>" -> field's type token`, so a receiver-typed
+    /// pattern can be evaluated: a pattern restricted to `Command::arg` must
+    /// know what `cmd` is.
+    field_types: &'a HashMap<String, String>,
+    /// `"<TypeToken>::<field>" -> field's element type token`, for container
+    /// fields whose elements dispatch (`handlers: Vec<Box<dyn Handler>>`).
+    field_element_types: &'a HashMap<String, String>,
+    return_types: &'a ReturnTypeIndex,
+}
+
 struct DataFlowBuilder<'a> {
     mode: &'a str,
     // Borrowed rather than owned: the parallel data-flow pass constructs one
@@ -6913,10 +7663,7 @@ struct DataFlowBuilder<'a> {
     summaries: &'a BTreeMap<String, FunctionSummary>,
     local_index: &'a HashMap<String, Vec<String>>,
     function_map: &'a HashMap<String, &'a FunctionRecord>,
-    /// Type indexes, so a receiver-typed sink pattern can be evaluated: a
-    /// pattern restricted to `Command::arg` must know what `cmd` is.
-    field_types: &'a HashMap<String, String>,
-    return_types: &'a ReturnTypeIndex,
+    indexes: &'a TypeIndexes<'a>,
     /// Type bindings of the function currently being materialized.
     current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -6932,8 +7679,7 @@ impl<'a> DataFlowBuilder<'a> {
         summaries: &'a BTreeMap<String, FunctionSummary>,
         local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
-        field_types: &'a HashMap<String, String>,
-        return_types: &'a ReturnTypeIndex,
+        indexes: &'a TypeIndexes<'a>,
     ) -> Self {
         Self {
             mode,
@@ -6941,8 +7687,7 @@ impl<'a> DataFlowBuilder<'a> {
             summaries,
             local_index,
             function_map,
-            field_types,
-            return_types,
+            indexes,
             current_bindings: HashMap::new(),
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
@@ -6952,7 +7697,12 @@ impl<'a> DataFlowBuilder<'a> {
     }
 
     fn materialize_function(&mut self, function: &FunctionRecord) {
-        self.current_bindings = infer_type_bindings(function, self.field_types, self.return_types);
+        self.current_bindings = infer_type_bindings(
+            function,
+            self.indexes.field_types,
+            self.indexes.field_element_types,
+            self.indexes.return_types,
+        );
         let mut env: HashMap<String, ConcreteTaint> = HashMap::new();
         for (idx, param) in function.params.iter().enumerate() {
             let category = function
@@ -7100,8 +7850,8 @@ impl<'a> DataFlowBuilder<'a> {
                             let receiver_type = infer_expr_type(
                                 receiver,
                                 &self.current_bindings,
-                                self.field_types,
-                                self.return_types,
+                                self.indexes.field_types,
+                                self.indexes.return_types,
                             );
                             (method.clone(), all_args, position.clone(), receiver_type)
                         }
@@ -9137,12 +9887,168 @@ pub fn run() {
         .expect("analysis succeeds");
 
         // `&dyn Store` reduces to the trait name; the call dispatches to the
-        // trait's impls, not to an impl of a type named `Store`.
+        // trait's impls, not to an impl of a type named `Store`. The edges
+        // record which trait's vtable dispatched the call.
         let edges = resolved_edges(&report, "persist");
         assert_eq!(edges.len(), 2, "expected both Store impls");
         for edge in &edges {
             assert_eq!(edge.call_type, "trait-overapprox");
+            assert_eq!(edge.dispatch_trait.as_deref(), Some("Store"));
         }
+    }
+
+    #[test]
+    fn multi_bound_trait_objects_dispatch_on_the_principal_trait() {
+        // `dyn Store + Send + Sync` carries one vtable — `Store`'s — so the
+        // bounds after `+` must not stop the receiver reducer. Real code
+        // spells trait objects with these bounds constantly.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-bounds-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // `store: &(dyn Store + Send + Sync)` — the multi-bound parameter.
+        let routed = resolved_edges(&report, "persist")
+            .into_iter()
+            .filter(|edge| edge.receiver.as_deref() == Some("store"))
+            .collect::<Vec<_>>();
+        assert_eq!(routed.len(), 2, "both Store impls must stay reachable");
+        for edge in &routed {
+            assert_eq!(edge.call_type, "trait-overapprox");
+            assert_eq!(edge.dispatch_trait.as_deref(), Some("Store"));
+        }
+
+        // `Box<dyn Store + 'static>` returned by the builder dispatches the
+        // same way.
+        let boxed = resolved_edges(&report, "persist")
+            .into_iter()
+            .filter(|edge| edge.receiver.as_deref() == Some("boxed"))
+            .collect::<Vec<_>>();
+        assert_eq!(boxed.len(), 2);
+        for edge in &boxed {
+            assert_eq!(edge.call_type, "trait-overapprox");
+            assert_eq!(edge.dispatch_trait.as_deref(), Some("Store"));
+        }
+
+        // `Arc<dyn Auditor + Send + Sync>` has a single impl, so it resolves
+        // exactly — and names the dispatching trait.
+        let audited = resolved_edges(&report, "audited");
+        assert_eq!(audited.len(), 1, "one Auditor impl");
+        assert_eq!(audited[0].call_type, "trait-impl");
+        assert_eq!(audited[0].dispatch_trait.as_deref(), Some("Auditor"));
+    }
+
+    #[test]
+    fn trait_object_collections_type_iteration_and_indexing() {
+        // The heterogeneous-collection idiom: `Vec<Box<dyn Handler>>` exists
+        // so a loop can dispatch through the element trait. Iteration and
+        // indexing receivers must type as the element, not the container.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-collection-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        let handle_edges = resolved_edges(&report, "handle");
+        // Every `handle` site iterates or indexes a collection of
+        // `Box<dyn Handler>`: field iteration, field indexing, iterator
+        // construction on a parameter, and map-value iteration — four sites,
+        // each reaching both impls.
+        let dispatched_sites = [
+            "handler",             // for over `&self.handlers` and `batch.iter()`
+            "node",                // for over map values
+            "self . handlers [0]", // indexed field element
+        ];
+        let sites: std::collections::HashSet<&str> = handle_edges
+            .iter()
+            .filter_map(|edge| edge.receiver.as_deref())
+            .collect();
+        for site in dispatched_sites {
+            assert!(
+                sites.contains(site),
+                "expected dispatch from receiver `{site}`, saw {sites:?}"
+            );
+        }
+        for edge in &handle_edges {
+            assert_eq!(
+                edge.call_type, "trait-overapprox",
+                "both Handler impls are visible, so every element dispatch is one"
+            );
+            assert_eq!(edge.dispatch_trait.as_deref(), Some("Handler"));
+        }
+        assert_eq!(
+            handle_edges.len(),
+            8,
+            "four dispatched sites, two impls behind each"
+        );
+
+        // The container's own methods stay container-typed: element typing
+        // must not turn `Vec::push` into a `Handler` call.
+        for edge in resolved_edges(&report, "push") {
+            assert_eq!(edge.call_type, "external");
+        }
+        for edge in resolved_edges(&report, "is_empty") {
+            assert_eq!(edge.call_type, "external");
+        }
+    }
+
+    #[test]
+    fn an_object_unsafe_dyn_receiver_is_diagnosed_and_not_dispatched() {
+        // `Plugin` returns `Self`, takes `self` by value, and has a generic
+        // method: no `dyn Plugin` can exist in a program that compiles. The
+        // receiver must not dispatch to `Loader`'s impls — the site cannot
+        // compile as written — and the report must say why.
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("dyn-object-unsafe-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+
+        // No dispatch edges from the `dyn Plugin` receiver.
+        for method in ["register", "consume", "name"] {
+            let edges = resolved_edges(&report, method)
+                .into_iter()
+                .filter(|edge| edge.call_type != "external")
+                .collect::<Vec<_>>();
+            assert!(
+                edges.is_empty(),
+                "`dyn Plugin` must not dispatch `{method}`, saw {edges:?}"
+            );
+        }
+
+        // One diagnostic per gated site, naming the trait and the reasons.
+        let object_safety: Vec<&rusi_schema::Diagnostic> = report
+            .call_graph
+            .as_ref()
+            .expect("callgraph emitted")
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == "object-safety")
+            .collect();
+        assert_eq!(object_safety.len(), 2, "`consume` and `name` are gated");
+        for diagnostic in &object_safety {
+            let message = &diagnostic.message;
+            assert!(message.contains("`Plugin`"), "{message}");
+            assert!(message.contains("returns `Self`"), "{message}");
+            assert!(
+                message.contains("generic type or const parameters"),
+                "{message}"
+            );
+            assert!(message.contains("takes `self` by value"), "{message}");
+        }
+
+        // The object-safe control still dispatches, exactly and named.
+        let reported = resolved_edges(&report, "report");
+        assert_eq!(reported.len(), 1);
+        assert_eq!(reported[0].call_type, "trait-impl");
+        assert_eq!(reported[0].dispatch_trait.as_deref(), Some("Reporter"));
     }
 
     #[test]
@@ -11554,6 +12460,187 @@ mod receiver_type_tests {
     fn trait_objects_reduce_to_the_trait() {
         assert_eq!(bare_type_token("&dyn Store").as_deref(), Some("Store"));
         assert_eq!(bare_type_token("impl Store").as_deref(), Some("Store"));
+    }
+
+    #[test]
+    fn trait_object_bounds_after_plus_do_not_stop_the_reduction() {
+        // The vtable belongs to the principal trait; auto-trait bounds add no
+        // entries, so `dyn Error + Send + Sync` dispatches like `dyn Error`.
+        assert_eq!(
+            bare_type_token("&dyn Store + Send + Sync").as_deref(),
+            Some("Store")
+        );
+        // The common error-plumbing spelling, wrapped and qualified.
+        assert_eq!(
+            bare_type_token("Box<dyn std::error::Error + Send + Sync>").as_deref(),
+            Some("Error")
+        );
+        // Parenthesized trait objects — the token stream's rendering of
+        // `&(dyn Store + Send)`.
+        assert_eq!(
+            bare_type_token("& (dyn Store + Send + Sync)").as_deref(),
+            Some("Store")
+        );
+        // A lifetime bound is dropped the same way.
+        assert_eq!(
+            bare_type_token("Box<dyn Store + 'static>").as_deref(),
+            Some("Store")
+        );
+        // A `+` nested inside generic arguments is not top level: the wrapper
+        // peels to the inner object, whose own principal trait is the answer.
+        assert_eq!(
+            bare_type_token("Arc<(dyn Auditor + Send) + Send + Sync>").as_deref(),
+            Some("Auditor")
+        );
+    }
+}
+
+#[cfg(test)]
+mod dyn_dispatch_helper_tests {
+    use super::*;
+
+    #[test]
+    fn top_level_plus_ignores_nested_bounds() {
+        assert_eq!(top_level_plus("Store + Send"), Some(6));
+        assert_eq!(top_level_plus("Store"), None);
+        // The `+` sits inside the wrapper's arguments, not at top level.
+        assert_eq!(top_level_plus("Box < dyn Error + Send >"), None);
+        assert_eq!(top_level_plus("Fn() -> Box<dyn E + Send>"), None);
+    }
+
+    #[test]
+    fn matched_parens_strip_only_balanced_pairs() {
+        assert_eq!(
+            strip_matched_parens("(dyn Store + Send)"),
+            Some("dyn Store + Send")
+        );
+        assert_eq!(strip_matched_parens("(a) + (b)"), None);
+        assert_eq!(strip_matched_parens("Store"), None);
+    }
+
+    #[test]
+    fn container_elements_reduce_to_the_dispatching_type() {
+        assert_eq!(
+            container_element_type_of("Vec<Box<dyn Store>>").as_deref(),
+            Some("Store")
+        );
+        // Token-stream spacing.
+        assert_eq!(
+            container_element_type_of("Vec < Box < dyn Store > >").as_deref(),
+            Some("Store")
+        );
+        // A map's element is its value.
+        assert_eq!(
+            container_element_type_of("HashMap<String, Box<dyn Handler>>").as_deref(),
+            Some("Handler")
+        );
+        assert_eq!(
+            container_element_type_of("std::collections::HashMap<String, Box<dyn Handler>>")
+                .as_deref(),
+            Some("Handler")
+        );
+        // Slices and arrays.
+        assert_eq!(
+            container_element_type_of("&[Box<dyn Store>]").as_deref(),
+            Some("Store")
+        );
+        assert_eq!(
+            container_element_type_of("[Handler; 3]").as_deref(),
+            Some("Handler")
+        );
+        // Pairs: the value half dispatches.
+        assert_eq!(
+            container_element_type_of("Vec<(String, Box<dyn Handler>)>").as_deref(),
+            Some("Handler")
+        );
+        // Plain elements pass through.
+        assert_eq!(
+            container_element_type_of("Vec<Client>").as_deref(),
+            Some("Client")
+        );
+        // A bare type has no statically visible element.
+        assert_eq!(container_element_type_of("Grid"), None);
+        // A non-container generic owns no dispatchable element.
+        assert_eq!(container_element_type_of("PhantomData<Client>"), None);
+    }
+
+    #[test]
+    fn for_loop_iterables_reduce_to_dotted_paths() {
+        let parse = |text: &str| syn::parse_str::<syn::Expr>(text).unwrap();
+        assert_eq!(
+            for_loop_iterable_path(&parse("&self.handlers")).as_deref(),
+            Some("self.handlers")
+        );
+        assert_eq!(
+            for_loop_iterable_path(&parse("shapes")).as_deref(),
+            Some("shapes")
+        );
+        assert_eq!(
+            for_loop_iterable_path(&parse("batch.iter()")).as_deref(),
+            Some("batch")
+        );
+        assert_eq!(
+            for_loop_iterable_path(&parse("&self.handlers.into_iter()")).as_deref(),
+            Some("self.handlers")
+        );
+        // Iterator adaptors change the element: no path, no binding.
+        assert_eq!(for_loop_iterable_path(&parse("xs.map(f)")), None);
+        assert_eq!(for_loop_iterable_path(&parse("0..n")), None);
+    }
+
+    #[test]
+    fn loop_patterns_name_the_dispatching_variable() {
+        let parse = |text: &str| {
+            let block = syn::parse_str::<syn::Block>(&format!("{{ let {text} = (); }}")).unwrap();
+            match &block.stmts[0] {
+                syn::Stmt::Local(local) => local.pat.clone(),
+                other => unreachable!("expected a local, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            loop_pattern_ident(&parse("handler")).as_deref(),
+            Some("handler")
+        );
+        assert_eq!(loop_pattern_ident(&parse("&item")).as_deref(), Some("item"));
+        assert_eq!(loop_pattern_ident(&parse("mut h")).as_deref(), Some("h"));
+        // A map's tuple pattern binds the value half.
+        assert_eq!(
+            loop_pattern_ident(&parse("(_name, node)")).as_deref(),
+            Some("node")
+        );
+    }
+
+    #[test]
+    fn object_safety_violations_are_detected_per_method() {
+        let parse = |text: &str| syn::parse_str::<syn::ItemTrait>(text).unwrap();
+        let reasons = non_object_safety_reasons(&parse(
+            "trait Plugin { \
+                 fn register(&self) -> Self; \
+                 fn load<T>(&self, raw: T); \
+                 fn consume(self); \
+             }",
+        ));
+        assert_eq!(reasons.len(), 3, "{reasons:?}");
+
+        // `where Self: Sized` excuses the method, as it does for rustc.
+        let reasons = non_object_safety_reasons(&parse(
+            "trait Mixed { fn sized_only(&self) -> Self where Self: Sized; fn fine(&self); }",
+        ));
+        assert!(reasons.is_empty(), "{reasons:?}");
+
+        // An object-safe trait stays clean.
+        let reasons =
+            non_object_safety_reasons(&parse("trait Reporter { fn report(&self, line: String); }"));
+        assert!(reasons.is_empty(), "{reasons:?}");
+    }
+
+    #[test]
+    fn only_dyn_spelled_types_read_as_trait_objects() {
+        assert!(type_text_is_trait_object("& dyn Plugin"));
+        assert!(type_text_is_trait_object("Box < dyn Error + Send >"));
+        // `impl Trait` dispatches statically — it must not read as `dyn`.
+        assert!(!type_text_is_trait_object("& impl Plugin"));
+        assert!(!type_text_is_trait_object("Client"));
     }
 }
 

@@ -640,6 +640,7 @@ mod tests {
                     method: None,
                     candidate_count: None,
                     emitted_candidate_count: None,
+                    dispatch_trait: None,
                     properties: IndexMap::new(),
                 }],
                 diagnostics: Vec::new(),
