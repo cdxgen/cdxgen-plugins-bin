@@ -1,0 +1,88 @@
+.github/workflows/kosi-test.yml
+  h_6a4cc5cdf68def 1-99
+build.sh
+  h_6a4cc5cdf68def 5-6,8
+packages/darwin-amd64/build-darwin-amd64.sh
+  h_6a4cc5cdf68def 9-10,17
+packages/darwin-arm64/build-darwin-arm64.sh
+  h_6a4cc5cdf68def 9-10,19
+packages/linux-amd64/build-linux-amd64.sh
+  h_6a4cc5cdf68def 21
+packages/linux-arm/build-linux-arm.sh
+  h_6a4cc5cdf68def 8,14
+packages/linux-arm64/build-linux-arm64.sh
+  h_6a4cc5cdf68def 9-10,23
+packages/linux-riscv64/build-linux-riscv64.sh
+  h_6a4cc5cdf68def 6,8
+packages/linuxmusl-amd64/build-linuxmusl-amd64.sh
+  h_6a4cc5cdf68def 5-6,15
+packages/linuxmusl-arm64/build-linuxmusl-arm64.sh
+  h_6a4cc5cdf68def 5-6,15
+packages/ppc64/build-ppc64.sh
+  h_6a4cc5cdf68def 6,8
+packages/windows-amd64/build-windows-amd64.sh
+  h_6a4cc5cdf68def 8,18
+packages/windows-arm64/build-windows-arm64.sh
+  h_6a4cc5cdf68def 8,17
+scripts/check-plugin-coverage.sh
+  h_6a4cc5cdf68def 17-27,34-53,81-90,114
+thirdparty/kosi/.gitignore
+  h_6a4cc5cdf68def 5
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 1-204
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 1-114
+thirdparty/kosi/README.md
+  h_6a4cc5cdf68def 1-85
+thirdparty/kosi/THREAT_MODEL.md
+  h_6a4cc5cdf68def 1-66
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 1-100
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 1-94
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 207
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/PeakRss.kt
+  h_6a4cc5cdf68def 1-44
+thirdparty/kosi/modules/kosi-cli/build.gradle.kts
+  h_6a4cc5cdf68def 1-5,46-142
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Args.kt
+  h_6a4cc5cdf68def 90
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 294-305
+thirdparty/kosi/modules/kosi-cli/src/main/resources/META-INF/native-image/io.cdxgen.kosi/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 1-28
+thirdparty/kosi/modules/kosi-cli/src/main/resources/kosi-ext/META-INF/extensions/compiler-cli-root.xml
+  h_6a4cc5cdf68def 1-4
+thirdparty/kosi/modules/kosi-cli/src/main/resources/kosi-ext/META-INF/extensions/compiler.xml
+  h_6a4cc5cdf68def 1-42
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/PsiEnvironment.kt
+  h_6a4cc5cdf68def 4,60-90,95-97
+thirdparty/kosi/native-metadata/jetbrains/PINNED-SOURCE.txt
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json
+  h_6a4cc5cdf68def 1-1965
+thirdparty/kosi/native-metadata/kosi-hand/reachability-metadata.json
+  h_6a4cc5cdf68def 1-16
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 1-1074
+thirdparty/kosi/native-metadata/merged/reachability-metadata.json
+  h_6a4cc5cdf68def 1-2473
+thirdparty/kosi/native-metadata/proxy-config.json
+  h_6a4cc5cdf68def 1-47
+thirdparty/kosi/native-metadata/resource-config.json
+  h_6a4cc5cdf68def 1-12
+thirdparty/kosi/scripts/merge-agent-metadata.py
+  h_6a4cc5cdf68def 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "0beecb52f3b2711cf0bbd6e0891c9be6995abfb5",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
