@@ -45,7 +45,7 @@ object BenchRunner {
             w.beginObject(key)
             w.num("annotations", annotations)
             w.dbl("connectivity", connectivity)
-            w.str("digest", digest.sections["report"] ?: "")
+            w.str("digest", digest.combined)
             w.num("fail", fail)
             w.num("integrityViolations", integrityViolations)
             w.num("negatives", negatives)
@@ -218,24 +218,55 @@ object BenchRunner {
             return dir
         }
         // Pinned upstream repo, cached under .corpus-cache/<slug>/ at an exact sha.
+        val sha = entry.sha
+            ?: throw BenchException("fixture ${entry.slug}: repo entries must pin a sha (corpus.toml)")
+        val repoUrl = entry.repo
+            ?: throw BenchException("fixture ${entry.slug}: neither path nor repo is set (corpus.toml)")
         val cache = repoRoot.resolve(".corpus-cache").resolve(entry.slug)
-        if (isCheckedOutAt(cache, entry.sha!!)) return cache
-        val fetch = ProcessBuilder(
-            "git", "clone", "--quiet", entry.repo!!, cache.toString(),
-        ).redirectErrorStream(true).start()
-        val output = fetch.inputStream.bufferedReader().readText()
-        fetch.waitFor()
-        if (fetch.exitValue() != 0) {
-            if (skipMissing) return null
-            throw BenchException("fixture ${entry.slug}: git clone failed:\n$output")
+        if (isCheckedOutAt(cache, sha)) return cache
+        if (Files.isDirectory(cache)) {
+            if (Files.isDirectory(cache.resolve(".git"))) {
+                // Cache present but not at the pinned sha (another tier may
+                // have checked out a different one): fetch and hard-checkout
+                // rather than failing with a "destination exists" clone error.
+                git(cache, entry.slug, "fetch", "--quiet", "--all", "--tags")
+                git(cache, entry.slug, "checkout", "--quiet", "--force", sha)
+            }
+            if (!isCheckedOutAt(cache, sha)) {
+                // Not a usable repo (interrupted clone, corrupted cache):
+                // start over rather than analyse a stale tree.
+                cache.toFile().deleteRecursively()
+            }
         }
-        val checkout = ProcessBuilder("git", "-C", cache.toString(), "checkout", "--quiet", entry.sha)
-            .redirectErrorStream(true).start()
-        checkout.waitFor()
-        if (checkout.exitValue() != 0) {
-            throw BenchException("fixture ${entry.slug}: checkout ${entry.sha} failed")
+        if (!isCheckedOutAt(cache, sha)) {
+            Files.createDirectories(cache.parent)
+            val fetch = ProcessBuilder(
+                "git", "clone", "--quiet", repoUrl, cache.toString(),
+            ).redirectErrorStream(true).start()
+            val output = fetch.inputStream.bufferedReader().readText()
+            fetch.waitFor()
+            if (fetch.exitValue() != 0) {
+                if (skipMissing) return null
+                throw BenchException("fixture ${entry.slug}: git clone failed:\n$output")
+            }
+            git(cache, entry.slug, "checkout", "--quiet", sha)
+        }
+        if (!isCheckedOutAt(cache, sha)) {
+            if (skipMissing) return null
+            throw BenchException("fixture ${entry.slug}: could not check out $sha")
         }
         return cache
+    }
+
+    private fun git(dir: Path, slug: String, vararg args: String) {
+        val process = ProcessBuilder("git", "-C", dir.toString(), *args)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText()
+        process.waitFor()
+        if (process.exitValue() != 0) {
+            throw BenchException("fixture $slug: git ${args.first()} failed:\n$output")
+        }
     }
 
     private fun isCheckedOutAt(dir: Path, sha: String): Boolean {
@@ -270,7 +301,7 @@ object BenchRunner {
         // Wall clock is measured OUTSIDE the report: the report itself must
         // stay byte-identical across runs on the same input.
         val start = System.nanoTime()
-        val report = Analyzer.analyze(dir, options, commit, pretty = false)
+        val report = Analyzer.analyze(dir, options, commit)
         val wallMillis = (System.nanoTime() - start) / 1_000_000
         val evaluation = Evaluator.evaluate(report, annotations, mode = slot.label, backend = options.backend.id)
         val failureDetails = (evaluation.fail + evaluation.xpass).map { outcome ->

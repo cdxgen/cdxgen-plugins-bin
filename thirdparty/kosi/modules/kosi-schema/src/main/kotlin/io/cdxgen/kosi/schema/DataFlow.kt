@@ -148,7 +148,7 @@ data class FlowSummary(
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.beginObject("accessPaths")
-        for ((k, v) in accessPaths) w.str(k, v)
+        for (entry in accessPaths.entries.sortedBy { it.key }) w.str(entry.key, entry.value)
         w.endObject()
         w.str("function", function)
         w.str("functionId", functionId)
@@ -160,7 +160,7 @@ data class FlowSummary(
         for (v in paramToReceiver.sorted()) w.str(v)
         w.endArray()
         w.beginObject("paramToSink")
-        for (key in paramToSink.keys) {
+        for (key in paramToSink.keys.sorted()) {
             w.beginArray(key)
             for (v in (paramToSink[key] ?: emptyList()).sorted()) w.num(v.toLong())
             w.endArray()
@@ -175,9 +175,7 @@ data class FlowSummary(
         w.beginArray("parameterTypes")
         for (v in parameterTypes) w.str(v)
         w.endArray()
-        w.beginArray("returnType")
-        w.str(returnType)
-        w.endArray()
+        w.str("returnType", returnType)
         w.beginArray("sanitizes")
         for (v in sanitizes.sorted()) w.str(v)
         w.endArray()
@@ -265,7 +263,7 @@ data class DataFlowStats(
         w.num("crossDependencySlices", crossDependencySlices)
         w.num("integrityViolations", integrityViolations)
         w.beginObject("summariesByOrigin")
-        for (key in summariesByOrigin.keys) {
+        for (key in summariesByOrigin.keys.sorted()) {
             w.num(key, (summariesByOrigin[key] ?: 0).toLong())
         }
         w.endObject()

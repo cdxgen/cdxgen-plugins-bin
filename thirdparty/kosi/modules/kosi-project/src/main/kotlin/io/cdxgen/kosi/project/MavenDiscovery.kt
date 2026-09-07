@@ -21,6 +21,15 @@ class XmlElement(
     fun textOr(name: String, fallback: String? = null): String? =
         child(name)?.text?.takeIf { it.isNotBlank() } ?: fallback
 
+    /** Depth-first search for the first element with [name] (e.g. build/plugins). */
+    fun findRecursive(name: String): XmlElement? {
+        childrenNamed(name).firstOrNull()?.let { return it }
+        for (c in children) {
+            c.findRecursive(name)?.let { return it }
+        }
+        return null
+    }
+
     companion object {
         private val TAG = Regex("""<(/?)([A-Za-z0-9_.:-]+)([^>]*?)(/?)>""")
 
@@ -35,14 +44,14 @@ class XmlElement(
             stack.addLast(fakeRoot)
             var lastMatchEnd = 0
             for (match in TAG.findAll(stripped)) {
-                val (closing, tagName, attrs, selfClosing) = match.destructured
+                val (closing, tagName, _, selfClosing) = match.destructured
                 val textContent = stripped.substring(lastMatchEnd, match.range.first).trim()
                 if (textContent.isNotEmpty() && stack.size > 1) {
                     val owner = stack.last()
                     owner.text = if (owner.text.isEmpty()) textContent else owner.text
                 }
                 if (closing.isEmpty()) {
-                    val element = XmlElement(tagName, "", extractChildHolders(attrs))
+                    val element = XmlElement(tagName, "")
                     stack.last().children.add(element)
                     if (selfClosing != "/") stack.addLast(element)
                 } else {
@@ -55,8 +64,6 @@ class XmlElement(
             }
             return fakeRoot.children.firstOrNull() ?: XmlElement("empty")
         }
-
-        private fun extractChildHolders(attrs: String): MutableList<XmlElement> = mutableListOf()
     }
 }
 
@@ -91,9 +98,14 @@ object MavenDiscovery {
             val version = xml.textOr("version") ?: parent?.textOr("version")
             val dir = pom.parent ?: root
             val modulePath = if (dir == root) "." else root.relativize(dir).toString().replace('\\', '/')
+            // sourceRoots are relative to the ANALYSIS root (that is what
+            // SourceCollector resolves them against), so a nested module's
+            // roots carry the module directory prefix.
             val roots = mutableListOf<String>()
             for (candidate in listOf("src/main/kotlin", "src/main/java")) {
-                if (TextScan.isDirectory(dir, candidate)) roots.add(candidate)
+                if (TextScan.isDirectory(dir, candidate)) {
+                    roots.add(if (modulePath == ".") candidate else "$modulePath/$candidate")
+                }
             }
             if (roots.isEmpty()) roots.add(modulePath)
             val props = xml.child("properties")
@@ -115,10 +127,25 @@ object MavenDiscovery {
         return DiscoveryResult(modules, buildSystem = "maven")
     }
 
-    /** Reads <languageVersion>/<apiVersion>/<jvmTarget> from the kotlin-maven-plugin configuration. */
+    /**
+     * Reads <languageVersion>/<apiVersion>/<jvmTarget> from the
+     * kotlin-maven-plugin's <configuration> block. XML is parsed as XML (the
+     * brace-block scanner in TextScan is for Gradle scripts and can never
+     * match a pom), and a setting that is absent stays null — never guessed.
+     */
     private fun kotlinPluginSetting(pomText: String, setting: String): String? {
-        val pluginBlock = TextScan.block(pomText, "kotlin-maven-plugin") ?: return null
-        val value = TextScan.assignment(pluginBlock, setting) ?: return null
-        return TextScan.versionValue(value) ?: value.trim().removeSurrounding("\"")
+        val pom = XmlElement.parse(pomText)
+        val configuration = pom.findRecursive("plugins")
+            ?.childrenNamed("plugin")
+            ?.firstOrNull { plugin ->
+                plugin.childrenNamed("artifactId").any { it.text.trim() == "kotlin-maven-plugin" }
+            }
+            ?.child("configuration")
+            ?: return null
+        val raw = configuration?.childrenNamed(setting)
+            ?.firstOrNull { it.text.isNotBlank() }
+            ?.text?.trim()
+            ?: return null
+        return TextScan.versionValue(raw) ?: raw.removeSurrounding("\"").ifBlank { null }
     }
 }

@@ -36,7 +36,7 @@ data class Stats(
         w.num("declarationCount", declarationCount)
         w.num("fileCount", fileCount)
         w.beginObject("loweringFailures")
-        for (key in loweringFailures.keys) {
+        for (key in loweringFailures.keys.sorted()) {
             w.num(key, (loweringFailures[key] ?: 0).toLong())
         }
         w.endObject()
@@ -48,7 +48,7 @@ data class Stats(
         w.num("sinkCount", sinkCount)
         w.num("sourceCount", sourceCount)
         w.beginObject("truncations")
-        for (key in truncations.keys) {
+        for (key in truncations.keys.sorted()) {
             w.num(key, (truncations[key] ?: 0).toLong())
         }
         w.endObject()

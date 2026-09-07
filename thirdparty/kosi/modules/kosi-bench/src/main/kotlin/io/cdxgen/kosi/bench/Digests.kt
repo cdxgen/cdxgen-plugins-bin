@@ -22,11 +22,24 @@ object Digests {
         val slot: String,
         val sections: Map<String, String>,
     ) {
+        /**
+         * Stable digest over all section digests (sorted), so a single value
+         * can travel in bench output/baselines while [diff] still names the
+         * changed section during investigation.
+         */
+        val combined: String
+            get() = sha256(
+                sections.entries
+                    .sortedBy { it.key }
+                    .joinToString("\n") { "${it.key}=${it.value}" },
+            )
+
         fun toJson(): String {
             val w = JsonWriter()
             w.beginObject()
+            w.str("combinedDigest", combined)
             w.beginArray("digests")
-            for (key in sections.keys) {
+            for (key in sections.keys.sorted()) {
                 w.beginObject()
                 w.str("digest", sections[key] ?: "")
                 w.str("section", key)

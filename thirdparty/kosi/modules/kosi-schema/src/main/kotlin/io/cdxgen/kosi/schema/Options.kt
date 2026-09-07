@@ -136,15 +136,18 @@ data class AnalyzeOptions(
         w.num("dataflowWorkers", dataflowWorkers)
         w.str("dependencyDetail", dependencyDetail.id)
         w.str("format", format)
+        w.bool("includeStdlib", includeStdlib)
         w.str("jvmTarget", jvmTarget)
         w.str("languageVersion", languageVersion)
         w.num("maxPathsPerSymbol", maxPathsPerSymbol)
+        w.str("multiplatformTarget", multiplatformTarget)
         w.beginArray("optIn")
         for (value in optIn.sorted()) {
             w.str(value)
         }
         w.endArray()
         w.bool("pretty", pretty)
+        w.bool("progressive", progressive)
         w.beginArray("roots")
         for (value in roots.sorted()) {
             w.str(value)

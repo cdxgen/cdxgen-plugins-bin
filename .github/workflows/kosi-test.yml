@@ -69,10 +69,11 @@ jobs:
         run: ./gradlew corpusFull --no-daemon
 
   # The native-image spike must keep working: build the host binary, verify it
-  # runs and that its output matches the JVM output. The build peaks well
-  # under 2 GiB (serial GC, -Os), so standard runners suffice.
+  # runs and that its output is byte-identical across runs. The build peaks
+  # well under 2 GiB (serial GC, -Os), so standard runners suffice. Linux runs
+  # on demand (workflow_dispatch) to keep per-push CI time unchanged.
   native:
-    name: make native (host)
+    name: make native (darwin-arm64)
     runs-on: macos-latest
     permissions:
       contents: read
@@ -91,9 +92,40 @@ jobs:
         run: make native
       - name: Binary smoke (version + determinism)
         run: |
-          ./build/kosi-darwin-aarch64 version
-          ./build/kosi-darwin-aarch64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
-          ./build/kosi-darwin-aarch64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          ./build/kosi-darwin-arm64 version
+          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
+          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
           cmp /tmp/a.json /tmp/b.json
       - name: Reachability metadata drift check
         run: make native-metadata-check
+
+  # On-demand (workflow_dispatch): the linux-native path through the pinned
+  # GraalVM, exercising `make linux` exactly as the release workflow calls it.
+  native-linux:
+    name: make linux (linux-amd64, on demand)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned GraalVM (see Makefile GRAAL_HOME)
+        run: |
+          mkdir -p "$HOME/tools"
+          curl -sL -o /tmp/graalvm.tar.gz \
+            https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-amd64_bin.tar.gz
+          # Integrity comes from the HTTPS-pinned release asset; a truncated
+          # tar fails extraction. Record the sha256 in docs/BUILD.md at the
+          # first successful run so it can be pinned like the macOS one.
+          tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+          "$HOME/tools"/graalvm-community-*/bin/native-image --version
+      - name: make linux
+        run: make linux
+      - name: Binary smoke
+        run: |
+          ./build/kosi-linux-amd64 version
+          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
+          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          cmp /tmp/a.json /tmp/b.json

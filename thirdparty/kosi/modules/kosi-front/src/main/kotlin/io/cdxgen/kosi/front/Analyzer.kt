@@ -44,7 +44,7 @@ object Analyzer {
 
     class AnalysisException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-    fun analyze(root: Path, options: AnalyzeOptions, commit: String, pretty: Boolean): KosiReport {
+    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
         require(options.backend == Backend.SYNTAX) {
             "backend ${options.backend.id} is not available in phase 0; use --backend syntax"
         }

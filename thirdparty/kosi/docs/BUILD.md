@@ -16,7 +16,7 @@ Measured P0 numbers:
 | Artifact | Size |
 | --- | --- |
 | deterministic fat jar (`kosi-all.jar`) | 68,596,677 bytes (65.4 MiB) |
-| native binary `kosi-darwin-aarch64` | 46,893,264 bytes (44.7 MiB) |
+| native binary `kosi-darwin-arm64` | 46,909,824 bytes (44.7 MiB) |
 | native build wall clock | 30 s (M4 Pro, `--gc=serial -Os`) |
 | cold start, `kosi version`, median of 20 | < 10 ms (`/usr/bin/time` resolution) |
 | `java -jar kosi-all.jar version` | ~60 ms |
@@ -35,9 +35,9 @@ Reproduce:
 cd thirdparty/kosi
 make bootstrap-darwin   # verifies the pinned GraalVM is installed
 make native             # fat jar + native image + sha256 sidecar
-./build/kosi-darwin-aarch64 version
-./build/kosi-darwin-aarch64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
-./build/kosi-darwin-aarch64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+./build/kosi-darwin-arm64 version
+./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
+./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
 cmp /tmp/a.json /tmp/b.json
 ```
 
@@ -94,7 +94,22 @@ for ppc64/arm32 regardless.
 Native-image is claimed for darwin-arm64 (proven here) and, by the same
 recipe, linux-amd64/linux-arm64 and musl static builds on the release
 runners. ppc64 and 32-bit arm remain declared gaps with a documented JVM-jar
-fallback (see `docs/KOSI.md` and `scripts/check-plugin-coverage.sh`); riscv64
-stays best-effort per the plan. Windows follows at the release phase with the
-MSVC toolchain. CI: `.github/workflows/kosi-test.yml` runs the JVM gates on
-every change and the native build on demand (runner RAM allowing).
+fallback (see `docs/KOSI.md`); riscv64 stays best-effort per the plan.
+Windows follows at the release phase with the MSVC toolchain.
+
+Binary names use the package fragments (`kosi-darwin-arm64`,
+`kosi-linux-amd64`, ...) so `stage-built-plugins.sh` finds them without a
+mapping. The Makefile carries the same family targets the release workflow
+invokes for the other plugins — `linux`, `linuxmusl` (needs `musl-gcc`,
+`apt install musl-tools`), `windows`, `darwin` — and because native-image
+cannot cross-compile, each builds for the host it runs on and errors with a
+named message otherwise (including the declared gaps: ppc64le, 32-bit arm,
+riscv64). The per-platform exemption table shared by staging and coverage
+lives in `scripts/plugin-platform-support.sh`; exemptions are printed
+wherever they apply, never silent.
+
+CI: `.github/workflows/kosi-test.yml` runs the JVM gates on every change and
+the darwin-arm64 native build on every change; a `workflow_dispatch`-only
+`make linux` job exercises the linux-amd64 path. Record the linux-amd64
+GraalVM tarball sha256 here at its first successful run so it can be pinned
+like the macOS one.

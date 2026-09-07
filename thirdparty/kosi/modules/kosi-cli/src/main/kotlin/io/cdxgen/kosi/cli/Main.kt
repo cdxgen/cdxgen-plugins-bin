@@ -87,11 +87,8 @@ object Main {
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
         val options = optionsFrom(parsed)
-        if (parsed.bool("pretty")) {
-            // pretty is part of options; writer choice comes from there
-        }
         val out = parsed.value("out")
-        val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit, options.pretty)
+        val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit)
         val json = report.toJson(options.pretty)
         if (out != null) {
             val outPath = Path.of(out)
@@ -257,7 +254,7 @@ object Main {
             val dir = repoRoot.resolve(entry.path!!)
             for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
                 checked++
-                val report = Analyzer.analyze(dir, slot.options(), commit, pretty = false)
+                val report = Analyzer.analyze(dir, slot.options(), commit)
                 val digest = Digests.FixtureDigest(
                     slug = entry.slug,
                     slot = slot.label,
@@ -291,18 +288,6 @@ object Main {
 
     private fun version(args: List<String>): Int {
         val parsed = ParsedArgs.parse(args)
-        if (parsed.bool("probe-resources")) {
-            val cl = javaClass.classLoader
-            val names = listOf(
-                "org/jetbrains/kotlin/cli/common/CompilerSystemProperties.class",
-                "META-INF/services/org.jetbrains.kotlin.com.intellij.openapi.application.ApplicationManager",
-            )
-            for (n in names) {
-                val stream = cl.getResourceAsStream(n)
-                println("probe $n -> ${if (stream != null) "FOUND" else "MISSING"}")
-                stream?.close()
-            }
-        }
         val probe = StandaloneSessionProbe.probe()
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()

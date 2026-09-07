@@ -13,6 +13,10 @@
         <groupId>org.jetbrains.kotlin</groupId>
         <artifactId>kotlin-maven-plugin</artifactId>
         <configuration>
+          <!-- Deliberately below the bundled compiler's supported band: the
+             clamp diagnostic proves kosi actually parsed this block (Maven
+             settings are read as XML, not as a Gradle-style brace block). -->
+          <languageVersion>1.9</languageVersion>
           <jvmTarget>17</jvmTarget>
         </configuration>
       </plugin>

@@ -4,6 +4,7 @@
 //
 // Positive half.
 // kosi:want module name=maven-fixture platform=jvm
+// kosi:want diagnostic code=kotlin-language-version
 // kosi:want declaration name=Worker kind=class
 // kosi:want declaration name=work kind=method
 // kosi:want usage name=~.uppercase

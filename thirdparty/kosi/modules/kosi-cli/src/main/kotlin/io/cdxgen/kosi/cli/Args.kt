@@ -87,7 +87,7 @@ class ParsedArgs private constructor() {
 
         private val BOOLEAN_FLAGS = setOf(
             "pretty", "help", "version", "write-baseline", "compare", "fail-unless-promotable",
-            "update-goldens", "verbose", "progressive", "skip-missing-repos", "probe-resources",
+            "update-goldens", "verbose", "progressive", "skip-missing-repos",
         )
     }
 }

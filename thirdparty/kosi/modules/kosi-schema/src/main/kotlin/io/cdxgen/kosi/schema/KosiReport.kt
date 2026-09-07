@@ -92,7 +92,7 @@ data class KosiReport(
         crypto.writeJson(w, "crypto")
         if (dataFlow != null) dataFlow.writeJson(w, "dataFlow") else w.nul("dataFlow")
         w.beginArray("declarations")
-        for (d in declarations) d.writeJson(w)
+        for (d in declarations.sortedWith(Declaration.COMPARATOR)) d.writeJson(w)
         w.endArray()
         w.beginArray("diagnostics")
         for (d in diagnostics.sortedWith(Diagnostic.COMPARATOR)) d.writeJson(w)
@@ -123,7 +123,7 @@ data class KosiReport(
         for (u in urls.sortedWith(UrlEvidence.COMPARATOR)) u.writeJson(w)
         w.endArray()
         w.beginArray("usages")
-        for (u in usages) u.writeJson(w)
+        for (u in usages.sortedWith(LibraryUsage.COMPARATOR)) u.writeJson(w)
         w.endArray()
         w.endObject()
     }
