@@ -1,0 +1,292 @@
+thirdparty/kosi/.gitignore
+  h_6a4cc5cdf68def 1-4
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 1-93
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 1-120
+thirdparty/kosi/fixtures/android-compose-app/build.gradle.kts
+  h_6a4cc5cdf68def 1-18
+thirdparty/kosi/fixtures/android-compose-app/settings.gradle.kts
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/fixtures/android-compose-app/src/debug/kotlin/Probes.kt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/android-compose-app/src/main/kotlin/MainActivity.kt
+  h_6a4cc5cdf68def 1-17
+thirdparty/kosi/fixtures/android-compose-app/src/release/kotlin/Probes.kt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/command-exec/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/command-exec/src/main/kotlin/CommandExec.kt
+  h_6a4cc5cdf68def 1-31
+thirdparty/kosi/fixtures/coroutine-suspend/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/coroutine-suspend/src/main/kotlin/Pipeline.kt
+  h_6a4cc5cdf68def 1-23
+thirdparty/kosi/fixtures/data-class-copy/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/data-class-copy/src/main/kotlin/Records.kt
+  h_6a4cc5cdf68def 1-15
+thirdparty/kosi/fixtures/java-interop/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/java-interop/src/main/java/Greeter.java
+  h_6a4cc5cdf68def 1-7
+thirdparty/kosi/fixtures/java-interop/src/main/kotlin/Main.kt
+  h_6a4cc5cdf68def 1-16
+thirdparty/kosi/fixtures/kmp-jvm-android/build.gradle.kts
+  h_6a4cc5cdf68def 1-19
+thirdparty/kosi/fixtures/kmp-jvm-android/settings.gradle.kts
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/fixtures/kmp-jvm-android/src/androidMain/kotlin/Platform.android.kt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/kmp-jvm-android/src/commonMain/kotlin/Platform.kt
+  h_6a4cc5cdf68def 1-14
+thirdparty/kosi/fixtures/kmp-jvm-android/src/jvmMain/kotlin/Platform.jvm.kt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/log-injection/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/log-injection/src/main/kotlin/Logging.kt
+  h_6a4cc5cdf68def 1-12
+thirdparty/kosi/fixtures/maven-project/pom.xml
+  h_6a4cc5cdf68def 1-21
+thirdparty/kosi/fixtures/maven-project/src/main/kotlin/Worker.kt
+  h_6a4cc5cdf68def 1-14
+thirdparty/kosi/fixtures/multi-module-gradle/app/build.gradle.kts
+  h_6a4cc5cdf68def 1-7
+thirdparty/kosi/fixtures/multi-module-gradle/app/src/main/kotlin/App.kt
+  h_6a4cc5cdf68def 1-16
+thirdparty/kosi/fixtures/multi-module-gradle/build.gradle.kts
+  h_6a4cc5cdf68def 1-4
+thirdparty/kosi/fixtures/multi-module-gradle/core/build.gradle.kts
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/fixtures/multi-module-gradle/core/src/main/kotlin/Core.kt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/multi-module-gradle/settings.gradle.kts
+  h_6a4cc5cdf68def 1-4
+thirdparty/kosi/fixtures/null-safety/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/null-safety/src/main/kotlin/NullSafety.kt
+  h_6a4cc5cdf68def 1-20
+thirdparty/kosi/fixtures/parse-error-reporting/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/parse-error-reporting/src/main/kotlin/Broken.kt
+  h_6a4cc5cdf68def 1-13
+thirdparty/kosi/fixtures/parse-error-reporting/src/main/kotlin/Healthy.kt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/scope-functions/src/Sample.kt
+  h_6a4cc5cdf68def 1-22
+thirdparty/kosi/fixtures/sealed-when/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/sealed-when/src/main/kotlin/Events.kt
+  h_6a4cc5cdf68def 1-21
+thirdparty/kosi/fixtures/sqli-jdbc-concat/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/sqli-jdbc-concat/src/main/kotlin/Store.kt
+  h_6a4cc5cdf68def 1-23
+thirdparty/kosi/fixtures/string-template/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/string-template/src/main/kotlin/Templates.kt
+  h_6a4cc5cdf68def 1-16
+thirdparty/kosi/fixtures/weak-crypto/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/weak-crypto/src/main/kotlin/Crypto.kt
+  h_6a4cc5cdf68def 1-24
+thirdparty/kosi/goldens/android-compose-app-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-compose-app-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/gradle/libs.versions.toml
+  h_6a4cc5cdf68def 1-21
+thirdparty/kosi/gradle/wrapper/gradle-wrapper.properties
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/gradlew
+  h_6a4cc5cdf68def 1-248
+thirdparty/kosi/gradlew.bat
+  h_6a4cc5cdf68def 1-82
+thirdparty/kosi/modules/kosi-bench/build.gradle.kts
+  h_6a4cc5cdf68def 1-14
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  h_6a4cc5cdf68def 1-264
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 1-366
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Digests.kt
+  h_6a4cc5cdf68def 1-100
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 1-47
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DefaultsSyncTest.kt
+  h_6a4cc5cdf68def 1-42
+thirdparty/kosi/modules/kosi-bytecode/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-cli/build.gradle.kts
+  h_6a4cc5cdf68def 1-40
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Args.kt
+  h_6a4cc5cdf68def 1-93
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 1-389
+thirdparty/kosi/modules/kosi-cli/src/main/resources/kosi-commit.txt
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-cli/src/test/kotlin/io/cdxgen/kosi/cli/DefaultsFromParserTest.kt
+  h_6a4cc5cdf68def 1-48
+thirdparty/kosi/modules/kosi-corpus/build.gradle.kts
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  h_6a4cc5cdf68def 1-106
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/AnnotationParser.kt
+  h_6a4cc5cdf68def 1-214
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/CorpusManifest.kt
+  h_6a4cc5cdf68def 1-99
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Evaluator.kt
+  h_6a4cc5cdf68def 1-205
+thirdparty/kosi/modules/kosi-corpus/src/test/kotlin/io/cdxgen/kosi/corpus/CorpusTest.kt
+  h_6a4cc5cdf68def 1-140
+thirdparty/kosi/modules/kosi-evidence/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-export/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-flow/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-front/build.gradle.kts
+  h_6a4cc5cdf68def 1-27
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 1-417
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/CompilerInfo.kt
+  h_6a4cc5cdf68def 1-96
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/PsiEnvironment.kt
+  h_6a4cc5cdf68def 1-72
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/StandaloneSessionProbe.kt
+  h_6a4cc5cdf68def 1-39
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzer.kt
+  h_6a4cc5cdf68def 1-530
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/ModuleBoundaryTest.kt
+  h_6a4cc5cdf68def 1-49
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzerTest.kt
+  h_6a4cc5cdf68def 1-122
+thirdparty/kosi/modules/kosi-graph/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-kir/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-models/build.gradle.kts
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/ModelPack.kt
+  h_6a4cc5cdf68def 1-102
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/ModelPacks.kt
+  h_6a4cc5cdf68def 1-143
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  h_6a4cc5cdf68def 1-40
+thirdparty/kosi/modules/kosi-models/src/test/kotlin/io/cdxgen/kosi/models/ModelPackTest.kt
+  h_6a4cc5cdf68def 1-81
+thirdparty/kosi/modules/kosi-project/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/GradleDiscovery.kt
+  h_6a4cc5cdf68def 1-312
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/MavenDiscovery.kt
+  h_6a4cc5cdf68def 1-124
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/Model.kt
+  h_6a4cc5cdf68def 1-32
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ProjectDiscovery.kt
+  h_6a4cc5cdf68def 1-128
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/TextScan.kt
+  h_6a4cc5cdf68def 1-149
+thirdparty/kosi/modules/kosi-schema/build.gradle.kts
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/CallGraph.kt
+  h_6a4cc5cdf68def 1-155
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Crypto.kt
+  h_6a4cc5cdf68def 1-117
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/DataFlow.kt
+  h_6a4cc5cdf68def 1-278
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Diagnostics.kt
+  h_6a4cc5cdf68def 1-65
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Evidence.kt
+  h_6a4cc5cdf68def 1-189
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/JsonReader.kt
+  h_6a4cc5cdf68def 1-164
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/JsonValue.kt
+  h_6a4cc5cdf68def 1-64
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/JsonWriter.kt
+  h_6a4cc5cdf68def 1-232
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/KosiReport.kt
+  h_6a4cc5cdf68def 1-140
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  h_6a4cc5cdf68def 1-156
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Services.kt
+  h_6a4cc5cdf68def 1-145
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Stats.kt
+  h_6a4cc5cdf68def 1-59
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Usages.kt
+  h_6a4cc5cdf68def 1-64
+thirdparty/kosi/modules/kosi-schema/src/test/kotlin/io/cdxgen/kosi/schema/JsonWriterTest.kt
+  h_6a4cc5cdf68def 1-138
+thirdparty/kosi/settings.gradle.kts
+  h_6a4cc5cdf68def 1-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "8413538678471b80f15141f5bc01c727845bd912",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
