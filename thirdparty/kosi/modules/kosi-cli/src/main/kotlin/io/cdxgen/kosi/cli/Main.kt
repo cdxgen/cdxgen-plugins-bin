@@ -1,0 +1,389 @@
+package io.cdxgen.kosi.cli
+
+import io.cdxgen.kosi.bench.Baseline
+import io.cdxgen.kosi.bench.BenchRunner
+import io.cdxgen.kosi.bench.Digests
+import io.cdxgen.kosi.bench.Promotion
+import io.cdxgen.kosi.front.Analyzer
+import io.cdxgen.kosi.front.StandaloneSessionProbe
+import io.cdxgen.kosi.schema.AnalyzeOptions
+import io.cdxgen.kosi.schema.Backend
+import io.cdxgen.kosi.schema.CallGraphMode
+import io.cdxgen.kosi.schema.DataflowMode
+import io.cdxgen.kosi.schema.DependencyDetail
+import io.cdxgen.kosi.schema.Diagnostic
+import io.cdxgen.kosi.schema.Position
+import io.cdxgen.kosi.schema.RootScope
+import io.cdxgen.kosi.schema.Severity
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.exists
+
+/**
+ * The kosi command line: analyze, bench, golden, version. Exit codes in
+ * [ExitCodes]; every option default lives in [AnalyzeOptions], never here.
+ */
+object Main {
+
+    private val commit: String by lazy {
+        // Injected by the build into a resource; falls back to "unknown" so
+        // analysis never depends on git being present.
+        try {
+            javaClass.getResourceAsStream("/kosi-commit.txt")
+                ?.bufferedReader()?.use { it.readText().trim() }
+                ?.takeIf { it.isNotEmpty() && it != "unknown" }
+                ?: gitCommit()
+        } catch (_: Exception) {
+            "unknown"
+        }
+    }
+
+    private fun gitCommit(): String =
+        try {
+            val p = ProcessBuilder("git", "rev-parse", "HEAD").redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor()
+            if (p.exitValue() == 0 && out.matches(Regex("[0-9a-f]{40}"))) out else "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
+
+    fun run(args: Array<String>): Int {
+        return try {
+            when (args.firstOrNull()) {
+                null, "help", "--help" -> {
+                    printUsage()
+                    ExitCodes.OK
+                }
+                "analyze" -> analyze(args.drop(1))
+                "bench" -> bench(args.drop(1))
+                "golden" -> golden(args.drop(1))
+                "version" -> version(args.drop(1))
+                else -> {
+                    System.err.println("kosi: unknown command '${args[0]}' (try: analyze, bench, golden, version)")
+                    ExitCodes.USAGE
+                }
+            }
+        } catch (e: UsageException) {
+            System.err.println("kosi: ${e.message}")
+            ExitCodes.USAGE
+        } catch (e: Analyzer.AnalysisException) {
+            System.err.println("kosi: ${e.message}")
+            ExitCodes.RUNTIME
+        } catch (e: BenchRunner.BenchException) {
+            System.err.println("kosi: ${e.message}")
+            ExitCodes.RUNTIME
+        }
+    }
+
+    // ---- analyze ----------------------------------------------------------
+
+    private fun analyze(args: List<String>): Int {
+        val parsed = ParsedArgs.parse(args)
+        if (parsed.bool("help")) {
+            printAnalyzeUsage()
+            return ExitCodes.OK
+        }
+        val dir = Path.of(parsed.value("dir", "."))
+        if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
+        val options = optionsFrom(parsed)
+        if (parsed.bool("pretty")) {
+            // pretty is part of options; writer choice comes from there
+        }
+        val out = parsed.value("out")
+        val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit, options.pretty)
+        val json = report.toJson(options.pretty)
+        if (out != null) {
+            val outPath = Path.of(out)
+            outPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+            Files.writeString(outPath, json)
+        } else {
+            println(json)
+        }
+        // Error-severity diagnostics mean the analysis is incomplete; surface
+        // them without failing the run (they are data, not a crash).
+        val errors = report.diagnostics.count { it.severity == Severity.ERROR }
+        if (errors > 0 && out != null) {
+            System.err.println("kosi: report contains $errors error diagnostic(s) (see diagnostics[] in the report)")
+        }
+        return ExitCodes.OK
+    }
+
+    /** Maps parsed flags onto [AnalyzeOptions]; defaults come only from there. */
+    private fun optionsFrom(parsed: ParsedArgs): AnalyzeOptions {
+        val defaults = AnalyzeOptions()
+        val backend = parsed.value("backend")?.let {
+            Backend.fromId(it) ?: throw UsageException("unknown backend '$it' (syntax, resolved)")
+        } ?: defaults.backend
+        if (backend != Backend.SYNTAX) {
+            throw UsageException(
+                "backend '${backend.id}' is not available in phase 0; " +
+                    "use --backend syntax (the resolved tier lands in a later phase)",
+            )
+        }
+        val dataflow = parsed.value("dataflow")?.let {
+            DataflowMode.fromId(it) ?: throw UsageException("unknown dataflow mode '$it'")
+        } ?: defaults.dataflow
+        val callgraph = parsed.value("callgraph")?.let {
+            CallGraphMode.fromId(it) ?: throw UsageException("unknown callgraph mode '$it'")
+        } ?: defaults.callgraph
+        val dependencyDetail = parsed.value("dependency-detail")?.let {
+            DependencyDetail.fromId(it) ?: throw UsageException("unknown dependency-detail '$it'")
+        } ?: defaults.dependencyDetail
+        val roots = parsed.values("roots").ifEmpty { parsed.values("root") }
+            .map { value ->
+                RootScope.parse(value) ?: throw UsageException("unknown root scope '$value'")
+            }
+            .map { (scope, arg) -> if (arg != null) "${scope.id}:$arg" else scope.id }
+            .ifEmpty { defaults.roots }
+        return defaults.copy(
+            backend = backend,
+            dataflow = dataflow,
+            callgraph = callgraph,
+            dependencyDetail = dependencyDetail,
+            roots = roots,
+            dataflowMaxSlices = parsed.value("dataflow-max-slices")?.toIntOrNull() ?: defaults.dataflowMaxSlices,
+            dataflowWorkers = parsed.value("dataflow-workers")?.toIntOrNull() ?: defaults.dataflowWorkers,
+            dataflowMaxFunctionInstructions = parsed.value("dataflow-max-function-instructions")?.toIntOrNull()
+                ?: defaults.dataflowMaxFunctionInstructions,
+            dataflowMaxTraceNodes = parsed.value("dataflow-max-trace-nodes")?.toIntOrNull()
+                ?: defaults.dataflowMaxTraceNodes,
+            dataflowMaxTraceEdges = parsed.value("dataflow-max-trace-edges")?.toIntOrNull()
+                ?: defaults.dataflowMaxTraceEdges,
+            accessPathDepth = parsed.value("access-path-depth")?.toIntOrNull() ?: defaults.accessPathDepth,
+            dataflowSkipGenerated = parsed.bool("dataflow-skip-generated", defaults.dataflowSkipGenerated),
+            callgraphTimeoutSeconds = parsed.value("callgraph-timeout")?.toIntOrNull() ?: defaults.callgraphTimeoutSeconds,
+            maxPathsPerSymbol = parsed.value("max-paths-per-symbol")?.toIntOrNull() ?: defaults.maxPathsPerSymbol,
+            includeStdlib = parsed.bool("include-stdlib", defaults.includeStdlib),
+            unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
+                if (it != "propagate" && it != "drop") {
+                    throw UsageException("--unknown-call must be propagate|drop")
+                }
+                it
+            },
+            languageVersion = parsed.value("language-version") ?: defaults.languageVersion,
+            apiVersion = parsed.value("api-version") ?: defaults.apiVersion,
+            jvmTarget = parsed.value("jvm-target") ?: defaults.jvmTarget,
+            progressive = parsed.bool("progressive", defaults.progressive),
+            optIn = parsed.values("opt-in"),
+            multiplatformTarget = parsed.value("multiplatform-target") ?: defaults.multiplatformTarget,
+            pretty = parsed.bool("pretty", defaults.pretty),
+            format = parsed.value("format", defaults.format).let {
+                if (it != "json") throw UsageException("only --format json is supported in phase 0")
+                it
+            },
+        )
+    }
+
+    // ---- bench -------------------------------------------------------------
+
+    private fun bench(args: List<String>): Int {
+        val parsed = ParsedArgs.parse(args)
+        if (parsed.bool("help")) {
+            printBenchUsage()
+            return ExitCodes.OK
+        }
+        val tiers = (parsed.value("tier", "fixtures") ?: "fixtures").split(',').map { it.trim() }.toSet()
+        val only = parsed.value("only")
+        val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
+        val result = BenchRunner.run(
+            repoRoot,
+            BenchRunner.RunOptions(
+                tiers = tiers,
+                only = only,
+                skipMissingRepos = parsed.bool("skip-missing-repos"),
+            ),
+            commit = commit,
+        )
+        val baselineFile = parsed.value("baseline")
+        val baseline = baselineFile?.let { Baseline.load(Path.of(it)) }
+        val writeBaseline = parsed.bool("write-baseline")
+        if (writeBaseline) {
+            val target = Path.of(baselineFile ?: "baseline.json")
+            Baseline.save(result, target)
+            System.err.println("kosi: baseline written to $target")
+        }
+
+        // The ratchet: any FAIL or XPASS fails the build, in both directions.
+        val totals = result.totals()
+        val regressions = mutableListOf<String>()
+        for (res in result.results) {
+            if (res.fail > 0) {
+                regressions.add("${res.slug}/${res.slot}: ${res.fail} failed expectation(s)")
+            }
+            if (res.xpass > 0) {
+                regressions.add("${res.slug}/${res.slot}: ${res.xpass} known-fail expectation(s) started passing (XPASS)")
+            }
+        }
+        val compareAgainst = baseline
+        if (compareAgainst != null) {
+            Baseline.compare(result, compareAgainst).forEach { regressions.add(it.render()) }
+        }
+
+        val gate = Promotion.evaluate(result, compareAgainst)
+        if (parsed.bool("fail-unless-promotable") && !gate.promotable) {
+            regressions.add("promotion gate: ${gate.verdict}")
+        }
+
+        println(result.toJson())
+        if (parsed.bool("verbose")) {
+            println(gate.render())
+        }
+
+        return if (regressions.isEmpty()) {
+            ExitCodes.OK
+        } else {
+            System.err.println("kosi bench: ${regressions.size} problem(s):")
+            regressions.forEach { System.err.println("  - $it") }
+            ExitCodes.EXPECTATIONS_FAILED
+        }
+    }
+
+    // ---- golden -------------------------------------------------------------
+
+    private fun golden(args: List<String>): Int {
+        val parsed = ParsedArgs.parse(args)
+        if (parsed.bool("help")) {
+            printGoldenUsage()
+            return ExitCodes.OK
+        }
+        val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
+        val goldensDir = Path.of(parsed.value("goldens", "goldens"))
+        val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
+        val entries = manifest.select(setOf("fixtures"), parsed.value("only"))
+        val problems = mutableListOf<String>()
+        var checked = 0
+        for (entry in entries) {
+            val dir = repoRoot.resolve(entry.path!!)
+            for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
+                checked++
+                val report = Analyzer.analyze(dir, slot.options(), commit, pretty = false)
+                val digest = Digests.FixtureDigest(
+                    slug = entry.slug,
+                    slot = slot.label,
+                    sections = Digests.compute(report.toJson(pretty = false)),
+                )
+                val goldenFile = goldensDir.resolve("${entry.slug}-${slot.label}.json")
+                val existing = Digests.load(goldenFile)
+                if (existing == null || parsed.bool("update-goldens")) {
+                    if (existing == null && !parsed.bool("update-goldens")) {
+                        problems.add("${entry.slug}/${slot.label}: no golden (run kosi golden --update-goldens)")
+                        continue
+                    }
+                    Digests.save(digest, goldenFile)
+                } else {
+                    val diff = Digests.diff(digest, existing)
+                    if (diff.isNotEmpty()) {
+                        diff.forEach { problems.add("${entry.slug}/${slot.label}: $it") }
+                    }
+                }
+            }
+        }
+        System.err.println("kosi golden: checked $checked fixture/slot pair(s), ${problems.size} problem(s)")
+        if (problems.isNotEmpty()) {
+            problems.forEach { System.err.println("  - $it") }
+            return ExitCodes.EXPECTATIONS_FAILED
+        }
+        return ExitCodes.OK
+    }
+
+    // ---- version --------------------------------------------------------------
+
+    private fun version(args: List<String>): Int {
+        val parsed = ParsedArgs.parse(args)
+        val probe = StandaloneSessionProbe.probe()
+        val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
+        w.beginObject()
+        w.beginObject("components")
+        w.str("backend-syntax", "available")
+        w.str("backend-resolved", "planned (phase 2)")
+        w.str("analysis-api-standalone", if (probe.available) "available" else probe.detail)
+        w.endObject()
+        w.str("commit", commit)
+        w.beginObject("compiler")
+        val band = io.cdxgen.kosi.front.CompilerInfo.versionBand()
+        w.str("firstSupported", band.first)
+        w.str("firstNonDeprecated", band.firstNonDeprecated)
+        w.str("latestStable", band.latestStable)
+        w.str("version", io.cdxgen.kosi.front.CompilerInfo.compilerVersion())
+        w.endObject()
+        w.str("description", Analyzer.TOOL_DESCRIPTION)
+        w.str("host", Analyzer.hostId())
+        w.bool("nativeImage", Analyzer.isNativeImage())
+        w.str("schemaVersion", io.cdxgen.kosi.schema.KosiReport.SCHEMA_VERSION)
+        w.str("version", Analyzer.TOOL_VERSION)
+        w.endObject()
+        println(w.render())
+        return ExitCodes.OK
+    }
+
+    // ---- usage ------------------------------------------------------------------
+
+    private fun printUsage() {
+        println(
+            """
+            kosi — Kotlin Source Inspector (phase 0: syntax backend)
+
+            Usage:
+              kosi analyze --dir <path> [--out <file>] [options]
+              kosi bench   [--tier fixtures,small,...] [--baseline <file>] [--write-baseline]
+                           [--compare] [--fail-unless-promotable] [--only <slug>]
+              kosi golden  [--update-goldens] [--only <slug>]
+              kosi version
+
+            Exit codes: 0 success; 1 expectations failed; 2 usage error; 3 runtime error.
+            """.trimIndent(),
+        )
+    }
+
+    private fun printAnalyzeUsage() {
+        println(
+            """
+            kosi analyze options (defaults live in AnalyzeOptions, not in the parser):
+              --dir <path>                    project root to analyse (default: .)
+              --out <file>                    write report to file (default: stdout)
+              --backend <syntax|resolved>     analysis tier (resolved arrives in phase 2)
+              --dataflow <mode>               none|security|crypto|reachable|security-deps|all
+              --callgraph <mode>              none|static|cha|sealed|rta|vta|auto
+              --roots <scope>                 repeatable: main, exported, handlers, tests, android, all, symbol:<regex>
+              --dependency-detail <view>      collapse|drop|full
+              --language-version <v>          override language version (diagnosed)
+              --api-version <v>               override api version (diagnosed)
+              --jvm-target <v>                override JVM target (diagnosed)
+              --pretty                        indented JSON
+            """.trimIndent(),
+        )
+    }
+
+    private fun printBenchUsage() {
+        println(
+            """
+            kosi bench options:
+              --tier <tiers>                 comma-separated tiers from corpus.toml (default: fixtures)
+              --only <slug>                  restrict to one fixture
+              --baseline <file>              baseline to compare against
+              --write-baseline               write the baseline (implies --baseline <file> target)
+              --fail-unless-promotable       fail the run unless the promotion gate says PROMOTE
+              --skip-missing-repos           warn instead of failing when a pinned repo cannot be fetched
+              --repo-root <path>             repository root holding corpus.toml (default: .)
+            """.trimIndent(),
+        )
+    }
+
+    private fun printGoldenUsage() {
+        println(
+            """
+            kosi golden options:
+              --update-goldens               write missing/changed goldens
+              --only <slug>                  restrict to one fixture
+              --goldens <dir>                golden directory (default: goldens)
+              --repo-root <path>             repository root holding corpus.toml (default: .)
+            """.trimIndent(),
+        )
+    }
+}
+
+/** Entry point (also used by the Gradle bench/corpus tasks). */
+fun main(args: Array<String>) {
+    kotlin.system.exitProcess(Main.run(args))
+}
