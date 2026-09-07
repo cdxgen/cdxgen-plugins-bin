@@ -1,0 +1,128 @@
+.github/workflows/kosi-test.yml
+  h_6a4cc5cdf68def 72-74,76,95-97,101-131
+README.md
+  h_6a4cc5cdf68def 168-181
+scripts/check-plugin-coverage.sh
+  h_6a4cc5cdf68def 18-24,26-27,29,31-32,49-50,62-65,91
+scripts/plugin-platform-support.sh
+  h_6a4cc5cdf68def 1-57
+scripts/stage-built-plugins.sh
+  h_6a4cc5cdf68def 4-6,67-78
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 8-40,43,45,47,49-52,54-57,59,63,65-67,69,72-73,84-91,99-170,180
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 19,38-40,97-115
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 34,42-43,95-111
+thirdparty/kosi/fixtures/maven-project/pom.xml
+  h_6a4cc5cdf68def 16-19
+thirdparty/kosi/fixtures/maven-project/src/main/kotlin/Worker.kt
+  h_6a4cc5cdf68def 7
+thirdparty/kosi/goldens/android-compose-app-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-compose-app-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 48,221-224,226-239,241-256,261-271,304
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Digests.kt
+  h_6a4cc5cdf68def 25-36,40,42
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Args.kt
+  h_6a4cc5cdf68def 90
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 91,257
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 47
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/ModuleBoundaryTest.kt
+  h_6a4cc5cdf68def 11-14,39-46,51-77
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/MavenDiscovery.kt
+  h_6a4cc5cdf68def 24-32,47,54,101-103,106-108,130-135,137-149
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/MavenDiscoveryTest.kt
+  h_6a4cc5cdf68def 1-102
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/CallGraph.kt
+  h_6a4cc5cdf68def 66,69-70
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Crypto.kt
+  h_6a4cc5cdf68def 98,101,107,110
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/DataFlow.kt
+  h_6a4cc5cdf68def 151,163,178,266
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/KosiReport.kt
+  h_6a4cc5cdf68def 95,126
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  h_6a4cc5cdf68def 139,143,150
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Services.kt
+  h_6a4cc5cdf68def 46,58
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Stats.kt
+  h_6a4cc5cdf68def 39,51
+thirdparty/kosi/modules/kosi-schema/src/test/kotlin/io/cdxgen/kosi/schema/ReportSerializationTest.kt
+  h_6a4cc5cdf68def 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "efa167ff0c8818a7054394cb444be6e498ffcb87",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
