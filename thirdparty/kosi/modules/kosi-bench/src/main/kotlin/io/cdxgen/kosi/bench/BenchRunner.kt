@@ -204,7 +204,7 @@ object BenchRunner {
             toolCommit = commit,
             medianWallMillis = if (walls.isEmpty()) 0 else walls[walls.size / 2],
             worstWallMillis = walls.maxOrNull() ?: 0,
-            peakRssBytes = Analyzer.peakRssBytes(),
+            peakRssBytes = PeakRss.bytes(),
         )
     }
 

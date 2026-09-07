@@ -23,7 +23,6 @@ import io.cdxgen.kosi.schema.RuntimeInfo
 import io.cdxgen.kosi.schema.Severity
 import io.cdxgen.kosi.schema.Stats
 import io.cdxgen.kosi.schema.ToolInfo
-import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
@@ -370,39 +369,6 @@ object Analyzer {
         System.getProperty("org.graalvm.nativeimage.enabled") != null ||
             System.getProperty("org.graalvm.nativeimage.imagecode") != null
 
-    /**
-     * Peak RSS via the OS where available (linux VmHWM, darwin ps), else the
-     * JVM heap ceiling as a documented lower bound with a diagnostic from the
-     * caller. Volatile by nature; excluded from digest goldens.
-     */
-    fun peakRssBytes(): Long {
-        try {
-            val proc = Path.of("/proc/self/status")
-            if (Files.exists(proc)) {
-                for (line in Files.readAllLines(proc)) {
-                    if (line.startsWith("VmHWM:")) {
-                        val kb = line.substringAfter("VmHWM:").trim().substringBefore(" ").toLongOrNull()
-                        if (kb != null) return kb * 1024
-                    }
-                }
-            }
-            if (hostId().startsWith("darwin")) {
-                val pid = ProcessHandle.current().pid()
-                val p = ProcessBuilder("ps", "-o", "rss=", "-p", pid.toString())
-                    .redirectErrorStream(true)
-                    .start()
-                val out = p.inputStream.bufferedReader().readText().trim()
-                p.waitFor()
-                val kb = out.lines().firstOrNull()?.toLongOrNull()
-                if (kb != null) return kb * 1024
-            }
-        } catch (_: Exception) {
-            // fall through to the JVM lower bound
-        }
-        val heap = ManagementFactory.getMemoryMXBean().heapMemoryUsage
-        val nonHeap = ManagementFactory.getMemoryMXBean().nonHeapMemoryUsage
-        return heap.used + nonHeap.used
-    }
 }
 
 /** True when a declared version is below FIRST_SUPPORTED (vs above the ceiling). */

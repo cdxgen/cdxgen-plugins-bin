@@ -291,6 +291,18 @@ object Main {
 
     private fun version(args: List<String>): Int {
         val parsed = ParsedArgs.parse(args)
+        if (parsed.bool("probe-resources")) {
+            val cl = javaClass.classLoader
+            val names = listOf(
+                "org/jetbrains/kotlin/cli/common/CompilerSystemProperties.class",
+                "META-INF/services/org.jetbrains.kotlin.com.intellij.openapi.application.ApplicationManager",
+            )
+            for (n in names) {
+                val stream = cl.getResourceAsStream(n)
+                println("probe $n -> ${if (stream != null) "FOUND" else "MISSING"}")
+                stream?.close()
+            }
+        }
         val probe = StandaloneSessionProbe.probe()
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()

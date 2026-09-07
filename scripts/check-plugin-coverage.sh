@@ -14,11 +14,42 @@
 # Only *built* plugins are checked. `dosai` and `osquery` are downloaded from
 # upstream projects that do not publish for every architecture, so their
 # absence on riscv64, ppc64le and arm is expected and not a build failure.
+#
+# `kosi` is built from source but is a GraalVM native image, which does not
+# exist for every architecture. Exemptions are named per platform with the
+# reason, never silent:
+#   - ppc64 (linux-ppc64le): not a Native Image platform at all
+#   - linux-arm (32-bit): not a Native Image platform
+#   - linux-riscv64: best effort only (LLVM backend cross-build); accepted
+#     absent until a release run produces one
+# On those platforms cdxgen falls back to its own JS-side structural analysis
+# for Kotlin and, when a JDK 21+ is present, to the kosi-portable.jar
+# (docs/KOSI.md, docs/BUILD.md §6).
 
 set -euo pipefail
 
 # Plugins built from source in this repository, present on every platform.
 readonly BUILT_PLUGINS=(trivy trustinspector golem rusi cdxui cdxrs)
+
+# Plugins with per-platform exemptions: "plugin|package-name|reason".
+readonly EXEMPTED=(
+  "kosi|ppc64|not a Native Image platform; JVM-jar fallback documented in docs/KOSI.md"
+  "kosi|linux-arm|not a Native Image platform (32-bit); JVM-jar fallback documented in docs/KOSI.md"
+  "kosi|linux-riscv64|best-effort LLVM-backend cross-build; no artifact produced at this phase"
+)
+
+is_exempt() {
+  local plugin="$1" package_name="$2" entry
+  for entry in "${EXEMPTED[@]}"; do
+    local e_plugin="${entry%%|*}"
+    local rest="${entry#*|}"
+    local e_package="${rest%%|*}"
+    if [[ "$plugin" == "$e_plugin" && "$package_name" == "$e_package" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # Package directory name -> the filename fragment its binaries carry.
 platform_fragment() {
@@ -47,6 +78,16 @@ main() {
     fragment="$(platform_fragment "$package_name")"
 
     for plugin in "${BUILT_PLUGINS[@]}"; do
+      if is_exempt "$plugin" "$package_name"; then
+        entry="${EXEMPTED[0]}"
+        for e in "${EXEMPTED[@]}"; do
+          if [[ "$e" == "$plugin|"*"$package_name"* || "$e" == "$plugin|$package_name|"* ]]; then
+            entry="$e"
+          fi
+        done
+        echo "Note: $package_name has no $plugin binary — exempt: ${entry#*|*|}" >&2
+        continue
+      fi
       # `|| true` matters: under `set -o pipefail` a find over a missing
       # directory fails the pipeline and would abort the script before it can
       # report which plugin is absent, which is the whole point of this check.
@@ -70,7 +111,7 @@ main() {
     exit 1
   fi
 
-  echo "Plugin coverage OK: ${#BUILT_PLUGINS[@]} plugins present across $# package(s)."
+  echo "Plugin coverage OK: ${#BUILT_PLUGINS[@]} plugins present across $# package(s) (${#EXEMPTED[@]} named exemption(s))."
 }
 
 main "$@"
