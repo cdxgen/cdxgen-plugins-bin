@@ -67,14 +67,25 @@ object Digests {
         }
     }
 
+    /**
+     * Sections excluded from the digest, each because it changes without the
+     * analysis changing. Everything else in the report is digested — an
+     * allowlist would silently stop covering every section a later phase adds
+     * (crypto, services, callGraph, dataFlow, ...).
+     */
+    val VOLATILE_SECTIONS = setOf(
+        // tool.commit changes on every commit; runtime carries the absolute
+        // working directory, the host id and the JVM version.
+        "tool",
+        "runtime",
+    )
+
     /** Sections that enter the digest, computed from the rendered report JSON. */
     fun compute(reportJson: String): Map<String, String> {
         val root = io.cdxgen.kosi.schema.JsonReader.parse(reportJson).asObject()
         val sections = linkedMapOf<String, String>()
-        for (section in listOf(
-            "declarations", "diagnostics", "files", "imports",
-            "modules", "options", "packages", "usages",
-        )) {
+        for (section in root.members.keys.sorted()) {
+            if (section in VOLATILE_SECTIONS) continue
             root[section]?.let { value ->
                 sections[section] = sha256(value.toString())
             }

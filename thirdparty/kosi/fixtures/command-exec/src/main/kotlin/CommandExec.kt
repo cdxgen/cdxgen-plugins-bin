@@ -1,6 +1,12 @@
-// Negative half first: exact near-misses that must stay absent.
-// kosi:want-not usage name=Executors.newScheduledThreadPool
-// kosi:want-not usage name=Runtime.availableProcessors
+// Negative half first: exact near-misses of symbols this file *does*
+// contain, so none of them can pass vacuously.
+//   - `newScheduledThreadPool`: the file calls `newFixedThreadPool` on the
+//     same receiver, so a renderer that dropped the member name would trip;
+//   - `ProcessBuilder` as an `operator`: present as a `call`;
+//   - `runCommand` as a `property`: present as a `function`.
+// kosi:want-not usage name=~Executors.newScheduledThreadPool
+// kosi:want-not usage name=ProcessBuilder kind=operator
+// kosi:want-not declaration name=runCommand kind=property
 // kosi:want-not diagnostic code=parse-error
 //
 // Positive half.

@@ -35,6 +35,12 @@ object BenchRunner {
         val positivesRecallDenominator: Int,
         val recall: Double,
         val connectivity: Double,
+        /**
+         * Number of slices connectivity was computed over. Zero means the
+         * 1.0 above is vacuous, which is why the count travels with it (an
+         * unbroken-down metric is not a result).
+         */
+        val sliceCount: Int,
         val integrityViolations: Int,
         val wallMillis: Long,
         val parseErrors: Int,
@@ -55,6 +61,7 @@ object BenchRunner {
             w.num("positivesPassed", positivesPassed)
             w.num("positivesRecallDenominator", positivesRecallDenominator)
             w.dbl("recall", recall)
+            w.num("sliceCount", sliceCount)
             w.str("slot", slot)
             w.str("slug", slug)
             w.num("wallMillis", wallMillis)
@@ -131,10 +138,19 @@ object BenchRunner {
                 positivesRecallDenominator = recallDenominator,
                 recall = recall,
                 connectivity = connectivity,
+                sliceCount = results.sumOf { it.sliceCount },
                 integrityViolations = integrity,
                 wallMillis = results.sumOf { it.wallMillis },
                 parseErrors = parseErrors,
-                digest = Digests.FixtureDigest("TOTAL", "all", emptyMap()),
+                // One digest over every fixture digest, so the totals row
+                // changes whenever any fixture's report changes. An empty
+                // section map here would publish the digest of the empty
+                // string, which never changes and means nothing.
+                digest = Digests.FixtureDigest(
+                    slug = "TOTAL",
+                    slot = "all",
+                    sections = results.associate { "${it.slug}/${it.slot}" to it.digest.combined },
+                ),
             )
         }
 
@@ -157,6 +173,7 @@ object BenchRunner {
                         positivesRecallDenominator = (r.long("positivesRecallDenominator") ?: 0).toInt(),
                         recall = r.dbl("recall") ?: 0.0,
                         connectivity = r.dbl("connectivity") ?: 0.0,
+                        sliceCount = (r.long("sliceCount") ?: 0).toInt(),
                         integrityViolations = (r.long("integrityViolations") ?: 0).toInt(),
                         wallMillis = r.long("wallMillis") ?: 0,
                         parseErrors = (r.long("parseErrors") ?: 0).toInt(),
@@ -332,6 +349,7 @@ object BenchRunner {
             xpass = evaluation.xpass.size,
             recall = evaluation.recall(options.backend.id),
             connectivity = connectivity,
+            sliceCount = report.dataFlow?.slices?.size ?: 0,
             integrityViolations = integrity,
             wallMillis = wallMillis,
             parseErrors = report.diagnostics.count { it.code == "parse-error" },

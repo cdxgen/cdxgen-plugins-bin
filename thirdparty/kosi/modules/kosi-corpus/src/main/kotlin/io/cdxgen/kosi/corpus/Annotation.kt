@@ -1,6 +1,7 @@
 package io.cdxgen.kosi.corpus
 
 import io.cdxgen.kosi.models.Categories
+import io.cdxgen.kosi.schema.DiagnosticCodes
 
 /**
  * Corpus annotations, parsed from `// kosi:want ...` and
@@ -93,6 +94,21 @@ data class Annotation(
         }
         if (kind == Kind.MODULE && name == null) errors.add("module requires name=")
         if (kind == Kind.DIAGNOSTIC && code == null) errors.add("diagnostic requires code=")
+        // Closed vocabularies. A misspelled value would make a positive
+        // unsatisfiable and — worse — a negative vacuously true, which is
+        // exactly what the corpus exists to prevent.
+        if (usageKind != null && usageKind !in USAGE_KINDS) {
+            errors.add("usage kind must be one of $USAGE_KINDS, got $usageKind")
+        }
+        if (declKind != null && declKind !in DECLARATION_KINDS) {
+            errors.add("declaration kind must be one of $DECLARATION_KINDS, got $declKind")
+        }
+        if (code != null && !code.startsWith("~") && code !in DiagnosticCodes.ALL) {
+            errors.add(
+                "unknown diagnostic code '$code'; known: ${DiagnosticCodes.ALL.sorted()} " +
+                    "(register it in DiagnosticCodes when the engine starts emitting it)",
+            )
+        }
         if (mode != null && mode != "security" && mode != "all") {
             errors.add("mode must be security or all, got $mode")
         }
@@ -100,6 +116,16 @@ data class Annotation(
     }
 
     companion object {
+        /** `usages[].usageKind` vocabulary (SyntaxAnalyzer emits exactly these). */
+        val USAGE_KINDS = setOf("call", "operator", "reference")
+
+        /** `declarations[].kind` vocabulary. */
+        val DECLARATION_KINDS = setOf(
+            "class", "interface", "enum", "annotation", "data-class", "sealed-class",
+            "object", "companion", "function", "method", "extension-function",
+            "property", "getter", "setter", "constructor", "init", "typealias",
+        )
+
         /** Backends that may appear in scoped known-fail markers. */
         val KNOWN_BACKENDS = listOf("syntax", "resolved", "deps", "compile")
     }

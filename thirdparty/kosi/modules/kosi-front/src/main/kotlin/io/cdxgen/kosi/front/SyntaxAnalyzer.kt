@@ -54,7 +54,7 @@ class SyntaxAnalyzer(
         val canonicalName: String,
         val kind: String,
         val signature: String?,
-        val receiverType: String?,
+        val returnType: String?,
         val extensionReceiverType: String?,
         val visibility: String,
         val modifiers: List<String>,
@@ -70,6 +70,7 @@ class SyntaxAnalyzer(
 
     fun analyze(text: String): FileResult {
         val file = env.parseFile(text)
+        val lines = LineIndex(text)
         val diagnostics = mutableListOf<Diagnostic>()
         for (error in collectParseErrors(file)) {
             diagnostics.add(
@@ -77,15 +78,15 @@ class SyntaxAnalyzer(
                     code = "parse-error",
                     severity = Severity.ERROR,
                     message = error.errorDescription ?: "syntax error",
-                    position = positionAt(text, error.textOffset).copy(filename = filePath),
+                    position = lines.positionAt(error.textOffset).copy(filename = filePath),
                 ),
             )
         }
-        val imports = file.importDirectives.mapNotNull { directive -> importUsage(directive, text) }
+        val imports = file.importDirectives.mapNotNull { directive -> importUsage(directive, lines) }
         val declarations = mutableListOf<RawDeclaration>()
         val usages = mutableListOf<RawUsage>()
         val pkg = file.packageFqName.asString()
-        file.accept(DeclarationVisitor(text, pkg, declarations, usages))
+        file.accept(DeclarationVisitor(lines, pkg, declarations, usages))
         // Stamp the filename on every position now that we know it.
         declarations.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
         usages.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
@@ -94,7 +95,7 @@ class SyntaxAnalyzer(
 
     private fun collectParseErrors(file: KtFile): List<PsiErrorElement> = env.collectParseErrors(file)
 
-    private fun importUsage(directive: KtImportDirective, text: String): ImportUsage? {
+    private fun importUsage(directive: KtImportDirective, lines: LineIndex): ImportUsage? {
         val offset = directive.textOffset
         val fqName = directive.importedFqName?.asString() ?: return null
         return ImportUsage(
@@ -103,19 +104,19 @@ class SyntaxAnalyzer(
             star = directive.isAllUnder,
             purl = null,
             filePath = filePath,
-            position = positionAt(text, offset).copy(filename = filePath),
+            position = lines.positionAt(offset).copy(filename = filePath),
         )
     }
 
     private inner class DeclarationVisitor(
-        private val text: String,
+        private val lines: LineIndex,
         private val pkg: String,
         private val declarations: MutableList<RawDeclaration>,
         private val usages: MutableList<RawUsage>,
     ) : KtTreeVisitorVoid() {
 
         private fun pos(element: PsiElement): Position =
-            positionAt(text, element.textOffset).copy(filename = filePath)
+            lines.positionAt(element.textOffset).copy(filename = filePath)
 
         private fun emit(
             element: PsiElement,
@@ -123,7 +124,7 @@ class SyntaxAnalyzer(
             containers: List<String>,
             kind: String,
             signature: String? = null,
-            receiverType: String? = null,
+            returnType: String? = null,
             extensionReceiverType: String? = null,
             visibility: String = "public",
             modifiers: List<String> = emptyList(),
@@ -137,7 +138,7 @@ class SyntaxAnalyzer(
                     canonicalName = fqName,
                     kind = kind,
                     signature = signature,
-                    receiverType = receiverType,
+                    returnType = returnType,
                     extensionReceiverType = extensionReceiverType,
                     visibility = visibility,
                     modifiers = modifiers,
@@ -200,7 +201,7 @@ class SyntaxAnalyzer(
             emit(
                 function, name, containers, kind,
                 signature = signature,
-                receiverType = returnType,
+                returnType = returnType,
                 extensionReceiverType = function.receiverTypeReference?.text?.normalized(),
                 visibility = visibilityOf(function) ?: "public",
                 modifiers = modifiersOf(function),
@@ -221,7 +222,7 @@ class SyntaxAnalyzer(
             emit(
                 property, name, containerChainOf(property), "property",
                 signature = signature,
-                receiverType = typeText,
+                returnType = typeText,
                 extensionReceiverType = property.receiverTypeReference?.text?.normalized(),
                 visibility = visibilityOf(property) ?: "public",
                 modifiers = modifiersOf(property),
@@ -242,7 +243,7 @@ class SyntaxAnalyzer(
                     canonicalName = fqName,
                     kind = if (accessor.isGetter) "getter" else "setter",
                     signature = null,
-                    receiverType = null,
+                    returnType = null,
                     extensionReceiverType = property?.receiverTypeReference?.text?.normalized(),
                     visibility = visibilityOf(accessor)
                         ?: property?.let { visibilityOf(it) }
@@ -292,7 +293,7 @@ class SyntaxAnalyzer(
                     canonicalName = fqName,
                     kind = "init",
                     signature = null,
-                    receiverType = null,
+                    returnType = null,
                     extensionReceiverType = null,
                     visibility = "public",
                     modifiers = emptyList(),
@@ -309,7 +310,7 @@ class SyntaxAnalyzer(
             emit(
                 typeAlias, name, containerChainOf(typeAlias), "typealias",
                 signature = "typealias $name = $target",
-                receiverType = target,
+                returnType = target,
                 visibility = visibilityOf(typeAlias) ?: "public",
                 annotations = annotationsOf(typeAlias),
             )
@@ -338,27 +339,25 @@ class SyntaxAnalyzer(
         }
 
         override fun visitBinaryExpression(expression: org.jetbrains.kotlin.psi.KtBinaryExpression) {
-            val ref = expression.operationReference
-            usages.add(
-                RawUsage(
-                    name = operatorFunctionName(ref.text) ?: normalizeName(ref.text),
-                    usageKind = "operator",
-                    position = pos(ref),
-                ),
-            )
+            emitOperator(expression.operationReference)
             super.visitBinaryExpression(expression)
         }
 
         override fun visitUnaryExpression(expression: org.jetbrains.kotlin.psi.KtUnaryExpression) {
-            val ref = expression.operationReference
-            usages.add(
-                RawUsage(
-                    name = operatorFunctionName(ref.text) ?: normalizeName(ref.text),
-                    usageKind = "operator",
-                    position = pos(ref),
-                ),
-            )
+            emitOperator(expression.operationReference)
             super.visitUnaryExpression(expression)
+        }
+
+        /**
+         * Emits an operator usage only when the operator denotes a *callable*
+         * (`+` -> `plus`, an infix function by its own name). `=`, `&&`, `!!`,
+         * `as` and friends resolve to no function, so naming them as usages
+         * would put unmatchable names in `usages[]`; [operatorFunctionName]
+         * returning null means "not a call".
+         */
+        private fun emitOperator(ref: org.jetbrains.kotlin.psi.KtSimpleNameExpression) {
+            val name = operatorFunctionName(ref.text) ?: return
+            usages.add(RawUsage(name, "operator", pos(ref)))
         }
 
         override fun visitCallableReferenceExpression(expression: KtCallableReferenceExpression) {
@@ -480,7 +479,7 @@ class SyntaxAnalyzer(
             "%" -> "rem"
             "+=" -> "plusAssign"
             "-=" -> "minusAssign"
-            "*=" -> "mulAssign"
+            "*=" -> "timesAssign"
             "/=" -> "divAssign"
             "%=" -> "remAssign"
             "in" -> "contains"
@@ -491,16 +490,18 @@ class SyntaxAnalyzer(
             "==", "!=", "===", "!==" -> "equals"
             "++" -> "inc"
             "--" -> "dec"
-            else -> if (text.isNotBlank() && text != "!!" && text != "!" && text != "?" &&
-                text != "?:" && text != "[]" && text != "as" && text != "as?"
-            ) {
-                // Infix functions come through as their own names; non-function
-                // operators are excluded so usage evidence stays nameable.
-                text
-            } else {
-                null
-            }
+            // Infix functions arrive as their own names, which are
+            // identifiers; every remaining symbolic operator (`=`, `&&`,
+            // `||`, `!!`, `?:`, `as`, ...) resolves to no function and is
+            // deliberately not a usage. Keywords are identifiers too, so the
+            // ones that are operators rather than calls are named here.
+            else -> text.takeIf { IDENTIFIER.matches(it) && it !in NON_CALL_KEYWORD_OPERATORS }
         }
+
+        private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+
+        /** Keyword operators that are not function calls. */
+        private val NON_CALL_KEYWORD_OPERATORS = setOf("as", "is", "in")
 
         fun normalizeName(raw: String): String =
             raw.replace(Regex("\\s+"), "")
@@ -514,17 +515,29 @@ class SyntaxAnalyzer(
                 .filter { it.isNotBlank() }
                 .joinToString(".")
 
-        fun positionAt(text: String, offset: Int): Position {
-            val safeOffset = offset.coerceIn(0, text.length)
-            var line = 1
-            var lineStart = 0
-            for (i in 0 until safeOffset) {
-                if (text[i] == '\n') {
-                    line++
-                    lineStart = i + 1
-                }
-            }
-            return Position(filename = "", line = line, column = safeOffset - lineStart + 1)
+        fun positionAt(text: String, offset: Int): Position = LineIndex(text).positionAt(offset)
+    }
+
+    /**
+     * Offset -> (line, column) over one file. The line starts are indexed once
+     * and binary-searched per lookup; scanning the prefix per element made
+     * position stamping quadratic in file length.
+     */
+    class LineIndex(text: String) {
+        private val length = text.length
+        private val lineStarts: IntArray = buildList {
+            add(0)
+            for (i in text.indices) if (text[i] == '\n') add(i + 1)
+        }.toIntArray()
+
+        fun positionAt(offset: Int): Position {
+            val safeOffset = offset.coerceIn(0, length)
+            val found = lineStarts.binarySearch(safeOffset)
+            // binarySearch returns -(insertionPoint) - 1 when absent; the line
+            // is the one whose start is the greatest <= safeOffset.
+            val index = if (found >= 0) found else -found - 2
+            val lineStart = lineStarts[index]
+            return Position(filename = "", line = index + 1, column = safeOffset - lineStart + 1)
         }
     }
 }

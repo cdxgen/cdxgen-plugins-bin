@@ -35,9 +35,41 @@ enum class Severity(val id: String) {
 }
 
 /**
+ * The closed registry of diagnostic codes, mirroring
+ * JSON_ATTRIBUTE_REFERENCE.md §diagnostics. It lives here rather than in the
+ * corpus module so there is exactly one list: [Diagnostic] rejects an
+ * unregistered code, and a corpus annotation naming an unregistered code is an
+ * annotation error instead of a negative expectation that passes vacuously.
+ * A phase that emits a new code adds it here and to the reference doc.
+ */
+object DiagnosticCodes {
+    const val PARSE_ERROR = "parse-error"
+    const val SYNTAX_BACKEND_NO_RESOLUTION = "syntax-backend-no-resolution"
+    const val JAVA_SOURCE_NOT_PARSED = "java-source-not-parsed"
+    const val KOTLIN_LANGUAGE_VERSION = "kotlin-language-version"
+    const val KOTLIN_VERSION = "kotlin-version"
+    const val KOTLIN_API_VERSION = "kotlin-api-version"
+    const val NO_BUILD_FILES = "no-build-files"
+    const val NO_SOURCES = "no-sources"
+    const val UNREADABLE_SOURCE = "unreadable-source"
+
+    val ALL: Set<String> = setOf(
+        PARSE_ERROR,
+        SYNTAX_BACKEND_NO_RESOLUTION,
+        JAVA_SOURCE_NOT_PARSED,
+        KOTLIN_LANGUAGE_VERSION,
+        KOTLIN_VERSION,
+        KOTLIN_API_VERSION,
+        NO_BUILD_FILES,
+        NO_SOURCES,
+        UNREADABLE_SOURCE,
+    )
+}
+
+/**
  * Every truncation, cap, fallback and unresolved thing becomes one of these
  * (03-SCHEMA.md rule 5). Codes are machine-readable and stable; see
- * JSON_ATTRIBUTE_REFERENCE.md §diagnostics for the registry.
+ * [DiagnosticCodes] and JSON_ATTRIBUTE_REFERENCE.md §diagnostics.
  */
 data class Diagnostic(
     val code: String,
@@ -46,6 +78,13 @@ data class Diagnostic(
     val position: Position? = null,
     val count: Int? = null,
 ) {
+    init {
+        require(code in DiagnosticCodes.ALL) {
+            "unregistered diagnostic code '$code'; add it to DiagnosticCodes and " +
+                "JSON_ATTRIBUTE_REFERENCE.md"
+        }
+    }
+
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.str("code", code)

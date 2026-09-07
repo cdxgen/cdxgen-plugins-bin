@@ -25,28 +25,23 @@ import kotlin.io.path.exists
  */
 object Main {
 
+    /**
+     * The kosi commit, injected into a resource at build time. There is
+     * deliberately no `git rev-parse` fallback: at analysis time the working
+     * directory is the *analysed* project, so shelling out to git would stamp
+     * the analysed repository's commit onto kosi's own provenance (and run a
+     * subprocess the threat model does not allow).
+     */
     private val commit: String by lazy {
-        // Injected by the build into a resource; falls back to "unknown" so
-        // analysis never depends on git being present.
         try {
             javaClass.getResourceAsStream("/kosi-commit.txt")
                 ?.bufferedReader()?.use { it.readText().trim() }
-                ?.takeIf { it.isNotEmpty() && it != "unknown" }
-                ?: gitCommit()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "unknown"
         } catch (_: Exception) {
             "unknown"
         }
     }
-
-    private fun gitCommit(): String =
-        try {
-            val p = ProcessBuilder("git", "rev-parse", "HEAD").redirectErrorStream(true).start()
-            val out = p.inputStream.bufferedReader().readText().trim()
-            p.waitFor()
-            if (p.exitValue() == 0 && out.matches(Regex("[0-9a-f]{40}"))) out else "unknown"
-        } catch (_: Exception) {
-            "unknown"
-        }
 
     fun run(args: Array<String>): Int {
         return try {
@@ -78,8 +73,31 @@ object Main {
 
     // ---- analyze ----------------------------------------------------------
 
+    // Flag vocabularies. Every accepted flag is listed here: an unknown flag
+    // is a usage error (exit 2), never a silently dropped option.
+    private val ANALYZE_VALUE_FLAGS = setOf(
+        "dir", "out", "backend", "dataflow", "callgraph", "roots", "root", "dependency-detail",
+        "dataflow-max-slices", "dataflow-workers", "dataflow-max-function-instructions",
+        "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
+        "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
+        "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
+    )
+    private val ANALYZE_BOOLEAN_FLAGS = setOf(
+        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive",
+    )
+    private val BENCH_VALUE_FLAGS = setOf("tier", "only", "repo-root", "baseline", "compare")
+    private val BENCH_BOOLEAN_FLAGS =
+        setOf("help", "write-baseline", "fail-unless-promotable", "skip-missing-repos", "verbose")
+    private val GOLDEN_VALUE_FLAGS = setOf("only", "goldens", "repo-root")
+    private val GOLDEN_BOOLEAN_FLAGS = setOf("help", "update-goldens")
+    private val VERSION_BOOLEAN_FLAGS = setOf("help", "pretty")
+
     private fun analyze(args: List<String>): Int {
-        val parsed = ParsedArgs.parse(args)
+        val parsed = ParsedArgs.parse(
+            args,
+            known = ANALYZE_VALUE_FLAGS + ANALYZE_BOOLEAN_FLAGS,
+            booleans = ANALYZE_BOOLEAN_FLAGS,
+        )
         if (parsed.bool("help")) {
             printAnalyzeUsage()
             return ExitCodes.OK
@@ -175,12 +193,16 @@ object Main {
     // ---- bench -------------------------------------------------------------
 
     private fun bench(args: List<String>): Int {
-        val parsed = ParsedArgs.parse(args)
+        val parsed = ParsedArgs.parse(
+            args,
+            known = BENCH_VALUE_FLAGS + BENCH_BOOLEAN_FLAGS,
+            booleans = BENCH_BOOLEAN_FLAGS,
+        )
         if (parsed.bool("help")) {
             printBenchUsage()
             return ExitCodes.OK
         }
-        val tiers = (parsed.value("tier", "fixtures") ?: "fixtures").split(',').map { it.trim() }.toSet()
+        val tiers = parsed.value("tier", "fixtures")!!.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
         val only = parsed.value("only")
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
         val result = BenchRunner.run(
@@ -192,9 +214,21 @@ object Main {
             ),
             commit = commit,
         )
-        val baselineFile = parsed.value("baseline")
-        val baseline = baselineFile?.let { Baseline.load(Path.of(it)) }
+        // `--compare <file>` is the spelling the review protocol uses and
+        // `--baseline <file>` the one the help text uses; both name the same
+        // file, and a baseline that cannot be read is a runtime error rather
+        // than a comparison that silently checks nothing.
+        val baselineFile = parsed.value("compare") ?: parsed.value("baseline")
         val writeBaseline = parsed.bool("write-baseline")
+        val baseline = baselineFile
+            ?.takeUnless { writeBaseline && !Path.of(it).exists() }
+            ?.let { file ->
+                val path = Path.of(file)
+                if (!path.exists()) {
+                    throw BenchRunner.BenchException("baseline $file does not exist (write one with --write-baseline)")
+                }
+                Baseline.load(path)
+            }
         if (writeBaseline) {
             val target = Path.of(baselineFile ?: "baseline.json")
             Baseline.save(result, target)
@@ -239,7 +273,11 @@ object Main {
     // ---- golden -------------------------------------------------------------
 
     private fun golden(args: List<String>): Int {
-        val parsed = ParsedArgs.parse(args)
+        val parsed = ParsedArgs.parse(
+            args,
+            known = GOLDEN_VALUE_FLAGS + GOLDEN_BOOLEAN_FLAGS,
+            booleans = GOLDEN_BOOLEAN_FLAGS,
+        )
         if (parsed.bool("help")) {
             printGoldenUsage()
             return ExitCodes.OK
@@ -287,7 +325,11 @@ object Main {
     // ---- version --------------------------------------------------------------
 
     private fun version(args: List<String>): Int {
-        val parsed = ParsedArgs.parse(args)
+        val parsed = ParsedArgs.parse(
+            args,
+            known = VERSION_BOOLEAN_FLAGS,
+            booleans = VERSION_BOOLEAN_FLAGS,
+        )
         val probe = StandaloneSessionProbe.probe()
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()
@@ -347,7 +389,11 @@ object Main {
               --language-version <v>          override language version (diagnosed)
               --api-version <v>               override api version (diagnosed)
               --jvm-target <v>                override JVM target (diagnosed)
+              --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
               --pretty                        indented JSON
+
+            Unknown flags are a usage error (exit 2); repeatable flags (--roots, --opt-in)
+            accumulate, and a repeated single-value flag takes its last occurrence.
             """.trimIndent(),
         )
     }
@@ -359,6 +405,7 @@ object Main {
               --tier <tiers>                 comma-separated tiers from corpus.toml (default: fixtures)
               --only <slug>                  restrict to one fixture
               --baseline <file>              baseline to compare against
+              --compare <file>               same as --baseline (the review-protocol spelling)
               --write-baseline               write the baseline (implies --baseline <file> target)
               --fail-unless-promotable       fail the run unless the promotion gate says PROMOTE
               --skip-missing-repos           warn instead of failing when a pinned repo cannot be fetched

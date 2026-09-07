@@ -15,16 +15,22 @@ Measured P0 numbers:
 
 | Artifact | Size |
 | --- | --- |
-| deterministic fat jar (`kosi-all.jar`) | 68,596,677 bytes (65.4 MiB) |
-| native binary `kosi-darwin-arm64` | 46,909,824 bytes (44.7 MiB) |
-| native build wall clock | 30 s (M4 Pro, `--gc=serial -Os`) |
-| cold start, `kosi version`, median of 20 | < 10 ms (`/usr/bin/time` resolution) |
+| deterministic fat jar (`kosi-all.jar`) | 68,608,874 bytes (65.4 MiB) |
+| native binary `kosi-darwin-arm64` | 53,185,568 bytes (50.7 MiB) |
+| native build wall clock | 31 s (M4 Pro, `--gc=serial -Os`, peak RSS 3.3 GB) |
+| cold start, `kosi version` | < 10 ms (below `/usr/bin/time` resolution) |
 | `java -jar kosi-all.jar version` | ~60 ms |
-| `kosi analyze` (native), 16-fixture sweep | all succeed, byte-identical output |
+| `kosi analyze` (native), 16-fixture sweep | all succeed, byte-identical across runs **and** byte-identical to the JVM build |
 | UPX-LZMA (`--force-macos`) | 35 MB -> 12 MB, **binary segfaults: NOT USED** |
 
-Toolchain: GraalVM Community Edition **JDK 25.0.4.1** (release
-`graal-25.3.4.1`), pinned in the `Makefile` (`GRAAL_HOME`). The plan's
+Toolchain: GraalVM Community Edition JDK 25 (`native-image` from
+`$GRAAL_HOME`). The numbers above were re-measured at review time with
+GraalVM CE 25.0.2 (`sdk install java 25-graalce`), which is why the binary is
+~6 MB larger than the first measurement on CE 25.0.4.1 — **binary size is
+toolchain-specific, so record the GraalVM build alongside the number.**
+`GRAAL_HOME` resolves in order: an explicit override, a `JAVA_HOME` that
+already provides `native-image`, then the pinned release under
+`$HOME/tools`. The plan's
 "most binaries land 120-260 MB uncompressed" budget is beaten by an order of
 magnitude because the P0 closed world is small: the syntax tier touches the
 frontend/PSI only, never the compiler *backends*.

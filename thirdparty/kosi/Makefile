@@ -38,14 +38,17 @@ endif
 
 host_platform := $(host_os)-$(host_arch)
 
-# GraalVM JDK 25 toolchain, pinned (05-BUILD-DIST.md). Overridable:
+# GraalVM JDK 25 toolchain (05-BUILD-DIST.md). Overridable:
 #   make native GRAAL_HOME=/path/to/graalvm
-# macOS layouts put the JDK under Contents/Home; Linux/Windows do not.
+# Resolution order: an explicit GRAAL_HOME, then a JAVA_HOME that already
+# provides native-image (sdkman/asdf/CI installs land there), then the pinned
+# release under $HOME/tools. macOS layouts put the JDK under Contents/Home.
 ifeq ($(host_os),darwin)
-  graal_home_default := $(HOME)/tools/graalvm-community-25.3.4.1+1.1/Contents/Home
+  graal_home_pinned := $(HOME)/tools/graalvm-community-25.3.4.1+1.1/Contents/Home
 else
-  graal_home_default := $(HOME)/tools/graalvm-community-25.3.4.1+1.1
+  graal_home_pinned := $(HOME)/tools/graalvm-community-25.3.4.1+1.1
 endif
+graal_home_default := $(if $(and $(JAVA_HOME),$(wildcard $(JAVA_HOME)/bin/native-image)),$(JAVA_HOME),$(graal_home_pinned))
 GRAAL_HOME ?= $(graal_home_default)
 graal_env = JAVA_HOME=$(GRAAL_HOME) PATH="$(GRAAL_HOME)/bin:$(PATH)"
 
@@ -72,11 +75,12 @@ endif
 ## bootstrap-*: install/verify the pinned GraalVM toolchain.
 bootstrap-darwin bootstrap-linux bootstrap-windows:
 	@test -x "$(GRAAL_HOME)/bin/native-image" || { \
-	  echo "GraalVM not found at $(GRAAL_HOME)."; \
-	  echo "Install the pinned toolchain:"; \
-	  echo "  mkdir -p $$HOME/tools && curl -sL -o /tmp/graalvm.tar.gz \\"; \
-	  echo "    https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_$$(case '$(host_os)' in darwin) echo macos-aarch64;; *) echo linux-amd64;; esac)_bin.tar.gz"; \
-	  echo "  tar xzf /tmp/graalvm.tar.gz -C $$HOME/tools/"; \
+	  echo "GraalVM (with native-image) not found at $(GRAAL_HOME)."; \
+	  echo "Either point GRAAL_HOME at an existing install:"; \
+	  echo "  make native GRAAL_HOME=/path/to/graalvm"; \
+	  echo "or install a GraalVM CE JDK 25 build from"; \
+	  echo "  https://github.com/graalvm/graalvm-ce-builds/releases"; \
+	  echo "(sdkman: sdk install java 25-graalce) and re-run."; \
 	  exit 1; \
 	}
 	@$(GRAAL_HOME)/bin/native-image --version

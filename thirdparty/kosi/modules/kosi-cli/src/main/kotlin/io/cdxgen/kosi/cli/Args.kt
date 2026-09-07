@@ -23,25 +23,33 @@ class UsageException(message: String) : RuntimeException(message)
 
 class ParsedArgs private constructor() {
 
-    private val values = linkedMapOf<String, String>()
+    /** Every occurrence of a value flag, in command-line order. */
+    private val values = linkedMapOf<String, MutableList<String>>()
     private val flags = linkedMapOf<String, Boolean>()
     val positionals = mutableListOf<String>()
 
-    fun value(name: String, default: String? = null): String? = values[name] ?: default
+    /** The last occurrence of a value flag, so a later flag overrides an earlier one. */
+    fun value(name: String, default: String? = null): String? = values[name]?.lastOrNull() ?: default
 
-    fun values(name: String): List<String> =
-        values.entries.filter { it.key.startsWith("$name.") }.map { it.value }
+    /** Every occurrence, for repeatable flags such as `--roots` and `--opt-in`. */
+    fun values(name: String): List<String> = values[name]?.toList() ?: emptyList()
 
     fun bool(name: String, default: Boolean = false): Boolean = flags[name] ?: default
 
     fun requireValue(name: String): String =
-        values[name] ?: throw UsageException("missing required --$name")
+        value(name) ?: throw UsageException("missing required --$name")
 
     companion object {
-        fun parse(args: List<String>): ParsedArgs {
+        /**
+         * Parses `args` accepting only the flags in [known] — an unknown flag
+         * is a usage error, not a silently dropped option (a report that
+         * echoes `options` must echo what actually ran). Names in [booleans]
+         * take no value; every other known name requires one and may repeat.
+         */
+        fun parse(args: List<String>, known: Set<String>, booleans: Set<String>): ParsedArgs {
+            require(booleans.all { it in known }) { "boolean flags must also be declared known" }
             val parsed = ParsedArgs()
             var i = 0
-            var valueCounts = mutableMapOf<String, Int>()
             while (i < args.size) {
                 val arg = args[i]
                 when {
@@ -51,22 +59,37 @@ class ParsedArgs private constructor() {
                     }
                     arg.startsWith("--") -> {
                         val body = arg.removePrefix("--")
-                        val (name, inlineValue) = body.split("=", limit = 2).let {
+                        val (rawName, inlineValue) = body.split("=", limit = 2).let {
                             it[0] to it.getOrElse(1) { null }
                         }
-                        if (name.startsWith("no-")) {
-                            parsed.flags[name.removePrefix("no-")] = false
-                        } else if (inlineValue != null) {
-                            store(parsed, valueCounts, name, inlineValue)
-                            parsed.flags[name] = true
-                        } else if (BOOLEAN_FLAGS.contains(name)) {
-                            parsed.flags[name] = true
-                        } else {
-                            val next = args.getOrNull(i + 1)
-                                ?: throw UsageException("--$name requires a value")
-                            store(parsed, valueCounts, name, next)
-                            parsed.flags[name] = true
-                            i++
+                        val negated = rawName.startsWith("no-") && rawName.removePrefix("no-") in booleans
+                        val name = if (negated) rawName.removePrefix("no-") else rawName
+                        if (name !in known) {
+                            throw UsageException(
+                                "unknown flag --$rawName (known: ${known.sorted().joinToString(", ")})",
+                            )
+                        }
+                        when {
+                            negated -> {
+                                if (inlineValue != null) {
+                                    throw UsageException("--$rawName does not take a value")
+                                }
+                                parsed.flags[name] = false
+                            }
+                            name in booleans -> {
+                                if (inlineValue != null) {
+                                    parsed.flags[name] = inlineValue.toBooleanStrictOrNull()
+                                        ?: throw UsageException("--$name must be true or false, got '$inlineValue'")
+                                } else {
+                                    parsed.flags[name] = true
+                                }
+                            }
+                            else -> {
+                                val value = inlineValue ?: args.getOrNull(i + 1)?.also { i++ }
+                                    ?: throw UsageException("--$name requires a value")
+                                parsed.values.getOrPut(name) { mutableListOf() }.add(value)
+                                parsed.flags[name] = true
+                            }
                         }
                     }
                     arg.startsWith("-") && arg.length > 1 ->
@@ -77,17 +100,5 @@ class ParsedArgs private constructor() {
             }
             return parsed
         }
-
-        private fun store(parsed: ParsedArgs, counts: MutableMap<String, Int>, name: String, value: String) {
-            val n = counts.getOrDefault(name, 0)
-            counts[name] = n + 1
-            val key = if (n == 0) name else "$name.$n"
-            parsed.values[key] = value
-        }
-
-        private val BOOLEAN_FLAGS = setOf(
-            "pretty", "help", "version", "write-baseline", "compare", "fail-unless-promotable",
-            "update-goldens", "verbose", "progressive", "skip-missing-repos",
-        )
     }
 }

@@ -151,7 +151,15 @@ object Promotion {
         // caveat stated so a vacuous pass is never mistaken for a flow result.
         checks.add(
             if (curTotal.connectivity == 1.0) {
-                Check("connectivity", State.PASS, "1.000 (vacuous: no slices exist yet at the syntax tier)")
+                Check(
+                    "connectivity",
+                    State.PASS,
+                    if (curTotal.sliceCount == 0) {
+                        "1.000 over 0 slices (vacuous: no slices exist yet at the syntax tier)"
+                    } else {
+                        "1.000 over ${curTotal.sliceCount} slice(s)"
+                    },
+                )
             } else {
                 Check("connectivity", State.FAIL, "below 1.000: ${curTotal.connectivity}")
             },
@@ -218,8 +226,9 @@ object Promotion {
         }
 
         // 7. full fixture coverage
-        val coverageOk = current.results.map { it.slug }.toSortedSet().size * 2 == current.results.size &&
-            current.results.isNotEmpty()
+        val slotsPerFixture = Matrix.defaultMatrix().size
+        val coverageOk = current.results.map { it.slug }.toSortedSet().size * slotsPerFixture ==
+            current.results.size && current.results.isNotEmpty()
         checks.add(
             if (coverageOk) {
                 Check("fixture-coverage", State.PASS, "${current.results.size} slots run (both modes)")

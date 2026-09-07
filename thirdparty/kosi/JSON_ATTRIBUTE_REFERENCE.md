@@ -126,7 +126,7 @@ never refuses to run and never pretends the declared version was honoured.
 | `jvmOwner`, `jvmDescriptor` | string? | null until the resolved tier |
 | `kind` | string | `function`, `method`, `constructor`, `property`, `getter`, `setter`, `class`, `object`, `companion`, `interface`, `enum`, `sealed-class`, `data-class`, `annotation`, `typealias`, `extension-function`, `lambda`, `init` |
 | `signature` | string? | normalised source signature |
-| `receiverType` | string? | return/property type |
+| `returnType` | string? | declared return type (functions) or declared type (properties, typealias targets) |
 | `extensionReceiverType` | string? | extension receiver |
 | `visibility` | string | `public` (default), `private`, `internal`, `protected` |
 | `modifiers` | string[] | `inline`, `suspend`, `operator`, `infix`, `expect`, `actual`, `external`, `abstract`, `open`, `override`, `const`, `tailrec`, plus factual extras (`data`, `sealed`, `value`, `inner`, `lateinit`, `companion`) |
@@ -157,7 +157,10 @@ Property accesses that are not calls are not emitted at the syntax tier.
 | `position` | Position? | when localisable |
 | `count` | int? | aggregate counter |
 
-Codes emitted by the syntax tier:
+Codes emitted by the syntax tier. The list is closed: `DiagnosticCodes` in
+`kosi-schema` is the registry, `Diagnostic` rejects a code that is not in it,
+and a corpus annotation naming an unregistered code is an annotation error
+rather than a negative expectation that passes vacuously.
 
 | code | severity | meaning |
 | --- | --- | --- |
@@ -169,6 +172,7 @@ Codes emitted by the syntax tier:
 | `no-build-files` | info | no Gradle/Maven build files; analysed as a plain source tree |
 | `no-sources` | warning | no Kotlin/Java sources under the discovered roots |
 | `unreadable-source` | error | file could not be read |
+| `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at this tier; `count` is how many |
 
 ## stats
 

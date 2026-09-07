@@ -144,7 +144,7 @@ data class Declaration(
     val purl: String,
     val filePath: String,
     val signature: String?,
-    val receiverType: String?,
+    val returnType: String?,
     val extensionReceiverType: String?,
     val visibility: String,
     val modifiers: List<String>,
@@ -177,7 +177,7 @@ data class Declaration(
         w.str("purl", purl)
         position.writeJson(w, "position")
         w.str("qualifiedName", qualifiedName)
-        w.str("receiverType", receiverType)
+        w.str("returnType", returnType)
         w.str("signature", signature)
         w.str("visibility", visibility)
         w.endObject()

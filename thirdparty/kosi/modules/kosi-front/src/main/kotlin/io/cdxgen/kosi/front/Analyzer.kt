@@ -120,6 +120,7 @@ object Analyzer {
         val usages = mutableListOf<LibraryUsage>()
         val diagnostics = mutableListOf<Diagnostic>()
         var fileCount = 0
+        var javaFileCount = 0
         PsiEnvironment.create().use { env ->
             for (source in collected) {
                 val text = try {
@@ -137,8 +138,11 @@ object Analyzer {
                 }
                 if (source.language == FileEvidence.LANGUAGE_JAVA) {
                     // Java sources are evidence in files[] at the syntax tier;
-                    // parsing Java PSI is part of the resolved tier.
+                    // parsing Java PSI is part of the resolved tier. Counted in
+                    // a diagnostic below so the gap is measurable rather than
+                    // implied by a smaller declarations[].
                     fileCount++
+                    javaFileCount++
                     continue
                 }
                 val analyzer = SyntaxAnalyzer(env, source.relativePath, source.modulePath)
@@ -164,6 +168,17 @@ object Analyzer {
                     )
                 }
             }
+        }
+        if (javaFileCount > 0) {
+            diagnostics.add(
+                Diagnostic(
+                    code = "java-source-not-parsed",
+                    severity = Severity.WARNING,
+                    message = "$javaFileCount Java source file(s) are listed in files[] but not parsed at the " +
+                        "syntax tier; their declarations and usages are absent from this report",
+                    count = javaFileCount,
+                ),
+            )
         }
         diagnostics.add(
             Diagnostic(
@@ -250,7 +265,7 @@ object Analyzer {
                 purl = holder.source.modulePurl,
                 filePath = holder.source.relativePath,
                 signature = raw.signature,
-                receiverType = raw.receiverType,
+                returnType = raw.returnType,
                 extensionReceiverType = raw.extensionReceiverType,
                 visibility = raw.visibility,
                 modifiers = raw.modifiers,

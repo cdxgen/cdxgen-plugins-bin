@@ -1,7 +1,14 @@
-// Negative half first: the clean TLS path must not be conflated with the
-// weak digest usage below.
-// kosi:want-not usage name=javax.net.ssl.SSLContext
-// kosi:want-not usage name=SecureRandom.getInstanceStrong
+// Negative half first. Each names something a *plausibly over-broad*
+// implementation would emit from this exact file, so none of them can pass
+// vacuously:
+//   - `MessageDigest`: the bare receiver, which a renderer that reported
+//     qualifier chains as usages in their own right would produce;
+//   - `Cipher.getInstance` as a `reference`: it is present as a `call`, so
+//     this fails the moment usageKind stops discriminating;
+//   - `weakDigest` as a `property`: present as a `function`.
+// kosi:want-not usage name=MessageDigest
+// kosi:want-not usage name=Cipher.getInstance kind=reference
+// kosi:want-not declaration name=weakDigest kind=property
 // kosi:want-not diagnostic code=parse-error
 //
 // Positive half.
