@@ -60,6 +60,54 @@ impl Reporter for StderrReporter {
     }
 }
 
+/// The negative half of the object-safety gate: a trait that returns an
+/// *associated item* of `Self`, which stays dyn compatible.
+///
+/// This is the `Iterator` shape — `fn next(&mut self) -> Option<Self::Item>`,
+/// and `dyn Iterator<Item = u32>` is the canonical trait object. A reader that
+/// tests the return type for the substring `Self` gates this trait out of
+/// dispatch and reports a violation that does not exist, deleting real edges.
+pub trait Feed {
+    type Item;
+    fn next_item(&mut self) -> Option<Self::Item>;
+    fn origin(&self) -> String;
+}
+
+pub struct FileFeed;
+
+impl Feed for FileFeed {
+    type Item = String;
+
+    fn next_item(&mut self) -> Option<String> {
+        Some("row".to_string())
+    }
+
+    fn origin(&self) -> String {
+        "file".to_string()
+    }
+}
+
+/// The other half: a type whose *name* merely contains `Self`. Returning it is
+/// not returning `Self`.
+pub struct MySelfish;
+
+pub trait Renderer {
+    fn render(&self) -> MySelfish;
+    fn label(&self) -> String;
+}
+
+pub struct HtmlRenderer;
+
+impl Renderer for HtmlRenderer {
+    fn render(&self) -> MySelfish {
+        MySelfish
+    }
+
+    fn label(&self) -> String {
+        "html".to_string()
+    }
+}
+
 fn boot(plugin: &dyn Plugin) {
     // Neither call may resolve to `Loader`'s impls: a `dyn Plugin` cannot
     // exist, so the site does not compile as written.
@@ -72,6 +120,17 @@ fn audit(reporter: &dyn Reporter) {
     reporter.report("audit".to_string());
 }
 
+fn drain(feed: &mut dyn Feed<Item = String>) -> String {
+    // Must dispatch to `FileFeed::origin`: an associated-item return keeps the
+    // trait dyn compatible.
+    feed.origin()
+}
+
+fn show(renderer: &dyn Renderer) -> String {
+    // Must dispatch to `HtmlRenderer::label`: `MySelfish` is not `Self`.
+    renderer.label()
+}
+
 fn main() {
     let loader = Loader {
         origin: "builtin".to_string(),
@@ -80,4 +139,8 @@ fn main() {
 
     let reporter = StderrReporter;
     audit(&reporter);
+
+    let mut feed = FileFeed;
+    let _ = drain(&mut feed);
+    let _ = show(&HtmlRenderer);
 }

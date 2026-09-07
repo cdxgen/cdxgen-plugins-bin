@@ -1692,9 +1692,15 @@ struct TraitImplRecord {
 /// that compiles: a `-> Self` return has a size the caller could not know, a
 /// generic method would need infinitely many vtable entries, and by-value
 /// `self` cannot be dispatched through a pointer. So when a receiver reduces
-/// to such a trait's name, the call site either does not compile as written or
-/// was misparsed — and dispatching to the trait's impls would assert calls the
-/// program cannot make.
+/// to such a trait's name, dispatching to the trait's impls would assert calls
+/// the program cannot make.
+///
+/// The reader is a syntactic approximation of rustc's dyn-compatibility rules,
+/// and it is deliberately biased to under-report: a missed violation costs a
+/// few over-approximating edges, while a false one *deletes* real edges and
+/// tells a reviewer their code is wrong. `Self::Assoc` returns and types whose
+/// names merely contain `Self` are the two shapes that bias exists for — see
+/// [`returns_self_type`].
 #[derive(Debug, Clone)]
 struct TraitDefRecord {
     name: String,
@@ -1738,12 +1744,34 @@ fn non_object_safety_reasons(trait_item: &syn::ItemTrait) -> Vec<String> {
             reasons.push(format!("method `{name}` takes `self` by value"));
         }
         if let syn::ReturnType::Type(_, output) = &method.sig.output
-            && output.to_token_stream().to_string().contains("Self")
+            && returns_self_type(&output.to_token_stream().to_string())
         {
             reasons.push(format!("method `{name}` returns `Self`"));
         }
     }
     reasons
+}
+
+/// Whether a return type as written names `Self` *as a type*.
+///
+/// Two shapes must not read as `Self`, and a substring test gets both wrong:
+///
+/// - `Self::Item`. An associated-item path is not the `Self` type, and a
+///   method returning one stays dispatchable — `Iterator::next` returns
+///   `Option<Self::Item>` and `dyn Iterator<Item = u32>` is the canonical
+///   trait object. Reading this as a violation gates a legal trait out of
+///   dispatch.
+/// - A type whose *name* merely contains `Self`, such as `MySelfish`.
+///
+/// So the test is token-wise: a `Self` token that is not followed by `::`.
+/// `-> Self`, `-> Box<Self>` and `-> Vec<Self>` are all violations, because
+/// each needs the concrete size the caller does not have.
+fn returns_self_type(output_tokens: &str) -> bool {
+    let tokens: Vec<&str> = output_tokens.split_whitespace().collect();
+    tokens
+        .iter()
+        .enumerate()
+        .any(|(index, token)| *token == "Self" && tokens.get(index + 1).copied() != Some("::"))
 }
 
 fn supertrait_requires_sized(trait_item: &syn::ItemTrait) -> bool {
@@ -4008,9 +4036,15 @@ fn build_call_graph(
 
             if candidates.is_empty() {
                 // An empty resolution from a `dyn` receiver on a local trait
-                // that is clearly not object safe is not "unknown target" — it
-                // is a site that cannot compile as written (or a misparse).
-                // Say so, next to the legacy unresolved-call diagnostic.
+                // that reads as not object safe is not "unknown target" — the
+                // trait cannot back a vtable, so dispatching to its impls
+                // would assert calls the program cannot make. Report what was
+                // read and what was withheld, next to the legacy
+                // unresolved-call diagnostic. The message states rusi's own
+                // reading, not a verdict on the code: the reader is a
+                // syntactic approximation of rustc's dyn-compatibility rules,
+                // so a wrong reading here must send a reviewer to this
+                // analyzer, not to their compiler.
                 if let Some((trait_name, reasons)) = object_safety_violation(
                     call,
                     &context,
@@ -4021,10 +4055,10 @@ fn build_call_graph(
                     diagnostics.push(Diagnostic {
                         kind: "object-safety".to_string(),
                         message: format!(
-                            "receiver of trait `{trait_name}` is not object safe ({}); the \
-                             trait cannot appear behind `dyn`, so this call site does not \
-                             compile as written or was misparsed and no dispatch target was \
-                             asserted",
+                            "receiver reads as `dyn {trait_name}`, and `{trait_name}` reads \
+                             as not object safe ({}); a trait object needs a vtable this \
+                             trait cannot have, so no dispatch target was asserted for this \
+                             call",
                             reasons.join("; ")
                         ),
                         package_path: Some(function.package_path.clone()),
@@ -10049,6 +10083,31 @@ pub fn run() {
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].call_type, "trait-impl");
         assert_eq!(reported[0].dispatch_trait.as_deref(), Some("Reporter"));
+
+        // The negative half of the gate. `Feed` returns `Option<Self::Item>`
+        // (the `Iterator` shape) and `Renderer` returns a type merely *named*
+        // `MySelfish`; both are dyn compatible, so both must keep dispatching
+        // and neither may appear in a diagnostic. A substring test for `Self`
+        // fails exactly here, and it fails by deleting real edges.
+        for (method, trait_name) in [("origin", "Feed"), ("label", "Renderer")] {
+            let edges = resolved_edges(&report, method);
+            assert_eq!(
+                edges.len(),
+                1,
+                "`{trait_name}` is dyn compatible, so `{method}` must dispatch to its impl"
+            );
+            assert_eq!(edges[0].call_type, "trait-impl");
+            assert_eq!(edges[0].dispatch_trait.as_deref(), Some(trait_name));
+        }
+        for diagnostic in &object_safety {
+            for dyn_compatible in ["`Feed`", "`Renderer`"] {
+                assert!(
+                    !diagnostic.message.contains(dyn_compatible),
+                    "{dyn_compatible} is dyn compatible and must not be gated: {}",
+                    diagnostic.message
+                );
+            }
+        }
     }
 
     #[test]
@@ -12632,6 +12691,43 @@ mod dyn_dispatch_helper_tests {
         let reasons =
             non_object_safety_reasons(&parse("trait Reporter { fn report(&self, line: String); }"));
         assert!(reasons.is_empty(), "{reasons:?}");
+
+        // `Self::Assoc` is not `Self`: this is `Iterator`, and
+        // `dyn Iterator<Item = u32>` exists.
+        let reasons = non_object_safety_reasons(&parse(
+            "trait Feed { type Item; fn next_item(&mut self) -> Option<Self::Item>; }",
+        ));
+        assert!(reasons.is_empty(), "{reasons:?}");
+
+        // A type whose name merely contains `Self` is not `Self`.
+        let reasons =
+            non_object_safety_reasons(&parse("trait Renderer { fn render(&self) -> MySelfish; }"));
+        assert!(reasons.is_empty(), "{reasons:?}");
+
+        // But `Self` inside a wrapper still needs a size the caller lacks.
+        for output in ["Self", "Box<Self>", "Vec<Self>", "Result<Self, Error>"] {
+            let reasons = non_object_safety_reasons(&parse(&format!(
+                "trait Dup {{ fn dup(&self) -> {output}; }}"
+            )));
+            assert_eq!(
+                reasons.len(),
+                1,
+                "`-> {output}` is a violation: {reasons:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn returns_self_reads_tokens_not_substrings() {
+        assert!(returns_self_type("Self"));
+        assert!(returns_self_type("Box < Self >"));
+        assert!(returns_self_type("Result < Self , Error >"));
+        // Associated items and lookalike names are not `Self`.
+        assert!(!returns_self_type("Option < Self :: Item >"));
+        assert!(!returns_self_type("Self :: Output"));
+        assert!(!returns_self_type("MySelfish"));
+        assert!(!returns_self_type("SelfDescribing"));
+        assert!(!returns_self_type("String"));
     }
 
     #[test]

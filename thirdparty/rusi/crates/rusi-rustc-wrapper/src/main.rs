@@ -2030,6 +2030,20 @@ fn build_call_graph(
                             method: None,
                             candidate_count: None,
                             emitted_candidate_count: None,
+                            // Stable-backend field, deliberately absent here.
+                            // This backend does know the dispatching trait —
+                            // a `ty::Dynamic` receiver carries it as
+                            // `principal_def_id()` — but the only trait text
+                            // reaching this point is `receiver_type`, which
+                            // `normalize_type_name` has already stripped of
+                            // spaces and generic arguments. Deriving a
+                            // published identifier from that mangled form
+                            // would sometimes name the wrong trait, which is
+                            // worse than naming none. Populating it properly
+                            // means carrying the principal trait through
+                            // `ResolvedCall`/`MirCall` from the point the
+                            // receiver type is still a `Ty`.
+                            dispatch_trait: None,
                             properties,
                         });
                 }
@@ -2165,6 +2179,8 @@ fn build_call_graph(
                     method: None,
                     candidate_count: None,
                     emitted_candidate_count: None,
+                    // Absent for the same reason as the MIR path above.
+                    dispatch_trait: None,
                     properties,
                 });
         }
