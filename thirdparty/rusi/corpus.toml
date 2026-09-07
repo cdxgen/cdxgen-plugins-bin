@@ -87,6 +87,24 @@ tier = "fixtures"
 path = "fixtures/dyn-dispatch-app"
 capabilities = ["traits", "dyn-dispatch", "over-approx"]
 
+[[fixtures]]
+slug = "dyn-bounds-app"
+tier = "fixtures"
+path = "fixtures/dyn-bounds-app"
+capabilities = ["traits", "dyn-dispatch", "multi-bound", "principal-trait"]
+
+[[fixtures]]
+slug = "dyn-collection-app"
+tier = "fixtures"
+path = "fixtures/dyn-collection-app"
+capabilities = ["traits", "dyn-dispatch", "collections", "element-typing"]
+
+[[fixtures]]
+slug = "dyn-object-unsafe-app"
+tier = "fixtures"
+path = "fixtures/dyn-object-unsafe-app"
+capabilities = ["traits", "dyn-dispatch", "object-safety", "dispatch-gate"]
+
 # ---------------------------------------------------------------------------
 # Small tier - cloned once, cached, run on every change.
 # ---------------------------------------------------------------------------

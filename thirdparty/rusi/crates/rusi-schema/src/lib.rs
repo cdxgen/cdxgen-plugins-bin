@@ -554,6 +554,14 @@ pub struct CallGraphEdge {
     /// a sample of `candidate_count`, not the whole set".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emitted_candidate_count: Option<usize>,
+    /// Trait whose vtable dispatches this call, when the receiver is a trait
+    /// object (`&dyn Store`) and the target resolved through that trait's impls.
+    /// A trait object carries one vtable — the principal trait's — so the trait
+    /// names exactly which set of impls the call can reach. Absent for every
+    /// other resolution shape, including blanket-impl dispatch, where no single
+    /// trait is selected by the receiver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_trait: Option<String>,
     /// Backend-specific extras (compiler-backend dispatch metadata). Empty for
     /// everything the stable backend models with the typed fields above.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]

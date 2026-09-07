@@ -240,6 +240,12 @@ fn render_call_graph_graphml(call_graph: &CallGraph) -> String {
         push_graphml_data(&mut xml, "edge_call_type", &edge.call_type, 3);
         push_graphml_data(
             &mut xml,
+            "edge_dispatch_trait",
+            edge.dispatch_trait.as_deref().unwrap_or(""),
+            3,
+        );
+        push_graphml_data(
+            &mut xml,
             "edge_position_filename",
             exported.position_filename,
             3,
@@ -334,6 +340,7 @@ fn render_call_graph_gexf(call_graph: &CallGraph) -> String {
             ("target_purl", "targetPurl", "string"),
             ("purls", "purls", "string"),
             ("call_type", "callType", "string"),
+            ("dispatch_trait", "dispatchTrait", "string"),
             ("position_filename", "positionFilename", "string"),
             ("position_line", "positionLine", "integer"),
             ("position_column", "positionColumn", "integer"),
@@ -398,6 +405,12 @@ fn render_call_graph_gexf(call_graph: &CallGraph) -> String {
         push_gexf_attvalue(&mut xml, "target_purl", exported.target_purl, 5);
         push_gexf_attvalue(&mut xml, "purls", &json_text(&exported.purls), 5);
         push_gexf_attvalue(&mut xml, "call_type", &edge.call_type, 5);
+        push_gexf_attvalue(
+            &mut xml,
+            "dispatch_trait",
+            edge.dispatch_trait.as_deref().unwrap_or(""),
+            5,
+        );
         push_gexf_attvalue(&mut xml, "position_filename", exported.position_filename, 5);
         push_gexf_attvalue(&mut xml, "position_line", &edge.line.to_string(), 5);
         push_gexf_attvalue(&mut xml, "position_column", &edge.column.to_string(), 5);
@@ -937,6 +950,7 @@ mod tests {
                 method: None,
                 candidate_count: None,
                 emitted_candidate_count: None,
+                dispatch_trait: None,
                 properties: Default::default(),
             }],
             diagnostics: vec![Diagnostic {

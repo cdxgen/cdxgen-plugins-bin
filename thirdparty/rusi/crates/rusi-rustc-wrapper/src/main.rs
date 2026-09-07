@@ -605,6 +605,7 @@ impl EmbeddedCollector {
                 target_names: vec![declaration.qualified_name.clone()],
                 candidate_receivers: declaration.receiver.clone().into_iter().collect(),
                 receiver_type: declaration.receiver.clone(),
+                dispatch_trait: None,
                 specialization_key: declaration.qualified_name.clone(),
                 semantic_tags: semantic_tags_for_call(
                     &declaration.qualified_name,
@@ -650,6 +651,7 @@ impl EmbeddedCollector {
                 target_names: target_names.clone(),
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
+                dispatch_trait: None,
                 specialization_key: specialization_key_from_parts(
                     None,
                     &semantic_tags,
@@ -1239,6 +1241,10 @@ struct ResolvedCall {
     target_names: Vec<String>,
     candidate_receivers: Vec<String>,
     receiver_type: Option<String>,
+    /// Trait whose vtable dispatched this call. `Some` only for a
+    /// `ty::Dynamic` receiver whose targets were found through that trait's
+    /// impls; see [`DynCandidates`].
+    dispatch_trait: Option<String>,
     specialization_key: String,
     semantic_tags: Vec<String>,
     async_boundary: bool,
@@ -1255,6 +1261,7 @@ impl ResolvedCall {
             target_names: Vec::new(),
             candidate_receivers: Vec::new(),
             receiver_type: None,
+            dispatch_trait: None,
             specialization_key: "unresolved".to_string(),
             semantic_tags: Vec::new(),
             async_boundary: false,
@@ -1450,6 +1457,7 @@ impl MirBlock {
                         target_names: resolved.target_names,
                         candidate_receivers: resolved.candidate_receivers,
                         receiver_type: resolved.receiver_type,
+                        dispatch_trait: resolved.dispatch_trait,
                         specialization_key: resolved.specialization_key,
                         semantic_tags: resolved.semantic_tags,
                         async_boundary: resolved.async_boundary,
@@ -1515,6 +1523,7 @@ fn callable_candidate_resolution(
         target_names: target_names.clone(),
         candidate_receivers: Vec::new(),
         receiver_type: None,
+        dispatch_trait: None,
         specialization_key: specialization_key_from_parts(None, &semantic_tags, &target_names),
         semantic_tags,
         async_boundary: false,
@@ -1620,6 +1629,7 @@ struct MirCall {
     target_names: Vec<String>,
     candidate_receivers: Vec<String>,
     receiver_type: Option<String>,
+    dispatch_trait: Option<String>,
     specialization_key: String,
     semantic_tags: Vec<String>,
     async_boundary: bool,
@@ -2030,6 +2040,7 @@ fn build_call_graph(
                             method: None,
                             candidate_count: None,
                             emitted_candidate_count: None,
+                            dispatch_trait: call.dispatch_trait.clone(),
                             properties,
                         });
                 }
@@ -2165,6 +2176,7 @@ fn build_call_graph(
                     method: None,
                     candidate_count: None,
                     emitted_candidate_count: None,
+                    dispatch_trait: call.resolved.dispatch_trait.clone(),
                     properties,
                 });
         }
@@ -6314,12 +6326,25 @@ fn resolve_method_call(
     } else {
         "static"
     };
-    let (target_ids, target_names, candidate_receivers) = if call_type == "dyn-dispatch" {
+    // Only a `ty::Dynamic` receiver dispatches through a vtable, and
+    // `call_type` above is exactly that test. A `trait-static` call reaches a
+    // trait's method too, but it is resolved statically and selects no vtable,
+    // so it reports no dispatching trait.
+    let DynCandidates {
+        ids: target_ids,
+        names: target_names,
+        receivers: candidate_receivers,
+        dispatch_trait,
+    } = if call_type == "dyn-dispatch" {
         enumerate_dyn_candidates(tcx, receiver_ty, def_id, function_ids)
     } else {
         let (ids, names) = target_for_def_id(tcx, def_id, function_ids);
-        let receiver_candidates = receiver_type.clone().into_iter().collect();
-        (ids, names, receiver_candidates)
+        DynCandidates {
+            ids,
+            names,
+            receivers: receiver_type.clone().into_iter().collect(),
+            dispatch_trait: None,
+        }
     };
     let native_boundary = modeled_native_boundary(&symbol)
         || target_names
@@ -6348,6 +6373,7 @@ fn resolve_method_call(
         target_names,
         candidate_receivers,
         receiver_type: receiver_type.clone(),
+        dispatch_trait,
         specialization_key,
         semantic_tags,
         async_boundary,
@@ -6386,6 +6412,7 @@ fn resolve_expr_call(
                 target_names,
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
+                dispatch_trait: None,
                 specialization_key: specialization_key_from_parts(None, &semantic_tags, &[]),
                 semantic_tags: semantic_tags.clone(),
                 async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
@@ -6410,6 +6437,7 @@ fn resolve_expr_call(
                     target_names,
                     candidate_receivers: Vec::new(),
                     receiver_type: None,
+                    dispatch_trait: None,
                     specialization_key: specialization_key_from_parts(None, &semantic_tags, &[]),
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
@@ -6433,6 +6461,7 @@ fn resolve_expr_call(
                     target_names,
                     candidate_receivers: Vec::new(),
                     receiver_type: None,
+                    dispatch_trait: None,
                     specialization_key: specialization_key_from_parts(None, &semantic_tags, &[]),
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
@@ -6447,6 +6476,7 @@ fn resolve_expr_call(
                 target_names: Vec::new(),
                 candidate_receivers: Vec::new(),
                 receiver_type: None,
+                dispatch_trait: None,
                 specialization_key: "fn-pointer".to_string(),
                 semantic_tags: vec!["fn-pointer".to_string()],
                 async_boundary: false,
@@ -6474,15 +6504,40 @@ fn target_for_def_id(
     )
 }
 
+/// What a `dyn` receiver's method call resolved to.
+///
+/// `dispatch_trait` is `Some` only when the targets in `ids` were found by
+/// walking a trait's impls: that trait owns the called method, so it is the
+/// trait whose vtable dispatches the call. Every fallback path below resolves
+/// the callee directly instead, and reports no trait, because none was used.
+struct DynCandidates {
+    ids: Vec<String>,
+    names: Vec<String>,
+    receivers: Vec<String>,
+    dispatch_trait: Option<String>,
+}
+
+impl DynCandidates {
+    /// The callee resolved without going through a trait's impls.
+    fn without_trait(ids: Vec<String>, names: Vec<String>) -> Self {
+        Self {
+            ids,
+            names,
+            receivers: Vec::new(),
+            dispatch_trait: None,
+        }
+    }
+}
+
 fn enumerate_dyn_candidates(
     tcx: TyCtxt<'_>,
     receiver_ty: Ty<'_>,
     method_def_id: DefId,
     function_ids: &HashMap<LocalDefId, String>,
-) -> (Vec<String>, Vec<String>, Vec<String>) {
+) -> DynCandidates {
     let Some(assoc) = tcx.opt_associated_item(method_def_id) else {
         let (ids, names) = target_for_def_id(tcx, method_def_id, function_ids);
-        return (ids, names, Vec::new());
+        return DynCandidates::without_trait(ids, names);
     };
     let trait_item = assoc.trait_item_def_id().unwrap_or(method_def_id);
     let Some(trait_def_id) = tcx
@@ -6490,7 +6545,7 @@ fn enumerate_dyn_candidates(
         .and_then(|item| item.trait_container(tcx))
     else {
         let (ids, names) = target_for_def_id(tcx, method_def_id, function_ids);
-        return (ids, names, Vec::new());
+        return DynCandidates::without_trait(ids, names);
     };
     let method_name = tcx.associated_item(trait_item).name();
     let mut ids = Vec::new();
@@ -6531,9 +6586,17 @@ fn enumerate_dyn_candidates(
     }
     if ids.is_empty() {
         let (ids, names) = target_for_def_id(tcx, method_def_id, function_ids);
-        (ids, names, Vec::new())
+        DynCandidates::without_trait(ids, names)
     } else {
-        (ids, names, receivers)
+        DynCandidates {
+            ids,
+            names,
+            receivers,
+            // The bare trait name, matching what the stable backend emits, so
+            // the field joins across backends rather than carrying a full path
+            // in one and a short name in the other.
+            dispatch_trait: Some(tcx.item_name(trait_def_id).to_string()),
+        }
     }
 }
 
