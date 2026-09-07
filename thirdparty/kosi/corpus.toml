@@ -1,0 +1,120 @@
+# kosi corpus manifest. Modeled on rusi's corpus.toml (06-CORPUS.md).
+#
+# Tiers:
+#   fixtures - bundled micro-projects under fixtures/, no network, run on every change
+#   small    - small real repos, SHA-pinned, fetched into .corpus-cache/<slug>/, run on every change
+#   medium   - larger repos, per phase / nightly (entries land with their enabling phase)
+#   large    - on demand
+#   android / kmp / hybrid - per phase
+#   vuln     - intentionally vulnerable, ground truth, every change
+#   ported   - DroidBench/Ghera cases rewritten in idiomatic Kotlin, every change
+#
+# capabilities are recorded, not enforced. expected_flows points at a JSONL
+# file of hand-annotated ground truth for pinned repos; bundled fixtures carry
+# their expectations as kosi:want annotations in the sources themselves.
+
+[[fixtures]]
+slug = "scope-functions"
+tier = "fixtures"
+path = "fixtures/scope-functions"
+capabilities = ["scope-functions", "null-safety"]
+
+[[fixtures]]
+slug = "null-safety"
+tier = "fixtures"
+path = "fixtures/null-safety"
+capabilities = ["elvis-join", "safe-call"]
+
+[[fixtures]]
+slug = "string-template"
+tier = "fixtures"
+path = "fixtures/string-template"
+capabilities = ["string-template"]
+
+[[fixtures]]
+slug = "data-class-copy"
+tier = "fixtures"
+path = "fixtures/data-class-copy"
+capabilities = ["data-class", "copy"]
+
+[[fixtures]]
+slug = "sealed-when"
+tier = "fixtures"
+path = "fixtures/sealed-when"
+capabilities = ["sealed", "when-exhaustive"]
+
+[[fixtures]]
+slug = "coroutine-suspend"
+tier = "fixtures"
+path = "fixtures/coroutine-suspend"
+capabilities = ["coroutines", "suspend", "structured-concurrency"]
+
+[[fixtures]]
+slug = "sqli-jdbc-concat"
+tier = "fixtures"
+path = "fixtures/sqli-jdbc-concat"
+capabilities = ["sqli", "jdbc"]
+
+[[fixtures]]
+slug = "command-exec"
+tier = "fixtures"
+path = "fixtures/command-exec"
+capabilities = ["command-exec", "process"]
+# known-fail=1 lives in the fixture sources: no flow engine exists at the
+# syntax tier yet.
+
+[[fixtures]]
+slug = "weak-crypto"
+tier = "fixtures"
+path = "fixtures/weak-crypto"
+capabilities = ["crypto", "weak-digest", "ecb"]
+
+[[fixtures]]
+slug = "log-injection"
+tier = "fixtures"
+path = "fixtures/log-injection"
+capabilities = ["log-injection"]
+
+[[fixtures]]
+slug = "parse-error-reporting"
+tier = "fixtures"
+path = "fixtures/parse-error-reporting"
+capabilities = ["diagnostics", "parse-error"]
+
+[[fixtures]]
+slug = "java-interop"
+tier = "fixtures"
+path = "fixtures/java-interop"
+capabilities = ["java-interop", "mixed-sources"]
+
+[[fixtures]]
+slug = "multi-module-gradle"
+tier = "fixtures"
+path = "fixtures/multi-module-gradle"
+capabilities = ["gradle-multi-module", "version-clamp"]
+
+[[fixtures]]
+slug = "maven-project"
+tier = "fixtures"
+path = "fixtures/maven-project"
+capabilities = ["maven", "jvm-target"]
+
+[[fixtures]]
+slug = "kmp-jvm-android"
+tier = "fixtures"
+path = "fixtures/kmp-jvm-android"
+capabilities = ["kmp", "expect-actual", "source-sets"]
+
+[[fixtures]]
+slug = "android-compose-app"
+tier = "fixtures"
+path = "fixtures/android-compose-app"
+capabilities = ["android", "variants", "log"]
+
+[[fixtures]]
+slug = "ktor-samples"
+tier = "small"
+# Pinned 2026-09-07 to main.
+repo = "https://github.com/ktorio/ktor-samples"
+sha = "69dcff3fa81daa85f936cfb7f17007761363c303"
+capabilities = ["ktor", "web", "coroutines"]

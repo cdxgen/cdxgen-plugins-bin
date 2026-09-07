@@ -2,10 +2,10 @@
 set -e
 
 rm -rf plugins/trivy plugins/osquery plugins/dosai plugins/sourcekitten
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-for plug in trivy trustinspector golem rusi cdxui cdxrs
+for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug

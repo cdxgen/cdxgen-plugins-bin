@@ -1,0 +1,131 @@
+name: kosi test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "thirdparty/kosi/**"
+      - ".github/workflows/kosi-test.yml"
+  pull_request:
+    paths:
+      - "thirdparty/kosi/**"
+      - ".github/workflows/kosi-test.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    working-directory: thirdparty/kosi
+
+jobs:
+  # Unit tests + the fixture-tier corpus ratchet (both modes) + digest goldens.
+  # Every tier task named in the docs is exercised here; a renamed or missing
+  # tier task fails this job.
+  test:
+    name: gradle build + corpusQuick + golden
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Gradle build (unit + fixture tiers)
+        run: ./gradlew build --no-daemon
+      - name: Corpus ratchet (fixtures tier, security + all)
+        run: ./gradlew corpusQuick --no-daemon
+      - name: Digest goldens
+        run: ./gradlew golden --no-daemon
+      - name: Tier task presence
+        run: ./gradlew corpusTierList --no-daemon --console=plain -q
+
+  # Pinned real-repo tiers. Fetches through git into .corpus-cache/ at exact
+  # SHAs; a repo that moves upstream still resolves because of the pin.
+  corpus-full:
+    name: corpusFull (fixtures + pinned repos)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Corpus full tier
+        run: ./gradlew corpusFull --no-daemon
+
+  # The native-image spike must keep working: build the host binary, verify it
+  # runs and that its output is byte-identical across runs. The build peaks
+  # well under 2 GiB (serial GC, -Os), so standard runners suffice. Linux runs
+  # on demand (workflow_dispatch) to keep per-push CI time unchanged.
+  native:
+    name: make native (darwin-arm64)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned GraalVM (see Makefile GRAAL_HOME)
+        run: |
+          mkdir -p "$HOME/tools"
+          curl -sL -o /tmp/graalvm.tar.gz \
+            https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
+          echo "ebfab1d74420f355a459076162012d6835fa6068bd9d2f230f1fcaf7ee0dd923  /tmp/graalvm.tar.gz" | shasum -a 256 -c -
+          tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+      - name: make native
+        run: make native
+      - name: Binary smoke (version + determinism)
+        run: |
+          ./build/kosi-darwin-arm64 version
+          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
+          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          cmp /tmp/a.json /tmp/b.json
+      - name: Reachability metadata drift check
+        run: make native-metadata-check
+
+  # On-demand (workflow_dispatch): the linux-native path through the pinned
+  # GraalVM, exercising `make linux` exactly as the release workflow calls it.
+  native-linux:
+    name: make linux (linux-amd64, on demand)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned GraalVM (see Makefile GRAAL_HOME)
+        run: |
+          mkdir -p "$HOME/tools"
+          curl -sL -o /tmp/graalvm.tar.gz \
+            https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-amd64_bin.tar.gz
+          # Integrity comes from the HTTPS-pinned release asset; a truncated
+          # tar fails extraction. Record the sha256 in docs/BUILD.md at the
+          # first successful run so it can be pinned like the macOS one.
+          tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+          "$HOME/tools"/graalvm-community-*/bin/native-image --version
+      - name: make linux
+        run: make linux
+      - name: Binary smoke
+        run: |
+          ./build/kosi-linux-amd64 version
+          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
+          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          cmp /tmp/a.json /tmp/b.json

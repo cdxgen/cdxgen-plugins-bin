@@ -1,0 +1,21 @@
+# One Kotlin version property per 08-VERSION-POLICY.md policy 1: it sets the
+# compiler, the Analysis API artifacts and the published ceiling
+# (runtime.kotlinVersion). Bump on every stable release; track the EAP in CI
+# only, never in the release.
+[versions]
+kotlin = "2.4.0"
+
+[libraries]
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+kotlin-compiler-embeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
+# Alias note: the accessors avoid `for` (a Kotlin keyword), so the
+# analysis-api-for-ide artifact is aliased `analysis-api-ide` and
+# analysis-api-standalone-for-ide is aliased `analysis-api-standalone-ide`.
+analysis-api-ide = { module = "org.jetbrains.kotlin:analysis-api-for-ide", version.ref = "kotlin" }
+analysis-api-standalone-ide = { module = "org.jetbrains.kotlin:analysis-api-standalone-for-ide", version.ref = "kotlin" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+kotlin-test-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlin" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "1.13.4" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

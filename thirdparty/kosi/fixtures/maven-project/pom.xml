@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.kosi.fixtures</groupId>
+  <artifactId>maven-fixture</artifactId>
+  <version>0.3.0</version>
+  <properties>
+    <maven.compiler.target>17</maven.compiler.target>
+  </properties>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-maven-plugin</artifactId>
+        <configuration>
+          <!-- Deliberately below the bundled compiler's supported band: the
+             clamp diagnostic proves kosi actually parsed this block (Maven
+             settings are read as XML, not as a Gradle-style brace block). -->
+          <languageVersion>1.9</languageVersion>
+          <jvmTarget>17</jvmTarget>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
