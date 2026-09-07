@@ -939,3 +939,158 @@ fn cli_cryptos_command_filters_to_crypto_flows_and_paths() -> Result<()> {
     }));
     Ok(())
 }
+
+/// Run one fixture through one backend and return its call graph.
+fn analyze_with_backend(fixture: &str, backend: &str) -> Result<Report> {
+    let binary = std::env::var("CARGO_BIN_EXE_rusi")?;
+    let mut args = vec![
+        "analyze".to_string(),
+        "--dir".to_string(),
+        fixture_path(fixture).to_string_lossy().to_string(),
+        "--backend".to_string(),
+        backend.to_string(),
+        "--callgraph".to_string(),
+        "static".to_string(),
+        "--dataflow".to_string(),
+        "none".to_string(),
+    ];
+    // `--toolchain auto` prefers a nightly, and a nightly outside the narrow
+    // `rustc_private` window cannot build the embedded wrapper, so on such a
+    // machine every compiler-backend assertion below skips itself. Setting
+    // `RUSI_TEST_TOOLCHAIN=stable` (with the `rustc-dev` and `rust-src`
+    // components installed, as `rust-toolchain.toml` specifies) pins the
+    // toolchain so the assertions actually run. Without this there is no way
+    // to make them execute on a machine whose nightly has drifted, and a
+    // suite that cannot be made to run is a suite nobody trusts.
+    if let Ok(toolchain) = std::env::var("RUSI_TEST_TOOLCHAIN") {
+        args.push("--toolchain".to_string());
+        args.push(toolchain);
+    }
+    let output = Command::new(&binary).args(&args).output()?;
+    assert!(
+        output.status.success(),
+        "{fixture}/{backend} cli stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+/// True when the embedded rustc collector actually ran.
+///
+/// The `rustc_private` API window is narrow, so on a machine whose resolved
+/// toolchain is outside it the driver reports `backend-error` and falls back to
+/// stable evidence. A compiler-backend assertion made against that fallback
+/// would be testing the stable backend under another name, so callers skip.
+/// The skip is announced rather than silent: a test that quietly asserts
+/// nothing is worse than one that fails.
+fn embedded_compiler_ran(report: &Report, context: &str) -> bool {
+    let ran = report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == "compiler-source-evidence");
+    if !ran {
+        eprintln!(
+            "SKIP {context}: embedded rustc collector unavailable, \
+             compiler-backend assertions not exercised"
+        );
+    }
+    ran
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn both_backends_name_the_same_dispatching_trait() -> Result<()> {
+    // A trait object carries one vtable, so both backends should name the same
+    // trait for the same dispatched call. They reach it by different routes:
+    // the stable backend reduces the written receiver type, the compiler
+    // backend takes the trait owning the called method from `TyCtxt`. If they
+    // disagree, `dispatch_trait` cannot be joined across backends and is not
+    // worth publishing.
+    //
+    // `dyn-bounds-app` is the fixture for the compiler half. It is the one
+    // whose receiver is a bare `&(dyn Store + Send + Sync)`, which is what
+    // `resolve_method_call` recognises as `ty::Dynamic`. See the two tests
+    // below for why the other dyn fixtures cannot serve here.
+    //
+    // The trait name is asserted literally. "Some trait is named" passes
+    // against the wrong trait, which is the failure this test exists to catch.
+    let stable = analyze_with_backend("dyn-bounds-app", "stable")?;
+    let stable_traits: Vec<&str> = stable
+        .call_graph
+        .as_ref()
+        .expect("stable call graph")
+        .edges
+        .iter()
+        .filter(|edge| edge.method.as_deref() == Some("persist"))
+        .filter_map(|edge| edge.dispatch_trait.as_deref())
+        .collect();
+    assert!(
+        !stable_traits.is_empty(),
+        "stable backend must dispatch `persist` through a trait"
+    );
+    for named in &stable_traits {
+        assert_eq!(*named, "Store", "stable backend named the wrong trait");
+    }
+
+    let compiler = analyze_with_backend("dyn-bounds-app", "compiler")?;
+    if !embedded_compiler_ran(&compiler, "both_backends_name_the_same_dispatching_trait") {
+        return Ok(());
+    }
+    let compiler_graph = compiler.call_graph.as_ref().expect("compiler call graph");
+    let dyn_edges: Vec<_> = compiler_graph
+        .edges
+        .iter()
+        .filter(|edge| edge.call_type.starts_with("dyn-dispatch"))
+        .collect();
+    assert!(
+        !dyn_edges.is_empty(),
+        "compiler backend must see `&(dyn Store + Send + Sync)` as vtable dispatch"
+    );
+    for edge in dyn_edges {
+        assert_eq!(
+            edge.dispatch_trait.as_deref(),
+            Some("Store"),
+            "backends disagree on the trait dispatching `persist`; \
+             compiler-side receiver text was {:?}",
+            edge.receiver
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+fn compiler_backend_names_no_trait_outside_vtable_dispatch() -> Result<()> {
+    // The negative half. `dispatch_trait` means "the receiver is a trait
+    // object and the target resolved through that trait's impls". A change
+    // that sets it on every call reaching a trait method, or on every call at
+    // all, passes the agreement test above and fails here.
+    let report = analyze_with_backend("dyn-bounds-app", "compiler")?;
+    if !embedded_compiler_ran(
+        &report,
+        "compiler_backend_names_no_trait_outside_vtable_dispatch",
+    ) {
+        return Ok(());
+    }
+    let graph = report.call_graph.as_ref().expect("compiler call graph");
+    for edge in &graph.edges {
+        if edge.call_type.starts_with("dyn-dispatch") {
+            continue;
+        }
+        assert_eq!(
+            edge.dispatch_trait, None,
+            "`{}` is not vtable dispatch, so it must name no trait",
+            edge.call_type
+        );
+    }
+    // `trait-static` edges are the ones that make this assertion mean
+    // something: they reach a trait's method without a vtable.
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.call_type.starts_with("trait-static")),
+        "fixture must contain static trait calls for this test to bite"
+    );
+    Ok(())
+}
