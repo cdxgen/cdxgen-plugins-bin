@@ -96,10 +96,11 @@ define build_native
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
 	$(graal_env) native-image -jar modules/kosi-cli/build/dist/kosi-all.jar \
 	  -Os --gc=serial \
-	  -H:ConfigurationFileDirectories=native-metadata/merged \
-	  -H:DynamicProxyConfigurationFiles=native-metadata/proxy-config.json \
-	  -H:IncludeResources='^kosi-ext/META-INF/extensions/.*\.xml$$|^META-INF/services/.*|^META-INF/.*\.xml' \
-	  --initialize-at-run-time=org.jetbrains.kotlin.com.intellij.openapi.util.registry.EarlyAccessRegistry \
+	  -H:ConfigurationFileDirectories=native-metadata/kosi \
+	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
+	  -H:+UnlockExperimentalVMOptions \
+	  -H:+AddAllCharsets \
+	  --enable-monitoring=jfr \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
 	@cd $(build_dir) && shasum -a 256 $(notdir $(2)) > $(notdir $(2)).sha256
@@ -108,16 +109,16 @@ endef
 $(build_dir):
 	mkdir -p "$(build_dir)"
 
-$(build_dir)/kosi-darwin-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
 
-$(build_dir)/kosi-linux-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
 
-$(build_dir)/kosi-linuxmusl-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
 	$(call build_native,--static --libc=musl,$(build_dir)/kosi-linuxmusl-$*)
 
-$(build_dir)/kosi-windows-%.exe: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-windows-$*.exe)
 
 ## native: host-platform binary (whichever family this machine is).
@@ -173,9 +174,14 @@ linuxmusl: check-linuxmusl-host $(build_dir)/kosi-linuxmusl-$(host_arch)
 ## windows: host-arch Windows binary (MSVC toolchain; docs/BUILD.md §6).
 windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 
-## native-metadata: re-run the tracing agent over the whole fixture tree and
+## native-metadata: re-run the tracing agent over the whole fixture tree —
+## syntax AND resolved backends (the resolved pass exercises the Analysis
+## API session, the reflection/ServiceLoader heart of the binary) — and
 ## merge the result into native-metadata/kosi. CI fails if the checked-in
 ## metadata differs from what the agent produces (native-metadata-check).
+## The JetBrains compiler metadata is no longer used: P1 moved the substrate
+## from the shaded kotlin-compiler-embeddable to the unrelocated -for-ide
+## artifacts, whose reflection surface the agent re-derives from our runs.
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
@@ -183,6 +189,8 @@ native-metadata:
 	  slug=$$(basename $$f); \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \
 	    -jar modules/kosi-cli/build/dist/kosi-all.jar analyze --dir $$f --out /dev/null; \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
+	    -jar modules/kosi-cli/build/dist/kosi-all.jar analyze --backend resolved --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 

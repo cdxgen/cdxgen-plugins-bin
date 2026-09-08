@@ -123,6 +123,7 @@ object ResolvedAnalyzer {
         val diagnostics = mutableListOf<Diagnostic>()
         var callsTotal = 0
         var callsResolved = 0
+        val unresolvedSample = mutableListOf<String>()
         val errorCodes = LinkedHashMap<String, Int>()
 
         if (ktFile != null) {
@@ -313,8 +314,13 @@ object ResolvedAnalyzer {
                 } catch (_: Exception) {
                     false
                 }
-                if (resolved) callsResolved++
+                if (resolved) {
+                    callsResolved++
+                } else if (System.getenv("KOSI_TRACE") != null && unresolvedSample.size < 25) {
+                    unresolvedSample.add(relativePath + ": " + expression.text.take(80))
+                }
             }
+            for (u in unresolvedSample) System.err.println("UNRESOLVED: " + u)
 
             // Resolution diagnostics, summarised: per-error floods would dwarf
             // the evidence on real projects; the count is the signal.

@@ -54,6 +54,7 @@ object StandaloneSessionProbe {
                 )
             }
         } catch (t: Throwable) {
+            if (System.getenv("KOSI_PROBE_TRACE") != null) t.printStackTrace()
             val cause = generateSequence(t as Throwable?) { it.cause }
                 .firstOrNull { it is NoClassDefFoundError || it is ClassNotFoundException }
             ProbeResult(

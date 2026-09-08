@@ -1,0 +1,65 @@
+# 08-VERSION-POLICY.md policy 2: track the EAP in CI, not in the release.
+# Builds kosi against the newest Kotlin EAP/RC and runs the full corpus,
+# including the eap tier's future-syntax fixture. Failure is a warning, not a
+# release blocker — this is what turns "the Analysis API broke us" into a
+# known, scheduled repair instead of a post-release surprise. The kotlin
+# version is overridden through the -PkotlinVersion build property; the
+# gradle/libs.versions.toml pins stay the release ones.
+name: kosi eap
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # weekly, Mondays 05:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    working-directory: thirdparty/kosi
+
+jobs:
+  corpus:
+    name: corpus against newest Kotlin RC
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Resolve newest Kotlin EAP/RC version
+        id: eap
+        run: |
+          # The newest non-stable 2.x Kotlin version on the dev repo
+          # (maven central only carries stable builds).
+          latest=$(curl -s "https://redirector.kotlinlang.org/maven/kotlin-dev/org/jetbrains/kotlin/kotlin-compiler/maven-metadata.xml" \
+            | grep -oE "<version>2\.[0-9.]+(-(RC|Beta|Alpha)[0-9]*|-dev-[0-9]+)</version>" \
+            | sed -E 's/<\/?version>//g' | sort -V | tail -1)
+          echo "version=${latest:-2.4.20-RC}" >> "$GITHUB_OUTPUT"
+          echo "tracking Kotlin $latest"
+      - name: Build against the EAP
+        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} build --no-daemon || true
+      - name: Corpus ratchet (fixtures, both syntax slots + resolved)
+        id: corpusQuick
+        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} corpusQuick --no-daemon
+      - name: eap tier (future-syntax fixture)
+        id: eapTier
+        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} kosiEap --no-daemon
+      - name: Report (the job warns; it never blocks a release)
+        if: always()
+        run: |
+          {
+            echo "EAP run against Kotlin ${{ steps.eap.outputs.version }} finished."
+            echo "corpusQuick: ${{ steps.corpusQuick.outcome }}"
+            echo "eap tier: ${{ steps.eapTier.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"

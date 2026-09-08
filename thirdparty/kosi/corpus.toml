@@ -142,4 +142,43 @@ tier = "small"
 # Pinned 2026-09-07 to main.
 repo = "https://github.com/ktorio/ktor-samples"
 sha = "69dcff3fa81daa85f936cfb7f17007761363c303"
+classpath_file = "classpath.txt"
 capabilities = ["ktor", "web", "coroutines"]
+
+# P1 gate: five pinned real repos spanning Spring / Ktor / Android / KMP /
+# mixed-Java. resolvedCallRatio is reported PER REPO against these (never an
+# average), and the hybrid entry declares old language versions so the clamp
+# path is exercised on real code (08-VERSION-POLICY.md §4). Pinned
+# 2026-09-08.
+
+[[fixtures]]
+slug = "spring-fu"
+tier = "medium"
+repo = "https://github.com/spring-attic/spring-fu"
+sha = "8f8775ec5a5e69e9835fff356804e0b183161333"
+classpath_file = "classpath.txt"
+capabilities = ["spring", "dsl", "coroutines"]
+
+[[fixtures]]
+slug = "nowinandroid"
+tier = "android"
+repo = "https://github.com/android/nowinandroid"
+sha = "12f80da6518e161ed16a06a68e71fb8a873576d6"
+classpath_file = "classpath.txt"
+capabilities = ["android", "compose", "hilt", "multi-module"]
+
+[[fixtures]]
+slug = "kampkit"
+tier = "kmp"
+repo = "https://github.com/touchlab/KaMPKit"
+sha = "93f563a05de78f5b6512c0572e704ceb23b37aab"
+classpath_file = "classpath.txt"
+capabilities = ["kmp", "ios", "sqliter"]
+
+[[fixtures]]
+slug = "anki-android"
+tier = "hybrid"
+repo = "https://github.com/ankidroid/Anki-Android"
+sha = "b1d3c81dfe304c19bf544a33923ab1042e28fe4b"
+classpath_file = "classpath.txt"
+capabilities = ["android", "mixed-java", "legacy-language-version"]

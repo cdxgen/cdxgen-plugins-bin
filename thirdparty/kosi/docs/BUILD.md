@@ -58,19 +58,27 @@ cmp /tmp/a.json /tmp/b.json
 | build-time class-init clashes | `--initialize-at-run-time=...EarlyAccessRegistry`; `--trace-class-initialization` documents any further clashes | minimal list, grows on evidence |
 | reachability drift when the Kotlin pin bumps | `make native-metadata` re-runs the tracing agent over every fixture and deterministically re-merges (`scripts/merge-agent-metadata.py`); `make native-metadata-check` fails CI on drift | wired |
 
-## 3. Reachability metadata provenance
+## 3. Reachability metadata provenance (rewritten at P1)
 
-- Seed: JetBrains' own compiler image config, pinned to
-  `JetBrains/kotlin@4d1f6aaf3c0e2e47b2da9f7829ccdf551774bd26`,
-  file `prepare/compiler-native-image/resources/META-INF/native-image/org/jetbrains/kotlin/kotlin-compiler-embeddable/reachability-metadata.json`
-  (checked in at `native-metadata/jetbrains/`). **Deviation, recorded:** the
-  `prepare/compiler-native-image` module does not exist at the `v2.4.0` tag —
-  it only exists on master — so the pin is a master commit, not the release
-  tag.
-- Refined by the GraalVM tracing agent over all 16 fixtures
-  (`native-metadata/kosi/reachability-metadata.json`, regenerated with
-  `make native-metadata`; deterministic merge so CI can diff it).
-- Hand-maintained proxy groups: `native-metadata/proxy-config.json`.
+P1 moved the substrate from the shaded `kotlin-compiler-embeddable` to the
+unrelocated `-for-ide` artifacts plus the unrelocated IntelliJ platform
+(02-ARCHITECTURE.md §1 amendment). The JetBrains seed metadata described the
+SHADED class names (`org.jetbrains.kotlin.com.intellij.*`) and cannot apply;
+the whole surface is now re-derived from our own runs:
+
+- `native-metadata/kosi/reachability-metadata.json` — the GraalVM tracing
+  agent over ALL fixtures with BOTH backends (every fixture at the syntax
+  backend plus every fixture again at `--backend resolved`, so the Analysis
+  API session's ServiceLoader, reflection and proxy surface is recorded),
+  merged by `scripts/merge-agent-metadata.py` (deterministic union; CI diffs
+  the checked-in file via `make native-metadata-check`).
+- `native-metadata/proxy-config.json` (P0's hand-maintained relocated
+  proxies) and the JetBrains seed (`native-metadata/jetbrains/`) are retired;
+  proxy groups arrive through the agent's reachability metadata now.
+- The fat jar carries the kotlin-stdlib JAR FILE as a resource
+  (`kosi-libs/kotlin-stdlib.jar`): the native resolved tier materializes it
+  to a temp jar at run time as the module provider's stdlib binary root —
+  an image has no classpath jars on disk.
 
 ## 4. Size levers still available (05-BUILD-DIST.md §3, in order)
 

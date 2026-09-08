@@ -47,12 +47,29 @@ object ClasspathResolver {
         var explicit = false
         if (explicitJars.isNotEmpty() || explicitFile != null) {
             explicit = true
+            val fileCoordinates = LinkedHashMap<Coordinate, Int>()
             val paths = buildList {
                 addAll(explicitJars)
                 if (explicitFile != null && Files.isRegularFile(explicitFile)) {
                     for (line in explicitFile.toFile().readLines()) {
                         val trimmed = line.trim()
-                        if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) add(Path.of(trimmed))
+                        if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+                        // The file carries jar paths or dependency coordinates
+                        // (build-produced classpath files list g:a:v lines).
+                        val parts = trimmed.split(':')
+                        when {
+                            trimmed.endsWith(".jar") -> add(Path.of(trimmed))
+                            parts.size >= 3 -> fileCoordinates.putIfAbsent(
+                                // Gradle tree lines can carry
+                                // `requested -> resolved` version chains
+                                // after the arrow conversion; the resolved
+                                // (last) version is what the cache holds.
+                                Coordinate(parts[0], parts[1], parts.last()),
+                                0,
+                            )
+                            // Version-less lines cannot be located; ignoring
+                            // them keeps the missing list meaningful.
+                        }
                     }
                 }
             }
@@ -61,6 +78,14 @@ object ClasspathResolver {
                     add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
                 } else {
                     missing.add(p.toString())
+                }
+            }
+            for (coordinate in fileCoordinates.keys) {
+                val found = locate(coordinate, root, moduleDirs.toSet())
+                if (found == null) {
+                    missing.add(coordinate.toString())
+                } else {
+                    add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
                 }
             }
         } else {
@@ -179,7 +204,10 @@ object ClasspathResolver {
                 continue
             }
             if (!inLibraries) continue
-            val value = line.substringAfter('=').trim().trim('"', '\'')
+            // Both short form (name = "g:a:v") and map form
+            // (name = { module = "g:a:v", ... }) appear in catalogs.
+            val value = TOML_MODULE.find(line)?.groupValues?.get(1)
+                ?: line.substringAfter('=').trim().trim('"', '\'')
             val parts = value.split(':')
             if (parts.size >= 2 && parts[0].contains('.')) {
                 out.add(Coordinate(parts[0], parts[1], parts.getOrNull(2)))
@@ -213,7 +241,8 @@ object ClasspathResolver {
         val version = coordinate.version
         if (version != null) {
             for (candidate in locatedByVersion(coordinate, version, root)) {
-                if (Files.isRegularFile(candidate)) return candidate
+                if (!Files.isRegularFile(candidate)) continue
+                return usableArtifact(candidate)
             }
         } else {
             // Unknown version (build-script indirection): pick the highest
@@ -274,6 +303,25 @@ object ClasspathResolver {
     }
 
     /**
+     * Android libraries are published as AARs; the FIR session reads jars,
+     * so the AAR's classes.jar is extracted next to the cache entry
+     * (deterministic path, reused across runs) and returned instead.
+     */
+    private fun usableArtifact(path: Path): Path {
+        if (!path.fileName.toString().endsWith(".aar")) return path
+        val stamp = path.toAbsolutePath().normalize().toString().hashCode().toUInt().toString()
+        val target = Files.createTempDirectory("kosi-aar-$stamp").resolve("classes.jar")
+        if (Files.isRegularFile(target)) return target
+        java.util.zip.ZipFile(path.toFile()).use { zip ->
+            val entry = zip.getEntry("classes.jar") ?: return path
+            zip.getInputStream(entry).use { input ->
+                Files.copy(input, target)
+            }
+        }
+        return target
+    }
+
+    /**
      * Gradle's modules-2 layout stores each version under content hashes:
      * <cache>/<group>/<artifact>/<version>/<hash>/<artifact>-<version>.jar.
      */
@@ -282,9 +330,11 @@ object ClasspathResolver {
         val hashDirs = Files.list(versionDir).use { it.toList() }
             .filter { Files.isDirectory(it) }
             .sortedBy { it.fileName.toString() }
-        return hashDirs.mapNotNull { hashDir ->
-            val jar = hashDir.resolve("$artifact-$version.jar")
-            jar.takeIf { Files.isRegularFile(it) }
+        return hashDirs.flatMap { hashDir ->
+            listOf("$artifact-$version.jar", "$artifact-$version.aar").mapNotNull { name ->
+                val candidate = hashDir.resolve(name)
+                candidate.takeIf { Files.isRegularFile(it) }
+            }
         }
     }
 
@@ -310,6 +360,8 @@ object ClasspathResolver {
         }
         return a.compareTo(b)
     }
+
+    private val TOML_MODULE = Regex("""module\s*=\s*"([^"]+)"""")
 
     private val GRADLE_COORDINATE = Regex("""["']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.${'$'}{}-]+)?(?::[^"']*)?)["']""")
 
@@ -340,7 +392,7 @@ object ClasspathResolver {
                 for (entry in zip.entries()) {
                     val name = entry.name
                     if (!name.endsWith(".class") || name.contains('$')) continue
-                    val pkg = name.removeSuffix(".class").substringBeforeLast('/')
+                    val pkg = name.removeSuffix(".class").substringBeforeLast('/').replace('/', '.')
                     if (pkg.isNotEmpty()) packages.add(pkg)
                     if (packages.size > 4096) break
                 }

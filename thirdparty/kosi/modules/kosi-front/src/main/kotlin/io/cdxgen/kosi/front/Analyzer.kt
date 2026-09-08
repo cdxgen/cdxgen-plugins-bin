@@ -243,8 +243,11 @@ object Analyzer {
         }
 
         // The JDK module: explicit --jdk-home, else the running JVM's home.
-        val jdkHome = options.jdkHome?.let { Path.of(it) } ?: Path.of(System.getProperty("java.home"))
-        val jdkDiagnostic = if (!Files.isDirectory(jdkHome)) {
+        // In a native image java.home is not set; the diagnostic below names
+        // the gap and the caller can pass --jdk-home.
+        val jdkHome = options.jdkHome?.let { Path.of(it) }
+            ?: System.getProperty("java.home")?.let { Path.of(it) }
+        val jdkDiagnostic = if (jdkHome == null || !Files.isDirectory(jdkHome)) {
             Diagnostic(
                 code = DiagnosticCodes.CLASSPATH_PARTIAL,
                 severity = Severity.WARNING,
@@ -279,7 +282,7 @@ object Analyzer {
             languageVersion = effectiveVersion?.let { CompilerInfo.versionAtRank(it) },
             apiVersion = effectiveApi,
             libraries = libraries,
-            jdkHome = if (Files.isDirectory(jdkHome)) jdkHome else null,
+            jdkHome = jdkHome?.takeIf { Files.isDirectory(it) },
         )
 
         val fileRelPathByAbsolute = collected.associate {
@@ -288,11 +291,14 @@ object Analyzer {
         }
 
         AnalysisEnvironment.createForResolved(plan).use { env ->
+            if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: session built, modules=" + env.session.modulesWithFiles.size)
             val workspace = env.session.modulesWithFiles.keys
                 .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
                 .firstOrNull() ?: throw AnalysisException("resolved backend: session built no workspace module")
 
+            if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: running resolved analyzer")
             val facts = ResolvedAnalyzer.run(env, workspace, fileRelPathByAbsolute)
+            if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: facts=" + facts.size)
 
             val imports = mutableListOf<ImportUsage>()
             val usages = mutableListOf<LibraryUsage>()

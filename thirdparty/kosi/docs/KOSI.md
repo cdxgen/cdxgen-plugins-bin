@@ -5,7 +5,97 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
-## Phase 0 — measurement harness + native-image spike (this branch)
+## Phase 1 — resolved front end (this branch)
+
+Shipped:
+
+- **Substrate fixed.** The dependency allowlist amendment
+  (02-ARCHITECTURE.md §1) is in: kotlin-compiler-embeddable is gone and
+  kosi-front runs on the unrelocated `-for-ide` split artifacts, the
+  unrelocated IntelliJ platform at 251.27812.49 (the build Kotlin v2.4.0
+  pins in `versions.intellijSdk`, same version KSP2 uses), and the
+  third-party libraries KSP2 pins. `kosi version` reports
+  `analysis-api-standalone: available` on the JVM — the probe builds a real
+  session and resolves a declaration through it.
+- `AnalysisEnvironment`: one standalone session per analysis run; the
+  syntax tier parses through the same session, so both tiers share one
+  substrate. The bench runs 48 sessions per `corpusQuick` without leakage.
+- **Resolved tier** (`--backend resolved`): project discovery reuses
+  kosi-project; the session sees one merged workspace module over exactly
+  the files SourceCollector collected (module attribution stays
+  report-level). Resolved `declarations` carry `jvmOwner`/`jvmDescriptor`
+  via the compiler's own JVM type mapping, `supertypes`, and
+  `overrides` (allOverriddenSymbols); `imports[].purl` names the jar whose
+  package prefix the import matches; **Java sources are parsed through the
+  same symbols** (`java-source-not-parsed` is gone from resolved reports —
+  defect 2 closed on this backend, still open at syntax by design).
+- **Offline classpath resolution** with a loud partial: coordinates parsed
+  as text from build.gradle(.kts)/pom.xml/libs.versions.toml, located in
+  the local Gradle/Maven caches and `build/libs`; every miss becomes a
+  `classpath-partial` diagnostic naming the coordinate; explicit
+  `--classpath`/`--classpath-file`/`--jdk-home` flags implement the plan's
+  acquisition order 1/2/4. Corpus entries may carry a build-produced
+  `classpath_file` (scripts/warm-corpus-classpath.sh — developer-side,
+  kosi never executes a project build).
+- **stats.resolvedCallRatio** is computed: explicit Kotlin calls whose
+  resolution produced symbols / all explicit calls. The `empty-classpath`
+  fixture (deliberately unresolvable coordinate) must emit
+  `classpath-partial` and still report the unresolved call; the
+  ResolvedBackendTest asserts the ratio collapse and fails if the
+  diagnostic is removed. The bench matrix has a third `resolved` slot, so
+  every fixture's resolved behaviour is ratcheted.
+- **Version policy** (08-VERSION-POLICY.md in full): ceiling and band from
+  the bundled compiler (kept from P0), clamp path (`kotlin-language-version`),
+  ceiling (`kotlin-version`), `kotlin-api-version`, recorded
+  `version-override` diagnostics for CLI passthrough, and
+  `stats.degraded = "kotlin-version"` when a version mismatch coincides
+  with heavy resolution fallout. Four version fixtures exist: `old-language-version`
+  (declares 1.9: clamp + analysis continues), `latest-syntax` (2.4 context
+  parameters + explicit backing fields resolve clean), `future-syntax`
+  (eap tier only, ceiling diagnostic), plus the clamp-covered
+  `maven-project`/`multi-module-gradle` and real-hybrid `anki-android`.
+  `FlowFoundAcrossLanguageVersionRange` analyses the taint fixture at
+  every accepted language version (enumerated at runtime) and asserts the
+  flow outcome plus resolved facts are identical across the band; the flow
+  outcome is XFAIL until P4 by design — the ratchet makes it real when the
+  engine lands.
+- Corpus: 20 fixtures × 3 slots; pinned repos now span Spring (spring-fu),
+  Ktor (ktor-samples), Android (nowinandroid), KMP (kampkit) and
+  mixed-Java (anki-android), with per-repo `resolvedCallRatio` in the bench
+- **Native image carries the resolved tier.** `kosi version` in the
+  `kosi-darwin-arm64` binary reports all three components available and
+  `--backend resolved` runs end-to-end, byte-identical across runs. The
+  image needed three recorded fixes: the K1 application environment is
+  seeded once per process with a configuration pointing
+  INTELLIJ_PLUGIN_ROOT at the materialized `kosi-ext` descriptors (the
+  stock session builder creates a fresh configuration whose jar-location
+  lookup cannot work in an image — `PathManager.urlToFile` rejects image
+  `resource:` URLs); a no-op `awt.toolkit` (the platform's mock application
+  schedules one runnable through Swing and the image has no AWT natives);
+  `-H:+AddAllCharsets` (the platform loads UTF-32BE by name) and
+  `--enable-monitoring=jfr` (the low-level-api-fir flight recorder refuses
+  to run otherwise). The stdlib jar ships inside the fat jar
+  (`kosi-libs/kotlin-stdlib.jar`) and is materialized at run time as the
+  session's stdlib binary root.
+- Binary: 93,627,264 bytes (89.3 MiB) on GraalVM CE 25.0.4.1, up from P0's
+  53,185,568 — the unrelocated IntelliJ platform + FIR + Analysis API is
+  the closed world now. Determinism holds: native output byte-identical
+  across runs and byte-identical to the JVM build.
+- **Per-repo `resolvedCallRatio`** (resolved slot, this machine):
+  spring-fu 0.9405, anki-android 0.9232, ktor-samples 0.9024,
+  nowinandroid 0.7564, kampkit 0.6639. **Named limitation, not hidden:**
+  three of five pinned repos meet the 0.90 P1 gate; nowinandroid and
+  kampkit do not. nowinandroid's remaining gap is AndroidX multiplatform
+  artifacts whose AAR variants cannot always be matched by a non-AGP
+  consumer (the warm script retries with androidJvm/aar attributes and
+  pulls most; the rest are variant combinations only AGP constructs).
+  kampkit's cap is inherent to JVM-tier analysis: iosMain sources
+  reference Kotlin Native-only libraries that do not exist as JVM jars.
+  Follow-up levers: AGP-style variant-aware AAR resolution, and P9's
+  bytecode tier which reads dependency jars directly.
+  result.
+
+## Phase 0 — measurement harness + native-image spike (merged 2026-09-08)
 
 Shipped:
 

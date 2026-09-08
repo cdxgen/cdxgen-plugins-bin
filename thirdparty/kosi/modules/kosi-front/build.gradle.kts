@@ -20,6 +20,32 @@ kotlin {
     }
 }
 
+// The resolved tier resolves builtin declarations against a REAL stdlib jar
+// (the native image has no classpath jars on disk), so the stdlib file ships
+// as a resource next to the code that materializes it.
+val kosiStdlibJar = configurations.create("kosiStdlib") {
+    attributes {
+        attribute(
+            org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE,
+            objects.named(org.gradle.api.attributes.Usage::class, org.gradle.api.attributes.Usage.JAVA_RUNTIME),
+        )
+        attribute(
+            org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+            objects.named(org.gradle.api.attributes.LibraryElements::class, org.gradle.api.attributes.LibraryElements.JAR),
+        )
+    }
+}
+dependencies {
+    add("kosiStdlib", "org.jetbrains.kotlin:kotlin-stdlib:2.4.0") { isTransitive = false }
+}
+tasks.processResources {
+    dependsOn(kosiStdlibJar)
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(kosiStdlibJar) {
+        rename { "kosi-libs/kotlin-stdlib.jar" }
+    }
+}
+
 dependencies {
     implementation(project(":kosi-schema"))
     implementation(project(":kosi-project"))
@@ -83,6 +109,9 @@ dependencies {
     implementation(libs.aa.caffeine)
     implementation(libs.aa.javax.inject)
 
+    // FlowFoundAcrossLanguageVersionRange evaluates corpus expectations; the
+    // corpus module is compiler-free, so the kosi-front boundary holds.
+    testImplementation(project(":kosi-corpus"))
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly(libs.junit.platform.launcher)

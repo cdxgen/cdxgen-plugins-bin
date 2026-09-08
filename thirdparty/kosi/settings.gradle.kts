@@ -9,6 +9,17 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
+    // -PkotlinVersion overrides the catalog's kotlin version (the EAP CI job
+    // uses this to build against the newest RC); everything else in
+    // gradle/libs.versions.toml stays the release pin.
+    versionCatalogs {
+        create("libs") {
+            val eap = providers.gradleProperty("kotlinVersion")
+            if (eap.isPresent) {
+                version("kotlin", eap.get())
+            }
+        }
+    }
     repositories {
         mavenCentral()
         // The Analysis API `-for-ide` artifacts are published only here, not

@@ -69,6 +69,10 @@ kosiTask("corpusFull", "Fixture + pinned-repo tiers (network required for repo f
     )
 }
 
+kosiTask("kosiEap", "EAP tier: fixtures using the next version's syntax (only meaningful with -PkotlinVersion=<rc>).") {
+    args = listOf("bench", "--tier", "eap", "--repo-root", rootDir.absolutePath)
+}
+
 kosiTask("golden", "Verify digest goldens for every fixture in both modes.") {
     args = listOf("golden", "--repo-root", rootDir.absolutePath)
 }
@@ -81,7 +85,7 @@ tasks.register("corpusTierList") {
     group = "kosi"
     description = "Lists the tier tasks CI must be able to run; fails if one is missing."
     doLast {
-        val required = listOf("corpusQuick", "corpusFull", "golden", "goldenUpdate")
+        val required = listOf("corpusQuick", "corpusFull", "kosiEap", "golden", "goldenUpdate")
         val missing = required.filter { tasks.names.none { n -> n == it } }
         if (missing.isNotEmpty()) {
             throw GradleException("missing kosi tier tasks: $missing")
