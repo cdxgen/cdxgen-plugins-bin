@@ -10,10 +10,8 @@ plugins {
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
-    repositories {
-        mavenCentral()
-        maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies/")
-    }
+    // Repositories come from settings.gradle.kts dependencyResolutionManagement
+    // so every module resolves against exactly the same list.
 
     the<JavaPluginExtension>().toolchain {
         languageVersion = JavaLanguageVersion.of(21)

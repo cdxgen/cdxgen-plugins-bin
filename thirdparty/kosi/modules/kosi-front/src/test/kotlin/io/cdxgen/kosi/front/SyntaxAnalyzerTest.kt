@@ -7,7 +7,7 @@ import kotlin.test.assertTrue
 class SyntaxAnalyzerTest {
 
     private fun analyze(text: String): SyntaxAnalyzer.FileResult =
-        PsiEnvironment.create().use { env ->
+        AnalysisEnvironment.createForSyntax().use { env ->
             SyntaxAnalyzer(env, "src/Test.kt", ".").analyze(text)
         }
 

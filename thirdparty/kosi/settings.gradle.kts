@@ -11,10 +11,17 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
-        // The Analysis API standalone modules are published only here, not on
-        // Maven Central. Do not declare the shadowed analysis-api-*-base
-        // modules separately; they are merged into the -for-ide jars.
+        // The Analysis API `-for-ide` artifacts are published only here, not
+        // on Maven Central. Do not declare the shadowed analysis-api-*-base
+        // modules separately; they are merged into the -for-ide jars (and
+        // their POM entries 404 — resolved non-transitively instead).
         maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies/")
+        // The unrelocated IntelliJ platform modules
+        // (com.jetbrains.intellij.platform:*) the standalone session needs.
+        // This is the repository JetBrains documents for platform artifacts;
+        // the version is pinned in gradle/libs.versions.toml to the build
+        // Kotlin itself declares (versions.intellijSdk at tag v2.4.0).
+        maven("https://www.jetbrains.com/intellij-repository/releases")
     }
 }
 

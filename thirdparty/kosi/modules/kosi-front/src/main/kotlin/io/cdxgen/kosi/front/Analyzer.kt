@@ -1,15 +1,15 @@
 package io.cdxgen.kosi.front
 
+import io.cdxgen.kosi.project.ClasspathResolver
 import io.cdxgen.kosi.project.DiscoveredModule
-import io.cdxgen.kosi.project.GradleDiscovery
 import io.cdxgen.kosi.project.ProjectDiscovery
 import io.cdxgen.kosi.project.SourceCollector
 import io.cdxgen.kosi.schema.AnalyzeOptions
 import io.cdxgen.kosi.schema.Backend
-import io.cdxgen.kosi.schema.CallGraph
 import io.cdxgen.kosi.schema.CryptoEvidence
-import io.cdxgen.kosi.schema.DataFlowEvidence
 import io.cdxgen.kosi.schema.Diagnostic
+import io.cdxgen.kosi.schema.AnnotationEvidence
+import io.cdxgen.kosi.schema.DiagnosticCodes
 import io.cdxgen.kosi.schema.Declaration
 import io.cdxgen.kosi.schema.FileEvidence
 import io.cdxgen.kosi.schema.ImportUsage
@@ -24,15 +24,18 @@ import io.cdxgen.kosi.schema.Severity
 import io.cdxgen.kosi.schema.Stats
 import io.cdxgen.kosi.schema.ToolInfo
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.nio.file.Path
+import java.io.File
 import java.util.Locale
 
 /**
- * The phase-0 analysis pipeline: project discovery (read-only), the syntax
- * backend (PSI-only), and report assembly with deterministic ordering and
- * stable ids. Later phases plug the resolved/bytecode tiers in between
- * discovery and assembly; nothing downstream of kosi-front sees compiler
- * types.
+ * The analysis pipeline: project discovery (read-only), the chosen backend,
+ * and report assembly with deterministic ordering and stable ids. The syntax
+ * backend parses PSI without a classpath; the resolved backend (P1) runs the
+ * standalone Analysis API session over the discovered modules, the
+ * offline-resolved classpath and the JDK module. Nothing downstream of
+ * kosi-front sees compiler types.
  */
 object Analyzer {
 
@@ -40,16 +43,21 @@ object Analyzer {
 
     const val TOOL_DESCRIPTION = "kosi — Kotlin Source Inspector (static analysis for cdxgen)"
 
-    const val TOOL_VERSION = "0.1.0"
+    const val TOOL_VERSION = "0.2.0"
 
     class AnalysisException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
-        require(options.backend == Backend.SYNTAX) {
-            "backend ${options.backend.id} is not available in phase 0; use --backend syntax"
-        }
+    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport = when (options.backend) {
+        Backend.SYNTAX -> analyzeSyntax(root, options, commit)
+        Backend.RESOLVED -> analyzeResolved(root, options, commit)
+    }
+
+    // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
+
+    private fun analyzeSyntax(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
         val discovery = ProjectDiscovery.discover(root)
-        val (versionedModules, versionDiagnostics) = discoverVersionPolicy(root, discovery.modules)
+        val (versionedModules, versionDiagnostics, overrideDiagnostics) =
+            discoverVersionPolicy(root, discovery.modules, options)
         val collected = SourceCollector.collect(root, versionedModules.map { it.module })
         val syntax = runSyntaxBackend(root, collected)
 
@@ -60,55 +68,47 @@ object Analyzer {
             modules = versionedModules,
             buildSystem = discovery.buildSystem,
             collected = collected,
-            syntax = syntax,
-            extraDiagnostics = versionDiagnostics,
+            declarations = syntax.declarations.map { (raw, source) ->
+                DeclarationDraft(
+                    name = raw.name,
+                    qualifiedName = raw.qualifiedName,
+                    canonicalName = raw.canonicalName,
+                    kind = raw.kind,
+                    signature = raw.signature,
+                    returnType = raw.returnType,
+                    extensionReceiverType = raw.extensionReceiverType,
+                    visibility = raw.visibility,
+                    modifiers = raw.modifiers,
+                    annotations = raw.annotations,
+                    overrides = emptyList(),
+                    supertypes = emptyList(),
+                    jvmOwner = null,
+                    jvmDescriptor = null,
+                    position = raw.position,
+                    source = source,
+                )
+            },
+            usages = syntax.usages,
+            imports = syntax.imports,
+            diagnostics = versionDiagnostics + overrideDiagnostics + syntax.diagnostics,
+            stats = Stats(
+                fileCount = syntax.fileCount,
+                declarationCount = syntax.declarations.size,
+                usageCount = syntax.usages.size,
+                importCount = syntax.imports.size,
+                resolvedCallRatio = 0.0,
+                unknownCallPropagations = 0,
+                loweringFailures = emptyMap(),
+                fixpointCapHits = 0,
+                sourceCount = 0,
+                sinkCount = 0,
+                sliceCount = 0,
+                crossDependencySliceCount = 0,
+                reachableSliceCount = 0,
+                truncations = emptyMap(),
+                degraded = null,
+            ),
         )
-    }
-
-    /**
-     * Version policy (08-VERSION-POLICY.md §3/§4): clamp declared versions
-     * into the bundled compiler's band, loudly, before any other diagnostics.
-     */
-    private data class VersionedModule(val module: DiscoveredModule, val effective: String)
-
-    private fun discoverVersionPolicy(root: Path, modules: List<DiscoveredModule>): Pair<List<VersionedModule>, List<Diagnostic>> {
-        val out = mutableListOf<VersionedModule>()
-        val diagnostics = mutableListOf<Diagnostic>()
-        val band = CompilerInfo.versionBand()
-        for (module in modules.sortedWith(compareBy({ it.modulePath }, { it.name }))) {
-            val clamped = CompilerInfo.clampLanguageVersion(module.declaredLanguageVersion)
-            if (clamped.clamped) {
-                val direction = if (CompilerInfo.isBelowBand(module.declaredLanguageVersion)) {
-                    "below"
-                } else {
-                    "above"
-                }
-                diagnostics.add(
-                    Diagnostic(
-                        code = if (direction == "below") "kotlin-language-version" else "kotlin-version",
-                        severity = Severity.WARNING,
-                        message = "module ${module.name} declares languageVersion=${module.declaredLanguageVersion} " +
-                            "($direction the supported band ${band.first}..${band.latestStable}); " +
-                            "analysis uses ${clamped.effective}",
-                        position = Position(filename = module.modulePath, line = 1, column = 1),
-                    ),
-                )
-            }
-            val apiClamped = CompilerInfo.clampApiVersion(module.declaredApiVersion, clamped.effective)
-            if (apiClamped.clamped) {
-                diagnostics.add(
-                    Diagnostic(
-                        code = "kotlin-api-version",
-                        severity = Severity.WARNING,
-                        message = "module ${module.name} declares apiVersion=${module.declaredApiVersion} " +
-                            "above its language version; clamped to ${apiClamped.effective}",
-                        position = Position(filename = module.modulePath, line = 1, column = 1),
-                    ),
-                )
-            }
-            out.add(VersionedModule(module, clamped.effective))
-        }
-        return out to diagnostics
     }
 
     private fun runSyntaxBackend(
@@ -121,14 +121,14 @@ object Analyzer {
         val diagnostics = mutableListOf<Diagnostic>()
         var fileCount = 0
         var javaFileCount = 0
-        PsiEnvironment.create().use { env ->
+        AnalysisEnvironment.createForSyntax().use { env ->
             for (source in collected) {
                 val text = try {
                     Files.readString(source.absolutePath)
                 } catch (e: Exception) {
                     diagnostics.add(
                         Diagnostic(
-                            code = "unreadable-source",
+                            code = DiagnosticCodes.UNREADABLE_SOURCE,
                             severity = Severity.ERROR,
                             message = "could not read ${source.relativePath}: ${e.message ?: "error"}",
                             position = Position(source.relativePath, 1, 1),
@@ -172,7 +172,7 @@ object Analyzer {
         if (javaFileCount > 0) {
             diagnostics.add(
                 Diagnostic(
-                    code = "java-source-not-parsed",
+                    code = DiagnosticCodes.JAVA_SOURCE_NOT_PARSED,
                     severity = Severity.WARNING,
                     message = "$javaFileCount Java source file(s) are listed in files[] but not parsed at the " +
                         "syntax tier; their declarations and usages are absent from this report",
@@ -182,7 +182,7 @@ object Analyzer {
         }
         diagnostics.add(
             Diagnostic(
-                code = "syntax-backend-no-resolution",
+                code = DiagnosticCodes.SYNTAX_BACKEND_NO_RESOLUTION,
                 severity = Severity.INFO,
                 message = "syntax backend parses without a classpath; no symbol resolution is " +
                     "performed and resolvedCallRatio is 0.0 by construction",
@@ -205,6 +205,335 @@ object Analyzer {
         val fileCount: Int,
     )
 
+    // ---- resolved tier (P1) -------------------------------------------------
+
+    private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
+        val discovery = ProjectDiscovery.discover(root)
+        val (versionedModules, versionDiagnostics, overrideDiagnostics) =
+            discoverVersionPolicy(root, discovery.modules, options)
+        val collected = SourceCollector.collect(root, versionedModules.map { it.module })
+
+        // Classpath acquisition (02-ARCHITECTURE.md §3): explicit flags first,
+        // then offline resolution from the local caches. Every coordinate the
+        // resolver cannot find becomes a `classpath-partial` diagnostic naming
+        // it — a partial classpath is never silent (07-REVIEW-PROTOCOL.md #9).
+        val moduleDirs = versionedModules.map { vm ->
+            root.resolve(vm.module.modulePath).toAbsolutePath().normalize()
+        }
+        val resolution = ClasspathResolver.resolve(
+            root = root,
+            explicitJars = options.classpath.map { Path.of(it) },
+            explicitFile = options.classpathFile?.let { Path.of(it) },
+            moduleDirs = moduleDirs,
+        )
+        val classpathDiagnostics = buildList {
+            if (resolution.missing.isNotEmpty()) {
+                add(
+                    Diagnostic(
+                        code = DiagnosticCodes.CLASSPATH_PARTIAL,
+                        severity = Severity.WARNING,
+                        message = "offline resolution could not locate ${resolution.missing.size} " +
+                            "coordinate(s): ${resolution.missing.joinToString(", ")}; " +
+                            "calls into them resolve as unresolved",
+                        position = Position(".", 1, 1),
+                        count = resolution.missing.size,
+                    ),
+                )
+            }
+        }
+
+        // The JDK module: explicit --jdk-home, else the running JVM's home.
+        val jdkHome = options.jdkHome?.let { Path.of(it) } ?: Path.of(System.getProperty("java.home"))
+        val jdkDiagnostic = if (!Files.isDirectory(jdkHome)) {
+            Diagnostic(
+                code = DiagnosticCodes.CLASSPATH_PARTIAL,
+                severity = Severity.WARNING,
+                message = "JDK home $jdkHome does not exist; java.* symbols resolve as unresolved " +
+                    "(pass --jdk-home to name the JDK module)",
+                position = Position(".", 1, 1),
+                count = 1,
+            )
+        } else {
+            null
+        }
+
+        // The workspace's own kotlin-stdlib rides the classpath so stdlib
+        // symbols resolve for projects that do not declare it explicitly.
+        val stdlibJar = stdlibJarPath()
+        val packageIndex = ClasspathResolver.packageIndex(resolution.jars)
+
+        // The offline resolver is project-global; the merged workspace module
+        // sees the whole resolved classpath, plus the bundled stdlib so
+        // implicit stdlib references resolve.
+        val libraries = resolution.jars.map { ResolvedPlan.ResolvedLibrary(it.jar, it.purl) } +
+            listOfNotNull(stdlibJar?.let { ResolvedPlan.ResolvedLibrary(it, STDLIB_PURL) })
+        // The workspace module analyses at the highest effective version among
+        // the discovered modules (each module's own effective version is still
+        // published in modules[] and clamped there).
+        val effectiveVersion = versionedModules.maxOfOrNull { CompilerInfo.bandRank(it.effective) }
+        val effectiveApi = versionedModules
+            .mapNotNull { vm -> vm.module.declaredApiVersion?.let { effectiveApiVersion(it, vm.effective) } }
+            .maxOrNull()
+        val plan = ResolvedPlan(
+            sourceFiles = collected.map { it.absolutePath },
+            languageVersion = effectiveVersion?.let { CompilerInfo.versionAtRank(it) },
+            apiVersion = effectiveApi,
+            libraries = libraries,
+            jdkHome = if (Files.isDirectory(jdkHome)) jdkHome else null,
+        )
+
+        val fileRelPathByAbsolute = collected.associate {
+            it.absolutePath.toAbsolutePath().normalize().toString() to
+                (it.relativePath to it.modulePath)
+        }
+
+        AnalysisEnvironment.createForResolved(plan).use { env ->
+            val workspace = env.session.modulesWithFiles.keys
+                .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
+                .firstOrNull() ?: throw AnalysisException("resolved backend: session built no workspace module")
+
+            val facts = ResolvedAnalyzer.run(env, workspace, fileRelPathByAbsolute)
+
+            val imports = mutableListOf<ImportUsage>()
+            val usages = mutableListOf<LibraryUsage>()
+            val diagnostics = mutableListOf<Diagnostic>()
+            val drafts = mutableListOf<DeclarationDraft>()
+            var fileCount = 0
+            var callsTotal = 0
+            var callsResolved = 0
+
+            for (fact in facts) {
+                fileCount++
+                callsTotal += fact.callsTotal
+                callsResolved += fact.callsResolved
+                diagnostics.addAll(fact.diagnostics)
+                for (import in fact.imports) {
+                    imports.add(import.copy(purl = ClasspathResolver.purlForImport(import.name, packageIndex)))
+                }
+                for (raw in fact.usages) {
+                    usages.add(
+                        LibraryUsage(
+                            id = "",
+                            name = raw.name,
+                            simpleName = raw.name.substringAfterLast('.').substringAfterLast("::"),
+                            usageKind = raw.usageKind,
+                            modulePath = fact.modulePath,
+                            purl = fileRelPathByAbsolute.entries
+                                .firstOrNull { it.value.first == fact.relativePath }?.value?.second
+                                ?.let { modulePurl(versionedModules, it) }
+                                ?: "",
+                            filePath = fact.relativePath,
+                            position = raw.position,
+                        ),
+                    )
+                }
+                for (decl in fact.declarations) {
+                    val source = collected.firstOrNull { it.relativePath == fact.relativePath }
+                    drafts.add(
+                        DeclarationDraft(
+                            name = decl.name,
+                            qualifiedName = decl.qualifiedName,
+                            canonicalName = decl.canonicalName,
+                            kind = decl.kind,
+                            signature = decl.signature,
+                            returnType = decl.returnType,
+                            extensionReceiverType = decl.extensionReceiverType,
+                            visibility = decl.visibility,
+                            modifiers = decl.modifiers,
+                            annotations = decl.annotations,
+                            overrides = decl.overrides,
+                            supertypes = decl.supertypes,
+                            jvmOwner = decl.jvmOwner,
+                            jvmDescriptor = decl.jvmDescriptor,
+                            position = decl.position,
+                            source = source,
+                        ),
+                    )
+                }
+            }
+
+            val totalCalls = callsTotal
+            val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
+
+            return assemble(
+                root = root,
+                options = options,
+                commit = commit,
+                modules = versionedModules,
+                buildSystem = discovery.buildSystem,
+                collected = collected,
+                declarations = drafts,
+                usages = usages,
+                imports = imports,
+                diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
+                    listOfNotNull(jdkDiagnostic) + diagnostics,
+                stats = Stats(
+                    fileCount = fileCount,
+                    declarationCount = drafts.size,
+                    usageCount = usages.size,
+                    importCount = imports.size,
+                    resolvedCallRatio = ratio,
+                    unknownCallPropagations = 0,
+                    loweringFailures = emptyMap(),
+                    fixpointCapHits = 0,
+                    sourceCount = 0,
+                    sinkCount = 0,
+                    sliceCount = 0,
+                    crossDependencySliceCount = 0,
+                    reachableSliceCount = 0,
+                    truncations = emptyMap(),
+                    degraded = degradedTag(versionDiagnostics, resolution, ratio),
+                ),
+            )
+        }
+    }
+
+    private fun modulePurl(modules: List<VersionedModule>, modulePath: String): String =
+        modules.firstOrNull { it.module.modulePath == modulePath }?.module?.purl ?: ""
+
+    /**
+     * 08-VERSION-POLICY.md policy 4: a run with a version mismatch AND heavy
+     * resolution fallout is marked degraded so no consumer reads the fallout
+     * as facts about the code.
+     */
+    private fun degradedTag(
+        versionDiagnostics: List<Diagnostic>,
+        resolution: ClasspathResolver.Result,
+        ratio: Double,
+    ): String? {
+        val versionMismatch = versionDiagnostics.any {
+            it.code == DiagnosticCodes.KOTLIN_LANGUAGE_VERSION || it.code == DiagnosticCodes.KOTLIN_VERSION
+        }
+        if (!versionMismatch) return null
+        val fallout = resolution.missing.isNotEmpty() || ratio < 0.5
+        return if (fallout) "kotlin-version" else null
+    }
+
+    private fun effectiveApiVersion(declared: String, language: String): String {
+        val clamped = CompilerInfo.clampApiVersion(declared, language)
+        return clamped.effective
+    }
+
+    private fun stdlibJarPath(): Path? {
+        // The kotlin-stdlib this kosi runs with: on the JVM it is a classpath
+        // entry; in a native image the fat jar ships it as a resource, which
+        // is materialized to a temp jar so the session can read it.
+        for (entry in System.getProperty("java.class.path")?.split(File.pathSeparator) ?: emptyList()) {
+            if (entry.isEmpty()) continue
+            val p = Path.of(entry)
+            val name = p.fileName.toString()
+            if (name.startsWith("kotlin-stdlib-") && name.endsWith(".jar")) return p
+        }
+        val stream = Analyzer::class.java.classLoader.getResourceAsStream("kosi-libs/kotlin-stdlib.jar")
+            ?: return null
+        val target = Files.createTempFile("kosi-stdlib", ".jar")
+        stream.use { input -> Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING) }
+        return target
+    }
+
+    private val STDLIB_PURL: String
+        get() = "pkg:maven/org.jetbrains.kotlin/kotlin-stdlib@" + CompilerInfo.compilerVersion()
+
+    // ---- shared assembly -----------------------------------------------------
+
+    class DeclarationDraft(
+        val name: String,
+        val qualifiedName: String,
+        val canonicalName: String,
+        val kind: String,
+        val signature: String?,
+        val returnType: String?,
+        val extensionReceiverType: String?,
+        val visibility: String,
+        val modifiers: List<String>,
+        val annotations: List<AnnotationEvidence>,
+        val overrides: List<String>,
+        val supertypes: List<String>,
+        val jvmOwner: String?,
+        val jvmDescriptor: String?,
+        val position: Position,
+        val source: SourceCollector.CollectedFile?,
+    )
+
+    /**
+     * Version policy (08-VERSION-POLICY.md §3/§4): clamp declared versions
+     * into the bundled compiler's band, loudly, before any other diagnostics;
+     * record explicit CLI overrides.
+     */
+    data class VersionedModule(val module: DiscoveredModule, val effective: String)
+
+    private fun discoverVersionPolicy(
+        root: Path,
+        modules: List<DiscoveredModule>,
+        options: AnalyzeOptions,
+    ): Triple<List<VersionedModule>, List<Diagnostic>, List<Diagnostic>> {
+        val out = mutableListOf<VersionedModule>()
+        val diagnostics = mutableListOf<Diagnostic>()
+        val overrides = mutableListOf<Diagnostic>()
+        val band = CompilerInfo.versionBand()
+        for (module in modules.sortedWith(compareBy({ it.modulePath }, { it.name }))) {
+            val clamped = CompilerInfo.clampLanguageVersion(module.declaredLanguageVersion)
+            if (clamped.clamped) {
+                val direction = if (CompilerInfo.isBelowBand(module.declaredLanguageVersion)) {
+                    "below"
+                } else {
+                    "above"
+                }
+                diagnostics.add(
+                    Diagnostic(
+                        code = if (direction == "below") DiagnosticCodes.KOTLIN_LANGUAGE_VERSION else DiagnosticCodes.KOTLIN_VERSION,
+                        severity = Severity.WARNING,
+                        message = "module ${module.name} declares languageVersion=${module.declaredLanguageVersion} " +
+                            "($direction the supported band ${band.first}..${band.latestStable}); " +
+                            "analysis uses ${clamped.effective}",
+                        position = Position(filename = module.modulePath, line = 1, column = 1),
+                    ),
+                )
+            }
+            val apiClamped = CompilerInfo.clampApiVersion(module.declaredApiVersion, clamped.effective)
+            if (apiClamped.clamped) {
+                diagnostics.add(
+                    Diagnostic(
+                        code = DiagnosticCodes.KOTLIN_API_VERSION,
+                        severity = Severity.WARNING,
+                        message = "module ${module.name} declares apiVersion=${module.declaredApiVersion} " +
+                            "above its language version; clamped to ${apiClamped.effective}",
+                        position = Position(filename = module.modulePath, line = 1, column = 1),
+                    ),
+                )
+            }
+            // CLI passthrough is a recorded override, not a silent one
+            // (08-VERSION-POLICY.md policy 5).
+            if (options.languageVersion != null &&
+                module.declaredLanguageVersion != null &&
+                options.languageVersion != module.declaredLanguageVersion
+            ) {
+                overrides.add(
+                    Diagnostic(
+                        code = DiagnosticCodes.VERSION_OVERRIDE,
+                        severity = Severity.INFO,
+                        message = "--language-version=${options.languageVersion} overrides module " +
+                            "${module.name}'s declared ${module.declaredLanguageVersion}",
+                        position = Position(filename = module.modulePath, line = 1, column = 1),
+                    ),
+                )
+            }
+            if (options.jvmTarget != null && module.jvmTarget != null && options.jvmTarget != module.jvmTarget) {
+                overrides.add(
+                    Diagnostic(
+                        code = DiagnosticCodes.VERSION_OVERRIDE,
+                        severity = Severity.INFO,
+                        message = "--jvm-target=${options.jvmTarget} overrides module " +
+                            "${module.name}'s declared ${module.jvmTarget}",
+                        position = Position(filename = module.modulePath, line = 1, column = 1),
+                    ),
+                )
+            }
+            out.add(VersionedModule(module, clamped.effective))
+        }
+        return Triple(out, diagnostics, overrides)
+    }
+
     private fun assemble(
         root: Path,
         options: AnalyzeOptions,
@@ -212,8 +541,11 @@ object Analyzer {
         modules: List<VersionedModule>,
         buildSystem: String,
         collected: List<SourceCollector.CollectedFile>,
-        syntax: SyntaxRun,
-        extraDiagnostics: List<Diagnostic>,
+        declarations: List<DeclarationDraft>,
+        usages: List<LibraryUsage>,
+        imports: List<ImportUsage>,
+        diagnostics: List<Diagnostic>,
+        stats: Stats,
     ): KosiReport {
         val moduleRefs = modules.map { vm ->
             val m = vm.module
@@ -242,42 +574,42 @@ object Analyzer {
         }
 
         // Deterministic ids: sort canonically, then number.
-        val sortedDeclarations = syntax.declarations
+        val sortedDeclarations = declarations
             .sortedWith(
                 compareBy(
-                    { it.raw.position.filename },
-                    { it.raw.position.line },
-                    { it.raw.position.column },
-                    { it.raw.name },
+                    { it.position.filename },
+                    { it.position.line },
+                    { it.position.column },
+                    { it.name },
                 ),
             )
-        val declarations = sortedDeclarations.mapIndexed { index, holder ->
-            val raw = holder.raw
+        val declarationsOut = sortedDeclarations.mapIndexed { index, draft ->
             Declaration(
                 id = "dec-${(index + 1).toString().padStart(6, '0')}",
-                name = raw.name,
-                qualifiedName = raw.qualifiedName,
-                canonicalName = raw.canonicalName,
-                jvmOwner = null,
-                jvmDescriptor = null,
-                kind = raw.kind,
-                modulePath = holder.source.modulePath,
-                purl = holder.source.modulePurl,
-                filePath = holder.source.relativePath,
-                signature = raw.signature,
-                returnType = raw.returnType,
-                extensionReceiverType = raw.extensionReceiverType,
-                visibility = raw.visibility,
-                modifiers = raw.modifiers,
-                annotations = raw.annotations,
-                overrides = emptyList(),
-                position = raw.position,
+                name = draft.name,
+                qualifiedName = draft.qualifiedName,
+                canonicalName = draft.canonicalName,
+                jvmOwner = draft.jvmOwner,
+                jvmDescriptor = draft.jvmDescriptor,
+                kind = draft.kind,
+                modulePath = draft.source?.modulePath ?: "",
+                purl = draft.source?.modulePurl ?: "",
+                filePath = draft.source?.relativePath ?: draft.position.filename,
+                signature = draft.signature,
+                returnType = draft.returnType,
+                extensionReceiverType = draft.extensionReceiverType,
+                visibility = draft.visibility,
+                modifiers = draft.modifiers,
+                annotations = draft.annotations,
+                overrides = draft.overrides,
+                supertypes = draft.supertypes,
+                position = draft.position,
                 generated = null,
             )
         }
 
-        val sortedUsages = syntax.usages.sortedWith(LibraryUsage.COMPARATOR)
-        val usages = sortedUsages.mapIndexed { index, usage ->
+        val sortedUsages = usages.sortedWith(LibraryUsage.COMPARATOR)
+        val usagesOut = sortedUsages.mapIndexed { index, usage ->
             usage.copy(id = "use-${(index + 1).toString().padStart(6, '0')}")
         }
 
@@ -290,13 +622,12 @@ object Analyzer {
             )
         }
 
-        val diagnostics = buildList {
-            addAll(extraDiagnostics)
-            addAll(syntax.diagnostics)
+        val diagnosticsOut = buildList {
+            addAll(diagnostics)
             if (buildSystem == "none") {
                 add(
                     Diagnostic(
-                        code = "no-build-files",
+                        code = DiagnosticCodes.NO_BUILD_FILES,
                         severity = Severity.INFO,
                         message = "no Gradle/Maven build files found; analysed as a plain source tree " +
                             "with inferred source roots",
@@ -304,10 +635,10 @@ object Analyzer {
                     ),
                 )
             }
-            if (syntax.fileCount == 0) {
+            if (stats.fileCount == 0) {
                 add(
                     Diagnostic(
-                        code = "no-sources",
+                        code = DiagnosticCodes.NO_SOURCES,
                         severity = Severity.WARNING,
                         message = "no Kotlin or Java source files were found under the discovered source roots",
                         position = Position(".", 1, 1),
@@ -315,24 +646,6 @@ object Analyzer {
                 )
             }
         }.sortedWith(Diagnostic.COMPARATOR)
-
-        val stats = Stats(
-            fileCount = syntax.fileCount,
-            declarationCount = declarations.size,
-            usageCount = usages.size,
-            importCount = syntax.imports.size,
-            resolvedCallRatio = 0.0,
-            unknownCallPropagations = 0,
-            loweringFailures = emptyMap(),
-            fixpointCapHits = 0,
-            sourceCount = 0,
-            sinkCount = 0,
-            sliceCount = 0,
-            crossDependencySliceCount = 0,
-            reachableSliceCount = 0,
-            truncations = emptyMap(),
-            degraded = null,
-        )
 
         return KosiReport(
             schemaVersion = KosiReport.SCHEMA_VERSION,
@@ -352,9 +665,9 @@ object Analyzer {
             modules = moduleRefs,
             packages = packages,
             files = files,
-            imports = syntax.imports.sortedWith(ImportUsage.COMPARATOR),
-            declarations = declarations,
-            usages = usages,
+            imports = imports.sortedWith(ImportUsage.COMPARATOR),
+            declarations = declarationsOut,
+            usages = usagesOut,
             securitySignals = emptyList(),
             crypto = CryptoEvidence(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
             callGraph = null,
@@ -362,7 +675,7 @@ object Analyzer {
             apiEndpoints = emptyList(),
             services = emptyList(),
             urls = emptyList(),
-            diagnostics = diagnostics,
+            diagnostics = diagnosticsOut,
             stats = stats,
         )
     }
@@ -383,7 +696,6 @@ object Analyzer {
     fun isNativeImage(): Boolean =
         System.getProperty("org.graalvm.nativeimage.enabled") != null ||
             System.getProperty("org.graalvm.nativeimage.imagecode") != null
-
 }
 
 /** True when a declared version is below FIRST_SUPPORTED (vs above the ceiling). */

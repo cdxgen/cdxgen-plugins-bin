@@ -93,4 +93,16 @@ object CompilerInfo {
     fun latestStable(): String = LanguageVersion.LATEST_STABLE.versionString
 
     fun firstSupported(): String = LanguageVersion.FIRST_SUPPORTED.versionString
+
+    /** Ordinal of a version string within the accepted band, for max/min picks. */
+    fun bandRank(version: String): Int {
+        val parsed = LanguageVersion.fromVersionString(version)
+            ?: LanguageVersion.fromFullVersionString(version)
+            ?: return -1
+        return parsed.ordinal
+    }
+
+    /** Inverse of [bandRank] for versions the bundled compiler knows. */
+    fun versionAtRank(rank: Int): String? =
+        LanguageVersion.entries.firstOrNull { it.ordinal == rank }?.versionString
 }

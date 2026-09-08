@@ -150,6 +150,7 @@ data class Declaration(
     val modifiers: List<String>,
     val annotations: List<AnnotationEvidence>,
     val overrides: List<String>,
+    val supertypes: List<String>,
     val position: Position,
     val generated: Boolean?,
 ) {
@@ -179,6 +180,9 @@ data class Declaration(
         w.str("qualifiedName", qualifiedName)
         w.str("returnType", returnType)
         w.str("signature", signature)
+        w.beginArray("supertypes")
+        for (s in supertypes.sorted()) w.str(s)
+        w.endArray()
         w.str("visibility", visibility)
         w.endObject()
     }
