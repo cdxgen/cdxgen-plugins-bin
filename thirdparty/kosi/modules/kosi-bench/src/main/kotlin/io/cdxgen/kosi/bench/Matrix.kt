@@ -26,12 +26,19 @@ data class MatrixSlot(
     companion object {
         const val SECURITY_LABEL = "security"
         const val ALL_LABEL = "all"
+        const val RESOLVED_LABEL = "resolved"
     }
 }
 
 object Matrix {
 
-    /** Both slots run the syntax backend in phase 0. */
+    /**
+     * Since P1 the matrix runs every case three ways: the two syntax slots
+     * (dataflow modes, as in P0) and the resolved backend, so the resolved
+     * tier's expectations are ratcheted per fixture exactly like the syntax
+     * tier's. The slot options still derive from [AnalyzeOptions] defaults
+     * only, overriding what the label names.
+     */
     fun defaultMatrix(): List<MatrixSlot> = listOf(
         MatrixSlot(
             label = MatrixSlot.SECURITY_LABEL,
@@ -42,6 +49,11 @@ object Matrix {
             label = MatrixSlot.ALL_LABEL,
             dataflow = DataflowMode.ALL,
             backend = Backend.SYNTAX,
+        ),
+        MatrixSlot(
+            label = MatrixSlot.RESOLVED_LABEL,
+            dataflow = DataflowMode.SECURITY,
+            backend = Backend.RESOLVED,
         ),
     )
 }

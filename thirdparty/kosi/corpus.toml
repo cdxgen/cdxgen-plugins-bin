@@ -112,6 +112,31 @@ path = "fixtures/android-compose-app"
 capabilities = ["android", "variants", "log"]
 
 [[fixtures]]
+slug = "empty-classpath"
+tier = "fixtures"
+path = "fixtures/empty-classpath"
+capabilities = ["classpath-partial", "offline-resolution"]
+
+[[fixtures]]
+slug = "old-language-version"
+tier = "fixtures"
+path = "fixtures/old-language-version"
+capabilities = ["version-clamp", "language-version-band"]
+
+[[fixtures]]
+slug = "latest-syntax"
+tier = "fixtures"
+path = "fixtures/latest-syntax"
+capabilities = ["context-parameters", "explicit-backing-fields"]
+
+[[fixtures]]
+# Run only by the EAP CI job (tier eap): uses the next version's syntax.
+slug = "future-syntax"
+tier = "eap"
+path = "fixtures/future-syntax"
+capabilities = ["version-ceiling", "eap"]
+
+[[fixtures]]
 slug = "ktor-samples"
 tier = "small"
 # Pinned 2026-09-07 to main.
