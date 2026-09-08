@@ -1,0 +1,46 @@
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 13-14
+thirdparty/kosi/gradle/libs.versions.toml
+  h_6a4cc5cdf68def 5-13,16-34,42-101
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 84,177-179,336,362,389-392
+thirdparty/kosi/modules/kosi-front/build.gradle.kts
+  h_6a4cc5cdf68def 2-22,27-44,46-85
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/AnalysisEnvironment.kt
+  h_6a4cc5cdf68def 3-18,21,24-27,29-36,38-40,43,52,63,67-70,72-74,76-82,84-142,144-153,157-162,164-166,168-176
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 3,11-12,27,29,33-38,46,50-57,59-60,71-88,90-111,124,131,175,185,208-536,544-548,577,580-583,586,589-606,611-612,625-626,630,638,641,668-670,678
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/CompilerInfo.kt
+  h_6a4cc5cdf68def 96-107
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/JvmSignatures.kt
+  h_6a4cc5cdf68def 1-21
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/ResolvedAnalyzer.kt
+  h_6a4cc5cdf68def 1-729
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/StandaloneSessionProbe.kt
+  h_6a4cc5cdf68def 3-5,8-15,23-45,47-54
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzer.kt
+  h_6a4cc5cdf68def 8-9,38,41-46,77-80,96,123,160-163,183-186,199-202,234-237,259-262,288-291,305-308,322-325,348-351,477,480
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzerTest.kt
+  h_6a4cc5cdf68def 10
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  h_6a4cc5cdf68def 1-376
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Diagnostics.kt
+  h_6a4cc5cdf68def 52-54,66-68
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Evidence.kt
+  h_6a4cc5cdf68def 153,183-185
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  h_6a4cc5cdf68def 119-124,136-139,150
+thirdparty/kosi/settings.gradle.kts
+  h_6a4cc5cdf68def 14-17,19-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "96a965216bb1208a64f391eee326cf3a9b6ad808",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
