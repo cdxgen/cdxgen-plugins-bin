@@ -1,0 +1,40 @@
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 114-138
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 96-97
+thirdparty/kosi/fixtures/empty-classpath/build.gradle.kts
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/fixtures/empty-classpath/src/main/kotlin/Report.kt
+  h_6a4cc5cdf68def 1-33
+thirdparty/kosi/fixtures/future-syntax/build.gradle.kts
+  h_6a4cc5cdf68def 1-14
+thirdparty/kosi/fixtures/future-syntax/src/main/kotlin/Ahead.kt
+  h_6a4cc5cdf68def 1-20
+thirdparty/kosi/fixtures/java-interop/src/main/kotlin/Main.kt
+  h_6a4cc5cdf68def 5-9,13-14
+thirdparty/kosi/fixtures/latest-syntax/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/latest-syntax/src/main/kotlin/Modern.kt
+  h_6a4cc5cdf68def 1-26
+thirdparty/kosi/fixtures/old-language-version/build.gradle.kts
+  h_6a4cc5cdf68def 1-13
+thirdparty/kosi/fixtures/old-language-version/src/main/kotlin/Legacy.kt
+  h_6a4cc5cdf68def 1-32
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 29,35-41,53-57
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DefaultsSyncTest.kt
+  h_6a4cc5cdf68def 35-41
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ProjectDiscovery.kt
+  h_6a4cc5cdf68def 107-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c9dbf5b0939e032a01d6772121c3eccd64a0be1c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
