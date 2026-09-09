@@ -1,0 +1,30 @@
+thirdparty/kosi/docs/KOSI.md
+  s_9d783fb1e8d1fd::t_5b2b4dd5a85b3e 227,247
+  s_9d783fb1e8d1fd::t_7390c8401ce0b7 66-99
+  s_9d783fb1e8d1fd::t_92131e20eee95c 246
+  s_9d783fb1e8d1fd::t_584ad89b4de6e5 110-118
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_9d783fb1e8d1fd::t_63280fb420ee3e 258-263
+thirdparty/kosi/docs/BUILD.md
+  s_9d783fb1e8d1fd::t_155414d05caba0 26-58
+thirdparty/kosi/Makefile
+  s_9d783fb1e8d1fd::t_dc70026ee5346e 43-55,61,65-83,153,156,159,162
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  s_9d783fb1e8d1fd::t_92131e20eee95c 234-238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26875225a0d29c19d8015221b3237db1ef5db6df",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
