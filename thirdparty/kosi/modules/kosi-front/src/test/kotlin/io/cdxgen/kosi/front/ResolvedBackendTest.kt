@@ -71,33 +71,27 @@ class ResolvedBackendTest {
             commit = "test",
         )
         assertEquals(1.0, full.stats.resolvedCallRatio, "every call resolves with stdlib + JDK")
+    }
 
-        // Emptied run: the JDK home does not exist, so the SDK module is
-        // absent and java.* calls cannot resolve (the bundled stdlib still
-        // rides along, by design). The report must say so and the ratio must
-        // collapse by the JDK call share.
-        val emptied = Analyzer.analyze(
-            root,
-            AnalyzeOptions(
-                backend = Backend.RESOLVED,
-                jdkHome = "/kosi-test/no-such-jdk",
-            ),
-            commit = "test",
-        )
-        val partials = emptied.diagnostics.filter { it.code == DiagnosticCodes.CLASSPATH_PARTIAL }
-        assertTrue(
-            partials.isNotEmpty(),
-            "an emptied classpath must produce classpath-partial; got ${emptied.diagnostics.map { it.code }}",
-        )
-        assertTrue(
-            emptied.stats.resolvedCallRatio < full.stats.resolvedCallRatio - 0.4,
-            "an emptied classpath must visibly lower the ratio: full=${full.stats.resolvedCallRatio} " +
-                "empty=${emptied.stats.resolvedCallRatio}",
-        )
-        // The evidence is still reported: the calls exist as usages even
-        // though they did not resolve (a plausible-looking small graph would
-        // drop them instead).
-        assertTrue(emptied.usages.isNotEmpty(), "unresolved calls stay in usages[]")
+    @Test
+    fun anExplicitJdkHomeThatIsNotAJdkIsAUsageError() {
+        // A flag that cannot work must be rejected with the reason, never
+        // silently downgraded to a partial classpath (the old behaviour was
+        // a classpath-partial warning and a report that quietly resolved
+        // every java.* symbol as unresolved).
+        val root = project(buildFile = null, sources = mapOf("src/main/kotlin/Main.kt" to kotlinSource))
+        val failure = assertFailsWith<Analyzer.AnalysisException> {
+            Analyzer.analyze(
+                root,
+                AnalyzeOptions(
+                    backend = Backend.RESOLVED,
+                    jdkHome = "/kosi-test/no-such-jdk",
+                ),
+                commit = "test",
+            )
+        }
+        assertTrue("no-such-jdk" in failure.message!!, failure.message!!)
+        assertTrue("modular" in failure.message!!, "the error must say what kind of home is required: ${failure.message}")
     }
 
     @Test

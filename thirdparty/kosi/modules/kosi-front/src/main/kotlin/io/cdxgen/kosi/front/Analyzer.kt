@@ -268,17 +268,24 @@ object Analyzer {
             }
         }
 
-        // The JDK module: explicit --jdk-home, else the running JVM's home.
-        // In a native image java.home is not set; the diagnostic below names
-        // the gap and the caller can pass --jdk-home.
-        val jdkHome = options.jdkHome?.let { Path.of(it) }
-            ?: System.getProperty("java.home")?.let { Path.of(it) }
-        val jdkDiagnostic = if (jdkHome == null || !Files.isDirectory(jdkHome)) {
+        // The JDK module: explicit --jdk-home, else the running JVM's home,
+        // else JAVA_HOME (which is how an image finds one, java.home being
+        // unset there). A home that names no modular JDK is a usage error —
+        // a flag that cannot work is rejected with the reason, never
+        // silently downgraded to a partial classpath. When no source names a
+        // JDK at all the run continues with the gap diagnosed below.
+        val jdkResolution = JdkModules.resolve(options.jdkHome?.let { Path.of(it) })
+        val jdkHome = when (val resolution = jdkResolution) {
+            is JdkModules.Resolution.Found -> resolution.home
+            is JdkModules.Resolution.Invalid -> throw AnalysisException(resolution.message)
+            is JdkModules.Resolution.NotFound -> null
+        }
+        val jdkDiagnostic = if (jdkHome == null) {
             Diagnostic(
                 code = DiagnosticCodes.CLASSPATH_PARTIAL,
                 severity = Severity.WARNING,
-                message = "JDK home $jdkHome does not exist; java.* symbols resolve as unresolved " +
-                    "(pass --jdk-home to name the JDK module)",
+                message = (jdkResolution as JdkModules.Resolution.NotFound).tried +
+                    "; java.* symbols resolve as unresolved",
                 position = Position(".", 1, 1),
                 count = 1,
             )

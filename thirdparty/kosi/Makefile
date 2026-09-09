@@ -128,6 +128,7 @@ define build_native
 	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
 	  -H:+UnlockExperimentalVMOptions \
 	  -H:+AddAllCharsets \
+	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
@@ -217,8 +218,10 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 
 ## native-metadata: re-run the tracing agent over the whole fixture tree —
 ## syntax AND resolved backends (the resolved pass exercises the Analysis
-## API session, the reflection/ServiceLoader heart of the binary) — and
-## merge the result into native-metadata/kosi. CI fails if the checked-in
+## API session, the reflection/ServiceLoader heart of the binary) — plus one
+## `kosi version` run, whose probes build a resolved session over a source
+## with a supertype and so cover PSI the fixture tree alone may not contain.
+## Merged into native-metadata/kosi. CI fails if the checked-in
 ## metadata differs from what the agent produces (native-metadata-check).
 ## The JetBrains compiler metadata is no longer used: P1 moved the substrate
 ## from the shaded kotlin-compiler-embeddable to the unrelocated -for-ide
@@ -226,6 +229,8 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
+	@$(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/version \
+	  -jar $(fat_jar) version
 	@for f in fixtures/*/; do \
 	  slug=$$(basename $$f); \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \

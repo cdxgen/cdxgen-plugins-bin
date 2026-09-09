@@ -21,6 +21,17 @@ def canon(x):
 def merge():
     root, out_path = sys.argv[1], sys.argv[2]
     reflection, resources = {}, {}
+    # Reflection entries under jdk.internal.* describe the substrate of the
+    # native image itself (docs/KOSI.md defect 3: the jimage reader for the
+    # resolved tier's JDK). The tracing agent runs on the JVM, where that
+    # code path never executes, so regeneration would silently drop them.
+    # Seed the union from the checked-in output before merging agent runs.
+    if os.path.exists(out_path):
+        previous = json.load(open(out_path))
+        for entry in previous.get("reflection", []):
+            t = entry.get("type")
+            if isinstance(t, str) and t.startswith("jdk.internal."):
+                reflection.setdefault(("type", t), {k: v for k, v in entry.items() if k != "type"} | {"type": t})
     for slug in sorted(os.listdir(root)):
         path = os.path.join(root, slug, "reachability-metadata.json")
         if not os.path.exists(path):

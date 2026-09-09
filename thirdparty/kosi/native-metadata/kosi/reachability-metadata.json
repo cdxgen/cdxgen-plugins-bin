@@ -706,6 +706,23 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeList"
     },
     {
@@ -1419,15 +1436,6 @@
           "parameterTypes": []
         }
       ],
-      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProviderCliImpl"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ],
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.file.structure.LLFirInBlockModificationTracker"
     },
     {
@@ -1505,6 +1513,31 @@
         }
       ],
       "type": "java.util.Optional"
+    },
+    {
+      "methods": [
+        {
+          "name": "open",
+          "parameterTypes": [
+            "java.nio.file.Path"
+          ]
+        },
+        {
+          "name": "getEntryNames",
+          "parameterTypes": []
+        },
+        {
+          "name": "getResource",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        },
+        {
+          "name": "close",
+          "parameterTypes": []
+        }
+      ],
+      "type": "jdk.internal.jimage.BasicImageReader"
     },
     {
       "methods": [
@@ -1844,6 +1877,9 @@
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProvider"
+    },
+    {
+      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProviderCliImpl"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.K2KotlinBuiltInDecompilationInterceptor"
@@ -2231,9 +2267,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeCallEntry[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry[]"
