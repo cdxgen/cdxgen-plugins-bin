@@ -70,9 +70,15 @@ Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `dataflowMaxTraceNodes`, `dataflowMaxTraceEdges`, `accessPathDepth`,
 `dataflowSkipGenerated`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
-`progressive`, `optIn`, `multiplatformTarget`, `pretty`, `format`.
-Phase 0 accepts `--backend syntax` only; other tiers are usage errors, not
-silent degrades.
+`progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
+`classpathFile` (one jar path per line, `#` comments), `jdkHome`,
+`pretty`, `format`.
+An explicit `--classpath`/`--classpath-file` replaces offline resolution
+entirely (02-ARCHITECTURE.md §3 acquisition order); otherwise the resolved
+backend scans build files as text and locates coordinates in the local
+Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
+defaults to the running JVM. Unknown flags are a usage error, never a silent
+degrade.
 
 ## modules — ModuleRef
 
@@ -102,8 +108,8 @@ never refuses to run and never pretends the declared version was honoured.
 | `path` | string | relative, POSIX separators |
 | `modulePath` | string | owning module |
 | `purl` | string | owning module purl |
-| `language` | string | `kotlin` or `java` (Java is evidence-only at the syntax tier) |
-| `generated` | boolean | false at the syntax tier; build/output trees are excluded outright |
+| `language` | string | `kotlin` or `java` (Java is parsed at the resolved tier; evidence-only at the syntax tier, where `java-source-not-parsed` fires) |
+| `generated` | boolean | false; build/output trees are excluded outright |
 
 ## imports — ImportUsage
 
@@ -112,7 +118,7 @@ never refuses to run and never pretends the declared version was honoured.
 | `name` | string | imported FQN, backtick-free (`kotlin.io.println`); `star` marks wildcard |
 | `alias` | string? | `import ... as x` |
 | `star` | boolean | wildcard import |
-| `purl` | string? | resolved purl (null at the syntax tier) |
+| `purl` | string? | resolved tier: the purl of the library jar whose package prefix the import matches (longest prefix wins; null when no resolved jar contains it, and always null at the syntax tier) |
 | `filePath`, `position` | | occurrence |
 
 ## declarations — Declaration
@@ -123,15 +129,16 @@ never refuses to run and never pretends the declared version was honoured.
 | `name` | string | simple name |
 | `qualifiedName` | string | `<modulePath>:<pkg>.<containers>.<name>` — rooted at the module so `commonMain` and `androidMain` actuals are distinguishable |
 | `canonicalName` | string | generic-free, hash-free, backtick-free join key |
-| `jvmOwner`, `jvmDescriptor` | string? | null until the resolved tier |
+| `jvmOwner`, `jvmDescriptor` | string? | resolved tier: internal owner name (`t/Greeter`) and erased descriptor (`(Ljava/lang/String;)Ljava/lang/String;`) computed through the compiler's own JVM type mapping; null when not computable, never guessed |
 | `kind` | string | `function`, `method`, `constructor`, `property`, `getter`, `setter`, `class`, `object`, `companion`, `interface`, `enum`, `sealed-class`, `data-class`, `annotation`, `typealias`, `extension-function`, `lambda`, `init` |
 | `signature` | string? | normalised source signature |
 | `returnType` | string? | declared return type (functions) or declared type (properties, typealias targets) |
 | `extensionReceiverType` | string? | extension receiver |
-| `visibility` | string | `public` (default), `private`, `internal`, `protected` |
+| `visibility` | string | `public` (default), `private`, `internal`, `protected`; the resolved tier adds `package-private` (Java default visibility) and `local` |
 | `modifiers` | string[] | `inline`, `suspend`, `operator`, `infix`, `expect`, `actual`, `external`, `abstract`, `open`, `override`, `const`, `tailrec`, plus factual extras (`data`, `sealed`, `value`, `inner`, `lateinit`, `companion`) |
 | `annotations` | AnnotationEvidence[] | name + first const string argument |
-| `overrides` | string[] | empty until resolution exists |
+| `overrides` | string[] | resolved tier: canonical names of every symbol this declaration overrides (empty at the syntax tier) |
+| `supertypes` | string[] | resolved tier: canonical names of direct supertypes of class-like declarations, `kotlin.Any` elided (empty otherwise) |
 | `position` | Position | 1-based line/column |
 | `generated` | boolean? | null at the syntax tier |
 
@@ -171,16 +178,30 @@ rather than a negative expectation that passes vacuously.
 | `kotlin-api-version` | warning | declared apiVersion above the language version; clamped |
 | `no-build-files` | info | no Gradle/Maven build files; analysed as a plain source tree |
 | `no-sources` | warning | no Kotlin/Java sources under the discovered roots |
-| `unreadable-source` | error | file could not be read |
-| `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at this tier; `count` is how many |
+| `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists |
+| `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
+| `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
+| `resolution-errors` | warning | frontend resolution reported diagnostics in a file; `message` summarises per-checker counts, `count` is the total |
+| `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
+| `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 
 ## stats
 
 `fileCount`, `declarationCount`, `usageCount`, `importCount`,
-`resolvedCallRatio` (0.0 at the syntax tier, explained by a diagnostic),
-`unknownCallPropagations`, `loweringFailures{}`, `fixpointCapHits`,
-`sourceCount`, `sinkCount`, `sliceCount`, `crossDependencySliceCount`,
-`reachableSliceCount`, `truncations{}`, `degraded`.
+`resolvedCallRatio` — 0.0 at the syntax tier (explained by
+`syntax-backend-no-resolution`); at the resolved tier: explicit Kotlin calls
+whose resolution produced symbols divided by all explicit calls, 0.0 when
+there are no calls — with `callsTotal` and `callsResolved`, the denominator
+and numerator it was computed from, published beside it: a 0.0 over 0 calls
+and a 0.0 over 400 calls are the same number and opposite facts, so the ratio
+is never published alone (the same rule as `sliceCount` beside
+`connectivity`). Java sources contribute declarations but no calls, so the
+ratio measures Kotlin call sites — `callsTotal` says how many there were —
+plus `unknownCallPropagations`, `loweringFailures{}`,
+`fixpointCapHits`, `sourceCount`, `sinkCount`, `sliceCount`,
+`crossDependencySliceCount`, `reachableSliceCount`, `truncations{}`,
+`degraded` (`kotlin-version` when a version mismatch coincides with heavy
+resolution fallout — never read such a report as facts about the code).
 
 **Deliberate deviation from the v1 sketch, for the PR:** the
 `analysisMillis{}` and `peakRssBytes` keys are NOT emitted. Embedding a

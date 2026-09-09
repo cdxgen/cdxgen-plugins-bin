@@ -5,8 +5,8 @@ import io.cdxgen.kosi.schema.Diagnostic
 import io.cdxgen.kosi.schema.ImportUsage
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.Severity
-import org.jetbrains.kotlin.com.intellij.psi.PsiElement
-import org.jetbrains.kotlin.com.intellij.psi.PsiErrorElement
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiErrorElement
 import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtAnnotated
@@ -35,9 +35,15 @@ import org.jetbrains.kotlin.psi.KtValueArgument
  * `syntax-backend-no-resolution`).
  */
 class SyntaxAnalyzer(
-    private val env: PsiEnvironment,
+    private val env: AnalysisEnvironment,
     private val filePath: String,
     private val modulePath: String,
+    /**
+     * False when the caller (the resolved tier) wants only usage names and
+     * parse errors: declaration facts then come from resolved symbols instead
+     * of PSI text, and emitting both would duplicate every declaration.
+     */
+    private val collectDeclarations: Boolean = true,
 ) {
 
     data class FileResult(
@@ -68,9 +74,10 @@ class SyntaxAnalyzer(
         val position: Position,
     )
 
-    fun analyze(text: String): FileResult {
-        val file = env.parseFile(text)
-        val lines = LineIndex(text)
+    fun analyze(text: String): FileResult = analyze(env.parseFile(text))
+
+    fun analyze(file: KtFile): FileResult {
+        val lines = LineIndex(file.text)
         val diagnostics = mutableListOf<Diagnostic>()
         for (error in collectParseErrors(file)) {
             diagnostics.add(
@@ -86,7 +93,7 @@ class SyntaxAnalyzer(
         val declarations = mutableListOf<RawDeclaration>()
         val usages = mutableListOf<RawUsage>()
         val pkg = file.packageFqName.asString()
-        file.accept(DeclarationVisitor(lines, pkg, declarations, usages))
+        file.accept(DeclarationVisitor(lines, pkg, declarations, usages, collectDeclarations))
         // Stamp the filename on every position now that we know it.
         declarations.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
         usages.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
@@ -113,6 +120,7 @@ class SyntaxAnalyzer(
         private val pkg: String,
         private val declarations: MutableList<RawDeclaration>,
         private val usages: MutableList<RawUsage>,
+        private val emitDeclarations: Boolean,
     ) : KtTreeVisitorVoid() {
 
         private fun pos(element: PsiElement): Position =
@@ -149,6 +157,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitClass(klass: KtClass) {
+            if (!emitDeclarations) {
+                super.visitClass(klass)
+                return
+            }
             val kind = when {
                 klass.hasModifier(KtTokens.ENUM_KEYWORD) -> "enum"
                 klass.hasModifier(KtTokens.ANNOTATION_KEYWORD) -> "annotation"
@@ -168,6 +180,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitObjectDeclaration(declaration: KtObjectDeclaration) {
+            if (!emitDeclarations) {
+                super.visitObjectDeclaration(declaration)
+                return
+            }
             val name = declaration.name ?: "<anonymous>"
             emit(
                 declaration, name, containerChainOf(declaration),
@@ -180,6 +196,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitNamedFunction(function: KtNamedFunction) {
+            if (!emitDeclarations) {
+                super.visitNamedFunction(function)
+                return
+            }
             val name = function.name ?: "<anonymous>"
             val containers = containerChainOf(function)
             val kind = when {
@@ -211,6 +231,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitProperty(property: KtProperty) {
+            if (!emitDeclarations) {
+                super.visitProperty(property)
+                return
+            }
             val name = property.name ?: "<anonymous>"
             val typeText = property.typeReference?.text?.normalized()
             val signature = buildString {
@@ -232,6 +256,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitPropertyAccessor(accessor: KtPropertyAccessor) {
+            if (!emitDeclarations) {
+                super.visitPropertyAccessor(accessor)
+                return
+            }
             val property = accessor.property
             val name = property?.name ?: "<anonymous>"
             val fqName = joinCanonical(pkg, containerChainOf(accessor), name) +
@@ -257,6 +285,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitPrimaryConstructor(constructor: KtPrimaryConstructor) {
+            if (!emitDeclarations) {
+                super.visitPrimaryConstructor(constructor)
+                return
+            }
             val container = constructor.getContainingClassOrObject()
             val containerName = container?.name ?: "<anonymous>"
             emit(
@@ -270,6 +302,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitSecondaryConstructor(constructor: KtSecondaryConstructor) {
+            if (!emitDeclarations) {
+                super.visitSecondaryConstructor(constructor)
+                return
+            }
             val container = constructor.getContainingClassOrObject()
             val containerName = container?.name ?: "<anonymous>"
             emit(
@@ -283,6 +319,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitClassInitializer(initializer: KtClassInitializer) {
+            if (!emitDeclarations) {
+                super.visitClassInitializer(initializer)
+                return
+            }
             val container = initializer.parent as? KtClassOrObject
             val containerName = container?.name ?: "<anonymous>"
             val fqName = joinCanonical(pkg, containerChainOf(initializer), containerName) + ".<init-block>"
@@ -305,6 +345,10 @@ class SyntaxAnalyzer(
         }
 
         override fun visitTypeAlias(typeAlias: KtTypeAlias) {
+            if (!emitDeclarations) {
+                super.visitTypeAlias(typeAlias)
+                return
+            }
             val name = typeAlias.name ?: "<anonymous>"
             val target = typeAlias.getTypeReference()?.text?.normalized() ?: "?"
             emit(
@@ -430,10 +474,10 @@ class SyntaxAnalyzer(
          * elided (`a.b(x).c()` -> `a.b.c`), so usage names are comparable to
          * model-pack patterns regardless of call arguments.
          */
-        fun qualifiedNameWithoutArgs(expression: org.jetbrains.kotlin.com.intellij.psi.PsiElement): String =
+        fun qualifiedNameWithoutArgs(expression: com.intellij.psi.PsiElement): String =
             renderQualified(expression)
 
-        private fun renderQualified(element: org.jetbrains.kotlin.com.intellij.psi.PsiElement): String =
+        private fun renderQualified(element: com.intellij.psi.PsiElement): String =
             when (element) {
                 is org.jetbrains.kotlin.psi.KtQualifiedExpression ->
                     renderQualified(element.receiverExpression) + "." +

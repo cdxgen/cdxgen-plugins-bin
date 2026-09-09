@@ -32,6 +32,13 @@ class DefaultsSyncTest {
         val labels = Matrix.defaultMatrix().map { it.label }.toSet()
         assertTrue("security" in labels, "the shipping default mode must be exercised")
         assertTrue("all" in labels, "the all mode must be exercised for every case")
+        assertTrue("resolved" in labels, "the resolved backend must be exercised for every case (P1)")
+    }
+
+    @Test
+    fun resolvedSlotRunsTheResolvedBackend() {
+        val resolved = Matrix.defaultMatrix().single { it.label == "resolved" }
+        assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, resolved.backend)
     }
 
     @Test

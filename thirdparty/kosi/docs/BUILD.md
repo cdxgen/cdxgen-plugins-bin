@@ -23,14 +23,39 @@ Measured P0 numbers:
 | `kosi analyze` (native), 16-fixture sweep | all succeed, byte-identical across runs **and** byte-identical to the JVM build |
 | UPX-LZMA (`--force-macos`) | 35 MB -> 12 MB, **binary segfaults: NOT USED** |
 
-Toolchain: GraalVM Community Edition JDK 25 (`native-image` from
-`$GRAAL_HOME`). The numbers above were re-measured at review time with
-GraalVM CE 25.0.2 (`sdk install java 25-graalce`), which is why the binary is
-~6 MB larger than the first measurement on CE 25.0.4.1 — **binary size is
-toolchain-specific, so record the GraalVM build alongside the number.**
-`GRAAL_HOME` resolves in order: an explicit override, a `JAVA_HOME` that
-already provides `native-image`, then the pinned release under
-`$HOME/tools`. The plan's
+**Toolchain: the pin is part of the contract, not a preference.** kosi builds
+against GraalVM CE 25.3.4.1 (`native-image 25.0.4.1`, GraalVM for JDK 25):
+
+```bash
+# sdkman's own 25.3.4+1.r25-graalce candidate fails to repackage on macOS,
+# so install the release directly, under the path the Makefile pins:
+mkdir -p ~/tools && cd ~/tools
+curl -LO https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
+shasum -a 256 -c <<<"ebfab1d74420f355a459076162012d6835fa6068bd9d2f230f1fcaf7ee0dd923  graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz"
+tar -xzf graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
+# optional: expose it through sdkman as a local candidate
+sdk install java 25.0.4.1-gce ~/tools/graalvm-community-25.3.4.1+1.1/Contents/Home
+```
+
+Other GraalVM builds are not interchangeable: on **CE 25.0.2** the same
+sources produce a binary that cannot create the analysis session at all
+(`UnsatisfiedLinkError: Can't load library: awt` — that JDK's
+`Toolkit.<clinit>` loads its natives before reading the `awt.toolkit`
+property, so kosi's no-op toolkit is never selected), and it is 12 MB
+larger. So `GRAAL_HOME` resolves in order: an explicit override, **the pinned
+release** under `$HOME/tools`, then a `JAVA_HOME` that provides
+`native-image` — and every binary rule depends on `native-toolchain-check`,
+which prints the `native-image` version in use and refuses anything but the
+pin unless `GRAAL_ALLOW_ANY=1`:
+
+```
+$ make native-toolchain-check
+kosi: native-image 25.0.4.1 (pinned) at /Users/you/tools/graalvm-community-25.3.4.1+1.1/Contents/Home
+```
+
+**Binary size is toolchain-specific, so record the GraalVM build alongside
+every number.** P1 on the pin: 93,709,760 bytes (89.4 MiB); the same sources
+on CE 25.0.2: 106,000,640 bytes. The plan's
 "most binaries land 120-260 MB uncompressed" budget is beaten by an order of
 magnitude because the P0 closed world is small: the syntax tier touches the
 frontend/PSI only, never the compiler *backends*.
@@ -58,19 +83,27 @@ cmp /tmp/a.json /tmp/b.json
 | build-time class-init clashes | `--initialize-at-run-time=...EarlyAccessRegistry`; `--trace-class-initialization` documents any further clashes | minimal list, grows on evidence |
 | reachability drift when the Kotlin pin bumps | `make native-metadata` re-runs the tracing agent over every fixture and deterministically re-merges (`scripts/merge-agent-metadata.py`); `make native-metadata-check` fails CI on drift | wired |
 
-## 3. Reachability metadata provenance
+## 3. Reachability metadata provenance (rewritten at P1)
 
-- Seed: JetBrains' own compiler image config, pinned to
-  `JetBrains/kotlin@4d1f6aaf3c0e2e47b2da9f7829ccdf551774bd26`,
-  file `prepare/compiler-native-image/resources/META-INF/native-image/org/jetbrains/kotlin/kotlin-compiler-embeddable/reachability-metadata.json`
-  (checked in at `native-metadata/jetbrains/`). **Deviation, recorded:** the
-  `prepare/compiler-native-image` module does not exist at the `v2.4.0` tag —
-  it only exists on master — so the pin is a master commit, not the release
-  tag.
-- Refined by the GraalVM tracing agent over all 16 fixtures
-  (`native-metadata/kosi/reachability-metadata.json`, regenerated with
-  `make native-metadata`; deterministic merge so CI can diff it).
-- Hand-maintained proxy groups: `native-metadata/proxy-config.json`.
+P1 moved the substrate from the shaded `kotlin-compiler-embeddable` to the
+unrelocated `-for-ide` artifacts plus the unrelocated IntelliJ platform
+(02-ARCHITECTURE.md §1 amendment). The JetBrains seed metadata described the
+SHADED class names (`org.jetbrains.kotlin.com.intellij.*`) and cannot apply;
+the whole surface is now re-derived from our own runs:
+
+- `native-metadata/kosi/reachability-metadata.json` — the GraalVM tracing
+  agent over ALL fixtures with BOTH backends (every fixture at the syntax
+  backend plus every fixture again at `--backend resolved`, so the Analysis
+  API session's ServiceLoader, reflection and proxy surface is recorded),
+  merged by `scripts/merge-agent-metadata.py` (deterministic union; CI diffs
+  the checked-in file via `make native-metadata-check`).
+- `native-metadata/proxy-config.json` (P0's hand-maintained relocated
+  proxies) and the JetBrains seed (`native-metadata/jetbrains/`) are retired;
+  proxy groups arrive through the agent's reachability metadata now.
+- The fat jar carries the kotlin-stdlib JAR FILE as a resource
+  (`kosi-libs/kotlin-stdlib.jar`): the native resolved tier materializes it
+  to a temp jar at run time as the module provider's stdlib binary root —
+  an image has no classpath jars on disk.
 
 ## 4. Size levers still available (05-BUILD-DIST.md §3, in order)
 

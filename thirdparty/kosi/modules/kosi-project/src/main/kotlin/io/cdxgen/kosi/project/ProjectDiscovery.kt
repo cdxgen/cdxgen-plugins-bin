@@ -104,7 +104,11 @@ object SourceCollector {
                                 .relativize(p.toAbsolutePath().normalize()).toString().replace('\\', '/')
                             files.add(
                                 CollectedFile(
-                                    absolutePath = p,
+                                    // Normalized: a module root of "." produces
+                                    // "/./" segments that would break any
+                                    // consumer matching these paths against
+                                    // paths derived elsewhere.
+                                    absolutePath = p.toAbsolutePath().normalize(),
                                     relativePath = rel,
                                     modulePath = module.modulePath,
                                     modulePurl = module.purl,

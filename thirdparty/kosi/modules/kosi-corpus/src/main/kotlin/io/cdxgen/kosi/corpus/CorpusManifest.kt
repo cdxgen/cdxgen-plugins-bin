@@ -18,6 +18,15 @@ data class CorpusEntry(
     val capabilities: List<String>,
     val expectedFlows: String?,
     val features: List<String>,
+    /**
+     * Optional build-produced classpath file inside the entry's directory
+     * (one jar path per line, `#` comments) — 02-ARCHITECTURE.md §3
+     * acquisition order 2. Generated developer-side by
+     * scripts/warm-corpus-classpath.sh; kosi never executes a build to make
+     * one. When absent or unreadable, offline resolution runs and any gap is
+     * diagnosed as classpath-partial.
+     */
+    val classpathFile: String?,
 ) {
     fun validate() {
         if (path == null && repo == null) {
@@ -93,6 +102,7 @@ data class CorpusManifest(
                 capabilities = list("capabilities"),
                 expectedFlows = str("expected_flows"),
                 features = list("features"),
+                classpathFile = str("classpath_file"),
             )
         }
     }

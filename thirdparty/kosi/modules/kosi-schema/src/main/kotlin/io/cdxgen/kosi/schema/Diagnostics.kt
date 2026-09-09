@@ -49,6 +49,10 @@ object DiagnosticCodes {
     const val KOTLIN_LANGUAGE_VERSION = "kotlin-language-version"
     const val KOTLIN_VERSION = "kotlin-version"
     const val KOTLIN_API_VERSION = "kotlin-api-version"
+    const val VERSION_OVERRIDE = "version-override"
+    const val CLASSPATH_PARTIAL = "classpath-partial"
+    const val RESOLUTION_ERRORS = "resolution-errors"
+    const val SYMBOL_RESOLUTION_FAILED = "symbol-resolution-failed"
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
@@ -60,6 +64,10 @@ object DiagnosticCodes {
         KOTLIN_LANGUAGE_VERSION,
         KOTLIN_VERSION,
         KOTLIN_API_VERSION,
+        VERSION_OVERRIDE,
+        CLASSPATH_PARTIAL,
+        RESOLUTION_ERRORS,
+        SYMBOL_RESOLUTION_FAILED,
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,

@@ -116,6 +116,12 @@ data class AnalyzeOptions(
     val progressive: Boolean = false,
     val optIn: List<String> = emptyList(),
     val multiplatformTarget: String? = null,
+    // Resolved-tier classpath acquisition (02-ARCHITECTURE.md §3, in order:
+    // explicit --classpath/--classpath-file first, then offline resolution;
+    // --jdk-home names the SDK module, defaulting to the running JDK).
+    val classpath: List<String> = emptyList(),
+    val classpathFile: String? = null,
+    val jdkHome: String? = null,
     val pretty: Boolean = false,
     val format: String = "json",
 ) {
@@ -127,6 +133,10 @@ data class AnalyzeOptions(
         w.str("backend", backend.id)
         w.str("callgraph", callgraph.id)
         w.num("callgraphTimeoutSeconds", callgraphTimeoutSeconds)
+        w.beginArray("classpath")
+        for (value in classpath.sorted()) w.str(value)
+        w.endArray()
+        w.str("classpathFile", classpathFile)
         w.str("dataflow", dataflow.id)
         w.num("dataflowMaxFunctionInstructions", dataflowMaxFunctionInstructions)
         w.num("dataflowMaxSlices", dataflowMaxSlices)
@@ -137,6 +147,7 @@ data class AnalyzeOptions(
         w.str("dependencyDetail", dependencyDetail.id)
         w.str("format", format)
         w.bool("includeStdlib", includeStdlib)
+        w.str("jdkHome", jdkHome)
         w.str("jvmTarget", jvmTarget)
         w.str("languageVersion", languageVersion)
         w.num("maxPathsPerSymbol", maxPathsPerSymbol)

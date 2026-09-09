@@ -40,17 +40,46 @@ host_platform := $(host_os)-$(host_arch)
 
 # GraalVM JDK 25 toolchain (05-BUILD-DIST.md). Overridable:
 #   make native GRAAL_HOME=/path/to/graalvm
-# Resolution order: an explicit GRAAL_HOME, then a JAVA_HOME that already
-# provides native-image (sdkman/asdf/CI installs land there), then the pinned
-# release under $HOME/tools. macOS layouts put the JDK under Contents/Home.
+# Resolution order: an explicit GRAAL_HOME, then the PINNED release under
+# $HOME/tools, then a JAVA_HOME that provides native-image. macOS layouts put
+# the JDK under Contents/Home.
+#
+# The pin comes FIRST for a reason paid for in a review: preferring any
+# JAVA_HOME that happens to ship native-image silently builds on whatever
+# GraalVM the shell points at, and the resulting binary is not the reviewed
+# artifact. On GraalVM CE 25.0.2 the analysis session cannot even be created
+# (the platform's Swing call reaches an AWT toolkit that image has no natives
+# for), while the pinned 25.3.4.1 build runs both tiers — same sources, same
+# flags, opposite verdicts. So the toolchain is part of the build contract
+# and `native-toolchain-check` states it out loud.
+graal_version_pinned := 25.0.4.1
 ifeq ($(host_os),darwin)
   graal_home_pinned := $(HOME)/tools/graalvm-community-25.3.4.1+1.1/Contents/Home
 else
   graal_home_pinned := $(HOME)/tools/graalvm-community-25.3.4.1+1.1
 endif
-graal_home_default := $(if $(and $(JAVA_HOME),$(wildcard $(JAVA_HOME)/bin/native-image)),$(JAVA_HOME),$(graal_home_pinned))
+graal_home_default := $(if $(wildcard $(graal_home_pinned)/bin/native-image),$(graal_home_pinned),$(if $(and $(JAVA_HOME),$(wildcard $(JAVA_HOME)/bin/native-image)),$(JAVA_HOME),$(graal_home_pinned)))
 GRAAL_HOME ?= $(graal_home_default)
 graal_env = JAVA_HOME=$(GRAAL_HOME) PATH="$(GRAAL_HOME)/bin:$(PATH)"
+
+## native-toolchain-check: name the native-image build in use, and refuse a
+## version other than the pinned one unless GRAAL_ALLOW_ANY=1 says so.
+.PHONY: native-toolchain-check
+native-toolchain-check:
+	@test -x "$(GRAAL_HOME)/bin/native-image" || { \
+	  echo "kosi: no native-image at $(GRAAL_HOME)/bin (install the pinned build:"; \
+	  echo "      https://github.com/graalvm/graalvm-ce-builds/releases/tag/graal-25.3.4.1"; \
+	  echo "      extracted under \$$HOME/tools, or pass GRAAL_HOME=...)"; exit 1; }
+	@found=$$("$(GRAAL_HOME)/bin/native-image" --version 2>/dev/null | head -1 | awk '{print $$2}'); \
+	 if [ "$$found" != "$(graal_version_pinned)" ]; then \
+	   echo "kosi: native-image $$found at $(GRAAL_HOME) is not the pinned $(graal_version_pinned)."; \
+	   echo "      Binaries from other builds are not the reviewed artifact: CE 25.0.2, for"; \
+	   echo "      instance, produces a binary whose analysis session cannot start at all."; \
+	   echo "      Set GRAAL_ALLOW_ANY=1 to build anyway (and say so next to any number you report)."; \
+	   [ "$(GRAAL_ALLOW_ANY)" = "1" ] || exit 1; \
+	 else \
+	   echo "kosi: native-image $$found (pinned) at $(GRAAL_HOME)"; \
+	 fi
 
 gradle := ./gradlew --no-daemon
 
@@ -93,13 +122,13 @@ bootstrap-darwin bootstrap-linux bootstrap-windows:
 #   ppc64le, 32-bit arm - not Native Image platforms at all
 #   riscv64             - best-effort LLVM backend, not built at this phase
 define build_native
-	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
-	$(graal_env) native-image -jar modules/kosi-cli/build/dist/kosi-all.jar \
+	$(graal_env) native-image -jar $(fat_jar) \
 	  -Os --gc=serial \
-	  -H:ConfigurationFileDirectories=native-metadata/merged \
-	  -H:DynamicProxyConfigurationFiles=native-metadata/proxy-config.json \
-	  -H:IncludeResources='^kosi-ext/META-INF/extensions/.*\.xml$$|^META-INF/services/.*|^META-INF/.*\.xml' \
-	  --initialize-at-run-time=org.jetbrains.kotlin.com.intellij.openapi.util.registry.EarlyAccessRegistry \
+	  -H:ConfigurationFileDirectories=native-metadata/kosi \
+	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
+	  -H:+UnlockExperimentalVMOptions \
+	  -H:+AddAllCharsets \
+	  --enable-monitoring=jfr \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
 	@cd $(build_dir) && shasum -a 256 $(notdir $(2)) > $(notdir $(2)).sha256
@@ -108,16 +137,29 @@ endef
 $(build_dir):
 	mkdir -p "$(build_dir)"
 
-$(build_dir)/kosi-darwin-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
+
+# Gradle decides whether the jar changed; make then decides whether to
+# relink. Declared PHONY so the jar is never assumed current: a binary that
+# is newer than the metadata file but older than the sources is exactly how
+# a stale binary gets measured as if it were the build under review.
+.PHONY: fat-jar
+fat-jar:
+	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
+
+$(fat_jar): fat-jar
+	@test -f $@
+
+$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
 
-$(build_dir)/kosi-linux-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
 
-$(build_dir)/kosi-linuxmusl-%: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,--static --libc=musl,$(build_dir)/kosi-linuxmusl-$*)
 
-$(build_dir)/kosi-windows-%.exe: native-metadata/jetbrains/kotlin-compiler-embeddable-reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-windows-$*.exe)
 
 ## native: host-platform binary (whichever family this machine is).
@@ -173,16 +215,23 @@ linuxmusl: check-linuxmusl-host $(build_dir)/kosi-linuxmusl-$(host_arch)
 ## windows: host-arch Windows binary (MSVC toolchain; docs/BUILD.md §6).
 windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 
-## native-metadata: re-run the tracing agent over the whole fixture tree and
+## native-metadata: re-run the tracing agent over the whole fixture tree —
+## syntax AND resolved backends (the resolved pass exercises the Analysis
+## API session, the reflection/ServiceLoader heart of the binary) — and
 ## merge the result into native-metadata/kosi. CI fails if the checked-in
 ## metadata differs from what the agent produces (native-metadata-check).
+## The JetBrains compiler metadata is no longer used: P1 moved the substrate
+## from the shaded kotlin-compiler-embeddable to the unrelocated -for-ide
+## artifacts, whose reflection surface the agent re-derives from our runs.
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
 	@for f in fixtures/*/; do \
 	  slug=$$(basename $$f); \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \
-	    -jar modules/kosi-cli/build/dist/kosi-all.jar analyze --dir $$f --out /dev/null; \
+	    -jar $(fat_jar) analyze --dir $$f --out /dev/null; \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
+	    -jar $(fat_jar) analyze --backend resolved --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 

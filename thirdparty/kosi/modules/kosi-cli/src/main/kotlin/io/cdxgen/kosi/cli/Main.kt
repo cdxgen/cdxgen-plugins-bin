@@ -81,6 +81,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
+        "classpath", "classpath-file", "jdk-home",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
         "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive",
@@ -130,12 +131,6 @@ object Main {
         val backend = parsed.value("backend")?.let {
             Backend.fromId(it) ?: throw UsageException("unknown backend '$it' (syntax, resolved)")
         } ?: defaults.backend
-        if (backend != Backend.SYNTAX) {
-            throw UsageException(
-                "backend '${backend.id}' is not available in phase 0; " +
-                    "use --backend syntax (the resolved tier lands in a later phase)",
-            )
-        }
         val dataflow = parsed.value("dataflow")?.let {
             DataflowMode.fromId(it) ?: throw UsageException("unknown dataflow mode '$it'")
         } ?: defaults.dataflow
@@ -179,6 +174,9 @@ object Main {
             languageVersion = parsed.value("language-version") ?: defaults.languageVersion,
             apiVersion = parsed.value("api-version") ?: defaults.apiVersion,
             jvmTarget = parsed.value("jvm-target") ?: defaults.jvmTarget,
+            classpath = parsed.values("classpath"),
+            classpathFile = parsed.value("classpath-file"),
+            jdkHome = parsed.value("jdk-home"),
             progressive = parsed.bool("progressive", defaults.progressive),
             optIn = parsed.values("opt-in"),
             multiplatformTarget = parsed.value("multiplatform-target") ?: defaults.multiplatformTarget,
@@ -257,8 +255,12 @@ object Main {
         }
 
         println(result.toJson())
-        if (parsed.bool("verbose")) {
-            println(gate.render())
+        // Asking for a comparison IS asking for the gate: rendering it only
+        // under --verbose meant `bench --compare <baseline>` computed every
+        // criterion and showed none of them. It goes to stderr so stdout
+        // stays a parseable report.
+        if (compareAgainst != null || parsed.bool("verbose")) {
+            System.err.println(gate.render())
         }
 
         return if (regressions.isEmpty()) {
@@ -330,12 +332,17 @@ object Main {
             known = VERSION_BOOLEAN_FLAGS,
             booleans = VERSION_BOOLEAN_FLAGS,
         )
+        val syntaxProbe = StandaloneSessionProbe.probeSyntax()
         val probe = StandaloneSessionProbe.probe()
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()
         w.beginObject("components")
-        w.str("backend-syntax", "available")
-        w.str("backend-resolved", "planned (phase 2)")
+        // Both backends are PROBED, never asserted: since P1 they share one
+        // session substrate, so a build where the session cannot be created
+        // has no working syntax tier either — and a constant "available"
+        // string would report the opposite of the truth.
+        w.str("backend-syntax", if (syntaxProbe.available) "available" else syntaxProbe.detail)
+        w.str("backend-resolved", if (probe.available) "available" else probe.detail)
         w.str("analysis-api-standalone", if (probe.available) "available" else probe.detail)
         w.endObject()
         w.str("commit", commit)
@@ -361,7 +368,7 @@ object Main {
     private fun printUsage() {
         println(
             """
-            kosi — Kotlin Source Inspector (phase 0: syntax backend)
+            kosi — Kotlin Source Inspector (syntax and resolved backends)
 
             Usage:
               kosi analyze --dir <path> [--out <file>] [options]
@@ -381,7 +388,6 @@ object Main {
             kosi analyze options (defaults live in AnalyzeOptions, not in the parser):
               --dir <path>                    project root to analyse (default: .)
               --out <file>                    write report to file (default: stdout)
-              --backend <syntax|resolved>     analysis tier (resolved arrives in phase 2)
               --dataflow <mode>               none|security|crypto|reachable|security-deps|all
               --callgraph <mode>              none|static|cha|sealed|rta|vta|auto
               --roots <scope>                 repeatable: main, exported, handlers, tests, android, all, symbol:<regex>
@@ -389,6 +395,10 @@ object Main {
               --language-version <v>          override language version (diagnosed)
               --api-version <v>               override api version (diagnosed)
               --jvm-target <v>                override JVM target (diagnosed)
+              --classpath <jar>               repeatable: explicit classpath jar for the resolved backend
+              --classpath-file <file>         file of jar paths (one per line, # comments)
+              --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
+              --backend <syntax|resolved>     analysis tier (resolved needs no build execution)
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
               --pretty                        indented JSON
 

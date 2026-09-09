@@ -44,6 +44,13 @@ object BenchRunner {
         val integrityViolations: Int,
         val wallMillis: Long,
         val parseErrors: Int,
+        /**
+         * stats.resolvedCallRatio of this slot's report, surfaced so the P1
+         * gate reads per-repo ratios directly from the bench result (the
+         * gate is per repo, never an average). Null only for legacy
+         * baselines written before P1.
+         */
+        val resolvedCallRatio: Double? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -51,6 +58,7 @@ object BenchRunner {
             w.beginObject(key)
             w.num("annotations", annotations)
             w.dbl("connectivity", connectivity)
+            resolvedCallRatio?.let { w.dbl("resolvedCallRatio", it) }
             w.str("digest", digest.combined)
             w.num("fail", fail)
             w.num("integrityViolations", integrityViolations)
@@ -314,7 +322,14 @@ object BenchRunner {
         slot: MatrixSlot,
         commit: String,
     ): FixtureResult {
-        val options = slot.options()
+        // A build-produced classpath file (warm-corpus-classpath.sh) rides
+        // the entry; kosi itself never executes the project's build to make
+        // one. Absent file -> offline resolution, gaps diagnosed.
+        val options = entry.classpathFile
+            ?.let { entryDir -> dir.resolve(entryDir) }
+            ?.takeIf { Files.isRegularFile(it) }
+            ?.let { slot.options().copy(classpathFile = it.toString()) }
+            ?: slot.options()
         // Wall clock is measured OUTSIDE the report: the report itself must
         // stay byte-identical across runs on the same input.
         val start = System.nanoTime()
@@ -353,6 +368,7 @@ object BenchRunner {
             integrityViolations = integrity,
             wallMillis = wallMillis,
             parseErrors = report.diagnostics.count { it.code == "parse-error" },
+            resolvedCallRatio = report.stats.resolvedCallRatio,
             digest = digest,
             failures = failureDetails,
         )
