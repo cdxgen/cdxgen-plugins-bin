@@ -1,0 +1,36 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 131,221-224,232-233
+thirdparty/kosi/modules/kosi-cli/src/main/resources/META-INF/native-image/io.cdxgen.kosi/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 3-11
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/AnalysisEnvironment.kt
+  h_6a4cc5cdf68def 261-271
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 271-283,287-288
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/JdkModules.kt
+  h_6a4cc5cdf68def 1-297
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/StandaloneSessionProbe.kt
+  h_6a4cc5cdf68def 52,54-60,66,73,80-112
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/JdkModulesTest.kt
+  h_6a4cc5cdf68def 1-120
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/ResolvedBackendTest.kt
+  h_6a4cc5cdf68def 74,76-94
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirInstructions.kt
+  h_6a4cc5cdf68def 1-100
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirTypes.kt
+  h_6a4cc5cdf68def 1-71
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 694-710,1517-1541,1881-1883
+thirdparty/kosi/scripts/merge-agent-metadata.py
+  h_6a4cc5cdf68def 24-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "fb5e6c22f42bbd3e9f5b3a08553006cdc2f1cece",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
