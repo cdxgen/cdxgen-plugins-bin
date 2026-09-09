@@ -1,0 +1,232 @@
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 188-190,204-206,232-315,318
+thirdparty/kosi/README.md
+  h_6a4cc5cdf68def 11-13,35-37,46-61
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 169-196
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 8-108
+thirdparty/kosi/fixtures/framework-handlers/src/main/kotlin/Api.kt
+  h_6a4cc5cdf68def 1-19
+thirdparty/kosi/fixtures/framework-handlers/src/main/kotlin/Homonym.kt
+  h_6a4cc5cdf68def 1-15
+thirdparty/kosi/fixtures/framework-handlers/src/main/kotlin/org/springframework/web/bind/annotation/Annotations.kt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/library-api/src/main/kotlin/Csv.kt
+  h_6a4cc5cdf68def 1-34
+thirdparty/kosi/fixtures/library-api/src/main/kotlin/Csv2.kt
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/fixtures/sealed-dispatch/src/main/kotlin/Tickets.kt
+  h_6a4cc5cdf68def 1-45
+thirdparty/kosi/fixtures/virtual-dispatch/src/main/kotlin/Payroll.kt
+  h_6a4cc5cdf68def 1-45
+thirdparty/kosi/goldens/android-compose-app-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-compose-app-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/coroutine-suspend-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/data-class-copy-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/delegated-properties-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/delegated-properties-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/destructuring-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/destructuring-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/empty-classpath-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/empty-classpath-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/for-iterable-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/for-iterable-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-handlers-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-handlers-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-handlers-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-handlers-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/java-interop-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/kmp-jvm-android-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/latest-syntax-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/latest-syntax-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/library-api-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/library-api-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/library-api-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/library-api-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/log-injection-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/maven-project-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/multi-module-gradle-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/null-safety-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/old-language-version-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/old-language-version-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/operators-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/operators-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parse-error-reporting-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-functions-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-dispatch-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-dispatch-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-dispatch-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-dispatch-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sealed-when-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/sqli-jdbc-concat-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/use-close-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/use-close-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/virtual-dispatch-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/virtual-dispatch-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/virtual-dispatch-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/virtual-dispatch-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  h_6a4cc5cdf68def 287-296,364-366,429-549
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 73-94,103,105,110-120,133-135,265-280,439,470-485,492-590
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 22,24-29,35,45-50,68-73
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/CallGraphGateTest.kt
+  h_6a4cc5cdf68def 1-240
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DefaultsSyncTest.kt
+  h_6a4cc5cdf68def 23,25,44-58
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/FixtureResultJsonTest.kt
+  h_6a4cc5cdf68def 47-62
+thirdparty/kosi/modules/kosi-cli/build.gradle.kts
+  h_6a4cc5cdf68def 19-20
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 89,116-160,228-230,524-525
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  h_6a4cc5cdf68def 112-113,122-124
+thirdparty/kosi/modules/kosi-export/build.gradle.kts
+  h_6a4cc5cdf68def 1-4
+thirdparty/kosi/modules/kosi-export/src/main/kotlin/io/cdxgen/kosi/export/GraphMl.kt
+  h_6a4cc5cdf68def 1-219
+thirdparty/kosi/modules/kosi-export/src/test/kotlin/io/cdxgen/kosi/export/GraphExportTest.kt
+  h_6a4cc5cdf68def 1-78
+thirdparty/kosi/modules/kosi-front/build.gradle.kts
+  h_6a4cc5cdf68def 53
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 369-373,389-412,473-474,476,478,520-524,536,707,832
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  h_6a4cc5cdf68def 4,41,43,106-114,125-168,177,208-323,327,334-342,345-378,461,473-474,501,508-509,511,513,516-519,566-567,694,726,743,759,771,786,908,936,1112,1312,1373,1391,1400,1404,1412,1414,1451-1453,1546,1615,1639,1662,1684
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/CallGraphPipelineTest.kt
+  h_6a4cc5cdf68def 1-188
+thirdparty/kosi/modules/kosi-graph/build.gradle.kts
+  h_6a4cc5cdf68def 1-5,8
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/CallGraphBuilder.kt
+  h_6a4cc5cdf68def 1-662
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/Classification.kt
+  h_6a4cc5cdf68def 1-59
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/Dispatch.kt
+  h_6a4cc5cdf68def 1-148
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/GraphNodes.kt
+  h_6a4cc5cdf68def 1-162
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/GraphOptions.kt
+  h_6a4cc5cdf68def 1-37
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/Reachability.kt
+  h_6a4cc5cdf68def 1-103
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/Roots.kt
+  h_6a4cc5cdf68def 1-145
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/ViewFilter.kt
+  h_6a4cc5cdf68def 1-243
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/WitnessPaths.kt
+  h_6a4cc5cdf68def 1-95
+thirdparty/kosi/modules/kosi-graph/src/test/kotlin/io/cdxgen/kosi/graph/DispatchTest.kt
+  h_6a4cc5cdf68def 1-183
+thirdparty/kosi/modules/kosi-graph/src/test/kotlin/io/cdxgen/kosi/graph/GraphFixtures.kt
+  h_6a4cc5cdf68def 1-95
+thirdparty/kosi/modules/kosi-graph/src/test/kotlin/io/cdxgen/kosi/graph/ViewFilterTest.kt
+  h_6a4cc5cdf68def 1-177
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirInstructions.kt
+  h_6a4cc5cdf68def 32-33,40,53,57
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirModule.kt
+  h_6a4cc5cdf68def 9-18,37-48,51-57,82-87
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirReader.kt
+  h_6a4cc5cdf68def 36-39,65-69,116-119,194-200,204,207-211,215,218-221,225,262-274
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirWriter.kt
+  h_6a4cc5cdf68def 35-38,63,65-66,84-86
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/CallGraph.kt
+  h_6a4cc5cdf68def 23-38,59-60
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Diagnostics.kt
+  h_6a4cc5cdf68def 59-67,84-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8bf4a5c138c62d4aa326b4a7deb6e4437b64e843",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
