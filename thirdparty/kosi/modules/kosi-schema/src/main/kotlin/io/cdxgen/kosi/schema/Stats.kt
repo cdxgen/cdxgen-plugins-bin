@@ -18,6 +18,16 @@ data class Stats(
     val usageCount: Int,
     val importCount: Int,
     val resolvedCallRatio: Double,
+    /**
+     * The denominator and numerator of [resolvedCallRatio], published next to
+     * it: a ratio of 0.0 over zero calls (a fixture with no call expressions)
+     * and a ratio of 0.0 over 400 calls (a resolved tier that resolved
+     * nothing) are the same number and opposite facts. An unbroken-down
+     * metric is not a result — the same reason `sliceCount` travels with
+     * `connectivity`.
+     */
+    val callsTotal: Int,
+    val callsResolved: Int,
     val unknownCallPropagations: Int,
     val loweringFailures: Map<String, Int>,
     val fixpointCapHits: Int,
@@ -31,6 +41,8 @@ data class Stats(
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
+        w.num("callsResolved", callsResolved)
+        w.num("callsTotal", callsTotal)
         w.num("crossDependencySliceCount", crossDependencySliceCount)
         w.str("degraded", degraded)
         w.num("declarationCount", declarationCount)

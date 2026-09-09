@@ -310,15 +310,28 @@ object ClasspathResolver {
     private fun usableArtifact(path: Path): Path {
         if (!path.fileName.toString().endsWith(".aar")) return path
         val stamp = path.toAbsolutePath().normalize().toString().hashCode().toUInt().toString()
-        val target = Files.createTempDirectory("kosi-aar-$stamp").resolve("classes.jar")
+        // A FIXED directory, so the extraction is genuinely reused across
+        // runs. `createTempDirectory` returns a fresh unique directory every
+        // call, which re-extracted every AAR on every run (hundreds of them
+        // on an Android repo, times every matrix slot) and leaked each one.
+        val dir = Path.of(System.getProperty("java.io.tmpdir"), "kosi-aar", stamp)
+        val target = dir.resolve("classes.jar")
         if (Files.isRegularFile(target)) return target
-        java.util.zip.ZipFile(path.toFile()).use { zip ->
-            val entry = zip.getEntry("classes.jar") ?: return path
-            zip.getInputStream(entry).use { input ->
-                Files.copy(input, target)
+        return try {
+            Files.createDirectories(dir)
+            java.util.zip.ZipFile(path.toFile()).use { zip ->
+                val entry = zip.getEntry("classes.jar") ?: return path
+                zip.getInputStream(entry).use { input ->
+                    Files.copy(input, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                }
             }
+            target
+        } catch (_: Exception) {
+            // An unreadable AAR falls back to the AAR itself, which the
+            // session will reject as a binary root — reported as an
+            // unresolvable coordinate by the caller rather than pretended away.
+            path
         }
-        return target
     }
 
     /**
@@ -377,37 +390,41 @@ object ClasspathResolver {
         for (resolved in jars) {
             val prefix = packagePrefixOf(resolved.jar) ?: continue
             val existing = index[prefix]
-            if (existing == null || existing.length < resolved.purl.length) {
+            // Two jars can share a package prefix (a library split across
+            // artifacts). The tie-break is the lexicographically smallest
+            // purl: an arbitrary-but-stated rule, so attribution is the same
+            // on every machine. Comparing purl *lengths* — the previous rule
+            // — orders on nothing at all.
+            if (existing == null || resolved.purl < existing) {
                 index[prefix] = resolved.purl
             }
         }
         return index
     }
 
-    /** The deepest common package of a jar's classes, capped at 3 segments. */
+    /**
+     * The deepest common package of a jar's classes. Computed as a running
+     * common prefix over EVERY class entry: sampling the first N packages
+     * would report a deeper prefix than the jar actually has, silently
+     * misattributing (or dropping) imports with no diagnostic to say so.
+     */
     private fun packagePrefixOf(jar: Path): String? {
         return try {
             java.util.zip.ZipFile(jar.toFile()).use { zip ->
-                val packages = mutableSetOf<String>()
+                var prefix: String? = null
                 for (entry in zip.entries()) {
                     val name = entry.name
                     if (!name.endsWith(".class") || name.contains('$')) continue
                     val pkg = name.removeSuffix(".class").substringBeforeLast('/').replace('/', '.')
-                    if (pkg.isNotEmpty()) packages.add(pkg)
-                    if (packages.size > 4096) break
-                }
-                if (packages.isEmpty()) return null
-                // Deepest common prefix among observed packages.
-                var prefix = packages.first()
-                for (pkg in packages) {
-                    while (!pkg.startsWith(prefix) ||
-                        (pkg.getOrNull(prefix.length) ?: '.') != '.'
-                    ) {
-                        prefix = prefix.substringBeforeLast('.', "")
-                        if (prefix.isEmpty()) return null
+                    if (pkg.isEmpty()) continue
+                    var current = prefix ?: pkg
+                    while (!pkg.startsWith(current) || (pkg.getOrNull(current.length) ?: '.') != '.') {
+                        current = current.substringBeforeLast('.', "")
+                        if (current.isEmpty()) return null
                     }
+                    prefix = current
                 }
-                prefix.takeIf { it.isNotBlank() }
+                prefix?.takeIf { it.isNotBlank() }
             }
         } catch (_: Exception) {
             null

@@ -97,6 +97,10 @@ object Analyzer {
                 usageCount = syntax.usages.size,
                 importCount = syntax.imports.size,
                 resolvedCallRatio = 0.0,
+                // The syntax tier counts no calls at all: the zeros say the
+                // 0.0 above is by construction, not a resolution failure.
+                callsTotal = 0,
+                callsResolved = 0,
                 unknownCallPropagations = 0,
                 loweringFailures = emptyMap(),
                 fixpointCapHits = 0,
@@ -121,7 +125,21 @@ object Analyzer {
         val diagnostics = mutableListOf<Diagnostic>()
         var fileCount = 0
         var javaFileCount = 0
-        AnalysisEnvironment.createForSyntax().use { env ->
+        // Same treatment as the resolved tier: since both tiers share one
+        // session substrate, a substrate that cannot be created must produce
+        // kosi's own RUNTIME error naming the cause, not a platform stack
+        // trace and exit 1.
+        val environment = try {
+            AnalysisEnvironment.createForSyntax()
+        } catch (t: Throwable) {
+            throw AnalysisException(
+                "syntax backend: the analysis session could not be created " +
+                    "(${t::class.simpleName}: ${t.message?.take(200) ?: "no message"}); " +
+                    "run `kosi version` to see which components are available on this build",
+                t,
+            )
+        }
+        environment.use { env ->
             for (source in collected) {
                 val text = try {
                     Files.readString(source.absolutePath)
@@ -220,6 +238,14 @@ object Analyzer {
         val moduleDirs = versionedModules.map { vm ->
             root.resolve(vm.module.modulePath).toAbsolutePath().normalize()
         }
+        // A named classpath file that does not exist is an error, not a
+        // silently empty classpath: the P0 review's `--compare` defect was
+        // exactly this shape — a flag the run echoed but never applied.
+        options.classpathFile?.let { file ->
+            if (!Files.isRegularFile(Path.of(file))) {
+                throw AnalysisException("--classpath-file $file does not exist or is not a regular file")
+            }
+        }
         val resolution = ClasspathResolver.resolve(
             root = root,
             explicitJars = options.classpath.map { Path.of(it) },
@@ -262,7 +288,7 @@ object Analyzer {
 
         // The workspace's own kotlin-stdlib rides the classpath so stdlib
         // symbols resolve for projects that do not declare it explicitly.
-        val stdlibJar = stdlibJarPath()
+        val stdlibJar = stdlibJar
         val packageIndex = ClasspathResolver.packageIndex(resolution.jars)
 
         // The offline resolver is project-global; the merged workspace module
@@ -290,7 +316,22 @@ object Analyzer {
                 (it.relativePath to it.modulePath)
         }
 
-        AnalysisEnvironment.createForResolved(plan).use { env ->
+        // Session construction can fail with a Throwable rather than an
+        // Exception (the platform reports extension-registration problems
+        // through an assertion). Turned into kosi's own error so the CLI
+        // exits with RUNTIME and a message that names the cause, instead of
+        // printing a platform stack trace and exiting 1.
+        val env = try {
+            AnalysisEnvironment.createForResolved(plan)
+        } catch (t: Throwable) {
+            throw AnalysisException(
+                "resolved backend: the analysis session could not be created " +
+                    "(${t::class.simpleName}: ${t.message?.take(200) ?: "no message"}); " +
+                    "run `kosi version` to see which components are available on this build",
+                t,
+            )
+        }
+        env.use { env ->
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: session built, modules=" + env.session.modulesWithFiles.size)
             val workspace = env.session.modulesWithFiles.keys
                 .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
@@ -307,11 +348,18 @@ object Analyzer {
             var fileCount = 0
             var callsTotal = 0
             var callsResolved = 0
+            var symbolFailures = 0
+            // Indexed once: a scan per declaration and per usage is quadratic
+            // in file count, which is invisible on fixtures and dominates the
+            // wall clock on a real repo's thousands of files.
+            val sourceByRelPath = collected.associateBy { it.relativePath }
+            val purlByModulePath = versionedModules.associate { it.module.modulePath to it.module.purl }
 
             for (fact in facts) {
                 fileCount++
                 callsTotal += fact.callsTotal
                 callsResolved += fact.callsResolved
+                symbolFailures += fact.symbolFailures
                 diagnostics.addAll(fact.diagnostics)
                 for (import in fact.imports) {
                     imports.add(import.copy(purl = ClasspathResolver.purlForImport(import.name, packageIndex)))
@@ -324,17 +372,14 @@ object Analyzer {
                             simpleName = raw.name.substringAfterLast('.').substringAfterLast("::"),
                             usageKind = raw.usageKind,
                             modulePath = fact.modulePath,
-                            purl = fileRelPathByAbsolute.entries
-                                .firstOrNull { it.value.first == fact.relativePath }?.value?.second
-                                ?.let { modulePurl(versionedModules, it) }
-                                ?: "",
+                            purl = purlByModulePath[fact.modulePath] ?: "",
                             filePath = fact.relativePath,
                             position = raw.position,
                         ),
                     )
                 }
                 for (decl in fact.declarations) {
-                    val source = collected.firstOrNull { it.relativePath == fact.relativePath }
+                    val source = sourceByRelPath[fact.relativePath]
                     drafts.add(
                         DeclarationDraft(
                             name = decl.name,
@@ -361,6 +406,41 @@ object Analyzer {
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
+            // Symbol operations that threw are counted, never swallowed: a
+            // report whose declarations lost their JVM evidence because the
+            // Analysis API failed underneath must say so, otherwise a
+            // wholesale resolution breakage looks like a clean text-tier
+            // report (07-REVIEW-PROTOCOL.md failure mode 9).
+            val symbolFailureDiagnostic = if (symbolFailures > 0) {
+                Diagnostic(
+                    code = DiagnosticCodes.SYMBOL_RESOLUTION_FAILED,
+                    severity = Severity.WARNING,
+                    message = "$symbolFailures symbol operation(s) failed during resolution; the affected " +
+                        "declarations carry text-derived evidence only (no jvmOwner/jvmDescriptor, " +
+                        "supertypes or overrides)",
+                    position = Position(".", 1, 1),
+                    count = symbolFailures,
+                )
+            } else {
+                null
+            }
+            // Files the session's VFS refused are dropped from resolution
+            // while staying in files[]; the count travels so the gap is not
+            // silent.
+            val droppedFiles = env.droppedSourceFiles
+            val droppedDiagnostic = if (droppedFiles > 0) {
+                Diagnostic(
+                    code = DiagnosticCodes.UNREADABLE_SOURCE,
+                    severity = Severity.ERROR,
+                    message = "$droppedFiles collected source file(s) could not be opened by the analysis " +
+                        "session and are absent from resolution although files[] lists them",
+                    position = Position(".", 1, 1),
+                    count = droppedFiles,
+                )
+            } else {
+                null
+            }
+
             return assemble(
                 root = root,
                 options = options,
@@ -372,13 +452,15 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic) + diagnostics,
+                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic) + diagnostics,
                 stats = Stats(
                     fileCount = fileCount,
                     declarationCount = drafts.size,
                     usageCount = usages.size,
                     importCount = imports.size,
                     resolvedCallRatio = ratio,
+                    callsTotal = callsTotal,
+                    callsResolved = callsResolved,
                     unknownCallPropagations = 0,
                     loweringFailures = emptyMap(),
                     fixpointCapHits = 0,
@@ -393,9 +475,6 @@ object Analyzer {
             )
         }
     }
-
-    private fun modulePurl(modules: List<VersionedModule>, modulePath: String): String =
-        modules.firstOrNull { it.module.modulePath == modulePath }?.module?.purl ?: ""
 
     /**
      * 08-VERSION-POLICY.md policy 4: a run with a version mismatch AND heavy
@@ -420,10 +499,17 @@ object Analyzer {
         return clamped.effective
     }
 
+    /**
+     * The kotlin-stdlib this kosi runs with: on the JVM it is a classpath
+     * entry; in a native image the fat jar ships it as a resource, which is
+     * materialized to a temp jar so the session can read it. Materialized
+     * ONCE per process and deleted on exit — a per-run copy of a 1.8 MB jar
+     * leaks a temp file for every analysed project (60 of them in one
+     * corpusQuick).
+     */
+    private val stdlibJar: Path? by lazy { stdlibJarPath() }
+
     private fun stdlibJarPath(): Path? {
-        // The kotlin-stdlib this kosi runs with: on the JVM it is a classpath
-        // entry; in a native image the fat jar ships it as a resource, which
-        // is materialized to a temp jar so the session can read it.
         for (entry in System.getProperty("java.class.path")?.split(File.pathSeparator) ?: emptyList()) {
             if (entry.isEmpty()) continue
             val p = Path.of(entry)
@@ -433,6 +519,7 @@ object Analyzer {
         val stream = Analyzer::class.java.classLoader.getResourceAsStream("kosi-libs/kotlin-stdlib.jar")
             ?: return null
         val target = Files.createTempFile("kosi-stdlib", ".jar")
+        target.toFile().deleteOnExit()
         stream.use { input -> Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING) }
         return target
     }

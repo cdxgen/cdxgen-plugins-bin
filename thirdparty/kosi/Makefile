@@ -93,8 +93,7 @@ bootstrap-darwin bootstrap-linux bootstrap-windows:
 #   ppc64le, 32-bit arm - not Native Image platforms at all
 #   riscv64             - best-effort LLVM backend, not built at this phase
 define build_native
-	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
-	$(graal_env) native-image -jar modules/kosi-cli/build/dist/kosi-all.jar \
+	$(graal_env) native-image -jar $(fat_jar) \
 	  -Os --gc=serial \
 	  -H:ConfigurationFileDirectories=native-metadata/kosi \
 	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
@@ -109,16 +108,29 @@ endef
 $(build_dir):
 	mkdir -p "$(build_dir)"
 
-$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
+fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
+
+# Gradle decides whether the jar changed; make then decides whether to
+# relink. Declared PHONY so the jar is never assumed current: a binary that
+# is newer than the metadata file but older than the sources is exactly how
+# a stale binary gets measured as if it were the build under review.
+.PHONY: fat-jar
+fat-jar:
+	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
+
+$(fat_jar): fat-jar
+	@test -f $@
+
+$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
 
-$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
 
-$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) | $(build_dir)
 	$(call build_native,--static --libc=musl,$(build_dir)/kosi-linuxmusl-$*)
 
-$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json | $(build_dir)
+$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json $(fat_jar) | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-windows-$*.exe)
 
 ## native: host-platform binary (whichever family this machine is).
@@ -188,9 +200,9 @@ native-metadata:
 	@for f in fixtures/*/; do \
 	  slug=$$(basename $$f); \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \
-	    -jar modules/kosi-cli/build/dist/kosi-all.jar analyze --dir $$f --out /dev/null; \
+	    -jar $(fat_jar) analyze --dir $$f --out /dev/null; \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
-	    -jar modules/kosi-cli/build/dist/kosi-all.jar analyze --backend resolved --dir $$f --out /dev/null; \
+	    -jar $(fat_jar) analyze --backend resolved --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 

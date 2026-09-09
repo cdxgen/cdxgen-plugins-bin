@@ -62,10 +62,39 @@ Shipped:
 - Corpus: 20 fixtures × 3 slots; pinned repos now span Spring (spring-fu),
   Ktor (ktor-samples), Android (nowinandroid), KMP (kampkit) and
   mixed-Java (anki-android), with per-repo `resolvedCallRatio` in the bench
-- **Native image carries the resolved tier.** `kosi version` in the
-  `kosi-darwin-arm64` binary reports all three components available and
-  `--backend resolved` runs end-to-end, byte-identical across runs. The
-  image needed three recorded fixes: the K1 application environment is
+  result.
+- **Native image: BROKEN for both tiers on this toolchain.** Reviewed and
+  re-measured 2026-09-09 on GraalVM CE 25.0.2 (darwin-arm64): `kosi version`
+  in a freshly built `kosi-darwin-arm64` reports
+  `analysis-api-standalone: unavailable`, `--backend resolved` fails, **and
+  so does the syntax tier** — because P1 replaced P0's standalone
+  `PsiEnvironment` with the shared session, so the syntax backend now
+  depends on the same application environment. P0's binary ran the syntax
+  tier, so this is a regression against a shipped capability, and it was
+  invisible in the PR because `kosi version` printed the constant string
+  `"available"` for `backend-syntax` instead of probing it. Cause, with the
+  stack captured:
+  creating the K1 application environment registers a `ClassFileDecompilers`
+  extension, whose change listener calls `MockApplication.invokeLater` ->
+  `SwingUtilities.invokeLater` -> `java.awt.Toolkit.<clinit>`, and
+  `Toolkit.<clinit>` calls `loadLibraries()` — which fails with
+  `UnsatisfiedLinkError: Can't load library: awt` — **before** it consults
+  the `awt.toolkit` property. So selecting `KosiNoopToolkit` through that
+  property cannot prevent the failure on JDK 25, and passing
+  `-Djava.awt.headless=true` or `-Dawt.toolkit=...` at run time does not
+  change it either (both verified against the binary). The P1 PR reported
+  this capability as available on GraalVM CE 25.0.4.1; that claim is not
+  reproducible here and the mechanism it credits cannot work as described.
+  Tracked as defect 3 in the registry below, carried into P2 as its
+  blocking first item.
+  Candidate fixes, in order of preference: a build-time `@Substitute` for
+  `SwingUtilities.invokeLater` via a compile-only `svm` dependency;
+  materializing the AWT natives and setting `java.library.path` before the
+  platform initialises (self-containment cost); or accepting a
+  JVM-only resolved tier, which the plan explicitly rules out. Until then
+  both backends fail in the image with kosi's own RUNTIME error naming the
+  cause, never a raw platform stack trace and never a silent degrade. The
+  image still needed three recorded fixes, all kept: the K1 application environment is
   seeded once per process with a configuration pointing
   INTELLIJ_PLUGIN_ROOT at the materialized `kosi-ext` descriptors (the
   stock session builder creates a fresh configuration whose jar-location
@@ -77,10 +106,13 @@ Shipped:
   to run otherwise). The stdlib jar ships inside the fat jar
   (`kosi-libs/kotlin-stdlib.jar`) and is materialized at run time as the
   session's stdlib binary root.
-- Binary: 93,627,264 bytes (89.3 MiB) on GraalVM CE 25.0.4.1, up from P0's
+- Binary: 106,000,640 bytes (101.1 MiB) on GraalVM CE 25.0.2 as rebuilt at
+  review time (the PR reported 93,627,264 bytes on CE 25.0.4.1; binary size
+  is toolchain-specific, so both numbers name their GraalVM), up from P0's
   53,185,568 — the unrelocated IntelliJ platform + FIR + Analysis API is
-  the closed world now. Determinism holds: native output byte-identical
-  across runs and byte-identical to the JVM build.
+  the closed world now. Determinism is verified on the JVM for both tiers
+  (two runs byte-identical on every fixture); the native-vs-JVM comparison
+  P0 published cannot be repeated until the image runs again.
 - **Per-repo `resolvedCallRatio`** (resolved slot, this machine):
   spring-fu 0.9405, anki-android 0.9232, ktor-samples 0.9024,
   nowinandroid 0.7564, kampkit 0.6639. **Named limitation, not hidden:**
@@ -92,8 +124,12 @@ Shipped:
   kampkit's cap is inherent to JVM-tier analysis: iosMain sources
   reference Kotlin Native-only libraries that do not exist as JVM jars.
   Follow-up levers: AGP-style variant-aware AAR resolution, and P9's
-  bytecode tier which reads dependency jars directly.
-  result.
+  bytecode tier which reads dependency jars directly. The gate is now
+  ENFORCED, not merely reported: `Promotion` carries a
+  `per-repo-resolved-call-ratio` check that fails on any per-repo drop below
+  the baseline and on any repo at or above 0.90 falling through it, reports
+  NOT_EVALUATED when a run has no repo tiers to look at, and names the
+  below-target repos with their measured values in the detail line.
 
 ## Phase 0 — measurement harness + native-image spike (merged 2026-09-08)
 
@@ -185,6 +221,29 @@ Gate proofs recorded in the PR body:
 | --- | --- | --- | --- |
 | 1 | syntax | no flow engine at the syntax tier: no slices, no call graph; `command-exec` carries `known-fail=1` for `flow source=untrusted-input sink=process-exec`. The resolved front end (P1) has no flow engine either, so the marker stays backend-agnostic until P4 | open |
 | 2 | syntax | Java sources are listed in `files[]` but not parsed at the syntax tier: their declarations are absent (R19 added the diagnostic; P1 closes the gap at the resolved tier, where Java PSI is parsed through the same symbols). `java-interop` and `empty-classpath` carry `known-fail=syntax:2` on the expectations that need the resolved tier | open (resolved tier: closed) |
+| 3 | both | **the native image runs neither tier** (P0's binary ran the syntax tier; P1's shared session regressed it): the platform's mock application schedules a Swing runnable while the application environment is created, and `Toolkit.<clinit>` fails to load libawt before the `awt.toolkit` property is read, so `KosiNoopToolkit` is never selected. `kosi version` reports both backends unavailable in the image and each exits RUNTIME with that cause. Measured on GraalVM CE 25.0.2 / JDK 25, darwin-arm64 | open (P2 blocking) |
+
+## Defects found and fixed during the P1 review
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R25 | kosi-schema | `resolvedCallRatio` was published with no denominator, so the resolved slots that print 0.000 could not be told apart: `kmp-jvm-android` and `sealed-when` have zero call sites (vacuous), `android-compose-app` resolved 0 of 1 (a real gap). The same defect P0 fixed for `connectivity` by shipping `sliceCount` | `stats.callsTotal` / `stats.callsResolved` travel with the ratio, asserted equal to it by `theRatioPublishesItsDenominator` |
+| R26 | kosi-bench | the P1 gate's per-repo ratio was *reported* but no check enforced it: `Promotion` had no resolved-ratio criterion at all, so a repo could fall from 0.94 to 0.20 and still read PROMOTE | `per-repo-resolved-call-ratio` check, two-way (regression vs baseline, and falling through the 0.90 target), NOT_EVALUATED when there are no repo tiers, with `ResolvedRatioGateTest` covering all five outcomes |
+| R27 | kosi-front | `--classpath-file /nonexistent` was silently ignored: the explicit branch set `fromExplicitFlags` and added nothing, producing an empty classpath with no diagnostic — the exact shape of P0's `--compare` defect | the analysis fails with a message naming the file; `aClasspathFileThatDoesNotExistIsAnError` |
+| R28 | kosi-front | `modifiers[]` carried `abstract` (and `sealed`) twice, once from the PSI modifier list and once from the symbol's modality: one fact stated as two | `.distinct()`, pinned for every declaration by `modifiersAreNotDuplicatedBetweenPsiAndSymbol` |
+| R29 | kosi-front | every resolved annotation was stamped at line 1 column 1 (`positionAt(lines, path, 0)`) — a position that is not where the annotation is | position taken from the declaration's own PSI annotation entry, falling back to the declaration; `annotationsCarryTheirOwnPosition` |
+| R30 | kosi-front | every symbol operation was wrapped in `catch (_: Exception)` returning empty evidence, uncounted: an Analysis API breakage would have produced a full-looking report with no JVM evidence and nothing to say why | failures are counted and surfaced as the `symbol-resolution-failed` diagnostic with its count |
+| R31 | kosi-front | source files the session's VFS would not open were dropped with `?.let`, while `files[]` kept listing them — resolution silently covering fewer files than the report advertises | counted and reported as `unreadable-source` with a count |
+| R32 | kosi-front | the shipped stdlib jar was copied to a fresh temp file on *every* session (60 per `corpusQuick`) and `stdlibJarPath()` copied it again per analysis, none of them deleted | materialized once per process, `deleteOnExit` |
+| R33 | kosi-project | `usableArtifact` documented "deterministic path, reused across runs" but called `createTempDirectory`, which returns a fresh unique directory — so every AAR was re-extracted on every run and every copy leaked; `Files.copy` without REPLACE_EXISTING would also have thrown on the reuse path it claimed to take | a fixed `$TMPDIR/kosi-aar/<stamp>` directory, actually reused, with an unreadable AAR falling back to the AAR itself (which the caller then reports as unresolvable) |
+| R34 | kosi-project | `packageIndex` broke prefix ties by comparing *purl string lengths* — an ordering on nothing | lexicographically smallest purl, stated in the comment |
+| R35 | kosi-project | `packagePrefixOf` sampled the first 4096 packages and broke out, so a large jar yielded a deeper prefix than it has and misattributed imports, with no diagnostic for the truncation | running common prefix over every class entry; no cap, no truncation |
+| R36 | kosi-front | `usages[].purl` scanned the whole file map per usage and `declarations` scanned `collected` per declaration — quadratic in file count, invisible on fixtures, dominant on a real repo | indexed once per run |
+| R37 | kosi-front | `collectJavaClasses` recursed exactly one level, so a class nested two deep was dropped while `javaCanonicalName` handled arbitrary depth | fully recursive |
+| R41 | build | `make native`'s binary rules depended only on `native-metadata/kosi/reachability-metadata.json`, so a binary newer than that file was never relinked after a Kotlin source change — `make native` printed a successful build and left the old binary in place (this review measured a stale binary once before catching it) | the rules depend on the fat jar, produced through a PHONY `fat-jar` target so Gradle decides whether it changed and make decides whether to relink |
+| R40 | kosi-cli | `kosi version` printed the constant string `"available"` for `backend-syntax` — a component report that never looked at the component, which is why a native binary unable to create a session still reported a working syntax tier | both backends are probed (`probeSyntax` parses a declaration through a real session), so the version output can no longer disagree with what the binary does |
+| R39 | build | the PR's headline claim — the resolved tier available in the native image — does not hold, and the same cause takes the syntax tier down with it: the `awt.toolkit` property is consulted *after* `Toolkit.<clinit>` has already failed to load libawt, so the no-op toolkit is never selected | not fixed in this phase; recorded as defect 3, the native resolved run now fails with kosi's own RUNTIME error naming the cause, and it is P2's blocking first item |
+| R38 | kosi-cli | `resolvedBackendIsAcceptedSinceP1` accepted `OK` **or** `RUNTIME`, so a resolved tier that could not start at all would have passed the test that exists to prove it starts | asserts OK on a real project and that the report carries the resolved-tier counters |
 
 ## Defects found and fixed during the P0 review
 

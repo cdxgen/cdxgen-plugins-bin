@@ -18,6 +18,32 @@ object StandaloneSessionProbe {
 
     data class ProbeResult(val available: Boolean, val detail: String)
 
+    /**
+     * Whether the SYNTAX backend can run here. Since P1 both tiers share one
+     * session substrate, so "syntax works" is no longer free: it is a claim
+     * that has to be checked. `kosi version` used to print the constant
+     * string "available" for this backend, which in a native image where the
+     * session cannot be created at all was simply false.
+     */
+    fun probeSyntax(): ProbeResult =
+        try {
+            AnalysisEnvironment.createForSyntax().use { env ->
+                val file = env.parseFile("package kosi.probe\n\nclass Probe\n")
+                val parsed = file.declarations.firstOrNull()?.name == "Probe"
+                ProbeResult(
+                    available = parsed,
+                    detail = if (parsed) {
+                        "parsed a declaration through the shared session"
+                    } else {
+                        "unavailable: session created but parsing produced no declaration"
+                    },
+                )
+            }
+        } catch (t: Throwable) {
+            if (System.getenv("KOSI_PROBE_TRACE") != null) t.printStackTrace()
+            ProbeResult(false, "unavailable: ${t::class.simpleName}: ${t.message?.take(160)}")
+        }
+
     fun probe(): ProbeResult {
         return try {
             val dir = Files.createTempDirectory("kosi-probe")

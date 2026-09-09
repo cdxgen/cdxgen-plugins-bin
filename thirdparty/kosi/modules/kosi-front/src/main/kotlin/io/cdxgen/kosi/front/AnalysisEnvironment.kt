@@ -45,6 +45,12 @@ import java.nio.file.Path
 class AnalysisEnvironment private constructor(
     val session: StandaloneAnalysisAPISession,
     private val disposable: Disposable,
+    /**
+     * Collected source files the session's VFS would not open, so the caller
+     * can diagnose the gap instead of quietly analysing fewer files than
+     * `files[]` advertises.
+     */
+    val droppedSourceFiles: Int = 0,
 ) : AutoCloseable {
 
     val project = session.project
@@ -73,7 +79,10 @@ class AnalysisEnvironment private constructor(
     companion object {
         /** A parse-only environment: the provider registers no modules. */
         fun createForSyntax(): AnalysisEnvironment =
-            create { builder -> builder.platform = JvmPlatforms.defaultJvmPlatform }
+            create { builder ->
+                builder.platform = JvmPlatforms.defaultJvmPlatform
+                0
+            }
 
         /**
          * Builds the environment with the resolved tier's module provider over
@@ -113,9 +122,10 @@ class AnalysisEnvironment private constructor(
             )
         }
 
-        private fun create(configure: (KtModuleProviderBuilder) -> Unit): AnalysisEnvironment {
+        private fun create(configure: (KtModuleProviderBuilder) -> Int): AnalysisEnvironment {
             applicationEnvironmentSeed // warm/cached K1 application environment
             val disposable = Disposer.newDisposable()
+            var dropped = 0
             val session = buildStandaloneAnalysisAPISession(disposable) {
                 // Serialized builtins must resolve against the materialized
                 // stdlib jar, not classloader URLs (unusable in images). The
@@ -127,20 +137,25 @@ class AnalysisEnvironment private constructor(
                 applicationPico.unregisterComponent(providerKey)
                 applicationPico.registerComponentInstance(
                     providerKey,
-                    KosiBuiltinsVirtualFileProvider(materializedStdlibJar()),
+                    KosiBuiltinsVirtualFileProvider(materializedStdlibJar),
                 )
-                buildKtModuleProvider(configure)
+                buildKtModuleProvider { dropped = configure(this) }
             }
-            return AnalysisEnvironment(session, disposable)
+            return AnalysisEnvironment(session, disposable, dropped)
         }
 
-        /** Materializes the shipped kotlin-stdlib jar (kosi-libs resource). */
-        private fun materializedStdlibJar(): java.nio.file.Path {
+        /**
+         * The shipped kotlin-stdlib jar (kosi-libs resource), materialized
+         * ONCE per process and deleted on exit: one copy per session leaks a
+         * temp jar for every analysed project.
+         */
+        private val materializedStdlibJar: java.nio.file.Path by lazy {
             val stream = AnalysisEnvironment::class.java.classLoader.getResourceAsStream("kosi-libs/kotlin-stdlib.jar")
                 ?: error("kosi-libs/kotlin-stdlib.jar missing from the distribution")
             val target = Files.createTempFile("kosi-stdlib", ".jar")
+            target.toFile().deleteOnExit()
             stream.use { input -> Files.copy(input, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
-            return target
+            target
         }
 
         /**
@@ -235,7 +250,8 @@ internal object ModuleProviderFactory {
 
     const val WORKSPACE_MODULE_NAME = "workspace"
 
-    fun populate(builder: KtModuleProviderBuilder, plan: ResolvedPlan) {
+    /** Returns the number of source files the VFS would not open. */
+    fun populate(builder: KtModuleProviderBuilder, plan: ResolvedPlan): Int {
         builder.platform = JvmPlatforms.defaultJvmPlatform
 
         val sdk = plan.jdkHome?.let { jdkHome ->
@@ -257,18 +273,26 @@ internal object ModuleProviderFactory {
                 }
             }
 
+        var dropped = 0
         val sourceModule = builder.buildKtSourceModule {
             platform = JvmPlatforms.defaultJvmPlatform
             moduleName = WORKSPACE_MODULE_NAME
             for (file in plan.sourceFiles.sorted()) {
-                VirtualFileManager.getInstance().refreshAndFindFileByNioPath(file)
-                    ?.let { addSourceVirtualFile(it) }
+                val virtual = VirtualFileManager.getInstance().refreshAndFindFileByNioPath(file)
+                if (virtual == null) {
+                    // Counted, not skipped silently: files[] would still list
+                    // this file while resolution never saw it.
+                    dropped++
+                } else {
+                    addSourceVirtualFile(virtual)
+                }
             }
             languageVersionSettings = languageVersionSettings(plan.languageVersion, plan.apiVersion)
             for (library in libraries) addRegularDependency(library)
             sdk?.let { addRegularDependency(it) }
         }
         builder.addModule(sourceModule)
+        return dropped
     }
 
     private fun languageVersionSettings(language: String?, api: String?): LanguageVersionSettings {

@@ -9,6 +9,7 @@ import java.nio.file.Path
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -204,6 +205,99 @@ class ResolvedBackendTest {
         val override = report.diagnostics.firstOrNull { it.code == DiagnosticCodes.VERSION_OVERRIDE }
         assertNotNull(override, "an explicit --language-version override must be recorded")
         assertTrue("2.2" in override.message && "2.0" in override.message, override.message)
+    }
+
+    @Test
+    fun theRatioPublishesItsDenominator() {
+        // The defect this guards: `resolvedCallRatio` alone cannot tell "no
+        // calls in this file" from "resolved nothing" — both print 0.0. The
+        // counts must travel with the ratio (as sliceCount does with
+        // connectivity), and they must agree with it.
+        val callFree = project(
+            buildFile = null,
+            sources = mapOf("src/main/kotlin/Data.kt" to "package t\n\nval answer: Int = 42\n"),
+        )
+        val none = Analyzer.analyze(callFree, AnalyzeOptions(backend = Backend.RESOLVED), commit = "test")
+        assertEquals(0, none.stats.callsTotal, "a file with no calls must publish a zero denominator")
+        assertEquals(0.0, none.stats.resolvedCallRatio)
+
+        val withCalls = project(
+            buildFile = null,
+            sources = mapOf("src/main/kotlin/Main.kt" to kotlinSource),
+        )
+        val some = Analyzer.analyze(withCalls, AnalyzeOptions(backend = Backend.RESOLVED), commit = "test")
+        assertTrue(some.stats.callsTotal > 0, "calls exist, so the denominator must not be zero")
+        assertEquals(
+            some.stats.callsResolved.toDouble() / some.stats.callsTotal,
+            some.stats.resolvedCallRatio,
+            "the published counts must be the ones the ratio was computed from",
+        )
+    }
+
+    @Test
+    fun aClasspathFileThatDoesNotExistIsAnError() {
+        // Never a silently empty classpath: a flag the report echoes but
+        // never applied is the P0 `--compare` defect.
+        val root = project(buildFile = null, sources = mapOf("src/main/kotlin/Main.kt" to kotlinSource))
+        val failure = assertFailsWith<Analyzer.AnalysisException> {
+            Analyzer.analyze(
+                root,
+                AnalyzeOptions(backend = Backend.RESOLVED, classpathFile = "/kosi-test/no-such-classpath.txt"),
+                commit = "test",
+            )
+        }
+        assertTrue("no-such-classpath.txt" in failure.message!!, failure.message!!)
+    }
+
+    @Test
+    fun modifiersAreNotDuplicatedBetweenPsiAndSymbol() {
+        // `abstract` is visible both in the PSI modifier list and in the
+        // symbol's modality; emitting it twice would state one fact as two.
+        val root = project(
+            buildFile = null,
+            sources = mapOf(
+                "src/main/kotlin/Shape.kt" to """
+                    package t
+
+                    abstract class Shape {
+                        abstract fun area(): Double
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val report = Analyzer.analyze(root, AnalyzeOptions(backend = Backend.RESOLVED), commit = "test")
+        for (declaration in report.declarations) {
+            assertEquals(
+                declaration.modifiers.distinct(),
+                declaration.modifiers,
+                "duplicate modifiers on ${declaration.name}: ${declaration.modifiers}",
+            )
+        }
+        val area = report.declarations.first { it.name == "area" }
+        assertTrue("abstract" in area.modifiers)
+    }
+
+    @Test
+    fun annotationsCarryTheirOwnPosition() {
+        // The defect this guards: stamping every annotation at line 1 column
+        // 1 reports a position that is not where the annotation is.
+        val root = project(
+            buildFile = null,
+            sources = mapOf(
+                "src/main/kotlin/Annotated.kt" to """
+                    package t
+
+                    @Deprecated("gone")
+                    fun old() {
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val report = Analyzer.analyze(root, AnalyzeOptions(backend = Backend.RESOLVED), commit = "test")
+        val old = report.declarations.first { it.name == "old" }
+        val annotation = old.annotations.firstOrNull { it.name == "Deprecated" }
+        assertNotNull(annotation, "the annotation must be reported: ${old.annotations.map { it.name }}")
+        assertEquals(3, annotation.position.line, "the annotation is on line 3, not line 1")
     }
 
     private fun stdlibJarFromTestClasspath(): Path? {

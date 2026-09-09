@@ -328,12 +328,17 @@ object Main {
             known = VERSION_BOOLEAN_FLAGS,
             booleans = VERSION_BOOLEAN_FLAGS,
         )
+        val syntaxProbe = StandaloneSessionProbe.probeSyntax()
         val probe = StandaloneSessionProbe.probe()
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()
         w.beginObject("components")
-        w.str("backend-syntax", "available")
-        w.str("backend-resolved", if (probe.available) "available" else "unavailable: ${probe.detail}")
+        // Both backends are PROBED, never asserted: since P1 they share one
+        // session substrate, so a build where the session cannot be created
+        // has no working syntax tier either — and a constant "available"
+        // string would report the opposite of the truth.
+        w.str("backend-syntax", if (syntaxProbe.available) "available" else syntaxProbe.detail)
+        w.str("backend-resolved", if (probe.available) "available" else probe.detail)
         w.str("analysis-api-standalone", if (probe.available) "available" else probe.detail)
         w.endObject()
         w.str("commit", commit)

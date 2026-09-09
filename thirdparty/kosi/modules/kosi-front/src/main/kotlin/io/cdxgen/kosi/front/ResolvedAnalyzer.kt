@@ -88,6 +88,15 @@ object ResolvedAnalyzer {
         val callsTotal: Int,
         val callsResolved: Int,
         val resolutionErrorCodes: Map<String, Int>,
+        /**
+         * Symbol operations that threw. The Analysis API is not total — a
+         * symbol can fail to build on broken or partially-resolvable code —
+         * and this tier degrades to text-derived evidence when it does. The
+         * count is what makes that degradation visible: without it, an API
+         * change that broke resolution wholesale would produce a report that
+         * merely looks like the syntax tier.
+         */
+        val symbolFailures: Int,
     )
 
     fun run(
@@ -123,6 +132,9 @@ object ResolvedAnalyzer {
         val diagnostics = mutableListOf<Diagnostic>()
         var callsTotal = 0
         var callsResolved = 0
+        // Every symbol operation below degrades to text-derived evidence when
+        // it throws; each such degrade is counted so the report can say so.
+        var symbolFailures = 0
         val unresolvedSample = mutableListOf<String>()
         val errorCodes = LinkedHashMap<String, Int>()
 
@@ -168,6 +180,7 @@ object ResolvedAnalyzer {
                 val symbol = try {
                     declaration.symbol
                 } catch (_: Exception) {
+                    symbolFailures++
                     null
                 }
                 Sym(declaration, symbol)
@@ -194,6 +207,7 @@ object ResolvedAnalyzer {
                         emptyList()
                     }
                 } catch (_: Exception) {
+                    symbolFailures++
                     emptyList()
                 }
                 supertypesOf[symbol] = try {
@@ -205,6 +219,7 @@ object ResolvedAnalyzer {
                         emptyList()
                     }
                 } catch (_: Exception) {
+                    symbolFailures++
                     emptyList()
                 }
                 annotationsOf[symbol] = try {
@@ -218,10 +233,13 @@ object ResolvedAnalyzer {
                                 .mapNotNull { arg -> arg.expression }
                                 .mapNotNull { v -> (v as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue)?.value?.toString() }
                                 .firstOrNull(),
+                            // Placeholder: the real offset comes from the
+                            // declaration's PSI annotation entry at emission.
                             position = positionAt(lines, relativePath, 0),
                         ) }
                         ?: emptyList()
                 } catch (_: Exception) {
+                    symbolFailures++
                     emptyList()
                 }
                 modifiersOf[symbol] = when (symbol) {
@@ -269,6 +287,7 @@ object ResolvedAnalyzer {
                         owner to descriptor
                     }
                 } catch (_: Exception) {
+                    symbolFailures++
                     null to null
                 }
             }
@@ -289,8 +308,24 @@ object ResolvedAnalyzer {
                         returnType = shape.returnType,
                         extensionReceiverType = shape.extensionReceiver,
                         visibility = symbol?.let { visibilityOf[it] } ?: psiVisibility(declaration) ?: "public",
-                        modifiers = psiModifiers(declaration) + (symbol?.let { modifiersOf[it] } ?: emptyList()),
-                        annotations = symbol?.let { annotationsOf[it] } ?: emptyList(),
+                        // Distinct: `abstract`/`sealed` are visible both in
+                        // the PSI modifier list and in the symbol's modality,
+                        // and the same word twice in modifiers[] is not two
+                        // facts.
+                        modifiers = (psiModifiers(declaration) + (symbol?.let { modifiersOf[it] } ?: emptyList()))
+                            .distinct(),
+                        annotations = (symbol?.let { annotationsOf[it] } ?: emptyList()).map { evidence ->
+                            val entry = declaration.annotationEntries.firstOrNull { candidate ->
+                                candidate.shortName?.asString() == evidence.name
+                            }
+                            evidence.copy(
+                                position = positionAt(
+                                    lines,
+                                    relativePath,
+                                    entry?.textOffset ?: declaration.textOffset,
+                                ),
+                            )
+                        },
                         overrides = symbol?.let { overridesOf[it] } ?: emptyList(),
                         supertypes = symbol?.let { supertypesOf[it] } ?: emptyList(),
                         jvmOwner = symbol?.let { jvmOf[it]?.first },
@@ -361,6 +396,7 @@ object ResolvedAnalyzer {
                     callsTotal = callsTotal,
                     callsResolved = callsResolved,
                     resolutionErrorCodes = errorCodes,
+                    symbolFailures = symbolFailures,
                 ),
             )
             continue@fileLoop
@@ -375,6 +411,7 @@ object ResolvedAnalyzer {
             try {
                 psiClass.namedClassSymbol
             } catch (_: Exception) {
+                symbolFailures++
                 null
             }
         }
@@ -387,6 +424,7 @@ object ResolvedAnalyzer {
             memberSymbols[member] = try {
                 member.callableSymbol
             } catch (_: Exception) {
+                symbolFailures++
                 null
             }
         }
@@ -425,6 +463,7 @@ object ResolvedAnalyzer {
                     owner to descriptor
                 }
             } catch (_: Exception) {
+                symbolFailures++
                 null to null
             }
         }
@@ -458,6 +497,7 @@ object ResolvedAnalyzer {
                                 ?.distinct()
                         } ?: emptyList()
                     } catch (_: Exception) {
+                        symbolFailures++
                         emptyList()
                     },
                     jvmOwner = symbol?.let { jvmByMember[it]?.first },
@@ -494,6 +534,7 @@ object ResolvedAnalyzer {
                                 emptyList()
                             }
                         } catch (_: Exception) {
+                            symbolFailures++
                             emptyList()
                         },
                         supertypes = emptyList(),
@@ -539,6 +580,7 @@ object ResolvedAnalyzer {
                 callsTotal = 0,
                 callsResolved = 0,
                 resolutionErrorCodes = emptyMap(),
+                symbolFailures = symbolFailures,
             ),
         )
         }
@@ -546,13 +588,14 @@ object ResolvedAnalyzer {
         return out
     }
 
+    /** Every class in the file, at any nesting depth. */
     private fun collectJavaClasses(file: PsiJavaFile, out: MutableList<PsiClass>) {
-        for (psiClass in file.classes) {
-            out.add(psiClass)
-            for (inner in psiClass.innerClasses) {
-                out.add(inner)
-            }
-        }
+        for (psiClass in file.classes) collectJavaClass(psiClass, out)
+    }
+
+    private fun collectJavaClass(psiClass: PsiClass, out: MutableList<PsiClass>) {
+        out.add(psiClass)
+        for (inner in psiClass.innerClasses) collectJavaClass(inner, out)
     }
 
     private fun positionAt(lines: SyntaxAnalyzer.LineIndex, filename: String, offset: Int): Position =

@@ -178,10 +178,11 @@ rather than a negative expectation that passes vacuously.
 | `kotlin-api-version` | warning | declared apiVersion above the language version; clamped |
 | `no-build-files` | info | no Gradle/Maven build files; analysed as a plain source tree |
 | `no-sources` | warning | no Kotlin/Java sources under the discovered roots |
-| `unreadable-source` | error | file could not be read |
+| `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists |
 | `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
 | `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
 | `resolution-errors` | warning | frontend resolution reported diagnostics in a file; `message` summarises per-checker counts, `count` is the total |
+| `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 
 ## stats
@@ -190,7 +191,13 @@ rather than a negative expectation that passes vacuously.
 `resolvedCallRatio` — 0.0 at the syntax tier (explained by
 `syntax-backend-no-resolution`); at the resolved tier: explicit Kotlin calls
 whose resolution produced symbols divided by all explicit calls, 0.0 when
-there are no calls — plus `unknownCallPropagations`, `loweringFailures{}`,
+there are no calls — with `callsTotal` and `callsResolved`, the denominator
+and numerator it was computed from, published beside it: a 0.0 over 0 calls
+and a 0.0 over 400 calls are the same number and opposite facts, so the ratio
+is never published alone (the same rule as `sliceCount` beside
+`connectivity`). Java sources contribute declarations but no calls, so the
+ratio measures Kotlin call sites — `callsTotal` says how many there were —
+plus `unknownCallPropagations`, `loweringFailures{}`,
 `fixpointCapHits`, `sourceCount`, `sinkCount`, `sliceCount`,
 `crossDependencySliceCount`, `reachableSliceCount`, `truncations{}`,
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy

@@ -76,10 +76,18 @@ class DefaultsFromParserTest {
         // The resolved tier is a real backend since P1; an unknown backend
         // name is still a usage error.
         assertEquals(ExitCodes.USAGE, Main.run(arrayOf("analyze", "--backend", "nope", "--dir", ".")))
-        // This run must NOT be rejected as a usage error (0 = success on a
-        // directory with no sources; 3 would mean a runtime error).
-        val code = Main.run(arrayOf("analyze", "--backend", "resolved", "--dir", "."))
-        assertTrue(code == ExitCodes.OK || code == ExitCodes.RUNTIME, "resolved backend rejected: $code")
+        // And the backend actually runs: accepting RUNTIME here as well would
+        // let a resolved tier that cannot start at all pass this test.
+        val root = java.nio.file.Files.createTempDirectory("kosi-cli-resolved")
+        val source = root.resolve("src/main/kotlin/Main.kt")
+        java.nio.file.Files.createDirectories(source.parent)
+        java.nio.file.Files.writeString(source, "package t\n\nfun main() { println(\"hi\") }\n")
+        val out = root.resolve("report.json")
+        assertEquals(
+            ExitCodes.OK,
+            Main.run(arrayOf("analyze", "--backend", "resolved", "--dir", root.toString(), "--out", out.toString())),
+        )
+        assertTrue("\"callsTotal\"" in java.nio.file.Files.readString(out))
     }
 
     @Test

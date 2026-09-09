@@ -263,11 +263,80 @@ object Promotion {
             checks.add(Check("per-repo-wall-clock", State.NOT_EVALUATED, "no baseline to compare"))
         }
 
+        // 10. per-repo resolvedCallRatio (P1 gate). Reported PER REPO, never
+        // as an average, and enforced two ways so neither direction can pass
+        // unnoticed: a repo may not fall below its baseline ratio (a
+        // regression), and a repo at or above the 0.90 target may not fall
+        // through it. Repos below the target are named with their measured
+        // value in the detail line — the number is the ratchet, so improving
+        // one forces the baseline to be rewritten rather than accumulating an
+        // exemption list.
+        checks.add(resolvedRatioCheck(current, baseline))
+
         val verdict = when {
             checks.all { it.state == State.PASS } -> "PROMOTE"
             checks.any { it.state == State.FAIL } -> "HOLD (regressions)"
             else -> "HOLD (criteria unevaluated)"
         }
         return Report(verdict, checks)
+    }
+
+    /** The P1 gate's per-repo resolved-call-ratio target. */
+    const val RESOLVED_RATIO_TARGET = 0.90
+
+    private const val RESOLVED_RATIO_TOLERANCE = 0.01
+
+    private fun resolvedRatioCheck(
+        current: BenchRunner.BenchResult,
+        baseline: BenchRunner.BenchResult?,
+    ): Check {
+        val name = "per-repo-resolved-call-ratio"
+        val repos = current.results
+            .filter { it.tier != "fixtures" && it.slot == MatrixSlot.RESOLVED_LABEL }
+            .sortedBy { it.slug }
+        if (repos.isEmpty()) {
+            // The check must never pass by having nothing to look at: a run
+            // without repo tiers cannot evaluate the gate.
+            return Check(name, State.NOT_EVALUATED, "no repo-tier resolved slots in this run (run --tier all)")
+        }
+        val measured = repos.joinToString(", ") { r ->
+            "${r.slug}=" + (r.resolvedCallRatio?.let { String.format("%.4f", it) } ?: "n/a")
+        }
+        val missing = repos.filter { it.resolvedCallRatio == null }
+        if (missing.isNotEmpty()) {
+            return Check(name, State.FAIL, "no ratio reported for ${missing.joinToString(", ") { it.slug }}")
+        }
+        val baseByKey = baseline?.results
+            ?.filter { it.slot == MatrixSlot.RESOLVED_LABEL }
+            ?.associateBy { it.slug }
+        if (baseByKey.isNullOrEmpty()) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "no baseline resolved slots to ratchet against; measured $measured " +
+                    "(target ${"%.2f".format(RESOLVED_RATIO_TARGET)})",
+            )
+        }
+        val regressed = mutableListOf<String>()
+        for (repo in repos) {
+            val cur = repo.resolvedCallRatio ?: continue
+            val base = baseByKey[repo.slug]?.resolvedCallRatio ?: continue
+            if (cur < base - RESOLVED_RATIO_TOLERANCE) {
+                regressed.add("${repo.slug} ${"%.4f".format(base)} -> ${"%.4f".format(cur)}")
+            } else if (base >= RESOLVED_RATIO_TARGET && cur < RESOLVED_RATIO_TARGET) {
+                regressed.add("${repo.slug} fell through the target: ${"%.4f".format(cur)}")
+            }
+        }
+        if (regressed.isNotEmpty()) {
+            return Check(name, State.FAIL, regressed.joinToString("; "))
+        }
+        val belowTarget = repos.filter { (it.resolvedCallRatio ?: 0.0) < RESOLVED_RATIO_TARGET }
+        val detail = if (belowTarget.isEmpty()) {
+            "$measured (all >= ${"%.2f".format(RESOLVED_RATIO_TARGET)})"
+        } else {
+            "$measured; below the ${"%.2f".format(RESOLVED_RATIO_TARGET)} target and held at the " +
+                "baseline value: ${belowTarget.joinToString(", ") { it.slug }}"
+        }
+        return Check(name, State.PASS, detail)
     }
 }
