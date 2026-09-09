@@ -103,6 +103,7 @@ object Analyzer {
                 callsResolved = 0,
                 unknownCallPropagations = 0,
                 loweringFailures = emptyMap(),
+                functionsLowered = 0,
                 fixpointCapHits = 0,
                 sourceCount = 0,
                 sinkCount = 0,
@@ -348,6 +349,24 @@ object Analyzer {
             val facts = ResolvedAnalyzer.run(env, workspace, fileRelPathByAbsolute)
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: facts=" + facts.size)
 
+            // P2: lower the same session to the KIR. The failures map is the
+            // itemised breakdown; the function count is what it was computed
+            // over — neither travels without the other.
+            val kir = KirLowering.lower(env, workspace)
+            val kirDiagnostic = if (kir.failures.isNotEmpty()) {
+                val breakdown = kir.failures.entries.sortedWith(compareBy({ it.key }, { it.value })).joinToString(", ") { "${it.key}=${it.value}" }
+                Diagnostic(
+                    code = DiagnosticCodes.LOWERING_FAILED,
+                    severity = Severity.WARNING,
+                    message = "lowering could not perform $breakdown " +
+                        "(${kir.failures.values.sum()} of ${kir.functionCount} functions)",
+                    position = Position(".", 1, 1),
+                    count = kir.failures.values.sum(),
+                )
+            } else {
+                null
+            }
+
             val imports = mutableListOf<ImportUsage>()
             val usages = mutableListOf<LibraryUsage>()
             val diagnostics = mutableListOf<Diagnostic>()
@@ -459,7 +478,7 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic) + diagnostics,
+                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic) + diagnostics,
                 stats = Stats(
                     fileCount = fileCount,
                     declarationCount = drafts.size,
@@ -469,7 +488,8 @@ object Analyzer {
                     callsTotal = callsTotal,
                     callsResolved = callsResolved,
                     unknownCallPropagations = 0,
-                    loweringFailures = emptyMap(),
+                    loweringFailures = kir.failures,
+                    functionsLowered = kir.functionCount,
                     fixpointCapHits = 0,
                     sourceCount = 0,
                     sinkCount = 0,
@@ -515,6 +535,9 @@ object Analyzer {
      * corpusQuick).
      */
     private val stdlibJar: Path? by lazy { stdlibJarPath() }
+
+    /** The bundled stdlib jar, shared with the kir dump pipeline. */
+    internal fun stdlibJarForDump(): Path? = stdlibJar
 
     private fun stdlibJarPath(): Path? {
         for (entry in System.getProperty("java.class.path")?.split(File.pathSeparator) ?: emptyList()) {
@@ -562,7 +585,7 @@ object Analyzer {
      */
     data class VersionedModule(val module: DiscoveredModule, val effective: String)
 
-    private fun discoverVersionPolicy(
+    internal fun discoverVersionPolicy(
         root: Path,
         modules: List<DiscoveredModule>,
         options: AnalyzeOptions,

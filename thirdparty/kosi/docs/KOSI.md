@@ -5,7 +5,70 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
-## Phase 1 — resolved front end (this branch)
+## Phase 2 — the native JDK, then KIR (this branch)
+
+Branch `feat/kosi-p2-kir`, off `feat/kosi` (`20b9e27`).
+
+**The blocker, closed.** Defect 3: a native image registers no jrt
+filesystem provider, so `addBinaryRootsFromJdkHome` could not read a
+modular JDK's `lib/modules` and every `java.*` symbol stayed unresolved
+(`weak-crypto` 0 of 4 in the image vs 4 of 4 on the JVM). The fix reads
+the module image DIRECTLY in the image through the image runtime's own
+`jdk.internal.jimage.BasicImageReader` and materializes ONE JAR PER MODULE
+under `$TMPDIR/kosi-jdk/<stamp>/` (keyed by path+size+mtime, atomically
+moved, reused across processes), handed to the SDK module as plain `.jar`
+binary roots. Two measured facts drove the shape:
+
+- The JDK's own standalone jrt provider cannot rescue an image:
+  `JrtFileSystemProvider.newFileSystem` re-loads its implementation classes
+  from the TARGET JDK's `jrt-fs.jar` through a URLClassLoader at run time,
+  and native image can neither execute build-time-unknown bytecode nor (by
+  default) even open a `jar:` URL — both probed, not assumed.
+- A single merged jar resolves nothing: the search scope's package trie
+  derives `java.base.java.lang.String` from the merged layout. One root
+  per module is the shape upstream produces on the JVM; it is load-bearing,
+  not taste. The per-module jars carry module-relative entries (asserted by
+  `JdkModulesTest`), the JVM keeps the upstream jrt route, and the same
+  fixtures are byte-identical across substrates.
+
+JVM-side extraction reads the same image through the public jrt NIO
+filesystem (env-key `java.home`), so the extraction is exercised by tests
+on every platform; the image-only reflection entries live in the checked-in
+reachability metadata (preserved by `merge-agent-metadata.py`, which the
+JVM tracing agent cannot see) and the build opens the package with
+`--add-opens java.base/jdk.internal.jimage=ALL-UNNAMED`.
+
+`--jdk-home` now either works or is a usage error naming why: a home
+without `lib/modules` (and without an exploded `modules/` tree) is
+rejected — `AnalysisException`, exit RUNTIME — never silently downgraded
+to a partial classpath. With no flag, resolution tries `java.home` then
+`JAVA_HOME` (the image case); when neither names a JDK, `classpath-partial`
+remains, naming every source tried.
+
+**KIR (02-ARCHITECTURE.md §4).** `kosi-kir` is the owned IR: 21
+instructions, basic blocks, field-sensitive access paths (depth cap 5,
+`*` collapse), and a validator whose reachability walk fails any
+unreachable-but-emitted block (the check-removed test is
+`KirValidatorTest.anUnreachableEmittedBlockIsAFinding`). `kosi-front`
+lowers PSI + one resolution pass into it; every §4 desugaring is
+implemented with a per-construct test in `KirLoweringTest`, negative-first
+(a while loop must not invent `hasNext`, an all-literal template must stay
+a Load, a plain class gets no synthetic members). A construct the lowering
+cannot perform is counted by construct in `stats.loweringFailures{}`,
+published beside `stats.functionsLowered` (the denominator), and diagnosed
+as `lowering-failed`. `kosi kir dump` enforces the round-trip
+(dump -> read -> dump byte-identical) and CFG validation on every dump.
+
+One naming decision worth recording: the KIR's operator names are the
+SYNTAX tier's names (`compareTo`, `equals`, `plus` — from
+`SyntaxAnalyzer.operatorFunctionName`), not JVM-style aliases (`less`,
+`notEquals`), so both tiers and the corpus speak one naming.
+
+**Fixtures**: 5 new (delegated-properties, destructuring, for-iterable,
+operators, use-close), each with a negative half that names what a
+plausibly over-broad lowering would emit; corpus grows to 480 annotations.
+
+## Phase 1 — resolved front end (merged 2026-09-09)
 
 Shipped:
 
@@ -224,7 +287,7 @@ Gate proofs recorded in the PR body:
 | --- | --- | --- | --- |
 | 1 | syntax | no flow engine at the syntax tier: no slices, no call graph; `command-exec` carries `known-fail=1` for `flow source=untrusted-input sink=process-exec`. The resolved front end (P1) has no flow engine either, so the marker stays backend-agnostic until P4 | open |
 | 2 | syntax | Java sources are listed in `files[]` but not parsed at the syntax tier: their declarations are absent (R19 added the diagnostic; P1 closes the gap at the resolved tier, where Java PSI is parsed through the same symbols). `java-interop` and `empty-classpath` carry `known-fail=syntax:2` on the expectations that need the resolved tier | open (resolved tier: closed) |
-| 3 | resolved | the native image attaches no JDK module: `java.home` is unset in an image, so `java.*` symbols go unresolved (reported as `classpath-partial`, and visible in the ratio — `weak-crypto` resolves 0/4 in the image vs 4/4 on the JVM), and `--jdk-home` fails with `ProviderNotFoundException: Provider "jrt" not found` because the image has no jrt filesystem provider for a modular JDK's `lib/modules`. Resolved-tier native output is therefore not byte-identical to JVM output; the syntax tier is unaffected | open (P2 first item) |
+| 3 | resolved | the native image attaches no JDK module: `java.home` is unset in an image, so `java.*` symbols go unresolved (reported as `classpath-partial`, and visible in the ratio — `weak-crypto` resolves 0/4 in the image vs 4/4 on the JVM), and `--jdk-home` fails with `ProviderNotFoundException: Provider "jrt" not found` because the image has no jrt filesystem provider for a modular JDK's `lib/modules`. Resolved-tier native output is therefore not byte-identical to JVM output; the syntax tier is unaffected | **closed in P2** — the image reads `lib/modules` through its own jimage reader and attaches per-module jars; `weak-crypto` 4/4 in the image, 8 fixtures byte-identical native vs JVM, `--jdk-home` works or is a usage error (see Phase 2) |
 
 ## Defects found and fixed during the P1 review
 

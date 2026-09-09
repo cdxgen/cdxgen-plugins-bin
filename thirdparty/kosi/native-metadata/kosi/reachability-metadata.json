@@ -913,7 +913,40 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtForExpression"
     },
     {
       "methods": [
@@ -969,6 +1002,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtOperationReferenceExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtPropertyDelegate"
     },
     {
       "methods": [
@@ -1068,6 +1112,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtWhenExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtWhileExpression"
     },
     {
       "methods": [
@@ -1693,6 +1748,9 @@
       "type": "java.util.Collection"
     },
     {
+      "type": "java.util.Iterator"
+    },
+    {
       "type": "java.util.List"
     },
     {
@@ -2080,12 +2138,6 @@
       "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtDoWhileExpression"
     },
     {
@@ -2123,9 +2175,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFinallySection"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtForExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFunctionType"
@@ -2222,9 +2271,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtPropertyAccessor[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtPropertyDelegate"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtProperty[]"
@@ -2345,9 +2391,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtWhenEntryGuard"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtWhileExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.stubs.elements.KtFileElementType"

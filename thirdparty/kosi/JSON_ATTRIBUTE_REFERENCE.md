@@ -184,6 +184,7 @@ rather than a negative expectation that passes vacuously.
 | `resolution-errors` | warning | frontend resolution reported diagnostics in a file; `message` summarises per-checker counts, `count` is the total |
 | `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
+| `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
 
 ## stats
 
@@ -197,7 +198,9 @@ and a 0.0 over 400 calls are the same number and opposite facts, so the ratio
 is never published alone (the same rule as `sliceCount` beside
 `connectivity`). Java sources contribute declarations but no calls, so the
 ratio measures Kotlin call sites — `callsTotal` says how many there were —
-plus `unknownCallPropagations`, `loweringFailures{}`,
+plus `unknownCallPropagations`, `loweringFailures{}` — itemised by
+construct, published beside `functionsLowered`, the function count it was
+computed over (a rate without its denominator is not a result) —
 `fixpointCapHits`, `sourceCount`, `sinkCount`, `sliceCount`,
 `crossDependencySliceCount`, `reachableSliceCount`, `truncations{}`,
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy

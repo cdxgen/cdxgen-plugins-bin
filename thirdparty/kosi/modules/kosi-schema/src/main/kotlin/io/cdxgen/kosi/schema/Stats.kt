@@ -30,6 +30,13 @@ data class Stats(
     val callsResolved: Int,
     val unknownCallPropagations: Int,
     val loweringFailures: Map<String, Int>,
+    /**
+     * How many functions the lowering attempted — the denominator the
+     * loweringFailures map was computed over. "0 failures" means nothing
+     * until the function count says what was lowered; the map and the count
+     * travel together (the P2 gate's rule for the lowering rate).
+     */
+    val functionsLowered: Int,
     val fixpointCapHits: Int,
     val sourceCount: Int,
     val sinkCount: Int,
@@ -53,6 +60,7 @@ data class Stats(
         }
         w.endObject()
         w.num("fixpointCapHits", fixpointCapHits)
+        w.num("functionsLowered", functionsLowered)
         w.num("importCount", importCount)
         w.num("reachableSliceCount", reachableSliceCount)
         w.dbl("resolvedCallRatio", resolvedCallRatio)

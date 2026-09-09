@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":kosi-schema"))
     implementation(project(":kosi-project"))
     implementation(project(":kosi-front"))
+    implementation(project(":kosi-kir"))
     implementation(project(":kosi-corpus"))
     implementation(project(":kosi-bench"))
     implementation(project(":kosi-models"))

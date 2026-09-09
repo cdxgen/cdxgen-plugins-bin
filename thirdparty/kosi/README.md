@@ -29,6 +29,7 @@ Useful variants:
 ```bash
 kosi analyze --dir . --pretty                       # indented output
 kosi analyze --dir . --backend syntax               # explicit (default) tier
+kosi kir dump --dir .                               # KIR dump (resolved tier), round-trip + CFG validated
 kosi bench --tier fixtures                          # corpus ratchet, both modes
 kosi bench --tier fixtures --write-baseline baseline.json
 kosi bench --tier fixtures --baseline baseline.json --fail-unless-promotable

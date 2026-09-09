@@ -64,6 +64,36 @@ capabilities = ["command-exec", "process"]
 # syntax tier yet.
 
 [[fixtures]]
+slug = "delegated-properties"
+tier = "fixtures"
+path = "fixtures/delegated-properties"
+capabilities = ["delegated-properties"]
+
+[[fixtures]]
+slug = "destructuring"
+tier = "fixtures"
+path = "fixtures/destructuring"
+capabilities = ["destructuring"]
+
+[[fixtures]]
+slug = "for-iterable"
+tier = "fixtures"
+path = "fixtures/for-iterable"
+capabilities = ["for-iterable"]
+
+[[fixtures]]
+slug = "operators"
+tier = "fixtures"
+path = "fixtures/operators"
+capabilities = ["operators"]
+
+[[fixtures]]
+slug = "use-close"
+tier = "fixtures"
+path = "fixtures/use-close"
+capabilities = ["use-close"]
+
+[[fixtures]]
 slug = "weak-crypto"
 tier = "fixtures"
 path = "fixtures/weak-crypto"

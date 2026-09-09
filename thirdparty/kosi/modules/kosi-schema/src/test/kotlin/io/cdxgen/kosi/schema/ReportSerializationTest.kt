@@ -30,6 +30,7 @@ class ReportSerializationTest {
             fileCount = 0, declarationCount = 0, usageCount = 0, importCount = 0,
             resolvedCallRatio = 0.0, callsTotal = 0, callsResolved = 0, unknownCallPropagations = 0,
             loweringFailures = linkedMapOf("b-constraint" to 2, "a-constraint" to 1),
+            functionsLowered = 0,
             fixpointCapHits = 0, sourceCount = 0, sinkCount = 0, sliceCount = 0,
             crossDependencySliceCount = 0, reachableSliceCount = 0,
             truncations = linkedMapOf("z-cap" to 1, "a-cap" to 3),
