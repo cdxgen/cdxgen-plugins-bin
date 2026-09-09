@@ -11,7 +11,27 @@ produce byte-identical output so CI can diff the checked-in file.
 """
 import json
 import os
+import re
 import sys
+
+# The tracing agent records whichever AWT locale properties the agent
+# host's default locale loads (awt_en_GB on a British host, awt_en_US on a
+# US one), so an un-normalized merge makes native-metadata host-dependent
+# and native-metadata-check fails on the other side of the Atlantic. kosi
+# never renders anything (the no-op toolkit is selected before AWT loads),
+# so one canonical English variant is a build-input fact, not an analysis
+# fact. Normalize every locale-suffixed sun/awt/resources glob to en_US.
+AWT_LOCALE_GLOB = re.compile(r"^(sun/awt/resources/awt[a-z]*_)[a-z]{2,3}(_[A-Z]{2})?\.properties$")
+
+
+def canonicalize(entry):
+    glob_value = entry.get("glob")
+    if isinstance(glob_value, str):
+        match = AWT_LOCALE_GLOB.match(glob_value)
+        if match and not glob_value.endswith("_en_US.properties"):
+            entry = dict(entry)
+            entry["glob"] = match.group(1) + "en_US.properties"
+    return entry
 
 
 def canon(x):
@@ -21,6 +41,20 @@ def canon(x):
 def merge():
     root, out_path = sys.argv[1], sys.argv[2]
     reflection, resources = {}, {}
+    # Reflection entries under jdk.internal.* describe the substrate of the
+    # native image itself (docs/KOSI.md defect 3: the jimage reader for the
+    # resolved tier's JDK). The tracing agent runs on the JVM, where that
+    # code path never executes, so regeneration would silently drop them.
+    # Seed the union from the checked-in output before merging agent runs.
+    if os.path.exists(out_path):
+        previous = json.load(open(out_path))
+        for entry in previous.get("resources", []):
+            entry = canonicalize(entry)
+            resources[canon(entry)] = entry
+        for entry in previous.get("reflection", []):
+            t = entry.get("type")
+            if isinstance(t, str) and t.startswith("jdk.internal."):
+                reflection.setdefault(("type", t), {k: v for k, v in entry.items() if k != "type"} | {"type": t})
     for slug in sorted(os.listdir(root)):
         path = os.path.join(root, slug, "reachability-metadata.json")
         if not os.path.exists(path):
@@ -42,6 +76,7 @@ def merge():
                 else:
                     slot[lk] = lv
         for entry in doc.get("resources", []):
+            entry = canonicalize(entry)
             resources[canon(entry)] = entry
 
     def sort_entries(entries):

@@ -277,6 +277,13 @@ object Promotion {
         // exemption list.
         checks.add(resolvedRatioCheck(current, baseline))
 
+        // 11. the P2 lowering gate: loweringFailures empty on every fixture
+        // slot, and below LOWERING_FAILURE_RATE_MAX of the functions lowered
+        // on the repo tiers. Enforced here rather than measured by hand once
+        // in a PR body, because a lowering that regresses between phases is
+        // exactly what a ratchet is for.
+        checks.add(loweringCheck(current))
+
         val verdict = when {
             checks.all { it.state == State.PASS } -> "PROMOTE"
             checks.any { it.state == State.FAIL } -> "HOLD (regressions)"
@@ -287,6 +294,62 @@ object Promotion {
 
     /** The P1 gate's per-repo resolved-call-ratio target. */
     const val RESOLVED_RATIO_TARGET = 0.90
+
+    /** The P2 gate's ceiling on the repo-tier lowering failure rate. */
+    const val LOWERING_FAILURE_RATE_MAX = 0.005
+
+    /**
+     * `loweringFailures` must be empty on every fixture slot that lowered
+     * anything, and under [LOWERING_FAILURE_RATE_MAX] on the repo tiers. Both
+     * arms report the failure count over the function count it was measured
+     * against — a rate with no denominator would repeat the defect this gate
+     * exists to catch (R25).
+     */
+    private fun loweringCheck(current: BenchRunner.BenchResult): Check {
+        val name = "lowering-failures"
+        val lowered = current.results.filter { (it.functionsLowered ?: 0) > 0 }
+        if (lowered.isEmpty()) {
+            // Never pass by having nothing to look at: no slot lowered a
+            // single function, so the gate saw nothing.
+            return Check(name, State.NOT_EVALUATED, "no slot reported a lowered function (run the resolved slot)")
+        }
+        val fixtureFailures = lowered
+            .filter { it.tier == "fixtures" && it.loweringFailures.isNotEmpty() }
+            .sortedBy { it.slug }
+        if (fixtureFailures.isNotEmpty()) {
+            val detail = fixtureFailures.joinToString("; ") { r ->
+                "${r.slug}/${r.slot} ${r.loweringFailures.values.sum()} of ${r.functionsLowered} functions " +
+                    "(${r.loweringFailures.toSortedMap().entries.joinToString(", ") { "${it.key}=${it.value}" }})"
+            }
+            return Check(name, State.FAIL, "fixtures must lower cleanly: $detail")
+        }
+        val overRate = mutableListOf<String>()
+        val repos = lowered.filter { it.tier != "fixtures" }.sortedBy { it.slug }
+        for (repo in repos) {
+            val total = repo.functionsLowered ?: continue
+            val failed = repo.loweringFailures.values.sum()
+            val rate = failed.toDouble() / total
+            if (rate > LOWERING_FAILURE_RATE_MAX) {
+                overRate.add(
+                    "${repo.slug} $failed of $total functions (${"%.4f".format(rate)} > " +
+                        "${"%.4f".format(LOWERING_FAILURE_RATE_MAX)}): " +
+                        repo.loweringFailures.toSortedMap().entries
+                            .sortedByDescending { it.value }
+                            .take(5).joinToString(", ") { "${it.key}=${it.value}" },
+                )
+            }
+        }
+        if (overRate.isNotEmpty()) return Check(name, State.FAIL, overRate.joinToString("; "))
+        val fixtureFunctions = lowered.filter { it.tier == "fixtures" }.sumOf { it.functionsLowered ?: 0 }
+        val repoFailed = repos.sumOf { r -> r.loweringFailures.values.sum() }
+        val repoFunctions = repos.sumOf { it.functionsLowered ?: 0 }
+        val repoDetail = if (repos.isEmpty()) {
+            "no repo tiers in this run"
+        } else {
+            "repos $repoFailed of $repoFunctions functions failed"
+        }
+        return Check(name, State.PASS, "fixtures clean over $fixtureFunctions functions; $repoDetail")
+    }
 
     private const val RESOLVED_RATIO_TOLERANCE = 0.01
 
@@ -304,7 +367,8 @@ object Promotion {
             return Check(name, State.NOT_EVALUATED, "no repo-tier resolved slots in this run (run --tier all)")
         }
         val measured = repos.joinToString(", ") { r ->
-            "${r.slug}=" + (r.resolvedCallRatio?.let { String.format("%.4f", it) } ?: "n/a")
+            "${r.slug}=" + (r.resolvedCallRatio?.let { String.format("%.4f", it) } ?: "n/a") +
+                (r.callsTotal?.let { " (${r.callsResolved ?: 0}/$it)" } ?: "")
         }
         val missing = repos.filter { it.resolvedCallRatio == null }
         if (missing.isNotEmpty()) {
@@ -323,6 +387,10 @@ object Promotion {
         }
         val regressed = mutableListOf<String>()
         for (repo in repos) {
+            // A ratio over zero calls is vacuous: 0.0 there is "nothing to
+            // resolve", not "resolved nothing", and comparing it against a
+            // baseline would manufacture a regression out of an empty repo.
+            if (repo.callsTotal == 0) continue
             val cur = repo.resolvedCallRatio ?: continue
             val base = baseByKey[repo.slug]?.resolvedCallRatio ?: continue
             if (cur < base - RESOLVED_RATIO_TOLERANCE) {
@@ -334,7 +402,9 @@ object Promotion {
         if (regressed.isNotEmpty()) {
             return Check(name, State.FAIL, regressed.joinToString("; "))
         }
-        val belowTarget = repos.filter { (it.resolvedCallRatio ?: 0.0) < RESOLVED_RATIO_TARGET }
+        val belowTarget = repos.filter {
+            it.callsTotal != 0 && (it.resolvedCallRatio ?: 0.0) < RESOLVED_RATIO_TARGET
+        }
         val detail = if (belowTarget.isEmpty()) {
             "$measured (all >= ${"%.2f".format(RESOLVED_RATIO_TARGET)})"
         } else {

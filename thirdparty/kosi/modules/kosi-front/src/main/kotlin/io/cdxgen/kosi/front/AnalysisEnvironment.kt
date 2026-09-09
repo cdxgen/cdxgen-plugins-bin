@@ -258,7 +258,17 @@ internal object ModuleProviderFactory {
             builder.buildKtSdkModule {
                 platform = JvmPlatforms.defaultJvmPlatform
                 libraryName = "jdk:$jdkHome"
-                addBinaryRootsFromJdkHome(jdkHome, isJre = false)
+                // The image has no jrt filesystem provider (docs/KOSI.md
+                // defect 3): JdkModules hands over the module image as a
+                // plain zip root there, an exploded JDK as plain module
+                // directories, and null on the JVM where the Analysis API's
+                // own jrt route works.
+                val roots = JdkModules.sdkBinaryRoots(jdkHome)
+                if (roots != null) {
+                    addBinaryRoots(roots)
+                } else {
+                    addBinaryRootsFromJdkHome(jdkHome, isJre = false)
+                }
             }
         }
 

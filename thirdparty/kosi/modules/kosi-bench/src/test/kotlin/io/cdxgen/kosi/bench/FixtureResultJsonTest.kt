@@ -1,0 +1,109 @@
+package io.cdxgen.kosi.bench
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * The baseline file is the only path by which a gate sees the previous run,
+ * so anything a gate reads must survive write -> read. It did not:
+ * `resolvedCallRatio` was written by `toJson` and never parsed by `fromJson`,
+ * so every baseline loaded from disk carried null and the per-repo ratio
+ * gate's two enforcing arms — regression, and falling through the target —
+ * silently could not fire. The gate's own unit tests missed it because they
+ * built `BenchResult` in memory and never went through the parser.
+ *
+ * [everyGateReadableFieldSurvivesTheBaselineFile] is the general guard: it
+ * compares field by field over the whole data class, so the next field added
+ * for a gate cannot go missing in the parser the same way.
+ */
+class FixtureResultJsonTest {
+
+    /** Distinctive values throughout, so a dropped field cannot coincide with a default. */
+    private fun sample() = BenchRunner.FixtureResult(
+        slug = "some-repo",
+        tier = "medium",
+        slot = MatrixSlot.RESOLVED_LABEL,
+        annotations = 11,
+        positives = 7,
+        negatives = 4,
+        pass = 9,
+        fail = 1,
+        xfail = 2,
+        xpass = 3,
+        positivesPassed = 6,
+        positivesRecallDenominator = 8,
+        recall = 0.8125,
+        connectivity = 0.5,
+        sliceCount = 13,
+        integrityViolations = 2,
+        wallMillis = 4242,
+        parseErrors = 5,
+        resolvedCallRatio = 0.9405,
+        callsTotal = 1000,
+        callsResolved = 940,
+        loweringFailures = linkedMapOf("b-construct" to 2, "a-construct" to 7),
+        functionsLowered = 321,
+        digest = Digests.FixtureDigest("some-repo", MatrixSlot.RESOLVED_LABEL, emptyMap()),
+    )
+
+    private fun roundTrip(result: BenchRunner.FixtureResult): BenchRunner.FixtureResult {
+        val bench = BenchRunner.BenchResult(
+            results = listOf(result),
+            toolCommit = "deadbeef",
+            medianWallMillis = 1,
+            worstWallMillis = 2,
+            peakRssBytes = 3,
+        )
+        val parsed = BenchRunner.BenchResult.fromJson(bench.toJson())
+        return parsed.results.single()
+    }
+
+    @Test
+    fun everyGateReadableFieldSurvivesTheBaselineFile() {
+        val original = sample()
+        val parsed = roundTrip(original)
+        // `failures` and the digest's per-section map are deliberately not
+        // carried in the baseline (details of a run, not gate inputs);
+        // everything else must come back exactly.
+        val notPersisted = setOf("failures", "digest")
+        val dropped = BenchRunner.FixtureResult::class.java.declaredFields
+            .map { it.name }
+            .filterNot { it in notPersisted }
+            .filterNot { name ->
+                val field = BenchRunner.FixtureResult::class.java.getDeclaredField(name)
+                field.isAccessible = true
+                field.get(original) == field.get(parsed)
+            }
+        assertEquals(
+            emptyList(), dropped,
+            "these fields did not survive the baseline round-trip, so any gate reading them is dead: $dropped",
+        )
+    }
+
+    @Test
+    fun theRatioAndItsCountsComeBackTogether() {
+        val parsed = roundTrip(sample())
+        assertEquals(0.9405, parsed.resolvedCallRatio)
+        assertEquals(1000, parsed.callsTotal)
+        assertEquals(940, parsed.callsResolved)
+    }
+
+    @Test
+    fun aPreP2BaselineParsesWithAbsentCountsRatherThanZero() {
+        // Old baselines have no counts. Absent must stay null — zero would
+        // read as "a repo with no call sites" and quietly excuse the gate.
+        val json = """
+            {"results":[{"slug":"old","tier":"medium","slot":"resolved","annotations":1,
+             "connectivity":1,"recall":1,"digest":"x","fail":0,"integrityViolations":0,
+             "negatives":0,"parseErrors":0,"pass":1,"positives":1,"positivesPassed":1,
+             "positivesRecallDenominator":1,"sliceCount":0,"wallMillis":1,"xfail":0,"xpass":0}],
+             "toolCommit":"x","medianWallMillis":1,"worstWallMillis":1,"peakRssBytes":1}
+        """.trimIndent()
+        val parsed = BenchRunner.BenchResult.fromJson(json).results.single()
+        assertEquals(null, parsed.callsTotal)
+        assertEquals(null, parsed.functionsLowered)
+        assertEquals(null, parsed.resolvedCallRatio)
+        assertTrue(parsed.loweringFailures.isEmpty())
+    }
+}

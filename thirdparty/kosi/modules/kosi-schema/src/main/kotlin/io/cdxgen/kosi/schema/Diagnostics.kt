@@ -53,6 +53,9 @@ object DiagnosticCodes {
     const val CLASSPATH_PARTIAL = "classpath-partial"
     const val RESOLUTION_ERRORS = "resolution-errors"
     const val SYMBOL_RESOLUTION_FAILED = "symbol-resolution-failed"
+
+    /** A construct the P2 lowering could not perform; the message names it. */
+    const val LOWERING_FAILED = "lowering-failed"
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
@@ -68,6 +71,7 @@ object DiagnosticCodes {
         CLASSPATH_PARTIAL,
         RESOLUTION_ERRORS,
         SYMBOL_RESOLUTION_FAILED,
+        LOWERING_FAILED,
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,

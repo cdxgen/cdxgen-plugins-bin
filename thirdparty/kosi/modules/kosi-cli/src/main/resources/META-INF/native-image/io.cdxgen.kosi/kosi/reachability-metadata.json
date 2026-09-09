@@ -1,6 +1,15 @@
 {
   "reflection": [
     {
+      "type": "jdk.internal.jimage.BasicImageReader",
+      "methods": [
+        { "name": "open", "parameterTypes": ["java.nio.file.Path"] },
+        { "name": "getEntryNames", "parameterTypes": [] },
+        { "name": "getResource", "parameterTypes": ["java.lang.String"] },
+        { "name": "close", "parameterTypes": [] }
+      ]
+    },
+    {
       "type": {
         "proxy": [
           "org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileListener",

@@ -103,6 +103,7 @@ object Analyzer {
                 callsResolved = 0,
                 unknownCallPropagations = 0,
                 loweringFailures = emptyMap(),
+                functionsLowered = 0,
                 fixpointCapHits = 0,
                 sourceCount = 0,
                 sinkCount = 0,
@@ -268,17 +269,24 @@ object Analyzer {
             }
         }
 
-        // The JDK module: explicit --jdk-home, else the running JVM's home.
-        // In a native image java.home is not set; the diagnostic below names
-        // the gap and the caller can pass --jdk-home.
-        val jdkHome = options.jdkHome?.let { Path.of(it) }
-            ?: System.getProperty("java.home")?.let { Path.of(it) }
-        val jdkDiagnostic = if (jdkHome == null || !Files.isDirectory(jdkHome)) {
+        // The JDK module: explicit --jdk-home, else the running JVM's home,
+        // else JAVA_HOME (which is how an image finds one, java.home being
+        // unset there). A home that names no modular JDK is a usage error —
+        // a flag that cannot work is rejected with the reason, never
+        // silently downgraded to a partial classpath. When no source names a
+        // JDK at all the run continues with the gap diagnosed below.
+        val jdkResolution = JdkModules.resolve(options.jdkHome?.let { Path.of(it) })
+        val jdkHome = when (val resolution = jdkResolution) {
+            is JdkModules.Resolution.Found -> resolution.home
+            is JdkModules.Resolution.Invalid -> throw AnalysisException(resolution.message)
+            is JdkModules.Resolution.NotFound -> null
+        }
+        val jdkDiagnostic = if (jdkHome == null) {
             Diagnostic(
                 code = DiagnosticCodes.CLASSPATH_PARTIAL,
                 severity = Severity.WARNING,
-                message = "JDK home $jdkHome does not exist; java.* symbols resolve as unresolved " +
-                    "(pass --jdk-home to name the JDK module)",
+                message = (jdkResolution as JdkModules.Resolution.NotFound).tried +
+                    "; java.* symbols resolve as unresolved",
                 position = Position(".", 1, 1),
                 count = 1,
             )
@@ -340,6 +348,24 @@ object Analyzer {
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: running resolved analyzer")
             val facts = ResolvedAnalyzer.run(env, workspace, fileRelPathByAbsolute)
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: facts=" + facts.size)
+
+            // P2: lower the same session to the KIR. The failures map is the
+            // itemised breakdown; the function count is what it was computed
+            // over — neither travels without the other.
+            val kir = KirLowering.lower(env, workspace)
+            val kirDiagnostic = if (kir.failures.isNotEmpty()) {
+                val breakdown = kir.failures.entries.sortedWith(compareBy({ it.key }, { it.value })).joinToString(", ") { "${it.key}=${it.value}" }
+                Diagnostic(
+                    code = DiagnosticCodes.LOWERING_FAILED,
+                    severity = Severity.WARNING,
+                    message = "lowering could not perform $breakdown " +
+                        "(${kir.failures.values.sum()} of ${kir.functionCount} functions)",
+                    position = Position(".", 1, 1),
+                    count = kir.failures.values.sum(),
+                )
+            } else {
+                null
+            }
 
             val imports = mutableListOf<ImportUsage>()
             val usages = mutableListOf<LibraryUsage>()
@@ -452,7 +478,7 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic) + diagnostics,
+                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic) + diagnostics,
                 stats = Stats(
                     fileCount = fileCount,
                     declarationCount = drafts.size,
@@ -462,7 +488,8 @@ object Analyzer {
                     callsTotal = callsTotal,
                     callsResolved = callsResolved,
                     unknownCallPropagations = 0,
-                    loweringFailures = emptyMap(),
+                    loweringFailures = kir.failures,
+                    functionsLowered = kir.functionCount,
                     fixpointCapHits = 0,
                     sourceCount = 0,
                     sinkCount = 0,
@@ -508,6 +535,9 @@ object Analyzer {
      * corpusQuick).
      */
     private val stdlibJar: Path? by lazy { stdlibJarPath() }
+
+    /** The bundled stdlib jar, shared with the kir dump pipeline. */
+    internal fun stdlibJarForDump(): Path? = stdlibJar
 
     private fun stdlibJarPath(): Path? {
         for (entry in System.getProperty("java.class.path")?.split(File.pathSeparator) ?: emptyList()) {
@@ -555,7 +585,7 @@ object Analyzer {
      */
     data class VersionedModule(val module: DiscoveredModule, val effective: String)
 
-    private fun discoverVersionPolicy(
+    internal fun discoverVersionPolicy(
         root: Path,
         modules: List<DiscoveredModule>,
         options: AnalyzeOptions,

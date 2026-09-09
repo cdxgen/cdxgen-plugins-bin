@@ -706,6 +706,23 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeList"
     },
     {
@@ -896,7 +913,40 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtForExpression"
     },
     {
       "methods": [
@@ -952,6 +1002,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtOperationReferenceExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtPropertyDelegate"
     },
     {
       "methods": [
@@ -1051,6 +1112,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtWhenExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtWhileExpression"
     },
     {
       "methods": [
@@ -1419,15 +1491,6 @@
           "parameterTypes": []
         }
       ],
-      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProviderCliImpl"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ],
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.file.structure.LLFirInBlockModificationTracker"
     },
     {
@@ -1505,6 +1568,31 @@
         }
       ],
       "type": "java.util.Optional"
+    },
+    {
+      "methods": [
+        {
+          "name": "open",
+          "parameterTypes": [
+            "java.nio.file.Path"
+          ]
+        },
+        {
+          "name": "getEntryNames",
+          "parameterTypes": []
+        },
+        {
+          "name": "getResource",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        },
+        {
+          "name": "close",
+          "parameterTypes": []
+        }
+      ],
+      "type": "jdk.internal.jimage.BasicImageReader"
     },
     {
       "methods": [
@@ -1658,6 +1746,9 @@
     },
     {
       "type": "java.util.Collection"
+    },
+    {
+      "type": "java.util.Iterator"
     },
     {
       "type": "java.util.List"
@@ -1844,6 +1935,9 @@
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProvider"
+    },
+    {
+      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProviderCliImpl"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.K2KotlinBuiltInDecompilationInterceptor"
@@ -2044,12 +2138,6 @@
       "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtDoWhileExpression"
     },
     {
@@ -2087,9 +2175,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFinallySection"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtForExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFunctionType"
@@ -2188,9 +2273,6 @@
       "type": "org.jetbrains.kotlin.psi.KtPropertyAccessor[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtPropertyDelegate"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtProperty[]"
     },
     {
@@ -2231,9 +2313,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeCallEntry[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeEntry[]"
@@ -2312,9 +2391,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtWhenEntryGuard"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtWhileExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.stubs.elements.KtFileElementType"
@@ -2481,19 +2557,11 @@
       "glob": "pluginsCompatibleWithK2Mode.txt"
     },
     {
-      "glob": "sun/awt/resources/awt_en.properties",
+      "glob": "sun/awt/resources/awt_en_US.properties",
       "module": "java.desktop"
     },
     {
-      "glob": "sun/awt/resources/awt_en_GB.properties",
-      "module": "java.desktop"
-    },
-    {
-      "glob": "sun/awt/resources/awtosx_en.properties",
-      "module": "java.desktop"
-    },
-    {
-      "glob": "sun/awt/resources/awtosx_en_GB.properties",
+      "glob": "sun/awt/resources/awtosx_en_US.properties",
       "module": "java.desktop"
     }
   ]

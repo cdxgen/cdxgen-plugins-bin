@@ -51,16 +51,43 @@ object BenchRunner {
          * baselines written before P1.
          */
         val resolvedCallRatio: Double? = null,
+        /**
+         * The counts [resolvedCallRatio] was computed from, carried across
+         * the bench boundary rather than left behind in the report. The gate
+         * reads its ratios from here, so dropping the denominator here makes
+         * the GATE unable to tell 0 of 0 calls (a fixture with no call sites)
+         * from 0 of 400 (a resolved tier that resolved nothing). Null only
+         * for baselines written before P2.
+         */
+        val callsTotal: Int? = null,
+        val callsResolved: Int? = null,
+        /**
+         * The lowering's failures by construct and the function count they
+         * were computed over (03-SCHEMA.md `stats.loweringFailures` /
+         * `stats.functionsLowered`), surfaced so the P2 lowering gate reads
+         * them from the bench result instead of being measured by hand once
+         * and never again. Empty map + null count is a pre-P2 baseline.
+         */
+        val loweringFailures: Map<String, Int> = emptyMap(),
+        val functionsLowered: Int? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
         fun toJson(w: JsonWriter, key: String? = null) {
             w.beginObject(key)
             w.num("annotations", annotations)
+            callsResolved?.let { w.num("callsResolved", it) }
+            callsTotal?.let { w.num("callsTotal", it) }
             w.dbl("connectivity", connectivity)
             resolvedCallRatio?.let { w.dbl("resolvedCallRatio", it) }
             w.str("digest", digest.combined)
             w.num("fail", fail)
+            functionsLowered?.let { w.num("functionsLowered", it) }
+            w.beginObject("loweringFailures")
+            for (construct in loweringFailures.keys.sorted()) {
+                w.num(construct, (loweringFailures[construct] ?: 0).toLong())
+            }
+            w.endObject()
             w.num("integrityViolations", integrityViolations)
             w.num("negatives", negatives)
             w.num("parseErrors", parseErrors)
@@ -185,6 +212,18 @@ object BenchRunner {
                         integrityViolations = (r.long("integrityViolations") ?: 0).toInt(),
                         wallMillis = r.long("wallMillis") ?: 0,
                         parseErrors = (r.long("parseErrors") ?: 0).toInt(),
+                        // Every field the gates read must be read back here.
+                        // resolvedCallRatio was written but never parsed, so
+                        // every baseline loaded from disk carried null and the
+                        // per-repo ratio gate's regression and target arms
+                        // could not fire at all (see FixtureResultJsonTest,
+                        // which round-trips through this parser).
+                        resolvedCallRatio = r.dbl("resolvedCallRatio"),
+                        callsTotal = r.long("callsTotal")?.toInt(),
+                        callsResolved = r.long("callsResolved")?.toInt(),
+                        loweringFailures = r.obj("loweringFailures")?.members.orEmpty()
+                            .mapValues { (_, v) -> v.asLong().toInt() },
+                        functionsLowered = r.long("functionsLowered")?.toInt(),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -369,6 +408,10 @@ object BenchRunner {
             wallMillis = wallMillis,
             parseErrors = report.diagnostics.count { it.code == "parse-error" },
             resolvedCallRatio = report.stats.resolvedCallRatio,
+            callsTotal = report.stats.callsTotal,
+            callsResolved = report.stats.callsResolved,
+            loweringFailures = report.stats.loweringFailures,
+            functionsLowered = report.stats.functionsLowered,
             digest = digest,
             failures = failureDetails,
         )

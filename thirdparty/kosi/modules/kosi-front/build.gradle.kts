@@ -49,6 +49,7 @@ tasks.processResources {
 dependencies {
     implementation(project(":kosi-schema"))
     implementation(project(":kosi-project"))
+    implementation(project(":kosi-kir"))
     implementation(libs.kotlin.stdlib)
 
     // Analysis API + unrelocated compiler. Non-transitive on purpose: the

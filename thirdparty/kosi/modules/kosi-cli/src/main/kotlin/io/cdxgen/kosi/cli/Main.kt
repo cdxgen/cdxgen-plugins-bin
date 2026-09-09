@@ -5,6 +5,10 @@ import io.cdxgen.kosi.bench.BenchRunner
 import io.cdxgen.kosi.bench.Digests
 import io.cdxgen.kosi.bench.Promotion
 import io.cdxgen.kosi.front.Analyzer
+import io.cdxgen.kosi.front.KirDumper
+import io.cdxgen.kosi.kir.KirReader
+import io.cdxgen.kosi.kir.KirValidator
+import io.cdxgen.kosi.kir.KirWriter
 import io.cdxgen.kosi.front.StandaloneSessionProbe
 import io.cdxgen.kosi.schema.AnalyzeOptions
 import io.cdxgen.kosi.schema.Backend
@@ -51,11 +55,12 @@ object Main {
                     ExitCodes.OK
                 }
                 "analyze" -> analyze(args.drop(1))
+                "kir" -> kir(args.drop(1))
                 "bench" -> bench(args.drop(1))
                 "golden" -> golden(args.drop(1))
                 "version" -> version(args.drop(1))
                 else -> {
-                    System.err.println("kosi: unknown command '${args[0]}' (try: analyze, bench, golden, version)")
+                    System.err.println("kosi: unknown command '${args[0]}' (try: analyze, kir, bench, golden, version)")
                     ExitCodes.USAGE
                 }
             }
@@ -185,6 +190,82 @@ object Main {
                 if (it != "json") throw UsageException("only --format json is supported in phase 0")
                 it
             },
+        )
+    }
+
+    // ---- kir ----------------------------------------------------------------
+
+    /**
+     * `kosi kir dump` (P2 gate): lower the resolved tier to the KIR and dump
+     * it. The round-trip is enforced HERE on every dump — dump, re-read,
+     * dump again must be byte-identical, or the command fails loudly instead
+     * of publishing a format nothing can re-read.
+     */
+    private fun kir(args: List<String>): Int {
+        val sub = args.firstOrNull()
+        when (sub) {
+            "dump" -> {}
+            null, "help", "--help" -> {
+                printKirUsage()
+                return ExitCodes.OK
+            }
+            else -> {
+                System.err.println("kosi: unknown kir subcommand '$sub' (try: dump)")
+                return ExitCodes.USAGE
+            }
+        }
+        val rest = args.drop(1)
+        val parsed = ParsedArgs.parse(
+            rest,
+            known = ANALYZE_VALUE_FLAGS + ANALYZE_BOOLEAN_FLAGS,
+            booleans = ANALYZE_BOOLEAN_FLAGS,
+        )
+        if (parsed.bool("help")) {
+            printKirUsage()
+            return ExitCodes.OK
+        }
+        val dir = parsed.value("dir") ?: throw UsageException("kir dump requires --dir <path>")
+        val outPath = parsed.value("out")
+        val root = Path.of(dir)
+        if (!Files.isDirectory(root)) throw UsageException("--dir $dir does not exist or is not a directory")
+        val options = optionsFrom(parsed).copy(backend = Backend.RESOLVED)
+        val dump = KirDumper.dump(root.toAbsolutePath(), options)
+        // Round-trip enforcement (P2 gate): dump -> read -> dump byte-identical.
+        val reRead = KirReader.read(dump)
+        val second = KirWriter.write(reRead)
+        if (second != dump) {
+            throw Analyzer.AnalysisException("kir dump round-trip mismatch: the dumper and reader disagree")
+        }
+        val findings = KirValidator.validate(reRead)
+        if (findings.isNotEmpty()) {
+            throw Analyzer.AnalysisException(
+                "kir dump validation failed: " +
+                    findings.take(10).joinToString("; ") { "${it.function} ${it.block}: ${it.problem}" },
+            )
+        }
+        return when (outPath) {
+            null -> {
+                println(dump)
+                ExitCodes.OK
+            }
+            else -> {
+                Files.writeString(Path.of(outPath), dump)
+                ExitCodes.OK
+            }
+        }
+    }
+
+    private fun printKirUsage() {
+        println(
+            """
+            kosi kir dump — lower the resolved tier to the KIR and dump it
+
+              kosi kir dump --dir <path> [--out <file>] [analyze flags]
+
+            Applies the same discovery, classpath resolution and JDK attachment
+            as `analyze --backend resolved`, then dumps the lowered module.
+            Fails when the dump does not round-trip or the CFG validates dirty.
+            """.trimIndent(),
         )
     }
 
