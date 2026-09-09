@@ -1,0 +1,18 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 232-233,237-238,240-241
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 2560,2564
+thirdparty/kosi/scripts/merge-agent-metadata.py
+  h_6a4cc5cdf68def 14,17-35,51-53,79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "bf2fe6cc0ec1dbd22f4924f0359b1d570d62ca6d",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
