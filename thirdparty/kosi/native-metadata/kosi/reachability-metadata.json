@@ -2557,19 +2557,11 @@
       "glob": "pluginsCompatibleWithK2Mode.txt"
     },
     {
-      "glob": "sun/awt/resources/awt_en.properties",
+      "glob": "sun/awt/resources/awt_en_US.properties",
       "module": "java.desktop"
     },
     {
-      "glob": "sun/awt/resources/awt_en_GB.properties",
-      "module": "java.desktop"
-    },
-    {
-      "glob": "sun/awt/resources/awtosx_en.properties",
-      "module": "java.desktop"
-    },
-    {
-      "glob": "sun/awt/resources/awtosx_en_GB.properties",
+      "glob": "sun/awt/resources/awtosx_en_US.properties",
       "module": "java.desktop"
     }
   ]

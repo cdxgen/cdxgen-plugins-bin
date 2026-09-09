@@ -229,13 +229,16 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
-	@$(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/version \
+	@$(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	  -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/version \
 	  -jar $(fat_jar) version
 	@for f in fixtures/*/; do \
 	  slug=$$(basename $$f); \
-	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \
 	    -jar $(fat_jar) analyze --dir $$f --out /dev/null; \
-	  $(graal_env) "$(GRAAL_HOME)/bin/java" -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
 	    -jar $(fat_jar) analyze --backend resolved --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
