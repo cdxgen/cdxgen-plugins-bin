@@ -5,7 +5,121 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
-## Phase 2 — the native JDK, then KIR (this branch)
+## Phase 3 — the call graph and reachability (this branch)
+
+Branch `feat/kosi-p3-callgraph`, off `feat/kosi` (`94aecaa`).
+
+**What ships.** `kosi-graph` (compiler-free, KIR + schema types only) builds
+`callGraph` on the resolved tier: dispatch resolution per mode (`static`,
+`cha`, `sealed` with closed-set narrowing and `sealed-exact`/`sealed-bounded`
+labels, `rta`, `vta`, `auto` = vta falling back to rta then sealed), roots
+(`main`, `exported`, `handlers`, `tests`, `android`, `all`, `symbol:<regex>`;
+framework registrations matched against RESOLVED annotation FQNs — a
+homonym annotation in a different package must not and does not register a
+handler, pinned by `framework-handlers`' negative half), reachability with
+per-node `distance`/`roots[]`, shortest witness paths via
+`--reachable-symbols`, GraphML/GEXF export, and the post-hoc view filter
+(`--include-stdlib`, `--dependency-detail collapse|drop|full`) where a path a
+filter cuts survives as one `collapsed` edge carrying hop count and traversed
+packages. RTA is genuinely reachability-driven: classes instantiate only
+from reached constructor sites (plus singletons and root receivers), and a
+virtual site connects candidates only once their owner class is live — dead
+implementations get no edges (`virtual-dispatch`'s negative half pins this
+through a `known-fail`-free want-not).
+
+**KIR format bumped to `kir 2`:** dispatch facts the graph needs — per-call
+source lines on `Call`/`DynamicCall`/`New`, real `visibility`/`modifiers`
+(were hard-coded `public`/empty), resolved `overrides`, enclosing-class
+`supertypes`, `ownerFlags`, `ownerAnnotations`, `ownerVisibility`, and
+per-function `jvmDescriptor` for overload identity. Missing facts narrow
+dispatch toward MORE candidates, never fewer (unknown visibility never reads
+as exact), and a shortfall surfaces as `symbol-resolution-failed`.
+
+**Gate, measured (JVM, darwin-aarch64, M4 Pro, pinned toolchain for the
+binary):**
+
+- Edge connectivity **1.000 over 3 edge-reached nodes (of 66 reached)**
+  across 58 graph slots. The denominator counts only nodes at distance > 0,
+  because a root is reached with no edge involved: measured against every
+  reached node instead, the corpus scored 1.000 over 62 having traversed
+  nothing at all (R50). Vacuity stays reported — a run whose reached set is
+  entirely roots is NOT_EVALUATED, never a pass — and `reachable-depth` is
+  the fixture that keeps it evaluated.
+- `--roots exported` public-API reach **0.9839 (61 of 62)** on fixtures,
+  against a denominator taken from `declarations[]` rather than from the
+  graph's own nodes. Read off the graph the figure was a tautology, 1.0000
+  everywhere including all five repos (R49). The single miss is
+  `fixtures.interop.Greeter.greet`: a Java-declared method the Kotlin
+  lowering has no body for, so it never becomes a node — a real gap, named
+  rather than absorbed, that P9's bytecode tier closes. The repo figures
+  below predate the denominator change and are being re-measured; the 0.95
+  bar first read 0.839 on nowinandroid, which was a DEFINITION mismatch
+  (the bench's public-API denominator ignored enclosing-class visibility
+  while the root rule gated on it), fixed by publishing `ownerVisibility`
+  on the node. Note that unifying those two predicates is precisely what
+  made the metric tautological, which is why the denominator now comes from
+  outside the graph.
+- Breakdowns recorded per slot and checked for internal consistency
+  (`graph-breakdown`): e.g. spring-fu 706 nodes = 598 local + 108
+  synthetic; anki-android 12029 = 9681 local + 2173 synthetic + 175 stdlib
+  + 0 dependency in the default view (see deviation below).
+- `--include-stdlib` toggles the counts through the real pipeline
+  (`includeStdlibChangesTheGraphThroughTheRealPipeline`): a `main` calling
+  into the stdlib shows stdlib nodes/edges only with the flag on, and the
+  breakdown moves with it — the golem always-true filter defect has a
+  failing test on both sides.
+- Determinism: two runs byte-identical on all **30** fixtures — report,
+  GraphML export, and witness sidecar — on the JVM AND in the native image;
+  native equals JVM byte-for-byte on the same input, `tool.commit` aside
+  (the image bakes in its build commit). Native binary built on the pinned
+  GraalVM CE 25.3.4.1 (`native-image 25.0.4.1`). The first native-vs-JVM
+  sweep of this phase reported all fixtures identical while the image was in
+  fact dying on two of them; see R53 for what the comparison was actually
+  measuring.
+- Ratchet still fails both ways, re-proven on this branch: a broken
+  expectation exits 1; a `known-fail=99` stamped on a passing expectation
+  XPASSes and exits 1; restored, exit 0.
+- Bench matrix grows to 4 slots (`security`, `all`, `resolved`, `exported`),
+  goldens to 116 pairs; the corpus evaluates 788 annotation outcomes over
+  **29** corpus fixtures x 4 slots (the review added `reachable-depth`):
+  687 pass / 0 fail / 14 xfail / 0 xpass, structural recall 1.000
+  (393 of 393) over the non-known-fail positives. The xfail count grew from 12 to 14 with the fourth slot
+  (command-exec's known-fail markers evaluate once per slot by design).
+
+**Promotion checks added** (each tested through the baseline file — write,
+read back with the production parser, then evaluate; the standing R44
+rule): `edge-connectivity` (witness-confirmed nodes over the EDGE-TRAVERSED
+reached set, vacuity-guarded — see R50 for why the denominator is not every
+reached node), `exported-reach` (both counts published, >= 0.95, denominator
+from `declarations[]` — see R49 for why not from the graph),
+`graph-breakdown` (the four-way split must exist and must sum to the
+totals). The round-trip guard `FixtureResultJsonTest` now covers every new
+gate field with distinctive non-default values — and caught a real R44-shaped
+defect during development: the graph fields were read by `fromJson` but
+three of them (`reachedNodes`, `publicCallables`, `reachedPublicCallables`)
+were never WRITTEN by `toJson`, so a baseline comparison would have seen
+zeros. In-memory objects passed; the file round-trip did not.
+
+**Deviations recorded for this phase:**
+
+6. **`--callgraph-timeout` is a deterministic work budget, not wall
+   clock.** Byte-identical output is a gate; a wall-clock fallback would
+   break it precisely on the large inputs the fallback exists for. `auto`
+   budgets `timeoutSeconds * 1,000,000` work units (evaluations + edge
+   emissions) per algorithm before falling back down the chain, recorded as
+   `callgraph-timeout`.
+7. **CHA "including library types from the classpath" is approximated at
+   the source tier.** Library callees have no bodies, so external nodes are
+   leaves and dispatch INTO library code is one receiver-typed edge.
+   Dispatch THROUGH a library interface to workspace implementations IS
+   resolved (a local `Runnable` implementation receives the call);
+   library-internal overrides arrive with P9's bytecode tier.
+8. **`lambda-inlined` retained edges and higher-order bodies.** Scope
+   functions keep their evidence edge; standalone lambda bodies are still
+   not extracted as functions (a P2 shape), so `higher-order` edges wait
+   for that lowering work; the corpus pins none of it.
+
+## Phase 2 — the native JDK, then KIR (merged 2026-09-09)
 
 Branch `feat/kosi-p2-kir`, off `feat/kosi` (`20b9e27`).
 
@@ -288,6 +402,16 @@ Gate proofs recorded in the PR body:
 | 1 | syntax | no flow engine at the syntax tier: no slices, no call graph; `command-exec` carries `known-fail=1` for `flow source=untrusted-input sink=process-exec`. The resolved front end (P1) has no flow engine either, so the marker stays backend-agnostic until P4 | open |
 | 2 | syntax | Java sources are listed in `files[]` but not parsed at the syntax tier: their declarations are absent (R19 added the diagnostic; P1 closes the gap at the resolved tier, where Java PSI is parsed through the same symbols). `java-interop` and `empty-classpath` carry `known-fail=syntax:2` on the expectations that need the resolved tier | open (resolved tier: closed) |
 | 3 | resolved | the native image attaches no JDK module: `java.home` is unset in an image, so `java.*` symbols go unresolved (reported as `classpath-partial`, and visible in the ratio — `weak-crypto` resolves 0/4 in the image vs 4/4 on the JVM), and `--jdk-home` fails with `ProviderNotFoundException: Provider "jrt" not found` because the image has no jrt filesystem provider for a modular JDK's `lib/modules`. Resolved-tier native output is therefore not byte-identical to JVM output; the syntax tier is unaffected | **closed in P2** — the image reads `lib/modules` through its own jimage reader and attaches per-module jars; `weak-crypto` 4/4 in the image, 8 fixtures byte-identical native vs JVM, `--jdk-home` works or is a usage error (see Phase 2) |
+
+## Defects found and fixed during the P3 review
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R49 | kosi-bench | **`exported-reach` was a tautology and could not fail.** Its denominator was the graph's own public nodes; the `exported` root selector picks exactly the public local nodes; a root is reached at distance 0 by definition. Numerator and denominator were therefore the same set by construction, which is why the gate read exactly `1.0000` on every fixture and on all five pinned repos — anki-android's headline `7976/7976` is the tell. Unifying the two visibility predicates (the right fix for the nowinandroid 0.839 mismatch) is what closed the last gap between them | the denominator comes from `declarations[]`, published by the front end independently of graph construction: callables whose own visibility and whose enclosing declaration's visibility are consumer-nameable, with `unknown` counting IN so a missing fact widens the obligation rather than deleting it. A public callable that never became a node now costs a point, which is the failure the gate exists to catch. Measured: **0.9839 (61 of 62)**, the one miss being `fixtures.interop.Greeter.greet` — a Java-declared method the Kotlin lowering has no body for, a real gap that P9's bytecode tier closes. `PublicApiDenominatorTest` |
+| R50 | kosi-bench | **`edge-connectivity` confirmed 62 nodes without traversing a single edge.** A root is reached at distance 0, so it is "connected" with no edge involved; `connectedCount` seeds every root into the visited set before the walk starts. Across the whole corpus **0 of 62** reached nodes sat at distance > 0 — every reached node was a root, in all 56 graph slots — so the 1.000 was a count of roots. The P3 prompt asked specifically that this denominator stop being vacuous; the number got bigger, and stayed vacuous | the denominator is the edge-traversed subset: `reachedViaEdge` (distance > 0) and `connectedViaEdge`, both carried across the bench boundary, with NOT_EVALUATED when it is empty and the detail line naming both figures. The corpus gains `reachable-depth` — one public entry point over a chain of non-public helpers, the only fixture whose reachability is a fact about edges rather than about being declared public. Measured: **1.000 over 3 edge-reached nodes (of 66 reached)**. `CallGraphGateTest.aRunWhoseReachedNodesAreAllRootsIsNotEvaluatedRatherThanPassing` |
+| R51 | kosi-graph | `--roots all` matched **every node** — `RootScope.ALL -> true` in the per-node `when`, contradicting the `// filled below from the other scopes` comment two lines under it. Rooting the stdlib and every dependency makes reachability say "everything runs", and hands any connectivity denominator a free pass, since a root needs no edge. Untested in either direction | `all` never matches directly; it is the union of the concrete scopes, as the comment always said. `RootsTest` pins both halves — no non-workspace root, and set equality with the union |
+| R53 | build | **the native image could not analyse any fixture containing an `object`.** `MissingReflectionRegistrationError` on `KtObjectDeclaration(ASTNode)` at the resolved tier, exit 3, no report written. The cause is upstream of the metadata file: `make native-metadata` runs the agent over every FIXTURE but only two SLOTS, and P3 added a third. A slot the agent never runs is a code path the image never registers. It survived the phase's own native-vs-JVM sweep because `analyze` writes nothing when it fails, so `cmp` compared the previous fixture's report with itself and reported every fixture identical — the same vacuous-comparison trap the P2 review fell into over empty files, this time hiding a real regression | the agent target runs the `exported` slot (with `--include-stdlib`, so the filter's kept-node path is registered too); 90 new metadata lines, and `sealed-dispatch` and `framework-handlers` analyse in the image again. `docs/BUILD.md`'s determinism recipe now deletes its outputs first, asserts they are non-empty, and normalises `tool.commit`, because a comparison over reused paths passes loudest exactly when the tool is broken |
+| R52 | kosi-bench | `everyGateReadableFieldSurvivesTheBaselineFile` compares field by field, so a **newly added** field left at its `null` default passes it vacuously: null in, null out, no evidence the parser ever heard of the field. R44's shape one level up — the guard against unenforced checks, itself unenforced for anything added after it was written | `theSampleLeavesNoFieldAtItsDefault` reflectively requires every persisted field of the sample to carry a distinctive value before the round-trip comparison can claim anything about it |
 
 ## Defects found and fixed during the P2 review
 

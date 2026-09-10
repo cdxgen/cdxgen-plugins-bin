@@ -226,6 +226,14 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 ## The JetBrains compiler metadata is no longer used: P1 moved the substrate
 ## from the shaded kotlin-compiler-embeddable to the unrelocated -for-ide
 ## artifacts, whose reflection surface the agent re-derives from our runs.
+##
+## The agent must run every MATRIX SLOT, not every fixture: a slot the agent
+## never runs is a code path the image never registers. P3 added `exported`
+## and the agent did not, so the image had no constructor for
+## `KtObjectDeclaration` and died on any fixture containing an `object` —
+## invisible in the phase's own native-vs-JVM proof, because a failed run
+## leaves the previous `--out` file on disk and `cmp` then compares a report
+## with itself (R53).
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
@@ -240,6 +248,10 @@ native-metadata:
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
 	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-resolved \
 	    -jar $(fat_jar) analyze --backend resolved --dir $$f --out /dev/null; \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-exported \
+	    -jar $(fat_jar) analyze --backend resolved --roots exported --include-stdlib \
+	    --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 

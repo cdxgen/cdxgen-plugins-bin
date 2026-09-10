@@ -413,6 +413,23 @@
         {
           "name": "<init>",
           "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinAnnotationEntryStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtAnnotationEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
             "org.jetbrains.kotlin.psi.stubs.KotlinBackingFieldStub"
           ]
         }
@@ -520,6 +537,23 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtNameReferenceExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinObjectStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtObjectDeclaration"
     },
     {
       "methods": [
@@ -689,6 +723,23 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtStringTemplateExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeCallEntry"
     },
     {
@@ -787,6 +838,23 @@
         {
           "name": "<init>",
           "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderWithTextStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
             "org.jetbrains.kotlin.psi.stubs.KotlinPropertyStub"
           ]
         }
@@ -826,6 +894,23 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtUserType"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinValueArgumentStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtValueArgument"
     },
     {
       "methods": [
@@ -990,7 +1075,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry"
+      "type": "org.jetbrains.kotlin.psi.KtOperationReferenceExpression"
     },
     {
       "methods": [
@@ -1001,7 +1086,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtOperationReferenceExpression"
+      "type": "org.jetbrains.kotlin.psi.KtPrefixExpression"
     },
     {
       "methods": [
@@ -1046,28 +1131,6 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtStringTemplateExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtValueArgument"
     },
     {
       "methods": [
@@ -1745,6 +1808,9 @@
       "type": "java.lang.Void"
     },
     {
+      "type": "java.lang.annotation.Annotation"
+    },
+    {
       "type": "java.util.Collection"
     },
     {
@@ -2027,9 +2093,6 @@
       "type": "org.jetbrains.kotlin.psi.KtAnnotation"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtAnnotationEntry"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtAnnotationEntry[]"
     },
     {
@@ -2237,9 +2300,6 @@
       "type": "org.jetbrains.kotlin.psi.KtNullableType[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtObjectDeclaration"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtObjectDeclaration[]"
     },
     {
@@ -2259,9 +2319,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtPostfixExpression"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtPrefixExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtPrimaryConstructor[]"

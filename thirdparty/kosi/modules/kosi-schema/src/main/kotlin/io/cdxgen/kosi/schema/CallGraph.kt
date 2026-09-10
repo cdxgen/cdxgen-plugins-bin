@@ -20,6 +20,22 @@ data class CallGraphNode(
     val external: Boolean,
     val synthetic: Boolean,
     val suspend: Boolean,
+    /**
+     * Declared visibility (`public`, `protected`, `internal`, `private`,
+     * `package-private`, `local`); `unknown` for external nodes, whose
+     * declarations kosi has not analysed. `--roots exported` roots exactly
+     * the local nodes whose visibility is `public` or `protected`, so the
+     * field a gate reads is on the artifact the gate reads.
+     */
+    val visibility: String,
+    /**
+     * Declared visibility of the enclosing class; null for ownerless
+     * (top-level) functions and external nodes. A public member of an
+     * internal class is not public API, and `--roots exported` gates on
+     * this — the field is ON the node so every consumer applies the same
+     * definition instead of re-deriving one.
+     */
+    val ownerVisibility: String?,
     val receiver: String?,
     val position: Position?,
 ) {
@@ -40,6 +56,8 @@ data class CallGraphNode(
         w.str("receiver", receiver)
         w.bool("stdlib", stdlib)
         w.bool("suspend", suspend)
+        w.str("visibility", visibility)
+        w.str("ownerVisibility", ownerVisibility)
         w.bool("synthetic", synthetic)
         w.endObject()
     }

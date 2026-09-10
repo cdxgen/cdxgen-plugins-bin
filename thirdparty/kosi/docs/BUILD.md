@@ -67,10 +67,24 @@ cd thirdparty/kosi
 make bootstrap-darwin   # verifies the pinned GraalVM is installed
 make native             # fat jar + native image + sha256 sidecar
 ./build/kosi-darwin-arm64 version
+rm -f /tmp/a.json /tmp/b.json   # a failed run leaves the OLD file in place
+set -e                          # ...and `cmp` would then compare it with itself
 ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
 ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+test -s /tmp/a.json && test -s /tmp/b.json
 cmp /tmp/a.json /tmp/b.json
 ```
+
+The two lines before the runs are not decoration. `analyze` writes nothing
+when it fails, so a comparison over reused paths passes loudest exactly when
+the tool is broken — an empty-vs-empty match, or last run's report against
+itself. R53 reached the P3 gate that way: the image could not analyse any
+fixture containing an `object`, and the phase's own native-vs-JVM sweep
+reported every fixture identical.
+
+When comparing a native report against a JVM one, normalise `tool.commit`:
+the image bakes in the commit it was built from, the JVM run reads the one
+its jar was built from, and the two differ whenever either is stale.
 
 ## 2. Handled pitfalls (05-BUILD-DIST.md §1 table, with outcomes)
 

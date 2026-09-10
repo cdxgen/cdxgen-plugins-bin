@@ -20,9 +20,9 @@ class DefaultsSyncTest {
         for (slot in Matrix.defaultMatrix()) {
             val slotOptions = slot.options()
             assertEquals(
-                defaults.copy(dataflow = slotOptions.dataflow, backend = slotOptions.backend),
+                defaults.copy(dataflow = slotOptions.dataflow, backend = slotOptions.backend, roots = slotOptions.roots),
                 slotOptions,
-                "slot ${slot.label} overrides more than its own dataflow/backend",
+                "slot ${slot.label} overrides more than its own dataflow/backend/roots",
             )
         }
     }
@@ -39,6 +39,21 @@ class DefaultsSyncTest {
     fun resolvedSlotRunsTheResolvedBackend() {
         val resolved = Matrix.defaultMatrix().single { it.label == "resolved" }
         assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, resolved.backend)
+    }
+
+    @Test
+    fun exportedSlotRootsAtThePublicApi() {
+        // P3: a library yields nothing from `main` alone (golem's lesson);
+        // the exported slot is where the edge gates get a real denominator.
+        val exported = Matrix.defaultMatrix().single { it.label == "exported" }
+        assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, exported.backend)
+        assertEquals(listOf(io.cdxgen.kosi.schema.RootScope.EXPORTED.id), exported.options().roots)
+    }
+
+    @Test
+    fun theExportedSlotIsInTheMatrixForEveryCase() {
+        val labels = Matrix.defaultMatrix().map { it.label }.toSet()
+        assertTrue("exported" in labels, "the exported slot must run for every corpus case (P3)")
     }
 
     @Test

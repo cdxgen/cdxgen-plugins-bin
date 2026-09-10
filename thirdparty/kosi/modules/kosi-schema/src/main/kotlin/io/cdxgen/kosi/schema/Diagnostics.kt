@@ -56,6 +56,15 @@ object DiagnosticCodes {
 
     /** A construct the P2 lowering could not perform; the message names it. */
     const val LOWERING_FAILED = "lowering-failed"
+
+    /** P3 call graph: an `auto` mode fell back down the chain (vta -> rta -> sealed). */
+    const val CALLGRAPH_TIMEOUT = "callgraph-timeout"
+
+    /** P3 call graph: call sites that resolved to no callee and therefore emit no edge. */
+    const val CALLGRAPH_UNRESOLVED_CALLS = "callgraph-unresolved-calls"
+
+    /** P3 call graph: a declared root scope matched no function. */
+    const val CALLGRAPH_ROOT_NOT_FOUND = "callgraph-root-not-found"
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
@@ -72,6 +81,9 @@ object DiagnosticCodes {
         RESOLUTION_ERRORS,
         SYMBOL_RESOLUTION_FAILED,
         LOWERING_FAILED,
+        CALLGRAPH_TIMEOUT,
+        CALLGRAPH_UNRESOLVED_CALLS,
+        CALLGRAPH_ROOT_NOT_FOUND,
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,

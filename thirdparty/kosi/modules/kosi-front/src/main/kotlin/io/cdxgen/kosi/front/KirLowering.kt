@@ -1,6 +1,7 @@
 package io.cdxgen.kosi.front
 
 import io.cdxgen.kosi.kir.AccessPath
+import java.util.TreeSet
 import io.cdxgen.kosi.kir.CallKind
 import io.cdxgen.kosi.kir.KirBlock
 import io.cdxgen.kosi.kir.KirBody
@@ -37,7 +38,9 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.symbol
 import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtBreakExpression
@@ -100,6 +103,15 @@ object KirLowering {
         val failures: Map<String, Int>,
         /** how many functions the lowering attempted — the denominator for the failure rate. */
         val functionCount: Int,
+        /**
+         * Symbol operations that threw while collecting the dispatch facts
+         * (visibility, modality, overrides, supertypes). NOT a lowering
+         * failure — the function still lowers — but the graph must know the
+         * facts are missing, because missing facts narrow dispatch toward
+         * MORE candidates, and a silent shortfall would quietly narrow it
+         * toward fewer. Surfaced through `symbol-resolution-failed`.
+         */
+        val symbolFactFailures: Int = 0,
     )
 
     /** What the analyze-scoped resolver hands the lowering per call site. */
@@ -110,6 +122,50 @@ object KirLowering {
         val isOperator: Boolean,
     )
 
+    /**
+     * The dispatch facts one declaration carries into the graph: declared
+     * visibility, modality/keyword modifiers, resolved canonical names of the
+     * symbols it overrides, RESOLVED annotation FQNs (framework roots are
+     * type-resolved, never name-matched), the JVM descriptor for overload
+     * identity, and the enclosing class's supertypes, kind flags and
+     * annotations. `factsAvailable = false` when the symbol could not be
+     * read; consumers then treat the function as open and non-exported
+     * rather than guessing.
+     */
+    data class Facts(
+        val visibility: String,
+        val modifiers: Set<String>,
+        val overrides: List<String>,
+        val annotations: List<String>,
+        val supertypes: List<String>,
+        val ownerFlags: Set<String>,
+        val ownerAnnotations: List<String>,
+        val ownerVisibility: String?,
+        val jvmDescriptor: String?,
+        val factsAvailable: Boolean,
+    )
+
+    private val NO_FACTS = Facts(
+        visibility = "unknown",
+        modifiers = emptySet(),
+        overrides = emptyList(),
+        annotations = emptyList(),
+        supertypes = emptyList(),
+        ownerFlags = emptySet(),
+        ownerAnnotations = emptyList(),
+        ownerVisibility = null,
+        jvmDescriptor = null,
+        factsAvailable = false,
+    )
+
+    /** Supertypes, kind flags and resolved annotations of one enclosing class. */
+    data class OwnerFacts(
+        val supertypes: List<String>,
+        val flags: Set<String>,
+        val annotations: List<String>,
+        val visibility: String,
+    )
+
     fun lower(env: AnalysisEnvironment, module: org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule): Result {
         val files = env.session.modulesWithFiles.values
             .flatten()
@@ -118,6 +174,7 @@ object KirLowering {
         val functions = mutableListOf<KirFunction>()
         val failures = LinkedHashMap<String, Int>()
         var functionCount = 0
+        var symbolFactFailures = 0
         analyze(module) {
             // resolveCall and the JVM-descriptor mapping are Analysis API
             // operations: they resolve only lexically inside this block, so
@@ -148,18 +205,176 @@ object KirLowering {
             } catch (_: Exception) {
                 null
             }
+
+            // The dispatch facts for one declaration, computed once per run
+            // through the same session (the enclosing class's facts are
+            // cached — every member of one class reads them).
+            val classFactsCache = HashMap<org.jetbrains.kotlin.psi.KtClassOrObject, OwnerFacts>()
+            fun ownerFacts(owner: org.jetbrains.kotlin.psi.KtClassOrObject): OwnerFacts =
+                classFactsCache.getOrPut(owner) {
+                    val symbol = owner.symbol
+                    val classSymbol = symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+                    val supertypes = classSymbol
+                        ?.superTypes
+                        ?.mapNotNull { (it as? org.jetbrains.kotlin.analysis.api.types.KaClassType)?.classId?.asSingleFqName()?.asString() }
+                        ?.filter { it != "kotlin.Any" }
+                        ?.distinct()
+                        ?: emptyList()
+                    val flags = buildSet {
+                        when (classSymbol?.classKind) {
+                            org.jetbrains.kotlin.analysis.api.symbols.KaClassKind.INTERFACE ->
+                                add(
+                                    // `fun interface` is the FUN keyword on an interface.
+                                    if (owner is org.jetbrains.kotlin.psi.KtClass &&
+                                        owner.isInterface() &&
+                                        owner.hasModifier(org.jetbrains.kotlin.lexer.KtTokens.FUN_KEYWORD)
+                                    ) {
+                                        "fun-interface"
+                                    } else {
+                                        "interface"
+                                    },
+                                )
+
+                            org.jetbrains.kotlin.analysis.api.symbols.KaClassKind.ENUM_CLASS -> add("enum")
+                            org.jetbrains.kotlin.analysis.api.symbols.KaClassKind.OBJECT -> add("object")
+                            org.jetbrains.kotlin.analysis.api.symbols.KaClassKind.COMPANION_OBJECT -> add("companion")
+                            else -> {}
+                        }
+                        when (classSymbol?.modality) {
+                            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.FINAL -> add("final")
+                            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.OPEN -> add("open")
+                            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.SEALED -> add("sealed")
+                            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT -> add("abstract")
+                            else -> {}
+                        }
+                    }
+                    val annotations = (symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
+                        ?.annotations
+                        ?.mapNotNull { it.classId?.asSingleFqName()?.asString() }
+                        ?.distinct()
+                        ?: emptyList()
+                    val visibility = symbol?.let { visibilityName(it) } ?: "unknown"
+                    OwnerFacts(supertypes, flags, annotations, visibility)
+                }
+
+            fun factsFor(psi: org.jetbrains.kotlin.psi.KtDeclaration): Facts = try {
+                val symbol = psi.symbol
+                val callable = symbol as? KaCallableSymbol
+                val visibility = symbol?.let { visibilityName(it) } ?: "unknown"
+                val overrides = callable
+                    ?.allOverriddenSymbols
+                    ?.mapNotNull { it.callableId?.asSingleFqName()?.asString() }
+                    ?.toList()
+                    ?.distinct()
+                    ?: emptyList()
+                val annotations = (symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
+                    ?.annotations
+                    ?.mapNotNull { it.classId?.asSingleFqName()?.asString() }
+                    ?.distinct()
+                    // An unresolved annotation keeps its PSI short name, which
+                    // cannot match a framework FQN pattern — an annotation
+                    // kosi could not resolve is never treated as resolved.
+                    ?.ifEmpty {
+                        psi.annotationEntries.mapNotNull { it.shortName?.asString() }
+                    }
+                    ?: psi.annotationEntries.mapNotNull { it.shortName?.asString() }
+                val owner = generateSequence(psi.parent) { it.parent }
+                    .firstOrNull { it is org.jetbrains.kotlin.psi.KtClassOrObject }
+                    as? org.jetbrains.kotlin.psi.KtClassOrObject
+                val ownerFacts = owner?.let { ownerFacts(it) }
+                    ?: OwnerFacts(emptyList(), emptySet(), emptyList(), "unknown")
+                val descriptor = when (callable) {
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol ->
+                        JvmSignatures.voidMethodDescriptor(
+                            callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
+                        )
+
+                    is KaFunctionSymbol -> {
+                        val params = buildList {
+                            callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                            callable.valueParameters.forEach { p ->
+                                add(p.returnType.mapToJvmType(TypeMappingMode.DEFAULT))
+                            }
+                        }
+                        JvmSignatures.methodDescriptor(
+                            callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
+                            params,
+                        )
+                    }
+
+                    else -> null
+                }
+                Facts(
+                    visibility = visibility,
+                    modifiers = (psiModifiers(psi) + listOfNotNull(modalityModifier(callable))).toCollection(TreeSet()),
+                    overrides = overrides,
+                    annotations = annotations,
+                    supertypes = ownerFacts.supertypes,
+                    ownerFlags = ownerFacts.flags,
+                    ownerAnnotations = ownerFacts.annotations,
+                    ownerVisibility = ownerFacts.visibility,
+                    jvmDescriptor = descriptor,
+                    factsAvailable = true,
+                )
+            } catch (_: Exception) {
+                symbolFactFailures++
+                NO_FACTS
+            }
+
             for (file in files) {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
-                    lowerFunction(functionLike, failures, ::resolve)?.let { functions.add(it) }
+                    lowerFunction(functionLike, failures, ::resolve, ::factsFor)?.let { functions.add(it) }
                 }
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
                 }
             }
         }
-        return Result(functions, failures, functionCount)
+        return Result(functions, failures, functionCount, symbolFactFailures)
     }
+
+    private fun modalityModifier(symbol: KaCallableSymbol?): String? = when (symbol?.modality) {
+        org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.FINAL -> "final"
+        org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.OPEN -> "open"
+        org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT -> "abstract"
+        org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.SEALED -> "sealed"
+        else -> null
+    }
+
+    private val MODIFIER_TOKENS = linkedMapOf(
+        org.jetbrains.kotlin.lexer.KtTokens.INLINE_KEYWORD to "inline",
+        org.jetbrains.kotlin.lexer.KtTokens.SUSPEND_KEYWORD to "suspend",
+        org.jetbrains.kotlin.lexer.KtTokens.OPERATOR_KEYWORD to "operator",
+        org.jetbrains.kotlin.lexer.KtTokens.INFIX_KEYWORD to "infix",
+        org.jetbrains.kotlin.lexer.KtTokens.EXPECT_KEYWORD to "expect",
+        org.jetbrains.kotlin.lexer.KtTokens.ACTUAL_KEYWORD to "actual",
+        org.jetbrains.kotlin.lexer.KtTokens.EXTERNAL_KEYWORD to "external",
+        org.jetbrains.kotlin.lexer.KtTokens.ABSTRACT_KEYWORD to "abstract",
+        org.jetbrains.kotlin.lexer.KtTokens.OPEN_KEYWORD to "open",
+        org.jetbrains.kotlin.lexer.KtTokens.OVERRIDE_KEYWORD to "override",
+        org.jetbrains.kotlin.lexer.KtTokens.CONST_KEYWORD to "const",
+        org.jetbrains.kotlin.lexer.KtTokens.TAILREC_KEYWORD to "tailrec",
+        org.jetbrains.kotlin.lexer.KtTokens.INNER_KEYWORD to "inner",
+        org.jetbrains.kotlin.lexer.KtTokens.LATEINIT_KEYWORD to "lateinit",
+    )
+
+    private fun psiModifiers(element: org.jetbrains.kotlin.psi.KtModifierListOwner): List<String> =
+        MODIFIER_TOKENS.mapNotNull { (token, name) -> if (element.hasModifier(token)) name else null }
+
+    private fun visibilityName(symbol: org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol): String =
+        when (symbol.visibility) {
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.PUBLIC -> "public"
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.PROTECTED -> "protected"
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.INTERNAL -> "internal"
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.PRIVATE -> "private"
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.PACKAGE_PROTECTED,
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.PACKAGE_PRIVATE,
+            -> "package-private"
+
+            org.jetbrains.kotlin.analysis.api.symbols.KaSymbolVisibility.LOCAL -> "local"
+            else -> "unknown"
+        }
 
     // ---- discovery ---------------------------------------------------------------
 
@@ -243,6 +458,7 @@ object KirLowering {
         psi: org.jetbrains.kotlin.psi.KtDeclaration,
         failures: MutableMap<String, Int>,
         resolve: (KtCallExpression) -> CallInfo?,
+        factsFor: (org.jetbrains.kotlin.psi.KtDeclaration) -> Facts,
     ): KirFunction? {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
@@ -254,7 +470,8 @@ object KirLowering {
         val chain = containerChain(psi)
         val canonical = listOf(pkg, chain, name).filter { it.isNotEmpty() }.joinToString(".")
 
-        val lower = BodyLower(failures, resolve)
+        val facts = factsFor(psi)
+        val lower = BodyLower(failures, resolve, psi)
         val bodyPsi: KtExpression? = when (psi) {
             is KtNamedFunction -> psi.bodyExpression
             is KtPropertyAccessor -> psi.bodyExpression
@@ -281,21 +498,25 @@ object KirLowering {
         }
         return KirFunction(
             canonicalName = canonical,
-            jvmDescriptor = null,
+            jvmDescriptor = facts.jvmDescriptor,
             purl = "",
             file = psi.containingFile?.virtualFile?.path ?: "<memory>",
             line = psi.line(),
             column = psi.column(),
             params = signatureParams(psi),
             returnType = null,
-            modifiers = emptySet(),
-            visibility = "public",
+            modifiers = facts.modifiers,
+            visibility = facts.visibility,
             enclosingClass = chain.ifEmpty { null },
-            overrides = emptyList(),
+            overrides = facts.overrides,
             overriddenBy = emptyList(),
-            annotations = psi.annotationEntries.mapNotNull { it.shortName?.asString() },
+            annotations = facts.annotations,
             syntheticCause = null,
             body = body,
+            supertypes = facts.supertypes,
+            ownerFlags = facts.ownerFlags,
+            ownerAnnotations = facts.ownerAnnotations,
+            ownerVisibility = facts.ownerVisibility,
         )
     }
 
@@ -342,6 +563,8 @@ object KirLowering {
     class BodyLower(
         private val failures: MutableMap<String, Int>,
         private val resolveCallInfo: (KtCallExpression) -> CallInfo?,
+        /** The lowered function's PSI: the fallback position for synthesized calls. */
+        private val functionPsi: org.jetbrains.kotlin.psi.KtDeclaration,
     ) {
 
         enum class Pos { STATEMENT, NESTED }
@@ -468,6 +691,7 @@ object KirLowering {
                             KirCallee("kotlin.properties.getValue", null, CallKind.EXTENSION),
                             receiver,
                             emptyList(),
+                            line = psi.line(),
                         ),
                     )
                     emit(KirStore(register, result))
@@ -499,6 +723,7 @@ object KirLowering {
                         KirCallee("kotlin.component${index + 1}", null, CallKind.EXTENSION),
                         value,
                         emptyList(),
+                        line = psi.line(),
                     ),
                 )
                 entry.name?.let { emit(KirStore("v$it", component)) }
@@ -515,6 +740,7 @@ object KirLowering {
                     KirCallee("kotlin.collections.iterator", null, CallKind.EXTENSION),
                     iterated,
                     emptyList(),
+                    line = psi.line(),
                 ),
             )
             val headerId = newId()
@@ -530,6 +756,7 @@ object KirLowering {
                     KirCallee("kotlin.collections.hasNext", null, CallKind.EXTENSION),
                     iterator,
                     emptyList(),
+                    line = psi.line(),
                 ),
             )
             emit(KirBranch(hasNext, bodyId, exitId))
@@ -541,6 +768,7 @@ object KirLowering {
                     KirCallee("kotlin.collections.next", null, CallKind.EXTENSION),
                     iterator,
                     emptyList(),
+                    line = psi.line(),
                 ),
             )
             val loopParameter = psi.loopParameter
@@ -555,6 +783,7 @@ object KirLowering {
                             KirCallee("kotlin.component${index + 1}", null, CallKind.EXTENSION),
                             next,
                             emptyList(),
+                            line = psi.line(),
                         ),
                     )
                     entry.name?.let { emit(KirStore("v$it", component)) }
@@ -676,6 +905,7 @@ object KirLowering {
                                             KirCallee("kotlin.equals", null, CallKind.STATIC),
                                             null,
                                             listOf(subject, expected),
+                                            line = psi.line(),
                                         ),
                                     )
                                     call
@@ -703,6 +933,7 @@ object KirLowering {
                                         KirCallee("kotlin.collections.contains", null, CallKind.EXTENSION),
                                         range,
                                         listOfNotNull(subject),
+                                        line = psi.line(),
                                     ),
                                 )
                                 call
@@ -878,7 +1109,7 @@ object KirLowering {
                 }
             }
             val reg = t()
-            emit(KirCall(reg, KirCallee("kotlin.$name", null, CallKind.OPERATOR), base, emptyList()))
+            emit(KirCall(reg, KirCallee("kotlin.$name", null, CallKind.OPERATOR), base, emptyList(), line = psi.line()))
             return reg
         }
 
@@ -1078,7 +1309,7 @@ object KirLowering {
             }
             fun call(left: String): String {
                 val reg = t()
-                emit(KirCall(reg, KirCallee("kotlin.$opName", null, CallKind.OPERATOR), left, listOf(value)))
+                emit(KirCall(reg, KirCallee("kotlin.$opName", null, CallKind.OPERATOR), left, listOf(value), line = psi.line()))
                 return reg
             }
             when (val target = psi.left) {
@@ -1139,7 +1370,7 @@ object KirLowering {
                 return reg
             }
             val isNull = t()
-            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(left)))
+            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(left), line = psi.line()))
             val nullId = newId()
             val valueId = newId()
             val joinId = newId()
@@ -1157,7 +1388,7 @@ object KirLowering {
         /** `!!` -> checked cast plus a throw branch on the null path (§4). */
         private fun notNull(psi: KtBinaryExpression): String {
             val left = psi.left?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
-            return notNullOf(left)
+            return notNullOf(left, psi.line())
         }
 
         /** `x!!` (checked cast) and `x++`/`x--` (inc/dec). The post-form's
@@ -1166,11 +1397,11 @@ object KirLowering {
         private fun postfix(psi: org.jetbrains.kotlin.psi.KtPostfixExpression): String {
             val left = psi.baseExpression?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
             when (psi.operationToken) {
-                KtTokens.EXCLEXCL -> return notNullOf(left)
+                KtTokens.EXCLEXCL -> return notNullOf(left, psi.line())
                 KtTokens.PLUSPLUS, KtTokens.MINUSMINUS -> {
                     val name = if (psi.operationToken == KtTokens.PLUSPLUS) "inc" else "dec"
                     val reg = t()
-                    emit(KirCall(reg, KirCallee("kotlin.$name", null, CallKind.OPERATOR), left, emptyList()))
+                    emit(KirCall(reg, KirCallee("kotlin.$name", null, CallKind.OPERATOR), left, emptyList(), line = psi.line()))
                     return reg
                 }
             }
@@ -1178,9 +1409,9 @@ object KirLowering {
             return left
         }
 
-        private fun notNullOf(left: String): String {
+        private fun notNullOf(left: String, line: Int): String {
             val isNull = t()
-            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(left)))
+            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(left), line = line))
             val throwId = newId()
             val okId = newId()
             emit(KirBranch(isNull, throwId, okId))
@@ -1217,7 +1448,9 @@ object KirLowering {
             if (token == KtTokens.IN_KEYWORD || token == KtTokens.NOT_IN) {
                 // `x in xs` is xs.contains(x): the range is the receiver.
                 val reg = t()
-                emit(KirCall(reg, KirCallee("kotlin.collections.contains", null, CallKind.OPERATOR), right, listOf(left)))
+                emit(
+                    KirCall(reg, KirCallee("kotlin.collections.contains", null, CallKind.OPERATOR), right, listOf(left), line = psi.line()),
+                )
                 return reg
             }
             val reg = t()
@@ -1310,7 +1543,7 @@ object KirLowering {
         private fun safeCall(psi: KtSafeQualifiedExpression): String {
             val receiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
             val isNull = t()
-            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(receiver)))
+            emit(KirCall(isNull, KirCallee("kotlin.isNull", null, CallKind.STATIC), null, listOf(receiver), line = psi.line()))
             val nullId = newId()
             val valueId = newId()
             val joinId = newId()
@@ -1379,7 +1612,7 @@ object KirLowering {
             if (symbol == null) {
                 val name = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
                 val reg = t()
-                emit(KirDynamicCall(reg, name, receiver, argRegs))
+                emit(KirDynamicCall(reg, name, receiver, argRegs, line = psi.line()))
                 return reg
             }
             val kind: CallKind
@@ -1403,7 +1636,7 @@ object KirLowering {
                 }
             }
             val reg = t()
-            emit(KirCall(reg, KirCallee(fqn, info.descriptor, kind), receiver, argRegs))
+            emit(KirCall(reg, KirCallee(fqn, info.descriptor, kind), receiver, argRegs, line = psi.line()))
             if (info.isSuspend) emit(KirSuspendPoint(reg))
             return reg
         }
@@ -1426,6 +1659,7 @@ object KirLowering {
                     KirCallee("kotlin.$name", null, CallKind.EXTENSION),
                     receiver,
                     emptyList(),
+                    line = psi.line(),
                 ),
             )
             val paramReg = "v${lambdaPsi.valueParameters.firstOrNull()?.name ?: "it"}"
@@ -1447,6 +1681,7 @@ object KirLowering {
                         KirCallee("java.io.Closeable.close", null, CallKind.EXTENSION),
                         receiver,
                         emptyList(),
+                        line = psi.line(),
                     ),
                 )
                 bodyResult

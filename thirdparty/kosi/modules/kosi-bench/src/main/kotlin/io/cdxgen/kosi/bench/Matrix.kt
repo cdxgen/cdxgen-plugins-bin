@@ -19,14 +19,20 @@ data class MatrixSlot(
     val label: String,
     val dataflow: DataflowMode,
     val backend: Backend,
+    val roots: List<String>? = null,
 ) {
-    /** Slot options derived from the CLI defaults, overriding only `dataflow`. */
-    fun options(): AnalyzeOptions = AnalyzeOptions(dataflow = dataflow, backend = backend)
+    /** Slot options derived from the CLI defaults, overriding only what the label names. */
+    fun options(): AnalyzeOptions = AnalyzeOptions(
+        dataflow = dataflow,
+        backend = backend,
+        roots = roots ?: AnalyzeOptions().roots,
+    )
 
     companion object {
         const val SECURITY_LABEL = "security"
         const val ALL_LABEL = "all"
         const val RESOLVED_LABEL = "resolved"
+        const val EXPORTED_LABEL = "exported"
     }
 }
 
@@ -36,8 +42,12 @@ object Matrix {
      * Since P1 the matrix runs every case three ways: the two syntax slots
      * (dataflow modes, as in P0) and the resolved backend, so the resolved
      * tier's expectations are ratcheted per fixture exactly like the syntax
-     * tier's. The slot options still derive from [AnalyzeOptions] defaults
-     * only, overriding what the label names.
+     * tier's. P3 adds the `exported` slot: the resolved backend rooted at the
+     * public API (`--roots exported`), because reachability from `main` alone
+     * yields nothing on a library — golem's lesson — and the P3 edge gates
+     * need a real witness denominator on every fixture. The slot options
+     * still derive from [AnalyzeOptions] defaults only, overriding what the
+     * label names.
      */
     fun defaultMatrix(): List<MatrixSlot> = listOf(
         MatrixSlot(
@@ -54,6 +64,12 @@ object Matrix {
             label = MatrixSlot.RESOLVED_LABEL,
             dataflow = DataflowMode.SECURITY,
             backend = Backend.RESOLVED,
+        ),
+        MatrixSlot(
+            label = MatrixSlot.EXPORTED_LABEL,
+            dataflow = DataflowMode.SECURITY,
+            backend = Backend.RESOLVED,
+            roots = listOf(io.cdxgen.kosi.schema.RootScope.EXPORTED.id),
         ),
     )
 }

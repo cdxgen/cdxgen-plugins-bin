@@ -50,6 +50,7 @@ dependencies {
     implementation(project(":kosi-schema"))
     implementation(project(":kosi-project"))
     implementation(project(":kosi-kir"))
+    implementation(project(":kosi-graph"))
     implementation(libs.kotlin.stdlib)
 
     // Analysis API + unrelocated compiler. Non-transitive on purpose: the

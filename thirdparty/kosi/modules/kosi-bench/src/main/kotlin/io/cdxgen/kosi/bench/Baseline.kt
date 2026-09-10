@@ -284,6 +284,16 @@ object Promotion {
         // exactly what a ratchet is for.
         checks.add(loweringCheck(current))
 
+        // 12-14. the P3 call-graph gates: edge connectivity 1.000 with a REAL
+        // denominator (witness-confirmed reached nodes), `--roots exported`
+        // reaching >= 95% of a library's public API with both counts
+        // published, and node/edge breakdowns that are recorded AND add up.
+        // Each is evaluated over the bench result rows exactly as a baseline
+        // comparison would feed them, never from in-memory report objects.
+        checks.add(edgeConnectivityCheck(current))
+        checks.add(exportedReachCheck(current))
+        checks.add(graphBreakdownCheck(current))
+
         val verdict = when {
             checks.all { it.state == State.PASS } -> "PROMOTE"
             checks.any { it.state == State.FAIL } -> "HOLD (regressions)"
@@ -351,6 +361,9 @@ object Promotion {
         return Check(name, State.PASS, "fixtures clean over $fixtureFunctions functions; $repoDetail")
     }
 
+    /** The P3 gate's bar for `--roots exported` public-API reach. */
+    const val EXPORTED_REACH_TARGET = 0.95
+
     private const val RESOLVED_RATIO_TOLERANCE = 0.01
 
     private fun resolvedRatioCheck(
@@ -412,5 +425,139 @@ object Promotion {
                 "baseline value: ${belowTarget.joinToString(", ") { it.slug }}"
         }
         return Check(name, State.PASS, detail)
+    }
+
+    /** Rows with a published call graph (the resolved tiers), TOTAL excluded. */
+    private fun graphRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
+        current.results.filter { it.slug != "TOTAL" && it.tier != "all" && it.graphNodes != null }
+
+    /**
+     * Edge connectivity: every reached view node must be confirmed by a walk
+     * over the EMITTED edges — a path a view filter cut must survive as a
+     * collapsed edge, and this check is where a severed one fails.
+     *
+     * The denominator is the EDGE-TRAVERSED subset (distance > 0), not every
+     * reached node. A root is reached at distance 0 by definition, so a run
+     * whose reached set is entirely roots confirms 1.000 having followed no
+     * edge at all — which is exactly what this gate reported before
+     * `reachable-depth` gave the corpus a node an edge has to reach. A run
+     * with no such node is NOT_EVALUATED, never a pass.
+     */
+    private fun edgeConnectivityCheck(current: BenchRunner.BenchResult): Check {
+        val name = "edge-connectivity"
+        val rows = graphRows(current)
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no slot published a call graph (run the resolved tier)")
+        }
+        val totalReached = rows.sumOf { it.reachedNodes ?: 0 }
+        val viaEdge = rows.sumOf { it.reachedViaEdge ?: 0 }
+        val confirmedViaEdge = rows.sumOf { it.connectedViaEdge ?: 0 }
+        if (viaEdge == 0) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "0 of $totalReached reached node(s) across ${rows.size} graph slot(s) sit at distance > 0: " +
+                    "every reached node is a root, so no edge was traversed and there is nothing to confirm",
+            )
+        }
+        if (confirmedViaEdge < viaEdge) {
+            val severed = rows
+                .filter { (it.connectedViaEdge ?: 0) < (it.reachedViaEdge ?: 0) }
+                .joinToString("; ") { "${it.slug}/${it.slot} ${it.connectedViaEdge} of ${it.reachedViaEdge}" }
+            return Check(name, State.FAIL, "severed path(s): $severed")
+        }
+        return Check(
+            name,
+            State.PASS,
+            "1.000 over $viaEdge edge-reached node(s) (of $totalReached reached) " +
+                "across ${rows.size} graph slot(s)",
+        )
+    }
+
+    /**
+     * The exported-reach gate: on the exported slots, the fraction of public
+     * API callables that became roots and are reached, with BOTH counts in
+     * the detail line. A shortfall names where resolution lost visibility
+     * facts — the 95% bar exists so `--roots exported` cannot silently root
+     * nothing on a library (golem: with only `main`, a library yields no
+     * graph at all).
+     *
+     * The denominator is `declarations`, not the graph's own public nodes.
+     * Counting nodes made this a tautology — the exported selector picks
+     * exactly the public local nodes and a root is reached at distance 0, so
+     * it read 1.0000 on every fixture and all five repos and could not fail.
+     * Against the front end's independent inventory, a public callable that
+     * never became a node costs a point, which is the failure the gate is for.
+     */
+    private fun exportedReachCheck(current: BenchRunner.BenchResult): Check {
+        val name = "exported-reach"
+        val rows = current.results.filter {
+            it.slug != "TOTAL" && it.slot == MatrixSlot.EXPORTED_LABEL && it.publicCallables != null
+        }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no exported slot published a call graph")
+        }
+        val totalPublic = rows.sumOf { it.publicCallables ?: 0 }
+        val totalReached = rows.sumOf { it.reachedPublicCallables ?: 0 }
+        if (totalPublic == 0) {
+            return Check(name, State.NOT_EVALUATED, "exported slots name 0 public callables; visibility facts missing")
+        }
+        val fraction = totalReached.toDouble() / totalPublic
+        if (fraction < EXPORTED_REACH_TARGET) {
+            val worst = rows.sortedBy { r ->
+                (r.reachedPublicCallables ?: 0).toDouble() / (r.publicCallables ?: 1)
+            }.take(5).joinToString("; ") { r ->
+                "${r.slug} ${(r.reachedPublicCallables ?: 0)} of ${r.publicCallables}"
+            }
+            return Check(
+                name,
+                State.FAIL,
+                String.format("%.4f < %.2f: %s", fraction, EXPORTED_REACH_TARGET, worst),
+            )
+        }
+        return Check(
+            name,
+            State.PASS,
+            String.format("%.4f (%d of %d public callables)", fraction, totalReached, totalPublic),
+        )
+    }
+
+    /**
+     * The breakdown gate: an aggregate count is not a result (golem's 6178
+     * nodes were 99.7% stdlib). Every graph slot must publish the four-way
+     * node and edge split, and the parts must SUM to the totals — a
+     * breakdown that does not add up is a breakdown nobody computed.
+     */
+    private fun graphBreakdownCheck(current: BenchRunner.BenchResult): Check {
+        val name = "graph-breakdown"
+        val rows = graphRows(current)
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no slot published a call graph (run the resolved tier)")
+        }
+        val mismatched = mutableListOf<String>()
+        for (row in rows) {
+            val nodeSum = (row.graphLocalNodes ?: 0) + (row.graphStdlibNodes ?: 0) +
+                (row.graphDependencyNodes ?: 0) + (row.graphSyntheticNodes ?: 0)
+            val edgeSum = (row.graphLocalEdges ?: 0) + (row.graphStdlibEdges ?: 0) +
+                (row.graphDependencyEdges ?: 0) + (row.graphSyntheticEdges ?: 0)
+            if (nodeSum != row.graphNodes || edgeSum != row.graphEdges) {
+                mismatched.add("${row.slug}/${row.slot} nodes $nodeSum != ${row.graphNodes}, edges $edgeSum != ${row.graphEdges}")
+            }
+        }
+        if (mismatched.isNotEmpty()) {
+            return Check(name, State.FAIL, mismatched.joinToString("; "))
+        }
+        val totalNodes = rows.sumOf { it.graphNodes ?: 0 }
+        val totalEdges = rows.sumOf { it.graphEdges ?: 0 }
+        val local = rows.sumOf { it.graphLocalNodes ?: 0 }
+        val stdlib = rows.sumOf { it.graphStdlibNodes ?: 0 }
+        val dependency = rows.sumOf { it.graphDependencyNodes ?: 0 }
+        val synthetic = rows.sumOf { it.graphSyntheticNodes ?: 0 }
+        return Check(
+            name,
+            State.PASS,
+            "$totalNodes node(s) / $totalEdges edge(s) over ${rows.size} slot(s) " +
+                "split local=$local stdlib=$stdlib dependency=$dependency synthetic=$synthetic (nodes)",
+        )
     }
 }

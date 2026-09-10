@@ -109,8 +109,8 @@ data class Annotation(
                     "(register it in DiagnosticCodes when the engine starts emitting it)",
             )
         }
-        if (mode != null && mode != "security" && mode != "all") {
-            errors.add("mode must be security or all, got $mode")
+        if (mode != null && mode !in MODES) {
+            errors.add("mode must be one of $MODES, got $mode")
         }
         return errors
     }
@@ -118,6 +118,9 @@ data class Annotation(
     companion object {
         /** `usages[].usageKind` vocabulary (SyntaxAnalyzer emits exactly these). */
         val USAGE_KINDS = setOf("call", "operator", "reference")
+
+        /** The bench matrix slots an annotation may scope itself to. */
+        val MODES = setOf("security", "all", "resolved", "exported")
 
         /** `declarations[].kind` vocabulary. */
         val DECLARATION_KINDS = setOf(

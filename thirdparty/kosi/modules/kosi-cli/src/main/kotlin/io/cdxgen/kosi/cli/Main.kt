@@ -86,7 +86,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
-        "classpath", "classpath-file", "jdk-home",
+        "classpath", "classpath-file", "jdk-home", "reachable-symbols",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
         "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive",
@@ -113,13 +113,51 @@ object Main {
         val options = optionsFrom(parsed)
         val out = parsed.value("out")
         val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit)
-        val json = report.toJson(options.pretty)
-        if (out != null) {
-            val outPath = Path.of(out)
-            outPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
-            Files.writeString(outPath, json)
-        } else {
-            println(json)
+        val reachableSymbols = parsed.value("reachable-symbols")
+        when (val format = parsed.value("format", "json")) {
+            "json" -> {
+                val json = report.toJson(options.pretty)
+                if (out != null) {
+                    val outPath = Path.of(out)
+                    outPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+                    Files.writeString(outPath, json)
+                } else {
+                    println(json)
+                }
+            }
+
+            "graphml", "gexf" -> {
+                // The graph exporters need a graph; the syntax tier and
+                // --callgraph none produce none, and that is a usage error
+                // rather than an empty file a consumer would misread.
+                val graph = report.callGraph ?: throw UsageException(
+                    "--format $format needs a call graph: run the resolved backend without --callgraph none " +
+                        "(the syntax tier builds no graph)",
+                )
+                val rendered = when (format) {
+                    "graphml" -> io.cdxgen.kosi.export.GraphMl.write(graph, dir.fileName.toString())
+                    else -> io.cdxgen.kosi.export.Gexf.write(graph, dir.fileName.toString())
+                }
+                if (out != null) {
+                    val outPath = Path.of(out)
+                    outPath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+                    Files.writeString(outPath, rendered)
+                } else {
+                    println(rendered)
+                }
+            }
+
+            else -> throw UsageException("unknown format '$format' (json, graphml, gexf)")
+        }
+        // Shortest witness paths for every reached symbol, for consumers that
+        // want the walks rather than the whole report.
+        if (reachableSymbols != null) {
+            val graph = report.callGraph ?: throw UsageException(
+                "--reachable-symbols needs a call graph: run the resolved backend without --callgraph none",
+            )
+            val target = Path.of(reachableSymbols)
+            target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+            Files.writeString(target, io.cdxgen.kosi.graph.WitnessPaths.write(graph, options.maxPathsPerSymbol))
         }
         // Error-severity diagnostics mean the analysis is incomplete; surface
         // them without failing the run (they are data, not a crash).
@@ -187,7 +225,9 @@ object Main {
             multiplatformTarget = parsed.value("multiplatform-target") ?: defaults.multiplatformTarget,
             pretty = parsed.bool("pretty", defaults.pretty),
             format = parsed.value("format", defaults.format).let {
-                if (it != "json") throw UsageException("only --format json is supported in phase 0")
+                if (it != "json" && it != "graphml" && it != "gexf") {
+                    throw UsageException("unknown format '$it' (json, graphml, gexf)")
+                }
                 it
             },
         )
@@ -481,6 +521,8 @@ object Main {
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved>     analysis tier (resolved needs no build execution)
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
+              --reachable-symbols <file>      write shortest witness paths for reached symbols (JSON)
+              --format <fmt>                  json (full report), graphml or gexf (call graph)
               --pretty                        indented JSON
 
             Unknown flags are a usage error (exit 2); repeatable flags (--roots, --opt-in)

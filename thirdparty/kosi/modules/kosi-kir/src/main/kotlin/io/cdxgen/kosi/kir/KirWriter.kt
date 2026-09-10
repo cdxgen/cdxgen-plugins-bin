@@ -32,6 +32,10 @@ object KirWriter {
         out.appendLine("  annotations ${f.annotations.sorted().joinToString(" ") { q(it) }}")
         out.appendLine("  overrides ${f.overrides.sorted().joinToString(" ") { q(it) }}")
         out.appendLine("  overriddenBy ${f.overriddenBy.sorted().joinToString(" ") { q(it) }}")
+        out.appendLine("  supertypes ${f.supertypes.sorted().joinToString(" ") { q(it) }}")
+        out.appendLine("  ownerflags ${f.ownerFlags.sorted().joinToString(" ") { q(it) }}")
+        out.appendLine("  ownerannotations ${f.ownerAnnotations.sorted().joinToString(" ") { q(it) }}")
+        out.appendLine("  ownervisibility ${qn(f.ownerVisibility)}")
         out.appendLine("  synthetic ${qn(f.syntheticCause)}")
         out.appendLine("  returns ${qn(f.returnType)}")
         for (p in f.params) {
@@ -56,10 +60,10 @@ object KirWriter {
         is KirFieldSet -> "fieldset ${ins.receiver} ${writePath(ins.path)} = ${ins.value}"
         is KirIndexGet -> "${ins.result} = indexget ${ins.receiver} ${ins.index}"
         is KirIndexSet -> "indexset ${ins.receiver} ${ins.index} = ${ins.value}"
-        is KirCall -> lhs(ins.result) + "call " + writeCall(ins.callee, ins.receiver, ins.args)
+        is KirCall -> lhs(ins.result) + "call " + writeCall(ins.callee, ins.receiver, ins.args) + lineSuffix(ins.line)
         is KirDynamicCall ->
-            lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args)
-        is KirNew -> "${ins.result} = new ${qn(ins.type)}${writeArgs(ins.args)}"
+            lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args) + lineSuffix(ins.line)
+        is KirNew -> "${ins.result} = new ${qn(ins.type)}${writeArgs(ins.args)}${lineSuffix(ins.line)}"
         is KirPhi ->
             "${ins.result} = phi [" + ins.inputs.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}=${it.value}" } + "]"
         is KirBranch -> "branch ${ins.condition} then=${ins.thenBlock} else=${ins.elseBlock}"
@@ -76,6 +80,9 @@ object KirWriter {
     }
 
     private fun lhs(result: String?): String = result?.let { "$it = " } ?: ""
+
+    /** Call-site lines ride the three edge-producing instructions; 0 is omitted. */
+    private fun lineSuffix(line: Int): String = if (line == 0) "" else " line=$line"
 
     private fun writeCall(callee: KirCallee, receiver: String?, args: List<String>): String =
         "${q(callee.fqn)} kind=${callee.kind.name.lowercase()} desc=${qn(callee.descriptor)}" +

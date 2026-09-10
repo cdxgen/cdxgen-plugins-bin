@@ -44,6 +44,24 @@ class FixtureResultJsonTest {
         callsResolved = 940,
         loweringFailures = linkedMapOf("b-construct" to 2, "a-construct" to 7),
         functionsLowered = 321,
+        graphNodes = 41,
+        graphEdges = 57,
+        graphLocalNodes = 11,
+        graphStdlibNodes = 13,
+        graphDependencyNodes = 17,
+        graphSyntheticNodes = 19,
+        graphLocalEdges = 23,
+        graphStdlibEdges = 29,
+        graphDependencyEdges = 31,
+        graphSyntheticEdges = 37,
+        reachedNodes = 39,
+        connectedNodes = 40,
+        reachedViaEdge = 47,
+        connectedViaEdge = 53,
+        collapsedEdges = 42,
+        publicCallables = 43,
+        reachedPublicCallables = 44,
+        graphAlgorithm = "vta",
         digest = Digests.FixtureDigest("some-repo", MatrixSlot.RESOLVED_LABEL, emptyMap()),
     )
 
@@ -78,6 +96,35 @@ class FixtureResultJsonTest {
         assertEquals(
             emptyList(), dropped,
             "these fields did not survive the baseline round-trip, so any gate reading them is dead: $dropped",
+        )
+    }
+
+    @Test
+    fun theSampleLeavesNoFieldAtItsDefault() {
+        // The round-trip guard above compares field by field, which means a
+        // NEW field left at its `null` default passes it vacuously — null in,
+        // null out, no evidence the parser ever heard of it. That is R44's
+        // shape one level up, so the sample itself is checked: every
+        // persisted field must carry a distinctive value before the
+        // comparison can prove anything about it.
+        val original = sample()
+        val notPersisted = setOf("failures", "digest")
+        val atDefault = BenchRunner.FixtureResult::class.java.declaredFields
+            .map { it.name }
+            .filterNot { it in notPersisted }
+            .filter { name ->
+                val field = BenchRunner.FixtureResult::class.java.getDeclaredField(name)
+                field.isAccessible = true
+                when (val value = field.get(original)) {
+                    null -> true
+                    is Map<*, *> -> value.isEmpty()
+                    is Collection<*> -> value.isEmpty()
+                    else -> false
+                }
+            }
+        assertEquals(
+            emptyList(), atDefault,
+            "add a distinctive value for these in sample(), or the round-trip test cannot see them: $atDefault",
         )
     }
 

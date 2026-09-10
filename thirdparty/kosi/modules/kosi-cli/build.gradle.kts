@@ -16,6 +16,8 @@ dependencies {
     implementation(project(":kosi-kir"))
     implementation(project(":kosi-corpus"))
     implementation(project(":kosi-bench"))
+    implementation(project(":kosi-graph"))
+    implementation(project(":kosi-export"))
     implementation(project(":kosi-models"))
     implementation(libs.kotlin.stdlib)
     testImplementation(libs.kotlin.test)

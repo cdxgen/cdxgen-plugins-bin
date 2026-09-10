@@ -29,13 +29,15 @@ data class KirIndexSet(val receiver: String, val index: String, val value: Strin
 
 /**
  * A resolved call. `result` is null for calls whose value is dropped
- * (statement-position calls to Unit).
+ * (statement-position calls to Unit). `line` is the call site's source line
+ * (1-based; [KIR_NO_LINE] when unknown) — the call graph's edge evidence.
  */
 data class KirCall(
     val result: String?,
     val callee: KirCallee,
     val receiver: String?,
     val args: List<String>,
+    val line: Int = KIR_NO_LINE,
 ) : KirIns
 
 /**
@@ -48,10 +50,11 @@ data class KirDynamicCall(
     val name: String,
     val receiver: String?,
     val args: List<String>,
+    val line: Int = KIR_NO_LINE,
 ) : KirIns
 
 /** An object creation with constructor arguments. */
-data class KirNew(val result: String, val type: String, val args: List<String>) : KirIns
+data class KirNew(val result: String, val type: String, val args: List<String>, val line: Int = KIR_NO_LINE) : KirIns
 
 /**
  * A join value: one input register per predecessor block id. Emitted by the

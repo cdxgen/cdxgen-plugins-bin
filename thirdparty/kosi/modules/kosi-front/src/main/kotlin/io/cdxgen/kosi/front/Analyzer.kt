@@ -366,6 +366,11 @@ object Analyzer {
             } else {
                 null
             }
+            // Dispatch facts (visibility/modality/overrides/supertypes) that
+            // could not be read join the resolution-failure count: the graph
+            // treats them as open and non-exported, and the report says why.
+            val kirSymbolFailures = kir.symbolFactFailures
+
 
             val imports = mutableListOf<ImportUsage>()
             val usages = mutableListOf<LibraryUsage>()
@@ -380,6 +385,30 @@ object Analyzer {
             // wall clock on a real repo's thousands of files.
             val sourceByRelPath = collected.associateBy { it.relativePath }
             val purlByModulePath = versionedModules.associate { it.module.modulePath to it.module.purl }
+
+            // P3: the call graph and reachability, built from the KIR in
+            // kosi-graph (compiler types stop at this module's boundary).
+            // `--callgraph none` publishes no graph at all — `options`
+            // already records that nothing was requested.
+            val graphResult = if (options.callgraph != io.cdxgen.kosi.schema.CallGraphMode.NONE) {
+                io.cdxgen.kosi.graph.CallGraphBuilder.build(
+                    io.cdxgen.kosi.kir.KirModule(kir.functions),
+                    io.cdxgen.kosi.graph.GraphOptions(
+                        mode = options.callgraph,
+                        roots = io.cdxgen.kosi.graph.GraphOptions.rootsOf(options.roots),
+                        includeStdlib = options.includeStdlib,
+                        dependencyDetail = options.dependencyDetail,
+                        maxPathsPerSymbol = options.maxPathsPerSymbol,
+                        timeoutSeconds = options.callgraphTimeoutSeconds,
+                    ),
+                    io.cdxgen.kosi.graph.CallGraphBuilder.Attribution(
+                        byAbsoluteFilePath = fileRelPathByAbsolute,
+                        purlByModulePath = purlByModulePath,
+                    ),
+                )
+            } else {
+                null
+            }
 
             for (fact in facts) {
                 fileCount++
@@ -441,11 +470,12 @@ object Analyzer {
                 Diagnostic(
                     code = DiagnosticCodes.SYMBOL_RESOLUTION_FAILED,
                     severity = Severity.WARNING,
-                    message = "$symbolFailures symbol operation(s) failed during resolution; the affected " +
+                    message = "${symbolFailures + kirSymbolFailures} symbol operation(s) failed during resolution " +
+                        "($symbolFailures declarations, $kirSymbolFailures dispatch facts); the affected " +
                         "declarations carry text-derived evidence only (no jvmOwner/jvmDescriptor, " +
-                        "supertypes or overrides)",
+                        "supertypes or overrides) and the graph treats the affected functions as open",
                     position = Position(".", 1, 1),
-                    count = symbolFailures,
+                    count = symbolFailures + kirSymbolFailures,
                 )
             } else {
                 null
@@ -487,7 +517,11 @@ object Analyzer {
                     resolvedCallRatio = ratio,
                     callsTotal = callsTotal,
                     callsResolved = callsResolved,
-                    unknownCallPropagations = 0,
+                    // The unresolved call sites the graph walked past: what
+                    // the flow engine would propagate per --unknown-call,
+                    // counted here so the graph's missing edges are a number,
+                    // not a shrug.
+                    unknownCallPropagations = graphResult?.unresolvedCalls ?: 0,
                     loweringFailures = kir.failures,
                     functionsLowered = kir.functionCount,
                     fixpointCapHits = 0,
@@ -499,6 +533,7 @@ object Analyzer {
                     truncations = emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
                 ),
+                callGraph = graphResult?.callGraph,
             )
         }
     }
@@ -669,6 +704,7 @@ object Analyzer {
         imports: List<ImportUsage>,
         diagnostics: List<Diagnostic>,
         stats: Stats,
+        callGraph: io.cdxgen.kosi.schema.CallGraph? = null,
     ): KosiReport {
         val moduleRefs = modules.map { vm ->
             val m = vm.module
@@ -793,7 +829,7 @@ object Analyzer {
             usages = usagesOut,
             securitySignals = emptyList(),
             crypto = CryptoEvidence(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
-            callGraph = null,
+            callGraph = callGraph,
             dataFlow = null,
             apiEndpoints = emptyList(),
             services = emptyList(),

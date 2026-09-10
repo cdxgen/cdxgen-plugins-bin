@@ -8,6 +8,9 @@ sibling of `golem` (Go) and `rusi` (Rust). It answers, for a Kotlin project:
   language versions
 - which imports, declarations and library calls occur (canonical, sorted,
   byte-identical output)
+- which functions call which, and what is reachable from `main`, the exported
+  API, or framework-registered handlers (resolved tier, call graph +
+  reachability)
 - which packages/purls the evidence attaches to
 
 Phase 0 ships the **syntax tier** (`--backend syntax`): PSI-only parsing via
@@ -29,6 +32,9 @@ Useful variants:
 ```bash
 kosi analyze --dir . --pretty                       # indented output
 kosi analyze --dir . --backend syntax               # explicit (default) tier
+kosi analyze --dir . --backend resolved --roots exported --callgraph auto   # call graph + reachability
+kosi analyze --dir . --backend resolved --format graphml --out graph.graphml # GraphML (or gexf) of the call graph
+kosi analyze --dir . --backend resolved --reachable-symbols witnesses.json   # shortest witness paths (JSON)
 kosi kir dump --dir .                               # KIR dump (resolved tier), round-trip + CFG validated
 kosi bench --tier fixtures                          # corpus ratchet, both modes
 kosi bench --tier fixtures --write-baseline baseline.json
@@ -36,6 +42,22 @@ kosi bench --tier fixtures --baseline baseline.json --fail-unless-promotable
 kosi golden                                         # digest goldens, trace invariants
 kosi version                                        # versions, compiler band, capabilities
 ```
+
+### Call graph and reachability (P3, resolved tier)
+
+`--callgraph none|static|cha|sealed|rta|vta|auto` builds `callGraph` —
+dispatch-resolved edges with call types (`static`, `receiver-typed`,
+`interface-cha`, `sealed-exact`, `sealed-bounded`, `lambda-inlined`,
+`framework-registered`, `override`, `collapsed`), per-node reachability from
+`--roots` (`main`, `exported` for libraries' public API, `handlers` for
+type-resolved framework registrations, `tests`, `android`, `all`,
+`symbol:<regex>`), and node/edge breakdowns by
+local/stdlib/dependency/synthetic. Reachability is computed on the complete
+graph; `--include-stdlib` and `--dependency-detail collapse|drop|full` then
+shape the VIEW: a path a filter cuts survives as one `collapsed` edge
+carrying the hop count and the packages traversed — it never silently
+vanishes. `auto` runs vta, falling back down the chain (rta, then sealed) on
+a deterministic work budget recorded as `callgraph-timeout`.
 
 Exit codes: `0` success, `1` expectations failed (ratchet/golden/bench),
 `2` usage error, `3` runtime error.

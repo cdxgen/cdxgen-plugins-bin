@@ -33,6 +33,10 @@ object KirReader {
         var annotations = emptyList<String>()
         var overrides = emptyList<String>()
         var overriddenBy = emptyList<String>()
+        var supertypes = emptyList<String>()
+        var ownerFlags = emptySet<String>()
+        var ownerAnnotations = emptyList<String>()
+        var ownerVisibility: String? = null
         var synthetic: String? = null
         var returnType: String? = null
         val params = mutableListOf<KirParam>()
@@ -58,6 +62,11 @@ object KirReader {
                 text.startsWith("  annotations ") -> annotations = splitList(text.removePrefix("  annotations "))
                 text.startsWith("  overrides ") -> overrides = splitList(text.removePrefix("  overrides "))
                 text.startsWith("  overriddenBy ") -> overriddenBy = splitList(text.removePrefix("  overriddenBy "))
+                text.startsWith("  supertypes ") -> supertypes = splitList(text.removePrefix("  supertypes "))
+                text.startsWith("  ownerflags ") -> ownerFlags = splitList(text.removePrefix("  ownerflags ")).toSet()
+                text.startsWith("  ownerannotations ") ->
+                    ownerAnnotations = splitList(text.removePrefix("  ownerannotations "))
+                text.startsWith("  ownervisibility ") -> ownerVisibility = unqn(text.removePrefix("  ownervisibility "))
                 text.startsWith("  synthetic ") -> synthetic = unqn(text.removePrefix("  synthetic "))
                 text.startsWith("  returns ") -> returnType = unqn(text.removePrefix("  returns "))
                 text.startsWith("  param ") -> {
@@ -104,6 +113,10 @@ object KirReader {
             annotations = annotations,
             syntheticCause = synthetic,
             body = if (blocks.isEmpty()) null else KirBody(blocks),
+            supertypes = supertypes,
+            ownerFlags = ownerFlags,
+            ownerAnnotations = ownerAnnotations,
+            ownerVisibility = ownerVisibility,
         )
     }
 
@@ -178,35 +191,38 @@ object KirReader {
             KirIndexGet(reg, parts[0], parts[1])
         }
         "call" -> {
-            val fqn = unq(rest.substringBefore(" kind="))
-            val kind = rest.substringAfter(" kind=").substringBefore(" desc=").let { kindByName(it) }
-            val desc = unqn(rest.substringAfter(" desc=").substringBefore(" recv=").substringBefore(" args="))
-            val recv = if (" recv=" in rest) rest.substringAfter(" recv=").substringBefore(" args=") else null
-            val args = if (" args=" in rest) {
-                rest.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
+            val (rest2, line) = splitLine(rest)
+            val fqn = unq(rest2.substringBefore(" kind="))
+            val kind = rest2.substringAfter(" kind=").substringBefore(" desc=").let { kindByName(it) }
+            val desc = unqn(rest2.substringAfter(" desc=").substringBefore(" recv=").substringBefore(" args="))
+            val recv = if (" recv=" in rest2) rest2.substringAfter(" recv=").substringBefore(" args=") else null
+            val args = if (" args=" in rest2) {
+                rest2.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
             } else {
                 emptyList()
             }
-            KirCall(reg, KirCallee(fqn, desc, kind), recv, args)
+            KirCall(reg, KirCallee(fqn, desc, kind), recv, args, line)
         }
         "dynamic" -> {
-            val name = unq(rest.substringBefore(" recv=").substringBefore(" args="))
-            val recv = if (" recv=" in rest) rest.substringAfter(" recv=").substringBefore(" args=") else null
-            val args = if (" args=" in rest) {
-                rest.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
+            val (rest2, line) = splitLine(rest)
+            val name = unq(rest2.substringBefore(" recv=").substringBefore(" args="))
+            val recv = if (" recv=" in rest2) rest2.substringAfter(" recv=").substringBefore(" args=") else null
+            val args = if (" args=" in rest2) {
+                rest2.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
             } else {
                 emptyList()
             }
-            KirDynamicCall(reg, name, recv, args)
+            KirDynamicCall(reg, name, recv, args, line)
         }
         "new" -> {
-            val type = unq(rest.substringBefore(" args="))
-            val args = if (" args=" in rest) {
-                rest.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
+            val (rest2, line) = splitLine(rest)
+            val type = unq(rest2.substringBefore(" args="))
+            val args = if (" args=" in rest2) {
+                rest2.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
             } else {
                 emptyList()
             }
-            KirNew(reg, type, args)
+            KirNew(reg, type, args, line)
         }
         "phi" -> {
             val inputs = rest.removePrefix("[").removeSuffix("]")
@@ -242,6 +258,19 @@ object KirReader {
     private fun kindByName(name: String): CallKind =
         CallKind.entries.firstOrNull { it.name.lowercase() == name }
             ?: throw KirFormatException("unknown call kind '$name'", 0)
+
+    /**
+     * `... args=(a,b) line=12` -> text without the line token, and the line
+     * (0 when absent — the writer omits it for positionless instructions).
+     */
+    private fun splitLine(text: String): Pair<String, Int> {
+        val marker = " line="
+        val idx = text.lastIndexOf(marker)
+        if (idx < 0) return text to 0
+        val line = text.substring(idx + marker.length).toIntOrNull()
+            ?: throw KirFormatException("bad line token '${text.substring(idx)}'", 0)
+        return text.substring(0, idx) to line
+    }
 
     private fun readConst(text: String): KirConstant = when {
         text == "null" -> KirConstant.Null

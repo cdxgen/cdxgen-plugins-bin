@@ -166,6 +166,43 @@ tier = "eap"
 path = "fixtures/future-syntax"
 capabilities = ["version-ceiling", "eap"]
 
+# P3 call-graph fixtures: dispatch modes, sealed narrowing, exported roots
+# and framework-registration roots. Each carries a negative half naming what
+# a plausibly wrong dispatcher would emit.
+
+[[fixtures]]
+slug = "sealed-dispatch"
+tier = "fixtures"
+path = "fixtures/sealed-dispatch"
+capabilities = ["call-graph", "sealed-narrowing", "dispatch"]
+
+[[fixtures]]
+slug = "virtual-dispatch"
+tier = "fixtures"
+path = "fixtures/virtual-dispatch"
+capabilities = ["call-graph", "cha", "library-interface"]
+
+[[fixtures]]
+slug = "library-api"
+tier = "fixtures"
+path = "fixtures/library-api"
+capabilities = ["call-graph", "exported-roots", "public-api"]
+
+[[fixtures]]
+# The only fixture whose reachability travels an edge: every other one
+# reaches nothing but its own roots, so the edge-connectivity gate had no
+# denominator to divide by.
+slug = "reachable-depth"
+tier = "fixtures"
+path = "fixtures/reachable-depth"
+capabilities = ["call-graph", "exported-roots", "reachability"]
+
+[[fixtures]]
+slug = "framework-handlers"
+tier = "fixtures"
+path = "fixtures/framework-handlers"
+capabilities = ["call-graph", "framework-roots", "type-resolved"]
+
 [[fixtures]]
 slug = "ktor-samples"
 tier = "small"

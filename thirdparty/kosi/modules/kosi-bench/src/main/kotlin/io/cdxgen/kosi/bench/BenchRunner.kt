@@ -70,6 +70,35 @@ object BenchRunner {
          */
         val loweringFailures: Map<String, Int> = emptyMap(),
         val functionsLowered: Int? = null,
+        /**
+         * P3 call-graph facts, read from the slot's report. Null only for
+         * slots that publish no graph (the syntax tiers) or baselines
+         * written before P3 — never defaulted to zero, which would read as
+         * an empty graph that was actually measured.
+         */
+        val graphNodes: Int? = null,
+        val graphEdges: Int? = null,
+        val graphLocalNodes: Int? = null,
+        val graphStdlibNodes: Int? = null,
+        val graphDependencyNodes: Int? = null,
+        val graphSyntheticNodes: Int? = null,
+        val graphLocalEdges: Int? = null,
+        val graphStdlibEdges: Int? = null,
+        val graphDependencyEdges: Int? = null,
+        val graphSyntheticEdges: Int? = null,
+        val reachedNodes: Int? = null,
+        val connectedNodes: Int? = null,
+        /**
+         * The edge-traversed subset of the above: nodes at distance > 0 and
+         * how many of them a walk over the emitted edges confirms. Roots are
+         * excluded on purpose — being a root is not evidence about edges.
+         */
+        val reachedViaEdge: Int? = null,
+        val connectedViaEdge: Int? = null,
+        val collapsedEdges: Int? = null,
+        val publicCallables: Int? = null,
+        val reachedPublicCallables: Int? = null,
+        val graphAlgorithm: String? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -78,11 +107,25 @@ object BenchRunner {
             w.num("annotations", annotations)
             callsResolved?.let { w.num("callsResolved", it) }
             callsTotal?.let { w.num("callsTotal", it) }
+            collapsedEdges?.let { w.num("collapsedEdges", it) }
             w.dbl("connectivity", connectivity)
+            connectedNodes?.let { w.num("connectedNodes", it) }
+            connectedViaEdge?.let { w.num("connectedViaEdge", it) }
             resolvedCallRatio?.let { w.dbl("resolvedCallRatio", it) }
             w.str("digest", digest.combined)
             w.num("fail", fail)
             functionsLowered?.let { w.num("functionsLowered", it) }
+            graphAlgorithm?.let { w.str("graphAlgorithm", it) }
+            graphDependencyEdges?.let { w.num("graphDependencyEdges", it) }
+            graphDependencyNodes?.let { w.num("graphDependencyNodes", it) }
+            graphEdges?.let { w.num("graphEdges", it) }
+            graphLocalEdges?.let { w.num("graphLocalEdges", it) }
+            graphLocalNodes?.let { w.num("graphLocalNodes", it) }
+            graphNodes?.let { w.num("graphNodes", it) }
+            graphStdlibEdges?.let { w.num("graphStdlibEdges", it) }
+            graphStdlibNodes?.let { w.num("graphStdlibNodes", it) }
+            graphSyntheticEdges?.let { w.num("graphSyntheticEdges", it) }
+            graphSyntheticNodes?.let { w.num("graphSyntheticNodes", it) }
             w.beginObject("loweringFailures")
             for (construct in loweringFailures.keys.sorted()) {
                 w.num(construct, (loweringFailures[construct] ?: 0).toLong())
@@ -95,6 +138,10 @@ object BenchRunner {
             w.num("positives", positives)
             w.num("positivesPassed", positivesPassed)
             w.num("positivesRecallDenominator", positivesRecallDenominator)
+            publicCallables?.let { w.num("publicCallables", it) }
+            reachedNodes?.let { w.num("reachedNodes", it) }
+            reachedPublicCallables?.let { w.num("reachedPublicCallables", it) }
+            reachedViaEdge?.let { w.num("reachedViaEdge", it) }
             w.dbl("recall", recall)
             w.num("sliceCount", sliceCount)
             w.str("slot", slot)
@@ -224,6 +271,24 @@ object BenchRunner {
                         loweringFailures = r.obj("loweringFailures")?.members.orEmpty()
                             .mapValues { (_, v) -> v.asLong().toInt() },
                         functionsLowered = r.long("functionsLowered")?.toInt(),
+                        graphNodes = r.long("graphNodes")?.toInt(),
+                        graphEdges = r.long("graphEdges")?.toInt(),
+                        graphLocalNodes = r.long("graphLocalNodes")?.toInt(),
+                        graphStdlibNodes = r.long("graphStdlibNodes")?.toInt(),
+                        graphDependencyNodes = r.long("graphDependencyNodes")?.toInt(),
+                        graphSyntheticNodes = r.long("graphSyntheticNodes")?.toInt(),
+                        graphLocalEdges = r.long("graphLocalEdges")?.toInt(),
+                        graphStdlibEdges = r.long("graphStdlibEdges")?.toInt(),
+                        graphDependencyEdges = r.long("graphDependencyEdges")?.toInt(),
+                        graphSyntheticEdges = r.long("graphSyntheticEdges")?.toInt(),
+                        reachedNodes = r.long("reachedNodes")?.toInt(),
+                        connectedNodes = r.long("connectedNodes")?.toInt(),
+                        reachedViaEdge = r.long("reachedViaEdge")?.toInt(),
+                        connectedViaEdge = r.long("connectedViaEdge")?.toInt(),
+                        collapsedEdges = r.long("collapsedEdges")?.toInt(),
+                        publicCallables = r.long("publicCallables")?.toInt(),
+                        reachedPublicCallables = r.long("reachedPublicCallables")?.toInt(),
+                        graphAlgorithm = r.str("graphAlgorithm"),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -382,6 +447,7 @@ object BenchRunner {
         }
         val connectivity = Connectivity.of(report)
         val integrity = Connectivity.integrityViolations(report)
+        val graphMetrics = GraphMetrics.of(report)
         // Fixture digest: full report serialization is deterministic; reuse it.
         val digest = Digests.FixtureDigest(
             slug = entry.slug,
@@ -412,9 +478,170 @@ object BenchRunner {
             callsResolved = report.stats.callsResolved,
             loweringFailures = report.stats.loweringFailures,
             functionsLowered = report.stats.functionsLowered,
+            graphNodes = graphMetrics.nodeCount,
+            graphEdges = graphMetrics.edgeCount,
+            graphLocalNodes = graphMetrics.localNodes,
+            graphStdlibNodes = graphMetrics.stdlibNodes,
+            graphDependencyNodes = graphMetrics.dependencyNodes,
+            graphSyntheticNodes = graphMetrics.syntheticNodes,
+            graphLocalEdges = graphMetrics.localEdges,
+            graphStdlibEdges = graphMetrics.stdlibEdges,
+            graphDependencyEdges = graphMetrics.dependencyEdges,
+            graphSyntheticEdges = graphMetrics.syntheticEdges,
+            reachedNodes = graphMetrics.reachedNodes,
+            connectedNodes = graphMetrics.connectedNodes,
+            reachedViaEdge = graphMetrics.reachedViaEdge,
+            connectedViaEdge = graphMetrics.connectedViaEdge,
+            collapsedEdges = graphMetrics.collapsedEdges,
+            publicCallables = graphMetrics.publicCallables,
+            reachedPublicCallables = graphMetrics.reachedPublicCallables,
+            graphAlgorithm = graphMetrics.algorithm,
             digest = digest,
             failures = failureDetails,
         )
+    }
+}
+
+/**
+ * Call-graph metrics read from a slot's report (the artifact production
+ * publishes — never recomputed from in-memory structures). [connectedNodes]
+ * is the numerator of edge connectivity: reached view nodes a breadth-first
+ * walk over the EMITTED edges confirms, root nodes (distance 0) included.
+ * A view filter that severed a path without re-bridging it shows up here as
+ * connectedNodes < reachedNodes, which is exactly what the P3 gate fails on.
+ *
+ * [reachedViaEdge] is the honest denominator underneath that. A ROOT is
+ * reached at distance 0 by definition — no edge is involved — so a gate that
+ * divides by [reachedNodes] can read 1.000 having followed no edge at all,
+ * which is what the P3 corpus did before `reachable-depth` existed. Only
+ * nodes at distance > 0 are reached BECAUSE of an edge, and only those can
+ * witness a severance.
+ */
+data class GraphMetrics(
+    val nodeCount: Int?,
+    val edgeCount: Int?,
+    val localNodes: Int?,
+    val stdlibNodes: Int?,
+    val dependencyNodes: Int?,
+    val syntheticNodes: Int?,
+    val localEdges: Int?,
+    val stdlibEdges: Int?,
+    val dependencyEdges: Int?,
+    val syntheticEdges: Int?,
+    val reachedNodes: Int?,
+    val connectedNodes: Int?,
+    val reachedViaEdge: Int?,
+    val connectedViaEdge: Int?,
+    val collapsedEdges: Int?,
+    val publicCallables: Int?,
+    val reachedPublicCallables: Int?,
+    val algorithm: String?,
+) {
+    companion object {
+
+        fun of(report: io.cdxgen.kosi.schema.KosiReport): GraphMetrics {
+            val graph = report.callGraph ?: return GraphMetrics(
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null,
+            )
+            val adjacency = graph.edges.groupBy({ it.sourceId }) { it.targetId }
+            val rootIds = graph.reachability.filter { it.distance == 0 }.map { it.nodeId }.toSet()
+            val reachedIds = graph.reachability.filter { it.reached }.map { it.nodeId }.toSet()
+            val viaEdgeIds = graph.reachability
+                .filter { it.reached && it.distance > 0 }
+                .map { it.nodeId }
+                .toSet()
+            val confirmed = GraphConnectivity.connectedCount(rootIds, reachedIds, adjacency)
+            val confirmedViaEdge = GraphConnectivity.connectedCount(rootIds, viaEdgeIds, adjacency)
+            // The exported-reach denominator comes from `declarations`, NOT
+            // from the graph's own node set. Counting public NODES made the
+            // gate a tautology: the exported root selector picks exactly the
+            // public local nodes, a root is reached at distance 0, so the
+            // fraction was 1.0000 by construction on every fixture and every
+            // repo. `declarations` is published by the front end independently
+            // of graph construction, so a public callable that never became a
+            // node — the failure the gate exists to catch — now costs a point.
+            val declaredPublic = publicCallableNames(report.declarations)
+            val reachedNames = graph.nodes
+                .filter { it.id in reachedIds }
+                .map { it.canonicalName }
+                .toSet()
+            return GraphMetrics(
+                nodeCount = graph.nodes.size,
+                edgeCount = graph.edges.size,
+                localNodes = graph.stats.localNodes,
+                stdlibNodes = graph.stats.stdlibNodes,
+                dependencyNodes = graph.stats.dependencyNodes,
+                syntheticNodes = graph.stats.syntheticNodes,
+                localEdges = graph.stats.localEdges,
+                stdlibEdges = graph.stats.stdlibEdges,
+                dependencyEdges = graph.stats.dependencyEdges,
+                syntheticEdges = graph.stats.syntheticEdges,
+                reachedNodes = reachedIds.size,
+                connectedNodes = confirmed,
+                reachedViaEdge = viaEdgeIds.size,
+                connectedViaEdge = confirmedViaEdge,
+                collapsedEdges = graph.edges.count { it.callType == "collapsed" },
+                publicCallables = declaredPublic.size,
+                reachedPublicCallables = declaredPublic.count { it in reachedNames },
+                algorithm = graph.algorithmUsed,
+            )
+        }
+
+        /** Declaration kinds that are callable, i.e. can be a graph node. */
+        private val CALLABLE_KINDS = setOf("function", "method", "extension-function", "constructor")
+
+        /** Declaration kinds that own members and can hide them. */
+        private val OWNER_KINDS = setOf(
+            "class", "interface", "enum", "annotation", "data-class", "sealed-class", "object", "companion",
+        )
+
+        private val API_VISIBILITIES = setOf("public", "protected", "unknown")
+
+        /**
+         * Public API callables as `declarations` records them: a callable
+         * whose own visibility is consumer-nameable and whose enclosing
+         * declaration, if any, is too. Kotlin's default visibility is public,
+         * so an absent or `unknown` visibility counts IN — the denominator
+         * must never shrink because a fact was missing.
+         */
+        fun publicCallableNames(declarations: List<io.cdxgen.kosi.schema.Declaration>): Set<String> {
+            val ownerVisibility = declarations
+                .filter { it.kind in OWNER_KINDS }
+                .associate { it.canonicalName to it.visibility }
+            return declarations
+                .filter { decl ->
+                    decl.kind in CALLABLE_KINDS &&
+                        decl.visibility in API_VISIBILITIES &&
+                        (ownerVisibility[decl.canonicalName.substringBeforeLast('.', "")]
+                            ?: "unknown") in API_VISIBILITIES
+                }
+                .map { it.canonicalName }
+                .toSet()
+        }
+    }
+}
+
+/** BFS over the emitted view; the path-existence check behind connectivity. */
+object GraphConnectivity {
+
+    fun connectedCount(
+        rootIds: Set<String>,
+        reachedIds: Set<String>,
+        adjacency: Map<String, List<String>>,
+    ): Int {
+        if (reachedIds.isEmpty()) return 0
+        val seen = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+        for (root in rootIds.sorted()) {
+            if (seen.add(root)) queue.addLast(root)
+        }
+        while (queue.isNotEmpty()) {
+            for (next in adjacency[queue.removeFirst()].orEmpty()) {
+                if (seen.add(next)) queue.addLast(next)
+            }
+        }
+        return reachedIds.count { it in seen }
     }
 }
 

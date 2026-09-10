@@ -185,6 +185,9 @@ rather than a negative expectation that passes vacuously.
 | `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 | `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
+| `callgraph-timeout` | warning | an `auto` callgraph fell back down the chain (vta -> rta -> sealed) after exceeding the deterministic work budget derived from `--callgraph-timeout`; the message names both the algorithm that gave up and the one that produced the graph |
+| `callgraph-unresolved-calls` | warning | call sites that resolved to no callee and emit no edge (`count` is how many, mirrored in `stats.unknownCallPropagations`) |
+| `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
 
 ## stats
 
@@ -198,7 +201,9 @@ and a 0.0 over 400 calls are the same number and opposite facts, so the ratio
 is never published alone (the same rule as `sliceCount` beside
 `connectivity`). Java sources contribute declarations but no calls, so the
 ratio measures Kotlin call sites — `callsTotal` says how many there were —
-plus `unknownCallPropagations`, `loweringFailures{}` — itemised by
+plus `unknownCallPropagations` (resolved tier: the call sites that resolved
+to no callee and emit no call-graph edge; the flow engine's use of it —
+propagation per `--unknown-call` — arrives with the engine), `loweringFailures{}` — itemised by
 construct, published beside `functionsLowered`, the function count it was
 computed over (a rate without its denominator is not a result) —
 `fixpointCapHits`, `sourceCount`, `sinkCount`, `sliceCount`,
@@ -224,9 +229,93 @@ the pattern's segments are a suffix of the symbol's segments
 annotations both use it; a build-time test fails the build when a shipped
 pattern can never match any renderer output.
 
+## callGraph — CallGraph (resolved tier, P3)
+
+Published when `--backend resolved` runs and `--callgraph` is not `none`;
+`null` otherwise (including every syntax-tier run, which resolves nothing
+and therefore builds no graph). `mode` is the REQUESTED `--callgraph` mode;
+`algorithmUsed` is what actually produced the graph (`vta`, `rta`, `sealed`,
+`cha`, `static`) — `auto` runs vta and falls back down the chain (rta, then
+sealed) on a deterministic work budget, recording every fallback as a
+`callgraph-timeout` diagnostic in `callGraph.diagnostics`.
+
+Reachability is computed on the COMPLETE graph; the `--include-stdlib` and
+`--dependency-detail` options then shape the VIEW that `nodes[]`/`edges[]`
+publish. A path a view filter cuts survives as one `collapsed` edge carrying
+`collapsedHops` and `collapsedPackages` — it never silently vanishes
+(`dependency-detail drop` is the exception a consumer chooses explicitly:
+dependency nodes are dropped and paths through them are severed, by
+definition of the option).
+
+### callGraph.nodes[] — CallGraphNode
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `id` | string | `node-000001...`, stable for a given tree state |
+| `name` | string | simple name |
+| `qualifiedName` | string | `<relativePath>:<canonicalName>` |
+| `canonicalName` | string | the join key (`pkg.Class.method`, `kotlin.io.println`) |
+| `jvmDescriptor` | string? | erased descriptor when the resolved tier computed one; null never guessed |
+| `kind` | string | `function`, `method`, `getter`, `setter`, `constructor` |
+| `modulePath`, `purl`, `filePath` | string | attribution (empty for external nodes) |
+| `local` | boolean | workspace function (every lowered function is a node, edges or not) |
+| `stdlib` | boolean | `kotlin.*` / JDK callee |
+| `external` | boolean | not workspace (stdlib or dependency) |
+| `synthetic` | boolean | synthesized member (`copy`, `componentN`), attributed via the lowering |
+| `suspend` | boolean | `suspend` function |
+| `visibility` | string | `public`, `protected`, `internal`, `private`, `package-private`, `local`; `unknown` for external nodes |
+| `ownerVisibility` | string? | enclosing class visibility; null for top-level functions and external nodes — a public member of an internal class is not public API, and `--roots exported` gates on this, so the field is on the node |
+| `position` | Position? | declaration site; null for external nodes |
+
+### callGraph.edges[] — CallGraphEdge
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `id` | string | `edge-000001...` |
+| `sourceId`, `targetId` | string | caller -> callee; both always present in `nodes[]` |
+| `callType` | string | `static` (dispatch-free: constructors, operators, extensions, top-level, private, final, object/companion/enum members), `receiver-typed` (single resolved dispatch target on an open owner, or a library leaf), `interface-cha` (open-hierarchy candidate set), `sealed-exact` / `sealed-bounded` (closed target set of a sealed hierarchy or enum), `lambda-inlined` (the retained evidence edge of a scope-function inlining), `collapsed` (a path a view filter cut, re-bridged), `framework-registered`, `override`, `higher-order`, `suspend`, `structured-concurrency`, `reflective`, `java-interop`, `external` (the last six are reserved vocabulary; each populating phase updates this line) |
+| `line` | int | the call site's line (0 for synthesized and collapsed edges) |
+| `method` | string? | callee simple name |
+| `candidateCount` | int? | dispatch target count when the site had more than one |
+| `collapsedHops` | int? | present on `collapsed` edges: edges traversed through the omitted region |
+| `collapsedPackages` | string[]? | distinct packages traversed, sorted |
+
+### callGraph.reachability[] — ReachabilityEntry
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `nodeId` | string | one entry per view node |
+| `reached` | boolean | reachable from any declared root |
+| `distance` | int | BFS distance on the complete graph; -1 when unreached |
+| `roots` | string[] | the root SCOPES (`main`, `exported`, `handlers`, `symbol:...`) from which the node is reachable |
+
+Root scopes: `main` (top-level `main`), `exported` (the public API: local,
+non-synthetic, visibility public/protected, in a class that is itself
+public/protected), `handlers` (RESOLVED framework annotation FQNs on the
+function or its class — type-resolved, never name-matched), `tests`
+(test-source-set files), `android` (Android component supertypes), `all`,
+`symbol:<regex>`. A scope that matches nothing emits
+`callgraph-root-not-found`.
+
+### callGraph.stats
+
+The four-way breakdown, a DISJOINT partition (synthetic first, then local,
+then stdlib, then dependency; edges classify by target): `localNodes`,
+`stdlibNodes`, `dependencyNodes`, `syntheticNodes`, and the same four for
+edges. The parts sum to the totals — the promotion gate checks that.
+
+### --reachable-symbols <file> (sidecar)
+
+`--reachable-symbols` writes shortest witness paths for every reached symbol
+(JSON; `--max-paths-per-symbol` paths per symbol, default 3, one per root
+scope that reaches it): `{"maxPathsPerSymbol":3,"symbols":[{"canonicalName":
+...,"nodeId":...,"paths":[{"root":<nodeId>,"edges":[<edgeId>...]}]}]}`. Every
+edge id exists in the report and the walk is connected — the same invariant
+the connectivity gate checks, published for consumers.
+
 ## Later-phase sections
 
-`callGraph`, `dataFlow`, `crypto`, `apiEndpoints`, `services`, `urls` and
+`dataFlow`, `crypto`, `apiEndpoints`, `services`, `urls` and
 `securitySignals` are part of the v1 envelope now (emitted empty or null) so
 consumers can rely on the shape; their population is phase work and each
 populating phase updates this document in the same PR.

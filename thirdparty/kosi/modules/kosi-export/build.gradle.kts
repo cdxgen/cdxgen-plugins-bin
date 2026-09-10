@@ -1,5 +1,7 @@
-// Placeholder module for a later phase (see README.md in this directory).
-// It stays wired into the build so the layout cannot drift.
+// kosi-export renders kosi artifacts to interchange formats. P3 ships the
+// call-graph exporters (GraphML, GEXF) — hand-rolled, deterministic, same
+// discipline as the JSON writer: sorted, minified, byte-identical across
+// runs. Compiler types stop at kosi-front; this module sees schema types.
 dependencies {
     implementation(project(":kosi-schema"))
     implementation(libs.kotlin.stdlib)
