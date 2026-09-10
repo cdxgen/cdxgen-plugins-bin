@@ -99,6 +99,24 @@ object BenchRunner {
         val publicCallables: Int? = null,
         val reachedPublicCallables: Int? = null,
         val graphAlgorithm: String? = null,
+        /**
+         * P4 taint facts. `flowPositives`/`flowPositivesMatched` are the
+         * non-known-fail flow EXPECTATIONS evaluated in this slot and how
+         * many were satisfied — taint recall's numerator and denominator.
+         * `flowTruePositives` counts reported slices an expectation actually
+         * asked for; against [sliceCount] it is precision per flow.
+         * `fixpointCapHits`/`functionsAnalysed` are the worklist cap count
+         * and the function count it was measured over. `crossDependencySlices`
+         * is the report's count of slices claiming to cross a dependency,
+         * which the intraprocedural engine cannot produce. Null only for
+         * baselines written before P4.
+         */
+        val flowPositives: Int = 0,
+        val flowPositivesMatched: Int = 0,
+        val flowTruePositives: Int = 0,
+        val crossDependencySlices: Int? = null,
+        val fixpointCapHits: Int? = null,
+        val functionsAnalysed: Int? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -114,7 +132,12 @@ object BenchRunner {
             resolvedCallRatio?.let { w.dbl("resolvedCallRatio", it) }
             w.str("digest", digest.combined)
             w.num("fail", fail)
+            w.num("flowPositives", flowPositives)
+            w.num("flowPositivesMatched", flowPositivesMatched)
+            w.num("flowTruePositives", flowTruePositives)
             functionsLowered?.let { w.num("functionsLowered", it) }
+            functionsAnalysed?.let { w.num("functionsAnalysed", it) }
+            fixpointCapHits?.let { w.num("fixpointCapHits", it) }
             graphAlgorithm?.let { w.str("graphAlgorithm", it) }
             graphDependencyEdges?.let { w.num("graphDependencyEdges", it) }
             graphDependencyNodes?.let { w.num("graphDependencyNodes", it) }
@@ -150,6 +173,7 @@ object BenchRunner {
             w.num("xfail", xfail)
             w.num("xpass", xpass)
             w.str("tier", tier)
+            crossDependencySlices?.let { w.num("crossDependencySlices", it) }
             w.endObject()
         }
 
@@ -199,6 +223,9 @@ object BenchRunner {
             val annotations = results.sumOf { it.annotations }
             val parseErrors = results.sumOf { it.parseErrors }
             val integrity = results.sumOf { it.integrityViolations }
+            val crossDependency = results.mapNotNull { it.crossDependencySlices }
+            val capHits = results.mapNotNull { it.fixpointCapHits }
+            val analysed = results.mapNotNull { it.functionsAnalysed }
             val recall = if (recallDenominator == 0) 1.0 else positivesPassed.toDouble() / recallDenominator
             val connectivity = if (results.isEmpty()) {
                 1.0
@@ -224,6 +251,14 @@ object BenchRunner {
                 integrityViolations = integrity,
                 wallMillis = results.sumOf { it.wallMillis },
                 parseErrors = parseErrors,
+                flowPositives = results.sumOf { it.flowPositives },
+                flowPositivesMatched = results.sumOf { it.flowPositivesMatched },
+                flowTruePositives = results.sumOf { it.flowTruePositives },
+                // An absent measurement (pre-P4 baseline) must stay absent,
+                // never read as a measured zero.
+                crossDependencySlices = if (crossDependency.isEmpty()) null else crossDependency.sum(),
+                fixpointCapHits = if (capHits.isEmpty()) null else capHits.sum(),
+                functionsAnalysed = if (analysed.isEmpty()) null else analysed.sum(),
                 // One digest over every fixture digest, so the totals row
                 // changes whenever any fixture's report changes. An empty
                 // section map here would publish the digest of the empty
@@ -289,6 +324,12 @@ object BenchRunner {
                         publicCallables = r.long("publicCallables")?.toInt(),
                         reachedPublicCallables = r.long("reachedPublicCallables")?.toInt(),
                         graphAlgorithm = r.str("graphAlgorithm"),
+                        flowPositives = (r.long("flowPositives") ?: 0).toInt(),
+                        flowPositivesMatched = (r.long("flowPositivesMatched") ?: 0).toInt(),
+                        flowTruePositives = (r.long("flowTruePositives") ?: 0).toInt(),
+                        crossDependencySlices = r.long("crossDependencySlices")?.toInt(),
+                        fixpointCapHits = r.long("fixpointCapHits")?.toInt(),
+                        functionsAnalysed = r.long("functionsAnalysed")?.toInt(),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -496,6 +537,12 @@ object BenchRunner {
             publicCallables = graphMetrics.publicCallables,
             reachedPublicCallables = graphMetrics.reachedPublicCallables,
             graphAlgorithm = graphMetrics.algorithm,
+            flowPositives = evaluation.flowPositives,
+            flowPositivesMatched = evaluation.flowPositivesMatched,
+            flowTruePositives = evaluation.flowTruePositives,
+            crossDependencySlices = report.dataFlow?.stats?.crossDependencySlices,
+            fixpointCapHits = report.stats.fixpointCapHits,
+            functionsAnalysed = report.stats.functionsAnalysed,
             digest = digest,
             failures = failureDetails,
         )

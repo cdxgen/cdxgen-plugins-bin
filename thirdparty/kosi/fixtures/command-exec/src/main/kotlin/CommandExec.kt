@@ -15,17 +15,19 @@
 // kosi:want usage name=~.start
 // kosi:want declaration name=runCommand kind=function
 //
-// Known-fail: the flow engine does not exist at the syntax tier, so this
-// flow cannot be reported yet. Defect #1 in docs/KOSI.md; when the resolved
-// tier starts producing slices this marker will XPASS and fail the build,
-// forcing re-baselining.
-// kosi:want flow source=untrusted-input sink=process-exec known-fail=1
+// The flow reads untrusted input through the shipped pack source
+// (kotlin.io.readLine) and concatenates it into the ProcessBuilder command
+// list. Real at the resolved tier since P4; the syntax tier still has no
+// flow engine (docs/KOSI.md defect 1), so the marker is scoped there — at
+// the resolved slots the expectation is a live ratchet, not a known-fail.
+// kosi:want flow source=untrusted-input sink=process-exec known-fail=syntax:1
 package fixtures.exec
 
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
-fun runCommand(input: String): String {
+fun runCommand(): String {
+    val input = readLine() ?: return ""
     val parts = input.trim().split("\\s+".toRegex())
     val process = ProcessBuilder(*parts.toTypedArray())
         .redirectErrorStream(true)

@@ -186,8 +186,10 @@ rather than a negative expectation that passes vacuously.
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 | `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
 | `callgraph-timeout` | warning | an `auto` callgraph fell back down the chain (vta -> rta -> sealed) after exceeding the deterministic work budget derived from `--callgraph-timeout`; the message names both the algorithm that gave up and the one that produced the graph |
-| `callgraph-unresolved-calls` | warning | call sites that resolved to no callee and emit no edge (`count` is how many, mirrored in `stats.unknownCallPropagations`) |
+| `callgraph-unresolved-calls` | warning | call sites that resolved to no callee and emit no edge (`count` is how many) |
 | `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
+| `fixpoint-cap` | warning | the P4 taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
+| `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
 
 ## stats
 
@@ -201,13 +203,20 @@ and a 0.0 over 400 calls are the same number and opposite facts, so the ratio
 is never published alone (the same rule as `sliceCount` beside
 `connectivity`). Java sources contribute declarations but no calls, so the
 ratio measures Kotlin call sites — `callsTotal` says how many there were —
-plus `unknownCallPropagations` (resolved tier: the call sites that resolved
-to no callee and emit no call-graph edge; the flow engine's use of it —
-propagation per `--unknown-call` — arrives with the engine), `loweringFailures{}` — itemised by
+plus `unknownCallPropagations` (resolved tier with `--dataflow` on: the calls
+the engine had no pack entry for and propagated anyway per the default
+`--unknown-call propagate` — counted per call where taint ACTUALLY moved, so
+the conservative default's precision cost is a number; with the engine off it
+is the call sites that resolved to no callee),
+`loweringFailures{}` — itemised by
 construct, published beside `functionsLowered`, the function count it was
 computed over (a rate without its denominator is not a result) —
-`fixpointCapHits`, `sourceCount`, `sinkCount`, `sliceCount`,
-`crossDependencySliceCount`, `reachableSliceCount`, `truncations{}`,
+`fixpointCapHits` published beside `functionsAnalysed`, the function count the
+taint worklist actually ran over (the same denominator rule) —
+`sourceCount`/`sinkCount` are the source/sink SITES the model pack matched in
+analysed code (not pack sizes; resolution regressions shrink them) —
+`sliceCount`, `crossDependencySliceCount`, `reachableSliceCount`,
+`truncations{}`,
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy
 resolution fallout — never read such a report as facts about the code).
 
@@ -313,9 +322,93 @@ scope that reaches it): `{"maxPathsPerSymbol":3,"symbols":[{"canonicalName":
 edge id exists in the report and the walk is connected — the same invariant
 the connectivity gate checks, published for consumers.
 
+## dataFlow — DataFlowEvidence (resolved tier, P4)
+
+Published when `--backend resolved` runs and `--dataflow` is not `none`
+(default `security`); `null` at the syntax tier, which has no KIR and no flow
+engine (docs/KOSI.md defect 1). The P4 engine is INTRAPROCEDURAL, field-
+sensitive taint over each lowered function's CFG, iterated with a worklist to
+a real fixpoint (`kosi-flow`, compiler-free). `--dataflow reachable`
+additionally intersects the slices with the call graph's reachability from the
+declared roots and sets `reachableFromRoots` on the survivors;
+`--dataflow crypto` and `--dataflow all` run the same pack today (the crypto
+collector's own model arrives with P8); `security-deps` behaves as `security`
+until P9.
+
+Everything that decides a category is DATA: the shipped model pack
+(`kosi-models/resources/models/security-pack-v0.json`, merged with user packs
+via `--patterns` when that flag lands). The engine hard-codes no rule about
+categories. Pack argument-index convention: `0` is the RECEIVER when the
+callee has one, otherwise the first argument; `n` is the n-th element of that
+`(receiver,) arguments` sequence; `-1` is the call's result. Constructor
+callees render as the class FQN with no `<init>` suffix, so a constructor's
+first parameter is index 0.
+
+### dataFlow.slices[] — FlowSlice
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `id` | string | `slice-000001...`, ordered by source then sink site |
+| `sourceId`, `sinkId` | string | both always present in `nodes[]` |
+| `sourceName`, `sinkName` | string | callee FQNs matched from the pack |
+| `sourceFunction`, `sinkFunction` | string | the one function both ends live in (intraprocedural) |
+| `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
+| `taintKinds` | string[] | the categories travelling on the trace |
+| `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
+| `pathLength` | int | `edgeIds.size` |
+| `elided` | boolean? | true when the trace cap (`--dataflow-max-trace-nodes`) cut the MIDDLE of the walk; the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
+| `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
+| `accessPath` | string | the tainted register (and path suffix) at the sink, `base::field` form |
+| `crossesModule`, `crossesDependency` | boolean | false at P4 by construction; the gate fails any slice claiming otherwise |
+| `reachableFromRoots` | boolean | `--dataflow reachable` only |
+| `ruleId`, `ruleName`, `description`, `severity`, `confidence`, `riskScore` | | `severity` comes from the matched SINK PACK ENTRY (severity as data), `confidence` is `high` for pack-matched (resolved) sites, `riskScore` derives from severity |
+| `flowKey` | string | SHA-256 over the flow's endpoints and trace — stable across runs for suppression |
+
+Invariants asserted by `kosi golden` and the promotion gate on every slice:
+`sourceId ∈ nodeIds`, `sinkId ∈ nodeIds`, `edgeIds` form a connected walk
+source -> sink, and `ruleId`/`severity`/`confidence`/`riskScore`/`flowKey` are
+non-empty.
+
+### dataFlow.nodes[] / edges[] — FlowNode / FlowEdge
+
+One node per trace program point (deduplicated across slices, ids assigned
+after sorting by file/line/kind/name): `kind` is `source`, `sink`, or the
+propagation role (`call`, `concat`, `field`, `index`, `assign`, `phi`,
+`elvis`, `new`, `propagate`). Edges (`dfe-...`) are deduplicated by
+`(sourceId, targetId, kind)`; kind `elided` marks a cap-cut walk.
+
+The endpoints are guaranteed: `sourceId` always names a node of kind
+`source` and `sinkId` a node of kind `sink`. When the backward walk cannot
+reach the source — the trace cap, a cycle, or a transfer that moved a fact
+without recording provenance — the source is prepended and the slice is
+marked `elided` rather than published as a shorter complete trace (R54).
+
+### dataFlow.stats
+
+`sliceCount`, `uniqueFlows` (distinct `flowKey`s), `crossDependencySlices`,
+`reachableSlices`, `connectivity` (fraction of slices whose walk is
+connected; 1.0 is the gate — but note it walks the edge list built from the
+trace's own consecutive nodes, so it is 1.0 by construction and catches only
+an id-assignment defect), `integrityViolations` (slices failing any
+invariant, including the endpoint-kind check that `connectivity` cannot see;
+0 is the gate, and this is the one with teeth). Both counts are computed from
+the emitted slices; `crossDependencySlices` in particular is counted, never
+written as a constant the gate then reads back (R55). `summariesComputed`/`summariesByOrigin{}` (empty at P4 — computed
+interprocedural summaries are P5; `origin` is how a reviewer tells a computed
+summary from blanket propagation).
+
+### dataFlow.patterns — ModelPackRef
+
+The effective pack: `builtin` names, `user` names, and the five entry counts
+(`sourceCount`, `sinkCount`, `passthroughCount`, `sanitizerCount`,
+`effectCount`). These are PACK sizes — the matched SITES in code are
+`stats.sourceCount`/`stats.sinkCount`.
+
 ## Later-phase sections
 
-`dataFlow`, `crypto`, `apiEndpoints`, `services`, `urls` and
+`crypto`, `apiEndpoints`, `services`, `urls` and
 `securitySignals` are part of the v1 envelope now (emitted empty or null) so
 consumers can rely on the shape; their population is phase work and each
-populating phase updates this document in the same PR.
+populating phase updates this document in the same PR. `dataFlow` is
+populated as of P4 (above).

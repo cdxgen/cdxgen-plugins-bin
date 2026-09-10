@@ -11,7 +11,7 @@ import io.cdxgen.kosi.schema.DiagnosticCodes
  *   kosi:want-not <kind> key=value...   (negative expectation)
  *
  * kinds and keys:
- *   flow        source=<category> sink=<category> [count=N] [mode=M]
+ *   flow        source=<category> sink=<category> [count=N] [mode=M] [fn=<function>]
  *   edge        from=<symbol> to=<symbol> [calltype=T]
  *   reachable   symbol=<symbol> [from=<symbol>] [maxdepth=N]
  *   usage       name=<name> [kind=call|operator|reference]
@@ -19,6 +19,11 @@ import io.cdxgen.kosi.schema.DiagnosticCodes
  *   declaration name=<name> [kind=<kind>]
  *   module      name=<name> [platform=<platform>]
  *   diagnostic  code=<code> [count=N]  (positive: code present; negative: absent)
+ *
+ * `fn=` scopes a flow expectation to the function whose canonical name
+ * matches (exact, or `~substring`): with it, a fixture can demand a flow in
+ * one function and demand the ABSENCE of that same-category flow in its
+ * sibling, which is how the clean-sibling negative stays expressible.
  *
  * Values match exactly unless prefixed with `~` (substring match). Negative
  * expectations are written before positive ones in every fixture (the
@@ -47,6 +52,7 @@ data class Annotation(
     val code: String?,
     val count: Int?,
     val mode: String?,
+    val fn: String?,
     val maxDepth: Int?,
     val knownFailAll: Int?,
     val knownFailByBackend: Map<String, Int>,
@@ -84,6 +90,9 @@ data class Annotation(
                     errors.add(Categories.vocabularyError(category))
                 }
             }
+        }
+        if (kind != Kind.FLOW && fn != null) {
+            errors.add("fn= is only valid on flow expectations")
         }
         if (kind == Kind.EDGE && (from == null || to == null)) errors.add("edge requires from= and to=")
         if (kind == Kind.REACHABLE && symbol == null) errors.add("reachable requires symbol=")

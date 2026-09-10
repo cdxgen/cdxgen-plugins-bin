@@ -35,6 +35,7 @@ object ModelPacks {
                 category = require(entry.str("category"), "sinks[].category", name),
                 relevantArguments = entry.arr("relevantArguments")?.items?.map { it.asLong().toInt() } ?: emptyList(),
                 receiverType = entry.str("receiverType"),
+                severity = entry.str("severity") ?: "high",
             )
         } ?: emptyList()
         val passthroughs = root.arr("passthroughs")?.objects()?.map { entry ->

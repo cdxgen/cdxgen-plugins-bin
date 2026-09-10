@@ -5,9 +5,116 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
-## Phase 3 — the call graph and reachability (this branch)
+## Phase 4 — intraprocedural, field-sensitive taint (this branch)
 
-Branch `feat/kosi-p3-callgraph`, off `feat/kosi` (`94aecaa`).
+Branch `feat/kosi-p4-taint`, off `feat/kosi` (`1aecdc0`).
+
+**What ships.** `kosi-flow` (compiler-free: KIR + schema + model-pack types
+only) runs forward, field-sensitive taint over every lowered function's CFG,
+iterated with a worklist to a real fixpoint — loop-carried flows need the
+second rotation and get it (`taint-loop-fixpoint` pins the shape a fixed
+pass count silently misses). Sources, sinks, passthroughs, sanitizers and
+effects are DATA in the shipped pack (`kosi-models`); the engine hard-codes
+no rule about categories. Taint is tracked on access paths `(base, field*)`:
+writing `obj.query` does not taint `obj.column` — `field-sensitivity`'s
+negative half is golem's most valuable single negative, written before any
+positive taint fixture, and `TaintEngineTest`
+.aFieldInsensitiveEngineReportsTheCleanSibling proves it fails with access
+paths collapsed (the annotation has teeth, not a vacuous pass). Scope
+functions (let/run/apply/also/with/use) now inline their lambda bodies for
+qualified calls too, bind `it` as a local and rebind `this` inside
+apply/run/with bodies (`scope-function-flow` pins receiver taint through all
+three bindings). `--dataflow reachable` intersects slices with call-graph
+reachability; severity is DATA on sink pack entries.
+
+**Lowering defects the new fixtures exposed (fixed, each lowering a shape the
+validator or corpus can now see):** `x ?: return` emitted the return
+mid-block (the elvis fallback now lowers inside the null arm's block, caught
+by `kosi kir dump`'s CFG validation on the loop fixture); `for` loop
+parameters read as member accesses on `this` (`isLocalReference` now binds
+them); implicit `it` likewise. No `kir` format change.
+
+**Pack entries corrected by executing them for the first time** (the P0 seed
+was never run through an engine): `ProcessBuilder.<init>` [1] -> `[0]` and
+constructor patterns render as the class FQN (the golem pattern-notation
+lesson: `java.lang.ProcessBuilder.<init>` could never match the renderer's
+`java.lang.ProcessBuilder`); `Runtime.exec`/`Logger.info`/`readValue`
+receiver-vs-argument indexes; `map` passthrough [[1,-1]] -> [[0,-1]];
+`MutableList.add` pattern matched to the renderer's owner-class form;
+collection/stdlib passthroughs (`listOf`, `split`, `toTypedArray`,
+`iterator`/`next`, `component1..5`) and empty-flow entries for the
+mechanical calls the lowering itself generates (`isNull`, `equals`,
+`iterator`, scope-function evidence edges) so they neither propagate nor
+inflate `unknownCallPropagations`.
+
+**Gate, measured (JVM, darwin-aarch64, M4 Pro):**
+
+- Taint recall on the single-function tier: **1.000 (18 of 18 flow
+  expectations)** at the resolved slots — target >= 0.85 (`taint-recall`).
+- Precision per flow: **1.000 (22 of 22 slices)** — every reported slice was
+  asked for by an expectation; target >= 0.95 (`precision-per-flow`, live
+  for the first time since P0).
+- Slice connectivity **1.000 over 22 slices**, integrity violations **0 of
+  22** — and read the two apart. `connectivity` walks the edge list that
+  `materialise` builds from consecutive trace nodes, so it is 1.000 **by
+  construction**: its value is that it now reads NOT_EVALUATED over 0 slices
+  instead of a vacuous pass, not that it can catch a bad trace. R54 is the
+  proof — 3 of 11 slices carried a trace that did not start at its source
+  while this line read 1.000. The check with teeth is
+  `integrity-violations`, which since the R54 fix compares the endpoint node
+  KINDS against the materialised node list rather than the trace against
+  itself, and which reads 2 of 3 the moment the defect is reintroduced.
+- `fixpointCapHits` **0 over 170 analysed functions** across all fixtures
+  (`fixpoint-cap`, denominator published).
+- Determinism, re-measured in review over **both** graph-bearing slots
+  rather than `resolved` alone (R53 generalises: a slot the sweep never runs
+  is a slot the sweep proves nothing about, and `exported` is the one whose
+  missing reflection entry killed the P3 image): **70 of 70 fixture/slot
+  pairs** byte-identical across two runs on the JVM, **70 of 70** in the
+  native image, and **70 of 70** native == JVM with `tool.commit`
+  normalised. `scripts/determinism-sweep.sh` deletes its outputs first,
+  checks exit codes, asserts sizes and prints per-pair slice/node/edge
+  counts. Native binary 95,743,696 B on GraalVM CE 25.3.4.1; `kosi version`
+  in the image reports all three components `available`.
+- Corpus: 876 annotations over 34 fixtures x 4 slots, **789 evaluated
+  outcomes**: 765 pass /
+  0 fail / 24 xfail / 0 xpass; structural recall 1.000 (411 of 411). The
+  xfail count grew 14 -> 24 — every one of the new markers is a flow
+  expectation scoped `known-fail=syntax:1` (defect 1 remains open at the
+  syntax tier BY DESIGN); the resolved-tier flow xfails went 8 -> 0. The
+  two-way ratchet re-proven on this branch (broken expectation FAIL;
+  `known-fail=resolved:99` on a passing expectation XPASS at both resolved
+  slots; restored, exit 0).
+- Goldens: 136 pairs (34 fixtures x 4 slots), 0 problems.
+- Repo tiers (all five pinned repos, 4 slots each): 0 failed expectations,
+  0 xpass, 0 slices — correct: no repo calls a pack source in a function
+  with a pack sink (cross-function flows are P5). Engine cost measured A/B
+  on spring-fu: 9.36 s (`--dataflow none`) vs 9.04 s (`security`) — within
+  noise; a fixpoint over functions with no facts is one CFG walk. Per-repo
+  `resolvedCallRatio` unchanged to four decimals (spring-fu 0.9405, anki
+  0.9232, ktor 0.9024, nowinandroid 0.7564, kampkit 0.6639). Per-repo
+  exported-reach against the declarations[] denominator, first real
+  measurement (pre-R49 figures read a tautological 1.0000): ktor 0.9932
+  (441/444), nowinandroid 0.9904 (617/623), kampkit 0.9865 (73/74), anki
+  0.9620 (7183/7467), **spring-fu 0.5359 (447/834)** — the gap is dominated
+  by public methods DECLARED IN JAVA (the repo's `*Initializer` modules),
+  the R49 `Greeter.greet` defect at repo scale, owned by P9's bytecode
+  tier. The `exported-reach` check keeps the P3 roadmap's fixture scope for
+  its 0.95 bar; the per-repo absolute bar returns with P9, and until then
+  `per-repo-exported-reach` (added in review, R56) ratchets the five repo
+  fractions against the baseline so an excluded population is still measured
+  by something.
+
+**Defect 1 narrowed:** `command-exec` and `old-language-version`'s flow
+expectations now read real slices at the resolved tier (each fixture gained a
+pack source call — `readLine()` — the flows were parameter-shaped, which is
+P5's summaries, not P4's intraprocedural sources); their markers are scoped
+`known-fail=syntax:1`. `FlowFoundAcrossLanguageVersionRange` asserts the
+fixture's flow PASSES at every accepted language version.
+
+## Phase 3 — the call graph and reachability
+
+Merged 2026-09-10 (`feat/kosi` at `1aecdc0`, squashed).
 
 **What ships.** `kosi-graph` (compiler-free, KIR + schema types only) builds
 `callGraph` on the resolved tier: dispatch resolution per mode (`static`,
@@ -394,14 +501,36 @@ Gate proofs recorded in the PR body:
    docs/BUILD.md §3.
 5. **UPX-LZMA is not used**: packed binary segfaults on macOS
    (docs/BUILD.md §4).
+6. **Every kosi JVM runs headless and out of the macOS Dock.** The Analysis
+   API brings in intellij-core, which initialises AWT; without
+   `-Djava.awt.headless=true -Dapple.awt.UIElement=true` an analyze run
+   registers as an application and takes keyboard focus, once per fixture.
+   Set in the build for tests and the bench JavaExecs, in
+   `org.gradle.jvmargs` for the daemon, in `applicationDefaultJvmArgs` for
+   the launcher, and in `main()` for the fat jar and the native image, where
+   there is no launcher to set it. (R57)
+7. **`dependency-crossing-flows` reports NOT_EVALUATED, not PASS, while the
+   engine is intraprocedural.** Both ends of every slice are one function,
+   so nothing can violate the criterion; a criterion nothing could have
+   violated must not be counted as met. It becomes a real comparison in P5.
+   (R55)
 
 ## Defect registry (numbers referenced by `known-fail=<backend>:<n>`)
 
 | # | backend | defect | status |
 | --- | --- | --- | --- |
-| 1 | syntax | no flow engine at the syntax tier: no slices, no call graph; `command-exec` carries `known-fail=1` for `flow source=untrusted-input sink=process-exec`. The resolved front end (P1) has no flow engine either, so the marker stays backend-agnostic until P4 | open |
+| 1 | syntax | no flow engine at the syntax tier: no slices, no call graph; the flow expectations of `command-exec`, `old-language-version` and the six P4 taint fixtures carry `known-fail=syntax:1` for their flows. **At the resolved tier this defect is closed (P4): the same expectations are live ratchets there and must pass** | open (syntax tier) — closed at resolved in P4 |
 | 2 | syntax | Java sources are listed in `files[]` but not parsed at the syntax tier: their declarations are absent (R19 added the diagnostic; P1 closes the gap at the resolved tier, where Java PSI is parsed through the same symbols). `java-interop` and `empty-classpath` carry `known-fail=syntax:2` on the expectations that need the resolved tier | open (resolved tier: closed) |
 | 3 | resolved | the native image attaches no JDK module: `java.home` is unset in an image, so `java.*` symbols go unresolved (reported as `classpath-partial`, and visible in the ratio — `weak-crypto` resolves 0/4 in the image vs 4/4 on the JVM), and `--jdk-home` fails with `ProviderNotFoundException: Provider "jrt" not found` because the image has no jrt filesystem provider for a modular JDK's `lib/modules`. Resolved-tier native output is therefore not byte-identical to JVM output; the syntax tier is unaffected | **closed in P2** — the image reads `lib/modules` through its own jimage reader and attaches per-module jars; `weak-crypto` 4/4 in the image, 8 fixtures byte-identical native vs JVM, `--jdk-home` works or is a usage error (see Phase 2) |
+
+## Defects found and fixed during the P4 review
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R54 | kosi-flow | **3 of 11 fixture slices carried a trace that did not start at the source, and the run reported connectivity 1.000 with 0 integrity violations.** `KirElvis` merged its operands' facts and recorded no provenance move, so the backward walk dead-ended at every `x ?: y` on a taint path — and `readLine() ?: ""` appears in four fixtures. The emitted trace then began wherever the walk happened to stop (`scope-function-flow`'s two slices began at a *field write*), `elided` was null, and nothing caught it: `isConnected` walks the edge list that `materialise` builds from consecutive trace nodes, so it is 1.000 **by construction** and can only catch a defect in id assignment. `everySliceSatisfiesTheTraceInvariants` asserted `sourceId in nodeIds`, which is trivially true — `sourceId` *is* `nodeIds.first()`. The phase's "connectivity is a real check for the first time" is the claim this disproves | three changes, each independent of the others. (1) Elvis records provenance, and concat/phi/elvis now attribute **per fact** to the operand that carried it, through one `joinInto` helper — blaming the first non-empty operand sends the other fact's walk into a register that never held it. (2) `buildSlice` GUARANTEES the endpoints: when the walk does not reach the birth move — cap, cycle, or missing provenance — the source site is prepended and the slice is marked `elided`, so a cut trace looks cut. (3) `invariantsHold` checks the endpoint node KINDS against the materialised node list, which is the one property here not derived from the trace-building code. Measured after the fix: 0 of 22 slices broken, same 22 slices, 4 goldens changed. Proven to have teeth by reintroducing the defect: elvis alone -> 2 of 3 slices marked `elided`; elvis plus the endpoint guarantee removed -> **integrityViolations 2 of 3** where it read 0 before. `anElvisOnTheTaintPathKeepsTheSourceEndpoint`, `aTraceTruncatedByTheCapKeepsItsSourceAndSaysSo`, `aJoinAttributesEachFactToTheOperandThatCarriedIt` |
+| R55 | kosi-bench | `dependency-crossing-flows` reported **PASS** on a criterion nothing could have violated. Both ends of an intraprocedural slice are the same function, so `crossesDependency` is false for a structural reason — and the count the gate read back was written as the literal `0` two modules away. R49's shape with a different variable name: a green line that carries no information | the stats field is counted from the slices (`slices.count { it.crossesDependency }`, likewise `reachableSlices`) instead of asserted, and the zero case is **NOT_EVALUATED** naming why nothing could have violated it. Nonzero still FAILs. It becomes a real comparison in P5, when summaries give a slice two ends. `crossDependencyIsCountedFromTheSlicesNotAsserted` |
+| R56 | kosi-bench | **`exported-reach`'s population shrank in the same change that would have made it fail.** P3 summed every exported slot; P4 restricted the 0.95 bar to the fixture tier, and the excluded repos include spring-fu at **0.5359**. The reason given is sound — the repo denominators only became honest with R49, and the misses are Java-declared bodies that P9's bytecode tier owns — but "reported in the detail line" is not a check. spring-fu could fall from 0.5359 to 0.05 and every gate would stay green | the fixture bar stands (holding this phase on a named P9 defect would hold it on work it does not own), and the repo figures gain `per-repo-exported-reach`: no absolute bar, but a repo may not DROP more than half a point against its baseline. The same two-way discipline the corpus ratchet uses, and it costs nothing — the numbers were already measured |
+| R57 | build | **every `kosi analyze` stole keyboard focus on macOS.** The Analysis API pulls in intellij-core, which initialises AWT; the JVM then registers as a real application, appears in the Dock and takes focus on startup. A corpus run over 35 fixtures does that 35 times and makes the machine unusable while it runs — reported from the far side of a review, which is the only way a defect like this surfaces | `-Djava.awt.headless=true -Dapple.awt.UIElement=true` on every JVM the build starts (`HEADLESS_JVM_ARGS` for tests and the `kosiTask` JavaExecs, `org.gradle.jvmargs` for the daemon, `applicationDefaultJvmArgs` for the installed launcher) and, for the paths that have no launcher — `java -jar kosi-all.jar` and the native image — set in `main()` before anything can touch the toolkit, never overriding a value the caller chose |
 
 ## Defects found and fixed during the P3 review
 

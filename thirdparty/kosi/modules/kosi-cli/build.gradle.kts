@@ -27,6 +27,9 @@ dependencies {
 
 application {
     mainClass = "io.cdxgen.kosi.cli.MainKt"
+    // See HEADLESS_JVM_ARGS in the root build: intellij-core initialises AWT,
+    // and without these a CLI run steals focus on macOS.
+    applicationDefaultJvmArgs = listOf("-Djava.awt.headless=true", "-Dapple.awt.UIElement=true")
 }
 
 // Deterministic provenance: inject the commit at build time (fallback

@@ -11,6 +11,9 @@ sibling of `golem` (Go) and `rusi` (Rust). It answers, for a Kotlin project:
 - which functions call which, and what is reachable from `main`, the exported
   API, or framework-registered handlers (resolved tier, call graph +
   reachability)
+- which untrusted data reaches dangerous calls within a function —
+  field-sensitive intraprocedural taint with sources/sinks/passthroughs/
+  sanitizers/effects as data (resolved tier, `dataFlow.slices[]`)
 - which packages/purls the evidence attaches to
 
 Phase 0 ships the **syntax tier** (`--backend syntax`): PSI-only parsing via
@@ -58,6 +61,23 @@ shape the VIEW: a path a filter cuts survives as one `collapsed` edge
 carrying the hop count and the packages traversed — it never silently
 vanishes. `auto` runs vta, falling back down the chain (rta, then sealed) on
 a deterministic work budget recorded as `callgraph-timeout`.
+
+### Taint analysis (P4, resolved tier)
+
+`--dataflow none|security|crypto|reachable|all` (default `security`) runs the
+intraprocedural, field-sensitive taint engine over the lowered KIR and
+publishes `dataFlow.slices[]` — each slice a connected trace from a source
+call to a sink argument, with `severity`/`ruleId`/`flowKey` and an
+`accessPath`. Sources, sinks, passthroughs, sanitizers and effects are DATA
+in the shipped model pack (`modules/kosi-models/src/main/resources/models/`);
+user packs extend or override entries. Taint is tracked on access paths, so
+sinking one field of a partly-tainted object does not report its clean
+siblings (`fixtures/field-sensitivity` pins the negative). Loop-carried
+flows converge to a worklist fixpoint — a cap that is hit is the
+`fixpoint-cap` diagnostic over `stats.functionsAnalysed`, never a silent
+truncation. `--dataflow reachable` keeps only slices whose function is
+reachable from the declared roots and flags them. Interprocedural summaries
+(param-to-param, dispatch replay) are P5.
 
 Exit codes: `0` success, `1` expectations failed (ratchet/golden/bench),
 `2` usage error, `3` runtime error.

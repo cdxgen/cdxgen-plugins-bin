@@ -671,6 +671,17 @@ object KirLowering {
         private val loopExits = ArrayDeque<String>()
         private val loopContinues = ArrayDeque<String>()
 
+        /**
+         * Inlined bodies of `apply`/`run`/`with` run with the scope
+         * function's receiver bound as `this`: member reads and writes inside
+         * the lambda target the receiver register, not the enclosing
+         * function's `this`. Stacked so nested scope functions restore the
+         * outer binding when their body ends.
+         */
+        private val thisOverrides = ArrayDeque<String>()
+
+        private fun currentThis(): String = thisOverrides.lastOrNull() ?: "v this"
+
         private fun throwNull(): String {
             val reg = t()
             emit(KirNew(reg, "kotlin.NullPointerException", emptyList()))
@@ -1156,13 +1167,15 @@ object KirLowering {
                 "v$name"
             } else {
                 // Not a local: a member (or top-level) property read, carried
-                // by the access path.
+                // by the access path over the CURRENT `this` (a scope
+                // function's receiver when inside an inlined apply/run/with).
+                val thisReg = currentThis()
                 val reg = t()
                 emit(
                     KirFieldGet(
                         reg,
-                        "v this",
-                        AccessPath.of("v this", listOf(AccessPath.Element.Field(name))),
+                        thisReg,
+                        AccessPath.of(thisReg, listOf(AccessPath.Element.Field(name))),
                     ),
                 )
                 reg
@@ -1181,12 +1194,25 @@ object KirLowering {
          */
         private fun isLocalReference(psi: KtNameReferenceExpression): Boolean {
             val name = psi.getReferencedName()
+            // Kotlin's implicit lambda parameter: the scope-function lowering
+            // binds it as a plain local (`v it` <- receiver), so a read of it
+            // must be a local read, not a member access on `this`.
+            if (name == "it") return true
             var cursor: com.intellij.psi.PsiElement? = psi.parent
             while (cursor != null) {
                 when (cursor) {
                     is KtNamedFunction -> {
                         if (cursor.valueParameters.any { it.name == name }) return true
                     }
+
+                    is org.jetbrains.kotlin.psi.KtForExpression -> {
+                        // A `for` loop parameter is bound to the next() result
+                        // by the lowering (`v<name>` <- iterator.next()); a
+                        // read of it must stay a local read.
+                        if (cursor.loopParameter?.name == name) return true
+                        if (cursor.destructuringDeclaration?.entries?.any { it.name == name } == true) return true
+                    }
+
                     is KtBlockExpression, is org.jetbrains.kotlin.psi.KtClassBody -> {
                         for (child in cursor.children) {
                             when (child) {
@@ -1197,6 +1223,7 @@ object KirLowering {
                             }
                         }
                     }
+
                     else -> {}
                 }
                 cursor = cursor.parent
@@ -1204,7 +1231,7 @@ object KirLowering {
             return false
         }
 
-        private fun thisReg(): String = "v this"
+        private fun thisReg(): String = currentThis()
 
         private fun arrayAccess(psi: org.jetbrains.kotlin.psi.KtArrayAccessExpression): String {
             val receiver = psi.arrayExpression?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
@@ -1357,14 +1384,19 @@ object KirLowering {
 
         private fun KtNameReferenceExpression.receiverExpressionSafe(): String {
             val parentDot = parent as? KtDotQualifiedExpression
-            return if (parentDot != null) lowerExpr(parentDot.receiverExpression, Pos.NESTED) else "v this"
+            return if (parentDot != null) lowerExpr(parentDot.receiverExpression, Pos.NESTED) else currentThis()
         }
 
         /** `?:` -> phi at statement/return positions (§4); Elvis opcode nested. */
         private fun elvis(psi: KtBinaryExpression, pos: Pos): String {
             val left = psi.left?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
-            val fallback = psi.right?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
-            if (pos == Pos.NESTED) {
+            // A fallback that itself leaves the function (`x ?: return`) must
+            // lower INSIDE the null arm's block — a terminator can never land
+            // in the middle of the current one. Plain expressions at nested
+            // positions keep the Elvis opcode (the §4 shape P2 pinned).
+            val fallbackLeaves = psi.right.let { it is KtReturnExpression || it is KtThrowExpression }
+            if (pos == Pos.NESTED && !fallbackLeaves) {
+                val fallback = psi.right?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
                 val reg = t()
                 emit(KirElvis(reg, left, fallback))
                 return reg
@@ -1376,6 +1408,7 @@ object KirLowering {
             val joinId = newId()
             emit(KirBranch(isNull, nullId, valueId))
             startBlock(nullId)
+            val fallback = psi.right?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
             goto(joinId)
             startBlock(valueId)
             goto(joinId)
@@ -1516,7 +1549,17 @@ object KirLowering {
             val receiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
             val selector = psi.selectorExpression
             return when (selector) {
-                is KtCallExpression -> callWithReceiver(selector, receiver)
+                is KtCallExpression -> {
+                    // `x.let { .. }` and friends: qualified scope functions
+                    // inline their lambda with the receiver bound (§4), like
+                    // the receiver-less `with(x) { .. }` form.
+                    val name = (selector.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
+                    if (name in SCOPE_FUNCTIONS && selector.hasLambdaArgument()) {
+                        inlineScopeFunction(selector, name!!, receiver)
+                    } else {
+                        callWithReceiver(selector, receiver)
+                    }
+                }
                 is KtNameReferenceExpression -> {
                     val reg = t()
                     emit(
@@ -1550,7 +1593,16 @@ object KirLowering {
             emit(KirBranch(isNull, nullId, valueId))
             startBlock(valueId)
             val valueResult = when (val selector = psi.selectorExpression) {
-                is KtCallExpression -> callWithReceiver(selector, receiver)
+                is KtCallExpression -> {
+                    val name = (selector.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
+                    if (name in SCOPE_FUNCTIONS && selector.hasLambdaArgument()) {
+                        // `x?.let { .. }`: the inlining runs on the non-null
+                        // arm, where the receiver register is the value.
+                        inlineScopeFunction(selector, name!!, receiver)
+                    } else {
+                        callWithReceiver(selector, receiver)
+                    }
+                }
                 is KtNameReferenceExpression -> {
                     val reg = t()
                     emit(
@@ -1581,24 +1633,19 @@ object KirLowering {
         private fun call(psi: KtCallExpression): String {
             val name = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
                 ?: return callWithReceiver(psi, receiver = null)
-            // A receiver-less scope-function call (`with(x) { }`, `use(x) { }`)
+            // A receiver-less scope-function call (`with(x) { }`, `run { }`)
             // or a plain call that happens to carry a lambda.
-            if (name in SCOPE_FUNCTIONS) {
-                val hasLambda = psi.valueArguments.any {
-                    it.getArgumentExpression() is KtLambdaExpression
+            if (name in SCOPE_FUNCTIONS && psi.hasLambdaArgument()) {
+                val receiver: String = if (name == "with" || name == "run") {
+                    psi.valueArguments.firstNotNullOfOrNull { arg ->
+                        (arg.getArgumentExpression() as? KtExpression)
+                            ?.takeIf { it !is KtLambdaExpression }
+                            ?.let { lowerExpr(it, Pos.NESTED) }
+                    } ?: "v this"
+                } else {
+                    "v this"
                 }
-                if (hasLambda) {
-                    val receiver: String = if (name == "with" || name == "run") {
-                        psi.valueArguments.firstNotNullOfOrNull { arg ->
-                            (arg.getArgumentExpression() as? KtExpression)
-                                ?.takeIf { it !is KtLambdaExpression }
-                                ?.let { lowerExpr(it, Pos.NESTED) }
-                        } ?: "v this"
-                    } else {
-                        "v this"
-                    }
-                    return inlineScopeFunction(psi, name, receiver)
-                }
+                return inlineScopeFunction(psi, name, receiver)
             }
             return callWithReceiver(psi, receiver = null)
         }
@@ -1642,10 +1689,16 @@ object KirLowering {
         }
 
         /**
-         * Scope functions (let/run/apply/also/with) and `use`: inline the
-         * lambda body with the receiver bound to a register and retain the
-         * call edge for evidence (§4); `use` shapes the inlined body as
-         * try/finally with the close call in the finally arm.
+         * Scope functions (let/run/apply/also/with/use) and `use`: inline the
+         * lambda body with the receiver bound and retain the call edge for
+         * evidence (§4). Two bindings, matching Kotlin's semantics:
+         *   - `let`/`also`/`use` bind the receiver to the lambda's parameter
+         *     (`it` unless named) as a plain local;
+         *   - `apply`/`run`/`with` bind the receiver as `this` for the body,
+         *     so member reads and writes inside the lambda target it.
+         * `apply`/`also` return the receiver; the others return the body's
+         * value. `use` shapes the inlined body as try/finally with the close
+         * call in the finally arm.
          */
         private fun inlineScopeFunction(psi: KtCallExpression, name: String, receiver: String): String {
             val lambdaPsi = psi.valueArguments
@@ -1662,17 +1715,20 @@ object KirLowering {
                     line = psi.line(),
                 ),
             )
+            val bindsParameter = name == "let" || name == "also" || name == "use"
             val paramReg = "v${lambdaPsi.valueParameters.firstOrNull()?.name ?: "it"}"
-            emit(KirStore(paramReg, receiver))
+            if (bindsParameter) emit(KirStore(paramReg, receiver))
+            val rebindsThis = name == "apply" || name == "run" || name == "with"
+            if (rebindsThis) thisOverrides.addLast(receiver)
             val isUse = name == "use"
-            val useResult = if (isUse) {
+            val bodyResult = if (isUse) {
                 // use -> try/finally (§4): body in the try arm, close in the
                 // finally arm.
                 val tryId = newId()
                 val finallyId = newId()
                 goto(tryId)
                 startBlock(tryId)
-                val bodyResult = lowerLambdaBody(lambdaPsi)
+                val result = lowerLambdaBody(lambdaPsi)
                 goto(finallyId)
                 startBlock(finallyId)
                 emit(
@@ -1684,11 +1740,13 @@ object KirLowering {
                         line = psi.line(),
                     ),
                 )
-                bodyResult
+                result
             } else {
                 lowerLambdaBody(lambdaPsi)
             }
-            return useResult
+            if (rebindsThis) thisOverrides.removeLast()
+            // apply/also hand the receiver back; let/run/with/use the value.
+            return if (name == "apply" || name == "also") receiver else bodyResult
         }
 
         private fun lowerLambdaBody(lambdaPsi: KtLambdaExpression): String {
@@ -1727,6 +1785,9 @@ object KirLowering {
     }
 
     private val SCOPE_FUNCTIONS = setOf("let", "run", "apply", "also", "with", "use")
+
+    private fun KtCallExpression.hasLambdaArgument(): Boolean =
+        valueArguments.any { it.getArgumentExpression() is KtLambdaExpression }
 }
 
 private typealias KtDeclaration = org.jetbrains.kotlin.psi.KtDeclaration

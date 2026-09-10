@@ -38,6 +38,19 @@ object Evaluator {
         val slices: List<FlowSlice>,
         val callGraph: CallGraph?,
         val dataFlow: DataFlowEvidence?,
+        /**
+         * The P4 flow metrics' raw counts, computed per evaluation so the
+         * bench carries fractions with BOTH counts (06-CORPUS.md §4).
+         * [flowPositives]/[flowPositivesMatched] are the non-known-fail flow
+         * EXPECTATIONS and how many were satisfied — structural recall over
+         * flows. [flowTruePositives] counts reported slices an expectation
+         * actually asked for (capped per expectation by its `count=`), which
+         * against the reported slice count is precision per FLOW, never per
+         * category pair.
+         */
+        val flowPositives: Int,
+        val flowPositivesMatched: Int,
+        val flowTruePositives: Int,
     ) {
         val pass: List<Outcome> get() = outcomes.filter { it.status == Status.PASS }
         val fail: List<Outcome> get() = outcomes.filter { it.status == Status.FAIL }
@@ -65,14 +78,39 @@ object Evaluator {
         val outcomes = annotations
             .filter { it.mode == null || it.mode == mode }
             .map { ann -> evaluateOne(report, ann, backend) }
+        val slices = report.dataFlow?.slices ?: emptyList()
+        val flowOutcomes = outcomes.filter { it.annotation.kind == Annotation.Kind.FLOW }
+        val flowPositives = flowOutcomes.filter { it.annotation.want && it.annotation.knownFailFor(backend) == null }
+        val claimed = HashSet<Int>()
+        var truePositives = 0
+        for (outcome in flowPositives) {
+            var need = outcome.annotation.count ?: 1
+            for ((index, slice) in slices.withIndex()) {
+                if (need == 0) break
+                if (index in claimed) continue
+                if (sliceMatches(slice, outcome.annotation)) {
+                    claimed.add(index)
+                    truePositives++
+                    need--
+                }
+            }
+        }
         return Evaluation(
             outcomes = outcomes,
             knownFailuresOpen = outcomes.filter { it.status == Status.XFAIL },
-            slices = report.dataFlow?.slices ?: emptyList(),
+            slices = slices,
             callGraph = report.callGraph,
             dataFlow = report.dataFlow,
+            flowPositives = flowPositives.size,
+            flowPositivesMatched = flowPositives.count { it.status == Status.PASS },
+            flowTruePositives = truePositives,
         )
     }
+
+    /** The per-slice half of [flowSatisfied]: categories plus the fn= scope. */
+    fun sliceMatches(slice: FlowSlice, ann: Annotation): Boolean =
+        matches(ann.source, slice.sourceCategory) && matches(ann.sink, slice.sinkCategory) &&
+            (ann.fn == null || matches(ann.fn, slice.sourceFunction) || matches(ann.fn, slice.sinkFunction))
 
     private fun evaluateOne(report: KosiReport, ann: Annotation, backend: String): Outcome {
         val satisfied = when (ann.kind) {
@@ -119,11 +157,8 @@ object Evaluator {
 
     private fun flowSatisfied(report: KosiReport, ann: Annotation): Boolean {
         val slices = report.dataFlow?.slices ?: return false
-        val matched = slices.filter { slice ->
-            matches(ann.source, slice.sourceCategory) && matches(ann.sink, slice.sinkCategory)
-        }
         val expected = ann.count ?: 1
-        return matched.size >= expected
+        return slices.count { sliceMatches(it, ann) } >= expected
     }
 
     private fun edgeSatisfied(report: KosiReport, ann: Annotation): Boolean {

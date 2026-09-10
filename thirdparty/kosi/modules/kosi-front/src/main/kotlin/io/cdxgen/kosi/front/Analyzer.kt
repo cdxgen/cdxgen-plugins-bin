@@ -105,6 +105,7 @@ object Analyzer {
                 loweringFailures = emptyMap(),
                 functionsLowered = 0,
                 fixpointCapHits = 0,
+                functionsAnalysed = 0,
                 sourceCount = 0,
                 sinkCount = 0,
                 sliceCount = 0,
@@ -458,6 +459,54 @@ object Analyzer {
                 }
             }
 
+            // P4: the intraprocedural taint engine (kosi-flow, compiler-free).
+            // Sources, sinks, passthroughs, sanitizers and effects are DATA
+            // (the shipped model pack); the engine walks each lowered
+            // function's CFG to a worklist fixpoint. `--dataflow reachable`
+            // intersects the slices with the call graph's reachability from
+            // the roots — a slice whose function no root reaches is not
+            // published, and the surviving ones carry the flag.
+            val flowResult = if (options.dataflow != io.cdxgen.kosi.schema.DataflowMode.NONE) {
+                io.cdxgen.kosi.flow.TaintEngine.analyze(
+                    io.cdxgen.kosi.kir.KirModule(kir.functions),
+                    io.cdxgen.kosi.models.ModelPacks.loadBuiltin(),
+                    io.cdxgen.kosi.flow.TaintEngine.Attribution(fileRelPathByAbsolute, purlByModulePath),
+                    io.cdxgen.kosi.flow.TaintEngine.Options(
+                        mode = options.dataflow.id,
+                        accessPathDepth = options.accessPathDepth,
+                        maxSlices = options.dataflowMaxSlices,
+                        maxTraceNodes = options.dataflowMaxTraceNodes,
+                        maxFunctionInstructions = options.dataflowMaxFunctionInstructions,
+                        unknownCallPropagate = options.unknownCall == "propagate",
+                        skipGenerated = options.dataflowSkipGenerated,
+                    ),
+                )
+            } else {
+                null
+            }
+            val dataFlow = if (flowResult != null) {
+                val evidence = flowResult.evidence
+                if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {
+                    val reachedFunctions = graphResult.callGraph.reachability
+                        .filter { it.reached }
+                        .mapNotNull { entry -> graphResult.callGraph.nodes.firstOrNull { it.id == entry.nodeId }?.canonicalName }
+                        .toSet()
+                    val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
+                    evidence.copy(
+                        slices = kept.map { it.copy(reachableFromRoots = true) },
+                        stats = evidence.stats.copy(
+                            sliceCount = kept.size,
+                            uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
+                            reachableSlices = kept.size,
+                        ),
+                    )
+                } else {
+                    evidence
+                }
+            } else {
+                null
+            }
+
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
@@ -508,7 +557,8 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic) + diagnostics,
+                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic) +
+                    diagnostics + (flowResult?.diagnostics ?: emptyList()),
                 stats = Stats(
                     fileCount = fileCount,
                     declarationCount = drafts.size,
@@ -517,23 +567,26 @@ object Analyzer {
                     resolvedCallRatio = ratio,
                     callsTotal = callsTotal,
                     callsResolved = callsResolved,
-                    // The unresolved call sites the graph walked past: what
-                    // the flow engine would propagate per --unknown-call,
-                    // counted here so the graph's missing edges are a number,
-                    // not a shrug.
-                    unknownCallPropagations = graphResult?.unresolvedCalls ?: 0,
+                    // The unresolved call sites the graph walked past; once the
+                    // flow engine runs it counts the unknown calls through
+                    // which taint ACTUALLY propagated — the honest measure of
+                    // the conservative default's precision cost.
+                    unknownCallPropagations = flowResult?.unknownCallPropagations
+                        ?: graphResult?.unresolvedCalls ?: 0,
                     loweringFailures = kir.failures,
                     functionsLowered = kir.functionCount,
-                    fixpointCapHits = 0,
-                    sourceCount = 0,
-                    sinkCount = 0,
-                    sliceCount = 0,
+                    fixpointCapHits = flowResult?.fixpointCapHits ?: 0,
+                    functionsAnalysed = flowResult?.functionsAnalysed ?: 0,
+                    sourceCount = flowResult?.sourceSites ?: 0,
+                    sinkCount = flowResult?.sinkSites ?: 0,
+                    sliceCount = dataFlow?.slices?.size ?: 0,
                     crossDependencySliceCount = 0,
-                    reachableSliceCount = 0,
-                    truncations = emptyMap(),
+                    reachableSliceCount = dataFlow?.slices?.count { it.reachableFromRoots } ?: 0,
+                    truncations = flowResult?.truncations ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
                 ),
                 callGraph = graphResult?.callGraph,
+                dataFlow = dataFlow,
             )
         }
     }
@@ -705,6 +758,7 @@ object Analyzer {
         diagnostics: List<Diagnostic>,
         stats: Stats,
         callGraph: io.cdxgen.kosi.schema.CallGraph? = null,
+        dataFlow: io.cdxgen.kosi.schema.DataFlowEvidence? = null,
     ): KosiReport {
         val moduleRefs = modules.map { vm ->
             val m = vm.module
@@ -830,7 +884,7 @@ object Analyzer {
             securitySignals = emptyList(),
             crypto = CryptoEvidence(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
             callGraph = callGraph,
-            dataFlow = null,
+            dataFlow = dataFlow,
             apiEndpoints = emptyList(),
             services = emptyList(),
             urls = emptyList(),

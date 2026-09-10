@@ -17,15 +17,13 @@ import kotlin.test.assertTrue
  * the test grows itself when the pin bumps — and must report the same flow at
  * each.
  *
- * Staged semantics, recorded as a deviation: the flow engine arrives in P4,
- * so "reports the same flow" is enforced today as "the flow expectation has
- * the same ratcheted outcome (XFAIL for defect 1) and the resolved front-end
- * facts are identical at every version". The ratchet makes this real: the
- * moment P4 lands (or the flow starts passing at any version), the XPASS
- * fails the corpus, and this test's outcome-equality assertion fails with it.
- * The old-language-version fixture additionally carries the clamp diagnostic
- * (languageVersion = 1.9, below FIRST_SUPPORTED), so every version here also
- * exercises the clamp path.
+ * P4 semantics: the intraprocedural engine is live, so "reports the same
+ * flow" is enforced as "the fixture's positive flow expectation PASSES at
+ * every accepted version, with no violated negative anywhere". Until P4 this
+ * asserted XFAIL everywhere (defect 1) and the ratchet forced this rewrite
+ * the moment the engine landed. The old-language-version fixture additionally
+ * carries the clamp diagnostic (languageVersion = 1.9, below
+ * FIRST_SUPPORTED), so every version here also exercises the clamp path.
  */
 class FlowFoundAcrossLanguageVersionRange {
 
@@ -70,16 +68,21 @@ class FlowFoundAcrossLanguageVersionRange {
             val report = analyzeAt(version)
             val evaluation = Evaluator.evaluate(report, annotations, mode = "all", backend = Backend.RESOLVED.id)
 
-            // The flow expectation's outcome must be identical at every
-            // accepted language version — today XFAIL (defect 1), the direct
-            // analog of golem's flow-at-every-go-directive test.
+            // The flow expectation must PASS at every accepted language
+            // version, and no negative expectation may be violated: the
+            // engine's verdict on this fixture is version-independent.
             val flowOutcomes = evaluation.outcomes
                 .filter { it.annotation.kind == Annotation.Kind.FLOW && it.annotation.want }
                 .map { it.status }
             assertEquals(
-                List(flowAnnotations.size) { Evaluator.Status.XFAIL },
+                List(flowAnnotations.size) { Evaluator.Status.PASS },
                 flowOutcomes,
                 "flow outcome changed at language-version=$version",
+            )
+            assertEquals(
+                emptyList(),
+                evaluation.violatedNegatives().map { it.annotation.kind.id },
+                "a negative expectation was violated at language-version=$version",
             )
 
             // The version diagnostics: the fixture declares 1.9, so the clamp

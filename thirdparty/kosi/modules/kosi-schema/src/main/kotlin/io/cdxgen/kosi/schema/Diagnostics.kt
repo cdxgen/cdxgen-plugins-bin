@@ -65,6 +65,23 @@ object DiagnosticCodes {
 
     /** P3 call graph: a declared root scope matched no function. */
     const val CALLGRAPH_ROOT_NOT_FOUND = "callgraph-root-not-found"
+
+    /**
+     * P4 taint: the worklist over one function's CFG hit its iteration
+     * budget before converging. The function's slices are best-effort, the
+     * hit is counted in `stats.fixpointCapHits` over
+     * `stats.functionsAnalysed`, and a fixed-cap engine that silently loses
+     * loop-carried flows is exactly the defect this makes visible.
+     */
+    const val FIXPOINT_CAP = "fixpoint-cap"
+
+    /**
+     * P4 taint: a limit shortened the analysis — a function skipped for
+     * exceeding `--dataflow-max-function-instructions`, or the slice cap
+     * reached. Every hit is itemised in `stats.truncations`.
+     */
+    const val DATAFLOW_TRUNCATED = "dataflow-truncated"
+
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
@@ -84,6 +101,8 @@ object DiagnosticCodes {
         CALLGRAPH_TIMEOUT,
         CALLGRAPH_UNRESOLVED_CALLS,
         CALLGRAPH_ROOT_NOT_FOUND,
+        FIXPOINT_CAP,
+        DATAFLOW_TRUNCATED,
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,

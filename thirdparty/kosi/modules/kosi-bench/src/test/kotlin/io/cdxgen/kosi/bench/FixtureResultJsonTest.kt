@@ -62,6 +62,12 @@ class FixtureResultJsonTest {
         publicCallables = 43,
         reachedPublicCallables = 44,
         graphAlgorithm = "vta",
+        flowPositives = 51,
+        flowPositivesMatched = 52,
+        flowTruePositives = 53,
+        crossDependencySlices = 54,
+        fixpointCapHits = 55,
+        functionsAnalysed = 56,
         digest = Digests.FixtureDigest("some-repo", MatrixSlot.RESOLVED_LABEL, emptyMap()),
     )
 
@@ -151,6 +157,26 @@ class FixtureResultJsonTest {
         assertEquals(null, parsed.callsTotal)
         assertEquals(null, parsed.functionsLowered)
         assertEquals(null, parsed.resolvedCallRatio)
+        assertEquals(null, parsed.functionsAnalysed)
+        assertEquals(null, parsed.fixpointCapHits)
         assertTrue(parsed.loweringFailures.isEmpty())
+    }
+
+    @Test
+    fun aPreP4BaselineHasNoFlowCountsAndTheGateSeesThat() {
+        // The P4 flow fields must be ABSENT in a pre-P4 baseline, not zero:
+        // zero would read as "measured, nothing found" and let the
+        // per-repo flow ratchet compare against a measurement never made.
+        val json = """
+            {"results":[{"slug":"old","tier":"medium","slot":"resolved","annotations":1,
+             "connectivity":1,"recall":1,"digest":"x","fail":0,"integrityViolations":0,
+             "negatives":0,"parseErrors":0,"pass":1,"positives":1,"positivesPassed":1,
+             "positivesRecallDenominator":1,"sliceCount":0,"wallMillis":1,"xfail":0,"xpass":0}],
+             "toolCommit":"x","medianWallMillis":1,"worstWallMillis":1,"peakRssBytes":1}
+        """.trimIndent()
+        val parsed = BenchRunner.BenchResult.fromJson(json).results.single()
+        assertEquals(null, parsed.crossDependencySlices)
+        assertEquals(null, parsed.functionsAnalysed)
+        assertEquals(null, parsed.fixpointCapHits)
     }
 }

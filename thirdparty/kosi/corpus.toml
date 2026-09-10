@@ -29,7 +29,41 @@ capabilities = ["elvis-join", "safe-call"]
 slug = "string-template"
 tier = "fixtures"
 path = "fixtures/string-template"
-capabilities = ["string-template"]
+capabilities = ["string-template", "taint-concat"]
+
+# P4 taint fixtures: intraprocedural, field-sensitive flows over the CFG.
+# field-sensitivity carries the corpus's most valuable negative: the clean
+# SIBLING field of a partly-tainted object must not report.
+
+[[fixtures]]
+slug = "field-sensitivity"
+tier = "fixtures"
+path = "fixtures/field-sensitivity"
+capabilities = ["taint", "field-sensitivity", "access-path"]
+
+[[fixtures]]
+slug = "taint-sanitizer"
+tier = "fixtures"
+path = "fixtures/taint-sanitizer"
+capabilities = ["taint", "sanitizer"]
+
+[[fixtures]]
+slug = "collection-passthrough"
+tier = "fixtures"
+path = "fixtures/collection-passthrough"
+capabilities = ["taint", "collection-passthrough", "effects"]
+
+[[fixtures]]
+slug = "scope-function-flow"
+tier = "fixtures"
+path = "fixtures/scope-function-flow"
+capabilities = ["taint", "scope-functions", "receiver"]
+
+[[fixtures]]
+slug = "taint-loop-fixpoint"
+tier = "fixtures"
+path = "fixtures/taint-loop-fixpoint"
+capabilities = ["taint", "fixpoint", "loop-carried"]
 
 [[fixtures]]
 slug = "data-class-copy"

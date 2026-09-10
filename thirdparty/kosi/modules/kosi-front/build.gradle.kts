@@ -51,6 +51,10 @@ dependencies {
     implementation(project(":kosi-project"))
     implementation(project(":kosi-kir"))
     implementation(project(":kosi-graph"))
+    // P4: the taint engine and the model packs it runs on — both
+    // compiler-free, so the kosi-front boundary still holds.
+    implementation(project(":kosi-flow"))
+    implementation(project(":kosi-models"))
     implementation(libs.kotlin.stdlib)
 
     // Analysis API + unrelocated compiler. Non-transitive on purpose: the

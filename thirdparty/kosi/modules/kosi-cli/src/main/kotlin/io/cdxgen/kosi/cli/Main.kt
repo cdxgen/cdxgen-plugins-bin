@@ -560,7 +560,21 @@ object Main {
     }
 }
 
-/** Entry point (also used by the Gradle bench/corpus tasks). */
+/**
+ * Entry point (also used by the Gradle bench/corpus tasks).
+ *
+ * kosi is a headless CLI, but the Analysis API pulls in intellij-core, which
+ * initialises AWT. On macOS that registers a real application: the process
+ * appears in the Dock and STEALS KEYBOARD FOCUS on startup, which turns a
+ * corpus run over 35 fixtures into an unusable machine. The launcher scripts
+ * and Gradle JVMs pass these already; setting them here as well covers the
+ * paths that have no launcher — `java -jar kosi-all.jar` and the native
+ * image. Set before anything can touch the toolkit, and never overriding a
+ * value the caller chose.
+ */
 fun main(args: Array<String>) {
+    for ((key, value) in listOf("java.awt.headless" to "true", "apple.awt.UIElement" to "true")) {
+        if (System.getProperty(key) == null) System.setProperty(key, value)
+    }
     kotlin.system.exitProcess(Main.run(args))
 }

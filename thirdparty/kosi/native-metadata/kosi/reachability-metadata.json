@@ -1586,6 +1586,15 @@
     {
       "methods": [
         {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "sun.security.provider.SHA2$SHA256"
+    },
+    {
+      "methods": [
+        {
           "name": "build",
           "parameterTypes": []
         },
@@ -2609,6 +2618,9 @@
     },
     {
       "glob": "kotlin/reflect/reflect.kotlin_builtins"
+    },
+    {
+      "glob": "models/security-pack-v0.json"
     },
     {
       "glob": "pluginsCompatibleWithK2Mode.txt"

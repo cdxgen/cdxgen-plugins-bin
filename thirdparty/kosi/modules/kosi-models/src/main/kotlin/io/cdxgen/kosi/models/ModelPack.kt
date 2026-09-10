@@ -2,7 +2,13 @@ package io.cdxgen.kosi.models
 
 /**
  * Model-pack patterns (02-ARCHITECTURE.md §7). The tuple notation `flows`
- * follows Tai-e: `-1` = return, `0` = receiver, `n` = parameter n.
+ * and the argument indexes follow Tai-e: `-1` = the call's result, `0` = the
+ * RECEIVER when the callee has one (otherwise the first argument), `n` = the
+ * n-th element of that (receiver,) arguments sequence. Constructor callees
+ * render as the class FQN with no `<init>` suffix, so a constructor's first
+ * parameter is index 0. P4 executes these packs for the first time; the
+ * argument convention and the renderer it must match are pinned by
+ * ModelPackTest and by the taint fixtures.
  *
  * Pattern notation is a single normalised form: a dot-separated,
  * generic-free, whitespace-free symbol path, matched against the canonical
@@ -27,6 +33,12 @@ data class SinkPattern(
     val category: String,
     val relevantArguments: List<Int>,
     val receiverType: String?,
+    /**
+     * Severity as DATA (P4): the slice's severity comes from the matched
+     * pack entry, never from a code-side category table. Packs that omit it
+     * get "high" — the honest default for an unnamed risk.
+     */
+    val severity: String = "high",
 ) {
     fun writeJson(w: io.cdxgen.kosi.schema.JsonWriter) {
         w.beginObject()
@@ -36,6 +48,7 @@ data class SinkPattern(
         w.endArray()
         w.str("pattern", pattern)
         w.str("receiverType", receiverType)
+        w.str("severity", severity)
         w.endObject()
     }
 }

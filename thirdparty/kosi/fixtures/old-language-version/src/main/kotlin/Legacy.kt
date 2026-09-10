@@ -1,9 +1,12 @@
 // Negative half: UserRepo.save is a near-miss of the annotated findUser the
 // file does contain; an engine that invents flow through same-class names
-// would trip it. The flow expectation itself is known-fail=1: no flow engine
-// exists at the resolved front end tier yet (docs/KOSI.md defect 1) — and it
-// must evaluate identically at the clamped version, which is what
-// FlowFoundAcrossLanguageVersionRange asserts per language version.
+// would trip it. The flow reads untrusted input through the shipped pack
+// source (kotlin.io.readLine) and concatenates it into the query. It became
+// real at the resolved tier in P4 and must evaluate identically at every
+// clamped language version, which is what
+// FlowFoundAcrossLanguageVersionRange asserts per language version; the
+// marker stays scoped to the syntax tier, which still has no flow engine
+// (docs/KOSI.md defect 1).
 // kosi:want-not declaration name=save kind=method
 // kosi:want-not usage name=~prepareStatement
 // kosi:want-not diagnostic code=parse-error
@@ -14,13 +17,14 @@
 // kosi:want declaration name=findUser kind=method
 // kosi:want declaration name=UserRepo kind=class
 // kosi:want usage name=~executeQuery
-// kosi:want flow source=untrusted-input sink=sql-query known-fail=1
+// kosi:want flow source=untrusted-input sink=sql-query known-fail=syntax:1
 package fixtures.legacy
 
 import java.sql.DriverManager
 
 class UserRepo {
-    fun findUser(id: String): String? {
+    fun findUser(): String? {
+        val id = readLine() ?: return null
         val conn = DriverManager.getConnection("jdbc:h2:mem:legacy")
         val stmt = conn.createStatement()
         val rs = stmt.executeQuery("SELECT name FROM users WHERE id = '$id'")

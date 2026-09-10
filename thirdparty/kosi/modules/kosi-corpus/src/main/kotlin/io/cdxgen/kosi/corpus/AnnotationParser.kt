@@ -91,6 +91,7 @@ object AnnotationParser {
             var code: String? = null
             var count: Int? = null
             var mode: String? = null
+            var fn: String? = null
             var maxDepth: Int? = null
             var knownFailAll: Int? = null
             val knownFailByBackend = linkedMapOf<String, Int>()
@@ -130,6 +131,7 @@ object AnnotationParser {
                         return@forEachIndexed
                     }
                     "mode" -> mode = rawValue
+                    "fn" -> fn = rawValue
                     "maxdepth" -> maxDepth = rawValue.toIntOrNull() ?: run {
                         results.add(Failure("maxdepth must be an integer", lineText, fileName, index + 1))
                         return@forEachIndexed
@@ -189,6 +191,7 @@ object AnnotationParser {
                 code = code,
                 count = count,
                 mode = mode,
+                fn = fn,
                 maxDepth = maxDepth,
                 knownFailAll = knownFailAll,
                 knownFailByBackend = knownFailByBackend,

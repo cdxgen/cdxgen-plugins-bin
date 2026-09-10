@@ -87,6 +87,16 @@ class AnnotationParserTest {
         assertTrue(a.isNegative)
         assertEquals("~executors", a.name)
     }
+
+    @Test
+    fun fnScopesAFlowExpectation() {
+        val a = parseOne("kosi:want flow source=untrusted-input sink=sql-query fn=~sibling")
+        assertEquals("~sibling", a.fn)
+        assertTrue(a.validate().isEmpty())
+    }
+
+    @Test
+    fun fnIsInvalidOutsideFlow() = expectFailure("kosi:want usage name=x fn=y", "fn=")
 }
 
 class CorpusManifestTest {

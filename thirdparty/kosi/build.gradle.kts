@@ -7,6 +7,18 @@ plugins {
     alias(libs.plugins.kotlin.jvm) apply false
 }
 
+/**
+ * kosi is a headless CLI, but the Analysis API drags in intellij-core, which
+ * initialises AWT. On macOS that registers a real application: every analyze
+ * run — every test worker, every bench fixture — bounces in the Dock and
+ * STEALS KEYBOARD FOCUS, which makes a corpus run over 35 fixtures unusable
+ * on the machine running it. `apple.awt.UIElement` keeps the process out of
+ * the Dock and the focus list; `java.awt.headless` stops the toolkit loading
+ * at all. Applied to every JVM this build starts, and to the installed
+ * launcher so a user's own `kosi analyze` is quiet too.
+ */
+val HEADLESS_JVM_ARGS = listOf("-Djava.awt.headless=true", "-Dapple.awt.UIElement=true")
+
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
@@ -36,6 +48,7 @@ subprojects {
         systemProperty("user.language", "en")
         systemProperty("user.country", "US")
         systemProperty("user.timezone", "UTC")
+        jvmArgs(HEADLESS_JVM_ARGS)
     }
 }
 
@@ -54,6 +67,7 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
             kosiCli.tasks.named("jar").map { (it as Jar).archiveFile },
         )
         mainClass = "io.cdxgen.kosi.cli.MainKt"
+        jvmArgs(HEADLESS_JVM_ARGS)
         configure(this)
     }
 

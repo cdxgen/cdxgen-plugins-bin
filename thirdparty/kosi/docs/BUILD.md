@@ -80,7 +80,27 @@ when it fails, so a comparison over reused paths passes loudest exactly when
 the tool is broken — an empty-vs-empty match, or last run's report against
 itself. R53 reached the P3 gate that way: the image could not analyse any
 fixture containing an `object`, and the phase's own native-vs-JVM sweep
-reported every fixture identical.
+reported every fixture identical. P4 turned the recipe into a script that
+cannot be run wrong — outputs deleted before every run, exit codes checked,
+sizes asserted, `tool.commit` normalised, and the per-fixture slice/node/edge
+counts printed so the sweep shows what it compared:
+
+```bash
+scripts/determinism-sweep.sh --jar modules/kosi-cli/build/dist/kosi-all.jar JVM
+scripts/determinism-sweep.sh build/kosi-darwin-arm64 native
+scripts/native-vs-jvm.sh build/kosi-darwin-arm64 \
+  modules/kosi-cli/build/dist/kosi-all.jar
+```
+
+Both sweeps run **both** graph-bearing slots (`resolved` and `--roots
+exported`), not `resolved` alone: R53's lesson is that a slot nobody runs is
+a code path nobody proves anything about, and `exported` is precisely the
+slot whose missing reflection entry killed the P3 image. 35 fixtures x 2
+slots = 70 pairs; at P4 all three sweeps read 70 of 70.
+
+The native-vs-JVM comparison is a script and not a paragraph for the same
+reason: it was prose in P3 ("cmp the outputs per fixture"), and it is the
+step R53 walked straight through.
 
 When comparing a native report against a JVM one, normalise `tool.commit`:
 the image bakes in the commit it was built from, the JVM run reads the one

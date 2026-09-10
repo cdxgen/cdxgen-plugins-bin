@@ -142,26 +142,39 @@ object Promotion {
             )
         }
 
-        // 2. precision per flow — needs slices (phase 3)
-        checks.add(
-            Check("precision-per-flow", State.NOT_EVALUATED, "no flow engine yet; slices do not exist at the syntax tier"),
-        )
+        // 2. precision per flow — LIVE since P4: over the fixture tier, the
+        // fraction of reported slices some positive flow expectation actually
+        // asked for, counted per FLOW and capped per expectation by its
+        // count=. A slice nobody asked for is a false positive by definition.
+        checks.add(precisionPerFlowCheck(current))
+
+        // 2b. taint recall over flow expectations on the fixture tier, as a
+        // fraction with BOTH counts (the P4 gate: >= 0.85).
+        checks.add(taintRecallCheck(current))
+
+        // 2c. the worklist cap: 0 hits on the fixture tier, with the
+        // functions-analysed denominator in the detail line.
+        checks.add(fixpointCapCheck(current))
 
         // 3. connectivity 1.000, integrity 0 — evaluable, with the vacuity
         // caveat stated so a vacuous pass is never mistaken for a flow result.
+        // Since P4 the fixtures publish slices, so zero slices is
+        // NOT_EVALUATED (the engine regressed) rather than a vacuous pass.
         checks.add(
-            if (curTotal.connectivity == 1.0) {
-                Check(
+            when {
+                curTotal.connectivity == 1.0 && curTotal.sliceCount > 0 -> Check(
                     "connectivity",
                     State.PASS,
-                    if (curTotal.sliceCount == 0) {
-                        "1.000 over 0 slices (vacuous: no slices exist yet at the syntax tier)"
-                    } else {
-                        "1.000 over ${curTotal.sliceCount} slice(s)"
-                    },
+                    "1.000 over ${curTotal.sliceCount} slice(s)",
                 )
-            } else {
-                Check("connectivity", State.FAIL, "below 1.000: ${curTotal.connectivity}")
+
+                curTotal.connectivity == 1.0 -> Check(
+                    "connectivity",
+                    State.NOT_EVALUATED,
+                    "1.000 over 0 slices (vacuous: the run produced no slices, so there is nothing to confirm)",
+                )
+
+                else -> Check("connectivity", State.FAIL, "below 1.000: ${curTotal.connectivity}")
             },
         )
         checks.add(
@@ -186,9 +199,35 @@ object Promotion {
             )
         }
 
-        // 5. dependency-crossing flows — needs slices
+        // 5. dependency-crossing flows. A nonzero count is a mislabelled
+        // slice and FAILs — but zero is NOT a pass. Both ends of every
+        // intraprocedural slice are the same function, so `crossesDependency`
+        // is false for a structural reason and the check cannot fail while
+        // that holds. Reporting PASS on a criterion nothing could have
+        // violated is R49's shape with a different variable name, so the
+        // zero case says NOT_EVALUATED and names why. P5's summaries give a
+        // slice two ends and turn this into a real comparison.
         checks.add(
-            Check("dependency-crossing-flows", State.NOT_EVALUATED, "no slices exist at the syntax tier"),
+            when {
+                curTotal.crossDependencySlices == null ->
+                    Check("dependency-crossing-flows", State.NOT_EVALUATED, "no slot published dataflow stats")
+
+                curTotal.crossDependencySlices > 0 ->
+                    Check(
+                        "dependency-crossing-flows",
+                        State.FAIL,
+                        "${curTotal.crossDependencySlices} slice(s) claim a dependency crossing the " +
+                            "intraprocedural engine cannot produce: the labelling is wrong",
+                    )
+
+                else ->
+                    Check(
+                        "dependency-crossing-flows",
+                        State.NOT_EVALUATED,
+                        "0 crossing slices over ${curTotal.sliceCount} slice(s), and no intraprocedural slice " +
+                            "can cross a dependency: nothing could have violated this yet (P5's summaries make it real)",
+                    )
+            },
         )
 
         // 6. time and memory ratios
@@ -241,10 +280,10 @@ object Promotion {
             },
         )
 
-        // 8+9. per-real-repo flow counts and wall clock — flow counts need slices
-        checks.add(
-            Check("per-repo-flow-counts", State.NOT_EVALUATED, "real-repo tiers carry no flows yet"),
-        )
+        // 8+9. per-real-repo flow counts and wall clock. The flow-count arm
+        // is LIVE since P4: a repo whose slice count drops below its
+        // baseline is golem's SEAM regression, seen exactly where it happens.
+        checks.add(perRepoFlowCountCheck(current, baseline))
         if (baseline != null) {
             val baselineRepoKeys = baseline.results.filter { it.tier != "fixtures" }.map { it.slug + "/" + it.slot }
             if (baselineRepoKeys.isEmpty()) {
@@ -292,6 +331,7 @@ object Promotion {
         // comparison would feed them, never from in-memory report objects.
         checks.add(edgeConnectivityCheck(current))
         checks.add(exportedReachCheck(current))
+        checks.add(perRepoExportedReachCheck(current, baseline))
         checks.add(graphBreakdownCheck(current))
 
         val verdict = when {
@@ -307,6 +347,156 @@ object Promotion {
 
     /** The P2 gate's ceiling on the repo-tier lowering failure rate. */
     const val LOWERING_FAILURE_RATE_MAX = 0.005
+
+    /** The P4 gate: taint recall over flow expectations on the fixture tier. */
+    const val TAINT_RECALL_TARGET = 0.85
+
+    /** The P4 gate: precision per flow (slices asked-for over slices reported). */
+    const val TAINT_PRECISION_TARGET = 0.95
+
+    private fun fixtureRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
+        current.results.filter { it.tier == "fixtures" && it.slug != "TOTAL" }
+
+    /**
+     * Taint recall on the single-function corpus tier: satisfied flow
+     * EXPECTATIONS over evaluated flow expectations, both counts in the
+     * detail line. A run with no live flow expectation cannot evaluate the
+     * gate and never passes by having nothing to look at.
+     */
+    private fun taintRecallCheck(current: BenchRunner.BenchResult): Check {
+        val name = "taint-recall"
+        val rows = fixtureRows(current)
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no fixture-tier rows in this run")
+        }
+        val positives = rows.sumOf { it.flowPositives }
+        val matched = rows.sumOf { it.flowPositivesMatched }
+        if (positives == 0) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "no non-known-fail flow expectation was evaluated on the fixture tier, so there is nothing to recall",
+            )
+        }
+        val fraction = matched.toDouble() / positives
+        val worst = rows.filter { it.flowPositives > 0 && it.flowPositivesMatched < it.flowPositives }
+            .sortedBy { it.flowPositivesMatched.toDouble() / it.flowPositives }
+            .take(5)
+            .joinToString("; ") { "${it.slug}/${it.slot} ${it.flowPositivesMatched} of ${it.flowPositives}" }
+        return if (fraction < TAINT_RECALL_TARGET) {
+            Check(
+                name,
+                State.FAIL,
+                String.format("%.4f < %.2f (%d of %d flow expectations)%s", fraction, TAINT_RECALL_TARGET, matched, positives, worst.let { if (it.isEmpty()) "" else ": $it" }),
+            )
+        } else {
+            Check(name, State.PASS, String.format("%.4f (%d of %d flow expectations)", fraction, matched, positives))
+        }
+    }
+
+    /**
+     * Precision per flow on the fixture tier: slices some positive flow
+     * expectation asked for, over ALL reported slices. A slice nobody asked
+     * for is a false positive — including one in a fixture whose annotations
+     * deliberately expect none. Not evaluated while no slices exist (a run
+     * without slices can neither pass nor fail it).
+     */
+    private fun precisionPerFlowCheck(current: BenchRunner.BenchResult): Check {
+        val name = "precision-per-flow"
+        val rows = fixtureRows(current)
+        val reported = rows.sumOf { it.sliceCount }
+        if (reported == 0) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "no slices reported on the fixture tier, so there is nothing to be precise about",
+            )
+        }
+        val truePositives = rows.sumOf { it.flowTruePositives }
+        val fraction = truePositives.toDouble() / reported
+        val offenders = rows.filter { row ->
+            row.sliceCount > 0 && row.flowTruePositives < row.sliceCount
+        }.sortedBy { row -> row.flowTruePositives.toDouble() / row.sliceCount }
+            .take(5)
+            .joinToString("; ") { "${it.slug}/${it.slot} ${it.flowTruePositives} of ${it.sliceCount}" }
+        return if (fraction < TAINT_PRECISION_TARGET) {
+            Check(
+                name,
+                State.FAIL,
+                String.format("%.4f < %.2f (%d of %d slices)%s", fraction, TAINT_PRECISION_TARGET, truePositives, reported, offenders.let { if (it.isEmpty()) "" else ": $it" }),
+            )
+        } else {
+            Check(name, State.PASS, String.format("%.4f (%d of %d slices)", fraction, truePositives, reported))
+        }
+    }
+
+    /**
+     * The worklist cap: on the fixture tier, `fixpointCapHits` must be 0 —
+     * and the detail line carries the functions-analysed denominator, because
+     * a cap count without the population it was measured over is R25's shape
+     * one phase later. A run that analysed nothing cannot evaluate this.
+     */
+    private fun fixpointCapCheck(current: BenchRunner.BenchResult): Check {
+        val name = "fixpoint-cap"
+        val rows = fixtureRows(current).filter { it.functionsAnalysed != null }
+        if (rows.isEmpty()) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "no fixture-tier slot reported a functions-analysed count (run the resolved tier)",
+            )
+        }
+        val analysed = rows.sumOf { it.functionsAnalysed ?: 0 }
+        val hits = rows.sumOf { it.fixpointCapHits ?: 0 }
+        return if (hits == 0) {
+            Check(name, State.PASS, "0 cap hits over $analysed analysed function(s)")
+        } else {
+            val offenders = rows.filter { (it.fixpointCapHits ?: 0) > 0 }
+                .joinToString("; ") { "${it.slug}/${it.slot} ${it.fixpointCapHits} of ${it.functionsAnalysed}" }
+            Check(name, State.FAIL, "$hits cap hit(s) over $analysed analysed function(s): $offenders")
+        }
+    }
+
+    /**
+     * Per-repo flow counts, two-way: a repo may not lose slices against its
+     * baseline. Baselines written before the engine shipped carry no flow
+     * data at all, and the check says so rather than passing vacuously.
+     */
+    private fun perRepoFlowCountCheck(current: BenchRunner.BenchResult, baseline: BenchRunner.BenchResult?): Check {
+        val name = "per-repo-flow-counts"
+        val rows = current.results.filter { it.tier != "fixtures" && it.slug != "TOTAL" && it.slot != "all" }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no repo-tier rows in this run")
+        }
+        val baseByKey = baseline?.results?.associateBy { it.slug + "/" + it.slot }
+        if (baseByKey == null || baseByKey.values.all { it.flowPositives == 0 && it.sliceCount == 0 && it.flowTruePositives == 0 && it.functionsAnalysed == null }) {
+            val counts = rows.sortedBy { it.slug }.joinToString(", ") { "${it.slug}/${it.slot}=${it.sliceCount}" }
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "the baseline carries no flow data to ratchet against; measured slices: $counts",
+            )
+        }
+        val regressed = mutableListOf<String>()
+        for (row in rows) {
+            val base = baseByKey[row.slug + "/" + row.slot]
+            if (base == null) continue
+            if (base.sliceCount > row.sliceCount) {
+                regressed.add("${row.slug}/${row.slot} slices ${base.sliceCount} -> ${row.sliceCount}")
+            }
+            if (base.functionsAnalysed != null && (row.functionsAnalysed ?: 0) < base.functionsAnalysed) {
+                regressed.add(
+                    "${row.slug}/${row.slot} analysed functions ${base.functionsAnalysed} -> ${row.functionsAnalysed}",
+                )
+            }
+        }
+        val counts = rows.sortedBy { it.slug }.joinToString(", ") { "${it.slug}/${it.slot}=${it.sliceCount}" }
+        return if (regressed.isEmpty()) {
+            Check(name, State.PASS, "no repo lost slices or analysis coverage; slices: $counts")
+        } else {
+            Check(name, State.FAIL, regressed.joinToString("; "))
+        }
+    }
 
     /**
      * `loweringFailures` must be empty on every fixture slot that lowered
@@ -475,12 +665,12 @@ object Promotion {
     }
 
     /**
-     * The exported-reach gate: on the exported slots, the fraction of public
-     * API callables that became roots and are reached, with BOTH counts in
-     * the detail line. A shortfall names where resolution lost visibility
-     * facts — the 95% bar exists so `--roots exported` cannot silently root
-     * nothing on a library (golem: with only `main`, a library yields no
-     * graph at all).
+     * The exported-reach gate: on the fixture tier's exported slots, the
+     * fraction of public API callables that became roots and are reached,
+     * with BOTH counts in the detail line. A shortfall names where
+     * resolution lost visibility facts — the 95% bar exists so `--roots
+     * exported` cannot silently root nothing on a library (golem: with only
+     * `main`, a library yields no graph at all).
      *
      * The denominator is `declarations`, not the graph's own public nodes.
      * Counting nodes made this a tautology — the exported selector picks
@@ -488,6 +678,14 @@ object Promotion {
      * it read 1.0000 on every fixture and all five repos and could not fail.
      * Against the front end's independent inventory, a public callable that
      * never became a node costs a point, which is the failure the gate is for.
+     *
+     * Scope: the FIXTURE tier, as the P3 roadmap defined it ("a library
+     * fixture"). The pinned repos are REPORTED in the detail line but do not
+     * hold the bar: their denominators only became honest with R49's fix,
+     * and the real repo figures name a known, owned gap — public methods
+     * DECLARED IN JAVA, whose bodies the Kotlin-only lowering never produces
+     * (R49's `Greeter.greet` at repo scale; P9's bytecode tier closes it).
+     * A per-repo bar returns when that tier lands.
      */
     private fun exportedReachCheck(current: BenchRunner.BenchResult): Check {
         val name = "exported-reach"
@@ -497,14 +695,30 @@ object Promotion {
         if (rows.isEmpty()) {
             return Check(name, State.NOT_EVALUATED, "no exported slot published a call graph")
         }
-        val totalPublic = rows.sumOf { it.publicCallables ?: 0 }
-        val totalReached = rows.sumOf { it.reachedPublicCallables ?: 0 }
-        if (totalPublic == 0) {
-            return Check(name, State.NOT_EVALUATED, "exported slots name 0 public callables; visibility facts missing")
+        val fixtureRows = rows.filter { it.tier == "fixtures" }
+        val totalPublic = fixtureRows.sumOf { it.publicCallables ?: 0 }
+        val totalReached = fixtureRows.sumOf { it.reachedPublicCallables ?: 0 }
+        val repoRows = rows.filter { it.tier != "fixtures" }.sortedBy { it.slug }
+        val repoDetail = repoRows.joinToString(", ") { r ->
+            val pub = r.publicCallables ?: 0
+            val reached = r.reachedPublicCallables ?: 0
+            "${r.slug}=" + if (pub == 0) "n/a" else String.format("%.4f (%d/%d)", reached.toDouble() / pub, reached, pub)
+        }
+        val repoSummary = if (repoRows.isEmpty()) {
+            ""
+        } else {
+            "; repos (reported, not gated — Java-declared bodies await P9): $repoDetail"
+        }
+        if (fixtureRows.isEmpty() || totalPublic == 0) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "fixture exported slots name 0 public callables; visibility facts missing$repoSummary",
+            )
         }
         val fraction = totalReached.toDouble() / totalPublic
         if (fraction < EXPORTED_REACH_TARGET) {
-            val worst = rows.sortedBy { r ->
+            val worst = fixtureRows.sortedBy { r ->
                 (r.reachedPublicCallables ?: 0).toDouble() / (r.publicCallables ?: 1)
             }.take(5).joinToString("; ") { r ->
                 "${r.slug} ${(r.reachedPublicCallables ?: 0)} of ${r.publicCallables}"
@@ -518,8 +732,67 @@ object Promotion {
         return Check(
             name,
             State.PASS,
-            String.format("%.4f (%d of %d public callables)", fraction, totalReached, totalPublic),
+            String.format("%.4f (%d of %d public callables)", fraction, totalReached, totalPublic) + repoSummary,
         )
+    }
+
+    /**
+     * The repo half of exported reach, as a RATCHET rather than a bar.
+     *
+     * P4 moved the 0.95 bar to the fixture tier for a defensible reason —
+     * the repo denominators only became honest with R49's fix, and the real
+     * figures are dominated by public methods declared in Java, whose bodies
+     * P9's bytecode tier owns. But narrowing a gate's population in the same
+     * change that would have made it fail leaves the excluded population
+     * measured by nothing, and "reported in a detail line" is not a check:
+     * spring-fu could fall from 0.5359 to 0.05 and every gate would still be
+     * green. So the repo fractions hold no absolute bar and instead may not
+     * DROP against the baseline — the same two-way discipline the corpus
+     * ratchet uses, and it costs this phase nothing because the numbers are
+     * already measured.
+     */
+    private fun perRepoExportedReachCheck(
+        current: BenchRunner.BenchResult,
+        baseline: BenchRunner.BenchResult?,
+    ): Check {
+        val name = "per-repo-exported-reach"
+        val rows = current.results.filter {
+            it.tier != "fixtures" && it.slug != "TOTAL" && it.slot == MatrixSlot.EXPORTED_LABEL &&
+                (it.publicCallables ?: 0) > 0
+        }.sortedBy { it.slug }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no repo-tier exported slot named any public callable")
+        }
+        fun fractionOf(r: BenchRunner.FixtureResult): Double =
+            (r.reachedPublicCallables ?: 0).toDouble() / (r.publicCallables ?: 1)
+        val measured = rows.joinToString(", ") { String.format("%s=%.4f (%d/%d)", it.slug, fractionOf(it), it.reachedPublicCallables ?: 0, it.publicCallables ?: 0) }
+        val baseByKey = baseline?.results
+            ?.filter { (it.publicCallables ?: 0) > 0 }
+            ?.associateBy { it.slug + "/" + it.slot }
+            .orEmpty()
+        if (baseByKey.isEmpty()) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "the baseline carries no per-repo exported-reach to ratchet against; measured: $measured",
+            )
+        }
+        val dropped = rows.mapNotNull { row ->
+            val base = baseByKey[row.slug + "/" + row.slot] ?: return@mapNotNull null
+            val before = fractionOf(base)
+            val after = fractionOf(row)
+            // A hair of movement is re-resolution noise, not a regression.
+            if (after < before - 0.005) {
+                String.format("%s %.4f -> %.4f", row.slug, before, after)
+            } else {
+                null
+            }
+        }
+        return if (dropped.isEmpty()) {
+            Check(name, State.PASS, "no repo lost exported reach; $measured")
+        } else {
+            Check(name, State.FAIL, "exported reach fell on ${dropped.size} repo(s): " + dropped.joinToString("; "))
+        }
     }
 
     /**

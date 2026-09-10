@@ -38,6 +38,14 @@ data class Stats(
      */
     val functionsLowered: Int,
     val fixpointCapHits: Int,
+    /**
+     * How many functions the P4 taint engine's worklist actually ran over —
+     * the denominator [fixpointCapHits] was measured against, exactly as
+     * [functionsLowered] is the denominator of [loweringFailures]. Zero with
+     * no flow run (the syntax tier, or `--dataflow none`); a run that
+     * analysed something never publishes the cap count without it.
+     */
+    val functionsAnalysed: Int,
     val sourceCount: Int,
     val sinkCount: Int,
     val sliceCount: Int,
@@ -60,6 +68,7 @@ data class Stats(
         }
         w.endObject()
         w.num("fixpointCapHits", fixpointCapHits)
+        w.num("functionsAnalysed", functionsAnalysed)
         w.num("functionsLowered", functionsLowered)
         w.num("importCount", importCount)
         w.num("reachableSliceCount", reachableSliceCount)
