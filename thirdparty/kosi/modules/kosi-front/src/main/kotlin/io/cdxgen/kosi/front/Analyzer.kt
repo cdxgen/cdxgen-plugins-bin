@@ -479,6 +479,7 @@ object Analyzer {
                         maxFunctionInstructions = options.dataflowMaxFunctionInstructions,
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
+                        dispatchMode = options.callgraph.id,
                     ),
                 )
             } else {
@@ -580,8 +581,12 @@ object Analyzer {
                     sourceCount = flowResult?.sourceSites ?: 0,
                     sinkCount = flowResult?.sinkSites ?: 0,
                     sliceCount = dataFlow?.slices?.size ?: 0,
-                    crossDependencySliceCount = 0,
+                    crossDependencySliceCount = dataFlow?.stats?.crossDependencySlices ?: 0,
+                    crossModuleSliceCount = dataFlow?.stats?.crossModuleSlices ?: 0,
                     reachableSliceCount = dataFlow?.slices?.count { it.reachableFromRoots } ?: 0,
+                    sccsProcessed = flowResult?.sccsProcessed ?: 0,
+                    sccIterationCapHits = flowResult?.sccIterationCapHits ?: 0,
+                    suspendCrossingSliceCount = dataFlow?.stats?.suspendCrossingSlices ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
                 ),

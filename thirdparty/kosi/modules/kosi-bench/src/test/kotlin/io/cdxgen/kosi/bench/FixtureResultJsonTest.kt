@@ -68,6 +68,14 @@ class FixtureResultJsonTest {
         crossDependencySlices = 54,
         fixpointCapHits = 55,
         functionsAnalysed = 56,
+        summariesComputed = 57,
+        summariesByOrigin = linkedMapOf("computed" to 5, "pack" to 3),
+        defaultOriginSlices = 58,
+        summaryCrossingSlices = 59,
+        crossModuleSlices = 60,
+        sccsProcessed = 61,
+        sccIterationCapHits = 62,
+        suspendCrossingSlices = 63,
         digest = Digests.FixtureDigest("some-repo", MatrixSlot.RESOLVED_LABEL, emptyMap()),
     )
 

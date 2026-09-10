@@ -86,7 +86,16 @@ object SourceCollector {
         val files = mutableListOf<CollectedFile>()
         for (module in modules) {
             for (sourceRoot in module.sourceRoots.sorted()) {
-                val rootDir = root.resolve(sourceRoot)
+                // Submodule roots can arrive MODULE-RELATIVE (`src/main/kotlin`
+                // of `:producer`), so a root-relative miss falls back to the
+                // module's own directory — the Gradle twin of the R5 Maven
+                // defect, and with the same face: a submodule whose sources
+                // are silently collected by nobody but the root sweep.
+                var rootDir = root.resolve(sourceRoot)
+                if (!Files.isDirectory(rootDir) && module.modulePath != ".") {
+                    val moduleDir = root.resolve(module.modulePath).resolve(sourceRoot)
+                    if (Files.isDirectory(moduleDir)) rootDir = moduleDir
+                }
                 if (!Files.isDirectory(rootDir)) continue
                 Files.walk(rootDir).use { stream ->
                     stream.filter { Files.isRegularFile(it) }
@@ -119,7 +128,21 @@ object SourceCollector {
                 }
             }
         }
-        return files.sortedBy { it.relativePath }.distinctBy { it.relativePath }
+        // A file reachable from SEVERAL modules (the root module's inferred
+        // roots sweep the whole tree; a submodule's roots are precise) is
+        // attributed to the MOST SPECIFIC module — the longest modulePath.
+        // Distinct-by-path alone kept whichever module enumerated first, so
+        // every multi-module file silently attributed to "." and per-module
+        // consumers (cross-module slice flags among them) read one blob.
+        return files
+            .sortedWith(
+                compareByDescending<CollectedFile> { it.modulePath.length }
+                    .thenBy { it.modulePath }
+                    .thenBy { it.modulePurl }
+                    .thenBy { it.relativePath },
+            )
+            .distinctBy { it.relativePath }
+            .sortedBy { it.relativePath }
     }
 
     private fun isInExcludedDir(root: Path, file: Path): Boolean =

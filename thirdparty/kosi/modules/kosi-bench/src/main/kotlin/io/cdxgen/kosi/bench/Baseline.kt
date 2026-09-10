@@ -149,12 +149,19 @@ object Promotion {
         checks.add(precisionPerFlowCheck(current))
 
         // 2b. taint recall over flow expectations on the fixture tier, as a
-        // fraction with BOTH counts (the P4 gate: >= 0.85).
+        // fraction with BOTH counts (the P4 gate, raised to the P5 bar: 0.90).
         checks.add(taintRecallCheck(current))
 
-        // 2c. the worklist cap: 0 hits on the fixture tier, with the
-        // functions-analysed denominator in the detail line.
+        // 2c. the worklist cap AND the P5 SCC iteration cap: 0 hits, each
+        // with its own denominator in the detail line.
         checks.add(fixpointCapCheck(current))
+
+        // 2d-2f. the P5 gates: computed summaries with a multi-key origin
+        // distribution, the default-origin share under 10%, and the async
+        // tier's own recall (P6).
+        checks.add(summariesComputedCheck(current))
+        checks.add(defaultOriginShareCheck(current))
+        checks.add(asyncRecallCheck(current))
 
         // 3. connectivity 1.000, integrity 0 — evaluable, with the vacuity
         // caveat stated so a vacuous pass is never mistaken for a flow result.
@@ -199,36 +206,14 @@ object Promotion {
             )
         }
 
-        // 5. dependency-crossing flows. A nonzero count is a mislabelled
-        // slice and FAILs — but zero is NOT a pass. Both ends of every
-        // intraprocedural slice are the same function, so `crossesDependency`
-        // is false for a structural reason and the check cannot fail while
-        // that holds. Reporting PASS on a criterion nothing could have
-        // violated is R49's shape with a different variable name, so the
-        // zero case says NOT_EVALUATED and names why. P5's summaries give a
-        // slice two ends and turn this into a real comparison.
-        checks.add(
-            when {
-                curTotal.crossDependencySlices == null ->
-                    Check("dependency-crossing-flows", State.NOT_EVALUATED, "no slot published dataflow stats")
-
-                curTotal.crossDependencySlices > 0 ->
-                    Check(
-                        "dependency-crossing-flows",
-                        State.FAIL,
-                        "${curTotal.crossDependencySlices} slice(s) claim a dependency crossing the " +
-                            "intraprocedural engine cannot produce: the labelling is wrong",
-                    )
-
-                else ->
-                    Check(
-                        "dependency-crossing-flows",
-                        State.NOT_EVALUATED,
-                        "0 crossing slices over ${curTotal.sliceCount} slice(s), and no intraprocedural slice " +
-                            "can cross a dependency: nothing could have violated this yet (P5's summaries make it real)",
-                    )
-            },
-        )
+        // 5. dependency-crossing flows, LIVE since P5. The summaries give a
+        // slice two ENDS: source and sink functions with their own module
+        // paths and purls, and the flags are computed from those ends — not
+        // written as a constant the gate then reads back (R55's rule). Zero
+        // crossings over slices is still NOT_EVALUATED, never a pass; and a
+        // run that LOSES every crossing its baseline measured is a
+        // regression, the same two-way discipline the corpus ratchet uses.
+        checks.add(dependencyCrossingCheck(current, baseline))
 
         // 6. time and memory ratios
         if (baseline == null) {
@@ -285,12 +270,12 @@ object Promotion {
         // baseline is golem's SEAM regression, seen exactly where it happens.
         checks.add(perRepoFlowCountCheck(current, baseline))
         if (baseline != null) {
-            val baselineRepoKeys = baseline.results.filter { it.tier != "fixtures" }.map { it.slug + "/" + it.slot }
+            val baselineRepoKeys = baseline.results.filter { it.tier in REPO_TIERS }.map { it.slug + "/" + it.slot }
             if (baselineRepoKeys.isEmpty()) {
                 checks.add(Check("per-repo-wall-clock", State.NOT_EVALUATED, "no repo-tier entries in baseline"))
             } else {
                 val curByKey = current.results.associateBy { it.slug + "/" + it.slot }
-                val slow = baseline.results.filter { it.tier != "fixtures" }.filter { base ->
+                val slow = baseline.results.filter { it.tier in REPO_TIERS }.filter { base ->
                     val cur = curByKey[base.slug + "/" + base.slot]
                     cur != null && base.wallMillis > 0 && cur.wallMillis > base.wallMillis * 1.5
                 }
@@ -348,14 +333,18 @@ object Promotion {
     /** The P2 gate's ceiling on the repo-tier lowering failure rate. */
     const val LOWERING_FAILURE_RATE_MAX = 0.005
 
-    /** The P4 gate: taint recall over flow expectations on the fixture tier. */
-    const val TAINT_RECALL_TARGET = 0.85
+    /** The P4 gate, raised to the P5 bar: taint recall over flow expectations. */
+    const val TAINT_RECALL_TARGET = 0.90
 
     /** The P4 gate: precision per flow (slices asked-for over slices reported). */
     const val TAINT_PRECISION_TARGET = 0.95
 
     private fun fixtureRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
         current.results.filter { it.tier == "fixtures" && it.slug != "TOTAL" }
+
+    /** The async tier's rows (P6): bundled coroutine/Flow fixtures, gated separately. */
+    private fun asyncRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
+        current.results.filter { it.tier == "async" && it.slug != "TOTAL" }
 
     /**
      * Taint recall on the single-function corpus tier: satisfied flow
@@ -403,7 +392,10 @@ object Promotion {
      */
     private fun precisionPerFlowCheck(current: BenchRunner.BenchResult): Check {
         val name = "precision-per-flow"
-        val rows = fixtureRows(current)
+        // Precision holds across fixtures AND async tiers together: async is
+        // where over-broad propagation is most tempting, and its seven
+        // fixtures would be diluted into silence inside the fixture number.
+        val rows = fixtureRows(current) + asyncRows(current)
         val reported = rows.sumOf { it.sliceCount }
         if (reported == 0) {
             return Check(
@@ -448,12 +440,22 @@ object Promotion {
         }
         val analysed = rows.sumOf { it.functionsAnalysed ?: 0 }
         val hits = rows.sumOf { it.fixpointCapHits ?: 0 }
-        return if (hits == 0) {
-            Check(name, State.PASS, "0 cap hits over $analysed analysed function(s)")
+        // The P5 SCC iteration cap is a SECOND counter with its own
+        // denominator (SCCs processed) — a cap without its population is
+        // R25's shape, in either counter.
+        val sccs = rows.sumOf { it.sccsProcessed ?: 0 }
+        val sccHits = rows.sumOf { it.sccIterationCapHits ?: 0 }
+        return if (hits == 0 && sccHits == 0) {
+            Check(name, State.PASS, "0 worklist cap hits over $analysed analysed function(s); 0 SCC " +
+                "iteration cap hits over $sccs SCC(s)")
         } else {
-            val offenders = rows.filter { (it.fixpointCapHits ?: 0) > 0 }
-                .joinToString("; ") { "${it.slug}/${it.slot} ${it.fixpointCapHits} of ${it.functionsAnalysed}" }
-            Check(name, State.FAIL, "$hits cap hit(s) over $analysed analysed function(s): $offenders")
+            val offenders = rows.filter { (it.fixpointCapHits ?: 0) > 0 || (it.sccIterationCapHits ?: 0) > 0 }
+                .joinToString("; ") {
+                    "${it.slug}/${it.slot} worklist ${it.fixpointCapHits}/${it.functionsAnalysed}, " +
+                        "SCC ${it.sccIterationCapHits}/${it.sccsProcessed}"
+                }
+            Check(name, State.FAIL, "$hits worklist cap hit(s) over $analysed function(s), " +
+                "$sccHits SCC cap hit(s) over $sccs SCC(s): $offenders")
         }
     }
 
@@ -464,7 +466,7 @@ object Promotion {
      */
     private fun perRepoFlowCountCheck(current: BenchRunner.BenchResult, baseline: BenchRunner.BenchResult?): Check {
         val name = "per-repo-flow-counts"
-        val rows = current.results.filter { it.tier != "fixtures" && it.slug != "TOTAL" && it.slot != "all" }
+        val rows = current.results.filter { it.tier in REPO_TIERS && it.slug != "TOTAL" && it.slot != "all" }
         if (rows.isEmpty()) {
             return Check(name, State.NOT_EVALUATED, "no repo-tier rows in this run")
         }
@@ -524,7 +526,7 @@ object Promotion {
             return Check(name, State.FAIL, "fixtures must lower cleanly: $detail")
         }
         val overRate = mutableListOf<String>()
-        val repos = lowered.filter { it.tier != "fixtures" }.sortedBy { it.slug }
+        val repos = lowered.filter { it.tier in REPO_TIERS }.sortedBy { it.slug }
         for (repo in repos) {
             val total = repo.functionsLowered ?: continue
             val failed = repo.loweringFailures.values.sum()
@@ -562,7 +564,7 @@ object Promotion {
     ): Check {
         val name = "per-repo-resolved-call-ratio"
         val repos = current.results
-            .filter { it.tier != "fixtures" && it.slot == MatrixSlot.RESOLVED_LABEL }
+            .filter { it.tier in REPO_TIERS && it.slot == MatrixSlot.RESOLVED_LABEL }
             .sortedBy { it.slug }
         if (repos.isEmpty()) {
             // The check must never pass by having nothing to look at: a run
@@ -698,7 +700,7 @@ object Promotion {
         val fixtureRows = rows.filter { it.tier == "fixtures" }
         val totalPublic = fixtureRows.sumOf { it.publicCallables ?: 0 }
         val totalReached = fixtureRows.sumOf { it.reachedPublicCallables ?: 0 }
-        val repoRows = rows.filter { it.tier != "fixtures" }.sortedBy { it.slug }
+        val repoRows = rows.filter { it.tier in REPO_TIERS }.sortedBy { it.slug }
         val repoDetail = repoRows.joinToString(", ") { r ->
             val pub = r.publicCallables ?: 0
             val reached = r.reachedPublicCallables ?: 0
@@ -757,7 +759,7 @@ object Promotion {
     ): Check {
         val name = "per-repo-exported-reach"
         val rows = current.results.filter {
-            it.tier != "fixtures" && it.slug != "TOTAL" && it.slot == MatrixSlot.EXPORTED_LABEL &&
+            it.tier in REPO_TIERS && it.slug != "TOTAL" && it.slot == MatrixSlot.EXPORTED_LABEL &&
                 (it.publicCallables ?: 0) > 0
         }.sortedBy { it.slug }
         if (rows.isEmpty()) {
@@ -794,6 +796,144 @@ object Promotion {
             Check(name, State.FAIL, "exported reach fell on ${dropped.size} repo(s): " + dropped.joinToString("; "))
         }
     }
+
+    /**
+     * The LIVE dependency-crossing check. Both counts are read from the
+     * bench rows (which the bench read from the slices), the detail line
+     * carries both populations, zero is NOT_EVALUATED with the reason, and
+     * losing every crossing the baseline measured is a FAIL.
+     */
+    private fun dependencyCrossingCheck(
+        current: BenchRunner.BenchResult,
+        baseline: BenchRunner.BenchResult?,
+    ): Check {
+        val name = "dependency-crossing-flows"
+        val rows = fixtureRows(current) + asyncRows(current)
+        val crossDep = rows.sumOf { it.crossDependencySlices ?: 0 }
+        val crossMod = rows.sumOf { it.crossModuleSlices ?: 0 }
+        if (rows.sumOf { it.sliceCount } == 0) {
+            return Check(name, State.NOT_EVALUATED, "no slices reported on the fixture or async tiers")
+        }
+        // The regression arm BEFORE the zero arm: losing every crossing the
+        // baseline measured must FAIL, not read NOT_EVALUATED past it.
+        val baseRows = baseline?.results?.filter { it.tier == "fixtures" || it.tier == "async" }.orEmpty()
+        val baseCross = baseRows.sumOf { it.crossDependencySlices ?: 0 } + baseRows.sumOf { it.crossModuleSlices ?: 0 }
+        if (baseCross > 0 && crossDep + crossMod == 0) {
+            return Check(name, State.FAIL, "baseline measured $baseCross crossing slice(s), this run measured 0")
+        }
+        if (crossDep == 0 && crossMod == 0) {
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "0 crossing slices over ${rows.sumOf { it.sliceCount }} slice(s): no slice's source and sink " +
+                    "landed in different modules or dependencies (P5's cross-module fixture should make this nonzero)",
+            )
+        }
+        return Check(
+            name,
+            State.PASS,
+            "$crossMod cross-module and $crossDep cross-dependency slice(s) over ${rows.sumOf { it.sliceCount }} " +
+                "fixture/async slices, flags computed from the slice ends",
+        )
+    }
+
+    /**
+     * The P5 summaries gate: computed summaries must EXIST and their origin
+     * distribution must name more than one producer — a single aggregate
+     * number cannot answer the question the `origin` field exists to ask.
+     * NOT_EVALUATED when no slot ran summaries — never a pass.
+     */
+    private fun summariesComputedCheck(current: BenchRunner.BenchResult): Check {
+        val name = "summaries-computed"
+        val rows = fixtureRows(current).filter { it.summariesComputed != null }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no fixture-tier slot published summaries (run the resolved tier)")
+        }
+        val computed = rows.sumOf { it.summariesComputed ?: 0 }
+        val byOrigin = rows
+            .flatMap { r -> r.summariesByOrigin.entries.map { e -> e.key to e.value } }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, vs) -> vs.sum() }
+        val keys = byOrigin.keys.sorted()
+        return if (computed > 0 && keys.size > 1) {
+            Check(
+                name,
+                State.PASS,
+                "$computed computed summar(ies) over ${rows.size} slot(s); origins: " +
+                    keys.joinToString(", ") { "$it=${byOrigin[it]}" },
+            )
+        } else if (computed == 0) {
+            Check(name, State.FAIL, "0 computed summaries over ${rows.size} slot(s): the interprocedural " +
+                "engine regressed to intraprocedural")
+        } else {
+            Check(name, State.FAIL, "origins carry a single key ($keys): the origin provenance is not " +
+                "distinguishing computed summaries from pack/default propagation")
+        }
+    }
+
+    /**
+     * The roadmap's P5 gate on blanket propagation: the fraction of slices
+     * whose existence depends ONLY on `origin=default` must stay under 10%.
+     * The denominator is the slices whose trace crossed at least one summary
+     * boundary — an intraprocedural slice depends on no propagation at all —
+     * and BOTH counts are published. NOT_EVALUATED over zero such slices.
+     */
+    private fun defaultOriginShareCheck(current: BenchRunner.BenchResult): Check {
+        val name = "default-origin-share"
+        val rows = fixtureRows(current) + asyncRows(current)
+        val crossing = rows.sumOf { it.summaryCrossingSlices ?: 0 }
+        val defaultOnly = rows.sumOf { it.defaultOriginSlices ?: 0 }
+        if (rows.sumOf { it.sliceCount } == 0) {
+            return Check(name, State.NOT_EVALUATED, "no slices reported on the fixture or async tiers")
+        }
+        if (crossing == 0) {
+            return Check(name, State.NOT_EVALUATED, "0 slices crossed a summary boundary, so no slice's " +
+                "existence depends on propagation")
+        }
+        val fraction = defaultOnly.toDouble() / crossing
+        val detail = String.format("%.4f (%d of %d summary-crossing slices depend only on origin=default)",
+            fraction, defaultOnly, crossing)
+        return if (fraction < DEFAULT_ORIGIN_SHARE_MAX) {
+            Check(name, State.PASS, detail)
+        } else {
+            Check(name, State.FAIL, "$detail >= $DEFAULT_ORIGIN_SHARE_MAX")
+        }
+    }
+
+    /**
+     * The P6 async gate: recall >= 0.90 on the async tier SPECIFICALLY, as
+     * its own fraction with both counts — not folded into the fixture-tier
+     * number, where seven async fixtures would be diluted by thirty others.
+     * NOT_EVALUATED when the async tier did not run.
+     */
+    private fun asyncRecallCheck(current: BenchRunner.BenchResult): Check {
+        val name = "async-recall"
+        val rows = asyncRows(current)
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no async-tier rows in this run (the async tier did not run)")
+        }
+        val positives = rows.sumOf { it.flowPositives }
+        val matched = rows.sumOf { it.flowPositivesMatched }
+        if (positives == 0) {
+            return Check(name, State.NOT_EVALUATED, "the async tier ran but evaluated no flow expectation")
+        }
+        val fraction = matched.toDouble() / positives
+        val detail = String.format("%.4f (%d of %d async flow expectations)", fraction, matched, positives)
+        return if (fraction < ASYNC_RECALL_TARGET) {
+            val worst = rows.filter { it.flowPositives > 0 && it.flowPositivesMatched < it.flowPositives }
+                .sortedBy { it.flowPositivesMatched.toDouble() / it.flowPositives }
+                .take(5).joinToString("; ") { "${it.slug}/${it.slot} ${it.flowPositivesMatched} of ${it.flowPositives}" }
+            Check(name, State.FAIL, "$detail < $ASYNC_RECALL_TARGET" + worst.let { if (it.isEmpty()) "" else ": $it" })
+        } else {
+            Check(name, State.PASS, detail)
+        }
+    }
+
+    /** The roadmap P5 gate's ceiling on default-only propagation. */
+    const val DEFAULT_ORIGIN_SHARE_MAX = 0.10
+
+    /** The roadmap P6 gate: async-tier recall. */
+    const val ASYNC_RECALL_TARGET = 0.90
 
     /**
      * The breakdown gate: an aggregate count is not a result (golem's 6178

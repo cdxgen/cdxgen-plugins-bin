@@ -57,6 +57,13 @@ data class PassthroughPattern(
     val pattern: String,
     val category: String,
     val flows: List<List<Int>>,
+    /**
+     * Element flows: same tuple notation, but index 0 reads the RECEIVER's
+     * ELEMENT state (`xs[...]`, a channel's sent values) instead of the
+     * receiver value itself — how `Channel.receive` yields what `send`
+     * delivered (P6).
+     */
+    val elementFlows: List<List<Int>> = emptyList(),
 ) {
     fun writeJson(w: io.cdxgen.kosi.schema.JsonWriter) {
         w.beginObject()

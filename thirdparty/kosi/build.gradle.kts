@@ -75,9 +75,17 @@ kosiTask("corpusQuick", "Fixture tier: the annotation ratchet in both modes, no 
     args = listOf("bench", "--tier", "fixtures", "--repo-root", rootDir.absolutePath)
 }
 
-kosiTask("corpusFull", "Fixture + pinned-repo tiers (network required for repo fetches).") {
+kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {
+    args = listOf("bench", "--tier", "async", "--repo-root", rootDir.absolutePath)
+}
+
+kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required for repo fetches).") {
     args = listOf(
-        "bench", "--tier", "fixtures,small,vuln,ported",
+        // Every tier the manifest actually carries. The old list named
+        // `vuln` and `ported`, which have never existed, and omitted
+        // `medium`, `android`, `kmp` and `hybrid` — four of the five pinned
+        // repos — so the "full" run measured one of them (R64).
+        "bench", "--tier", "fixtures,async,small,medium,android,kmp,hybrid",
         "--repo-root", rootDir.absolutePath,
         "--skip-missing-repos",
     )
@@ -99,7 +107,7 @@ tasks.register("corpusTierList") {
     group = "kosi"
     description = "Lists the tier tasks CI must be able to run; fails if one is missing."
     doLast {
-        val required = listOf("corpusQuick", "corpusFull", "kosiEap", "golden", "goldenUpdate")
+        val required = listOf("corpusQuick", "corpusAsync", "corpusFull", "kosiEap", "golden", "goldenUpdate")
         val missing = required.filter { tasks.names.none { n -> n == it } }
         if (missing.isNotEmpty()) {
             throw GradleException("missing kosi tier tasks: $missing")

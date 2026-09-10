@@ -93,7 +93,7 @@ class FlowGateTest {
         )
         val check = check(Promotion.evaluate(current, null), "taint-recall")
         assertEquals(Promotion.State.FAIL, check.state)
-        assertTrue(check.detail.contains("0.5000 < 0.85"), check.detail)
+        assertTrue(check.detail.contains("0.5000 < 0.90"), check.detail)
     }
 
     @Test
@@ -142,7 +142,10 @@ class FlowGateTest {
         )
         val check = check(Promotion.evaluate(current, null), "fixpoint-cap")
         assertEquals(Promotion.State.PASS, check.state)
-        assertTrue(check.detail.contains("0 cap hits over 100 analysed function(s)"), check.detail)
+        // P5 added the SCC iteration cap as a second counter, and the detail
+        // line now names both denominators.
+        assertTrue(check.detail.contains("0 worklist cap hits over 100 analysed function(s)"), check.detail)
+        assertTrue(check.detail.contains("0 SCC iteration cap hits over 0 SCC(s)"), check.detail)
     }
 
     @Test
@@ -152,7 +155,7 @@ class FlowGateTest {
         )
         val check = check(Promotion.evaluate(current, null), "fixpoint-cap")
         assertEquals(Promotion.State.FAIL, check.state)
-        assertTrue(check.detail.contains("2 cap hit(s) over 42"), check.detail)
+        assertTrue(check.detail.contains("2 worklist cap hit(s) over 42"), check.detail)
     }
 
     // ---- connectivity ------------------------------------------------------------

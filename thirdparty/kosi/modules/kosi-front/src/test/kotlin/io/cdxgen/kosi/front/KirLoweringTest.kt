@@ -1,6 +1,7 @@
 package io.cdxgen.kosi.front
 
 import io.cdxgen.kosi.kir.KirCall
+import io.cdxgen.kosi.kir.uses
 import io.cdxgen.kosi.kir.KirReader
 import io.cdxgen.kosi.kir.KirCast
 import io.cdxgen.kosi.kir.KirElvis
@@ -286,4 +287,195 @@ class KirLoweringTest {
         assertEquals(1, checks.size, "`is` lowers to TypeCheck")
         assertTrue(checks[0].type == "String", "the check names the tested type: ${checks[0].type}")
     }
+
+// ---- P5/P6: lambda extraction, higher-order invocation, coroutine builders --
+
+@Test
+fun standaloneLambdasExtractIntoTheirOwnFunctionsWithCapturesRenamed() {
+    // Negative half first: a lambda WITHOUT captures declares no capture
+    // parameters — an extraction that captures everything (or renames the
+    // body's own locals) fails here.
+    val root = project(
+        mapOf(
+            "src/main/kotlin/H.kt" to """
+                package t
+
+                fun runWith(block: (String) -> Unit) {
+                    block("x")
+                }
+
+                fun caller() {
+                    val raw = readLine()
+                    runWith { marker -> println(marker + raw) }
+                }
+
+                fun cleanCaller() {
+                    runWith { marker -> println(marker) }
+                }
+            """.trimIndent(),
+        ),
+    )
+    val result = loweredFunctions(root)
+    val extracted = result.functions.filter { "$" in it.canonicalName && "lambda" in it.canonicalName }
+    assertEquals(2, extracted.size, "both lambda bodies lower as their own functions")
+
+    val capturing = extracted.single { "caller" in it.canonicalName }
+    val captureParams = capturing.params.filter { it.register.startsWith("%c") }
+    assertEquals(listOf("vraw"), captureParams.map { it.name?.removePrefix("capture") }, "the capture names its enclosing register")
+    assertTrue(
+        capturing.body?.blocks?.flatMap { it.instructions }.orEmpty().any { it.uses.contains("%c0") },
+        "the body reads the capture through its parameter register",
+    )
+
+    val clean = extracted.single { "cleanCaller" in it.canonicalName }
+    assertEquals(emptyList(), clean.params.filter { it.register.startsWith("%c") }, "no captures, no capture parameters")
+}
+
+@Test
+fun aFunctionValuedParameterIsInvokedOnItsOwnRegister() {
+    // `block(x)` keeps the invoked VALUE on the receiver — without it the
+    // invocation site loses the one fact higher-order analysis needs.
+    val root = project(
+        mapOf(
+            "src/main/kotlin/I.kt" to """
+                package t
+
+                fun invokee(block: (String) -> Unit) {
+                    block("x")
+                }
+            """.trimIndent(),
+        ),
+    )
+    val result = loweredFunctions(root)
+    val invokes = result.instructionsOf("invokee").filterIsInstance<io.cdxgen.kosi.kir.KirCall>()
+        .filter { it.callee.fqn.endsWith(".invoke") }
+    assertEquals(1, invokes.size)
+    assertEquals("vblock", invokes[0].receiver, "the function value rides the receiver, not the void")
+}
+
+@Test
+fun coroutineBuilderBodiesInlineIntoTheCallerWithContext() {
+    val root = project(
+        mapOf(
+            "src/main/kotlin/C.kt" to """
+                package t
+
+                import kotlinx.coroutines.flow.flow
+                import kotlinx.coroutines.flow.map
+                import kotlinx.coroutines.flow.collect
+
+                fun flowCase() {
+                    val raw = readLine()
+                    flow { emit(raw) }
+                        .map { it }
+                        .collect { value ->
+                            println(value)
+                        }
+                }
+
+                fun mapIsNotAFlowHere() {
+                    val xs = listOf(1, 2, 3)
+                    xs.map { it + 1 }
+                }
+            """.trimIndent(),
+        ),
+    )
+    val result = loweredFunctions(root)
+    val flowCase = result.instructionsOf("flowCase")
+    // emit routes its argument into the flow value: an assign from the
+    // element register to the flow-value register follows the emit call.
+    val assigns = flowCase.filterIsInstance<io.cdxgen.kosi.kir.KirAssign>()
+    assertTrue(assigns.isNotEmpty(), "emit(x) assigns x into the flow value register")
+    // `it` binds the flow value: a store FROM the flow register into the
+    // lambda parameter local, so `collect { println(value) }` reads it.
+    val stores = flowCase.filterIsInstance<io.cdxgen.kosi.kir.KirStore>()
+    assertTrue(stores.any { it.value.startsWith("tf") || it.value.startsWith("t") }, "element binding lowers as a store")
+    // The evidence edges keep the call identity: the resolved FQN when the
+    // classpath reaches the builder, the plain name when it does not.
+    val edgeNames = flowCase.filterIsInstance<io.cdxgen.kosi.kir.KirCall>().map { it.callee.fqn.substringAfterLast('.') } +
+        flowCase.filterIsInstance<io.cdxgen.kosi.kir.KirDynamicCall>().map { it.name }
+    assertTrue(edgeNames.any { it == "flow" }, "the flow builder keeps its evidence edge")
+    assertTrue(edgeNames.any { it == "map" }, "map keeps its evidence edge")
+    assertTrue(edgeNames.any { it == "collect" }, "collect keeps its evidence edge")
+
+    // The negative half: a COLLECTION map over a resolved stdlib receiver is
+    // NOT inlined — its lambda stays a value argument, no flow-value store.
+    val collectionCase = result.instructionsOf("mapIsNotAFlowHere")
+    assertTrue(
+        collectionCase.filterIsInstance<io.cdxgen.kosi.kir.KirAssign>().isEmpty(),
+        "collection map does not fabricate a flow-value assign",
+    )
+}
+
+@Test
+fun suspendingBuildersEmitSuspendBoundaries() {
+    val root = project(
+        mapOf(
+            "src/main/kotlin/S.kt" to """
+                package t
+
+                suspend fun inner(): Int = 1
+
+                suspend fun work(): Int {
+                    return inner()
+                }
+            """.trimIndent(),
+        ),
+    )
+    val result = loweredFunctions(root)
+    assertTrue(
+        result.instructionsOf("work").any { it is io.cdxgen.kosi.kir.KirSuspendPoint },
+        "a resolved suspend call is followed by a suspend boundary",
+    )
+}
+
+/**
+ * A nested qualifier lowers to ONE path off the chain's base register, not
+ * one hop per field off a fresh temporary. `AccessPath` has carried a list
+ * of elements since P2 and both engines join them into the state key, but
+ * the lowering emitted length-one paths only: `o.inner.a = x` wrote onto a
+ * temp and the matching read looked at a different temp, so no nested field
+ * flow could ever be seen (R63). The negative half is the shape that
+ * regression would produce — a write path of length one.
+ */
+@Test
+fun nestedQualifiersComposeIntoOneAccessPath() {
+    val root = project(
+        mapOf(
+            "src/main/kotlin/N.kt" to """
+                package t
+
+                class Inner { var a: String = "" }
+                class Outer { var inner: Inner = Inner() }
+
+                fun write(o: Outer, value: String) {
+                    o.inner.a = value
+                }
+
+                fun read(o: Outer): String = o.inner.a
+
+                fun viaCall(make: () -> Outer): String = make().inner.a
+            """.trimIndent(),
+        ),
+    )
+    val result = loweredFunctions(root)
+
+    fun fields(path: io.cdxgen.kosi.kir.AccessPath) =
+        path.elements.filterIsInstance<io.cdxgen.kosi.kir.AccessPath.Element.Field>().map { it.name }
+
+    val writes = result.instructionsOf("write").filterIsInstance<io.cdxgen.kosi.kir.KirFieldSet>()
+    assertEquals(listOf(listOf("inner", "a")), writes.map { fields(it.path) }, "the write composes both fields")
+    val writeBase = writes.single().receiver
+    assertTrue(writeBase.startsWith("%") || writeBase.startsWith("v"), "the write hangs off the chain's base, not a temp: $writeBase")
+
+    val reads = result.instructionsOf("read").filterIsInstance<KirFieldGet>()
+    assertEquals(listOf(listOf("inner", "a")), reads.map { fields(it.path) }, "the read composes both fields")
+    assertEquals(writes.single().path.base, reads.single().path.base, "read and write name the same base")
+
+    // A chain whose root is a CALL still composes only the field part: the
+    // call is lowered once, as an expression, and the path hangs off its
+    // result register.
+    val viaCall = result.instructionsOf("viaCall").filterIsInstance<KirFieldGet>()
+    assertEquals(listOf(listOf("inner", "a")), viaCall.map { fields(it.path) }, "composition stops at the call")
+}
 }

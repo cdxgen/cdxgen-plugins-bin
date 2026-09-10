@@ -82,6 +82,30 @@ object DiagnosticCodes {
      */
     const val DATAFLOW_TRUNCATED = "dataflow-truncated"
 
+    /**
+     * P5 summaries: a strongly connected component of the call graph hit
+     * its summary iteration budget before its members' summaries converged.
+     * The last iterate is what callers applied — labelled
+     * `origin=recursive-approx` — and the count is published over the SCC
+     * count in `stats.sccIterationCapHits` / `stats.sccsProcessed`.
+     */
+    const val SUMMARY_ITERATION_CAP = "summary-iteration-cap"
+
+    /**
+     * P5 summaries: a virtual call site joined more dispatch-target
+     * summaries than the width budget; the JOIN was applied and precision
+     * may suffer where the targets disagree. The histogram stays in
+     * `dataFlow.stats.dispatchJoins{}`.
+     */
+    const val DISPATCH_JOIN_WIDTH = "dispatch-join-width"
+
+    /**
+     * P5 summaries: a lambda value the engine could not resolve to an
+     * extracted body (a callable reference `Foo::bar`, a local function
+     * value) — no summary was applied through it. Counted, never silent.
+     */
+    const val LAMBDA_UNRESOLVED = "lambda-unresolved"
+
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
@@ -103,6 +127,9 @@ object DiagnosticCodes {
         CALLGRAPH_ROOT_NOT_FOUND,
         FIXPOINT_CAP,
         DATAFLOW_TRUNCATED,
+        SUMMARY_ITERATION_CAP,
+        DISPATCH_JOIN_WIDTH,
+        LAMBDA_UNRESOLVED,
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,

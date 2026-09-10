@@ -18,6 +18,9 @@ import io.cdxgen.kosi.kir.KirFunction
 import io.cdxgen.kosi.kir.KirIndexGet
 import io.cdxgen.kosi.kir.KirIndexSet
 import io.cdxgen.kosi.kir.KirLambda
+import io.cdxgen.kosi.kir.defs
+import io.cdxgen.kosi.kir.mapRegisters
+import io.cdxgen.kosi.kir.uses
 import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirNew
 import io.cdxgen.kosi.kir.KirPhi
@@ -321,15 +324,17 @@ object KirLowering {
                 NO_FACTS
             }
 
+            val lambdaContext = LambdaContext(failures, ::resolve)
             for (file in files) {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
-                    lowerFunction(functionLike, failures, ::resolve, ::factsFor)?.let { functions.add(it) }
+                    lowerFunction(functionLike, failures, ::resolve, ::factsFor, lambdaContext)?.let { functions.add(it) }
                 }
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
                 }
             }
+            functions.addAll(lambdaContext.functions)
         }
         return Result(functions, failures, functionCount, symbolFactFailures)
     }
@@ -454,11 +459,27 @@ object KirLowering {
 
     // ---- signatures -----------------------------------------------------------------
 
+    /**
+     * Per-`lower()`-run context for the standalone-lambda extraction (P5):
+     * lambdas passed as VALUES (`runWith { .. }`, a function-valued argument)
+     * lower into their own KIR functions so the summary engine can compute
+     * and apply them like any other callee. The context owns the ordinal
+     * (deterministic naming) and the sink the extracted functions land in.
+     */
+    internal class LambdaContext(
+        val failures: MutableMap<String, Int>,
+        val resolve: (KtCallExpression) -> CallInfo?,
+    ) {
+        var ordinal = 0
+        val functions = mutableListOf<KirFunction>()
+    }
+
     private fun lowerFunction(
         psi: org.jetbrains.kotlin.psi.KtDeclaration,
         failures: MutableMap<String, Int>,
         resolve: (KtCallExpression) -> CallInfo?,
         factsFor: (org.jetbrains.kotlin.psi.KtDeclaration) -> Facts,
+        lambdaContext: LambdaContext,
     ): KirFunction? {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
@@ -471,7 +492,7 @@ object KirLowering {
         val canonical = listOf(pkg, chain, name).filter { it.isNotEmpty() }.joinToString(".")
 
         val facts = factsFor(psi)
-        val lower = BodyLower(failures, resolve, psi)
+        val lower = BodyLower(failures, resolve, psi, lambdaContext, enclosingCanonical = canonical)
         val bodyPsi: KtExpression? = when (psi) {
             is KtNamedFunction -> psi.bodyExpression
             is KtPropertyAccessor -> psi.bodyExpression
@@ -560,19 +581,42 @@ object KirLowering {
 
     // ---- the body lowering ----------------------------------------------------------
 
-    class BodyLower(
+    private class BodyLower(
         private val failures: MutableMap<String, Int>,
         private val resolveCallInfo: (KtCallExpression) -> CallInfo?,
         /** The lowered function's PSI: the fallback position for synthesized calls. */
         private val functionPsi: org.jetbrains.kotlin.psi.KtDeclaration,
+        /** Non-null when extracted standalone lambdas land somewhere (the `lower()` run's context). */
+        private val lambdaContext: LambdaContext? = null,
+        /** This function's canonical name: the prefix of extracted lambda names. */
+        private val enclosingCanonical: String = "",
+        /** First temporary index: an extracted body starts above its enclosing body's counter. */
+        tempStart: Int = 0,
     ) {
 
         enum class Pos { STATEMENT, NESTED }
 
-        private var temp = 0
+        private var temp = tempStart
         private var counter = 1
         private val blocks = LinkedHashMap<String, MutableList<KirIns>>()
         private var currentId = "b0"
+
+        /**
+         * Every register this body has DEFINED so far (parameters, instruction
+         * results, store targets). The lambda extraction reads it to decide
+         * which of a lambda body's free registers are captures of the
+         * enclosing scope.
+         */
+        private val definedRegisters = mutableSetOf<String>()
+
+        /**
+         * The `emit(x)` / `send(x)` sinks of inlined flow/channel builders,
+         * innermost first. While non-empty, a receiver-less `emit`/`send`
+         * call assigns its argument into the builder's value register — how
+         * `flow { emit(tainted) }` puts the element's taint on the flow
+         * value the downstream operator and `collect` see (P6).
+         */
+        private val emitSinks = mutableListOf<String>()
 
         init {
             blocks["b0"] = mutableListOf()
@@ -585,6 +629,7 @@ object KirLowering {
         private fun newId(): String = "b${counter++}"
 
         private fun emit(ins: KirIns) {
+            definedRegisters.addAll(ins.defs)
             current.add(ins)
         }
 
@@ -680,7 +725,12 @@ object KirLowering {
          */
         private val thisOverrides = ArrayDeque<String>()
 
-        private fun currentThis(): String = thisOverrides.lastOrNull() ?: "v this"
+        // The implicit receiver register is the ENTRY PARAMETER STORE (`v$this`
+        // from bindParameters) — not a distinct "v this" register nothing
+        // ever defines: with the old name, member reads and writes on the
+        // implicit receiver never saw the receiver's state, and a member
+        // function's own parameters never reached its fields.
+        private fun currentThis(): String = thisOverrides.lastOrNull() ?: "vthis"
 
         private fun throwNull(): String {
             val reg = t()
@@ -1205,6 +1255,13 @@ object KirLowering {
                         if (cursor.valueParameters.any { it.name == name }) return true
                     }
 
+                    // A NAMED lambda parameter (`collect { value -> .. }`):
+                    // the lowering binds it as a plain local exactly like the
+                    // implicit `it`, so a read of it must be a local read.
+                    is KtLambdaExpression -> {
+                        if (cursor.valueParameters.any { it.name == name }) return true
+                    }
+
                     is org.jetbrains.kotlin.psi.KtForExpression -> {
                         // A `for` loop parameter is bound to the next() result
                         // by the lowering (`v<name>` <- iterator.next()); a
@@ -1278,18 +1335,14 @@ object KirLowering {
                     }
                 }
                 is KtDotQualifiedExpression -> {
-                    val receiver = lowerExpr(target.receiverExpression, Pos.NESTED)
                     val name = (target.selectorExpression as? KtNameReferenceExpression)?.getReferencedName()
                     if (name == null) {
                         fail("assignment-target")
                     } else {
-                        emit(
-                            KirFieldSet(
-                                receiver,
-                                AccessPath.of(receiver, listOf(AccessPath.Element.Field(name))),
-                                value,
-                            ),
-                        )
+                        // The whole qualifier chain, so the key this write
+                        // lands on is the key the matching read looks at (R63).
+                        val (base, path) = fieldAccess(target.receiverExpression, name)
+                        emit(KirFieldSet(base, path, value))
                     }
                 }
                 is org.jetbrains.kotlin.psi.KtArrayAccessExpression -> {
@@ -1357,15 +1410,14 @@ object KirLowering {
                     }
                 }
                 is KtDotQualifiedExpression -> {
-                    val receiver = lowerExpr(target.receiverExpression, Pos.NESTED)
                     val name = (target.selectorExpression as? KtNameReferenceExpression)?.getReferencedName()
                     if (name == null) {
                         fail("assignment-target:${target.selectorExpression?.javaClass?.simpleName}")
                     } else {
-                        val path = AccessPath.of(receiver, listOf(AccessPath.Element.Field(name)))
+                        val (base, path) = fieldAccess(target.receiverExpression, name)
                         val read = t()
-                        emit(KirFieldGet(read, receiver, path))
-                        emit(KirFieldSet(receiver, path, call(read)))
+                        emit(KirFieldGet(read, base, path))
+                        emit(KirFieldSet(base, path, call(read)))
                     }
                 }
                 is org.jetbrains.kotlin.psi.KtArrayAccessExpression -> {
@@ -1545,9 +1597,53 @@ object KirLowering {
             else -> null
         }
 
+        /**
+         * Flattens a syntactic `a.b.c` qualifier chain into ONE base register
+         * and a multi-element field path.
+         *
+         * `AccessPath` has carried `elements: List<Element>` with a depth cap
+         * of 5 since P2, and both dataflow engines join those elements into
+         * the key they read and write — but the lowering only ever emitted
+         * paths of length ONE. `o.inner.a = tainted` became `t4 = fieldget vo
+         * vo.inner; fieldset t4 t4.a`, and the read `o.inner.a` became a
+         * fieldget off a DIFFERENT temp, so the write and the read never met:
+         * every nested field flow was lost, intraprocedurally and across
+         * summaries alike (R63). Composing here fixes both engines at once,
+         * and `AccessPath.of` still collapses past the cap.
+         *
+         * The walk stops at anything that is not a plain name selector — a
+         * call, an index, a safe call — so `f().inner.a` still lowers its
+         * receiver as an expression and composes only the part that is a
+         * syntactic field chain.
+         */
+        private fun fieldChain(psi: KtExpression): Pair<String, List<AccessPath.Element>> {
+            val names = ArrayDeque<String>()
+            var current: KtExpression = psi
+            while (current is KtDotQualifiedExpression) {
+                val selector = current.selectorExpression as? KtNameReferenceExpression ?: break
+                names.addFirst(selector.getReferencedName())
+                current = current.receiverExpression
+            }
+            return lowerExpr(current, Pos.NESTED) to names.map { AccessPath.Element.Field(it) }
+        }
+
+        /** The base register and full path for reading or writing `<receiver>.<name>`. */
+        private fun fieldAccess(receiverPsi: KtExpression, name: String): Pair<String, AccessPath> {
+            val (base, prefix) = fieldChain(receiverPsi)
+            return base to AccessPath.of(base, prefix + AccessPath.Element.Field(name))
+        }
+
         private fun dotChain(psi: KtDotQualifiedExpression): String {
-            val receiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
             val selector = psi.selectorExpression
+            // A plain name selector is a field read: compose the whole
+            // qualifier chain into one path instead of one temp per hop.
+            if (selector is KtNameReferenceExpression) {
+                val (base, path) = fieldAccess(psi.receiverExpression, selector.getReferencedName())
+                val reg = t()
+                emit(KirFieldGet(reg, base, path))
+                return reg
+            }
+            val receiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
             return when (selector) {
                 is KtCallExpression -> {
                     // `x.let { .. }` and friends: qualified scope functions
@@ -1556,20 +1652,14 @@ object KirLowering {
                     val name = (selector.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
                     if (name in SCOPE_FUNCTIONS && selector.hasLambdaArgument()) {
                         inlineScopeFunction(selector, name!!, receiver)
+                    } else if (name != null && selector.hasLambdaArgument()) {
+                        // `flow { .. }.map { .. }.collect { .. }`: the flow
+                        // operators inline their lambda with the flow value
+                        // bound (P6).
+                        inlineCoroutineBuilder(selector, name, receiver) ?: callWithReceiver(selector, receiver)
                     } else {
                         callWithReceiver(selector, receiver)
                     }
-                }
-                is KtNameReferenceExpression -> {
-                    val reg = t()
-                    emit(
-                        KirFieldGet(
-                            reg,
-                            receiver,
-                            AccessPath.of(receiver, listOf(AccessPath.Element.Field(selector.getReferencedName()))),
-                        ),
-                    )
-                    reg
                 }
                 else -> {
                     fail("selector:${selector?.javaClass?.simpleName ?: "null"}")
@@ -1599,6 +1689,8 @@ object KirLowering {
                         // `x?.let { .. }`: the inlining runs on the non-null
                         // arm, where the receiver register is the value.
                         inlineScopeFunction(selector, name!!, receiver)
+                    } else if (name != null && selector.hasLambdaArgument()) {
+                        inlineCoroutineBuilder(selector, name, receiver) ?: callWithReceiver(selector, receiver)
                     } else {
                         callWithReceiver(selector, receiver)
                     }
@@ -1641,11 +1733,26 @@ object KirLowering {
                         (arg.getArgumentExpression() as? KtExpression)
                             ?.takeIf { it !is KtLambdaExpression }
                             ?.let { lowerExpr(it, Pos.NESTED) }
-                    } ?: "v this"
+                    } ?: "vthis"
                 } else {
-                    "v this"
+                    "vthis"
                 }
                 return inlineScopeFunction(psi, name, receiver)
+            }
+            // Coroutine builders and flow operators: their trailing lambda is
+            // analysed in the caller's context (P6).
+            if (psi.hasLambdaArgument()) {
+                inlineCoroutineBuilder(psi, name, receiver = null)?.let { return it }
+            }
+            // A function-valued local invoked by name (`block(x)`): the
+            // invoked VALUE is the dispatch receiver of the invoke call. The
+            // lowering keeps it on the receiver so the graph's edge and the
+            // summary engine's invoked-parameter facts both see which local
+            // was invoked — without it, an invocation site loses the one
+            // fact higher-order analysis needs.
+            val calleeRef = psi.calleeExpression as? KtNameReferenceExpression
+            if (calleeRef != null && isFunctionValueLocal(calleeRef)) {
+                return callWithReceiver(psi, lowerExpr(calleeRef, Pos.NESTED))
             }
             return callWithReceiver(psi, receiver = null)
         }
@@ -1656,10 +1763,11 @@ object KirLowering {
             }
             val info = resolveCallInfo(psi)
             val symbol = info?.symbol
+            val simpleName = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
             if (symbol == null) {
-                val name = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
                 val reg = t()
-                emit(KirDynamicCall(reg, name, receiver, argRegs, line = psi.line()))
+                emit(KirDynamicCall(reg, simpleName, receiver, argRegs, line = psi.line()))
+                hookEmitSink(receiver, simpleName, argRegs)
                 return reg
             }
             val kind: CallKind
@@ -1685,7 +1793,26 @@ object KirLowering {
             val reg = t()
             emit(KirCall(reg, KirCallee(fqn, info.descriptor, kind), receiver, argRegs, line = psi.line()))
             if (info.isSuspend) emit(KirSuspendPoint(reg))
+            hookEmitSink(receiver, simpleName, argRegs)
             return reg
+        }
+
+        /**
+         * Inside an inlined `flow { }` / `channelFlow { }` body, a
+         * receiver-less `emit(x)` / `send(x)` is the body handing a value to
+         * the flow: the argument's taint lands on the builder's value
+         * register, which is what the operators and `collect` downstream
+         * read. Receiver-ful calls (`stateFlow.emit(x)`) are real member
+         * calls on other objects and keep their own semantics. The move is an
+         * ASSIGN, so multiple emits leave the LAST element's facts — a
+         * named approximation, documented in docs/KOSI.md.
+         */
+        private fun hookEmitSink(receiver: String?, simpleName: String, argRegs: List<String>) {
+            val sink = emitSinks.lastOrNull() ?: return
+            if (receiver != null) return
+            if (simpleName != "emit" && simpleName != "send") return
+            val arg = argRegs.firstOrNull() ?: return
+            emit(io.cdxgen.kosi.kir.KirAssign(sink, arg))
         }
 
         /**
@@ -1749,6 +1876,109 @@ object KirLowering {
             return if (name == "apply" || name == "also") receiver else bodyResult
         }
 
+        /**
+         * Coroutine builders and flow operators: the trailing lambda body is
+         * lowered INTO the caller's context under the binding the builder
+         * names (P6), with the RESOLVED call retained as the evidence edge —
+         * the same shape the scope functions use. Returns the expression's
+         * value register, or null when this call is not a builder the
+         * lowering inlines (the caller falls through to the plain call path).
+         */
+        private fun inlineCoroutineBuilder(psi: KtCallExpression, name: String, receiver: String?): String? {
+            val info = resolveCallInfo(psi)
+            val fqn = (info?.symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol)
+                ?.callableId?.asSingleFqName()?.asString()
+            val binding = coroutineBuilderBinding(name, fqn) ?: return null
+            val lambdaPsi = psi.valueArguments
+                .mapNotNull { it.getArgumentExpression() as? KtLambdaExpression }
+                .firstOrNull() ?: return null
+            // Only the NON-lambda arguments are argument values (a context, a
+            // dispatcher, Compose keys); the lambda is the body being inlined.
+            val argRegs = psi.valueArguments.mapNotNull { arg ->
+                (arg.getArgumentExpression() as? KtLambdaExpression)?.let { return@mapNotNull null }
+                arg.getArgumentExpression()?.let { lowerExpr(it, Pos.NESTED) }
+            }
+            // The retained evidence edge: the real callee where resolution
+            // succeeded, the plain name where it did not.
+            val edge = t()
+            val symbol = info?.symbol
+            if (symbol == null) {
+                emit(KirDynamicCall(edge, name, receiver, argRegs, line = psi.line()))
+            } else {
+                val calleeFqn = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol)
+                    ?.callableId?.asSingleFqName()?.asString() ?: "<function>"
+                val kind = if (receiver != null) CallKind.VIRTUAL else CallKind.STATIC
+                emit(KirCall(edge, KirCallee(calleeFqn, info!!.descriptor, kind), receiver, argRegs, line = psi.line()))
+                if (info.isSuspend) emit(KirSuspendPoint(edge))
+            }
+
+            when (binding) {
+                "value-builder" -> {
+                    // The builder's value register IS the flow value: every
+                    // receiver-less emit/send in the body assigns into it.
+                    val valueReg = t()
+                    emitSinks.addLast(valueReg)
+                    lowerLambdaBody(lambdaPsi)
+                    emitSinks.removeLast()
+                    return valueReg
+                }
+
+                "element-operator" -> {
+                    if (receiver != null) {
+                        val paramReg = "v${lambdaPsi.valueParameters.firstOrNull()?.name ?: "it"}"
+                        emit(io.cdxgen.kosi.kir.KirStore(paramReg, receiver))
+                    }
+                    return lowerLambdaBody(lambdaPsi)
+                }
+
+                "async" -> {
+                    // async's value is the body's value: `async { t }.await()`
+                    // then moves the body value to the await result through
+                    // the Deferred.await pack passthrough.
+                    return lowerLambdaBody(lambdaPsi)
+                }
+
+                else -> return lowerLambdaBody(lambdaPsi) // "plain"
+            }
+        }
+
+        /**
+         * True when [psi] names a function-valued LOCAL: a parameter or local
+         * property whose declared type is a function type, or whose
+         * initializer is a lambda. Invoking one by name (`block(x)`) is an
+         * invoke on that VALUE, and the lowering must keep the value on the
+         * call's receiver. A local FUNCTION is not function-valued — its call
+         * is a plain call to the KIR function the visitor already lowered.
+         * Pure-PSI like [isLocalReference]: no reference re-resolution.
+         */
+        private fun isFunctionValueLocal(psi: KtNameReferenceExpression): Boolean {
+            val name = psi.getReferencedName()
+            var cursor: com.intellij.psi.PsiElement? = psi.parent
+            while (cursor != null) {
+                when (cursor) {
+                    is KtNamedFunction -> {
+                        val param = cursor.valueParameters.firstOrNull { it.name == name }
+                        if (param != null) {
+                            return param.typeReference?.text?.contains("->") == true
+                        }
+                    }
+
+                    is KtBlockExpression, is org.jetbrains.kotlin.psi.KtClassBody -> {
+                        for (child in cursor.children) {
+                            if (child is KtProperty && child.isLocal && child.name == name) {
+                                if (child.initializer is KtLambdaExpression) return true
+                                return child.typeReference?.text?.contains("->") == true
+                            }
+                        }
+                    }
+
+                    else -> {}
+                }
+                cursor = cursor.parent
+            }
+            return false
+        }
+
         private fun lowerLambdaBody(lambdaPsi: KtLambdaExpression): String {
             val statements = lambdaPsi.bodyExpression?.statements ?: return unknown(lambdaPsi)
             var result = unknown(lambdaPsi)
@@ -1773,18 +2003,171 @@ object KirLowering {
             }
             return result
         }
-
         private fun lambda(psi: KtLambdaExpression): String {
-            // A standalone lambda value becomes a Lambda instruction naming
-            // the extracted body function; the body itself lowers as its own
-            // function.
+            // A standalone lambda value (an argument to a higher-order call,
+            // a function-valued local) is EXTRACTED into its own KIR function
+            // so the summary engine can compute a summary for the body and
+            // apply it where the lambda is passed or invoked (P5's
+            // higher-order item; the P3 `lambda-inlined` deviation named this
+            // as the missing lowering). The KirLambda instruction keeps the
+            // canonical name of the extracted body plus the CAPTURES: the
+            // enclosing registers the body reads, in the order the extracted
+            // function's capture parameters expect them.
             val reg = t()
-            emit(KirLambda(reg, "<lambda>", emptyList()))
+            val extracted = lambdaContext?.let { extractLambda(psi, it) }
+            emit(
+                KirLambda(
+                    reg,
+                    extracted?.first ?: "<lambda>",
+                    extracted?.second ?: emptyList(),
+                ),
+            )
             return reg
+        }
+
+        /**
+         * Lowers [psi]'s body into a fresh [BodyLower], discovers the free
+         * registers it reads from this scope, renames them into capture
+         * parameters (`%c<i>`), and registers the extracted function.
+         *
+         * Naming rules that make the rewrite unambiguous without a register
+         * namespace prefix: the extracted body's temporaries start ABOVE this
+         * body's counter (they can never collide with a capture name), and
+         * captures are renamed at USE positions only, so a body-local that
+         * shares a name with an enclosing local stays a body-local (Kotlin's
+         * shadowing). The rewrite renames a capture read even when the body
+         * later defines the same v-name — the pre-definition read is the
+         * capture, which is the semantics that matters for taint.
+         */
+        private fun extractLambda(psi: KtLambdaExpression, context: LambdaContext): Pair<String, List<String>>? {
+            val bodyPsi = psi.bodyExpression ?: return null
+            val ordinal = context.ordinal++
+            val canonical = "$enclosingCanonical\$lambda$ordinal"
+            val bodyLower = BodyLower(
+                context.failures,
+                context.resolve,
+                functionPsi,
+                lambdaContext = context,
+                enclosingCanonical = canonical,
+                tempStart = temp,
+            )
+            val valueParams = psi.valueParameters.mapIndexed { index, param ->
+                KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+            }
+            bodyLower.bindParameters(valueParams)
+            val statements = bodyPsi.statements
+            for ((index, statement) in statements.withIndex()) {
+                if (index < statements.lastIndex) {
+                    bodyLower.lowerStatement(statement)
+                    continue
+                }
+                // The last statement carries the lambda's value WHEN it is a
+                // value expression; a return/throw arm yields no value.
+                when (statement) {
+                    is KtReturnExpression, is KtThrowExpression -> bodyLower.lowerStatement(statement)
+                    is KtProperty -> {
+                        bodyLower.lowerStatement(statement)
+                        bodyLower.returnValue("v${statement.name ?: "local"}")
+                    }
+
+                    else -> bodyLower.returnValue(bodyLower.lowerExpr(statement, Pos.NESTED))
+                }
+            }
+            bodyLower.returnIfOpen()
+            val body = bodyLower.finish()
+            val instructions = body.blocks.flatMap { it.instructions }
+            val bodyDefs = instructions.flatMap { it.defs }.toHashSet() + valueParams.map { it.register }
+            val captureRegs = instructions
+                .flatMap { it.uses }
+                .filter { it !in bodyDefs }
+                .filter { it in definedRegisters }
+                .distinct()
+            val captureParams = captureRegs.mapIndexed { index, reg -> KirParam("%c$index", "capture$reg", null, receiver = false) }
+            val rename = captureRegs.withIndex().associate { (index, reg) -> reg to "%c$index" }
+            val rewritten = body.blocks.map { block ->
+                block.copy(instructions = block.instructions.map { ins -> ins.mapRegisters({ rename[it] ?: it }, defsToo = false) })
+            }
+            context.functions.add(
+                KirFunction(
+                    canonicalName = canonical,
+                    jvmDescriptor = null,
+                    purl = "",
+                    file = psi.containingFile?.virtualFile?.path
+                        ?: functionPsi.containingFile?.virtualFile?.path ?: "<memory>",
+                    line = psi.line(),
+                    column = psi.column(),
+                    params = captureParams + valueParams,
+                    returnType = null,
+                    modifiers = emptySet(),
+                    visibility = "private",
+                    enclosingClass = null,
+                    overrides = emptyList(),
+                    overriddenBy = emptyList(),
+                    annotations = emptyList(),
+                    syntheticCause = null,
+                    body = KirBody(rewritten),
+                    supertypes = emptyList(),
+                    ownerFlags = emptySet(),
+                    ownerAnnotations = emptyList(),
+                    ownerVisibility = null,
+                ),
+            )
+            return canonical to captureRegs
         }
     }
 
     private val SCOPE_FUNCTIONS = setOf("let", "run", "apply", "also", "with", "use")
+
+    /**
+     * Coroutine builders whose trailing lambda produces the builder's own
+     * value: `flow { emit(x) }` — the body's `emit` (and `channelFlow`'s
+     * `send`) calls assign their argument into the builder's value register,
+     * which is what the downstream operators and `collect` read (P6).
+     */
+    private val FLOW_VALUE_BUILDERS = setOf("flow", "channelFlow")
+
+    /**
+     * Flow operators whose trailing lambda receives the flow's element: the
+     * flow value (the receiver) is bound to the lambda's parameter, so
+     * `collect { sink(it) }` reads the flow value and `map { it }` passes it
+     * through; the operator's value is the body's value, so a sanitizing
+     * `map` body sanitizes everything downstream of it.
+     */
+    private val FLOW_ELEMENT_OPERATORS = setOf(
+        "map", "mapNotNull", "transform", "filter", "filterNot", "onEach",
+        "collect", "collectLatest", "forEach", "single", "first", "last",
+    )
+
+    /**
+     * Suspending builders whose body is analysed plainly in the caller's
+     * context: `launch`, `withContext`, `runBlocking`, `LaunchedEffect`
+     * capture their closure and run it; `async` additionally values as its
+     * body's value, which is what makes `async { t }.await()` a
+     * receiver-to-result passthrough on the body value (`Deferred.await` is
+     * a pack entry).
+     */
+    private val SUSPEND_BUILDERS = setOf("launch", "async", "withContext", "runBlocking", "LaunchedEffect")
+
+    /** The flow/channel packages an inlining-eligible callee must resolve into. */
+    private const val FLOW_PACKAGE = "kotlinx.coroutines.flow."
+    private const val COROUTINES_PACKAGE = "kotlinx.coroutines."
+
+    /**
+     * Which binding a builder call gets. When resolution FAILED the call's
+     * FQN is unknown and the NAME decides: an unresolved `collect { }` is
+     * modelled the same way as the resolved one, because skipping the body
+     * (the pre-P6 behaviour) loses the very flows this phase exists for. A
+     * RESOLVED callee outside the coroutines packages never inlines —
+     * `xs.map { }` over a collection keeps its pack passthrough, and the
+     * lambda parameter keeps collection element semantics.
+     */
+    private fun coroutineBuilderBinding(name: String, fqn: String?): String? = when {
+        name in FLOW_VALUE_BUILDERS && (fqn == null || fqn.startsWith(FLOW_PACKAGE)) -> "value-builder"
+        name in FLOW_ELEMENT_OPERATORS && (fqn == null || fqn.startsWith(FLOW_PACKAGE)) -> "element-operator"
+        name == "async" && (fqn == null || fqn.startsWith(COROUTINES_PACKAGE)) -> "async"
+        name in SUSPEND_BUILDERS && (fqn == null || fqn.startsWith(COROUTINES_PACKAGE) || fqn == "androidx.compose.runtime.LaunchedEffect") -> "plain"
+        else -> null
+    }
 
     private fun KtCallExpression.hasLambdaArgument(): Boolean =
         valueArguments.any { it.getArgumentExpression() is KtLambdaExpression }

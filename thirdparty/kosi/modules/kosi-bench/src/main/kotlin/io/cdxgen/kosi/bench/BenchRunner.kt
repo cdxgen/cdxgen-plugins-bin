@@ -117,6 +117,21 @@ object BenchRunner {
         val crossDependencySlices: Int? = null,
         val fixpointCapHits: Int? = null,
         val functionsAnalysed: Int? = null,
+        /**
+         * P5 summary facts, read from the slot's report. Null/empty only for
+         * slots that ran no dataflow or baselines written before P5 — never
+         * defaulted to a measured-looking zero.
+         */
+        val summariesComputed: Int? = null,
+        val summariesByOrigin: Map<String, Int> = emptyMap(),
+        val defaultOriginSlices: Int? = null,
+        val summaryCrossingSlices: Int? = null,
+        val crossModuleSlices: Int? = null,
+        /** P5 SCC counters: the summary cap and the population it was measured over. */
+        val sccsProcessed: Int? = null,
+        val sccIterationCapHits: Int? = null,
+        /** P6: slices crossing a suspend boundary. */
+        val suspendCrossingSlices: Int? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -167,6 +182,18 @@ object BenchRunner {
             reachedViaEdge?.let { w.num("reachedViaEdge", it) }
             w.dbl("recall", recall)
             w.num("sliceCount", sliceCount)
+            w.beginObject("summariesByOrigin")
+            for (origin in summariesByOrigin.keys.sorted()) {
+                w.num(origin, (summariesByOrigin[origin] ?: 0).toLong())
+            }
+            w.endObject()
+            defaultOriginSlices?.let { w.num("defaultOriginSlices", it) }
+            summaryCrossingSlices?.let { w.num("summaryCrossingSlices", it) }
+            summariesComputed?.let { w.num("summariesComputed", it) }
+            crossModuleSlices?.let { w.num("crossModuleSlices", it) }
+            sccsProcessed?.let { w.num("sccsProcessed", it) }
+            sccIterationCapHits?.let { w.num("sccIterationCapHits", it) }
+            suspendCrossingSlices?.let { w.num("suspendCrossingSlices", it) }
             w.str("slot", slot)
             w.str("slug", slug)
             w.num("wallMillis", wallMillis)
@@ -226,6 +253,17 @@ object BenchRunner {
             val crossDependency = results.mapNotNull { it.crossDependencySlices }
             val capHits = results.mapNotNull { it.fixpointCapHits }
             val analysed = results.mapNotNull { it.functionsAnalysed }
+            val summaries = results.mapNotNull { it.summariesComputed }
+            val defaultOrigin = results.mapNotNull { it.defaultOriginSlices }
+            val summaryCrossing = results.mapNotNull { it.summaryCrossingSlices }
+            val crossModule = results.mapNotNull { it.crossModuleSlices }
+            val sccs = results.mapNotNull { it.sccsProcessed }
+            val sccHits = results.mapNotNull { it.sccIterationCapHits }
+            val suspendCrossings = results.mapNotNull { it.suspendCrossingSlices }
+            val byOrigin = results
+                .flatMap { r -> r.summariesByOrigin.entries.map { e -> e.key to e.value } }
+                .groupBy({ it.first }, { it.second })
+                .mapValues { (_, vs) -> vs.sum() }
             val recall = if (recallDenominator == 0) 1.0 else positivesPassed.toDouble() / recallDenominator
             val connectivity = if (results.isEmpty()) {
                 1.0
@@ -259,6 +297,14 @@ object BenchRunner {
                 crossDependencySlices = if (crossDependency.isEmpty()) null else crossDependency.sum(),
                 fixpointCapHits = if (capHits.isEmpty()) null else capHits.sum(),
                 functionsAnalysed = if (analysed.isEmpty()) null else analysed.sum(),
+                summariesComputed = if (summaries.isEmpty()) null else summaries.sum(),
+                summariesByOrigin = byOrigin,
+                defaultOriginSlices = if (defaultOrigin.isEmpty()) null else defaultOrigin.sum(),
+                summaryCrossingSlices = if (summaryCrossing.isEmpty()) null else summaryCrossing.sum(),
+                crossModuleSlices = if (crossModule.isEmpty()) null else crossModule.sum(),
+                sccsProcessed = if (sccs.isEmpty()) null else sccs.sum(),
+                sccIterationCapHits = if (sccHits.isEmpty()) null else sccHits.sum(),
+                suspendCrossingSlices = if (suspendCrossings.isEmpty()) null else suspendCrossings.sum(),
                 // One digest over every fixture digest, so the totals row
                 // changes whenever any fixture's report changes. An empty
                 // section map here would publish the digest of the empty
@@ -330,6 +376,15 @@ object BenchRunner {
                         crossDependencySlices = r.long("crossDependencySlices")?.toInt(),
                         fixpointCapHits = r.long("fixpointCapHits")?.toInt(),
                         functionsAnalysed = r.long("functionsAnalysed")?.toInt(),
+                        summariesComputed = r.long("summariesComputed")?.toInt(),
+                        summariesByOrigin = r.obj("summariesByOrigin")?.members.orEmpty()
+                            .mapValues { (_, v) -> v.asLong().toInt() },
+                        defaultOriginSlices = r.long("defaultOriginSlices")?.toInt(),
+                        summaryCrossingSlices = r.long("summaryCrossingSlices")?.toInt(),
+                        crossModuleSlices = r.long("crossModuleSlices")?.toInt(),
+                        sccsProcessed = r.long("sccsProcessed")?.toInt(),
+                        sccIterationCapHits = r.long("sccIterationCapHits")?.toInt(),
+                        suspendCrossingSlices = r.long("suspendCrossingSlices")?.toInt(),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -543,11 +598,28 @@ object BenchRunner {
             crossDependencySlices = report.dataFlow?.stats?.crossDependencySlices,
             fixpointCapHits = report.stats.fixpointCapHits,
             functionsAnalysed = report.stats.functionsAnalysed,
+            summariesComputed = report.dataFlow?.stats?.summariesComputed,
+            summariesByOrigin = report.dataFlow?.stats?.summariesByOrigin ?: emptyMap(),
+            defaultOriginSlices = report.dataFlow?.stats?.defaultOriginSlices,
+            summaryCrossingSlices = report.dataFlow?.stats?.summaryCrossingSlices,
+            crossModuleSlices = report.dataFlow?.stats?.crossModuleSlices,
+            sccsProcessed = report.stats.sccsProcessed.takeIf { report.stats.functionsAnalysed > 0 },
+            sccIterationCapHits = report.stats.sccIterationCapHits.takeIf { report.stats.functionsAnalysed > 0 },
+            suspendCrossingSlices = report.dataFlow?.stats?.suspendCrossingSlices,
             digest = digest,
             failures = failureDetails,
         )
     }
 }
+
+/**
+ * The tiers that name real PINNED REPOSITORIES. Several gates are per-repo
+ * and must not mistake other fixture tiers for repos: the async tier is
+ * bundled fixtures (P6), the eap tier is a syntax probe — counting either as
+ * repo mass would let micro-fixtures hold a repo gate (or fail it) for the
+ * wrong reason.
+ */
+val REPO_TIERS: Set<String> = setOf("small", "medium", "large", "android", "kmp", "hybrid", "vuln", "ported")
 
 /**
  * Call-graph metrics read from a slot's report (the artifact production

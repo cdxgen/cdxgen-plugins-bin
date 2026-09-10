@@ -408,7 +408,10 @@ object Main {
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
         val goldensDir = Path.of(parsed.value("goldens", "goldens"))
         val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
-        val entries = manifest.select(setOf("fixtures"), parsed.value("only"))
+        // Every bundled fixture tier is golden-ratcheted: the async tier's
+        // reports are as deterministic as the fixture tier's, and a tier the
+        // goldens never see is a tier whose drift they prove nothing about.
+        val entries = manifest.select(setOf("fixtures", "async"), parsed.value("only"))
         val problems = mutableListOf<String>()
         var checked = 0
         for (entry in entries) {

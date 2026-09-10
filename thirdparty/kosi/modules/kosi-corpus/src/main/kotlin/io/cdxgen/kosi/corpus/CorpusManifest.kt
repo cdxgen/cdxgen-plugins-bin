@@ -44,8 +44,21 @@ data class CorpusEntry(
 data class CorpusManifest(
     val entries: List<CorpusEntry>,
 ) {
-    fun select(tiers: Set<String>, only: String? = null): List<CorpusEntry> =
-        entries.filter { it.tier in tiers && (only == null || it.slug == only) }
+    /**
+     * A tier no entry carries is a TYPO, not an empty selection. `corpusFull`
+     * asked for `vuln` and `ported` — neither has ever existed in the
+     * manifest — and quietly ran one of the five pinned repos while calling
+     * itself the full run (R64). Silently dropping an unknown tier turns a
+     * misspelling into missing coverage that still exits zero.
+     */
+    fun select(tiers: Set<String>, only: String? = null): List<CorpusEntry> {
+        val known = entries.map { it.tier }.toSet()
+        val unknown = (tiers - known).sorted()
+        require(unknown.isEmpty()) {
+            "unknown corpus tier(s) ${unknown.joinToString(", ")}; corpus.toml has ${known.sorted().joinToString(", ")}"
+        }
+        return entries.filter { it.tier in tiers && (only == null || it.slug == only) }
+    }
 
     companion object {
         fun parse(text: String): CorpusManifest {

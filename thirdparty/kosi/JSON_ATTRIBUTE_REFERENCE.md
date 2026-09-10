@@ -190,6 +190,9 @@ rather than a negative expectation that passes vacuously.
 | `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
 | `fixpoint-cap` | warning | the P4 taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
+| `summary-iteration-cap` | warning | the P5 summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
+| `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
+| `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
 
 ## stats
 
@@ -215,7 +218,11 @@ computed over (a rate without its denominator is not a result) —
 taint worklist actually ran over (the same denominator rule) —
 `sourceCount`/`sinkCount` are the source/sink SITES the model pack matched in
 analysed code (not pack sizes; resolution regressions shrink them) —
-`sliceCount`, `crossDependencySliceCount`, `reachableSliceCount`,
+`sliceCount`, `crossDependencySliceCount`, `crossModuleSliceCount`,
+`reachableSliceCount`, `sccsProcessed` beside `sccIterationCapHits` (the P5
+summary fixpoint's population and its cap count — a cap without its
+population is not a result), `suspendCrossingSliceCount` (P6: slices whose
+source and sink are separated by a suspend boundary),
 `truncations{}`,
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy
 resolution fallout — never read such a report as facts about the code).
@@ -322,18 +329,28 @@ scope that reaches it): `{"maxPathsPerSymbol":3,"symbols":[{"canonicalName":
 edge id exists in the report and the walk is connected — the same invariant
 the connectivity gate checks, published for consumers.
 
-## dataFlow — DataFlowEvidence (resolved tier, P4)
+## dataFlow — DataFlowEvidence (resolved tier, P4 + P5/P6)
 
 Published when `--backend resolved` runs and `--dataflow` is not `none`
 (default `security`); `null` at the syntax tier, which has no KIR and no flow
-engine (docs/KOSI.md defect 1). The P4 engine is INTRAPROCEDURAL, field-
-sensitive taint over each lowered function's CFG, iterated with a worklist to
-a real fixpoint (`kosi-flow`, compiler-free). `--dataflow reachable`
-additionally intersects the slices with the call graph's reachability from the
-declared roots and sets `reachableFromRoots` on the survivors;
-`--dataflow crypto` and `--dataflow all` run the same pack today (the crypto
-collector's own model arrives with P8); `security-deps` behaves as `security`
-until P9.
+engine (docs/KOSI.md defect 1). The engine is field-sensitive taint over each
+lowered function's CFG, iterated with a worklist to a real fixpoint
+(`kosi-flow`, compiler-free), plus P5's interprocedural summaries: bottom-up
+over the call graph's SCC condensation, applied at call sites AFTER the pack
+(in pack, then computed summary, then `--unknown-call` default order) and
+joined per dispatch target under the run's `--callgraph` mode. P6 routes
+coroutine builders through the same machinery: `launch`/`async`/
+`withContext`/`runBlocking`/`LaunchedEffect` and the flow operators inline
+their lambda bodies at LOWERING time (the body's taint is the caller's),
+`emit`/`send` assign into the builder's value register, and
+`Deferred.await` / `Channel.receive` are pack passthroughs (receive reads the
+channel's ELEMENT state). A suspend boundary is transparent to the analysis —
+suspension does not launder taint — and `stats.suspendCrossingSlices` counts
+the slices whose trace crosses one. `--dataflow reachable` additionally
+intersects the slices with the call graph's reachability from the declared
+roots and sets `reachableFromRoots` on the survivors; `--dataflow crypto`
+and `--dataflow all` run the same pack today; `security-deps` behaves as
+`security` until P9.
 
 Everything that decides a category is DATA: the shipped model pack
 (`kosi-models/resources/models/security-pack-v0.json`, merged with user packs
@@ -351,16 +368,18 @@ first parameter is index 0.
 | `id` | string | `slice-000001...`, ordered by source then sink site |
 | `sourceId`, `sinkId` | string | both always present in `nodes[]` |
 | `sourceName`, `sinkName` | string | callee FQNs matched from the pack |
-| `sourceFunction`, `sinkFunction` | string | the one function both ends live in (intraprocedural) |
+| `sourceFunction`, `sinkFunction` | string | the function each END lives in — two different functions (and modules) for an interprocedural slice |
 | `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
 | `taintKinds` | string[] | the categories travelling on the trace |
 | `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
 | `pathLength` | int | `edgeIds.size` |
 | `elided` | boolean? | true when the trace cap (`--dataflow-max-trace-nodes`) cut the MIDDLE of the walk; the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `kind` (nodes) | string | `source`, `sink`, or the propagation role — now including `suspend` (a coroutine boundary the trace crosses) |
 | `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
 | `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
 | `accessPath` | string | the tainted register (and path suffix) at the sink, `base::field` form |
-| `crossesModule`, `crossesDependency` | boolean | false at P4 by construction; the gate fails any slice claiming otherwise |
+| `crossesModule`, `crossesDependency` | boolean | computed from the slice ENDS: the source and sink functions' module paths and purls (P5) — true exactly when those differ |
+| `origins[]` | string[] | sorted distinct summary origins the trace crossed at interprocedural boundaries: `computed`, `pack`, `default`, `recursive-approx` (P5). `pack` on a source birth is provenance, not a boundary; the default-origin gate counts BOUNDARY origins (`default`/`computed`/`recursive-approx`) only |
 | `reachableFromRoots` | boolean | `--dataflow reachable` only |
 | `ruleId`, `ruleName`, `description`, `severity`, `confidence`, `riskScore` | | `severity` comes from the matched SINK PACK ENTRY (severity as data), `confidence` is `high` for pack-matched (resolved) sites, `riskScore` derives from severity |
 | `flowKey` | string | SHA-256 over the flow's endpoints and trace — stable across runs for suppression |
@@ -387,16 +406,50 @@ marked `elided` rather than published as a shorter complete trace (R54).
 ### dataFlow.stats
 
 `sliceCount`, `uniqueFlows` (distinct `flowKey`s), `crossDependencySlices`,
-`reachableSlices`, `connectivity` (fraction of slices whose walk is
-connected; 1.0 is the gate — but note it walks the edge list built from the
-trace's own consecutive nodes, so it is 1.0 by construction and catches only
-an id-assignment defect), `integrityViolations` (slices failing any
-invariant, including the endpoint-kind check that `connectivity` cannot see;
-0 is the gate, and this is the one with teeth). Both counts are computed from
-the emitted slices; `crossDependencySlices` in particular is counted, never
-written as a constant the gate then reads back (R55). `summariesComputed`/`summariesByOrigin{}` (empty at P4 — computed
-interprocedural summaries are P5; `origin` is how a reviewer tells a computed
-summary from blanket propagation).
+`crossModuleSlices`, `reachableSlices`, `connectivity` (fraction of slices
+whose walk is connected; 1.0 is the gate — but note it walks the edge list
+built from the trace's own consecutive nodes, so it is 1.0 by construction
+and catches only an id-assignment defect), `integrityViolations` (slices
+failing any invariant, including the endpoint-kind check that `connectivity`
+cannot see; 0 is the gate, and this is the one with teeth). All counts are
+computed from the emitted slices; nothing here is a constant a gate reads
+back (R55). Since P5:
+`summariesComputed`/`summariesByOrigin{}` — the summary table's size by
+origin (`computed`, `pack`, `recursive-approx`); `summaryCrossingSlices` —
+slices whose trace crossed at least one summary BOUNDARY;
+`defaultOriginSlices` — those whose boundary origins are ALL `default`
+(blanket propagation carried them); `dispatchJoins{}` — the histogram of
+dispatch-join widths at virtual sites; `suspendCrossingSlices` — slices
+whose trace crosses a suspend boundary (P6).
+
+### dataFlow.summaries[] — FlowSummary (P5)
+
+One entry per workspace function the summary fixpoint ran over (origin
+`computed`, or `recursive-approx` when its SCC hit the iteration budget),
+plus one per pack entry that actually moved taint at a call site (origin
+`pack`, shaped by the pack entry itself). Parameter ids are `p<i>` over the
+function's parameter list (dispatch receiver first when present).
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `functionId`, `function` | string | the function's canonical name (or the pack entry's pattern for pack-origin summaries) |
+| `parameterNames[]`, `parameterTypes[]` | string[] | the parameter list the `p<i>` ids index |
+| `paramToReturn[]` | string[] | parameters whose taint reaches the return value |
+| `paramToParam[]` | string[] | write effects `p<i>->p<j>` (parameter i's taint lands on parameter j) |
+| `paramToReceiver[]` | string[] | parameters whose taint is stored into the receiver |
+| `paramToSink{}` | map<string, int[]> | parameter -> argument indexes of the sinks it reaches inside the callee |
+| `sourceReturns[]` | string[] | categories born at a source call inside the body and returned |
+| `sanitizes[]` | string[] | categories a pack sanitizer inside the body clears |
+| `accessPaths{}` | map<string, string> | parameter -> the receiver access-path suffixes its taint is written to (`\|`-separated) |
+| `origin` | string | `computed` (a real fixpoint over the body), `pack` (a pack entry supplied the effect), `recursive-approx` (the SCC hit its iteration budget; last iterate), `default` (the `--unknown-call` fallback at a call site, no body seen) |
+
+A higher-order note: a lambda VALUE passed to a workspace callee is itself
+summarised (the lowering extracts the body; `KirLambda.captures` name the
+enclosing registers bound at application time). A `summary-iteration-cap`
+diagnostic names SCCs that hit the budget; a `dispatch-join-width`
+diagnostic names virtual sites whose join exceeded the width budget; a
+`lambda-unresolved` diagnostic names lambda values (callable references,
+local functions) with no extractable body.
 
 ### dataFlow.patterns — ModelPackRef
 

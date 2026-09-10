@@ -62,22 +62,43 @@ carrying the hop count and the packages traversed — it never silently
 vanishes. `auto` runs vta, falling back down the chain (rta, then sealed) on
 a deterministic work budget recorded as `callgraph-timeout`.
 
-### Taint analysis (P4, resolved tier)
+### Taint analysis (P4 + P5/P6, resolved tier)
 
 `--dataflow none|security|crypto|reachable|all` (default `security`) runs the
-intraprocedural, field-sensitive taint engine over the lowered KIR and
-publishes `dataFlow.slices[]` — each slice a connected trace from a source
-call to a sink argument, with `severity`/`ruleId`/`flowKey` and an
-`accessPath`. Sources, sinks, passthroughs, sanitizers and effects are DATA
-in the shipped model pack (`modules/kosi-models/src/main/resources/models/`);
-user packs extend or override entries. Taint is tracked on access paths, so
-sinking one field of a partly-tainted object does not report its clean
-siblings (`fixtures/field-sensitivity` pins the negative). Loop-carried
-flows converge to a worklist fixpoint — a cap that is hit is the
-`fixpoint-cap` diagnostic over `stats.functionsAnalysed`, never a silent
+field-sensitive taint engine over the lowered KIR and publishes
+`dataFlow.slices[]` — each slice a connected trace from a source call to a
+sink argument, with `severity`/`ruleId`/`flowKey` and an `accessPath`.
+Sources, sinks, passthroughs, sanitizers and effects are DATA in the shipped
+model pack (`modules/kosi-models/src/main/resources/models/`); user packs
+extend or override entries. Taint is tracked on access paths, so sinking one
+field of a partly-tainted object does not report its clean siblings —
+ACROSS call boundaries as well as within them
+(`fixtures/field-sensitivity`, `fixtures/summary-clean-sibling`).
+Loop-carried flows converge to a worklist fixpoint — a cap that is hit is
+the `fixpoint-cap` diagnostic over `stats.functionsAnalysed`, never a silent
 truncation. `--dataflow reachable` keeps only slices whose function is
-reachable from the declared roots and flags them. Interprocedural summaries
-(param-to-param, dispatch replay) are P5.
+reachable from the declared roots and flags them.
+
+Since P5 the engine is interprocedural: function summaries (parameters to
+returns, to other parameters, to the receiver, to sinks) are computed
+bottom-up over the call graph's SCC condensation — recursion converges —
+and applied at call sites in a fixed order: the model pack first, then the
+computed summaries of the dispatch targets (joined per `--callgraph` mode,
+narrowed by receiver construction types under rta/vta), then the
+`--unknown-call` default. Every slice records `origins[]` — which of those
+moved its taint — so computed summaries are distinguishable from blanket
+propagation, and the promotion gate holds the default-only share under 10%.
+Higher-order calls are covered: lambda values lower into their own bodies
+with captures bound at the call site, and a function-valued parameter's
+invocation is recorded on the value itself. P6 makes coroutines first-class:
+`launch`/`async`/`withContext`/`runBlocking`/`LaunchedEffect` and the flow
+operators analyse their lambda bodies in the caller's context,
+`flow { emit(x) }` carries `x` to whatever `collect` reads, `async{}.await()`
+is a passthrough, and `Channel.send`/`receive` move taint through the
+channel's element state — each with a dedicated `async`-tier fixture
+(`fixtures/async-*`, run by `gradlew corpusAsync`), and
+`stats.suspendCrossingSlices` reports how many slices cross a suspend
+boundary.
 
 Exit codes: `0` success, `1` expectations failed (ratchet/golden/bench),
 `2` usage error, `3` runtime error.

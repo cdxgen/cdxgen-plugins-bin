@@ -44,6 +44,8 @@ object ModelPacks {
                 category = require(entry.str("category"), "passthroughs[].category", name),
                 flows = entry.arr("flows")?.items?.map { flow -> flow.asArray().items.map { it.asLong().toInt() } }
                     ?: emptyList(),
+                elementFlows = entry.arr("elementFlows")?.items?.map { flow -> flow.asArray().items.map { it.asLong().toInt() } }
+                    ?: emptyList(),
             )
         } ?: emptyList()
         val sanitizers = root.arr("sanitizers")?.objects()?.map { entry ->

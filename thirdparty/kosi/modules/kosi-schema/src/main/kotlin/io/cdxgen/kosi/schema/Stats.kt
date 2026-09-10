@@ -50,7 +50,13 @@ data class Stats(
     val sinkCount: Int,
     val sliceCount: Int,
     val crossDependencySliceCount: Int,
+    val crossModuleSliceCount: Int = 0,
     val reachableSliceCount: Int,
+    /** P5: SCCs the summary fixpoint processed — the cap counter's denominator. */
+    val sccsProcessed: Int = 0,
+    val sccIterationCapHits: Int = 0,
+    /** P6: slices whose source and sink are separated by a suspend boundary. */
+    val suspendCrossingSliceCount: Int = 0,
     val truncations: Map<String, Int>,
     val degraded: String?,
 ) {
@@ -59,6 +65,7 @@ data class Stats(
         w.num("callsResolved", callsResolved)
         w.num("callsTotal", callsTotal)
         w.num("crossDependencySliceCount", crossDependencySliceCount)
+        w.num("crossModuleSliceCount", crossModuleSliceCount)
         w.str("degraded", degraded)
         w.num("declarationCount", declarationCount)
         w.num("fileCount", fileCount)
@@ -72,7 +79,10 @@ data class Stats(
         w.num("functionsLowered", functionsLowered)
         w.num("importCount", importCount)
         w.num("reachableSliceCount", reachableSliceCount)
+        w.num("sccIterationCapHits", sccIterationCapHits)
+        w.num("sccsProcessed", sccsProcessed)
         w.dbl("resolvedCallRatio", resolvedCallRatio)
+        w.num("suspendCrossingSliceCount", suspendCrossingSliceCount)
         w.num("sliceCount", sliceCount)
         w.num("sinkCount", sinkCount)
         w.num("sourceCount", sourceCount)

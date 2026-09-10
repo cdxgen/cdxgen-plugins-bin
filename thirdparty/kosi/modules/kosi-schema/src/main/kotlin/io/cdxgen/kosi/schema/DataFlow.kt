@@ -77,6 +77,15 @@ data class FlowSlice(
     val confidence: String,
     val riskScore: String,
     val flowKey: String,
+    /**
+     * P5: the summary origins this slice's trace crossed at interprocedural
+     * boundaries, sorted and distinct — `computed`, `pack`, `default`,
+     * `recursive-approx`. Empty for a purely intraprocedural slice. This is
+     * the per-slice half of the default-origin measurement: a slice whose
+     * origins are ALL `default` exists only because the blanket propagation
+     * did.
+     */
+    val origins: List<String> = emptyList(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -85,6 +94,9 @@ data class FlowSlice(
         w.bool("crossesDependency", crossesDependency)
         w.bool("crossesModule", crossesModule)
         w.str("description", description)
+        w.beginArray("origins")
+        for (o in origins.sorted()) w.str(o)
+        w.endArray()
         w.beginArray("edgeIds")
         for (e in edgeIds) w.str(e)
         w.endArray()
@@ -251,16 +263,32 @@ data class DataFlowStats(
     val sliceCount: Int,
     val uniqueFlows: Int,
     val crossDependencySlices: Int,
+    val crossModuleSlices: Int = 0,
     val reachableSlices: Int,
     val connectivity: Double,
     val integrityViolations: Int,
     val summariesComputed: Int,
     val summariesByOrigin: Map<String, Int>,
+    /** Slices whose trace crossed >= 1 summary boundary and crossed ONLY `default` ones. */
+    val defaultOriginSlices: Int = 0,
+    /** Slices whose trace crossed >= 1 summary boundary — the default-origin denominator. */
+    val summaryCrossingSlices: Int = 0,
+    /** P6: slices whose trace crosses a suspend boundary. */
+    val suspendCrossingSlices: Int = 0,
+    /** P5: dispatch joins by candidate width, e.g. {"2": 5}. */
+    val dispatchJoins: Map<String, Int> = emptyMap(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.dbl("connectivity", connectivity)
         w.num("crossDependencySlices", crossDependencySlices)
+        w.num("crossModuleSlices", crossModuleSlices)
+        w.beginObject("dispatchJoins")
+        for ((key2, value) in dispatchJoins.toSortedMap(compareBy { it.toIntOrNull() ?: Int.MAX_VALUE })) {
+            w.num(key2, value.toLong())
+        }
+        w.endObject()
+        w.num("defaultOriginSlices", defaultOriginSlices)
         w.num("integrityViolations", integrityViolations)
         w.beginObject("summariesByOrigin")
         for (key in summariesByOrigin.keys.sorted()) {
@@ -271,6 +299,8 @@ data class DataFlowStats(
         w.num("sliceCount", sliceCount)
         w.num("uniqueFlows", uniqueFlows)
         w.num("reachableSlices", reachableSlices)
+        w.num("summaryCrossingSlices", summaryCrossingSlices)
+        w.num("suspendCrossingSlices", suspendCrossingSlices)
         w.endObject()
     }
 }

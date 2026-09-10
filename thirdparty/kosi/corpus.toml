@@ -204,6 +204,74 @@ capabilities = ["version-ceiling", "eap"]
 # and framework-registration roots. Each carries a negative half naming what
 # a plausibly wrong dispatcher would emit.
 
+# Access paths deeper than one field (R63): the corpus was entirely flat, so
+# the depth-5 cap `AccessPath` has carried since P2 was never exercised and a
+# lowering that emitted length-one paths only read 1.000 recall.
+
+[[fixtures]]
+slug = "nested-field-path"
+tier = "fixtures"
+path = "fixtures/nested-field-path"
+capabilities = ["taint", "field-sensitivity", "summaries", "clean-sibling"]
+
+# P5 summary fixtures: interprocedural flows, negatives first.
+
+[[fixtures]]
+slug = "summary-clean-sibling"
+tier = "fixtures"
+path = "fixtures/summary-clean-sibling"
+capabilities = ["taint", "summaries", "field-sensitivity", "clean-sibling"]
+
+[[fixtures]]
+slug = "summary-sanitized-callee"
+tier = "fixtures"
+path = "fixtures/summary-sanitized-callee"
+capabilities = ["taint", "summaries", "sanitizer"]
+
+[[fixtures]]
+slug = "summary-param-to-return"
+tier = "fixtures"
+path = "fixtures/summary-param-to-return"
+capabilities = ["taint", "summaries", "param-to-return"]
+
+[[fixtures]]
+slug = "summary-param-to-param"
+tier = "fixtures"
+path = "fixtures/summary-param-to-param"
+capabilities = ["taint", "summaries", "param-to-param", "effects"]
+
+[[fixtures]]
+slug = "summary-param-to-receiver"
+tier = "fixtures"
+path = "fixtures/summary-param-to-receiver"
+capabilities = ["taint", "summaries", "param-to-receiver", "receiver"]
+
+[[fixtures]]
+slug = "summary-recursive"
+tier = "fixtures"
+path = "fixtures/summary-recursive"
+capabilities = ["taint", "summaries", "recursion", "scc"]
+
+[[fixtures]]
+slug = "summary-virtual-dispatch"
+tier = "fixtures"
+path = "fixtures/summary-virtual-dispatch"
+capabilities = ["taint", "summaries", "dispatch", "rta"]
+
+[[fixtures]]
+slug = "summary-higher-order"
+tier = "fixtures"
+path = "fixtures/summary-higher-order"
+capabilities = ["taint", "summaries", "higher-order", "lambdas"]
+
+# The cross-module fixture that makes `dependency-crossing-flows` real (R55).
+
+[[fixtures]]
+slug = "summary-cross-module"
+tier = "fixtures"
+path = "fixtures/summary-cross-module"
+capabilities = ["taint", "summaries", "cross-module", "gradle-multi-module"]
+
 [[fixtures]]
 slug = "sealed-dispatch"
 tier = "fixtures"
@@ -236,6 +304,53 @@ slug = "framework-handlers"
 tier = "fixtures"
 path = "fixtures/framework-handlers"
 capabilities = ["call-graph", "framework-roots", "type-resolved"]
+
+# P6 async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
+# its own task (`corpusAsync`) AND by the bench/gate run, so `async-recall`
+# has its own denominator while the sweeps and the native metadata agent see
+# every fixture directory.
+
+[[fixtures]]
+slug = "async-flow-collect"
+tier = "async"
+path = "fixtures/async-flow-collect"
+capabilities = ["coroutines", "flow", "collect", "sanitizer"]
+
+[[fixtures]]
+slug = "async-await"
+tier = "async"
+path = "fixtures/async-await"
+capabilities = ["coroutines", "async", "await"]
+
+[[fixtures]]
+slug = "async-channel"
+tier = "async"
+path = "fixtures/async-channel"
+capabilities = ["coroutines", "channel", "send-receive"]
+
+[[fixtures]]
+slug = "async-launch-scope"
+tier = "async"
+path = "fixtures/async-launch-scope"
+capabilities = ["coroutines", "launch", "scope"]
+
+[[fixtures]]
+slug = "async-withcontext"
+tier = "async"
+path = "fixtures/async-withcontext"
+capabilities = ["coroutines", "withcontext", "dispatchers"]
+
+[[fixtures]]
+slug = "async-android-scopes"
+tier = "async"
+path = "fixtures/async-android-scopes"
+capabilities = ["coroutines", "android", "viewmodelscope", "launchedeffect"]
+
+[[fixtures]]
+slug = "async-stateflow"
+tier = "async"
+path = "fixtures/async-stateflow"
+capabilities = ["coroutines", "stateflow", "collect"]
 
 [[fixtures]]
 slug = "ktor-samples"

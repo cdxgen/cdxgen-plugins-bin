@@ -5,6 +5,149 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
+## Phases 5+6 — interprocedural summaries, coroutines and Flow (this branch)
+
+Branch `feat/kosi-p5-p6-summaries-async`, off `feat/kosi` (`92d0c6e`). Two
+roadmap phases, one branch: P6's gate (`flow { emit(tainted) }.map{}.collect
+{ sink(it) }`) is unreachable without P5's summaries.
+
+**What ships (P5).** `kosi-flow` computes bottom-up function summaries over
+the call graph's SCC condensation (Tarjan, reverse topological order,
+callees before callers); each SCC iterates to a fixpoint — recursion
+CONVERGES (the `summary-recursive` fixture pins a mutually recursive pair,
+0 cap hits) — with a per-SCC iteration budget whose hit stamps the members
+`origin=recursive-approx` and is counted over the SCC count
+(`stats.sccIterationCapHits` / `stats.sccsProcessed`). At a call site the
+order is fixed: the PACK first (authoritative), then the JOIN of the
+dispatch targets' computed summaries (virtual sites join per the run's
+`--callgraph` mode; vta/auto narrow by receiver construction types on
+positive evidence only), then the `--unknown-call` default. Every boundary
+move carries its ORIGIN (`computed`, `pack`, `default`,
+`recursive-approx`), every slice publishes `origins[]`, and the promotion
+gate's `default-origin-share` holds the default-only fraction under 10%.
+Summaries are field-sensitive at the boundary: a sink effect records the
+access path from the callee's parameter to the sunk value, and the caller
+matches its taint on the SAME path — `summary-clean-sibling` (the
+interprocedural clean-sibling negative) stays silent, and
+`InterproceduralEngineTest` proves the negative BREAKS when access paths
+collapse, exactly as P4 did for the intraprocedural one. Higher-order:
+standalone lambda values lower into their OWN KIR functions with captures
+renamed to `%c` parameters (the P3 `lambda-inlined` deviation closed); a
+function-valued parameter's invocation keeps the value on the receiver; and
+a callee's invoked-parameter facts apply the PASSED lambda's summary with
+captures bound at the call site. Named limitation: invocation ARGUMENT
+flows (a callee feeding its own taint through an invoked lambda's
+parameter) are not tracked; callable references and local functions emit
+`lambda-unresolved` and no summary.
+
+**What ships (P6).** Coroutine builders and flow operators inline their
+lambda bodies at LOWERING time, into the caller's context:
+`launch`/`withContext`/`runBlocking`/`LaunchedEffect` plainly; `async` with
+the body's value AS the call value (so `Deferred.await` — a pack
+passthrough — carries it); `flow`/`channelFlow` with `emit`/`send`
+assigning into the builder's value register; the flow operators binding the
+flow value to the lambda parameter (a sanitizing `map` body sanitizes
+everything downstream). `Channel.send` writes the element state;
+`Channel.receive` reads it back (a new `elementFlows` pack tuple).
+Suspend boundaries are transparent to the may-analysis — an ignored opcode
+NOW IGNORED ON PURPOSE, with the comment in the transfer — and
+`stats.suspendCrossingSlices` counts the slices whose trace crosses one.
+The async tier is a dedicated corpus tier (7 fixtures, each with a negative
+half) run by `gradlew corpusAsync` AND by the bench, so `async-recall` has
+its own denominator while the sweeps and the native agent still see every
+fixture directory.
+
+**Gate, measured (JVM, darwin-aarch64, M4 Pro, fixtures+async tiers):**
+
+- Taint recall: **1.000 (40 of 40)** at target >= 0.90 (raised from 0.85).
+- Precision per flow: **1.000 (60 of 60 slices)** across fixtures AND async
+  tiers together.
+- `async-recall`: **1.000 (16 of 16)** on the async tier's own denominator.
+- `summaries-computed`: **288 computed summaries over 88 slots; origins:
+  computed=288, pack=52** — more than one producer.
+- `default-origin-share`: **0.0000 (0 of 20 summary-crossing slices)**.
+- `dependency-crossing-flows` LIVE: **2 cross-module and 2 cross-dependency
+  slices** (the `summary-cross-module` fixture), flags computed from the
+  slice ends; a baseline that loses all crossings FAILs. Read with the
+  caveat the equal counts imply: every Gradle module in the corpus carries
+  its own purl, so on this corpus `crossesDependency` is *collinear* with
+  `crossesModule` — both flags are computed from real attribution, but no
+  slice yet crosses into an EXTERNAL dependency, and that arm stays
+  unexercised until P9 analyses dependency code.
+- Integrity **0 of 60**; connectivity 1.000; the endpoint-kind check now
+  also covers cross-function slices.
+- Caps: **0** worklist cap hits over 252 analysed functions; **0** SCC cap
+  hits over 286 SCCs.
+- Corpus: 876 -> 1088 annotations, 789 -> 1001 evaluated outcomes: 939 pass /
+  0 fail / xfail 62 (all scoped `known-fail=syntax:1`) / 0 xpass at the
+  fixtures+async tiers; the two-way ratchet re-proven (broken expectation
+  FAILs at both resolved slots; `known-fail=resolved:99` on a passing
+  expectation XPASSes; restored, exit 0).
+- Goldens: **204 pairs** (51 fixtures x 4 slots), 0 problems.
+- Determinism: **104 of 104** fixture/slot pairs byte-identical across two
+  JVM runs, **104 of 104** in the native image, **104 of 104** native ==
+  JVM (`tool.commit` normalised). Native binary 96,140,416 B on the pinned
+  GraalVM CE 25.3.4.1; all three components `available`.
+
+**Pinned repos, re-measured (resolved slot, machine idle).** Two machines,
+because the review re-ran them and the absolute numbers are not portable —
+the ratios are what the gate reads:
+
+| repo | P5/P6 wall (impl. machine) | ratio vs P4 there | review machine | slices | summaries computed |
+| --- | --- | --- | --- | --- | --- |
+| spring-fu | 10.8 s | 1.20x | 3.6 s | 0 | 1128 |
+| anki-android | 237.9 s | **1.84x** | 38.7 s | 0 | 16953 |
+| ktor-samples | 14.3 s | 1.12x | 5.0 s | 0 | 2057 |
+| nowinandroid | 36.0 s | 1.46x | 3.7 s | 0 | 2424 |
+| kampkit | 3.4 s | 1.26x | 0.3 s | 0 | 198 |
+
+Repo slices stay **0** — correct even with summaries: none of the five
+calls a pack source in a function whose transitive callees reach a pack
+sink (the summaries found 17k functions worth of parameter behaviour on
+anki-android alone, and none of it completes a source-to-sink path through
+the shipped pack). Cross-dependency taint stays P9's. Lowering failures 0
+on all five. `per-repo-flow-counts` and `per-repo-exported-reach` hold
+their baselines for the first time on a baseline that carries flow data.
+
+**The wall-clock finding, plainly**: summaries pushed anki-android past the
+per-repo 1.5x allowance (1.84x) and nowinandroid near it (1.46x) on the
+implementation machine; the median fixture wall is unchanged and four of
+five repos are inside 1.5x. The review machine reproduces the same run at
+roughly a sixth of the wall (38.7 s for anki-android), so the *ratio*, not
+the second count, is the finding, and it is not independently confirmed
+here — the P4 side was not re-measured on this hardware. The cost is the
+SCC fixpoint re-running each member's analysis; the state budget (R58)
+bounds its memory but not its time. The roadmap's P10 (worker parallelism,
+`--max-analysis-seconds`, per-phase budgets) exists for exactly this; until
+then the per-repo wall-clock check reads the delta against ITS baseline, so
+a re-baseline records the cost and a future phase that removes it earns the
+improvement back as a measured win.
+
+Both figures come from `./gradlew corpusFull`, which until this review ran
+one of the five repos while calling itself the full corpus (R64).
+
+**Deviation 1 revisited (P4's).** `command-exec` and
+`old-language-version` KEEP their added `readLine()`: their original flows
+are parameter-shaped with no in-repo source, and summaries PROPAGATE
+sources — they do not invent entry-point taint. Parameter-shaped flows from
+unmodelled entry points stay out of scope until endpoint/entry modelling
+(P7); the fixture-patch stands, now next to `summary-param-to-return`,
+which pins the same shape where a source exists.
+
+**Defects found and fixed during this phase** (R58-R61 below): the summary
+engine's own OOM on a pinned repo; a P2-era implicit-this register that
+never connected to the receiver's state; Gradle submodule file attribution
+(the R5 twin); and a pack pattern that could never match the operator
+rendering it models.
+
+**Defects found and fixed during the review** (R62-R65 below): R54's
+per-fact provenance applied to the joins and to neither of the other two
+merges; every access path deeper than one field invisible while recall read
+1.000, because no fixture in the corpus was ever two levels deep; a
+`corpusFull` that measured one of five pinned repos and exited zero; and
+the two transfer functions, still a copy of each other, now held in
+lockstep by a parity test until a phase unifies them.
+
 ## Phase 4 — intraprocedural, field-sensitive taint (this branch)
 
 Branch `feat/kosi-p4-taint`, off `feat/kosi` (`1aecdc0`).
@@ -20,7 +163,10 @@ writing `obj.query` does not taint `obj.column` — `field-sensitivity`'s
 negative half is golem's most valuable single negative, written before any
 positive taint fixture, and `TaintEngineTest`
 .aFieldInsensitiveEngineReportsTheCleanSibling proves it fails with access
-paths collapsed (the annotation has teeth, not a vacuous pass). Scope
+paths collapsed (the annotation has teeth, not a vacuous pass). `field*` is
+a path of up to five elements, not one: `nested-field-path` pins the
+two-level positive and the two-level clean sibling, which is the depth the
+whole corpus lacked until the P5/P6 review (R63). Scope
 functions (let/run/apply/also/with/use) now inline their lambda bodies for
 qualified calls too, bind `it` as a local and rebind `this` inside
 apply/run/with bodies (`scope-function-flow` pins receiver taint through all
@@ -513,7 +659,31 @@ Gate proofs recorded in the PR body:
    engine is intraprocedural.** Both ends of every slice are one function,
    so nothing can violate the criterion; a criterion nothing could have
    violated must not be counted as met. It becomes a real comparison in P5.
-   (R55)
+   (R55) — it is live since P5, with the collinearity caveat recorded in
+   that section: no slice yet crosses into an EXTERNAL dependency.
+8. **The two dataflow transfer functions are duplicated, not shared.**
+   `TaintEngine`'s and `SummaryAnalysis`'s are the same ~700 lines over two
+   fact types. Unification is P7's first item; until then
+   `TransferParityTest` fails the build when one learns an opcode the other
+   does not. (R65)
+
+## Defects found and fixed during the P5/P6 implementation
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R58 | kosi-flow | **the summary engine crashed the JVM with OutOfMemoryError on a pinned repo** (anki-android): a summary analysis's live state (registers x facts) grows with the body's size and path fan-out, and nothing bounded it — the per-function instruction cap bounded the MAIN analysis but not the summary one, and the first full-repo measurement died instead of degrading. Found by this phase's own per-repo measurement, not by the fixture tier | a deterministic state budget (`maxSummaryStateEntries`, 60k register+fact entries, checked per worklist round): an over-budget summary is DROPPED, never partially published — callers fall to the labelled `origin=default` — and the drop is counted in `stats.truncations{}` (`summary-state-budget`). Functions over the body budget are likewise skipped from summarisation (`summary-oversized-function`), matching the main analysis. A summary that is silently absent is a counted absence |
+| R59 | kosi-front | **member reads and writes on the IMPLICIT receiver never saw the receiver's state.** `currentThis()` returned the register `"v this"` (with a space) while the entry parameter store binds `"vthis"` — two names, one receiver, so `fun stage(raw: String) { command = raw }` stored taint into a register nothing would ever read, and P2-era fixtures masked it by using explicit receivers | one naming: the implicit receiver IS the entry store (`v$this` from `bindParameters`). Found by `summary-param-to-receiver`, whose whole flow lives on the implicit this |
+| R60 | kosi-project | **files collected under a Gradle submodule were attributed to the root module**: submodule source roots arrive MODULE-RELATIVE (`src/main/kotlin`) but were resolved against the analysis root, so only the root module's inferred sweep collected anything — and its `"."` attribution won `distinctBy(relativePath)`. The Gradle twin of R5 (nested Maven), with the same face: a module boundary the report flattens into a blob | root-relative miss falls back to the module's own directory, and a file reachable from several modules attributes to the MOST SPECIFIC module (longest modulePath). Found by `summary-cross-module`: `crossesModule` read false while the trace visibly crossed modules |
+| R61 | kosi-models | **`kotlin.text.plus` could never match the `+` operator rendering.** `"a" + b` with a NON-null receiver resolves to `kotlin.text.plus`, but with a NULLABLE receiver to `kotlin.plus` — the pack modelled only the former, so every nullable `+` chain leaned on the unknown-call default (invisible until the default-origin gate measured it) | both patterns shipped, plus `trim`/`replace`/`lowercase`/`uppercase`/`substring` — the string passthroughs the corpus demonstrated were missing. Data fixed at the pack, not special-cased in the engine (the P4 lesson, twice now) |
+
+## Defects found and fixed during the P5/P6 review
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R62 | kosi-flow | **R54's per-fact provenance was applied to the joins and to nothing else.** Concat, phi and elvis blame the operand that actually carried each fact; the element read (`KirIndexGet`, merging the collection's element state with the collection value) and the unknown-call default (merging the receiver and every argument) still blamed *the first non-empty operand* for every fact they merged — in BOTH transfer functions. Two sources into one unresolvable call is enough: the fact that arrived on the second argument gets a move pointing at the first, the backward walk dead-ends in a register that never held it, and the P4 endpoint net quietly stamps the slice `elided` | per-fact blame at all four sites, matching `joinInto`. Proven by `TaintEngineTest.everyMergeAttributesPerFactNotJustTheJoins`, which fails on the restored defect |
+| R63 | kosi-front | **every access path deeper than one field was invisible, and recall read 1.000 anyway.** `AccessPath` has carried `elements: List<Element>` with a depth-5 cap since P2, and both engines join those elements into the state key — but the lowering only ever emitted length-ONE paths. `o.inner.a = readLine()` became `t4 = fieldget vo vo.inner; fieldset t4 t4.a`, while the read `o.inner.a` hung off a *different* temporary: the write and the read never met, intraprocedurally or across a summary. Nothing in 50 fixtures used a two-level path, so `accessPathDepth: 5` was advertised in the options, honoured by the engines, and unreachable — and the P5 clean-sibling negatives were vacuous below depth one | the lowering composes a syntactic `a.b.c` qualifier chain into ONE path off the chain's base register, for reads, writes and compound assignments alike; `AccessPath.of` still collapses past the cap. Both engines are fixed by the one change. New fixture `nested-field-path` carries the positive, the interprocedural positive and the depth-two clean sibling; restoring the defect fails all four (two positives x two slots) |
+| R64 | kosi-corpus | **`corpusFull` measured one of the five pinned repos and exited zero.** The task asked for tiers `fixtures,async,small,vuln,ported`: `vuln` and `ported` have never existed in `corpus.toml`, and the four tiers that hold the other repos — `medium`, `android`, `kmp`, `hybrid` — were not named. `select` filtered an unknown tier to nothing and said nothing, so the documented full-corpus command silently covered `ktor-samples` alone. The repo evidence in the P5/P6 report came from ad-hoc `--tier` invocations, not from the command the docs give a reader | the task names every tier the manifest carries, and `select` now REQUIRES each requested tier to exist — a typo'd tier is an error, not a quiet reduction in coverage |
+| R65 | kosi-flow | **the two transfer functions are a copy of each other with the fact type changed** (`TaintFact` vs `SummaryFact`): the same joins, field and index handling, unknown-call default and sink matching, ~700 lines each, and they must agree or a summary describes a function differently from the engine consuming it. R62 is what the drift looks like when it is small. Not fixed here — unification is a phase of its own | `TransferParityTest` pins the cheapest observable that catches the likeliest drift: an opcode one transfer learned and the other did not fails the build naming the opcode. Recorded as the first item of P7 |
 
 ## Defect registry (numbers referenced by `known-fail=<backend>:<n>`)
 

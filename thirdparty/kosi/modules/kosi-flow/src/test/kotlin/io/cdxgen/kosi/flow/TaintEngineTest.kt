@@ -363,7 +363,9 @@ class TaintEngineTest {
         val result = run(function, options.copy(maxFunctionInstructions = 1))
         assertEquals(0, result.functionsAnalysed, "the function exceeded the cap and was skipped")
         assertEquals(0, result.evidence.slices.size)
-        assertEquals(mapOf("function-instructions" to 1), result.truncations)
+        // The oversized function is skipped from BOTH analyses: the main
+        // worklist (function-instructions) and the P5 summarizer.
+        assertEquals(mapOf("function-instructions" to 1, "summary-oversized-function" to 1), result.truncations)
         assertTrue(result.diagnostics.any { it.code == DiagnosticCodes.DATAFLOW_TRUNCATED })
     }
 
@@ -521,5 +523,53 @@ class TaintEngineTest {
             result.evidence.slices.count { it.crossesDependency },
             result.evidence.stats.crossDependencySlices,
         )
+    }
+
+    @Test
+    fun everyMergeAttributesPerFactNotJustTheJoins() {
+        // R54 was fixed at the concat/phi/elvis join and nowhere else. The
+        // OTHER two merges — an element read, and the blanket propagation an
+        // unresolvable call performs by default — still blamed the first
+        // non-empty operand for every fact they merged. Two sources into
+        // one unknown call is the shape that exposes it: the fact that
+        // arrived on the second argument gets a move pointing at the first,
+        // the backward walk dead-ends in a register that never held it, and
+        // the endpoint net silently marks the slice elided.
+        val unknownCall = fn(
+            block(
+                "b0",
+                KirCall("t1", KirCallee("test.Source.read", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, emptyList(), 1),
+                KirCall("t2", KirCallee("test.Source.read", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, emptyList(), 2),
+                KirCall("t3", KirCallee("test.Nowhere.mix", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, listOf("t1", "t2"), 3),
+                KirCall("t4", KirCallee("test.Sink.exec", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, listOf("t3"), 4),
+                io.cdxgen.kosi.kir.KirReturn(null),
+                entry = true,
+            ),
+        )
+        val propagated = run(unknownCall)
+        assertEquals(2, propagated.evidence.slices.size, "both sources reach the sink through the unknown call")
+        assertEndpointsAreReal(propagated)
+        assertTrue(propagated.evidence.slices.none { it.elided == true }, "neither walk should dead-end")
+
+        // The element read merges the collection's element state with the
+        // collection value itself — the same two-operand merge.
+        val indexRead = fn(
+            block(
+                "b0",
+                KirCall("t1", KirCallee("test.Source.read", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, emptyList(), 1),
+                KirCall("t2", KirCallee("test.Source.read", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, emptyList(), 2),
+                KirLoad("t3", KirConstant.IntConst(0)),
+                // t2 is the collection VALUE; t1 lands in its element state.
+                io.cdxgen.kosi.kir.KirIndexSet("t2", "t3", "t1"),
+                io.cdxgen.kosi.kir.KirIndexGet("t4", "t2", "t3"),
+                KirCall("t5", KirCallee("test.Sink.exec", null, io.cdxgen.kosi.kir.CallKind.STATIC), null, listOf("t4"), 5),
+                io.cdxgen.kosi.kir.KirReturn(null),
+                entry = true,
+            ),
+        )
+        val indexed = run(indexRead)
+        assertEquals(2, indexed.evidence.slices.size, "the element and the collection each carry their own fact")
+        assertEndpointsAreReal(indexed)
+        assertTrue(indexed.evidence.slices.none { it.elided == true }, "neither walk should dead-end")
     }
 }

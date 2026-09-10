@@ -236,8 +236,28 @@ object ClasspathResolver {
 
     // ---- cache locators ----------------------------------------------------
 
-    /** Locates a coordinate in the local caches and project build outputs. */
+    /**
+     * Locates a coordinate in the local caches and project build outputs.
+     * Kotlin multiplatform artifacts declare the UMBRELLA coordinate
+     * (`kotlinx-coroutines-core`) while the caches store the JVM variant
+     * under the `-jvm`-suffixed module name; without the fallback every
+     * coroutines/ktor dependency read `classpath-partial` even against a
+     * warm cache. The DECLARED coordinate keeps naming the purl.
+     */
     fun locate(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
+        val artifactNames = if (coordinate.artifact.endsWith("-jvm")) {
+            listOf(coordinate.artifact)
+        } else {
+            listOf(coordinate.artifact, coordinate.artifact + "-jvm")
+        }
+        for (artifact in artifactNames) {
+            val found = locateArtifact(coordinate.copy(artifact = artifact), root, moduleDirs)
+            if (found != null) return found
+        }
+        return null
+    }
+
+    private fun locateArtifact(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
         val version = coordinate.version
         if (version != null) {
             for (candidate in locatedByVersion(coordinate, version, root)) {

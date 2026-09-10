@@ -275,16 +275,6 @@
       "jniAccessible": true,
       "methods": [
         {
-          "name": "getButtonDownMasks",
-          "parameterTypes": []
-        }
-      ],
-      "type": "java.awt.event.InputEvent"
-    },
-    {
-      "jniAccessible": true,
-      "methods": [
-        {
           "name": "getProperty",
           "parameterTypes": [
             "java.lang.String"
@@ -303,52 +293,11 @@
       "jniAccessible": true,
       "methods": [
         {
-          "name": "handleNativeNotification",
-          "parameterTypes": [
-            "int"
-          ]
-        }
-      ],
-      "type": "com.apple.eawt._AppEventHandler"
-    },
-    {
-      "jniAccessible": true,
-      "methods": [
-        {
-          "name": "initMenuStates",
-          "parameterTypes": [
-            "boolean",
-            "boolean",
-            "boolean",
-            "boolean"
-          ]
-        }
-      ],
-      "type": "com.apple.eawt._AppMenuBarHandler"
-    },
-    {
-      "jniAccessible": true,
-      "methods": [
-        {
           "name": "installToolkitThreadInJava",
           "parameterTypes": []
         }
       ],
       "type": "sun.lwawt.macosx.LWCToolkit"
-    },
-    {
-      "jniAccessible": true,
-      "methods": [
-        {
-          "name": "notifyToolkitThreadBusy",
-          "parameterTypes": []
-        },
-        {
-          "name": "notifyToolkitThreadFree",
-          "parameterTypes": []
-        }
-      ],
-      "type": "sun.awt.AWTAutoShutdown"
     },
     {
       "methods": [
@@ -486,6 +435,23 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtNamedFunction"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinFunctionTypeStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtFunctionType"
     },
     {
       "methods": [
@@ -2247,9 +2213,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFinallySection"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtFunctionType"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFunctionTypeReceiver"
