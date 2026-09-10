@@ -1,0 +1,79 @@
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  s_9d783fb1e8d1fd::t_357270e8f70fd4 493-494
+  s_9d783fb1e8d1fd::t_b2b429feab9fb7 113
+  s_9d783fb1e8d1fd::t_bc5e6ffad433d6 512-518
+  s_9d783fb1e8d1fd::t_566546f2ac692f 608-609,612
+  s_9d783fb1e8d1fd::t_4f873468599df8 144
+  s_9d783fb1e8d1fd::t_53c1a766d01d60 287
+  s_9d783fb1e8d1fd::t_a9a2211553624c 533-534
+  s_9d783fb1e8d1fd::t_bf63e14f88e6ce 611,615
+  s_9d783fb1e8d1fd::t_3c6169263eb0af 286
+  s_9d783fb1e8d1fd::t_2a906e30fa516f 91-97
+  s_9d783fb1e8d1fd::t_34555356646cd7 582-583,585-586,590-607,610,613-614,616-620
+  s_9d783fb1e8d1fd::t_b3e75a8110a76a 564
+  s_9d783fb1e8d1fd::t_4db1e40c707cb5 545,548,550-563,565-568
+  s_9d783fb1e8d1fd::t_9d80b281b18043 621
+thirdparty/kosi/corpus.toml
+  s_9d783fb1e8d1fd::t_5698c3be99f921 192-199
+  s_9d783fb1e8d1fd::t_3228525be4448f 191
+thirdparty/kosi/fixtures/reachable-depth/src/main/kotlin/Depth.kt
+  s_9d783fb1e8d1fd::t_cf9cc3ad83e0c3 1-32
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/PublicApiDenominatorTest.kt
+  s_9d783fb1e8d1fd::t_fd3d931560ae91 1-64,66-70,72-78,80-82
+  s_9d783fb1e8d1fd::t_eacee11ad5825d 65,71,79
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/CallGraphGateTest.kt
+  s_9d783fb1e8d1fd::t_2eb04c5c4577bc 107,118,122-136,142-149,155,169
+  s_9d783fb1e8d1fd::t_f2363e4fa66b8e 35-36
+  s_9d783fb1e8d1fd::t_52fb88de478f9d 73-74
+thirdparty/kosi/goldens/reachable-depth-resolved.json
+  s_9d783fb1e8d1fd::t_ce14a29b280f24 1
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/FixtureResultJsonTest.kt
+  s_9d783fb1e8d1fd::t_c8616fc542054d 59-60
+  s_9d783fb1e8d1fd::t_f381d43126a60a 103-130
+  s_9d783fb1e8d1fd::t_b7a9a6e5f5cbcc 102
+thirdparty/kosi/docs/BUILD.md
+  s_9d783fb1e8d1fd::t_bdfde91ad0e571 70-71,74,78-87
+  s_9d783fb1e8d1fd::t_67e6435a77f19e 88
+thirdparty/kosi/goldens/reachable-depth-all.json
+  s_9d783fb1e8d1fd::t_ce14a29b280f24 1
+thirdparty/kosi/Makefile
+  s_9d783fb1e8d1fd::t_ee0ded5ce82eab 251-254
+  s_9d783fb1e8d1fd::t_762a363dca1426 229-236
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  s_9d783fb1e8d1fd::t_36ce2c18a04681 484-490
+  s_9d783fb1e8d1fd::t_465e0b75ee81fb 437-444,453-455,459-460,463,465-466,472-473
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  s_9d783fb1e8d1fd::t_9acb6954a7a6a2 405-421,541-557,711-727,830-846,898-914,1078,1089,1810-1812
+thirdparty/kosi/modules/kosi-graph/src/test/kotlin/io/cdxgen/kosi/graph/RootsTest.kt
+  s_9d783fb1e8d1fd::t_778b467907ee1e 1-61
+thirdparty/kosi/docs/KOSI.md
+  s_9d783fb1e8d1fd::t_580d8df91b5c8e 83-86
+  s_9d783fb1e8d1fd::t_47042313cbaa11 406-412,414-415
+  s_9d783fb1e8d1fd::t_fb385f5641fdc7 413
+  s_9d783fb1e8d1fd::t_13590f53e5f9d8 41-56,59-61
+  s_9d783fb1e8d1fd::t_2579902a0cc022 71-78
+  s_9d783fb1e8d1fd::t_d4a9cd52587ea0 91-94
+thirdparty/kosi/modules/kosi-graph/src/main/kotlin/io/cdxgen/kosi/graph/Roots.kt
+  s_9d783fb1e8d1fd::t_c2c63b4f1aa007 113-117
+  s_9d783fb1e8d1fd::t_3c6169263eb0af 118
+thirdparty/kosi/goldens/reachable-depth-exported.json
+  s_9d783fb1e8d1fd::t_ce14a29b280f24 1
+thirdparty/kosi/goldens/reachable-depth-security.json
+  s_9d783fb1e8d1fd::t_ce14a29b280f24 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5e47208acc25391e33b3140c40ecde5c6a958de3",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
