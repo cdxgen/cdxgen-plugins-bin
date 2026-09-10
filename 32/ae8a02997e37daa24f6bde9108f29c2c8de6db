@@ -1,0 +1,79 @@
+thirdparty/kosi/modules/kosi-cli/build.gradle.kts
+  s_9d783fb1e8d1fd::t_48cb9c6d9c3280 30-32
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  s_9d783fb1e8d1fd::t_dd7619b55de04e 740-797
+  s_9d783fb1e8d1fd::t_476ccadccbbc78 334
+  s_9d783fb1e8d1fd::t_7446e8fb97f029 202-209,226-228
+  s_9d783fb1e8d1fd::t_dd6c0bc6c2f082 739
+thirdparty/kosi/scripts/native-vs-jvm.sh
+  s_9d783fb1e8d1fd::t_5814b903f08a18 1-58
+thirdparty/kosi/docs/BUILD.md
+  s_9d783fb1e8d1fd::t_7245f107796bfe 91-92,95-103
+  s_9d783fb1e8d1fd::t_057ebd56ea59c6 104
+thirdparty/kosi/gradle.properties
+  s_9d783fb1e8d1fd::t_a9493b3b0c1758 1-5
+  s_9d783fb1e8d1fd::t_d701ba723912e3 6-8
+thirdparty/kosi/scripts/determinism-sweep.sh
+  s_9d783fb1e8d1fd::t_6967de4cf8bbba 26-31,33-39,42-43,45-46,49
+  s_9d783fb1e8d1fd::t_2418022c96c8ea 62,65,67
+thirdparty/kosi/modules/kosi-flow/src/test/kotlin/io/cdxgen/kosi/flow/TaintEngineTest.kt
+  s_9d783fb1e8d1fd::t_07a3c7a88223db 419,425-524
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_9d783fb1e8d1fd::t_387c79b74de8cc 378,381-385
+  s_9d783fb1e8d1fd::t_0249c2fe47999b 390-397
+  s_526190b23001e8::t_c7abee2cbce1dd 386
+thirdparty/kosi/docs/KOSI.md
+  s_9d783fb1e8d1fd::t_be5c8325a588cc 57-66
+  s_9d783fb1e8d1fd::t_3a5550382e9382 69-78
+  s_9d783fb1e8d1fd::t_f43fae9f204c53 79-80
+  s_9d783fb1e8d1fd::t_3647c4ed040b6a 103-106
+  s_9d783fb1e8d1fd::t_dd306af5d0e0ae 526-534
+  s_9d783fb1e8d1fd::t_fce2e316b1364b 504-516
+thirdparty/kosi/build.gradle.kts
+  s_9d783fb1e8d1fd::t_64c6579db45210 10-21
+  s_9d783fb1e8d1fd::t_957655ef9ef563 51
+  s_9d783fb1e8d1fd::t_709428177fff51 70
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  s_9d783fb1e8d1fd::t_3b6edbfb6996f1 916-921
+  s_9d783fb1e8d1fd::t_1418dcf3e23df7 963-970
+  s_9d783fb1e8d1fd::t_43760407aa4caf 468,470,472-477
+  s_9d783fb1e8d1fd::t_2555349996271e 735,744-748,753,755-769
+  s_9d783fb1e8d1fd::t_147c3db680da8c 993-1008,1010-1011
+  s_9d783fb1e8d1fd::t_dd7d01369a2a5f 938-939
+  s_9d783fb1e8d1fd::t_62f7d25bdeb1d6 432-455
+  s_9d783fb1e8d1fd::t_e835203477bb04 799
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_9d783fb1e8d1fd::t_29a916183a5c88 563-574,576-578
+thirdparty/kosi/goldens/collection-passthrough-exported.json
+  s_526190b23001e8::t_86d5c801705bf7 1
+thirdparty/kosi/goldens/collection-passthrough-resolved.json
+  s_526190b23001e8::t_2166e2a784c7ea 1
+thirdparty/kosi/goldens/scope-function-flow-exported.json
+  s_526190b23001e8::t_ceaae0dd8fe11d 1
+thirdparty/kosi/goldens/scope-function-flow-resolved.json
+  s_526190b23001e8::t_d9f0314b7a45fc 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "32ae8a02997e37daa24f6bde9108f29c2c8de6db",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
