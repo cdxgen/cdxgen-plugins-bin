@@ -582,5 +582,19 @@ fun main(args: Array<String>) {
     for ((key, value) in listOf("java.awt.headless" to "true", "apple.awt.UIElement" to "true")) {
         if (System.getProperty(key) == null) System.setProperty(key, value)
     }
-    kotlin.system.exitProcess(Main.run(args))
+    // An UNCAUGHT exception must never end main: the IntelliJ substrate
+    // leaves a NON-daemon pooled thread behind, and a JVM whose main died
+    // naturally then waits for it FOREVER (the http4k corpus run hung two
+    // hours past a finished analysis, silent, exit never reached). Every
+    // failure exits here, with kosi's own message and code.
+    val code = try {
+        Main.run(args)
+    } catch (t: Throwable) {
+        System.err.println(
+            "kosi: " + (t.message?.take(400)?.ifBlank { null } ?: t::class.simpleName + " (no message)"),
+        )
+        if (System.getenv("KOSI_TRACE") != null) t.printStackTrace()
+        io.cdxgen.kosi.cli.ExitCodes.RUNTIME
+    }
+    kotlin.system.exitProcess(code)
 }

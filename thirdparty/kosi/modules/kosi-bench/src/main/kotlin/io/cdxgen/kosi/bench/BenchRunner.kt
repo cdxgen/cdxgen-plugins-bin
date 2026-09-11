@@ -484,7 +484,42 @@ object BenchRunner {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
             for (slot in Matrix.defaultMatrix()) {
-                results.add(runSlot(entry, dir, annotations, slot, commit))
+                results.add(
+                    try {
+                        runSlot(entry, dir, annotations, slot, commit)
+                    } catch (t: Throwable) {
+                        // A slot whose analysis dies is a NAMED failure row,
+                        // never a silent skip and never a dead run: the
+                        // corpus degrades by exactly one countable row and
+                        // the other slots still publish (07-REVIEW-PROTOCOL
+                        // #9 — a degradation nobody can see is the one that
+                        // ships). http4k's partial offline classpath trips
+                        // an upstream Analysis API checker and lands here.
+                        val message = (t.message ?: t::class.simpleName ?: "error").take(200)
+                        FixtureResult(
+                            slug = entry.slug,
+                            tier = entry.tier,
+                            slot = slot.label,
+                            annotations = annotations.size,
+                            positives = annotations.count { !it.isNegative },
+                            negatives = annotations.count { it.isNegative },
+                            pass = 0,
+                            fail = annotations.count { !it.isNegative },
+                            xfail = 0,
+                            xpass = 0,
+                            positivesPassed = 0,
+                            positivesRecallDenominator = annotations.count { !it.isNegative },
+                            recall = 0.0,
+                            connectivity = 0.0,
+                            sliceCount = 0,
+                            integrityViolations = 0,
+                            wallMillis = 0,
+                            parseErrors = 0,
+                            digest = Digests.FixtureDigest(entry.slug, slot.label, emptyMap()),
+                            failures = listOf("analysis failed: $message"),
+                        )
+                    },
+                )
             }
         }
         val walls = results.map { it.wallMillis }.sorted()
