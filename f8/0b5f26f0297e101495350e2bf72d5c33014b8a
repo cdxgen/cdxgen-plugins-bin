@@ -1,0 +1,18 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 255-258
+thirdparty/kosi/README.md
+  h_6a4cc5cdf68def 15-25,30-32
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 405-421,626-642,1135-1156,1808-1810,1880-1882,2635-2640
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f80b5f26f0297e101495350e2bf72d5c33014b8a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
