@@ -1,0 +1,78 @@
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  h_6a4cc5cdf68def 166-179,952-1166
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 135-154,217-244,436-451,673-682
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/EndpointMetrics.kt
+  h_6a4cc5cdf68def 1-95
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 23,30,38,77-85
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DefaultsSyncTest.kt
+  h_6a4cc5cdf68def 23-28,30,64-73
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 211
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  h_6a4cc5cdf68def 4,60-66,79-81,117-133,160-166,179-188
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/AnnotationParser.kt
+  h_6a4cc5cdf68def 97-103,142-148,212-218
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Evaluator.kt
+  h_6a4cc5cdf68def 125-127,157-159,230-280
+thirdparty/kosi/modules/kosi-crypto/build.gradle.kts
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/modules/kosi-crypto/src/main/kotlin/io/cdxgen/kosi/crypto/CryptoCollector.kt
+  h_6a4cc5cdf68def 1-512
+thirdparty/kosi/modules/kosi-endpoints/build.gradle.kts
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/AndroidManifestParser.kt
+  h_6a4cc5cdf68def 1-185
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/ConfigResolver.kt
+  h_6a4cc5cdf68def 1-157
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  h_6a4cc5cdf68def 1-382
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/Endpoints.kt
+  h_6a4cc5cdf68def 1-263
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/OutboundDetector.kt
+  h_6a4cc5cdf68def 1-113
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 184-190,619-632,887-895,898-904,948-950,953-963,967,971-978,984,1007,1046-1055,1058,1078,1131-1135,1137-1145,1150,1160,1201-1202,1209-1216,1218,1221,1228-1229,1231,1238,1268,1329-1336
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Transfer.kt
+  h_6a4cc5cdf68def 8-9,211-217,355-366,392,396-411
+thirdparty/kosi/modules/kosi-front/build.gradle.kts
+  h_6a4cc5cdf68def 57-58
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 462-506,528,557-582,667-677,682-725,894-897,1021,1024-1026
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirConstFold.kt
+  h_6a4cc5cdf68def 1-173
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/CryptoMappings.kt
+  h_6a4cc5cdf68def 1-101
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/EndpointModels.kt
+  h_6a4cc5cdf68def 1-117
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/ModelPack.kt
+  h_6a4cc5cdf68def 111-122,130
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/ModelPacks.kt
+  h_6a4cc5cdf68def 63-68,76,91
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/crypto-mappings-v0.json
+  h_6a4cc5cdf68def 1-36
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 1-153
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  h_6a4cc5cdf68def 3,5-6,8,11-12,14,17-18,20,23-24,26,29-30,32-35,37-38,41,54-55,64-65,74-75,84-85,94-95,104-105,126-127,148-149,158-159,168-169,178-179,188-189,198-199,208-209,218-219,223-224,228-229,233-234,238-239,243-244,248-249,253-254,258-259,263-264,268-269,374,395,471-472,477-478,481,483-494,496-497,500-503,505-506,509-512,514-515,518-521,523-524,527-586,588-621,624
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Crypto.kt
+  h_6a4cc5cdf68def 16-30,39-40,43-44
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Options.kt
+  h_6a4cc5cdf68def 113-119,146
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Services.kt
+  h_6a4cc5cdf68def 24-29,39,78
+thirdparty/kosi/settings.gradle.kts
+  h_6a4cc5cdf68def 48-49,64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f9ef8c0b6b34c346b2473c81c0d552411eacf26",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
