@@ -122,6 +122,9 @@ object Evaluator {
             Annotation.Kind.DECLARATION -> declarationSatisfied(report, ann)
             Annotation.Kind.MODULE -> moduleSatisfied(report, ann)
             Annotation.Kind.DIAGNOSTIC -> diagnosticSatisfied(report, ann)
+            Annotation.Kind.ENDPOINT -> endpointSatisfied(report, ann)
+            Annotation.Kind.CRYPTO -> cryptoSatisfied(report, ann)
+            Annotation.Kind.SERVICE -> serviceSatisfied(report, ann)
         }
         // Negative expectations (want-not) never get known-fail protection:
         // a violated negative is a false positive of the engine, and hiding
@@ -151,6 +154,9 @@ object Evaluator {
         Annotation.Kind.DECLARATION -> "declaration ${ann.name}"
         Annotation.Kind.MODULE -> "module ${ann.name}"
         Annotation.Kind.DIAGNOSTIC -> "diagnostic ${ann.code}"
+        Annotation.Kind.ENDPOINT -> "endpoint ${ann.framework} ${ann.path ?: ""} ${ann.fn ?: ""}"
+        Annotation.Kind.CRYPTO -> "crypto ${ann.name}"
+        Annotation.Kind.SERVICE -> "service ${ann.protocol} ${ann.name ?: ""}"
     }
 
     // ---- per-kind satisfaction -------------------------------------------
@@ -216,6 +222,57 @@ object Evaluator {
         val modules: List<ModuleRef> = report.modules
         val matched = modules.filter { module ->
             matches(ann.name, module.name) && (ann.platform == null || module.platform == ann.platform)
+        }
+        val expected = ann.count ?: 1
+        return matched.size >= expected
+    }
+
+    /**
+     * Endpoint expectations: framework (required), path template and handler
+     * (`fn=`, matched against the handler symbol) with `~` substring
+     * semantics; `method=` narrows to the endpoint's httpMethod list. A
+     * NEGATIVE endpoint expectation — the lookalike half every framework
+     * fixture carries — passes only when NO endpoint matches.
+     */
+    private fun endpointSatisfied(report: KosiReport, ann: Annotation): Boolean {
+        val matched = report.apiEndpoints.filter { endpoint ->
+            matches(ann.framework, endpoint.framework) &&
+                matches(ann.path, endpoint.pathTemplate) &&
+                matches(ann.fn, endpoint.handlerSymbol) &&
+                (ann.method == null || endpoint.httpMethods.any { matches(ann.method, it) })
+        }
+        val expected = ann.count ?: 1
+        return matched.size >= expected
+    }
+
+    /**
+     * Crypto expectations against `crypto.assets[]`: the algorithm/transform
+     * name plus any of mode=, padding=, and the resolution FORM the value
+     * was read in. A negative pins the absence of an algorithm (a weak one
+     * that must not appear) or of a wrong form.
+     */
+    private fun cryptoSatisfied(report: KosiReport, ann: Annotation): Boolean {
+        val matched = report.crypto.assets.filter { asset ->
+            matches(ann.name, asset.name) &&
+                (ann.mode == null || matches(ann.mode, asset.mode)) &&
+                (ann.padding == null || matches(ann.padding, asset.padding)) &&
+                (ann.form == null || matches(ann.form, asset.resolution))
+        }
+        val expected = ann.count ?: 1
+        return matched.size >= expected
+    }
+
+    /**
+     * Service expectations against the OUTBOUND `services[]`: protocol,
+     * name (the host or resolved value) and resolution status. This is the
+     * config-resolution gate's per-fixture expression.
+     */
+    private fun serviceSatisfied(report: KosiReport, ann: Annotation): Boolean {
+        val matched = report.services.filter { service ->
+            matches(ann.protocol, service.protocol) &&
+                matches(ann.name, service.name) &&
+                matches(ann.resolution, service.resolution) &&
+                (ann.path == null || service.endpoints.any { matches(ann.path, it) })
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

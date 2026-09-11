@@ -1,0 +1,36 @@
+{
+  "name": "crypto-mappings-v0",
+  "description": "The crypto/CBOM mapping table (P8). The collector parses transform strings and algorithm names against these rows and never invents a fact the table does not carry. POPULATION RULE (the P8 gate, R63's rule over a table): every row here must be exercised by at least one crypto-tier fixture, computed as mappings-exercised over mappings-shipped, FAIL below 1.000 — so a row is added to this file only together with the fixture that exercises it. Findings name risk codes; a finding is emitted only when the table row says so, never inferred from a default. `AES` alone is not `AES/ECB/PKCS5Padding` even though the JCA will substitute defaults: the collector reports what the code says and leaves the JCA's defaults to the consumer.",
+  "transforms": [
+    { "transform": "AES/ECB/PKCS5Padding", "algorithm": "AES", "family": "symmetric", "primitive": "block-cipher", "mode": "ECB", "padding": "PKCS5Padding", "findings": ["ecb-mode"] },
+    { "transform": "AES/CBC/PKCS5Padding", "algorithm": "AES", "family": "symmetric", "primitive": "block-cipher", "mode": "CBC", "padding": "PKCS5Padding", "findings": [] },
+    { "transform": "AES/GCM/NoPadding", "algorithm": "AES", "family": "symmetric", "primitive": "block-cipher", "mode": "GCM", "padding": "NoPadding", "findings": [] },
+    { "transform": "DESede/CBC/PKCS5Padding", "algorithm": "DESede", "family": "symmetric", "primitive": "block-cipher", "mode": "CBC", "padding": "PKCS5Padding", "findings": ["weak-cipher"] },
+    { "transform": "RSA/ECB/OAEPWithSHA-256AndMGF1Padding", "algorithm": "RSA", "family": "asymmetric", "primitive": "public-key", "mode": "ECB", "padding": "OAEPWithSHA-256AndMGF1Padding", "findings": [] }
+  ],
+  "algorithms": [
+    { "name": "AES", "family": "symmetric", "primitive": "block-cipher", "keySizeBits": 128 },
+    { "name": "DESede", "family": "symmetric", "primitive": "block-cipher", "keySizeBits": 168, "findings": ["weak-cipher"] },
+    { "name": "RSA", "family": "asymmetric", "primitive": "public-key", "keySizeBits": 2048 },
+    { "name": "EC", "family": "asymmetric", "primitive": "public-key" },
+    { "name": "MD5", "family": "digest", "primitive": "hash", "keySizeBits": 128, "findings": ["weak-digest"] },
+    { "name": "SHA-1", "family": "digest", "primitive": "hash", "keySizeBits": 160, "findings": ["weak-digest"] },
+    { "name": "SHA-256", "family": "digest", "primitive": "hash", "keySizeBits": 256 },
+    { "name": "HmacSHA256", "family": "mac", "primitive": "mac", "keySizeBits": 256 },
+    { "name": "SHA256withRSA", "family": "signature", "primitive": "signature" },
+    { "name": "PBKDF2WithHmacSHA256", "family": "kdf", "primitive": "kdf" },
+    { "name": "TLS", "family": "tls", "primitive": "protocol" },
+    { "name": "TLSv1.2", "family": "tls", "primitive": "protocol" },
+    { "name": "TLSv1.3", "family": "tls", "primitive": "protocol" },
+    { "name": "TLSv1.1", "family": "tls", "primitive": "protocol", "findings": ["insecure-tls-version"] },
+    { "name": "SSL", "family": "tls", "primitive": "protocol", "findings": ["insecure-tls-version"] },
+    { "name": "AndroidKeyStore", "family": "keystore", "primitive": "keystore" },
+    { "name": "none", "family": "jwt", "primitive": "signature", "findings": ["jwt-alg-none"] }
+  ],
+  "curves": [
+    { "name": "secp256r1", "keySizeBits": 256 }
+  ],
+  "modeVocabulary": ["ECB", "CBC", "CTR", "CFB", "OFB", "GCM", "CCM", "PCBC"],
+  "paddingVocabulary": ["NoPadding", "PKCS5Padding", "PKCS7Padding", "OAEPWithSHA-256AndMGF1Padding", "ISO10126Padding"],
+  "pbkdf2MinIterations": 210000
+}

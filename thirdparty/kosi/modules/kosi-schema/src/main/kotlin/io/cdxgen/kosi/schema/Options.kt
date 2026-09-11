@@ -110,6 +110,13 @@ data class AnalyzeOptions(
     val maxPathsPerSymbol: Int = 3,
     val includeStdlib: Boolean = false,
     val unknownCall: String = "propagate",
+    /**
+     * P7: endpoint handlers' parameters are taint sources (`--endpoint-sources`),
+     * so `--dataflow` links slices to the endpoint they enter through. The
+     * default is off: without the flag a run's slices start only at pack
+     * sources, exactly as before.
+     */
+    val endpointSources: Boolean = false,
     val languageVersion: String? = null,
     val apiVersion: String? = null,
     val jvmTarget: String? = null,
@@ -136,6 +143,7 @@ data class AnalyzeOptions(
         w.beginArray("classpath")
         for (value in classpath.sorted()) w.str(value)
         w.endArray()
+        w.bool("endpointSources", endpointSources)
         w.str("classpathFile", classpathFile)
         w.str("dataflow", dataflow.id)
         w.num("dataflowMaxFunctionInstructions", dataflowMaxFunctionInstructions)

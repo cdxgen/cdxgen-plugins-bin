@@ -181,6 +181,13 @@ object TaintEngine {
          * otherwise push the fixpoint into gigabytes and OOM the run.
          */
         val maxSummaryStateEntries: Int = 60000,
+        /**
+         * P7 endpoint-rooted taint, when the run asks for it: handler
+         * canonical name -> the category its parameters carry. Seeds live
+         * at the synthetic entry site (-1) so endpoint-rooted slices walk
+         * from the handler's own signature.
+         */
+        val endpointSources: Map<String, String> = emptyMap(),
     )
 
     data class Result(
@@ -609,6 +616,20 @@ object TaintEngine {
             collect?.let { it.unknownPropagations += 1 }
         }
 
+        private val literalMatchers: List<Pair<Regex, String>> =
+            context.pack.literalSources.map { Regex(it.namePattern) to it.category }
+
+        override fun literalSourceCategory(name: String): String? =
+            literalMatchers.firstOrNull { (regex, _) -> regex.matches(name) }?.second
+
+        override fun entryBindings(): List<Pair<String, TaintFact>> {
+            val category = context.options.endpointSources[compiled.function.canonicalName] ?: return emptyList()
+            return compiled.function.params.filter { !it.receiver }
+                .map { it.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category) }
+        }
+
+        override fun entryBlockId(): String? = compiled.blocks.firstOrNull()?.id
+
         fun moveChain(
             state: FlowState<TaintFact>,
             from: TaintKey,
@@ -863,14 +884,25 @@ object TaintEngine {
         val options = context.options
         val pack = context.pack
         val siteIndex = context.siteIndex
-        val sourceRef = siteIndex[fact.site] ?: return null
-        val sourceSite = sourceRef.second
-        val sourceIns = sourceSite.ins as? KirCall ?: return null
+        // A fact born at the synthetic entry site is an ENDPOINT-PARAMETER
+        // source (P7): the analysed function is the handler and its entry
+        // site is the trace head. A fact born at a STORE is a literal source
+        // (the pack's name rule): the store is the birth. Everything else is
+        // a pack source call, validated against the pack as always.
+        val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE
+        val sourceRef = siteIndex[fact.site]
+        val sourceSite = sourceRef?.second
+        val sourceIns = sourceSite?.ins as? KirCall
         val sinkRef = siteIndex[hit.sinkSite] ?: return null
         val sinkIns = sinkRef.second.ins as? KirCall ?: return null
-        val sourcePattern = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, sourceIns.callee.fqn) } ?: return null
+        val sourcePattern = sourceIns?.let { ins ->
+            pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
+        }
+        if (!entryFact && sourcePattern == null) return null
+        if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
+        val literalBirth = !entryFact && sourceSite?.ins is KirStore
+        if (!entryFact && !literalBirth && sourceRef == null) return null
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
-        if (fact.category != sourcePattern.category) return null
 
         // The upstream path of a source-return birth: taint that came back
         // from a callee's internal source starts its trace THERE, not at the
@@ -913,24 +945,43 @@ object TaintEngine {
         // is prepended and the slice is marked elided, so a truncated trace
         // is visible as a truncated trace instead of one that quietly starts
         // in the middle (R54).
-        val walked = moves.map { it.site }.reversed()
+        val walked = moves.map { it.site }.reversed().filter { it != SummaryAnalysis.ENTRY_SITE }
+        val handlerEntrySite = compiled.blocks.firstOrNull()
+            ?.let { compiled.sitesByBlock[it.id]?.firstOrNull()?.id }
         val traceSites = when {
             upstreamSites.isNotEmpty() -> upstreamSites + walked + listOf(hit.sinkSite)
+            entryFact -> {
+                // The handler's signature is the flow's origin: its entry
+                // site opens the trace; the seed move carries no instruction.
+                if (handlerEntrySite != null) {
+                    listOf(handlerEntrySite) + walked + listOf(hit.sinkSite)
+                } else {
+                    elided = true
+                    walked + listOf(hit.sinkSite)
+                }
+            }
+
             reachedBirth || walked.firstOrNull() == fact.site -> walked + hit.sinkSite
             else -> {
                 elided = true
-                listOf(fact.site) + walked + hit.sinkSite
+                listOfNotNull(fact.site.takeIf { it != SummaryAnalysis.ENTRY_SITE }) + walked + listOf(hit.sinkSite)
             }
         }
         // The trace's SOURCE node is the pack-source call — inside a callee
-        // for a source-return birth, the call site itself otherwise.
-        val sourceNodeSite = upstreamSites.firstOrNull() ?: fact.site
+        // for a source-return birth, the call site itself otherwise. An
+        // endpoint-rooted flow starts at the handler's entry site; a literal
+        // source at its store.
+        val sourceNodeSite = upstreamSites.firstOrNull()
+            ?: (if (entryFact) handlerEntrySite else null)
+            ?: fact.site.takeIf { siteIndex.containsKey(it) }
+            ?: walked.firstOrNull()
+            ?: hit.sinkSite
         val origins = moves.mapNotNull { it.origin }.distinct().sorted()
         val tracedWithSuspend = withSuspendBoundaries(traceSites, siteIndex)
         val suspendCrossing = tracedWithSuspend.any { siteIndex[it]?.second?.ins is KirSuspendPoint }
         val traceNodesInput = tracedWithSuspend
 
-        val sourceFunction = sourceRef.first.function
+        val sourceFunction = sourceRef?.first?.function ?: compiled.function
         val (sourceFilePath, sourceModulePath) = attribution.byAbsoluteFilePath[sourceFunction.file] ?: (sourceFunction.file to "")
         val sourcePurl = attribution.purlByModulePath[sourceModulePath].takeUnless { it.isNullOrEmpty() } ?: sourceFunction.purl
         val sinkFunction = sinkRef.first.function
@@ -953,6 +1004,7 @@ object TaintEngine {
                         else -> "call"
                     }
 
+                    is KirStore -> if (siteId == sourceNodeSite) "source" else "assign"
                     is KirSuspendPoint -> "suspend"
                     is KirDynamicCall -> "propagate"
                     is KirStringConcat -> "concat"
@@ -991,9 +1043,19 @@ object TaintEngine {
             )
         }
 
+        // The source display name: the handler's parameter list for
+        // endpoint-rooted flows, the material's local name for literal
+        // births, and the callee fqn for pack-source calls.
+        val sourceDisplayName = when {
+            entryFact -> "endpoint-params " + compiled.function.canonicalName
+            literalBirth -> (sourceSite?.ins as? KirStore)?.let { "literal " + it.target.removePrefix("v") }
+                ?: "literal"
+            else -> sourceIns?.callee?.fqn ?: sourcePattern?.pattern ?: "source"
+        }
+
         val flowKey = sha256(
             listOf(
-                sourceIns.callee.fqn,
+                sourceIns?.callee?.fqn ?: sourceDisplayName,
                 fact.category,
                 sinkIns.callee.fqn,
                 sinkPattern.category,
@@ -1013,7 +1075,7 @@ object TaintEngine {
             sourceCategory = fact.category,
             sinkCategory = sinkPattern.category,
             severity = sinkPattern.severity,
-            sourceName = sourceIns.callee.fqn,
+            sourceName = sourceDisplayName,
             sinkName = sinkIns.callee.fqn,
             sourceFunction = sourceFunction.canonicalName,
             sinkFunction = sinkFunction.canonicalName,
@@ -1066,18 +1128,26 @@ object TaintEngine {
         val sinkRef = siteIndex[effect.sinkSite] ?: return null
         val sinkIns = sinkRef.second.ins as? KirCall ?: return null
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
-        // The fact must have been born at a pack source — DIRECTLY at a
-        // source call in the caller, or at a call whose callee RETURNED
-        // source taint (the source-return birth: the real source lives at
-        // the head of the recorded upstream path, often in another module).
+        // The fact must have been born at a REAL source — a pack source call,
+        // a call whose callee RETURNED source taint (the source-return birth:
+        // the real source lives at the head of the recorded upstream path,
+        // often in another module), an endpoint parameter (P7), or a literal
+        // store the pack's name rule claimed (P8).
         val sourceRefs = hit.facts.mapNotNull { fact ->
-            siteIndex[fact.site]?.let { ref ->
-                val ins = ref.second.ins as? KirCall ?: return@mapNotNull null
+            val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE &&
+                context.options.endpointSources.containsKey(compiled.function.canonicalName)
+            val ref = siteIndex[fact.site]
+            val literalBirth = ref?.second?.ins is KirStore
+            if (entryFact || literalBirth) {
+                return@mapNotNull SourceRef(fact, ref ?: Pair(compiled, compiled.sitesByBlock.values.first().first()), "", emptyList())
+            }
+            ref?.let { r ->
+                val ins = r.second.ins as? KirCall ?: return@mapNotNull null
                 val direct = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
                 val upstream = context.sourceReturnPaths[fact]
                 when {
                     direct != null && direct.category == fact.category ->
-                        SourceRef(fact, ref, direct.pattern, upstream.orEmpty())
+                        SourceRef(fact, r, direct.pattern, upstream.orEmpty())
 
                     upstream != null && upstream.isNotEmpty() -> {
                         // Validate the upstream head against the pack: a
@@ -1087,7 +1157,7 @@ object TaintEngine {
                         val headIns = head.second.ins as? KirCall ?: return@mapNotNull null
                         val headSource = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, headIns.callee.fqn) }
                         if (headSource != null && headSource.category == fact.category) {
-                            SourceRef(fact, ref, headSource.pattern, upstream)
+                            SourceRef(fact, r, headSource.pattern, upstream)
                         } else {
                             null
                         }
@@ -1128,33 +1198,44 @@ object TaintEngine {
                 current = move.prevKey
             }
             origins.addAll(moves.mapNotNull { it.origin })
-            val walked = moves.map { it.site }.reversed()
+            val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE
+            val walked = moves.map { it.site }.reversed().filter { it != SummaryAnalysis.ENTRY_SITE }
             if (sourceRef.upstream.isNotEmpty()) {
                 // The real source call sits in the callee that RETURNED the
                 // taint: its path opens the trace.
                 traceSegments.add(sourceRef.upstream)
                 sourceNodeSite = sourceRef.upstream.first()
             }
-            if (reachedBirth && walked.firstOrNull() == fact.site) {
+            if (entryFact) {
+                // An endpoint-rooted interprocedural flow opens at the
+                // handler's entry site; the seed move carries no instruction.
+                compiled.sitesByBlock[compiled.blocks.first().id]?.firstOrNull()?.let { first ->
+                    traceSegments.add(listOf(first.id))
+                    if (sourceNodeSite == -1) sourceNodeSite = first.id
+                }
+            } else if (reachedBirth && walked.firstOrNull() == fact.site) {
                 traceSegments.add(walked)
+                if (sourceNodeSite == -1) sourceNodeSite = fact.site
             } else {
                 elided = true
-                traceSegments.add(listOf(fact.site) + walked)
+                traceSegments.add(walked)
             }
             traceSegments.add(listOf(hit.callSite))
             traceSegments.add(effect.path + listOf(effect.sinkSite))
         }
         if (sourceNodeSite == -1) {
             sourceNodeSite = sourceRefs.minByOrNull { it.fact.site }!!.fact.site
+                .takeIf { it != SummaryAnalysis.ENTRY_SITE && siteIndex.containsKey(it) }
+                ?: hit.callSite
         }
-        val traceSites = traceSegments.flatten().distinct()
+        val traceSites = traceSegments.flatten().filter { it != SummaryAnalysis.ENTRY_SITE }.distinct()
         // The SOURCE END's facts (file, module, purl) come from the function
         // holding the SOURCE NODE — for a source-return birth that is the
         // callee that read the source, not the caller that consumed it. The
         // cross-module flags are computed from these ends, so reading them
         // from the birth site would report the crossing the trace actually
         // makes as none.
-        val sourceRefForEnds = siteIndex.getValue(sourceNodeSite)
+        val sourceRefForEnds = siteIndex[sourceNodeSite] ?: Pair(compiled, compiled.sitesByBlock.values.first().first())
         val suspendCrossing = traceSites.any { siteIndex[it]?.second?.ins is KirSuspendPoint }
 
         val sourceFunction = sourceRefForEnds.first.function
@@ -1184,6 +1265,7 @@ object TaintEngine {
                         else -> "call"
                     }
 
+                    is KirStore -> if (siteId == sourceNodeSite) "source" else "assign"
                     is KirSuspendPoint -> "suspend"
                     is KirDynamicCall -> "propagate"
                     is KirStringConcat -> "concat"
@@ -1244,8 +1326,14 @@ object TaintEngine {
             sourceCategory = fact.category,
             sinkCategory = sinkPattern.category,
             severity = sinkPattern.severity,
-            sourceName = (siteIndex.getValue(sourceNodeSite).second.ins as? KirCall)?.callee?.fqn
-                ?: sourcePattern.pattern,
+            sourceName = (siteIndex[sourceNodeSite]?.second?.ins as? KirCall)?.callee?.fqn
+                ?: sourcePattern.pattern.ifEmpty {
+                    if (fact.site == SummaryAnalysis.ENTRY_SITE) {
+                        "endpoint-params " + compiled.function.canonicalName
+                    } else {
+                        "literal"
+                    }
+                },
             sinkName = sinkIns.callee.fqn,
             sourceFunction = sourceFunction.canonicalName,
             sinkFunction = sinkFunction.canonicalName,

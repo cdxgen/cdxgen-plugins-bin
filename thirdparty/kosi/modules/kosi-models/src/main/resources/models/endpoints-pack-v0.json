@@ -1,0 +1,153 @@
+{
+  "name": "endpoints-pack-v0",
+  "description": "The framework registry for endpoint, service and URL detection (P7). The detector matches RESOLVED annotation FQNs, DSL callee FQNs and supertype names against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a framework. A framework the pack does not name is invisible by construction, and every pattern here is validated by a build-time test. annotation FQNs must resolve through the workspace declarations or a real classpath: an unresolved annotation keeps its PSI short name and only matches when the pack pattern is itself a short name, which is never — type identity, not name matching, is what keeps a homonym annotation from becoming an endpoint.",
+  "frameworks": [
+    {
+      "id": "spring-mvc",
+      "kind": "annotation",
+      "classMarkers": [
+        "org.springframework.web.bind.annotation.RestController",
+        "org.springframework.web.bind.annotation.Controller"
+      ],
+      "mappingAnnotations": [
+        { "pattern": "org.springframework.web.bind.annotation.GetMapping", "methods": ["GET"] },
+        { "pattern": "org.springframework.web.bind.annotation.PostMapping", "methods": ["POST"] },
+        { "pattern": "org.springframework.web.bind.annotation.PutMapping", "methods": ["PUT"] },
+        { "pattern": "org.springframework.web.bind.annotation.DeleteMapping", "methods": ["DELETE"] },
+        { "pattern": "org.springframework.web.bind.annotation.PatchMapping", "methods": ["PATCH"] },
+        { "pattern": "org.springframework.web.bind.annotation.RequestMapping", "methods": [] }
+      ],
+      "pathPrefixAnnotations": [
+        "org.springframework.web.bind.annotation.RequestMapping"
+      ]
+    },
+    {
+      "id": "spring-webflux",
+      "kind": "annotation",
+      "classMarkers": [
+        "org.springframework.web.bind.annotation.RestController",
+        "org.springframework.web.bind.annotation.Controller"
+      ],
+      "mappingAnnotations": [
+        { "pattern": "org.springframework.web.bind.annotation.GetMapping", "methods": ["GET"] },
+        { "pattern": "org.springframework.web.bind.annotation.PostMapping", "methods": ["POST"] },
+        { "pattern": "org.springframework.web.bind.annotation.PutMapping", "methods": ["PUT"] },
+        { "pattern": "org.springframework.web.bind.annotation.DeleteMapping", "methods": ["DELETE"] },
+        { "pattern": "org.springframework.web.bind.annotation.RequestMapping", "methods": [] }
+      ],
+      "pathPrefixAnnotations": [
+        "org.springframework.web.bind.annotation.RequestMapping"
+      ]
+    },
+    {
+      "id": "spring-webflux-router",
+      "kind": "dsl",
+      "dslFunctions": [
+        { "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.GET", "methods": ["GET"] },
+        { "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.POST", "methods": ["POST"] },
+        { "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.PUT", "methods": ["PUT"] },
+        { "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.DELETE", "methods": ["DELETE"] },
+        { "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path", "methods": [] }
+      ]
+    },
+    {
+      "id": "ktor",
+      "kind": "dsl",
+      "dslFunctions": [
+        { "pattern": "io.ktor.server.routing.get", "methods": ["GET"] },
+        { "pattern": "io.ktor.server.routing.post", "methods": ["POST"] },
+        { "pattern": "io.ktor.server.routing.put", "methods": ["PUT"] },
+        { "pattern": "io.ktor.server.routing.delete", "methods": ["DELETE"] },
+        { "pattern": "io.ktor.server.routing.patch", "methods": ["PATCH"] },
+        { "pattern": "io.ktor.server.routing.head", "methods": ["HEAD"] },
+        { "pattern": "io.ktor.server.routing.options", "methods": ["OPTIONS"] },
+        { "pattern": "io.ktor.server.routing.route", "methods": [] }
+      ]
+    },
+    {
+      "id": "micronaut",
+      "kind": "annotation",
+      "classMarkers": [
+        "io.micronaut.http.annotation.Controller"
+      ],
+      "mappingAnnotations": [
+        { "pattern": "io.micronaut.http.annotation.Get", "methods": ["GET"] },
+        { "pattern": "io.micronaut.http.annotation.Post", "methods": ["POST"] },
+        { "pattern": "io.micronaut.http.annotation.Put", "methods": ["PUT"] },
+        { "pattern": "io.micronaut.http.annotation.Delete", "methods": ["DELETE"] },
+        { "pattern": "io.micronaut.http.annotation.Patch", "methods": ["PATCH"] },
+        { "pattern": "io.micronaut.http.annotation.HttpMethod", "methods": [] }
+      ],
+      "pathPrefixAnnotations": [
+        "io.micronaut.http.annotation.Controller"
+      ]
+    },
+    {
+      "id": "quarkus",
+      "kind": "annotation",
+      "classMarkers": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ],
+      "mappingAnnotations": [
+        { "pattern": "jakarta.ws.rs.GET", "methods": ["GET"] },
+        { "pattern": "jakarta.ws.rs.POST", "methods": ["POST"] },
+        { "pattern": "jakarta.ws.rs.PUT", "methods": ["PUT"] },
+        { "pattern": "jakarta.ws.rs.DELETE", "methods": ["DELETE"] },
+        { "pattern": "jakarta.ws.rs.PATCH", "methods": ["PATCH"] },
+        { "pattern": "javax.ws.rs.GET", "methods": ["GET"] },
+        { "pattern": "javax.ws.rs.POST", "methods": ["POST"] },
+        { "pattern": "javax.ws.rs.PUT", "methods": ["PUT"] },
+        { "pattern": "javax.ws.rs.DELETE", "methods": ["DELETE"] }
+      ],
+      "pathPrefixAnnotations": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ]
+    },
+    {
+      "id": "http4k",
+      "kind": "dsl",
+      "bindFunctions": [
+        { "pattern": "bind", "methods": ["GET", "POST", "PUT", "DELETE", "PATCH"] }
+      ]
+    },
+    {
+      "id": "grpc",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "GrpcKt",
+        "Grpc"
+      ],
+      "supertypeSuffixes": [
+        "ImplBase"
+      ]
+    },
+    {
+      "id": "android",
+      "kind": "manifest",
+      "manifestComponents": ["activity", "service", "receiver", "provider"]
+    }
+  ],
+  "outbound": [
+    { "pattern": "java.net.URL", "kind": "constructor", "protocol": "http", "clientLibrary": "java.net.URL", "urlArgument": 0 },
+    { "pattern": "java.net.URI", "kind": "constructor", "protocol": "http", "clientLibrary": "java.net.URI", "urlArgument": 0 },
+    { "pattern": "java.sql.DriverManager.getConnection", "kind": "static", "protocol": "jdbc", "clientLibrary": "java.sql.DriverManager", "urlArgument": 0 },
+    { "pattern": "okhttp3.Request.Builder.url", "kind": "virtual", "protocol": "https", "clientLibrary": "okhttp3", "urlArgument": 0 },
+    { "pattern": "retrofit2.Retrofit.Builder.baseUrl", "kind": "virtual", "protocol": "https", "clientLibrary": "retrofit2", "urlArgument": 0 },
+    { "pattern": "io.ktor.client.request.get", "kind": "extension", "protocol": "https", "clientLibrary": "ktor-client", "urlArgument": 0 },
+    { "pattern": "io.ktor.client.request.post", "kind": "extension", "protocol": "https", "clientLibrary": "ktor-client", "urlArgument": 0 },
+    { "pattern": "io.ktor.client.request.request", "kind": "extension", "protocol": "https", "clientLibrary": "ktor-client", "urlArgument": -1 },
+    { "pattern": "io.ktor.client.HttpClient", "kind": "constructor", "protocol": "https", "clientLibrary": "ktor-client", "urlArgument": -1 },
+    { "pattern": "java.net.http.HttpClient.newHttpClient", "kind": "static", "protocol": "https", "clientLibrary": "java.net.http", "urlArgument": -1 },
+    { "pattern": "org.springframework.web.client.RestTemplate.getForObject", "kind": "virtual", "protocol": "https", "clientLibrary": "spring-web", "urlArgument": 0 },
+    { "pattern": "io.lettuce.core.RedisClient.create", "kind": "static", "protocol": "redis", "clientLibrary": "lettuce", "urlArgument": 0 },
+    { "pattern": "org.apache.kafka.clients.producer.KafkaProducer", "kind": "constructor", "protocol": "kafka", "clientLibrary": "kafka-clients", "urlArgument": -1 }
+  ],
+  "configReaders": [
+    { "pattern": "java.util.Properties.getProperty", "argument": 0 },
+    { "pattern": "kotlin.system.getenv", "argument": 0 },
+    { "pattern": "java.lang.System.getenv", "argument": 0 },
+    { "pattern": "java.lang.System.getProperty", "argument": 0 }
+  ]
+}

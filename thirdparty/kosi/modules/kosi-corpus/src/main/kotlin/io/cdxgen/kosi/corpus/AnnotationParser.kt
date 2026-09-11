@@ -94,6 +94,13 @@ object AnnotationParser {
             var fn: String? = null
             var maxDepth: Int? = null
             var knownFailAll: Int? = null
+            var framework: String? = null
+            var path: String? = null
+            var method: String? = null
+            var padding: String? = null
+            var form: String? = null
+            var protocol: String? = null
+            var resolution: String? = null
             val knownFailByBackend = linkedMapOf<String, Int>()
 
             for (token in tokens.drop(1)) {
@@ -132,6 +139,13 @@ object AnnotationParser {
                     }
                     "mode" -> mode = rawValue
                     "fn" -> fn = rawValue
+                    "framework" -> framework = rawValue
+                    "path" -> path = rawValue
+                    "method" -> method = rawValue
+                    "padding" -> padding = rawValue
+                    "form" -> form = rawValue
+                    "protocol" -> protocol = rawValue
+                    "resolution" -> resolution = rawValue
                     "maxdepth" -> maxDepth = rawValue.toIntOrNull() ?: run {
                         results.add(Failure("maxdepth must be an integer", lineText, fileName, index + 1))
                         return@forEachIndexed
@@ -195,6 +209,13 @@ object AnnotationParser {
                 maxDepth = maxDepth,
                 knownFailAll = knownFailAll,
                 knownFailByBackend = knownFailByBackend,
+                framework = framework,
+                path = path,
+                method = method,
+                padding = padding,
+                form = form,
+                protocol = protocol,
+                resolution = resolution,
                 file = fileName,
                 line = index + 1,
             )

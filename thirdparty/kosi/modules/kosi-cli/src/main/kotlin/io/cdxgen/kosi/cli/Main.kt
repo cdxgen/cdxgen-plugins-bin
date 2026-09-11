@@ -208,6 +208,7 @@ object Main {
             callgraphTimeoutSeconds = parsed.value("callgraph-timeout")?.toIntOrNull() ?: defaults.callgraphTimeoutSeconds,
             maxPathsPerSymbol = parsed.value("max-paths-per-symbol")?.toIntOrNull() ?: defaults.maxPathsPerSymbol,
             includeStdlib = parsed.bool("include-stdlib", defaults.includeStdlib),
+            endpointSources = parsed.bool("endpoint-sources", defaults.endpointSources),
             unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
                 if (it != "propagate" && it != "drop") {
                     throw UsageException("--unknown-call must be propagate|drop")

@@ -45,6 +45,8 @@ include(
     ":kosi-kir",
     ":kosi-graph",
     ":kosi-flow",
+    ":kosi-endpoints",
+    ":kosi-crypto",
     ":kosi-models",
     ":kosi-bytecode",
     ":kosi-evidence",
@@ -59,3 +61,4 @@ include(
 for (project in rootProject.children) {
     project.projectDir = file("modules/${project.name}")
 }
+include(":kosi-endpoints")

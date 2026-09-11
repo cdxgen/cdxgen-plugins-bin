@@ -5,6 +5,8 @@ import io.cdxgen.kosi.kir.KirAssign
 import io.cdxgen.kosi.kir.KirBlock
 import io.cdxgen.kosi.kir.KirBranch
 import io.cdxgen.kosi.kir.KirCall
+import io.cdxgen.kosi.kir.KirConstant
+import io.cdxgen.kosi.kir.defs
 import io.cdxgen.kosi.kir.KirCast
 import io.cdxgen.kosi.kir.KirDynamicCall
 import io.cdxgen.kosi.kir.KirElvis
@@ -206,6 +208,13 @@ internal interface TransferHost<F, C> {
     /** A dynamic call (the summary engine records function-valued parameter invocations). */
     fun onDynamicCall(ins: KirDynamicCall, site: Int, collect: C?)
 
+    /**
+     * The category a string literal stored into the NAMED local [name]
+     * births (the pack's `literalSources` name rule), or null when this
+     * engine tracks no literal sources.
+     */
+    fun literalSourceCategory(name: String): String? = null
+
     /** An unknown call moved taint (the reporting engine counts the precision loss). */
     fun onUnknownPropagation(collect: C?)
 
@@ -343,6 +352,18 @@ internal class FlowTransfer<F, C>(
             for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind)
         }
 
+        /** True when [register] was loaded from a string literal above [upto] in this block. */
+        fun isLiteralLoad(sites: List<Site>, upto: Int, register: String): Boolean {
+            for (j in upto - 1 downTo 0) {
+                val ins = sites[j].ins
+                if (ins is KirLoad && ins.result == register) {
+                    return ins.constant is KirConstant.Str
+                }
+                if (ins.defs.contains(register)) return false
+            }
+            return false
+        }
+
         /**
          * A join over several operand registers (concat, phi, elvis): the
          * union of their facts, with provenance recorded PER FACT against
@@ -368,11 +389,26 @@ internal class FlowTransfer<F, C>(
             for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site, blame.getValue(fact), kind)
         }
 
-        for (site in sites) {
+        for ((sitePos, site) in sites.withIndex()) {
             when (val ins = site.ins) {
                 is KirAssign -> moveAll(reg(ins.source), reg(ins.result), site.id, "assign", replace = true)
 
-                is KirStore -> moveAll(reg(ins.value), reg(ins.target), site.id, "assign", replace = true)
+                is KirStore -> {
+                    moveAll(reg(ins.value), reg(ins.target), site.id, "assign", replace = true)
+                    // A hardcoded secret/key material has no source CALL to
+                    // hang a fact on — the pack's literalSources name rule
+                    // births one at the store instead, so crypto-flow slices
+                    // run through the same machinery as every other flow.
+                    if (ins.target.startsWith("v")) {
+                        val category = host.literalSourceCategory(ins.target.removePrefix("v"))
+                        if (category != null && isLiteralLoad(sites, sitePos, ins.value)) {
+                            val fact = host.birthFact(site.id, category)
+                            val targetKey = reg(ins.target)
+                            state.addFacts(targetKey, listOf(fact))
+                            chain[ChainKey(fact, targetKey)] = Move(site.id, null, "literal-source", host.packMoveOrigin())
+                        }
+                    }
+                }
 
                 is KirLoad -> state.removeKey(reg(ins.result))
 
