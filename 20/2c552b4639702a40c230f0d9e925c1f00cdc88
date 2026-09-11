@@ -1,0 +1,14 @@
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 60-74,79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "202c552b4639702a40c230f0d9e925c1f00cdc88",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
