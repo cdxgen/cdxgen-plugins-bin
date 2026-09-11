@@ -1,0 +1,18 @@
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  h_6a4cc5cdf68def 64-86,211,213-214,500-514,516-520,526,528-532,534-535,609,618-622,624,626-628,637-647,650,652,654-661,665-712,717-737,739-748,752,755-759,762-771,774,786-788,792-806,808-815,818-819,824,826,841,843-844,854-855,865,869-870,872,875,880,888,893-899,912,932-937,945,991
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 99-101,112-117,499,503-505,508-510,517-518,542-546,548-565,569,571-572,575-576,579-590,593-600,602,604,606,608-609,611-624,627-649,651-669,673-699,703-711,713-723,725-736,738-764,767,858,886,1059,1109
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Transfer.kt
+  h_6a4cc5cdf68def 1-671
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "31f57fb21472255c33eec37979cb5334024237aa",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
