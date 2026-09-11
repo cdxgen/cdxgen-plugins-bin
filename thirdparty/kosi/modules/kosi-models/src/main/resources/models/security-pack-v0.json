@@ -601,6 +601,22 @@
         1
       ],
       "severity": "critical"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.SecretKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.PBEKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
     }
   ],
   "sources": [

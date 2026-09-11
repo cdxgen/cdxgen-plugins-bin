@@ -53,14 +53,16 @@ object AndroidManifestParser {
     }
 
     internal fun parseText(text: String, file: String): Manifest? {
-        val packageAttr = Regex("""<manifest[^>]*\bpackage\s*=\s*"([^"]+)"""").find(text)?.groupValues?.get(1).orEmpty()
+        // Comments first: a commented-out component is not a component.
+        val withoutComments = text.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+        val packageAttr = Regex("""<manifest[^>]*\bpackage\s*=\s*"([^"]+)"""").find(withoutComments)?.groupValues?.get(1).orEmpty()
         val components = mutableListOf<ManifestComponent>()
         // Component elements with optional intent-filter children; scanning
         // element opens in document order and tracking the enclosing element
         // keeps the state machine one pass.
         var current: ComponentBuilder? = null
         var applicationPackage = packageAttr
-        Regex("""<(/?)([\w.-]+)([^>]*?)(/?)>""").findAll(text).forEach { match ->
+        Regex("""<(/?)([\w.-]+)([^>]*?)(/?)>""").findAll(withoutComments).forEach { match ->
             val (closing, rawTag, rawAttrs, selfClose) = match.destructured
             val tag = rawTag.substringAfterLast(':')
             val attrs = parseAttrs(rawAttrs)

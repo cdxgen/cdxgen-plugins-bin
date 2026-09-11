@@ -898,9 +898,9 @@ object TaintEngine {
         val sourcePattern = sourceIns?.let { ins ->
             pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
         }
-        if (!entryFact && sourcePattern == null) return null
-        if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         val literalBirth = !entryFact && sourceSite?.ins is KirStore
+        if (!entryFact && !literalBirth && sourcePattern == null) return null
+        if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
 

@@ -1,6 +1,8 @@
 package io.cdxgen.kosi.endpoints
 
 import io.cdxgen.kosi.kir.KirCall
+import io.cdxgen.kosi.kir.KirDynamicCall
+import io.cdxgen.kosi.kir.uses
 import io.cdxgen.kosi.kir.KirLambda
 import io.cdxgen.kosi.kir.KirModule
 import io.cdxgen.kosi.kir.KirValueFolder
@@ -235,8 +237,8 @@ object Endpoints {
                 for (ins in block.instructions) {
                     val lambda = ins as? KirLambda ?: continue
                     val creation = block.instructions.firstOrNull { candidate ->
-                        candidate is KirCall && lambda.result in candidate.args
-                    } as? KirCall ?: continue
+                        (candidate is KirCall || candidate is KirDynamicCall) && lambda.result in candidate.uses
+                    } ?: continue
                     links[lambda.function] = EndpointDetector.LambdaLink(fn.canonicalName, creation)
                 }
             }

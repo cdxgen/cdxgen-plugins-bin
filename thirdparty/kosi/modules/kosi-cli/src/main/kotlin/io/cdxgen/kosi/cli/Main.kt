@@ -89,7 +89,7 @@ object Main {
         "classpath", "classpath-file", "jdk-home", "reachable-symbols",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
-        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive",
+        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
     )
     private val BENCH_VALUE_FLAGS = setOf("tier", "only", "repo-root", "baseline", "compare")
     private val BENCH_BOOLEAN_FLAGS =
@@ -525,6 +525,8 @@ object Main {
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved>     analysis tier (resolved needs no build execution)
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
+              --endpoint-sources              seed handler parameters as taint sources (P7); endpoint-rooted
+                                              slices then carry the endpoint they enter through
               --reachable-symbols <file>      write shortest witness paths for reached symbols (JSON)
               --format <fmt>                  json (full report), graphml or gexf (call graph)
               --pretty                        indented JSON

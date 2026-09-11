@@ -97,6 +97,7 @@ object AnnotationParser {
             var framework: String? = null
             var path: String? = null
             var method: String? = null
+            var cipherMode: String? = null
             var padding: String? = null
             var form: String? = null
             var protocol: String? = null
@@ -142,6 +143,7 @@ object AnnotationParser {
                     "framework" -> framework = rawValue
                     "path" -> path = rawValue
                     "method" -> method = rawValue
+                    "ciphermode" -> cipherMode = rawValue
                     "padding" -> padding = rawValue
                     "form" -> form = rawValue
                     "protocol" -> protocol = rawValue
@@ -212,6 +214,7 @@ object AnnotationParser {
                 framework = framework,
                 path = path,
                 method = method,
+                cipherMode = cipherMode,
                 padding = padding,
                 form = form,
                 protocol = protocol,

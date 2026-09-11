@@ -247,16 +247,17 @@ object Evaluator {
 
     /**
      * Crypto expectations against `crypto.assets[]`: the algorithm/transform
-     * name plus any of mode=, padding=, and the resolution FORM the value
-     * was read in. A negative pins the absence of an algorithm (a weak one
-     * that must not appear) or of a wrong form.
+     * name plus any of ciphermode=, padding=, and the syntactic FORM the
+     * value was read in. A negative pins the absence of an algorithm (a
+     * weak one that must not appear) or of a wrong form. `mode=` stays the
+     * bench-slot filter on every kind; the cipher's mode is `ciphermode=`.
      */
     private fun cryptoSatisfied(report: KosiReport, ann: Annotation): Boolean {
         val matched = report.crypto.assets.filter { asset ->
             matches(ann.name, asset.name) &&
-                (ann.mode == null || matches(ann.mode, asset.mode)) &&
+                (ann.cipherMode == null || matches(ann.cipherMode, asset.mode)) &&
                 (ann.padding == null || matches(ann.padding, asset.padding)) &&
-                (ann.form == null || matches(ann.form, asset.resolution))
+                (ann.form == null || matches(ann.form, asset.form ?: asset.resolution))
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

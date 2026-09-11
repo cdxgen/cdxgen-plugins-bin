@@ -677,7 +677,7 @@ object BenchRunner {
             configValuesTotal = report.services.count { it.resolution != "literal" && it.resolution != "folded" },
             configValuesResolved = report.services.count { it.resolution == "config" },
             cryptoAssets = report.crypto.assets.size,
-            cryptoMappingHits = report.crypto.assets.flatMap { CryptoMetrics.mappingKeys(it) }.distinct(),
+            cryptoMappingHits = report.crypto.assets.flatMap { CryptoMetrics.mappingKeys(it) }.distinct().sorted(),
             cryptoFlowSlices = report.dataFlow?.slices?.count { CryptoMetrics.isCryptoFlow(it) },
             cryptoModePaddingByForm = CryptoMetrics.modePaddingByForm(report),
             digest = digest,

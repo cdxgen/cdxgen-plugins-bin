@@ -60,6 +60,7 @@ data class Annotation(
     val framework: String?,
     val path: String?,
     val method: String?,
+    val cipherMode: String?,
     val padding: String?,
     val form: String?,
     val protocol: String?,
@@ -102,8 +103,8 @@ data class Annotation(
                 }
             }
         }
-        if (kind != Kind.FLOW && fn != null) {
-            errors.add("fn= is only valid on flow expectations")
+        if (kind != Kind.FLOW && kind != Kind.ENDPOINT && fn != null) {
+            errors.add("fn= is only valid on flow and endpoint expectations")
         }
         if (kind == Kind.EDGE && (from == null || to == null)) errors.add("edge requires from= and to=")
         if (kind == Kind.REACHABLE && symbol == null) errors.add("reachable requires symbol=")
@@ -124,7 +125,9 @@ data class Annotation(
             )
         }
         if (kind == Kind.CRYPTO && name == null) errors.add("crypto requires name=")
-        if (kind == Kind.SERVICE && protocol == null) errors.add("service requires protocol=")
+        if (kind == Kind.SERVICE && protocol == null && name == null && path == null) {
+            errors.add("service requires protocol=, name= or path=")
+        }
         if (form != null && form !in FORMS) {
             errors.add("form must be one of $FORMS, got $form")
         }

@@ -96,8 +96,6 @@ object CryptoCollector {
                             )
                         }
 
-                        is KirNew -> collectNew(fn, block, index, ins, input, findings, assets)
-
                         is KirLoad -> {
                             // Material by name: a literal stored into a
                             // material-named local or parameter.
@@ -160,7 +158,20 @@ object CryptoCollector {
         modePaddingByForm: MutableMap<String, Pair<Int, Int>>,
     ) {
         val fqn = ins.callee.fqn
-        val api = CryptoApis.of(fqn) ?: return
+        val api = CryptoApis.of(fqn)
+        if (api == null) {
+            // Constructor-shaped evidence arrives as resolved CONSTRUCTOR
+            // calls: named EC curve specs and PBEKeySpec iteration counts.
+            if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
+                if (fqn.endsWith("ECGenParameterSpec")) {
+                    collectEcCurve(fn, block, index, ins, input, assets)
+                } else if (fqn.endsWith("PBEKeySpec")) {
+                    collectPbeIterations(fn, block, index, ins, findings)
+                }
+            }
+            collectJwtSignWith(fn, block, index, ins, assets)
+            return
+        }
         // An env-resolved or argument-shaped value: fold the naming argument.
         val folded = ins.args.getOrNull(api.argument)?.let { folder.valueAt(fn, block, index, it) }
         val value = folded?.value
@@ -213,6 +224,48 @@ object CryptoCollector {
 
             else -> {}
             }
+    }
+
+    /**
+     * JWT `signWith(algorithm)`: the algorithm names out of the enum member
+     * the argument reads (`SignatureAlgorithm.NONE` -> `none`), which the
+     * mapping table carries as the jwt family row with its finding.
+     */
+    private fun collectJwtSignWith(
+        fn: KirFunction,
+        block: KirBlock,
+        index: Int,
+        ins: KirCall,
+        assets: MutableList<CryptoAsset>,
+    ) {
+        if (ins.callee.fqn.substringAfterLast('.') != "signWith") return
+        val algReg = ins.args.firstOrNull() ?: return
+        for (i in index - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is io.cdxgen.kosi.kir.KirFieldGet && candidate.result == algReg) {
+                val member = (candidate.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name ?: return
+                val name = when {
+                    member.equals("NONE", ignoreCase = true) -> "none"
+                    else -> member
+                }
+                assets.add(
+                    CryptoAsset(
+                        name = name,
+                        algorithmFamily = "jwt",
+                        primitive = "signature",
+                        mode = null,
+                        padding = null,
+                        keySizeBits = null,
+                        curve = null,
+                        position = null,
+                        resolution = "literal",
+                        operation = "JwtSign",
+                        form = FORM_LITERAL,
+                    ),
+                )
+                return
+            }
+        }
     }
 
     /** The syntactic form the value was read in (the per-form gate's key). */
@@ -322,51 +375,49 @@ object CryptoCollector {
         else -> finding
     }
 
-    private fun collectNew(
+    /** Named EC curves: the curve is reported only when the literal names a table row. */
+    private fun collectEcCurve(
         fn: KirFunction,
         block: KirBlock,
         index: Int,
-        ins: KirNew,
+        ins: KirCall,
         input: Input,
-        findings: MutableList<CryptoFinding>,
         assets: MutableList<CryptoAsset>,
     ) {
-        // Named EC curves: `ECGenParameterSpec("secp256r1")` — the curve is
-        // reported only when the literal names one the table carries.
-        if (ins.type.endsWith("ECGenParameterSpec")) {
-            val folder = KirValueFolder(
-                module = input.module,
-                constValues = ConstTable.fromSources(input.sourceTexts),
-            )
-            val folded = ins.args.firstOrNull()?.let { folder.valueAt(fn, block, index, it) }
-            val curveName = folded?.value
-            if (curveName != null) {
-                val curve = CryptoMappingModels.loadBuiltin().curves.firstOrNull { it.name == curveName }
-                val ec = CryptoMappingModels.loadBuiltin().algorithms.firstOrNull { it.name == "EC" }
-                if (curve != null) {
-                    assets.add(
-                        CryptoAsset(
-                            name = "EC",
-                            algorithmFamily = ec?.family,
-                            primitive = ec?.primitive,
-                            mode = null,
-                            padding = null,
-                            keySizeBits = curve.keySizeBits,
-                            curve = curve.name,
-                            position = null,
-                            resolution = "literal",
-                            operation = "KeyPairGenerator",
-                            form = FORM_LITERAL,
-                        ),
-                    )
-                }
-            }
-            return
-        }
-        // PBEKeySpec(pass, salt, iterations, ...): the iteration count is a
-        // provable constant or the finding's reason says the count could not
-        // be proven. Nothing is inferred below the threshold without one.
-        if (!ins.type.endsWith("PBEKeySpec")) return
+        val folder = KirValueFolder(
+            module = input.module,
+            constValues = ConstTable.fromSources(input.sourceTexts),
+        )
+        val folded = ins.args.firstOrNull()?.let { folder.valueAt(fn, block, index, it) }
+        val curveName = folded?.value ?: return
+        val mappings = CryptoMappingModels.loadBuiltin()
+        val curve = mappings.curves.firstOrNull { it.name == curveName } ?: return
+        val ec = mappings.algorithms.firstOrNull { it.name == "EC" }
+        assets.add(
+            CryptoAsset(
+                name = "EC",
+                algorithmFamily = ec?.family,
+                primitive = ec?.primitive,
+                mode = null,
+                padding = null,
+                keySizeBits = curve.keySizeBits,
+                curve = curve.name,
+                position = null,
+                resolution = "literal",
+                operation = "KeyPairGenerator",
+                form = FORM_LITERAL,
+            ),
+        )
+    }
+
+    /** PBEKeySpec(pass, salt, iterations, ...): only a PROVABLE constant counts. */
+    private fun collectPbeIterations(
+        fn: KirFunction,
+        block: KirBlock,
+        index: Int,
+        ins: KirCall,
+        findings: MutableList<CryptoFinding>,
+    ) {
         val iterationArg = ins.args.getOrNull(2) ?: return
         val iterations = constantInt(block, index, iterationArg) ?: return
         val mappings = CryptoMappingModels.loadBuiltin()
@@ -388,7 +439,13 @@ object CryptoCollector {
         for (i in index - 1 downTo 0) {
             val ins = block.instructions.getOrNull(i) ?: continue
             if (ins is KirLoad && ins.result == register) {
-                return (ins.constant as? KirConstant.IntConst)?.value?.toInt()
+                return when (val constant = ins.constant) {
+                    is KirConstant.IntConst -> constant.value.toInt()
+                    // The dump/reader round-trip renders numeric constants
+                    // as their text; a numeric text is still a provable int.
+                    is KirConstant.Str -> constant.value.removeSurrounding("\"").toIntOrNull()
+                    else -> null
+                }
             }
         }
         return null

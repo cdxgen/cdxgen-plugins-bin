@@ -71,8 +71,8 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
         configure(this)
     }
 
-kosiTask("corpusQuick", "Fixture tier: the annotation ratchet in both modes, no network.") {
-    args = listOf("bench", "--tier", "fixtures", "--repo-root", rootDir.absolutePath)
+kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async ratchets, no network.") {
+    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async", "--repo-root", rootDir.absolutePath)
 }
 
 kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {

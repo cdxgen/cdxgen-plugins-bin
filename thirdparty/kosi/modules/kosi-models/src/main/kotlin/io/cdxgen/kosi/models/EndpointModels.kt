@@ -12,6 +12,8 @@ import io.cdxgen.kosi.schema.JsonReader
 data class MappingAnnotation(
     val pattern: String,
     val methods: List<String>,
+    /** A nesting route-shaper (`route("/x") { .. }`) contributes its path to descendants and publishes no endpoint itself. */
+    val nesting: Boolean = false,
 )
 
 /** One framework's detection data. [kind] is `annotation`, `dsl`, `supertype` or `manifest`. */
@@ -74,6 +76,7 @@ object EndpointModels {
                 MappingAnnotation(
                     pattern = require(m.str("pattern"), "frameworks[].${key}[].pattern"),
                     methods = m.arr("methods")?.strings() ?: emptyList(),
+                    nesting = m.bool("nesting") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(

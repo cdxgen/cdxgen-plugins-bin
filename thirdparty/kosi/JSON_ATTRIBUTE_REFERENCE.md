@@ -31,12 +31,12 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | `declarations` | Declaration[] | canonical declarations | symbol indexes |
 | `usages` | LibraryUsage[] | calls/references by name | cdxgen-critical |
 | `securitySignals` | SecuritySignal[] | non-flow findings (later phases) | findings UIs |
-| `crypto` | CryptoEvidence | CBOM evidence (later phases) | CBOM |
+| `crypto` | CryptoEvidence | CBOM evidence (P8) | CBOM |
 | `callGraph` | CallGraph? | null until a call-graph mode runs | reachability |
 | `dataFlow` | DataFlowEvidence? | null until taint runs | slices |
-| `apiEndpoints` | ApiEndpoint[] | inbound endpoints (later phases) | SaaSBOM |
-| `services` | ServiceRef[] | outbound deps (later phases) | services[] |
-| `urls` | UrlEvidence[] | URL/host/JDBC strings (later phases) | URL identification |
+| `apiEndpoints` | ApiEndpoint[] | inbound endpoints (P7) | SaaSBOM |
+| `services` | ServiceRef[] | outbound deps (P7) | services[] |
+| `urls` | UrlEvidence[] | URL/host/JDBC strings (P7) | URL identification |
 | `diagnostics` | Diagnostic[] | machine-readable conditions | silence is a bug |
 | `stats` | object | counters | scale judgement |
 
@@ -458,10 +458,63 @@ The effective pack: `builtin` names, `user` names, and the five entry counts
 `effectCount`). These are PACK sizes — the matched SITES in code are
 `stats.sourceCount`/`stats.sinkCount`.
 
-## Later-phase sections
+## apiEndpoints — ApiEndpoint (resolved tier, P7)
 
-`crypto`, `apiEndpoints`, `services`, `urls` and
-`securitySignals` are part of the v1 envelope now (emitted empty or null) so
-consumers can rely on the shape; their population is phase work and each
-populating phase updates this document in the same PR. `dataFlow` is
-populated as of P4 (above).
+Inbound entry points, one object per route/component. `framework` is a
+closed vocabulary (the shipped `endpoints-pack-v0.json` ids: `spring-mvc`,
+`spring-webflux`, `ktor`, `micronaut`, `quarkus`, `http4k`, `grpc`,
+`android`); `foundBy` names HOW the endpoint was found — `annotation`
+(a mapping annotation at its resolved fqn), `dsl` (a routing call, the
+handler resolved to the extracted lambda body), or `manifest` (an Android
+component). The framework match is on RESOLVED type identity: an
+annotation the front end could not resolve is never treated as the
+framework's, which is what keeps a homonym annotation from becoming an
+endpoint.
+
+| Attribute | Type | Notes |
+| --- | --- | --- |
+| `id` | string | `ep-NNNNNN`, assigned after sorting |
+| `framework` | string | pack vocabulary, above |
+| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method) |
+| `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
+| `pathParameters` | string[] | `{id}` template parameters |
+| `handlerSymbol` / `handlerCanonicalName` | string | the KIR canonical name of the handler; EMPTY when the handler could not be resolved (an Android component with no lifecycle method in the workspace) — the resolved-handler gate counts empty as unresolved |
+| `exported`, `permissions`, `deepLinkHosts` | Android only | from the manifest; `exported` falls back to the intent-filter rule |
+| `reachableSources` | string[] | the source categories the handler introduces (`untrusted-input` under `--endpoint-sources` when a flow enters here) |
+| `sliceIds` | string[] | endpoint-rooted slices (same flag) |
+| `foundBy` | string | `annotation` \| `dsl` \| `manifest` \| `config` |
+
+## services — ServiceRef and urls — UrlEvidence (resolved tier, P7)
+
+Outbound client calls the pack's `outbound[]` shapes match
+(`java.net.URL`, `DriverManager.getConnection`, OkHttp, Retrofit, Ktor
+client, RestTemplate, Redis, Kafka). Every value carries its
+`resolution`: `literal` (a string constant), `folded` (const-folded from
+a `const val` or a string template), `config` (resolved through
+`application.yml`/`.properties`/`BuildConfig`), `env` (an
+`System.getenv` read — the KEY is the evidence; kosi never reads the
+analysed build's environment), or `unresolved` (never a guess). `urls[]`
+carries the same values with their enclosing symbol.
+
+## crypto — CryptoEvidence (resolved tier, P8)
+
+`assets[]` name algorithms and transforms with their parsed shape:
+`algorithmFamily`, `primitive`, `mode`, `padding`, `keySizeBits`,
+`curve` — every one read from the shipped mapping table
+(`crypto-mappings-v0.json`), never inferred. `AES` alone is reported as
+`AES` without a mode or padding: the JCA's defaults are the JCA's
+business. `resolution` is the value's provenance (`literal`/`folded`/
+`config`/`env`/`unresolved`) and `form` its syntactic shape
+(`literal`/`const`/`template`/`config`) — the P8 gate counts mode/padding
+extraction per form. `materials[]` carry secret material BY NAME (kind,
+file, position) — never a value. `findings[]` are the mapping rows' risk
+codes (`ecb-mode`, `weak-digest`, `weak-cipher`, `insecure-tls-version`,
+`jwt-alg-none`, `trust-all-manager`, `predictable-random`,
+`low-iteration-pbkdf2`). Crypto-flow slices are ordinary
+`dataFlow.slices[]` whose source is a `hardcoded-secret` literal source
+(the pack's `literalSources[]` name rule) and whose sink is
+`crypto-asset` or `insecure-tls`.
+
+`securitySignals` remains part of the v1 envelope (emitted empty) so
+consumers can rely on the shape; its population is later-phase work.
+`dataFlow` is populated as of P4 (above).

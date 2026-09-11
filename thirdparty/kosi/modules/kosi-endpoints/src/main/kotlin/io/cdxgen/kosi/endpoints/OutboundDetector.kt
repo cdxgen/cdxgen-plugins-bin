@@ -28,6 +28,10 @@ object OutboundDetector {
         val position: Position,
     )
 
+    /** The scheme the value itself names (`https://...`), when readable. */
+    private fun schemeOf(value: String): String? =
+        Regex("^([a-z][a-z0-9+.-]*):").find(value)?.groupValues?.get(1)
+
     fun detect(
         module: KirModule,
         folder: KirValueFolder,
@@ -55,10 +59,25 @@ object OutboundDetector {
                     )
                     val foldedValue = folded?.value
                     when {
-                        foldedValue != null && folded != null && folded.status != KirValueFolder.ValueStatus.UNRESOLVED ->
+                        // An env read names the KEY, never the value: kosi
+                        // never reads the analysed build's environment.
+                        folded != null && folded.status == KirValueFolder.ValueStatus.ENV ->
                             out.add(
                                 Outbound(
                                     protocol = model.protocol,
+                                    clientLibrary = model.clientLibrary,
+                                    endpoint = null,
+                                    raw = "\${" + (folded.detail ?: "env") + "}",
+                                    resolution = "env",
+                                    enclosingSymbol = fn.canonicalName,
+                                    position = position,
+                                ),
+                            )
+
+                        foldedValue != null && folded.status != KirValueFolder.ValueStatus.UNRESOLVED ->
+                            out.add(
+                                Outbound(
+                                    protocol = schemeOf(foldedValue) ?: model.protocol,
                                     clientLibrary = model.clientLibrary,
                                     endpoint = foldedValue,
                                     raw = foldedValue,
