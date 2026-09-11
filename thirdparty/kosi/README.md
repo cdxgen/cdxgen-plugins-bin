@@ -12,15 +12,24 @@ sibling of `golem` (Go) and `rusi` (Rust). It answers, for a Kotlin project:
   API, or framework-registered handlers (resolved tier, call graph +
   reachability)
 - which untrusted data reaches dangerous calls within a function —
-  field-sensitive intraprocedural taint with sources/sinks/passthroughs/
-  sanitizers/effects as data (resolved tier, `dataFlow.slices[]`)
+  field-sensitive intraprocedural and interprocedural taint with
+  sources/sinks/passthroughs/sanitizers/effects as data
+  (resolved tier, `dataFlow.slices[]`), including coroutine and Flow
+  propagation
+- inbound endpoints per framework — Spring MVC, WebFlux, Ktor, Micronaut,
+  Quarkus/JAX-RS, http4k, gRPC, Android manifest components — and outbound
+  `services[]`/`urls[]` with config-resolved values
+  (resolved tier, `apiEndpoints[]`/`services[]`/`urls[]`)
+- a crypto/CBOM: transform strings parsed for mode/padding/key size/curve,
+  TLS and JWT misconfigurations, Android keystore, secret material by name,
+  and crypto-flow slices (`crypto`, `dataFlow.slices[]`)
 - which packages/purls the evidence attaches to
 
 Phase 0 ships the **syntax tier** (`--backend syntax`): PSI-only parsing via
 `kotlin-compiler-embeddable`, with **no classpath and no build execution**.
-The resolved tier (typed call graph, interprocedural taint, crypto/services
-evidence) lands in later phases on the same report contract
-(`schemaVersion: kosi/1`).
+The resolved tier carries the call graph, taint, endpoints and crypto
+evidence on the same report contract (`schemaVersion: kosi/1`); endpoint
+handlers double as taint sources under `--endpoint-sources`.
 
 ## Quick start
 

@@ -252,6 +252,10 @@ native-metadata:
 	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-exported \
 	    -jar $(fat_jar) analyze --backend resolved --roots exported --include-stdlib \
 	    --dir $$f --out /dev/null; \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-endpoint \
+	    -jar $(fat_jar) analyze --backend resolved --endpoint-sources \
+	    --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 
