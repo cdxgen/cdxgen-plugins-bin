@@ -130,7 +130,7 @@ define build_native
 	  -H:+AddAllCharsets \
 	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
-	  -J-Xmx6g -J-Xms1g \
+	  -J-Xmx$(KOSI_NATIVE_HEAP) -J-Xms1g \
 	  -H:DeadlockWatchdogInterval=300 -H:-DeadlockWatchdogExitOnTimeout \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
@@ -142,12 +142,13 @@ $(build_dir):
 
 fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 
-# The build JVM heap gets an explicit FLOOR (6g): native-image defaults to
-# a quarter of physical RAM, which on 7GB CI runners is ~1.75GB and even
-# 16GB arm runners yield only 4GB — the points-to analysis of the Kotlin
-# compiler OOMs at both with a bare OutOfMemoryError (measured on the
-# linux-arm64 build). The cap is not a reservation: darwin builds that
-# peak lower are unaffected.
+# The build JVM heap gets an explicit FLOOR (default 6g; the linux-arm64
+# build overrides to 12g): native-image defaults to a quarter of physical
+# RAM, which on 7GB CI runners is ~1.75GB and even 16GB arm runners yield
+# only 4GB — the points-to analysis of the Kotlin compiler OOMs at both
+# with a bare OutOfMemoryError (measured on the linux-arm64 build). The
+# cap is not a reservation: darwin builds that peak lower are unaffected.
+KOSI_NATIVE_HEAP ?= 6g
 # The DeadlockWatchdog defaults (10s quiet interval, abort on timeout)
 # killed CI builds that were merely SLOW: the points-to analysis on a
 # 2-3 core runner sits quiet for tens of minutes inside one method graph
@@ -167,6 +168,9 @@ $(fat_jar): fat-jar
 
 $(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
+
+# The arm64 points-to analysis needs more than the default floor.
+$(build_dir)/kosi-linux-arm64: KOSI_NATIVE_HEAP = 12g
 
 $(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
