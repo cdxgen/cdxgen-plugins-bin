@@ -1,0 +1,14 @@
+.github/workflows/native-builds.yml
+  h_6a4cc5cdf68def 142-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "912714e44912e748eaad35c7845cea2d2889e4e0",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
