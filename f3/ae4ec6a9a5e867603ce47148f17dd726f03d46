@@ -1,0 +1,16 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 133,144-149
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 86-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f3ae4ec6a9a5e867603ce47148f17dd726f03d46",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
