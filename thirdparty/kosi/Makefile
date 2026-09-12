@@ -287,8 +287,11 @@ endef
 test:
 	$(call gradle_or_diagnose,build)
 
+# KOSI_TRACE streams one stderr marker per fixture/slot into the CI log as
+# it runs: a runner that dies mid-bench then names the exact row it died
+# on, instead of a log that ends at the task line. CI sets CI=true.
 corpusQuick:
-	$(call gradle_or_diagnose,corpusQuick)
+	KOSI_TRACE=$(if $(CI),1,) $(call gradle_or_diagnose,corpusQuick)
 
 corpusFull:
 	$(call gradle_or_diagnose,corpusFull)

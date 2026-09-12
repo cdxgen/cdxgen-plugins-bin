@@ -480,7 +480,7 @@ object BenchRunner {
             )
         }
         val results = mutableListOf<FixtureResult>()
-        val trace = System.getenv("KOSI_TRACE") != null
+        val trace = !System.getenv("KOSI_TRACE").isNullOrBlank()
         for (entry in entries) {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
