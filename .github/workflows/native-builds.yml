@@ -140,18 +140,6 @@ jobs:
         tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
         sudo apt-get update
         sudo apt-get install -y musl-tools
-        # native-image looks for the ARCH-prefixed musl compiler name
-        # (x86_64-linux-musl-gcc even on arm runners); Ubuntu's musl-tools
-        # installs only the unprefixed wrapper, which targets this runner's
-        # own arch. Symlink both spellings onto it.
-        # Ubuntu's musl-tools names the wrapper for the runner's own arch
-        # (musl-gcc on amd64, aarch64-linux-musl-gcc on arm64) — provide
-        # whichever spelling native-image asks for that does not exist.
-        for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
-          if ! command -v "$name" >/dev/null 2>&1; then
-            sudo ln -s "$(command -v musl-gcc)" "/usr/bin/$name"
-          fi
-        done
         pushd thirdparty/kosi
         make linux linuxmusl
         popd
@@ -197,21 +185,13 @@ jobs:
           https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-aarch64_bin.tar.gz
         tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
         sudo apt-get update
-        sudo apt-get install -y musl-tools
-        # native-image looks for the ARCH-prefixed musl compiler name
-        # (x86_64-linux-musl-gcc even on arm runners); Ubuntu's musl-tools
-        # installs only the unprefixed wrapper, which targets this runner's
-        # own arch. Symlink both spellings onto it.
-        # Ubuntu's musl-tools names the wrapper for the runner's own arch
-        # (musl-gcc on amd64, aarch64-linux-musl-gcc on arm64) — provide
-        # whichever spelling native-image asks for that does not exist.
-        for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
-          if ! command -v "$name" >/dev/null 2>&1; then
-            sudo ln -s "$(command -v musl-gcc)" "/usr/bin/$name"
-          fi
-        done
+        # GraalVM does not support musl static images on linux-aarch64 (the
+        # build aborts with "LINUX_AARCH64 (target libc: musl) is not
+        # supported"), so this runner builds the glibc arm64 image only;
+        # kosi-linuxmusl-arm64 is a declared gap in
+        # scripts/plugin-platform-support.sh.
         pushd thirdparty/kosi
-        make linux linuxmusl
+        make linux
         popd
       if: matrix.os == 'ubuntu-24.04-arm'
     - name: Publish kosi natives to the oras cache (arm64)

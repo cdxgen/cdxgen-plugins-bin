@@ -15,6 +15,9 @@
 #     (thirdparty/kosi/docs/KOSI.md).
 #   - linux-riscv64: best-effort LLVM-backend cross-build per the plan; no
 #     artifact at this phase.
+#   - linuxmusl-arm64: GraalVM does not support musl static images on
+#     linux-aarch64 (build aborts: "LINUX_AARCH64 (target libc: musl) is
+#     not supported on your platform").
 #   - windows-amd64 / windows-arm64 / darwin-amd64: build jobs land with the
 #     release phase (MSVC toolchain / macos-intel runner; docs/BUILD.md §6).
 #
@@ -40,6 +43,10 @@ plugin_platform_exemption() {
       ;;
     linux-riscv64)
       echo "best-effort LLVM-backend cross-build; no artifact at this phase"
+      return 0
+      ;;
+    linuxmusl-arm64)
+      echo "GraalVM does not support musl static images on linux-aarch64"
       return 0
       ;;
     windows-amd64|windows-arm64)
