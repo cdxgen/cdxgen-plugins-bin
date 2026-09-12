@@ -129,6 +129,8 @@ jobs:
       if: matrix.os == 'macos-15'
     - name: Build musl zlib (the musl static link needs -lz against musl)
       run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
         # zlib's ./configure chokes on the musl-gcc wrapper ('compiler
         # error reporting is too harsh'), so compile the objects directly.
         curl -sL -o /tmp/zlib.tar.gz \
