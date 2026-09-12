@@ -140,6 +140,13 @@ jobs:
         tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
         sudo apt-get update
         sudo apt-get install -y musl-tools
+        # native-image looks for the ARCH-prefixed musl compiler name
+        # (x86_64-linux-musl-gcc even on arm runners); Ubuntu's musl-tools
+        # installs only the unprefixed wrapper, which targets this runner's
+        # own arch. Symlink both spellings onto it.
+        for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
+          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$$name"
+        done
         pushd thirdparty/kosi
         make linux linuxmusl
         popd
@@ -186,6 +193,13 @@ jobs:
         tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
         sudo apt-get update
         sudo apt-get install -y musl-tools
+        # native-image looks for the ARCH-prefixed musl compiler name
+        # (x86_64-linux-musl-gcc even on arm runners); Ubuntu's musl-tools
+        # installs only the unprefixed wrapper, which targets this runner's
+        # own arch. Symlink both spellings onto it.
+        for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
+          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$$name"
+        done
         pushd thirdparty/kosi
         make linux linuxmusl
         popd
