@@ -130,6 +130,7 @@ define build_native
 	  -H:+AddAllCharsets \
 	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
+	  -J-Xmx4g -J-Xms1g \
 	  -H:DeadlockWatchdogInterval=300 -H:-DeadlockWatchdogExitOnTimeout \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
@@ -141,6 +142,11 @@ $(build_dir):
 
 fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 
+# The build JVM heap gets an explicit FLOOR (4g): native-image defaults to
+# a quarter of physical RAM, which on 7GB CI runners is ~1.75GB — the
+# points-to analysis of the Kotlin compiler OOMs there with a bare
+# OutOfMemoryError, while the same build fits easily when the runner has
+# more RAM. Bound it so every runner behaves the same.
 # The DeadlockWatchdog defaults (10s quiet interval, abort on timeout)
 # killed CI builds that were merely SLOW: the points-to analysis on a
 # 2-3 core runner sits quiet for tens of minutes inside one method graph
