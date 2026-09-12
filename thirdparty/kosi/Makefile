@@ -270,18 +270,31 @@ native-metadata-check: native-metadata
 	@git diff --exit-code -- native-metadata/kosi/reachability-metadata.json || { \
 	  echo "reachability metadata drifted; commit the regenerated file"; exit 1; }
 
-## Tiers and gates (same entry points CI uses).
+## Tiers and gates (same entry points CI uses). On failure the recipe dumps
+## the diagnostics a silent runner death otherwise swallows: kernel OOM
+## kills, JVM hs_err crash files, and the last memory/disk state.
+define gradle_or_diagnose
+	$(gradle) $(1) || { \
+	  echo "=== kosi: gradle $(1) failed; diagnostics ==="; \
+	  for f in hs_err_*.log; do [ -f "$$f" ] && { echo "--- $$f"; head -60 "$$f"; }; done; \
+	  (dmesg 2>/dev/null || sudo dmesg 2>/dev/null) | grep -iE "out of memory|killed process" | tail -5 || true; \
+	  free -m 2>/dev/null | head -3 || true; \
+	  df -m . /tmp 2>/dev/null | head -4 || true; \
+	  exit 1; \
+	}
+endef
+
 test:
-	$(gradle) build
+	$(call gradle_or_diagnose,build)
 
 corpusQuick:
-	$(gradle) corpusQuick
+	$(call gradle_or_diagnose,corpusQuick)
 
 corpusFull:
-	$(gradle) corpusFull
+	$(call gradle_or_diagnose,corpusFull)
 
 golden:
-	$(gradle) golden
+	$(call gradle_or_diagnose,golden)
 
 goldenUpdate:
 	$(gradle) goldenUpdate

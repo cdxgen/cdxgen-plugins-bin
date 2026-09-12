@@ -480,10 +480,15 @@ object BenchRunner {
             )
         }
         val results = mutableListOf<FixtureResult>()
+        val trace = System.getenv("KOSI_TRACE") != null
         for (entry in entries) {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
             for (slot in Matrix.defaultMatrix()) {
+                // CI death diagnosis (the pkg corpusQuick hang): when a
+                // runner kills this JVM mid-run, stderr's last marker names
+                // the exact fixture and slot it died on.
+                if (trace) System.err.println("TRACE: bench ${entry.slug} ${slot.label} start")
                 results.add(
                     try {
                         runSlot(entry, dir, annotations, slot, commit)

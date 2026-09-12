@@ -3,6 +3,8 @@
 // dependency allowlist from docs (02-ARCHITECTURE.md §1). Nothing outside the
 // allowlist may be added without changing that doc first.
 
+import java.io.File
+
 plugins {
     alias(libs.plugins.kotlin.jvm) apply false
 }
@@ -87,8 +89,23 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
         // bundled fixtures; an unbounded default heap (25% of runner RAM)
         // makes this fork the OOM killer's first target on a shared CI box,
         // and a SIGKILLed JVM dies without a single line of output. Loud on
-        // exhaustion, small at rest.
-        jvmArgs(HEADLESS_JVM_ARGS + listOf("-Xmx3g", "-XX:+ExitOnOutOfMemoryError"))
+        // exhaustion, small at rest. hs_err files land in the project dir
+        // (a native crash must leave evidence, not a silent gap).
+        jvmArgs(
+            HEADLESS_JVM_ARGS + listOf(
+                "-Xmx3g",
+                "-XX:+ExitOnOutOfMemoryError",
+                "-XX:ErrorFile=" + File(rootDir.absolutePath, "hs_err_vm_%p.log").absolutePath,
+            ),
+        )
+        doFirst {
+            // Which JVM actually runs this tier: the CI corpusQuick hang
+            // (silent, ~34s in, twice) was undiagnosable without this line.
+            println(
+                "kosi tier JVM: " + javaLauncher.get().metadata.languageVersion.asInt() +
+                    " @ " + javaLauncher.get().executablePath.asFile.absolutePath,
+            )
+        }
         configure(this)
     }
 
