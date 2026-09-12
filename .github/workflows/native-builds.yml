@@ -145,7 +145,7 @@ jobs:
         # installs only the unprefixed wrapper, which targets this runner's
         # own arch. Symlink both spellings onto it.
         for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
-          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$$name"
+          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$name"
         done
         pushd thirdparty/kosi
         make linux linuxmusl
@@ -198,7 +198,7 @@ jobs:
         # installs only the unprefixed wrapper, which targets this runner's
         # own arch. Symlink both spellings onto it.
         for name in x86_64-linux-musl-gcc aarch64-linux-musl-gcc; do
-          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$$name"
+          sudo ln -sf "$(command -v musl-gcc)" "/usr/bin/$name"
         done
         pushd thirdparty/kosi
         make linux linuxmusl
