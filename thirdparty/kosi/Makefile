@@ -174,8 +174,10 @@ $(fat_jar): fat-jar
 $(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
 
-# The arm64 points-to analysis needs more than the default floor.
+# The arm64 points-to analysis needs more than the default floor; the
+# darwin-arm64 build is borderline on its 7GB runner and gets its own cap.
 $(build_dir)/kosi-linux-arm64: KOSI_NATIVE_HEAP = 12g
+$(build_dir)/kosi-darwin-arm64: KOSI_NATIVE_HEAP = 8g
 
 $(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
