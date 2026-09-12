@@ -15,7 +15,7 @@ for attempt in 1 2 3 4 5 6; do
 done
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-amd64 -o plugins/kosi/
 # tolerate nested layer paths from older cache pushes
-find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \ 2>/dev/null || true
+find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \; 2>/dev/null || true
 sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/

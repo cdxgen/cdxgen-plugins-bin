@@ -18,7 +18,7 @@ for attempt in 1 2 3 4 5 6; do
 done
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-darwin-arm64 -o plugins/kosi/
 # tolerate nested layer paths from older cache pushes
-find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \ 2>/dev/null || true
+find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \; 2>/dev/null || true
 
 bash ../../scripts/thirdparty-downloads.sh install-osquery darwin-arm64 plugins/osquery/osqueryi-darwin-arm64.app
 
