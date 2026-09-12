@@ -83,7 +83,12 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
             kosiCli.tasks.named("jar").map { (it as Jar).archiveFile },
         )
         mainClass = "io.cdxgen.kosi.cli.MainKt"
-        jvmArgs(HEADLESS_JVM_ARGS)
+        // Bounded heap: the resolved-tier analysis peaks around 1 GiB on the
+        // bundled fixtures; an unbounded default heap (25% of runner RAM)
+        // makes this fork the OOM killer's first target on a shared CI box,
+        // and a SIGKILLed JVM dies without a single line of output. Loud on
+        // exhaustion, small at rest.
+        jvmArgs(HEADLESS_JVM_ARGS + listOf("-Xmx3g", "-XX:+ExitOnOutOfMemoryError"))
         configure(this)
     }
 

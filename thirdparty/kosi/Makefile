@@ -130,6 +130,7 @@ define build_native
 	  -H:+AddAllCharsets \
 	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
+	  -H:DeadlockWatchdogInterval=300 -H:-DeadlockWatchdogExitOnTimeout \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
 	@cd $(build_dir) && shasum -a 256 $(notdir $(2)) > $(notdir $(2)).sha256
@@ -140,6 +141,12 @@ $(build_dir):
 
 fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 
+# The DeadlockWatchdog defaults (10s quiet interval, abort on timeout)
+# killed CI builds that were merely SLOW: the points-to analysis on a
+# 2-3 core runner sits quiet for tens of minutes inside one method graph
+# and the watchdog aborted at ~35min (exit 30), while the same jar and
+# metadata build fine on a many-core machine. 5-minute check intervals
+# keep the diagnostic dumps without the abort.
 # Gradle decides whether the jar changed; make then decides whether to
 # relink. Declared PHONY so the jar is never assumed current: a binary that
 # is newer than the metadata file but older than the sources is exactly how
