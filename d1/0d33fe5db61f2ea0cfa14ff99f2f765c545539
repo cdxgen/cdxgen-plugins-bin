@@ -1,0 +1,18 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 273-286,288,291,294,297
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 6-7,92-108
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 483,488-491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d10d33fe5db61f2ea0cfa14ff99f2f765c545539",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
