@@ -18,6 +18,8 @@ for attempt in 1 2 3 4 5 6; do
   echo "kosi cache tag kosi-linux-arm64 not ready (attempt $attempt)"; sleep 60
 done
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-arm64 -o plugins/kosi/
+# tolerate nested layer paths from older cache pushes
+find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \ 2>/dev/null || true
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/
 

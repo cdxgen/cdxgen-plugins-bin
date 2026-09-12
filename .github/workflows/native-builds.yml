@@ -170,7 +170,17 @@ jobs:
       if: matrix.os == 'ubuntu-24.04'
     - name: Publish kosi natives to the oras cache (amd64)
       run: |
-        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+        # Pushed from inside the build dir so the layer paths are FLAT —
+        # the flavour scripts pull these straight into plugins/kosi/.
+        cd thirdparty/kosi/build
+        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-amd64 \
+          --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
+          ./kosi-linux-amd64:application/octet-stream \
+          ./kosi-linux-amd64.sha256:text/plain
+        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linuxmusl-amd64 \
+          --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
+          ./kosi-linuxmusl-amd64:application/octet-stream \
+          ./kosi-linuxmusl-amd64.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload linux amd64
       run: |
@@ -220,7 +230,11 @@ jobs:
       if: matrix.os == 'ubuntu-24.04-arm'
     - name: Publish kosi natives to the oras cache (arm64)
       run: |
-        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+        cd thirdparty/kosi/build
+        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-arm64 \
+          --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
+          ./kosi-linux-arm64:application/octet-stream \
+          ./kosi-linux-arm64.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04-arm' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload linux arm64
       run: |
@@ -274,7 +288,11 @@ jobs:
       if: matrix.os == 'macos-15'
     - name: Publish kosi natives to the oras cache (darwin arm64)
       run: |
-        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+        cd thirdparty/kosi/build
+        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-darwin-arm64 \
+          --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
+          ./kosi-darwin-arm64:application/octet-stream \
+          ./kosi-darwin-arm64.sha256:text/plain
       if: matrix.os == 'macos-15' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload darwin arm64
       run: |
