@@ -286,7 +286,7 @@ jobs:
         # kosi natives are built by native-builds.yml (kosi PRs and workflow
         # dispatch) and cached on ghcr.io; the release consumes the cache
         # instead of rebuilding (native-image cannot cross-compile).
-        for platform in linux-amd64 linux-arm64 linuxmusl-amd64 linuxmusl-arm64 darwin-arm64; do
+        for platform in linux-amd64 linux-arm64 linuxmusl-amd64 darwin-arm64; do
           oras pull "ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-$platform" -o thirdparty/kosi/build
         done
         ls -l thirdparty/kosi/build/

@@ -11,12 +11,6 @@ sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
 # kosi natives ride the oras cache (native-builds.yml builds them on
 # kosi PRs and workflow dispatch); the release consumes this cache.
-# Retry while the concurrent native-builds run pushes the cache tag.
-for attempt in 1 2 3 4 5 6; do
-  oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linuxmusl-arm64 -o plugins/kosi/ && break
-  echo "kosi cache tag kosi-linuxmusl-arm64 not ready (attempt $attempt)"; sleep 60
-done
-oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linuxmusl-arm64 -o plugins/kosi/
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 

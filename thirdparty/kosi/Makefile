@@ -132,6 +132,7 @@ define build_native
 	  --enable-monitoring=jfr \
 	  -J-Xmx$(KOSI_NATIVE_HEAP) -J-Xms1g \
 	  -H:DeadlockWatchdogInterval=300 -H:-DeadlockWatchdogExitOnTimeout \
+	  $(KOSI_NATIVE_LINKER_FLAGS) \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
 	@cd $(build_dir) && shasum -a 256 $(notdir $(2)) > $(notdir $(2)).sha256
@@ -149,6 +150,10 @@ fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 # with a bare OutOfMemoryError (measured on the linux-arm64 build). The
 # cap is not a reservation: darwin builds that peak lower are unaffected.
 KOSI_NATIVE_HEAP ?= 6g
+
+# Extra flags a platform may need at link time (e.g. the musl build's zlib
+# search path; set by the native-builds workflow).
+KOSI_NATIVE_LINKER_FLAGS ?=
 # The DeadlockWatchdog defaults (10s quiet interval, abort on timeout)
 # killed CI builds that were merely SLOW: the points-to analysis on a
 # 2-3 core runner sits quiet for tens of minutes inside one method graph

@@ -127,6 +127,18 @@ jobs:
 
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/rusi/build 'rusi-darwin-*'
       if: matrix.os == 'macos-15'
+    - name: Build musl zlib (the musl static link needs -lz against musl)
+      run: |
+        curl -sL -o /tmp/zlib.tar.gz \
+          https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+        mkdir -p /tmp/zlibsrc
+        tar xzf /tmp/zlib.tar.gz -C /tmp/zlibsrc --strip-components=1
+        pushd /tmp/zlibsrc
+        CC=musl-gcc ./configure --static --prefix="$HOME/musl-zlib"
+        make -j4
+        sudo make install
+        popd
+        echo "KOSI_NATIVE_LINKER_FLAGS=-H:NativeLinkerOption=-L$HOME/musl-zlib/lib" >> "$GITHUB_ENV"
     - name: Set up JDK 21
       uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
       with:
