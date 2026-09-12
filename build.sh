@@ -9,7 +9,7 @@ for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]] || [[ "$plug" == "cdxrs" ]]; } && find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
+    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]] || [[ "$plug" == "cdxrs" ]] || [[ "$plug" == "kosi" ]]; } && find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
         make sbom
     else
         make all

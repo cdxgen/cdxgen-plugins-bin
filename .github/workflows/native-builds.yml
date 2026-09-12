@@ -2,9 +2,9 @@ name: Build and Upload native binaries
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+  pull_request:
+    paths:
+      - "thirdparty/kosi/**"
 env:
   REGISTRY: ghcr.io
 concurrency:
@@ -127,6 +127,27 @@ jobs:
 
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/rusi/build 'rusi-darwin-*'
       if: matrix.os == 'macos-15'
+    - name: Set up JDK 21
+      uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+    - name: Set up pinned GraalVM and build kosi natives (see thirdparty/kosi Makefile)
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -sL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
+        pushd thirdparty/kosi
+        make linux linuxmusl
+        popd
+      if: matrix.os == 'ubuntu-24.04'
+    - name: Publish kosi natives to the oras cache (amd64)
+      run: |
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+      if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload linux amd64
       run: |
         pushd thirdparty/trivy
@@ -152,6 +173,27 @@ jobs:
           ./sourcekitten:application/octet-stream \
           ./sourcekitten.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04'
+    - name: Set up JDK 21
+      uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+    - name: Set up pinned GraalVM and build kosi natives
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -sL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-aarch64_bin.tar.gz
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
+        pushd thirdparty/kosi
+        make linux linuxmusl
+        popd
+      if: matrix.os == 'ubuntu-24.04-arm'
+    - name: Publish kosi natives to the oras cache (arm64)
+      run: |
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+      if: matrix.os == 'ubuntu-24.04-arm' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload linux arm64
       run: |
         pushd thirdparty/trivy
@@ -186,6 +228,26 @@ jobs:
           ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
           ./sourcekitten.sha256:text/plain
       if: matrix.os == 'macos-15-intel'
+    - name: Set up JDK 21
+      uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+      if: matrix.os == 'macos-15'
+    - name: Set up pinned GraalVM and build kosi natives
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -sL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        pushd thirdparty/kosi
+        make darwin
+        popd
+      if: matrix.os == 'macos-15'
+    - name: Publish kosi natives to the oras cache (darwin arm64)
+      run: |
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./thirdparty/kosi/build 'kosi-*'
+      if: matrix.os == 'macos-15' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload darwin arm64
       run: |
         cd thirdparty/sourcekitten/SourceKitten/.build/release/

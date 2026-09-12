@@ -6,6 +6,14 @@ rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/
 mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxrs
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/sourcekitten/
+# kosi natives ride the oras cache (native-builds.yml builds them on
+# kosi PRs and workflow dispatch); the release consumes this cache.
+# Retry while the concurrent native-builds run pushes the cache tag.
+for attempt in 1 2 3 4 5 6; do
+  oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-amd64 -o plugins/kosi/ && break
+  echo "kosi cache tag kosi-linux-amd64 not ready (attempt $attempt)"; sleep 60
+done
+oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-amd64 -o plugins/kosi/
 sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/
