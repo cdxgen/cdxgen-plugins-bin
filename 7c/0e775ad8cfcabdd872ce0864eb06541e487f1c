@@ -1,0 +1,16 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 290-292,294
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c0e775ad8cfcabdd872ce0864eb06541e487f1c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
