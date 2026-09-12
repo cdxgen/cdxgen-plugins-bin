@@ -1,0 +1,28 @@
+.github/workflows/native-builds.yml
+  h_6a4cc5cdf68def 5-7,130-150,176-196,231-250
+.github/workflows/release.yml
+  h_6a4cc5cdf68def 284-292
+build.sh
+  h_6a4cc5cdf68def 12
+packages/darwin-arm64/build-darwin-arm64.sh
+  h_6a4cc5cdf68def 13-19
+packages/linux-amd64/build-linux-amd64.sh
+  h_6a4cc5cdf68def 9-16
+packages/linux-arm64/build-linux-arm64.sh
+  h_6a4cc5cdf68def 13-20
+packages/linuxmusl-amd64/build-linuxmusl-amd64.sh
+  h_6a4cc5cdf68def 12-19
+packages/linuxmusl-arm64/build-linuxmusl-arm64.sh
+  h_6a4cc5cdf68def 12-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90a656e822ed013d942c8700506feff9035dfa53",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
