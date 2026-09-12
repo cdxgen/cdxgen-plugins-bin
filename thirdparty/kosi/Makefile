@@ -278,6 +278,7 @@ define gradle_or_diagnose
 	  echo "=== kosi: gradle $(1) failed; diagnostics ==="; \
 	  for f in hs_err_*.log; do [ -f "$$f" ] && { echo "--- $$f"; head -60 "$$f"; }; done; \
 	  (dmesg 2>/dev/null || sudo dmesg 2>/dev/null) | grep -iE "out of memory|killed process" | tail -5 || true; \
+	  [ -f kosi-bench-report.json ] && { echo "--- kosi-bench-report.json: $$(wc -c < kosi-bench-report.json) bytes"; tail -c 300 kosi-bench-report.json; echo; } || true; \
 	  free -m 2>/dev/null | head -3 || true; \
 	  df -m . /tmp 2>/dev/null | head -4 || true; \
 	  exit 1; \
@@ -291,7 +292,7 @@ test:
 # it runs: a runner that dies mid-bench then names the exact row it died
 # on, instead of a log that ends at the task line. CI sets CI=true.
 corpusQuick:
-	KOSI_TRACE=$(if $(CI),1,) $(call gradle_or_diagnose,corpusQuick)
+	KOSI_TRACE=$(if $(CI),1,) KOSI_REPORT_DIR=$(if $(CI),$(CURDIR),) $(call gradle_or_diagnose,corpusQuick)
 
 corpusFull:
 	$(call gradle_or_diagnose,corpusFull)

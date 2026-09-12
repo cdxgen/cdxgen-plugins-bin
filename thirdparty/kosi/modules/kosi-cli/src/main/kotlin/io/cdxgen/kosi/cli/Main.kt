@@ -376,18 +376,23 @@ object Main {
             regressions.add("promotion gate: ${gate.verdict}")
         }
 
-        // The full report prints as ONE line; a multi-megabyte line has been
-        // observed to coincide with CI runners tearing the step down, so it
-        // streams in 256KB chunks (the JSON is whitespace-free, so the
-        // concatenation is byte-identical to the single-line form).
+        // In CI the multi-megabyte report goes to a FILE: the bench's JSON
+        // has repeatedly coincided with the runner tearing the step down
+        // (four runs, always at report time), and a file survives whatever
+        // kills the log stream. Local runs print to stdout as before.
         val json = result.toJson()
-        if (json.length > 262144) {
+        val reportDir = System.getenv("KOSI_REPORT_DIR")
+        if (!reportDir.isNullOrBlank()) {
+            val target = java.nio.file.Path.of(reportDir, "kosi-bench-report.json")
+            java.nio.file.Files.writeString(target, json)
+            println("kosi bench report: " + target.toAbsolutePath() + " (" + json.length + " chars)")
+        } else if (json.length > 262144) {
             for (chunk in json.chunked(262144)) println(chunk)
         } else {
             println(json)
         }
         if (System.getenv("KOSI_TRACE") != null && System.getenv("KOSI_TRACE") != "") {
-            System.err.println("TRACE: bench report printed (" + json.length + " chars)")
+            System.err.println("TRACE: bench report written (" + json.length + " chars)")
         }
         // Asking for a comparison IS asking for the gate: rendering it only
         // under --verbose meant `bench --compare <baseline>` computed every
