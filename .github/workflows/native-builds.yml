@@ -139,7 +139,8 @@ jobs:
           https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
         tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
         sudo apt-get update
-        sudo apt-get install -y musl-tools
+        # musl static linking needs the static zlib archive (-lz).
+        sudo apt-get install -y musl-tools zlib1g-dev
         pushd thirdparty/kosi
         make linux linuxmusl
         popd
