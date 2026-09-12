@@ -115,7 +115,7 @@ jobs:
         run: |
           mkdir -p "$HOME/tools"
           curl -sL -o /tmp/graalvm.tar.gz \
-            https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-amd64_bin.tar.gz
+            https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
           # Integrity comes from the HTTPS-pinned release asset; a truncated
           # tar fails extraction. Record the sha256 in docs/BUILD.md at the
           # first successful run so it can be pinned like the macOS one.
