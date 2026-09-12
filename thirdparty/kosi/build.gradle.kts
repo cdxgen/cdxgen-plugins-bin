@@ -93,7 +93,16 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
         // (a native crash must leave evidence, not a silent gap).
         jvmArgs(
             HEADLESS_JVM_ARGS + listOf(
-                "-Xmx3g",
+                // The bench runs ~315 analysis sessions in ONE JVM: IntelliJ
+                // session caches accumulate (the unbounded fork peaked at
+                // 10.3GB VmHWM locally), and on a loaded 16GB CI runner the
+                // OS OOM killer then takes the whole process tree — silently.
+                // Heap, metaspace and direct memory are all pinned so the
+                // fork's total RSS stays bounded; ExitOnOutOfMemoryError
+                // makes exhaustion a LOUD failure, not a vanished runner.
+                "-Xmx2g",
+                "-XX:MaxMetaspaceSize=512m",
+                "-XX:MaxDirectMemorySize=256m",
                 "-XX:+ExitOnOutOfMemoryError",
                 "-XX:ErrorFile=" + File(rootDir.absolutePath, "hs_err_vm_%p.log").absolutePath,
             ),
