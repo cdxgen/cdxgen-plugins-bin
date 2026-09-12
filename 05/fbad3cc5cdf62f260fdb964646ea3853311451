@@ -1,0 +1,14 @@
+thirdparty/kosi/gradle.properties
+  h_6a4cc5cdf68def 6-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "05fbad3cc5cdf62f260fdb964646ea3853311451",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
