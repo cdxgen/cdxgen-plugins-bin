@@ -376,7 +376,19 @@ object Main {
             regressions.add("promotion gate: ${gate.verdict}")
         }
 
-        println(result.toJson())
+        // The full report prints as ONE line; a multi-megabyte line has been
+        // observed to coincide with CI runners tearing the step down, so it
+        // streams in 256KB chunks (the JSON is whitespace-free, so the
+        // concatenation is byte-identical to the single-line form).
+        val json = result.toJson()
+        if (json.length > 262144) {
+            for (chunk in json.chunked(262144)) println(chunk)
+        } else {
+            println(json)
+        }
+        if (System.getenv("KOSI_TRACE") != null && System.getenv("KOSI_TRACE") != "") {
+            System.err.println("TRACE: bench report printed (" + json.length + " chars)")
+        }
         // Asking for a comparison IS asking for the gate: rendering it only
         // under --verbose meant `bench --compare <baseline>` computed every
         // criterion and showed none of them. It goes to stderr so stdout

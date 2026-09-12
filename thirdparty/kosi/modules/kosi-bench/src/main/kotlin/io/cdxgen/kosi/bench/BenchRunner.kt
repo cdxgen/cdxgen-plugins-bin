@@ -527,6 +527,7 @@ object BenchRunner {
                 )
             }
         }
+        if (trace) System.err.println("TRACE: bench assembling result (" + results.size + " rows)")
         val walls = results.map { it.wallMillis }.sorted()
         return BenchResult(
             results = results.sortedWith(compareBy({ it.slug }, { it.slot })),
