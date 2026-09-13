@@ -1,0 +1,22 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 263-267,290-296
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 8-161
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 92-96,102
+thirdparty/kosi/modules/kosi-bytecode/README.md
+  h_6a4cc5cdf68def 1-40
+thirdparty/kosi/scripts/determinism-sweep.sh
+  h_6a4cc5cdf68def 29-32,40-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c83e986df9ee77bdcbecdc5d66525b9d710a1859",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
