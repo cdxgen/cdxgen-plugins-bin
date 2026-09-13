@@ -1,0 +1,32 @@
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 90,94,177,214-217,549-551,555-562
+thirdparty/kosi/modules/kosi-evidence/build.gradle.kts
+  h_6a4cc5cdf68def 1-2,5
+thirdparty/kosi/modules/kosi-evidence/src/main/kotlin/io/cdxgen/kosi/evidence/NativeInterop.kt
+  h_6a4cc5cdf68def 1-127
+thirdparty/kosi/modules/kosi-front/build.gradle.kts
+  h_6a4cc5cdf68def 59-62
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 52,231-248,412-417,419-444,549-558,561,574-579,637-728,776-777,792,805-807,813-817,1045,1172,1200-1287
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Budgets.kt
+  h_6a4cc5cdf68def 1-121
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/BudgetDegradationTest.kt
+  h_6a4cc5cdf68def 1-86
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/DepsInvarianceTest.kt
+  h_6a4cc5cdf68def 1-154
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/WorkerDeterminismTest.kt
+  h_6a4cc5cdf68def 1-71
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  h_6a4cc5cdf68def 61-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a29508338f5fae0c5ff934ba8bb6147576df4b62",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
