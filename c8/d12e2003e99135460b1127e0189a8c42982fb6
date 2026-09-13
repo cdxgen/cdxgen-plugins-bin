@@ -1,0 +1,32 @@
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  h_6a4cc5cdf68def 318-335,976-1088
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 155-173,266,268-271,476-480,668-670,674,756-760
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Matrix.kt
+  h_6a4cc5cdf68def 24,32,41,89-99
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/PeakRss.kt
+  h_6a4cc5cdf68def 15-47
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DefaultsSyncTest.kt
+  h_6a4cc5cdf68def 28,31
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/FixtureResultJsonTest.kt
+  h_6a4cc5cdf68def 82-86
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/FlowGateTest.kt
+  h_6a4cc5cdf68def 220
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/P9P10GateTest.kt
+  h_6a4cc5cdf68def 1-152
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  h_6a4cc5cdf68def 83,129-135,151-154,171-182
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Evaluator.kt
+  h_6a4cc5cdf68def 128,161,284-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8d12e2003e99135460b1127e0189a8c42982fb6",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
