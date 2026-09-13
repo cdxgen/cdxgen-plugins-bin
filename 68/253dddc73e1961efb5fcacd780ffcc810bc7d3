@@ -1,0 +1,16 @@
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  h_6a4cc5cdf68def 25-26,31,34,346-358,366-367,392,394-399,442,449,464,553-556,846-855,859,1012
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 191-213,237-242,251-253,263,265,267,269,276-319,333-334,354-404,409,429,433-440,443,447-474,477,573-592,596,600,613-615,763,770,863-875,878-880,911,922,924,935,947,964,978,990,995-1000,1115-1128,1293-1297,1299-1300,1550-1553,1555-1556,1612,1750-1753
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "68253dddc73e1961efb5fcacd780ffcc810bc7d3",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
