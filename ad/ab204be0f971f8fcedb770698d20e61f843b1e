@@ -1,0 +1,87 @@
+thirdparty/kosi/goldens/null-safety-deps.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirDumper.kt
+  s_9d783fb1e8d1fd::t_082d0cdbbbf181 66
+thirdparty/kosi/fixtures/unresolved-constructor/build.gradle.kts
+  s_9d783fb1e8d1fd::t_c646f2872a8594 1-3
+thirdparty/kosi/goldens/null-safety-resolved.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/null-safety-endpoint.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/use-close-deps.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  s_9d783fb1e8d1fd::t_ef0ede22cf5868 915-925,2125-2130
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  s_9d783fb1e8d1fd::t_55fbec69add308 208-213
+  s_9d783fb1e8d1fd::t_6b3311911e3406 318-325,327
+  s_d1fe4047e496cd::t_d92aece87798b7 207
+  s_9d783fb1e8d1fd::t_b4be9c05dfef94 393-400
+  s_9d783fb1e8d1fd::t_4418467f6a9dad 413
+  s_9d783fb1e8d1fd::t_4a8d7784760513 891
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_9d783fb1e8d1fd::t_3d3b41a4fa53cd 162,379
+  s_9d783fb1e8d1fd::t_9d8fb88e2711a2 50-72
+  s_9d783fb1e8d1fd::t_6d224b6f4f7101 816-825
+  s_9d783fb1e8d1fd::t_017bbfdec9ec2b 601
+thirdparty/kosi/goldens/unresolved-constructor-endpoint.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/fixtures/unresolved-constructor/src/main/kotlin/UnresolvedConstructor.kt
+  s_9d783fb1e8d1fd::t_de6ff3c36e7c12 1-10,17-21,26,30-36,39,41,44,46
+  s_9d783fb1e8d1fd::t_1e5ed0757b0377 11-16,27-29,37-38,40,42-43,45,47-52
+  s_9d783fb1e8d1fd::t_273bb1a684d4db 22-25
+thirdparty/kosi/goldens/use-close-endpoint.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/null-safety-exported.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/unresolved-constructor-exported.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/use-close-exported.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/unresolved-constructor-resolved.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/unresolved-constructor-deps.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/docs/KOSI.md
+  s_9d783fb1e8d1fd::t_250cb326634785 68,176-177,958-959
+  s_9d783fb1e8d1fd::t_f00dc54a0728f4 76-78,960
+  s_9d783fb1e8d1fd::t_48375029793072 81-85
+  s_9d783fb1e8d1fd::t_9874cd43314bcd 41-49
+thirdparty/kosi/goldens/use-close-resolved.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/goldens/unresolved-constructor-security.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  s_9d783fb1e8d1fd::t_ddd2794631d44d 853
+  s_9d783fb1e8d1fd::t_d514068cf17b08 855-860,863,868-869,872
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 854
+  s_9d783fb1e8d1fd::t_0e89888e50244a 871
+thirdparty/kosi/corpus.toml
+  s_9d783fb1e8d1fd::t_1a42ba62f3d06d 217-227
+thirdparty/kosi/goldens/unresolved-constructor-all.json
+  s_9d783fb1e8d1fd::t_4f75089bf770b5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "adab204be0f971f8fcedb770698d20e61f843b1e",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_d1fe4047e496cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d4802a45-3c52-47af-ac4f-51aa8a3c558e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
