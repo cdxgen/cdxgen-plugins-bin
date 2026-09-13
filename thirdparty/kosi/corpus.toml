@@ -305,6 +305,89 @@ tier = "fixtures"
 path = "fixtures/framework-handlers"
 capabilities = ["call-graph", "framework-roots", "type-resolved"]
 
+# P7 framework tier: one bundled fixture per framework, each carrying its
+# positive endpoints AND its lookalike negatives (an annotated DTO, a
+# private method with a mapping-shaped name, a commented-out route, a
+# marker class with no mapped methods). Run by corpusQuick alongside the
+# fixture tier, so the per-framework endpoint ratchet is exercised on every
+# change.
+
+[[fixtures]]
+slug = "spring-mvc-app"
+tier = "frameworks"
+path = "fixtures/spring-mvc-app"
+capabilities = ["spring-mvc", "endpoints", "homonym-negative"]
+
+[[fixtures]]
+slug = "spring-webflux-app"
+tier = "frameworks"
+path = "fixtures/spring-webflux-app"
+capabilities = ["spring-webflux", "endpoints", "lookalike-negative"]
+
+[[fixtures]]
+slug = "ktor-app"
+tier = "frameworks"
+path = "fixtures/ktor-app"
+capabilities = ["ktor", "endpoints", "dsl", "outbound", "config-resolution"]
+
+[[fixtures]]
+slug = "micronaut-app"
+tier = "frameworks"
+path = "fixtures/micronaut-app"
+capabilities = ["micronaut", "endpoints", "homonym-negative"]
+
+[[fixtures]]
+slug = "quarkus-app"
+tier = "frameworks"
+path = "fixtures/quarkus-app"
+capabilities = ["quarkus", "jaxrs", "endpoints", "empty-resource-negative"]
+
+[[fixtures]]
+slug = "http4k-app"
+tier = "frameworks"
+path = "fixtures/http4k-app"
+capabilities = ["http4k", "contract-routes", "endpoints"]
+
+[[fixtures]]
+slug = "grpc-service"
+tier = "frameworks"
+path = "fixtures/grpc-service"
+capabilities = ["grpc", "rpc", "endpoints", "implbase-negative"]
+
+[[fixtures]]
+slug = "android-manifest-app"
+tier = "frameworks"
+path = "fixtures/android-manifest-app"
+capabilities = ["android", "manifest", "endpoints", "deep-links"]
+
+# P8 crypto tier: transform forms, TLS/JWT/keystore, and material flows.
+# Every shipped mapping row is exercised somewhere in this tier, which the
+# crypto-mapping-coverage gate enforces at 1.000.
+
+[[fixtures]]
+slug = "crypto-transform-forms"
+tier = "crypto"
+path = "fixtures/crypto-transform-forms"
+capabilities = ["crypto", "transforms", "const-folding", "config-resolution"]
+
+[[fixtures]]
+slug = "crypto-algorithms"
+tier = "crypto"
+path = "fixtures/crypto-algorithms"
+capabilities = ["crypto", "digests", "signatures", "asymmetric"]
+
+[[fixtures]]
+slug = "crypto-tls-jwt"
+tier = "crypto"
+path = "fixtures/crypto-tls-jwt"
+capabilities = ["crypto", "tls", "jwt", "keystore", "trust-all"]
+
+[[fixtures]]
+slug = "crypto-material-flow"
+tier = "crypto"
+path = "fixtures/crypto-material-flow"
+capabilities = ["crypto", "materials", "crypto-flow", "pbkdf2", "ec-curve"]
+
 # P6 async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
 # its own task (`corpusAsync`) AND by the bench/gate run, so `async-recall`
 # has its own denominator while the sweeps and the native metadata agent see
@@ -398,3 +481,31 @@ repo = "https://github.com/ankidroid/Anki-Android"
 sha = "b1d3c81dfe304c19bf544a33923ab1042e28fe4b"
 classpath_file = "classpath.txt"
 capabilities = ["android", "mixed-java", "legacy-language-version"]
+
+# P7: one pinned repo per framework tier. heterogeneous-microservices is
+# one Kotlin codebase implementing the same service on Spring Boot, Ktor,
+# Micronaut and Quarkus - four frameworks' endpoints in one pinned tree.
+
+[[fixtures]]
+slug = "heterogeneous-microservices"
+tier = "medium"
+repo = "https://github.com/rkudryashov/heterogeneous-microservices"
+sha = "55d89ff829dfdb412916e0163aa95cf3bcc5d75d"
+classpath_file = "classpath.txt"
+capabilities = ["spring", "ktor", "micronaut", "quarkus", "endpoints"]
+
+[[fixtures]]
+slug = "http4k"
+tier = "medium"
+repo = "https://github.com/http4k/http4k"
+sha = "b051f89d35ab9190385a244e9e77149e77c55f4d"
+classpath_file = "classpath.txt"
+capabilities = ["http4k", "contract-routes", "endpoints"]
+
+[[fixtures]]
+slug = "grpc-kotlin"
+tier = "small"
+repo = "https://github.com/grpc/grpc-kotlin"
+sha = "fffe0320d3c6af86e466f96bb3ec424f1c36a063"
+classpath_file = "classpath.txt"
+capabilities = ["grpc", "rpc", "endpoints"]

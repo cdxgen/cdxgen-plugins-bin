@@ -9,6 +9,8 @@ bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins
 sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
+# kosi natives ride the oras cache (native-builds.yml builds them on
+# kosi PRs and workflow dispatch); the release consumes this cache.
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 

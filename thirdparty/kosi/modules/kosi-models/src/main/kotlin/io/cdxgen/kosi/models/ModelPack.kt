@@ -108,6 +108,18 @@ data class EffectPattern(
     }
 }
 
+/**
+ * A LITERAL source (P8): a string literal stored into a local whose NAME
+ * matches [namePattern] births a fact with [category] at the store. This is
+ * how hardcoded secret/key material enters the flow graph — there is no
+ * source call to hang a pack entry on, but the name rule is still DATA, and
+ * the flow engine matches names against it exactly like callee symbols.
+ */
+data class LiteralSourcePattern(
+    val namePattern: String,
+    val category: String,
+)
+
 data class ModelPack(
     val name: String,
     val sources: List<SourcePattern>,
@@ -115,6 +127,7 @@ data class ModelPack(
     val passthroughs: List<PassthroughPattern>,
     val sanitizers: List<SanitizerPattern>,
     val effects: List<EffectPattern>,
+    val literalSources: List<LiteralSourcePattern> = emptyList(),
 ) {
     /** Every distinct category this pack can produce (sources and sinks). */
     val categories: Set<String>

@@ -20,12 +20,14 @@ data class MatrixSlot(
     val dataflow: DataflowMode,
     val backend: Backend,
     val roots: List<String>? = null,
+    val endpointSources: Boolean = false,
 ) {
     /** Slot options derived from the CLI defaults, overriding only what the label names. */
     fun options(): AnalyzeOptions = AnalyzeOptions(
         dataflow = dataflow,
         backend = backend,
         roots = roots ?: AnalyzeOptions().roots,
+        endpointSources = endpointSources,
     )
 
     companion object {
@@ -33,6 +35,7 @@ data class MatrixSlot(
         const val ALL_LABEL = "all"
         const val RESOLVED_LABEL = "resolved"
         const val EXPORTED_LABEL = "exported"
+        const val ENDPOINT_LABEL = "endpoint"
     }
 }
 
@@ -70,6 +73,15 @@ object Matrix {
             dataflow = DataflowMode.SECURITY,
             backend = Backend.RESOLVED,
             roots = listOf(io.cdxgen.kosi.schema.RootScope.EXPORTED.id),
+        ),
+        // P7: endpoint-rooted taint. The resolved backend with handler
+        // parameters as sources, so slices carry the endpoint they enter
+        // through and the endpoint-rooted-slices gate has a real population.
+        MatrixSlot(
+            label = MatrixSlot.ENDPOINT_LABEL,
+            dataflow = DataflowMode.SECURITY,
+            backend = Backend.RESOLVED,
+            endpointSources = true,
         ),
     )
 }

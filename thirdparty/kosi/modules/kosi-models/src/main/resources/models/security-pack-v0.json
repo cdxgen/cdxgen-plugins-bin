@@ -1,152 +1,46 @@
 {
-  "name": "security-pack-v0",
   "description": "The taint model pack. Sources, sinks, passthroughs, sanitizers and effects are DATA: the engine matches callee symbols against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a rule. Argument-index convention: 0 is the RECEIVER when the callee has one, otherwise the first argument; n is the n-th element of that (receiver,) arguments sequence; -1 is the call's result. Constructor callees render as the class FQN (no <init> suffix). P4 is the first phase that executes this pack, which is why several P0 seed entries carry corrected indexes.",
-  "sources": [
+  "effects": [
     {
-      "pattern": "java.io.BufferedReader.readLine",
-      "category": "untrusted-input"
+      "pattern": "kotlin.io.copyTo",
+      "writesToArguments": [
+        1
+      ]
     },
     {
-      "pattern": "javax.servlet.http.HttpServletRequest.getParameter",
-      "category": "untrusted-input"
+      "pattern": "java.lang.ProcessBuilder.redirectOutput",
+      "writesToArguments": [
+        1
+      ]
     },
     {
-      "pattern": "android.content.Intent.getStringExtra",
-      "category": "android-intent"
+      "pattern": "kotlin.collections.MutableList.add",
+      "writesToArguments": [
+        1
+      ]
     },
     {
-      "pattern": "kotlin.io.readLine",
-      "category": "untrusted-input"
+      "pattern": "kotlinx.coroutines.channels.Channel.send",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "kotlinx.coroutines.channels.SendChannel.send",
+      "writesToArguments": [
+        1
+      ]
     }
   ],
-  "sinks": [
+  "literalSources": [
     {
-      "pattern": "java.lang.ProcessBuilder",
-      "category": "process-exec",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "critical"
-    },
-    {
-      "pattern": "java.lang.Runtime.exec",
-      "category": "process-exec",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "java.lang.Runtime",
-      "severity": "critical"
-    },
-    {
-      "pattern": "java.sql.Statement.executeQuery",
-      "category": "sql-query",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "java.sql.Statement",
-      "severity": "critical"
-    },
-    {
-      "pattern": "java.sql.Statement.executeUpdate",
-      "category": "sql-query",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "java.sql.Statement",
-      "severity": "critical"
-    },
-    {
-      "pattern": "java.sql.Connection.prepareStatement",
-      "category": "sql-query",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "java.sql.Connection",
-      "severity": "critical"
-    },
-    {
-      "pattern": "java.lang.System.exit",
-      "category": "process-exec",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "high"
-    },
-    {
-      "pattern": "javax.crypto.Cipher.getInstance",
-      "category": "crypto-asset",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "medium"
-    },
-    {
-      "pattern": "java.security.MessageDigest.getInstance",
-      "category": "crypto-asset",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "medium"
-    },
-    {
-      "pattern": "javax.net.ssl.SSLContext.getInstance",
-      "category": "insecure-tls",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "high"
-    },
-    {
-      "pattern": "java.net.URL",
-      "category": "ssrf",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "high"
-    },
-    {
-      "pattern": "java.io.FileWriter",
-      "category": "path-traversal",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "high"
-    },
-    {
-      "pattern": "kotlin.io.println",
-      "category": "log-injection",
-      "relevantArguments": [
-        0
-      ],
-      "severity": "medium"
-    },
-    {
-      "pattern": "org.slf4j.Logger.info",
-      "category": "log-injection",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "org.slf4j.Logger",
-      "severity": "medium"
-    },
-    {
-      "pattern": "java.io.ObjectInputStream.readObject",
-      "category": "deserialization",
-      "severity": "critical"
-    },
-    {
-      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue",
-      "category": "deserialization",
-      "relevantArguments": [
-        1
-      ],
-      "receiverType": "com.fasterxml.jackson.databind.ObjectMapper",
-      "severity": "critical"
+      "category": "hardcoded-secret",
+      "namePattern": "(?i).*(password|passwd|pwd|secret|apikey|api[_-]?key|token|private[_-]?key|signing[_-]?key|encryption[_-]?key).*"
     }
   ],
+  "name": "security-pack-v0",
   "passthroughs": [
     {
-      "pattern": "kotlin.text.plus",
       "category": "iterator-adapter",
       "flows": [
         [
@@ -157,82 +51,60 @@
           1,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.text.plus"
     },
     {
-      "pattern": "kotlin.text.split",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.text.split"
     },
     {
-      "pattern": "kotlin.collections.split",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.split"
     },
     {
-      "pattern": "kotlin.collections.map",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.map"
     },
     {
-      "pattern": "kotlin.collections.toList",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.toList"
     },
     {
-      "pattern": "kotlin.collections.toTypedArray",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.toTypedArray"
     },
     {
-      "pattern": "kotlin.collections.listOf",
-      "category": "iterator-adapter",
-      "flows": [
-        [
-          0,
-          -1
-        ],
-        [
-          1,
-          -1
-        ],
-        [
-          2,
-          -1
-        ],
-        [
-          3,
-          -1
-        ]
-      ]
-    },
-    {
-      "pattern": "kotlin.collections.mutableListOf",
       "category": "iterator-adapter",
       "flows": [
         [
@@ -251,127 +123,150 @@
           3,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.listOf"
     },
     {
-      "pattern": "kotlin.collections.iterator",
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.mutableListOf"
+    },
+    {
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.iterator"
     },
     {
-      "pattern": "kotlin.collections.next",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.collections.next"
     },
     {
-      "pattern": "kotlin.component1",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.component1"
     },
     {
-      "pattern": "kotlin.component2",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.component2"
     },
     {
-      "pattern": "kotlin.component3",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.component3"
     },
     {
-      "pattern": "kotlin.component4",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.component4"
     },
     {
-      "pattern": "kotlin.component5",
       "category": "iterator-adapter",
       "flows": [
         [
           0,
           -1
         ]
-      ]
+      ],
+      "pattern": "kotlin.component5"
     },
     {
-      "pattern": "kotlin.let",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.let"
     },
     {
-      "pattern": "kotlin.run",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.run"
     },
     {
-      "pattern": "kotlin.apply",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.apply"
     },
     {
-      "pattern": "kotlin.also",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.also"
     },
     {
-      "pattern": "kotlin.with",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.with"
     },
     {
-      "pattern": "kotlin.use",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.use"
     },
     {
-      "pattern": "kotlin.equals",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.equals"
     },
     {
-      "pattern": "kotlin.isNull",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.isNull"
     },
     {
-      "pattern": "kotlin.collections.contains",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.collections.contains"
     },
     {
-      "pattern": "kotlin.collections.hasNext",
       "category": "iterator-adapter",
-      "flows": []
+      "flows": [],
+      "pattern": "kotlin.collections.hasNext"
     },
     {
       "category": "iterator-adapter",
@@ -470,13 +365,13 @@
     },
     {
       "category": "iterator-adapter",
-      "flows": [],
       "elementFlows": [
         [
           0,
           -1
         ]
       ],
+      "flows": [],
       "pattern": "kotlinx.coroutines.channels.Channel.receive"
     },
     {
@@ -491,13 +386,13 @@
     },
     {
       "category": "iterator-adapter",
-      "flows": [],
       "elementFlows": [
         [
           0,
           -1
         ]
       ],
+      "flows": [],
       "pattern": "kotlinx.coroutines.channels.ReceiveChannel.receive"
     },
     {
@@ -571,48 +466,175 @@
   ],
   "sanitizers": [
     {
-      "pattern": "org.owasp.encoder.Encode.forHtml",
       "clears": [
         "xss"
-      ]
+      ],
+      "pattern": "org.owasp.encoder.Encode.forHtml"
     },
     {
-      "pattern": "java.security.MessageDigest.digest",
       "clears": [
         "untrusted-input"
-      ]
+      ],
+      "pattern": "java.security.MessageDigest.digest"
     }
   ],
-  "effects": [
+  "sinks": [
     {
-      "pattern": "kotlin.io.copyTo",
-      "writesToArguments": [
-        1
-      ]
+      "category": "process-exec",
+      "pattern": "java.lang.ProcessBuilder",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "critical"
     },
     {
-      "pattern": "java.lang.ProcessBuilder.redirectOutput",
-      "writesToArguments": [
+      "category": "process-exec",
+      "pattern": "java.lang.Runtime.exec",
+      "receiverType": "java.lang.Runtime",
+      "relevantArguments": [
         1
-      ]
+      ],
+      "severity": "critical"
     },
     {
-      "pattern": "kotlin.collections.MutableList.add",
-      "writesToArguments": [
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.executeQuery",
+      "receiverType": "java.sql.Statement",
+      "relevantArguments": [
         1
-      ]
+      ],
+      "severity": "critical"
     },
     {
-      "pattern": "kotlinx.coroutines.channels.Channel.send",
-      "writesToArguments": [
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.executeUpdate",
+      "receiverType": "java.sql.Statement",
+      "relevantArguments": [
         1
-      ]
+      ],
+      "severity": "critical"
     },
     {
-      "pattern": "kotlinx.coroutines.channels.SendChannel.send",
-      "writesToArguments": [
+      "category": "sql-query",
+      "pattern": "java.sql.Connection.prepareStatement",
+      "receiverType": "java.sql.Connection",
+      "relevantArguments": [
         1
-      ]
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "process-exec",
+      "pattern": "java.lang.System.exit",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.Cipher.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "java.security.MessageDigest.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-tls",
+      "pattern": "javax.net.ssl.SSLContext.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "java.net.URL",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.FileWriter",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "kotlin.io.println",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "org.slf4j.Logger.info",
+      "receiverType": "org.slf4j.Logger",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "java.io.ObjectInputStream.readObject",
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue",
+      "receiverType": "com.fasterxml.jackson.databind.ObjectMapper",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.SecretKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.PBEKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    }
+  ],
+  "sources": [
+    {
+      "category": "untrusted-input",
+      "pattern": "java.io.BufferedReader.readLine"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getParameter"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getStringExtra"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "kotlin.io.readLine"
     }
   ]
 }

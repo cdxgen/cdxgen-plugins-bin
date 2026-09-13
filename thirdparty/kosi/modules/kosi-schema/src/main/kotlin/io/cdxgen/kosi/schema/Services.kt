@@ -21,6 +21,12 @@ data class ApiEndpoint(
     val deepLinkHosts: List<String>?,
     val reachableSources: List<String>,
     val sliceIds: List<String>,
+    /**
+     * P7: how the endpoint was found — `annotation`, `dsl`, `manifest` or
+     * `config`. A reviewer answers "why does kosi think this is an entry
+     * point" with this field, so it travels on every endpoint.
+     */
+    val foundBy: String = "annotation",
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -30,6 +36,7 @@ data class ApiEndpoint(
         w.beginArray("consumes")
         for (c in consumes.sorted()) w.str(c)
         w.endArray()
+        w.str("foundBy", foundBy)
         w.str("handlerCanonicalName", handlerCanonicalName)
         w.str("handlerSymbol", handlerSymbol)
         w.beginArray("deepLinkHosts")
@@ -68,6 +75,7 @@ data class ApiEndpoint(
 
     companion object {
         val COMPARATOR = compareBy<ApiEndpoint>({ it.pathTemplate }, { it.handlerSymbol }, { it.id })
+        val FOUND_BY = setOf("annotation", "dsl", "manifest", "config")
     }
 }
 

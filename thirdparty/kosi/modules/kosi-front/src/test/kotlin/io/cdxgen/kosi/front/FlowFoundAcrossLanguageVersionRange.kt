@@ -37,6 +37,11 @@ class FlowFoundAcrossLanguageVersionRange {
             AnalyzeOptions(
                 backend = Backend.RESOLVED,
                 languageVersion = languageVersion,
+                // P7: the fixture's flow is parameter-shaped (endpoint
+                // sources seed the handler's parameter), so the flag rides
+                // here exactly as it does in the bench's endpoint slot -
+                // and the invariance claim covers the endpoint-rooted flow.
+                endpointSources = true,
             ),
             commit = "test",
         )
@@ -66,7 +71,9 @@ class FlowFoundAcrossLanguageVersionRange {
         var baseline: String? = null
         for (version in versions) {
             val report = analyzeAt(version)
-            val evaluation = Evaluator.evaluate(report, annotations, mode = "all", backend = Backend.RESOLVED.id)
+            val evaluation = Evaluator.evaluate(report, annotations, // the bench's endpoint slot label (the string lives in kosi-bench, which
+                // cannot be a test dependency here)
+                mode = "endpoint", backend = Backend.RESOLVED.id)
 
             // The flow expectation must PASS at every accepted language
             // version, and no negative expectation may be violated: the

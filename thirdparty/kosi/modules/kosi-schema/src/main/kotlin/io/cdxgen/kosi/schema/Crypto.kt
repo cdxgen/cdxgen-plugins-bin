@@ -13,6 +13,21 @@ data class CryptoAsset(
     val keySizeBits: Int?,
     val curve: String?,
     val position: Position?,
+    /**
+     * P8: how the transform/name was resolved — `literal`, `folded`,
+     * `config`, `env`, or `unresolved` when only part of the string could
+     * be proven. An unresolved asset carries no invented mode or padding.
+     */
+    val resolution: String? = null,
+    /** The crypto operation kind that produced this asset (`Cipher`, `MessageDigest`, ...). */
+    val operation: String? = null,
+    /**
+     * The syntactic FORM the transform was read in — `literal`, `const`,
+     * `template`, `config`, `env` or `unresolved`. The P8 gate counts
+     * mode/padding extraction per form, each with its own denominator;
+     * `resolution` folds const and template into `folded`, this does not.
+     */
+    val form: String? = null,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -21,9 +36,12 @@ data class CryptoAsset(
         if (curve != null) w.str("curve", curve) else w.nul("curve")
         if (keySizeBits != null) w.num("keySizeBits", keySizeBits) else w.nul("keySizeBits")
         if (mode != null) w.str("mode", mode) else w.nul("mode")
-        if (padding != null) w.str("padding", padding) else w.nul("padding")
+        w.str("operation", operation)
+        w.str("padding", padding)
         position?.writeJson(w, "position")
         if (primitive != null) w.str("primitive", primitive) else w.nul("primitive")
+        w.str("resolution", resolution)
+        w.str("form", form)
         w.endObject()
     }
 }

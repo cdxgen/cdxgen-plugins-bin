@@ -3,6 +3,8 @@
 // dependency allowlist from docs (02-ARCHITECTURE.md §1). Nothing outside the
 // allowlist may be added without changing that doc first.
 
+import java.io.File
+
 plugins {
     alias(libs.plugins.kotlin.jvm) apply false
 }
@@ -57,22 +59,67 @@ subprojects {
 // (06-CORPUS.md §5, "documented test commands must actually run").
 val kosiCli = project(":kosi-cli")
 
+// The kosi jar is Java-21 bytecode, but these tasks are registered on the
+// ROOT project, which applies no Java toolchain — without an explicit
+// launcher a JavaExec runs on Gradle's own JVM, and on a JDK-17 runner that
+// is UnsupportedClassVersionError: class file 65 read by a class-61 runtime
+// (the corpusQuick CI failure). Launch every tier task on the same 21
+// toolchain the compilation uses; Test tasks in the subprojects already
+// launch on it by default. The launcher comes from kosi-cli (which applies
+// the JVM plugin and therefore carries the toolchain service); lazy so the
+// subproject's plugins are applied before the service is queried.
+val kosiLauncher by lazy {
+    kosiCli.the<org.gradle.jvm.toolchain.JavaToolchainService>().launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
 fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) =
     tasks.register(name, JavaExec::class) {
         group = "kosi"
         this.description = description
+        javaLauncher = kosiLauncher
         dependsOn(kosiCli.tasks.named("jar"))
         classpath = kosiCli.objects.fileCollection().from(
             kosiCli.configurations.getByName("runtimeClasspath"),
             kosiCli.tasks.named("jar").map { (it as Jar).archiveFile },
         )
         mainClass = "io.cdxgen.kosi.cli.MainKt"
-        jvmArgs(HEADLESS_JVM_ARGS)
+        // Bounded heap: the resolved-tier analysis peaks around 1 GiB on the
+        // bundled fixtures; an unbounded default heap (25% of runner RAM)
+        // makes this fork the OOM killer's first target on a shared CI box,
+        // and a SIGKILLed JVM dies without a single line of output. Loud on
+        // exhaustion, small at rest. hs_err files land in the project dir
+        // (a native crash must leave evidence, not a silent gap).
+        jvmArgs(
+            HEADLESS_JVM_ARGS + listOf(
+                // The bench runs ~315 analysis sessions in ONE JVM: IntelliJ
+                // session caches accumulate (the unbounded fork peaked at
+                // 10.3GB VmHWM locally), and on a loaded 16GB CI runner the
+                // OS OOM killer then takes the whole process tree — silently.
+                // Heap, metaspace and direct memory are all pinned so the
+                // fork's total RSS stays bounded; ExitOnOutOfMemoryError
+                // makes exhaustion a LOUD failure, not a vanished runner.
+                "-Xmx2g",
+                "-XX:MaxMetaspaceSize=512m",
+                "-XX:MaxDirectMemorySize=256m",
+                "-XX:+ExitOnOutOfMemoryError",
+                "-XX:ErrorFile=" + File(rootDir.absolutePath, "hs_err_vm_%p.log").absolutePath,
+            ),
+        )
+        doFirst {
+            // Which JVM actually runs this tier: the CI corpusQuick hang
+            // (silent, ~34s in, twice) was undiagnosable without this line.
+            println(
+                "kosi tier JVM: " + javaLauncher.get().metadata.languageVersion.asInt() +
+                    " @ " + javaLauncher.get().executablePath.asFile.absolutePath,
+            )
+        }
         configure(this)
     }
 
-kosiTask("corpusQuick", "Fixture tier: the annotation ratchet in both modes, no network.") {
-    args = listOf("bench", "--tier", "fixtures", "--repo-root", rootDir.absolutePath)
+kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async ratchets, no network.") {
+    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async", "--repo-root", rootDir.absolutePath)
 }
 
 kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {
