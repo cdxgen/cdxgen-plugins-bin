@@ -1,0 +1,20 @@
+packages/darwin-arm64/build-darwin-arm64.sh
+  h_6a4cc5cdf68def 16,19
+packages/linux-amd64/build-linux-amd64.sh
+  h_6a4cc5cdf68def 13,16
+packages/linux-arm64/build-linux-arm64.sh
+  h_6a4cc5cdf68def 17,20
+packages/linuxmusl-amd64/build-linuxmusl-amd64.sh
+  h_6a4cc5cdf68def 16,19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ecc5543695bf0c9298e717028a9a6eef629c112",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
