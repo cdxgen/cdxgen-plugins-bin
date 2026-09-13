@@ -33,7 +33,8 @@ plugin_platform_exemption() {
     return 1
   fi
   case "$platform" in
-    ppc64le)
+    # the packages/ppc64 directory names its fragment ppc64; same platform.
+    ppc64|ppc64le)
       echo "not a GraalVM Native Image platform; JVM-jar fallback documented in docs/KOSI.md"
       return 0
       ;;
