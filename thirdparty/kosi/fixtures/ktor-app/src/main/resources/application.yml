@@ -1,0 +1,6 @@
+# The config table the outbound fixtures resolve against. kosiapp values
+# resolve; the missing key ktorapp.missing must stay unresolved.
+ktorapp:
+  api:
+    base: "https://api.ktorapp.example.com/v2"
+  webhook: "https://webhook.example.com/hook"

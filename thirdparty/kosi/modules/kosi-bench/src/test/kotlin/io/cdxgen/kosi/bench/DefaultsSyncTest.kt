@@ -20,9 +20,14 @@ class DefaultsSyncTest {
         for (slot in Matrix.defaultMatrix()) {
             val slotOptions = slot.options()
             assertEquals(
-                defaults.copy(dataflow = slotOptions.dataflow, backend = slotOptions.backend, roots = slotOptions.roots),
+                defaults.copy(
+                    dataflow = slotOptions.dataflow,
+                    backend = slotOptions.backend,
+                    roots = slotOptions.roots,
+                    endpointSources = slotOptions.endpointSources,
+                ),
                 slotOptions,
-                "slot ${slot.label} overrides more than its own dataflow/backend/roots",
+                "slot ${slot.label} overrides more than its own dataflow/backend/roots/endpointSources",
             )
         }
     }
@@ -54,6 +59,16 @@ class DefaultsSyncTest {
     fun theExportedSlotIsInTheMatrixForEveryCase() {
         val labels = Matrix.defaultMatrix().map { it.label }.toSet()
         assertTrue("exported" in labels, "the exported slot must run for every corpus case (P3)")
+    }
+
+    @Test
+    fun theEndpointSlotRootsTaintAtHandlers() {
+        // P7: the endpoint slot is where endpoint-rooted slices come from;
+        // without it the endpoint-rooted-slices gate has no population.
+        val endpoint = Matrix.defaultMatrix().single { it.label == MatrixSlot.ENDPOINT_LABEL }
+        assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, endpoint.backend)
+        assertTrue(endpoint.endpointSources)
+        assertTrue(endpoint.options().endpointSources)
     }
 
     @Test

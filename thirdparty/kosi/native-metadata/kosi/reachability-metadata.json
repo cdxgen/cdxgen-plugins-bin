@@ -413,6 +413,23 @@
         {
           "name": "<init>",
           "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinClassStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtEnumEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
             "org.jetbrains.kotlin.psi.stubs.KotlinConstructorStub"
           ]
         }
@@ -605,6 +622,23 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtDotQualifiedExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtFunctionTypeReceiver"
     },
     {
       "methods": [
@@ -1097,6 +1131,28 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtSuperExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtThisExpression"
     },
     {
       "methods": [
@@ -1750,6 +1806,9 @@
       "type": "java.lang.Double"
     },
     {
+      "type": "java.lang.Enum"
+    },
+    {
       "type": "java.lang.Float"
     },
     {
@@ -1817,6 +1876,9 @@
     },
     {
       "type": "kotlin.jvm.internal.DoubleCompanionObject"
+    },
+    {
+      "type": "kotlin.jvm.internal.EnumCompanionObject"
     },
     {
       "type": "kotlin.jvm.internal.FloatCompanionObject"
@@ -2188,9 +2250,6 @@
       "type": "org.jetbrains.kotlin.psi.KtDynamicType[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtEnumEntry"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtEnumEntrySuperclassReferenceExpression"
     },
     {
@@ -2213,9 +2272,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFinallySection"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtFunctionTypeReceiver"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtFunctionTypeReceiver[]"
@@ -2338,9 +2394,6 @@
       "type": "org.jetbrains.kotlin.psi.KtStringTemplateExpression[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtSuperExpression"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeCallEntry[]"
     },
     {
@@ -2348,9 +2401,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeList[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtThisExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtThrowExpression"
@@ -2581,6 +2631,12 @@
     },
     {
       "glob": "kotlin/reflect/reflect.kotlin_builtins"
+    },
+    {
+      "glob": "models/crypto-mappings-v0.json"
+    },
+    {
+      "glob": "models/endpoints-pack-v0.json"
     },
     {
       "glob": "models/security-pack-v0.json"

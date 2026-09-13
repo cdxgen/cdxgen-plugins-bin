@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Negative half inline: a commented-out component is not a component. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="fixtures.android">
+    <application>
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".DeepLinkActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <data android:scheme="kosi" android:host="fixtures.example.com" />
+            </intent-filter>
+        </activity>
+        <!-- <activity android:name=".GhostActivity" android:exported="true" /> -->
+        <receiver android:name=".PackageReceiver" android:exported="false" />
+        <service android:name=".SyncService" />
+        <provider android:name=".MetaProvider" android:exported="true" />
+    </application>
+</manifest>

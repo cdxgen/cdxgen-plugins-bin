@@ -2,33 +2,15 @@ package io.cdxgen.kosi.flow
 
 import io.cdxgen.kosi.kir.AccessPath
 import io.cdxgen.kosi.kir.CallKind
-import io.cdxgen.kosi.kir.KirAssign
-import io.cdxgen.kosi.kir.KirBlock
-import io.cdxgen.kosi.kir.KirBranch
 import io.cdxgen.kosi.kir.KirCall
-import io.cdxgen.kosi.kir.KirCast
 import io.cdxgen.kosi.kir.KirDynamicCall
-import io.cdxgen.kosi.kir.KirElvis
-import io.cdxgen.kosi.kir.KirFieldGet
-import io.cdxgen.kosi.kir.KirFieldSet
 import io.cdxgen.kosi.kir.KirFunction
-import io.cdxgen.kosi.kir.KirIndexGet
-import io.cdxgen.kosi.kir.KirIndexSet
 import io.cdxgen.kosi.kir.KirIns
 import io.cdxgen.kosi.kir.KirLambda
-import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirNew
-import io.cdxgen.kosi.kir.KirPhi
 import io.cdxgen.kosi.kir.KirReturn
-import io.cdxgen.kosi.kir.KirSafeCall
 import io.cdxgen.kosi.kir.KirStore
-import io.cdxgen.kosi.kir.KirStringConcat
-import io.cdxgen.kosi.kir.KirSuspendPoint
-import io.cdxgen.kosi.kir.KirThrow
-import io.cdxgen.kosi.kir.KirTypeCheck
-import io.cdxgen.kosi.kir.uses
 import io.cdxgen.kosi.models.ModelPack
-import io.cdxgen.kosi.models.PatternMatcher
 
 /**
  * P5's interprocedural half: bottom-up function summaries over the call
@@ -78,6 +60,29 @@ internal data class SummarySinkEffect(
     /** True when the path could not be fully walked (cap, cycle, missing provenance). */
     val elided: Boolean,
 )
+
+/**
+ * A summary fact: `param` facts (a parameter's taint, no category — the
+ * caller's categories travel over the channel at application time) and
+ * `source` facts (born at a source call inside the body, category-carrying).
+ * [path] is the access path from the parameter root to the value carrying
+ * this fact: seeds start at "", and a field READ of the parameter's base
+ * extends it — so a sink reached through `job.command` records paramPath
+ * "command", and the caller looks for its taint on the SAME path of its own
+ * argument (field sensitivity at the boundary, the clean-sibling negative
+ * preserved).
+ */
+internal data class SummaryFact(
+    val param: Int?,
+    val site: Int?,
+    val category: String,
+    val path: String = "",
+) : Comparable<SummaryFact> {
+    override fun compareTo(other: SummaryFact): Int =
+        compareValuesBy(this, other, { it.param ?: -1 }, { it.site ?: -1 }, { it.category }, { it.path })
+
+    fun withPath(newPath: String): SummaryFact = SummaryFact(param, site, category, newPath)
+}
 
 /**
  * The summary of one function: what taint entering through its parameters
@@ -203,10 +208,10 @@ internal class CallIndex(
                                 else -> propagate(ins.result ?: continue, ins.receiver) || changed
                             }
 
-                        is KirAssign -> changed = propagate(ins.result, ins.source) || changed
+                        is io.cdxgen.kosi.kir.KirAssign -> changed = propagate(ins.result, ins.source) || changed
                         is KirStore -> changed = propagate(ins.target, ins.value) || changed
-                        is KirPhi -> for ((_, source) in ins.inputs) changed = propagate(ins.result, source) || changed
-                        is KirElvis -> {
+                        is io.cdxgen.kosi.kir.KirPhi -> for ((_, source) in ins.inputs) changed = propagate(ins.result, source) || changed
+                        is io.cdxgen.kosi.kir.KirElvis -> {
                             changed = propagate(ins.result, ins.value) || changed
                             changed = propagate(ins.result, ins.fallback) || changed
                         }
@@ -492,79 +497,42 @@ internal object Tarjan {
     }
 }
 
+/** Summary facts derive along field reads of their parameter roots only. */
+internal object SummaryFactOps : FactOps<SummaryFact> {
+    override fun categoryOf(fact: SummaryFact): String = fact.category
+
+    override fun deriveOnFieldRead(fact: SummaryFact, suffix: String): SummaryFact? =
+        fact.param?.let { fact.withPath(joinPath(fact.path, suffix)) }
+}
+
+internal fun joinPath(prefix: String, suffix: String): String =
+    when {
+        prefix.isEmpty() -> suffix
+        suffix.isEmpty() -> prefix
+        else -> "$prefix.$suffix"
+    }
+
 /**
- * The summary-mode analysis of one function. Facts are
- * [SummaryFact]s: `param` facts (a parameter's taint, no category — the
- * caller's categories travel over the channel at application time) and
- * `source` facts (born at a source call inside the body, category-carrying).
+ * The summary-mode analysis of one function. It is the ONE shared transfer
+ * ([FlowTransfer]) over [SummaryFact]s — the reporting engine's transfer and
+ * this one are the same function (R65); the summary's own work is in the
+ * host callbacks: parameter seeds at entry, escape recording at sinks,
+ * returns, field writes and invokes, and callee summary application.
  */
 internal class SummaryAnalysis(
     private val cf: CompiledFunction,
     private val table: Map<String, FunctionSummary>,
     private val callIndex: CallIndex,
-    private val pack: ModelPack,
+    pack: ModelPack,
     private val options: TaintEngine.Options,
-) {
-    /**
-     * A summary fact. [path] is the access path from the parameter root to
-     * the value carrying this fact: seeds start at "", and a field READ of
-     * the parameter's base extends it — so a sink reached through
-     * `job.command` records paramPath "command", and the caller looks for
-     * its taint on the SAME path of its own argument (field sensitivity at
-     * the boundary, the clean-sibling negative preserved).
-     */
-    private data class SummaryFact(
-        val param: Int?,
-        val site: Int?,
-        val category: String,
-        val path: String = "",
-    ) : Comparable<SummaryFact> {
-        override fun compareTo(other: SummaryFact): Int =
-            compareValuesBy(this, other, { it.param ?: -1 }, { it.site ?: -1 }, { it.category }, { it.path })
+) : TransferHost<SummaryFact, Boolean> {
+    override val ops = SummaryFactOps
+    override val pack = pack
+    override val unknownCallPropagate = options.unknownCallPropagate
+    override val fieldSensitive = options.accessPathDepth > 0
 
-        fun withPath(newPath: String): SummaryFact = SummaryFact(param, site, category, newPath)
-    }
-
-    private data class ChainKey(val fact: SummaryFact, val key: TaintKey)
-
-    /** Birth move kinds: a parameter's entry, a source call inside the body. */
-    private val chain = HashMap<ChainKey, Move>()
-
-    private val state = State()
-
-    private class State {
-        val map = java.util.TreeMap<TaintKey, java.util.TreeSet<SummaryFact>>()
-
-        fun factsOf(key: TaintKey): java.util.TreeSet<SummaryFact> = map[key] ?: EMPTY
-
-        fun setFacts(key: TaintKey, facts: java.util.TreeSet<SummaryFact>) {
-            if (facts.isEmpty()) map.remove(key) else map[key] = facts
-        }
-
-        fun addFacts(key: TaintKey, facts: Collection<SummaryFact>) {
-            if (facts.isEmpty()) return
-            val existing = map[key]
-            if (existing == null) map[key] = java.util.TreeSet(facts) else existing.addAll(facts)
-        }
-
-        fun removeKey(key: TaintKey) {
-            map.remove(key)
-        }
-
-        fun copy(): State {
-            val out = State()
-            for ((k, v) in map) out.map[k] = java.util.TreeSet(v)
-            return out
-        }
-
-        fun mergeFrom(other: State) {
-            for ((key, facts) in other.map) addFacts(key, facts)
-        }
-
-        companion object {
-            private val EMPTY = java.util.TreeSet<SummaryFact>()
-        }
-    }
+    private val chain = HashMap<ChainKey<SummaryFact>, Move>()
+    private val state = FlowState<SummaryFact>()
 
     /** Upstream paths for facts born at summary applications inside this body. */
     private val upstream = HashMap<SummaryFact, List<Int>>()
@@ -575,36 +543,6 @@ internal class SummaryAnalysis(
     private val paramToParam = HashMap<Int, MutableSet<Int>>()
     private val paramFieldWrites = HashMap<Int, MutableMap<Int, MutableSet<String>>>()
     private val receiverWrites = HashMap<Int, MutableSet<String>>()
-
-    /**
-     * A parameter-root fact sitting on a receiver's BASE register models the
-     * object itself; reading a FIELD of that object yields the value at
-     * fact.path + suffix. Without this, `fun sink(job: Job) =
-     * ProcessBuilder(job.command)` never sees the parameter's taint (it
-     * lives on the base) — and with a BLIND base read, the clean-sibling
-     * negative would die, because `job.label` would read the same taint.
-     * The synthesized fact carries the EXTENDED path, so the effect records
-     * exactly which field was sunk.
-     */
-    private fun synthesizeFieldRead(receiver: String, suffix: String, result: String, site: Int) {
-        if (suffix.isEmpty()) return
-        val baseKey = reg(receiver)
-        val resultKey = reg(result)
-        val rooted = state.factsOf(baseKey).filter { it.param != null }
-        if (rooted.isEmpty()) return
-        for (fact in rooted) {
-            val derived = fact.withPath(joinPath(fact.path, suffix))
-            state.addFacts(resultKey, listOf(derived))
-            chain[ChainKey(derived, resultKey)] = Move(site, baseKey, "field")
-        }
-    }
-
-    private fun joinPath(prefix: String, suffix: String): String =
-        when {
-            prefix.isEmpty() -> suffix
-            suffix.isEmpty() -> prefix
-            else -> "$prefix.$suffix"
-        }
 
     /** Records param i's taint stored into param [toParam]'s object at [suffix]. */
     private fun recordFieldWrite(fromParam: Int, toParam: Int, suffix: String) {
@@ -668,7 +606,7 @@ internal class SummaryAnalysis(
         // Follow one hop of assigns in program order.
         for (block in cf.blocks) {
             for (ins in block.instructions) {
-                if (ins is KirAssign && ins.result == register) {
+                if (ins is io.cdxgen.kosi.kir.KirAssign && ins.result == register) {
                     return paramIndexOf(ins.source, depth + 1)
                 }
             }
@@ -677,63 +615,17 @@ internal class SummaryAnalysis(
     }
 
     fun run() {
-        // Entry state: one fact per parameter, born at the (synthetic) entry
-        // move so every later move's provenance walk terminates here. It is
-        // JOINTED INTO the entry block's input on every pass — the entry
-        // block may also carry loop predecessors, and the seeds must
-        // survive both; seeding `state` directly would be erased by the
-        // next transfer's copy of its input.
-        val entryState = State()
-        for ((index, param) in cf.function.params.withIndex()) {
-            val fact = SummaryFact(index, null, "")
-            val key = TaintKey(param.register, "")
-            entryState.addFacts(key, listOf(fact))
-            chain[ChainKey(fact, key)] = Move(ENTRY_SITE, null, "param")
+        val transfer = FlowTransfer(this, chain)
+        val fixpoint = transfer.runFixpoint(cf.blocks, cf.sitesByBlock, cf.successors, cf.predecessors)
+        if (fixpoint == null) {
+            stateOverBudget = true
+            return
         }
-        val entryBlockId = cf.blocks.first().id
-        val blocks = cf.blocks
-        val outStates = HashMap<String, State>()
-        val work = ArrayDeque(blocks.map { it.id })
-        val queued = work.toHashSet()
-        // The budget is generous and deterministic: a monotone framework over
-        // finitely many facts converges well inside it on real code. Hitting
-        // it is a `fixpoint-cap` diagnostic over the analysed-function count,
-        // never a silent truncation.
-        val budget = 64 + 16 * blocks.size
-        var rounds = 0
-        while (work.isNotEmpty()) {
-            if (rounds++ > budget) {
-                capHit = true
-                break
-            }
-            val blockId = work.removeFirst()
-            queued.remove(blockId)
-            val input = joinPredecessors(blockId, outStates)
-            if (blockId == entryBlockId) input.mergeFrom(entryState)
-            val output = transfer(cf.sitesByBlock.getValue(blockId), input)
-            var entries = 0
-            for ((key, facts) in output.map) {
-                entries += 1 + facts.size
-                if (entries > options.maxSummaryStateEntries) break
-            }
-            if (entries > options.maxSummaryStateEntries) {
-                stateOverBudget = true
-                break
-            }
-            val previous = outStates[blockId]
-            if (previous == null || output.map != previous.map) {
-                outStates[blockId] = output
-                for (succ in cf.successors[blockId].orEmpty()) {
-                    if (queued.add(succ)) work.addLast(succ)
-                }
-            }
-        }
-        if (stateOverBudget) return
+        capHit = fixpoint.capHit
         // Final sweep at fixpoint: record every escape.
-        for (block in blocks) {
-            val input = joinPredecessors(block.id, outStates)
-            if (block.id == entryBlockId) input.mergeFrom(entryState)
-            transfer(cf.sitesByBlock.getValue(block.id), input, collect = true)
+        for (block in cf.blocks) {
+            val input = transfer.inputForBlock(block.id, fixpoint.outStates, cf.predecessors)
+            transfer.transfer(cf.sitesByBlock.getValue(block.id), input, collect = true)
         }
     }
 
@@ -742,177 +634,148 @@ internal class SummaryAnalysis(
         const val ENTRY_SITE = -1
     }
 
-    private fun joinPredecessors(blockId: String, outStates: Map<String, State>): State {
-        val joined = State()
-        for (pred in cf.predecessors[blockId].orEmpty()) {
-            outStates[pred]?.let { joined.mergeFrom(it) }
-        }
-        return joined
+    // ---- the TransferHost implementation ------------------------------------
+
+    override fun birthFact(site: Int, category: String): SummaryFact = SummaryFact(null, site, category)
+
+    override fun packMoveOrigin(): String? = null
+
+    override fun onSourceApplied(fqn: String, site: Int, fact: SummaryFact, resultKey: TaintKey, collect: Boolean?) {}
+
+    override fun onSanitizerCleared(cleared: List<String>, collect: Boolean?) {
+        if (collect != true) return
+        for (category in cleared) sanitizes.add(category)
     }
 
-    private fun fieldSuffix(path: AccessPath?): String =
-        if (options.accessPathDepth <= 0 || path == null) {
-            ""
-        } else {
-            path.elements.joinToString(".") { element ->
-                when (element) {
-                    is AccessPath.Element.Field -> element.name
-                    AccessPath.Element.Index -> "[]"
-                    AccessPath.Element.Star -> "*"
+    override fun onPackPassthroughApplied(fqn: String, collect: Boolean?) {}
+
+    override fun onSinkMatched(collect: Boolean?) {}
+
+    override fun onResolvedCall(ins: KirCall, site: Int, collect: Boolean?) {
+        // An invoke of a function-valued PARAMETER (`block(x)` lowers to
+        // Function1.invoke with the value on the receiver) is a fact about
+        // this summary regardless of what the pack says about Function1.
+        if (collect != true) return
+        val receiver = ins.receiver
+        if (ins.callee.fqn.endsWith(".invoke") && receiver != null) {
+            paramIndexOf(receiver)?.let { invokedParams.add(it) }
+        }
+    }
+
+    override fun onSinkRead(
+        sink: io.cdxgen.kosi.models.SinkPattern,
+        fqn: String,
+        site: Int,
+        argIndex: Int,
+        argKey: TaintKey,
+        facts: Set<SummaryFact>,
+        collect: Boolean?,
+    ) {
+        // Recorded in the collect sweep only: mid-fixpoint chains are
+        // partial, and a summary must describe the converged body, not an
+        // iterate.
+        if (collect != true) return
+        for (fact in facts) {
+            if (fact.param == null) continue // a source-born fact at a sink is intraprocedural
+            val raw = upstream[fact].orEmpty() + walkBack(fact, argKey)
+            val (path, cut) = stabilize(raw)
+            recordEffect(
+                SummarySinkEffect(
+                    paramIndex = fact.param,
+                    paramPath = fact.path,
+                    sinkSite = site,
+                    sinkCalleeFqn = fqn,
+                    sinkCategory = sink.category,
+                    sinkSeverity = sink.severity,
+                    sinkArgumentIndex = argIndex,
+                    sinkAccessPath = argKey.render(),
+                    path = path,
+                    elided = cut,
+                ),
+            )
+        }
+    }
+
+    override fun onEffectWritten(
+        fqn: String,
+        valueReg: String,
+        receiverKey: TaintKey,
+        facts: Set<SummaryFact>,
+        site: Int,
+        collect: Boolean?,
+    ) {
+        if (collect != true) return
+        val toParam = paramIndexOf(receiverKey.base)
+        for (fact in facts) {
+            val from = fact.param ?: continue
+            if (toParam != null) {
+                recordFieldWrite(from, toParam, "[]")
+            }
+        }
+    }
+
+    override fun onFieldWriteEscape(
+        receiver: String,
+        valueReg: String,
+        suffix: String,
+        facts: Set<SummaryFact>,
+        collect: Boolean?,
+    ) {
+        // A write into a PARAMETER's object is a summary ESCAPE: after the
+        // call, the caller's argument object carries the written field's
+        // taint. The receiver case (a member storing into `this`) is the
+        // to-param = receiver index.
+        if (collect != true) return
+        val toParam = paramIndexOf(receiver) ?: return
+        val fromParam = paramIndexOf(valueReg)
+        for (fact in facts) {
+            val from = fact.param ?: continue
+            if (fromParam != null) {
+                recordFieldWrite(from, toParam, suffix)
+            }
+        }
+    }
+
+    override fun onReturn(ins: KirReturn, site: Int, state: FlowState<SummaryFact>, collect: Boolean?) {
+        if (collect != true) return
+        if (ins.value != null) {
+            val valueKey = TaintKey(ins.value!!, "")
+            for (fact in state.factsOf(valueKey)) {
+                val up = upstream[fact].orEmpty()
+                val path = up + walkBack(fact, valueKey)
+                when {
+                    fact.param != null -> paramToReturn.add(fact.param!!)
+                    fact.site != null -> sourceReturns.getOrPut(fact.category) { mutableListOf() }.add(path)
                 }
             }
         }
-
-    private fun reg(register: String): TaintKey = TaintKey(register, "")
-
-    private fun moveAll(from: TaintKey, to: TaintKey, site: Int, kind: String, replace: Boolean) {
-        val facts = state.factsOf(from)
-        if (facts.isEmpty()) {
-            if (replace) state.removeKey(to)
-            return
-        }
-        if (replace) state.setFacts(to, java.util.TreeSet(facts)) else state.addFacts(to, facts)
-        for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind)
+        recordParamWrites(state)
     }
 
-    private fun joinInto(result: String, operands: List<String>, site: Int, kind: String) {
-        val merged = java.util.TreeSet<SummaryFact>()
-        val origin = HashMap<SummaryFact, TaintKey>()
-        for (operand in operands) {
-            val operandKey = reg(operand)
-            for (fact in state.factsOf(operandKey)) {
-                merged.add(fact)
-                origin.putIfAbsent(fact, operandKey)
-            }
-        }
-        val resultKey = reg(result)
-        state.setFacts(resultKey, merged)
-        for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site, origin.getValue(fact), kind)
+    override fun onDynamicCall(ins: KirDynamicCall, site: Int, collect: Boolean?) {
+        // An invocation of a function-valued parameter is a fact about this
+        // summary regardless of resolution.
+        if (collect != true) return
+        ins.receiver?.let { recv -> paramIndexOf(recv)?.let { invokedParams.add(it) } }
     }
 
-    private fun transfer(sites: List<Site>, input: State, collect: Boolean = false): State {
-        val state = this.state
-        state.map.clear()
-        for ((key, facts) in input.map) state.map[key] = java.util.TreeSet(facts)
+    override fun onUnknownPropagation(collect: Boolean?) {}
 
-        for (site in sites) {
-            when (val ins = site.ins) {
-                is KirAssign -> moveAll(reg(ins.source), reg(ins.result), site.id, "assign", replace = true)
-                is KirStore -> moveAll(reg(ins.value), reg(ins.target), site.id, "assign", replace = true)
-                is KirLoad -> state.removeKey(reg(ins.result))
-                is KirNew -> state.removeKey(reg(ins.result))
-                is KirLambda -> state.removeKey(reg(ins.result))
-                is KirTypeCheck -> state.removeKey(reg(ins.result))
-                is KirStringConcat -> joinInto(ins.result, ins.parts, site.id, "concat")
-                is KirPhi -> joinInto(ins.result, ins.inputs.values.toList(), site.id, "phi")
-                is KirElvis -> joinInto(ins.result, listOf(ins.value, ins.fallback), site.id, "elvis")
-                is KirCast -> moveAll(reg(ins.value), reg(ins.result), site.id, "assign", replace = true)
-                is KirFieldGet -> {
-                    moveAll(TaintKey(ins.receiver, fieldSuffix(ins.path)), reg(ins.result), site.id, "field", replace = true)
-                    synthesizeFieldRead(ins.receiver, fieldSuffix(ins.path), ins.result, site.id)
-                }
-                is KirSafeCall -> {
-                    moveAll(TaintKey(ins.receiver, fieldSuffix(ins.path)), reg(ins.result), site.id, "field", replace = true)
-                    synthesizeFieldRead(ins.receiver, fieldSuffix(ins.path), ins.result, site.id)
-                }
-                is KirFieldSet -> {
-                    val targetKey = TaintKey(ins.receiver, fieldSuffix(ins.path))
-                    moveAll(reg(ins.value), targetKey, site.id, "field", replace = false)
-                    // A write into a PARAMETER's object is a summary ESCAPE:
-                    // after the call, the caller's argument object carries
-                    // the written field's taint. The receiver case (a member
-                    // storing into `this`) is the to-param = receiver index.
-                    if (collect) {
-                        val toParam = paramIndexOf(ins.receiver) ?: continue
-                        val fromParam = paramIndexOf(ins.value)
-                        for (fact in state.factsOf(reg(ins.value))) {
-                            val from = fact.param ?: continue
-                            if (fromParam != null) {
-                                recordFieldWrite(from, toParam, fieldSuffix(ins.path))
-                            }
-                        }
-                    }
-                }
-                is KirIndexGet -> {
-                    val elementKey = TaintKey(ins.receiver, if (options.accessPathDepth > 0) "[]" else "")
-                    val wholeKey = reg(ins.receiver)
-                    // Per-fact blame, as in the reporting engine (R62).
-                    val merged = java.util.TreeSet<SummaryFact>()
-                    val blame = HashMap<SummaryFact, TaintKey>()
-                    for (sourceKey in listOf(elementKey, wholeKey)) {
-                        for (fact in state.factsOf(sourceKey)) {
-                            merged.add(fact)
-                            blame.putIfAbsent(fact, sourceKey)
-                        }
-                    }
-                    val resultKey = reg(ins.result)
-                    state.setFacts(resultKey, merged)
-                    for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site.id, blame.getValue(fact), "index")
-                }
-                is KirIndexSet ->
-                    moveAll(reg(ins.value), TaintKey(ins.receiver, if (options.accessPathDepth > 0) "[]" else ""), site.id, "index", replace = false)
+    override fun entryBindings(): List<Pair<String, SummaryFact>> =
+        cf.function.params.mapIndexed { index, param -> param.register to SummaryFact(index, null, "") }
 
-                is KirSuspendPoint -> {
-                    // A suspend boundary is transparent to a MAY analysis:
-                    // the value crossing it is the value the call produced,
-                    // and coroutine suspension does not launder taint. Not an
-                    // omission — the P6 report counts how many slices cross
-                    // these boundaries, which requires them to persist.
-                    state.removeKey(reg(ins.result))
-                }
+    override fun entryBlockId(): String? = cf.blocks.firstOrNull()?.id
 
-                is KirBranch, is KirThrow -> {}
-                is KirReturn -> {
-                    if (collect) {
-                        if (ins.value != null) {
-                            val valueKey = reg(ins.value!!)
-                            for (fact in state.factsOf(valueKey)) {
-                                val up = upstream[fact].orEmpty()
-                                val path = up + walkBack(fact, valueKey)
-                                when {
-                                    fact.param != null -> paramToReturn.add(fact.param)
-                                    fact.site != null -> sourceReturns.getOrPut(fact.category) { mutableListOf() }.add(path)
-                                }
-                            }
-                        }
-                        recordParamWrites()
-                    }
-                }
-
-                is KirCall -> handleCall(ins, site, collect)
-                is KirDynamicCall -> {
-                    // An invocation of a function-valued parameter is a fact
-                    // about this summary regardless of resolution.
-                    if (collect) {
-                        ins.receiver?.let { recv -> paramIndexOf(recv)?.let { invokedParams.add(it) } }
-                    }
-                    handleUnknown(ins.result, ins.receiver, ins.args, site.id)
-                }
-            }
-        }
-        // A COPY: outStates keeps per-block states, and this.state is reused
-        // by the next transfer call — returning the live object would alias
-        // every stored state to one mutating map.
-        return state.copy()
-    }
-
-    /** The `this` register of the analysed function, when it has one. */
-    private fun thisReceiver(): String? {
-        val receiverParam = cf.function.params.firstOrNull { it.receiver } ?: return null
-        return paramAliases.entries
-            .firstOrNull { cf.function.params.getOrNull(it.value)?.receiver == true }?.key
-            ?: receiverParam.register
-    }
+    override fun stateOverBudget(state: FlowState<SummaryFact>): Boolean =
+        state.entryCount() > options.maxSummaryStateEntries
 
     /** Walks the provenance chain from [key] back to a birth move; forward site list. */
     private fun walkBack(fact: SummaryFact, key: TaintKey): List<Int> {
-        val visited = HashSet<ChainKey>()
+        val visited = HashSet<ChainKey<SummaryFact>>()
         val moves = mutableListOf<Move>()
-        var elided = false
         var current = key
         while (true) {
             if (!visited.add(ChainKey(fact, current))) {
-                elided = true
                 break
             }
             val move = chain[ChainKey(fact, current)] ?: break
@@ -920,159 +783,47 @@ internal class SummaryAnalysis(
             if (move.prevKey == null) break
             current = move.prevKey
         }
-        // The walk's site list; `elided` is remembered by the caller's
-        // effect only when the walk never reached a birth move — an effect
-        // with a cut path is still published, and the SLICE built from it
-        // carries the elided marker and a guaranteed source endpoint.
+        // The walk's site list; an effect with a cut path is still published,
+        // and the SLICE built from it carries the elided marker and a
+        // guaranteed source endpoint.
         return moves.map { it.site }.filter { it >= 0 }.reversed()
     }
 
-    private fun handleCall(ins: KirCall, site: Site, collect: Boolean) {
+    private fun moveChain(
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+        from: TaintKey,
+        to: TaintKey,
+        site: Int,
+        kind: String,
+        origin: String?,
+    ): Boolean {
+        val facts = state.factsOf(from)
+        if (facts.isEmpty()) return false
+        state.addFacts(to, facts)
+        for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind, origin)
+        return true
+    }
+
+    override fun applyCalleeSummaries(
+        ins: KirCall,
+        site: Int,
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+        collect: Boolean?,
+    ): Boolean {
         val fqn = ins.callee.fqn
-        val result = ins.result
-        val receiver = ins.receiver
-
-        // An invoke of a function-valued PARAMETER (`block(x)` lowers to
-        // Function1.invoke with the value on the receiver) is a fact about
-        // this summary regardless of what the pack says about Function1.
-        if (collect && fqn.endsWith(".invoke") && receiver != null) {
-            paramIndexOf(receiver)?.let { invokedParams.add(it) }
-        }
-
-        fun registerAt(index: Int): String? {
-            if (index < 0) return null
-            return if (receiver != null) {
-                if (index == 0) receiver else ins.args.getOrNull(index - 1)
-            } else {
-                ins.args.getOrNull(index)
-            }
-        }
-
-        var matched = false
-
-        // SINK first, on the pre-call state. Recorded in the collect sweep
-        // only: mid-fixpoint chains are partial, and a summary must describe
-        // the converged body, not an iterate.
-        val sink = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
-        if (sink != null && collect) {
-            matched = true
-            for (argIndex in sink.relevantArguments.sorted()) {
-                val register = registerAt(argIndex) ?: continue
-                val argKey = TaintKey(register, "")
-                for (fact in state.factsOf(argKey)) {
-                    if (fact.param == null) continue // a source-born fact at a sink is intraprocedural
-                    val raw = upstream[fact].orEmpty() + walkBack(fact, argKey)
-                    val (path, cut) = stabilize(raw)
-                    recordEffect(
-                        SummarySinkEffect(
-                            paramIndex = fact.param,
-                            paramPath = fact.path,
-                            sinkSite = site.id,
-                            sinkCalleeFqn = fqn,
-                            sinkCategory = sink.category,
-                            sinkSeverity = sink.severity,
-                            sinkArgumentIndex = argIndex,
-                            sinkAccessPath = argKey.render(),
-                            path = path,
-                            elided = cut,
-                        ),
-                    )
-                }
-            }
-        } else if (sink != null) {
-            matched = true
-        }
-
-        // SOURCE: a category-carrying fact born here.
-        val source = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
-        if (source != null && result != null) {
-            matched = true
-            val fact = SummaryFact(null, site.id, source.category)
-            val resultKey = TaintKey(result, "")
-            state.addFacts(resultKey, listOf(fact))
-            chain[ChainKey(fact, resultKey)] = Move(site.id, null, "source")
-        }
-
-        // SANITIZER: clears the named categories on the result only.
-        val sanitizer = pack.sanitizers.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
-        if (sanitizer != null && result != null) {
-            matched = true
-            val resultKey = TaintKey(result, "")
-            val remaining = state.factsOf(resultKey).filter { it.category !in sanitizer.clears }
-            if (remaining.size != state.factsOf(resultKey).size) {
-                for (category in sanitizer.clears) sanitizes.add(category)
-            }
-            state.setFacts(resultKey, java.util.TreeSet(remaining))
-        }
-
-        // PASSTHROUGH.
-        val passthrough = pack.passthroughs.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
-        if (passthrough != null) {
-            matched = true
-            for (flow in passthrough.flows) {
-                if (flow.size < 2) continue
-                val from = registerAt(flow[0])
-                val to = if (flow[1] == -1) result else registerAt(flow[1])
-                if (from == null || to == null) continue
-                moveChain(TaintKey(from, ""), TaintKey(to, ""), site.id, "call")
-            }
-            for (flow in passthrough.elementFlows) {
-                if (flow.size < 2) continue
-                val to = if (flow[1] == -1) result else registerAt(flow[1])
-                val fromReceiver = receiver ?: continue
-                if (to == null) continue
-                moveChain(
-                    TaintKey(fromReceiver, if (options.accessPathDepth > 0) "[]" else ""),
-                    TaintKey(to, ""),
-                    site.id,
-                    "call",
-                )
-            }
-        }
-
-        // EFFECT: argument taint into the receiver's element state.
-        val effect = pack.effects.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
-        if (effect != null && receiver != null) {
-            matched = true
-            for (writeIndex in effect.writesToArguments) {
-                if (writeIndex <= 0) continue
-                val register = registerAt(writeIndex) ?: continue
-                moveChain(
-                    TaintKey(register, ""),
-                    TaintKey(receiver, if (options.accessPathDepth > 0) "[]" else ""),
-                    site.id,
-                    "effect",
-                )
-                if (collect) {
-                    val toParam = paramIndexOf(receiver)
-                    for (fact in state.factsOf(TaintKey(register, ""))) {
-                        val from = fact.param ?: continue
-                        if (toParam != null) {
-                            recordFieldWrite(from, toParam, "[]")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (matched) {
-            // Pack entries stay authoritative: a matched call applies no
-            // summary. Escape records that DO apply here: the pack sink above
-            // already recorded param escapes; nothing else carries a summary.
-            return
-        }
-
-        // Summary application: the JOIN of the dispatch targets' summaries.
         val targets = callIndex.targets(fqn, ins.callee.descriptor, ins.callee.kind)
         if (targets.isEmpty()) {
-            handleUnknown(result, receiver, ins.args, site.id)
-            return
+            // No dispatch target: the shared unknown default runs.
+            return false
         }
         val originByTarget = targets.associate { it.canonicalName to (table[it.canonicalName]?.origin ?: SummaryOrigin.COMPUTED) }
         for (target in targets) {
             val summary = table[target.canonicalName] ?: continue
-            applySummary(summary, receiver, ins.args, result, site, originByTarget.getValue(target.canonicalName))
+            applySummary(summary, ins.receiver, ins.args, ins.result, site, originByTarget.getValue(target.canonicalName), state, chain)
         }
+        return true
     }
 
     /**
@@ -1087,8 +838,10 @@ internal class SummaryAnalysis(
         receiver: String?,
         args: List<String>,
         result: String?,
-        site: Site,
+        site: Int,
         origin: String,
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
     ) {
         val params = summary.function.params
         val receiverIndex = params.indexOfFirst { it.receiver }
@@ -1097,6 +850,8 @@ internal class SummaryAnalysis(
             receiverIndex >= 0 -> args.getOrNull(index - 1)
             else -> args.getOrNull(index)
         }
+
+        fun reg(register: String): TaintKey = TaintKey(register, "")
 
         if (result != null) {
             val resultKey = reg(result)
@@ -1107,22 +862,22 @@ internal class SummaryAnalysis(
                 if (facts.isEmpty()) continue
                 state.addFacts(resultKey, facts)
                 for (fact in facts) {
-                    chain[ChainKey(fact, resultKey)] = Move(site.id, fromKey, "summary", origin)
+                    chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin)
                 }
             }
             for ((category, path) in summary.sourceReturns) {
-                val fact = SummaryFact(null, site.id, category)
-                upstream[fact] = listOf(site.id) + path
+                val fact = SummaryFact(null, site, category)
+                upstream[fact] = listOf(site) + path
                 state.addFacts(resultKey, listOf(fact))
-                chain[ChainKey(fact, resultKey)] = Move(site.id, null, "source-return", origin)
+                chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
             }
         }
-        if (summary.sinkEffects.isNotEmpty()) recordComposedSinkEffects(summary, receiver, args, site)
+        if (summary.sinkEffects.isNotEmpty()) recordComposedSinkEffects(summary, receiver, args, site, state)
         for ((from, tos) in summary.paramToParam) {
             val fromReg = mapping(from) ?: continue
             for (to in tos.sorted()) {
                 val toReg = mapping(to) ?: continue
-                moveChain(TaintKey(fromReg, ""), TaintKey(toReg, ""), site.id, "summary")
+                moveChain(state, chain, reg(fromReg), reg(toReg), site, "summary", null)
             }
         }
         for ((param, suffixes) in summary.receiverWrites) {
@@ -1130,12 +885,18 @@ internal class SummaryAnalysis(
             val targetBase = receiver ?: thisReceiver() ?: continue
             val fromReg = mapping(param) ?: continue
             for (suffix in suffixes.sorted()) {
-                moveChain(TaintKey(fromReg, ""), TaintKey(targetBase, suffix), site.id, "summary")
+                moveChain(state, chain, reg(fromReg), TaintKey(targetBase, suffix), site, "summary", null)
             }
         }
     }
 
-    private fun recordComposedSinkEffects(summary: FunctionSummary, receiver: String?, args: List<String>, site: Site) {
+    private fun recordComposedSinkEffects(
+        summary: FunctionSummary,
+        receiver: String?,
+        args: List<String>,
+        site: Int,
+        state: FlowState<SummaryFact>,
+    ) {
         val params = summary.function.params
         val receiverIndex = params.indexOfFirst { it.receiver }
         fun mapping(index: Int): String? = when {
@@ -1148,7 +909,7 @@ internal class SummaryAnalysis(
             val fromKey = TaintKey(fromReg, "")
             for (fact in state.factsOf(fromKey)) {
                 if (fact.param == null) continue
-                val raw = upstream[fact].orEmpty() + walkBack(fact, fromKey) + listOf(site.id) + effect.path
+                val raw = upstream[fact].orEmpty() + walkBack(fact, fromKey) + listOf(site) + effect.path
                 val (path, cut) = stabilize(raw)
                 recordEffect(
                     SummarySinkEffect(
@@ -1168,38 +929,12 @@ internal class SummaryAnalysis(
         }
     }
 
-    private fun moveChain(from: TaintKey, to: TaintKey, site: Int, kind: String) {
-        val facts = state.factsOf(from)
-        if (facts.isEmpty()) return
-        state.addFacts(to, facts)
-        for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind)
-    }
-
-    private fun handleUnknown(result: String?, receiver: String?, args: List<String>, site: Int) {
-        if (result == null) return
-        if (!options.unknownCallPropagate) {
-            state.removeKey(reg(result))
-            return
-        }
-        val resultKey = reg(result)
-        val incoming = java.util.TreeSet<SummaryFact>()
-        // Per-fact blame, as in the reporting engine (R62).
-        val blame = HashMap<SummaryFact, TaintKey>()
-        for (sourceReg in listOfNotNull(receiver) + args) {
-            val sourceKey = TaintKey(sourceReg, "")
-            for (fact in state.factsOf(sourceKey)) {
-                incoming.add(fact)
-                blame.putIfAbsent(fact, sourceKey)
-            }
-        }
-        if (incoming.isEmpty()) {
-            state.removeKey(resultKey)
-            return
-        }
-        state.addFacts(resultKey, incoming)
-        for (fact in incoming) {
-            chain[ChainKey(fact, resultKey)] = Move(site, blame.getValue(fact), "propagate", SummaryOrigin.DEFAULT)
-        }
+    /** The `this` register of the analysed function, when it has one. */
+    private fun thisReceiver(): String? {
+        val receiverParam = cf.function.params.firstOrNull { it.receiver } ?: return null
+        return paramAliases.entries
+            .firstOrNull { cf.function.params.getOrNull(it.value)?.receiver == true }?.key
+            ?: receiverParam.register
     }
 
     /**
@@ -1207,7 +942,7 @@ internal class SummaryAnalysis(
      * exit is a WRITE EFFECT the caller must see: after the call, argument
      * j carries argument i's taint (`paramToParam`).
      */
-    private fun recordParamWrites() {
+    private fun recordParamWrites(state: FlowState<SummaryFact>) {
         for ((alias, paramIndex) in paramAliases) {
             for ((key, facts) in state.map) {
                 if (key.base != alias) continue
@@ -1253,7 +988,7 @@ internal fun lambdaDefsOf(cf: CompiledFunction): Map<String, String> {
         for (ins in block.instructions) {
             when (ins) {
                 is KirLambda -> defs[ins.result] = ins.function
-                is KirAssign -> assigns[ins.result] = ins.source
+                is io.cdxgen.kosi.kir.KirAssign -> assigns[ins.result] = ins.source
                 else -> {}
             }
         }

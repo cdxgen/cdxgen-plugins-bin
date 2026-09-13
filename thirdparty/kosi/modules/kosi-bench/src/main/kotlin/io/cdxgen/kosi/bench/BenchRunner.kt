@@ -132,6 +132,26 @@ object BenchRunner {
         val sccIterationCapHits: Int? = null,
         /** P6: slices crossing a suspend boundary. */
         val suspendCrossingSlices: Int? = null,
+        /**
+         * P7 endpoint facts: the endpoint count and how many handler symbols
+         * resolve to a call-graph node (the resolved-handler gate's two
+         * counts), endpoint-rooted slices, and the per-framework endpoint
+         * expectations [matched, total]. Null/empty only for baselines
+         * written before P7.
+         */
+        val endpointCount: Int? = null,
+        val endpointsResolvedHandler: Int? = null,
+        val endpointRootedSlices: Int? = null,
+        val endpointRecallByFramework: Map<String, List<Int>> = emptyMap(),
+        /** P7 config-resolution counts (the gate's denominator and numerator). */
+        val configValuesTotal: Int? = null,
+        val configValuesResolved: Int? = null,
+        /** P8 crypto facts. `cryptoMappingHits` name the mapping rows this fixture exercised. */
+        val cryptoAssets: Int? = null,
+        val cryptoMappingHits: List<String> = emptyList(),
+        val cryptoFlowSlices: Int? = null,
+        /** Per-form Cipher mode/padding extraction: form -> [extracted, total]. */
+        val cryptoModePaddingByForm: Map<String, List<Int>> = emptyMap(),
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -194,6 +214,34 @@ object BenchRunner {
             sccsProcessed?.let { w.num("sccsProcessed", it) }
             sccIterationCapHits?.let { w.num("sccIterationCapHits", it) }
             suspendCrossingSlices?.let { w.num("suspendCrossingSlices", it) }
+            endpointCount?.let { w.num("endpointCount", it) }
+            endpointsResolvedHandler?.let { w.num("endpointsResolvedHandler", it) }
+            endpointRootedSlices?.let { w.num("endpointRootedSlices", it) }
+            w.beginObject("endpointRecallByFramework")
+            for (framework in endpointRecallByFramework.keys.sorted()) {
+                val pair = endpointRecallByFramework[framework] ?: continue
+                w.beginArray(framework)
+                w.num((pair.getOrNull(0) ?: 0).toLong())
+                w.num((pair.getOrNull(1) ?: 0).toLong())
+                w.endArray()
+            }
+            w.endObject()
+            configValuesTotal?.let { w.num("configValuesTotal", it) }
+            configValuesResolved?.let { w.num("configValuesResolved", it) }
+            cryptoAssets?.let { w.num("cryptoAssets", it) }
+            w.beginArray("cryptoMappingHits")
+            for (hit in cryptoMappingHits.sorted()) w.str(hit)
+            w.endArray()
+            cryptoFlowSlices?.let { w.num("cryptoFlowSlices", it) }
+            w.beginObject("cryptoModePaddingByForm")
+            for (form in cryptoModePaddingByForm.keys.sorted()) {
+                val pair = cryptoModePaddingByForm[form] ?: continue
+                w.beginArray(form)
+                w.num((pair.getOrNull(0) ?: 0).toLong())
+                w.num((pair.getOrNull(1) ?: 0).toLong())
+                w.endArray()
+            }
+            w.endObject()
             w.str("slot", slot)
             w.str("slug", slug)
             w.num("wallMillis", wallMillis)
@@ -385,6 +433,22 @@ object BenchRunner {
                         sccsProcessed = r.long("sccsProcessed")?.toInt(),
                         sccIterationCapHits = r.long("sccIterationCapHits")?.toInt(),
                         suspendCrossingSlices = r.long("suspendCrossingSlices")?.toInt(),
+                        endpointCount = r.long("endpointCount")?.toInt(),
+                        endpointsResolvedHandler = r.long("endpointsResolvedHandler")?.toInt(),
+                        endpointRootedSlices = r.long("endpointRootedSlices")?.toInt(),
+                        endpointRecallByFramework = r.obj("endpointRecallByFramework")?.members.orEmpty()
+                            .mapValues { (_, v) ->
+                                (v as? io.cdxgen.kosi.schema.JsonArr)?.items?.map { it.asLong().toInt() } ?: emptyList()
+                            },
+                        configValuesTotal = r.long("configValuesTotal")?.toInt(),
+                        configValuesResolved = r.long("configValuesResolved")?.toInt(),
+                        cryptoAssets = r.long("cryptoAssets")?.toInt(),
+                        cryptoMappingHits = r.arr("cryptoMappingHits")?.strings() ?: emptyList(),
+                        cryptoFlowSlices = r.long("cryptoFlowSlices")?.toInt(),
+                        cryptoModePaddingByForm = r.obj("cryptoModePaddingByForm")?.members.orEmpty()
+                            .mapValues { (_, v) ->
+                                (v as? io.cdxgen.kosi.schema.JsonArr)?.items?.map { it.asLong().toInt() } ?: emptyList()
+                            },
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -416,13 +480,54 @@ object BenchRunner {
             )
         }
         val results = mutableListOf<FixtureResult>()
+        val trace = !System.getenv("KOSI_TRACE").isNullOrBlank()
         for (entry in entries) {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
             for (slot in Matrix.defaultMatrix()) {
-                results.add(runSlot(entry, dir, annotations, slot, commit))
+                // CI death diagnosis (the pkg corpusQuick hang): when a
+                // runner kills this JVM mid-run, stderr's last marker names
+                // the exact fixture and slot it died on.
+                if (trace) System.err.println("TRACE: bench ${entry.slug} ${slot.label} start")
+                results.add(
+                    try {
+                        runSlot(entry, dir, annotations, slot, commit)
+                    } catch (t: Throwable) {
+                        // A slot whose analysis dies is a NAMED failure row,
+                        // never a silent skip and never a dead run: the
+                        // corpus degrades by exactly one countable row and
+                        // the other slots still publish (07-REVIEW-PROTOCOL
+                        // #9 — a degradation nobody can see is the one that
+                        // ships). http4k's partial offline classpath trips
+                        // an upstream Analysis API checker and lands here.
+                        val message = (t.message ?: t::class.simpleName ?: "error").take(200)
+                        FixtureResult(
+                            slug = entry.slug,
+                            tier = entry.tier,
+                            slot = slot.label,
+                            annotations = annotations.size,
+                            positives = annotations.count { !it.isNegative },
+                            negatives = annotations.count { it.isNegative },
+                            pass = 0,
+                            fail = annotations.count { !it.isNegative },
+                            xfail = 0,
+                            xpass = 0,
+                            positivesPassed = 0,
+                            positivesRecallDenominator = annotations.count { !it.isNegative },
+                            recall = 0.0,
+                            connectivity = 0.0,
+                            sliceCount = 0,
+                            integrityViolations = 0,
+                            wallMillis = 0,
+                            parseErrors = 0,
+                            digest = Digests.FixtureDigest(entry.slug, slot.label, emptyMap()),
+                            failures = listOf("analysis failed: $message"),
+                        )
+                    },
+                )
             }
         }
+        if (trace) System.err.println("TRACE: bench assembling result (" + results.size + " rows)")
         val walls = results.map { it.wallMillis }.sorted()
         return BenchResult(
             results = results.sortedWith(compareBy({ it.slug }, { it.slot })),
@@ -606,6 +711,16 @@ object BenchRunner {
             sccsProcessed = report.stats.sccsProcessed.takeIf { report.stats.functionsAnalysed > 0 },
             sccIterationCapHits = report.stats.sccIterationCapHits.takeIf { report.stats.functionsAnalysed > 0 },
             suspendCrossingSlices = report.dataFlow?.stats?.suspendCrossingSlices,
+            endpointCount = report.apiEndpoints.size,
+            endpointsResolvedHandler = EndpointMetrics.resolvedHandlers(report),
+            endpointRootedSlices = EndpointMetrics.rootedSlices(report),
+            endpointRecallByFramework = EndpointMetrics.recallByFramework(evaluation),
+            configValuesTotal = report.services.count { it.resolution != "literal" && it.resolution != "folded" },
+            configValuesResolved = report.services.count { it.resolution == "config" },
+            cryptoAssets = report.crypto.assets.size,
+            cryptoMappingHits = report.crypto.assets.flatMap { CryptoMetrics.mappingKeys(it) }.distinct().sorted(),
+            cryptoFlowSlices = report.dataFlow?.slices?.count { CryptoMetrics.isCryptoFlow(it) },
+            cryptoModePaddingByForm = CryptoMetrics.modePaddingByForm(report),
             digest = digest,
             failures = failureDetails,
         )

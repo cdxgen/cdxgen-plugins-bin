@@ -60,6 +60,12 @@ object ModelPacks {
                 writesToArguments = entry.arr("writesToArguments")?.items?.map { it.asLong().toInt() } ?: emptyList(),
             )
         } ?: emptyList()
+        val literalSources = root.arr("literalSources")?.objects()?.map { entry ->
+            LiteralSourcePattern(
+                namePattern = require(entry.str("namePattern"), "literalSources[].namePattern", name),
+                category = require(entry.str("category"), "literalSources[].category", name),
+            )
+        } ?: emptyList()
         return ModelPack(
             name = name,
             sources = sources,
@@ -67,6 +73,7 @@ object ModelPacks {
             passthroughs = passthroughs,
             sanitizers = sanitizers,
             effects = effects,
+            literalSources = literalSources,
         )
     }
 
@@ -81,6 +88,7 @@ object ModelPacks {
                 passthroughs = dedupe(merged.passthroughs, pack.passthroughs) { it.pattern },
                 sanitizers = dedupe(merged.sanitizers, pack.sanitizers) { it.pattern },
                 effects = dedupe(merged.effects, pack.effects) { it.pattern },
+                literalSources = dedupe(merged.literalSources, pack.literalSources) { it.namePattern },
             )
         }
         return merged

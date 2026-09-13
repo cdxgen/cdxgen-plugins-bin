@@ -2,14 +2,14 @@
 # Builds kosi against the newest Kotlin EAP/RC and runs the full corpus,
 # including the eap tier's future-syntax fixture. Failure is a warning, not a
 # release blocker — this is what turns "the Analysis API broke us" into a
-# known, scheduled repair instead of a post-release surprise. The kotlin
+# known, on-demand repair instead of a post-release surprise. The kotlin
 # version is overridden through the -PkotlinVersion build property; the
 # gradle/libs.versions.toml pins stay the release ones.
 name: kosi eap
 
 on:
-  schedule:
-    - cron: "0 5 * * 1" # weekly, Mondays 05:00 UTC
+  # No schedule: an EAP break is a warning, and a weekly cron that fails on
+  # upstream churn trains everyone to ignore red. Run it on demand instead.
   workflow_dispatch:
 
 concurrency:

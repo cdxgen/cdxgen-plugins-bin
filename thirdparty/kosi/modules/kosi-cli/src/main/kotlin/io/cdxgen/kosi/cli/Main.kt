@@ -89,7 +89,7 @@ object Main {
         "classpath", "classpath-file", "jdk-home", "reachable-symbols",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
-        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive",
+        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
     )
     private val BENCH_VALUE_FLAGS = setOf("tier", "only", "repo-root", "baseline", "compare")
     private val BENCH_BOOLEAN_FLAGS =
@@ -208,6 +208,7 @@ object Main {
             callgraphTimeoutSeconds = parsed.value("callgraph-timeout")?.toIntOrNull() ?: defaults.callgraphTimeoutSeconds,
             maxPathsPerSymbol = parsed.value("max-paths-per-symbol")?.toIntOrNull() ?: defaults.maxPathsPerSymbol,
             includeStdlib = parsed.bool("include-stdlib", defaults.includeStdlib),
+            endpointSources = parsed.bool("endpoint-sources", defaults.endpointSources),
             unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
                 if (it != "propagate" && it != "drop") {
                     throw UsageException("--unknown-call must be propagate|drop")
@@ -375,7 +376,24 @@ object Main {
             regressions.add("promotion gate: ${gate.verdict}")
         }
 
-        println(result.toJson())
+        // In CI the multi-megabyte report goes to a FILE: the bench's JSON
+        // has repeatedly coincided with the runner tearing the step down
+        // (four runs, always at report time), and a file survives whatever
+        // kills the log stream. Local runs print to stdout as before.
+        val json = result.toJson()
+        val reportDir = System.getenv("KOSI_REPORT_DIR")
+        if (!reportDir.isNullOrBlank()) {
+            val target = java.nio.file.Path.of(reportDir, "kosi-bench-report.json")
+            java.nio.file.Files.writeString(target, json)
+            println("kosi bench report: " + target.toAbsolutePath() + " (" + json.length + " chars)")
+        } else if (json.length > 262144) {
+            for (chunk in json.chunked(262144)) println(chunk)
+        } else {
+            println(json)
+        }
+        if (System.getenv("KOSI_TRACE") != null && System.getenv("KOSI_TRACE") != "") {
+            System.err.println("TRACE: bench report written (" + json.length + " chars)")
+        }
         // Asking for a comparison IS asking for the gate: rendering it only
         // under --verbose meant `bench --compare <baseline>` computed every
         // criterion and showed none of them. It goes to stderr so stdout
@@ -524,6 +542,8 @@ object Main {
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved>     analysis tier (resolved needs no build execution)
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
+              --endpoint-sources              seed handler parameters as taint sources (P7); endpoint-rooted
+                                              slices then carry the endpoint they enter through
               --reachable-symbols <file>      write shortest witness paths for reached symbols (JSON)
               --format <fmt>                  json (full report), graphml or gexf (call graph)
               --pretty                        indented JSON
@@ -579,5 +599,19 @@ fun main(args: Array<String>) {
     for ((key, value) in listOf("java.awt.headless" to "true", "apple.awt.UIElement" to "true")) {
         if (System.getProperty(key) == null) System.setProperty(key, value)
     }
-    kotlin.system.exitProcess(Main.run(args))
+    // An UNCAUGHT exception must never end main: the IntelliJ substrate
+    // leaves a NON-daemon pooled thread behind, and a JVM whose main died
+    // naturally then waits for it FOREVER (the http4k corpus run hung two
+    // hours past a finished analysis, silent, exit never reached). Every
+    // failure exits here, with kosi's own message and code.
+    val code = try {
+        Main.run(args)
+    } catch (t: Throwable) {
+        System.err.println(
+            "kosi: " + (t.message?.take(400)?.ifBlank { null } ?: t::class.simpleName + " (no message)"),
+        )
+        if (System.getenv("KOSI_TRACE") != null) t.printStackTrace()
+        io.cdxgen.kosi.cli.ExitCodes.RUNTIME
+    }
+    kotlin.system.exitProcess(code)
 }

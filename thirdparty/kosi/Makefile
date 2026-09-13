@@ -130,6 +130,9 @@ define build_native
 	  -H:+AddAllCharsets \
 	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
+	  -J-Xmx$(KOSI_NATIVE_HEAP) -J-Xms1g \
+	  -H:DeadlockWatchdogInterval=300 -H:-DeadlockWatchdogExitOnTimeout \
+	  $(KOSI_NATIVE_LINKER_FLAGS) \
 	  $(1) -o $(2)
 	@rm -f $(2).sha256
 	@cd $(build_dir) && shasum -a 256 $(notdir $(2)) > $(notdir $(2)).sha256
@@ -140,6 +143,23 @@ $(build_dir):
 
 fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 
+# The build JVM heap gets an explicit FLOOR (default 8g; the linux-arm64
+# build overrides to 12g): native-image defaults to a quarter of physical
+# RAM, which on 7GB CI runners is ~1.75GB and even 16GB arm runners yield
+# only 4GB — the points-to analysis of the Kotlin compiler OOMs at both
+# with a bare OutOfMemoryError (measured on the linux-arm64 build). The
+# cap is not a reservation: darwin builds that peak lower are unaffected.
+KOSI_NATIVE_HEAP ?= 8g
+
+# Extra flags a platform may need at link time (e.g. the musl build's zlib
+# search path; set by the native-builds workflow).
+KOSI_NATIVE_LINKER_FLAGS ?=
+# The DeadlockWatchdog defaults (10s quiet interval, abort on timeout)
+# killed CI builds that were merely SLOW: the points-to analysis on a
+# 2-3 core runner sits quiet for tens of minutes inside one method graph
+# and the watchdog aborted at ~35min (exit 30), while the same jar and
+# metadata build fine on a many-core machine. 5-minute check intervals
+# keep the diagnostic dumps without the abort.
 # Gradle decides whether the jar changed; make then decides whether to
 # relink. Declared PHONY so the jar is never assumed current: a binary that
 # is newer than the metadata file but older than the sources is exactly how
@@ -153,6 +173,13 @@ $(fat_jar): fat-jar
 
 $(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
+
+# The arm64 and static-musl points-to analyses need more than the default
+# floor; the darwin-arm64 build is borderline on its 7GB runner and gets
+# its own cap.
+$(build_dir)/kosi-linux-arm64: KOSI_NATIVE_HEAP = 12g
+$(build_dir)/kosi-linuxmusl-amd64: KOSI_NATIVE_HEAP = 12g
+$(build_dir)/kosi-darwin-arm64: KOSI_NATIVE_HEAP = 8g
 
 $(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
@@ -252,6 +279,10 @@ native-metadata:
 	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-exported \
 	    -jar $(fat_jar) analyze --backend resolved --roots exported --include-stdlib \
 	    --dir $$f --out /dev/null; \
+	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-endpoint \
+	    -jar $(fat_jar) analyze --backend resolved --endpoint-sources \
+	    --dir $$f --out /dev/null; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 
@@ -259,18 +290,35 @@ native-metadata-check: native-metadata
 	@git diff --exit-code -- native-metadata/kosi/reachability-metadata.json || { \
 	  echo "reachability metadata drifted; commit the regenerated file"; exit 1; }
 
-## Tiers and gates (same entry points CI uses).
-test:
-	$(gradle) build
+## Tiers and gates (same entry points CI uses). On failure the recipe dumps
+## the diagnostics a silent runner death otherwise swallows: kernel OOM
+## kills, JVM hs_err crash files, and the last memory/disk state.
+define gradle_or_diagnose
+	$(gradle) $(1) || { \
+	  echo "=== kosi: gradle $(1) failed; diagnostics ==="; \
+	  for f in hs_err_*.log; do [ -f "$$f" ] && { echo "--- $$f"; head -60 "$$f"; }; done; \
+	  (dmesg 2>/dev/null || sudo dmesg 2>/dev/null) | grep -iE "out of memory|killed process" | tail -5 || true; \
+	  [ -f kosi-bench-report.json ] && { echo "--- kosi-bench-report.json: $$(wc -c < kosi-bench-report.json) bytes"; tail -c 300 kosi-bench-report.json; echo; } || true; \
+	  free -m 2>/dev/null | head -3 || true; \
+	  df -m . /tmp 2>/dev/null | head -4 || true; \
+	  exit 1; \
+	}
+endef
 
+test:
+	$(call gradle_or_diagnose,build)
+
+# KOSI_TRACE streams one stderr marker per fixture/slot into the CI log as
+# it runs: a runner that dies mid-bench then names the exact row it died
+# on, instead of a log that ends at the task line. CI sets CI=true.
 corpusQuick:
-	$(gradle) corpusQuick
+	KOSI_TRACE=$(if $(CI),1,) KOSI_REPORT_DIR=$(if $(CI),$(CURDIR),) $(call gradle_or_diagnose,corpusQuick)
 
 corpusFull:
-	$(gradle) corpusFull
+	$(call gradle_or_diagnose,corpusFull)
 
 golden:
-	$(gradle) golden
+	$(call gradle_or_diagnose,golden)
 
 goldenUpdate:
 	$(gradle) goldenUpdate

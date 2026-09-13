@@ -1,6 +1,7 @@
 package io.cdxgen.kosi.corpus
 
 import io.cdxgen.kosi.models.Categories
+import io.cdxgen.kosi.models.EndpointModels
 import io.cdxgen.kosi.schema.DiagnosticCodes
 
 /**
@@ -56,6 +57,14 @@ data class Annotation(
     val maxDepth: Int?,
     val knownFailAll: Int?,
     val knownFailByBackend: Map<String, Int>,
+    val framework: String?,
+    val path: String?,
+    val method: String?,
+    val cipherMode: String?,
+    val padding: String?,
+    val form: String?,
+    val protocol: String?,
+    val resolution: String?,
     val file: String,
     val line: Int,
 ) {
@@ -68,6 +77,9 @@ data class Annotation(
         DECLARATION("declaration"),
         MODULE("module"),
         DIAGNOSTIC("diagnostic"),
+        ENDPOINT("endpoint"),
+        CRYPTO("crypto"),
+        SERVICE("service"),
         ;
 
         companion object {
@@ -91,8 +103,8 @@ data class Annotation(
                 }
             }
         }
-        if (kind != Kind.FLOW && fn != null) {
-            errors.add("fn= is only valid on flow expectations")
+        if (kind != Kind.FLOW && kind != Kind.ENDPOINT && fn != null) {
+            errors.add("fn= is only valid on flow and endpoint expectations")
         }
         if (kind == Kind.EDGE && (from == null || to == null)) errors.add("edge requires from= and to=")
         if (kind == Kind.REACHABLE && symbol == null) errors.add("reachable requires symbol=")
@@ -103,6 +115,25 @@ data class Annotation(
         }
         if (kind == Kind.MODULE && name == null) errors.add("module requires name=")
         if (kind == Kind.DIAGNOSTIC && code == null) errors.add("diagnostic requires code=")
+        if (kind == Kind.ENDPOINT && framework == null) {
+            errors.add("endpoint requires framework=")
+        }
+        if (kind == Kind.ENDPOINT && framework != null && !Frameworks.isValid(framework)) {
+            errors.add(
+                "unknown framework '$framework'; known: ${Frameworks.all().sorted()} " +
+                    "(add it to the shipped endpoints pack when the detector starts emitting it)",
+            )
+        }
+        if (kind == Kind.CRYPTO && name == null) errors.add("crypto requires name=")
+        if (kind == Kind.SERVICE && protocol == null && name == null && path == null) {
+            errors.add("service requires protocol=, name= or path=")
+        }
+        if (form != null && form !in FORMS) {
+            errors.add("form must be one of $FORMS, got $form")
+        }
+        if (resolution != null && resolution !in RESOLUTIONS) {
+            errors.add("resolution must be one of $RESOLUTIONS, got $resolution")
+        }
         // Closed vocabularies. A misspelled value would make a positive
         // unsatisfiable and — worse — a negative vacuously true, which is
         // exactly what the corpus exists to prevent.
@@ -129,7 +160,13 @@ data class Annotation(
         val USAGE_KINDS = setOf("call", "operator", "reference")
 
         /** The bench matrix slots an annotation may scope itself to. */
-        val MODES = setOf("security", "all", "resolved", "exported")
+        val MODES = setOf("security", "all", "resolved", "exported", "endpoint")
+
+        /** The endpoint `foundBy`/framework vocabulary comes from the shipped pack. */
+        val FORMS = setOf("literal", "const", "template", "config", "unresolved")
+
+        /** The resolution vocabulary (03-SCHEMA.md UrlEvidence.resolution). */
+        val RESOLUTIONS = setOf("literal", "folded", "config", "env", "unresolved")
 
         /** `declarations[].kind` vocabulary. */
         val DECLARATION_KINDS = setOf(
@@ -141,4 +178,14 @@ data class Annotation(
         /** Backends that may appear in scoped known-fail markers. */
         val KNOWN_BACKENDS = listOf("syntax", "resolved", "deps", "compile")
     }
+}
+
+
+/** The closed framework vocabulary endpoint expectations validate against (the shipped pack's ids). */
+object Frameworks {
+    private val ids: Set<String> by lazy { EndpointModels.loadBuiltin().frameworkIds }
+
+    fun all(): Set<String> = ids
+
+    fun isValid(framework: String): Boolean = framework in ids
 }

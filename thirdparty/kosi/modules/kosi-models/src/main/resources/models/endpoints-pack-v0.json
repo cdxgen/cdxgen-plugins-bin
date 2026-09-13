@@ -1,0 +1,403 @@
+{
+  "configReaders": [
+    {
+      "argument": 0,
+      "pattern": "java.util.Properties.getProperty"
+    },
+    {
+      "argument": 0,
+      "pattern": "kotlin.system.getenv"
+    },
+    {
+      "argument": 0,
+      "pattern": "java.lang.System.getenv"
+    },
+    {
+      "argument": 0,
+      "pattern": "java.lang.System.getProperty"
+    }
+  ],
+  "description": "The framework registry for endpoint, service and URL detection (P7). The detector matches RESOLVED annotation FQNs, DSL callee FQNs and supertype names against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a framework. A framework the pack does not name is invisible by construction, and every pattern here is validated by a build-time test. annotation FQNs must resolve through the workspace declarations or a real classpath: an unresolved annotation keeps its PSI short name and only matches when the pack pattern is itself a short name, which is never \u2014 type identity, not name matching, is what keeps a homonym annotation from becoming an endpoint.",
+  "frameworks": [
+    {
+      "classMarkers": [
+        "org.springframework.web.bind.annotation.RestController",
+        "org.springframework.web.bind.annotation.Controller"
+      ],
+      "id": "spring-mvc",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "methods": [],
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "org.springframework.web.bind.annotation.RequestMapping"
+      ]
+    },
+    {
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.PUT"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.DELETE"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
+        }
+      ],
+      "id": "spring-webflux",
+      "kind": "dsl"
+    },
+    {
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.ktor.server.routing.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "io.ktor.server.routing.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.ktor.server.routing.put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.ktor.server.routing.delete"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.ktor.server.routing.patch"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.ktor.server.routing.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.ktor.server.routing.options"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.server.routing.route"
+        }
+      ],
+      "id": "ktor",
+      "kind": "dsl"
+    },
+    {
+      "classMarkers": [
+        "io.micronaut.http.annotation.Controller"
+      ],
+      "id": "micronaut",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.micronaut.http.annotation.Get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "io.micronaut.http.annotation.Post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.micronaut.http.annotation.Put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.micronaut.http.annotation.Delete"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.micronaut.http.annotation.Patch"
+        },
+        {
+          "methods": [],
+          "pattern": "io.micronaut.http.annotation.HttpMethod"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "io.micronaut.http.annotation.Controller"
+      ]
+    },
+    {
+      "classMarkers": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ],
+      "id": "quarkus",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "jakarta.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "jakarta.ws.rs.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "jakarta.ws.rs.PUT"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "jakarta.ws.rs.DELETE"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "jakarta.ws.rs.PATCH"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "javax.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "javax.ws.rs.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "javax.ws.rs.PUT"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "javax.ws.rs.DELETE"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ]
+    },
+    {
+      "bindFunctions": [
+        {
+          "methods": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH"
+          ],
+          "pattern": "bind"
+        }
+      ],
+      "id": "http4k",
+      "kind": "dsl"
+    },
+    {
+      "id": "grpc",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "GrpcKt",
+        "Grpc"
+      ],
+      "supertypeSuffixes": [
+        "ImplBase"
+      ]
+    },
+    {
+      "id": "android",
+      "kind": "manifest",
+      "manifestComponents": [
+        "activity",
+        "service",
+        "receiver",
+        "provider"
+      ]
+    }
+  ],
+  "name": "endpoints-pack-v0",
+  "outbound": [
+    {
+      "clientLibrary": "java.net.URL",
+      "kind": "constructor",
+      "pattern": "java.net.URL",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "java.net.URI",
+      "kind": "constructor",
+      "pattern": "java.net.URI",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "java.sql.DriverManager",
+      "kind": "static",
+      "pattern": "java.sql.DriverManager.getConnection",
+      "protocol": "jdbc",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "okhttp3",
+      "kind": "virtual",
+      "pattern": "okhttp3.Request.Builder.url",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "retrofit2",
+      "kind": "virtual",
+      "pattern": "retrofit2.Retrofit.Builder.baseUrl",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.get",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.post",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.request",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "constructor",
+      "pattern": "io.ktor.client.HttpClient",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "java.net.http",
+      "kind": "static",
+      "pattern": "java.net.http.HttpClient.newHttpClient",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "spring-web",
+      "kind": "virtual",
+      "pattern": "org.springframework.web.client.RestTemplate.getForObject",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "lettuce",
+      "kind": "static",
+      "pattern": "io.lettuce.core.RedisClient.create",
+      "protocol": "redis",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "kafka-clients",
+      "kind": "constructor",
+      "pattern": "org.apache.kafka.clients.producer.KafkaProducer",
+      "protocol": "kafka",
+      "urlArgument": -1
+    }
+  ]
+}

@@ -54,6 +54,8 @@ dependencies {
     // P4: the taint engine and the model packs it runs on — both
     // compiler-free, so the kosi-front boundary still holds.
     implementation(project(":kosi-flow"))
+    implementation(project(":kosi-endpoints"))
+    implementation(project(":kosi-crypto"))
     implementation(project(":kosi-models"))
     implementation(libs.kotlin.stdlib)
 

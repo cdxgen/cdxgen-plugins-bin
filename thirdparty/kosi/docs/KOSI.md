@@ -5,6 +5,90 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
+## Phases 7+8 — frameworks/endpoints and crypto/CBOM (this branch)
+
+Branch `feat/kosi-p7-p8-endpoints-crypto`, off `feat/kosi` (`be924c9`). Two
+roadmap phases, one branch, plus item 1 of the brief: the two transfer
+functions unified.
+
+**Item 1 (R65) — ONE transfer.** `TaintEngine`'s reporting analysis and
+`SummaryAnalysis` were two ~700-line copies of the same transfer over two
+fact types; R62 was found in one of four merges and fixed in two because
+the copies had to be compared by eye. `Transfer.kt` now holds the opcode
+switch, the merges, the pack classification, the unknown-call default and
+the worklist ONCE (`FlowTransfer` + `TransferHost`), generic over the fact
+type; each engine supplies callbacks for what genuinely differs — fact
+births, sink recording, parameter seeds, escape records, callee summary
+application. Two documented disagreements were resolved to the shared
+semantics: a suspend boundary is TRANSPARENT in both (the summary engine
+dropped the call's result, contradicting its own comment), and a field
+write is a STRONG update in both (the summary engine weak-updated,
+undocumented). `TransferParityTest` is deleted in the same commit — there
+is one copy now. Proof of no change: all 204 pre-existing goldens were
+byte-identical on the unification commit and corpusQuick reported 0
+failures. (The goldens that moved in THIS branch moved for the options
+key and the new sections, not for the unification — the per-section
+digests show only `options` changing on every pre-existing fixture.)
+
+**What ships (P7).** `kosi-endpoints` detects inbound endpoints and
+outbound services/URLs, driven entirely by the shipped
+`endpoints-pack-v0.json` (the framework registry): eight frameworks —
+Spring MVC, Spring WebFlux (functional router), Ktor, Micronaut,
+Quarkus/JAX-RS, http4k, gRPC (generated `*ImplBase` supertypes) and
+Android (manifest components). Every endpoint publishes `foundBy`
+(`annotation` | `dsl` | `manifest`). The framework match is on RESOLVED
+type identity — a homonym annotation in a foreign package never matches,
+which is the framework-handlers rule applied to endpoints, and each
+framework fixture carries its lookalike negatives (annotated DTO, private
+method with a mapping-shaped name, commented-out route, marker class with
+no mapped methods, unregistered activity). DSL handlers resolve to the
+EXTRACTED LAMBDA body (ktor `get("/x") { .. }` publishes the lambda's
+canonical name); nested route prefixes compose (`route("/metrics") {
+get("/count") }` -> `/metrics/count`); an unresolved route shape publishes
+`resolution: unresolved` rather than dropping the endpoint. Outbound:
+client calls the pack's `outbound[]` shapes name produce `services[]` and
+`urls[]` with a `resolution` on every value — `literal`, `folded`
+(`const val` + string templates, via the shared `KirValueFolder` in
+kosi-kir), `config` (`application.yml`/`.properties`/`BuildConfig`), `env`
+(the key is the evidence; kosi never reads the analysed build's
+environment), or `unresolved`.
+
+**Endpoint-rooted taint.** `--endpoint-sources` (bench slot `endpoint`)
+seeds every endpoint handler's parameters as `untrusted-input` sources at
+the synthetic entry site; slices carry the endpoint they enter through
+(`ApiEndpoint.sliceIds`/`reachableSources`), and `command-exec` and
+`old-language-version` dropped the `readLine()` P4 patched in and are
+parameter-shaped again — P4's deviation 1 is retired. The seeded-entry
+machinery rides the same `TransferHost` hooks the summary engine uses.
+
+**What ships (P8).** `kosi-crypto` collects the CBOM: `Cipher.getInstance`
+transforms parsed for literal, `const val`, string-template and
+config-driven forms (each its own gate denominator — `form=` on the
+asset), digests, MACs, signatures, KDFs with PBKDF2 iteration floors,
+TLS protocol versions, the Android keystore, named EC curves, JWT
+`alg=none`, trust-all managers (empty `checkServerTrusted` bodies), and
+secret MATERIAL BY NAME — the pack's `literalSources[]` rule births
+`hardcoded-secret` facts at material-named stores, so crypto-flow slices
+are ordinary slices (material -> `crypto-asset`/`insecure-tls`) counted
+from `dataFlow.slices[]`. Every algorithm family, mode, padding, key size,
+curve and finding comes from the shipped `crypto-mappings-v0.json` — the
+collector invents nothing, and `"AES"` alone is reported as `"AES"`, not
+as `"AES/ECB/PKCS5Padding"` (the JCA's defaults are the JCA's business).
+The mapping-coverage gate holds every shipped row to at least one
+exercising fixture at 1.000 — it FAILed at 0.70 before the
+`crypto-algorithms` fixture landed, which is the gate working. The
+no-literal-secret gate (`scripts/scan-secrets.sh` +
+`NoSecretLeakTest`) proves both directions: a deliberately-broken report
+trips on the planted secrets, the real report is clean.
+
+**Gates** (all with both counts, `Promotion.evaluate`): per-framework
+endpoint recall (eight frameworks, never pooled, each >= 0.95),
+`endpoints-resolved-handler` (handler symbols looked up in the call-graph
+node set, 81/81 on the bundled tiers), `endpoint-rooted-slices`,
+`config-resolution` (resolved over config-derived; total > 0 with zero
+resolved FAILs), `crypto-mapping-coverage` (= 1.000), per-form
+mode/padding extraction, and `crypto-flow-slices`.
+
 ## Phases 5+6 — interprocedural summaries, coroutines and Flow (this branch)
 
 Branch `feat/kosi-p5-p6-summaries-async`, off `feat/kosi` (`92d0c6e`). Two

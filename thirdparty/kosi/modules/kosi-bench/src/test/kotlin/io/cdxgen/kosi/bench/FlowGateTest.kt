@@ -207,7 +207,7 @@ class FlowGateTest {
 
     @Test
     fun theGateDropsNotEvaluatedVerdictsIntoHold() {
-        // One fixture across all four slots (so coverage holds) with no flow
+        // One fixture across every slot (so coverage holds) with no flow
         // data at all: every unevaluatable criterion must hold the gate, not
         // pass it.
         val current = throughBaseline(
@@ -216,6 +216,7 @@ class FlowGateTest {
                 row("a", slot = MatrixSlot.ALL_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.RESOLVED_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.EXPORTED_LABEL, functionsAnalysed = 1),
+                row("a", slot = MatrixSlot.ENDPOINT_LABEL, functionsAnalysed = 1),
             ),
         )
         val report = Promotion.evaluate(current, null)

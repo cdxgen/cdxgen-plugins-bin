@@ -76,6 +76,16 @@ class FixtureResultJsonTest {
         sccsProcessed = 61,
         sccIterationCapHits = 62,
         suspendCrossingSlices = 63,
+        endpointCount = 71,
+        endpointsResolvedHandler = 70,
+        endpointRootedSlices = 69,
+        endpointRecallByFramework = linkedMapOf("ktor" to listOf(4, 5), "spring-mvc" to listOf(6, 6)),
+        configValuesTotal = 8,
+        configValuesResolved = 7,
+        cryptoAssets = 12,
+        cryptoMappingHits = listOf("algorithm:AES", "curve:secp256r1", "transform:AES/GCM/NoPadding"),
+        cryptoFlowSlices = 3,
+        cryptoModePaddingByForm = linkedMapOf("literal" to listOf(2, 2), "config" to listOf(1, 1)),
         digest = Digests.FixtureDigest("some-repo", MatrixSlot.RESOLVED_LABEL, emptyMap()),
     )
 

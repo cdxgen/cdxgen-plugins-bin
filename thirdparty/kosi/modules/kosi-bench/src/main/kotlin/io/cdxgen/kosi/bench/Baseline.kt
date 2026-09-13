@@ -163,6 +163,20 @@ object Promotion {
         checks.add(defaultOriginShareCheck(current))
         checks.add(asyncRecallCheck(current))
 
+        // 2g-2j. the P7 gates: per-framework endpoint recall, handlers that
+        // resolve to real graph nodes, endpoint-rooted slices, and the
+        // config-resolution fraction — each with both counts.
+        checks.add(endpointRecallByFrameworkCheck(current))
+        checks.add(endpointsResolvedHandlerCheck(current))
+        checks.add(endpointRootedSlicesCheck(current))
+        checks.add(configResolutionCheck(current))
+
+        // 2k-2m. the P8 gates: every shipped mapping exercised, per-form
+        // mode/padding extraction, and crypto-flow slices from the slices.
+        checks.add(cryptoMappingCoverageCheck(current))
+        checks.add(cryptoModePaddingByFormCheck(current))
+        checks.add(cryptoFlowSlicesCheck(current))
+
         // 3. connectivity 1.000, integrity 0 — evaluable, with the vacuity
         // caveat stated so a vacuous pass is never mistaken for a flow result.
         // Since P4 the fixtures publish slices, so zero slices is
@@ -934,6 +948,221 @@ object Promotion {
 
     /** The roadmap P6 gate: async-tier recall. */
     const val ASYNC_RECALL_TARGET = 0.90
+
+    /** The P7 gate's per-framework endpoint-recall bar. */
+    const val ENDPOINT_RECALL_TARGET = 0.95
+
+    /** The P8 gate's mapping-coverage bar: every shipped row exercised. */
+    const val CRYPTO_MAPPING_COVERAGE_TARGET = 1.0
+
+    /**
+     * P7: endpoint recall PER FRAMEWORK, never pooled - eight frameworks in
+     * one fraction would let one broken integration hide behind seven
+     * working ones (the async-recall argument). Every framework with
+     * expectations in the run holds the bar; a run with none is
+     * NOT_EVALUATED, not a pass.
+     */
+    private fun endpointRecallByFrameworkCheck(current: BenchRunner.BenchResult): Check {
+        val name = "endpoint-recall-by-framework"
+        val rows = current.results.filter { it.slug != "TOTAL" && it.endpointRecallByFramework.isNotEmpty() }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no endpoint expectation was evaluated in this run")
+        }
+        val byFramework = HashMap<String, MutableList<Int>>()
+        for (row in rows) {
+            for ((framework, pair) in row.endpointRecallByFramework) {
+                val slot = byFramework.getOrPut(framework) { mutableListOf(0, 0) }
+                slot[0] += pair.getOrNull(0) ?: 0
+                slot[1] += pair.getOrNull(1) ?: 0
+            }
+        }
+        val detail = byFramework.keys.sorted().joinToString(", ") { framework ->
+            val (matched, total) = byFramework[framework]!!
+            String.format("%s=%.4f (%d/%d)", framework, matched.toDouble() / total, matched, total)
+        }
+        val failing = byFramework.entries
+            .filter { (_, pair) -> (pair[0].toDouble() / pair[1]) < ENDPOINT_RECALL_TARGET }
+            .map { it.key }
+            .sorted()
+        return if (failing.isEmpty()) {
+            Check(name, State.PASS, String.format("all %d framework(s) >= %.2f: %s", byFramework.size, ENDPOINT_RECALL_TARGET, detail))
+        } else {
+            Check(name, State.FAIL, "below ${"%.2f".format(ENDPOINT_RECALL_TARGET)}: " +
+                failing.joinToString(", ") { framework ->
+                    val (matched, total) = byFramework[framework]!!
+                    String.format("%s=%.4f (%d/%d)", framework, matched.toDouble() / total, matched, total)
+                } + "; all: $detail")
+        }
+    }
+
+    /**
+     * P7: every endpoint's handler symbol must resolve to a call-graph node
+     * that EXISTS - looked up in the graph, not merely non-empty. An empty
+     * handler symbol counts as UNRESOLVED, so a detector that cannot find
+     * the handler cannot hide behind a zero denominator.
+     */
+    private fun endpointsResolvedHandlerCheck(current: BenchRunner.BenchResult): Check {
+        val name = "endpoints-resolved-handler"
+        val rows = current.results.filter { it.slug != "TOTAL" && (it.endpointCount ?: 0) > 0 }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no slot published an endpoint")
+        }
+        val total = rows.sumOf { it.endpointCount ?: 0 }
+        val resolved = rows.sumOf { it.endpointsResolvedHandler ?: 0 }
+        val fraction = resolved.toDouble() / total
+        val detail = String.format("%.4f (%d of %d endpoints)", fraction, resolved, total)
+        return if (fraction < 1.0) {
+            val worst = rows.filter { (it.endpointsResolvedHandler ?: 0) < (it.endpointCount ?: 0) }
+                .sortedBy { (it.endpointsResolvedHandler ?: 0).toDouble() / (it.endpointCount ?: 1) }
+                .take(5).joinToString("; ") { "${it.slug}/${it.slot} ${it.endpointsResolvedHandler}/${it.endpointCount}" }
+            Check(name, State.FAIL, "$detail below 1.000: $worst")
+        } else {
+            Check(name, State.PASS, detail)
+        }
+    }
+
+    /**
+     * P7: endpoint-rooted slices, counted from the slices whose source
+     * function is an endpoint handler. Greater than zero PASSES with both
+     * counts; zero is NOT_EVALUATED - a run where endpoint sources were
+     * off proves nothing either way.
+     */
+    private fun endpointRootedSlicesCheck(current: BenchRunner.BenchResult): Check {
+        val name = "endpoint-rooted-slices"
+        val rows = current.results.filter { it.slug != "TOTAL" && it.slot == MatrixSlot.ENDPOINT_LABEL }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "the endpoint slot did not run")
+        }
+        val rooted = rows.sumOf { it.endpointRootedSlices ?: 0 }
+        return if (rooted > 0) {
+            val byFixture = rows.filter { (it.endpointRootedSlices ?: 0) > 0 }
+                .sortedBy { it.slug }
+                .joinToString(", ") { "${it.slug}=${it.endpointRootedSlices}" }
+            Check(name, State.PASS, "$rooted endpoint-rooted slice(s): $byFixture")
+        } else {
+            Check(name, State.NOT_EVALUATED, "0 endpoint-rooted slices across ${rows.size} endpoint slot(s): " +
+                "no endpoint handler's parameters fed a flow (write one, or the flag is off)")
+        }
+    }
+
+    /**
+     * P7 config resolution: resolved over total CONFIG-DERIVED values, both
+     * counts. A phase that resolves nothing and reports everything
+     * unresolved passes nothing: total > 0 with resolved == 0 FAILS.
+     */
+    private fun configResolutionCheck(current: BenchRunner.BenchResult): Check {
+        val name = "config-resolution"
+        val rows = current.results.filter { it.slug != "TOTAL" && (it.configValuesTotal ?: 0) > 0 }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no config-derived value in this run (add a fixture whose client reads a config key)")
+        }
+        val total = rows.sumOf { it.configValuesTotal ?: 0 }
+        val resolved = rows.sumOf { it.configValuesResolved ?: 0 }
+        val detail = String.format("%.4f (%d of %d config-derived values)", resolved.toDouble() / total, resolved, total)
+        return if (resolved == 0) {
+            Check(name, State.FAIL, "$detail - nothing resolved and the vocabulary says the rest is unresolved")
+        } else {
+            Check(name, State.PASS, detail)
+        }
+    }
+
+    /**
+     * P8: every shipped algorithm mapping exercised by at least one fixture
+     * - R63's rule over a table. The denominator is the shipped mapping
+     * count (transform + algorithm + curve rows), the numerator the rows
+     * the crypto tier's assets actually name. FAIL below 1.000: shipping a
+     * mapping nothing touches and quoting recall over the tested third of
+     * the table is exactly the advertised-but-unproven capability.
+     */
+    private fun cryptoMappingCoverageCheck(current: BenchRunner.BenchResult): Check {
+        val name = "crypto-mapping-coverage"
+        val rows = current.results.filter { it.slug != "TOTAL" && it.cryptoMappingHits.isNotEmpty() }
+        val shipped = io.cdxgen.kosi.models.CryptoMappingModels.loadBuiltin().mappingCount
+        if (rows.isEmpty() || shipped == 0) {
+            return Check(name, State.NOT_EVALUATED, "no crypto asset in this run against $shipped shipped mapping(s)")
+        }
+        val exercised = rows.flatMap { it.cryptoMappingHits }.toSortedSet()
+        val allKeys = allMappingKeys()
+        val covered = allKeys.intersect(exercised)
+        val missing = (allKeys - covered).sorted()
+        val fraction = covered.size.toDouble() / allKeys.size
+        val detail = String.format("%.4f (%d of %d mapping rows exercised)", fraction, covered.size, allKeys.size)
+        return if (fraction < CRYPTO_MAPPING_COVERAGE_TARGET) {
+            Check(name, State.FAIL, "$detail < 1.000, missing: ${missing.joinToString(", ")}")
+        } else {
+            Check(name, State.PASS, detail)
+        }
+    }
+
+    /** Every mapping row's coverage key, from the same table the collector ships. */
+    private fun allMappingKeys(): Set<String> {
+        val mappings = io.cdxgen.kosi.models.CryptoMappingModels.loadBuiltin()
+        val keys = mutableSetOf<String>()
+        for (transform in mappings.transforms) {
+            keys.add("transform:${transform.transform}")
+            keys.add("algorithm:${transform.algorithm}")
+        }
+        for (algorithm in mappings.algorithms) {
+            keys.add("algorithm:${algorithm.name}")
+        }
+        for (curve in mappings.curves) {
+            keys.add("curve:${curve.name}")
+        }
+        return keys
+    }
+
+    /**
+     * P8: mode/padding extraction per FORM - literal, const, template,
+     * config - each with its own denominator. A form the fixtures claim
+     * must extract at 1.000; the forms' totals are published either way so
+     * a silent form cannot hide the misses.
+     */
+    private fun cryptoModePaddingByFormCheck(current: BenchRunner.BenchResult): Check {
+        val name = "crypto-mode-padding-by-form"
+        val rows = current.results.filter { it.slug != "TOTAL" && it.cryptoModePaddingByForm.isNotEmpty() }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no Cipher transform in this run")
+        }
+        val byForm = HashMap<String, MutableList<Int>>()
+        for (row in rows) {
+            for ((form, pair) in row.cryptoModePaddingByForm) {
+                val slot = byForm.getOrPut(form) { mutableListOf(0, 0) }
+                slot[0] += pair.getOrNull(0) ?: 0
+                slot[1] += pair.getOrNull(1) ?: 0
+            }
+        }
+        val detail = byForm.keys.sorted().joinToString(", ") { form ->
+            val (extracted, total) = byForm[form]!!
+            String.format("%s=%.4f (%d/%d)", form, extracted.toDouble() / total, extracted, total)
+        }
+        val gated = byForm.entries.filter { it.key != "unresolved" }
+        val failing = gated.filter { (_, pair) -> pair[0] < pair[1] }.map { it.key }.sorted()
+        return if (failing.isEmpty()) {
+            Check(name, State.PASS, "all forms fully extracted: $detail")
+        } else {
+            Check(name, State.FAIL, "form(s) below 1.000: " +
+                failing.joinToString(", ") { form ->
+                    val (extracted, total) = byForm[form]!!
+                    String.format("%s=%.4f (%d/%d)", form, extracted.toDouble() / total, extracted, total)
+                } + "; all: $detail")
+        }
+    }
+
+    /** P8: crypto-flow slices counted from the slices; NOT_EVALUATED at zero. */
+    private fun cryptoFlowSlicesCheck(current: BenchRunner.BenchResult): Check {
+        val name = "crypto-flow-slices"
+        val rows = current.results.filter { it.slug != "TOTAL" }
+        val flows = rows.sumOf { it.cryptoFlowSlices ?: 0 }
+        val slices = rows.sumOf { it.sliceCount }
+        if (slices == 0) {
+            return Check(name, State.NOT_EVALUATED, "no slices reported in this run")
+        }
+        return if (flows > 0) {
+            Check(name, State.PASS, "$flows crypto-flow slice(s) over $slices slice(s)")
+        } else {
+            Check(name, State.NOT_EVALUATED, "0 crypto-flow slices over $slices slice(s): no hardcoded material reached a crypto API")
+        }
+    }
 
     /**
      * The breakdown gate: an aggregate count is not a result (golem's 6178

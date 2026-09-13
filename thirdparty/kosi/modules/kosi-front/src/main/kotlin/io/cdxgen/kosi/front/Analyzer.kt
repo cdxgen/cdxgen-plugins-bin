@@ -459,6 +459,51 @@ object Analyzer {
                 }
             }
 
+            // P7: framework endpoints, outbound services and URL evidence,
+            // resolved from the lowered module plus the declaration
+            // annotations' values; and P8's crypto/CBOM evidence. Both live
+            // in their own modules; the pipeline only wires them.
+            val kirModule = io.cdxgen.kosi.kir.KirModule(kir.functions)
+            val sourceTexts = collected.associate { source ->
+                source.relativePath to (try {
+                    Files.readString(source.absolutePath)
+                } catch (_: Exception) {
+                    ""
+                })
+            }
+            val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
+                module = kirModule,
+                root = root,
+                sourceTexts = sourceTexts,
+                annotationValues = declarationAnnotations(drafts, kirModule),
+                attribution = io.cdxgen.kosi.endpoints.Endpoints.Attribution(fileRelPathByAbsolute, purlByModulePath),
+                includeManifests = true,
+            )
+            val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
+                io.cdxgen.kosi.crypto.CryptoCollector.Input(
+                    module = kirModule,
+                    sourceTexts = sourceTexts,
+                    configValues = configValuesForCrypto(root),
+                    configKeys = io.cdxgen.kosi.endpoints.ConfigResolver.load(root).keys(),
+                ),
+            ).let { result ->
+                // Evidence carries RELATIVE paths, like every other array.
+                result.copy(
+                    operations = result.operations.map { op ->
+                        val rel = fileRelPathByAbsolute[op.filePath]?.first ?: op.filePath
+                        op.copy(filePath = rel, position = Position(rel, op.position.line, op.position.column))
+                    },
+                    materials = result.materials.map { m ->
+                        val rel = fileRelPathByAbsolute[m.filePath]?.first ?: m.filePath
+                        m.copy(filePath = rel, position = Position(rel, m.position.line, m.position.column))
+                    },
+                    findings = result.findings.map { f ->
+                        val rel = fileRelPathByAbsolute[f.filePath]?.first ?: f.filePath
+                        f.copy(filePath = rel, position = Position(rel, f.position.line, f.position.column))
+                    },
+                )
+            }
+
             // P4: the intraprocedural taint engine (kosi-flow, compiler-free).
             // Sources, sinks, passthroughs, sanitizers and effects are DATA
             // (the shipped model pack); the engine walks each lowered
@@ -480,6 +525,7 @@ object Analyzer {
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
                         dispatchMode = options.callgraph.id,
+                        endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
                     ),
                 )
             } else {
@@ -506,6 +552,32 @@ object Analyzer {
                 }
             } else {
                 null
+            }
+
+            // P7: `--endpoint-sources` links endpoint-rooted slices to the
+            // endpoint they enter through, and names the source categories
+            // each endpoint introduces.
+            val apiEndpoints = if (options.endpointSources && dataFlow != null) {
+                val handlers = endpoints.apiEndpoints.associate { ep -> ep.handlerCanonicalName to ep.id }
+                val bySlice = HashMap<String, MutableList<String>>()
+                endpoints.apiEndpoints.forEach { ep -> bySlice[ep.handlerCanonicalName] = mutableListOf() }
+                dataFlow.slices.forEach { slice ->
+                    bySlice[slice.sourceFunction]?.add(slice.id)
+                }
+                endpoints.apiEndpoints.map { ep ->
+                    ep.copy(
+                        sliceIds = (bySlice[ep.handlerCanonicalName] ?: emptyList()).sorted(),
+                        reachableSources = if (ep.handlerCanonicalName in handlers &&
+                            (bySlice[ep.handlerCanonicalName] ?: emptyList()).isNotEmpty()
+                        ) {
+                            listOf(io.cdxgen.kosi.endpoints.Endpoints.SOURCE_CATEGORY)
+                        } else {
+                            emptyList()
+                        },
+                    )
+                }
+            } else {
+                endpoints.apiEndpoints
             }
 
             val totalCalls = callsTotal
@@ -592,8 +664,63 @@ object Analyzer {
                 ),
                 callGraph = graphResult?.callGraph,
                 dataFlow = dataFlow,
+                apiEndpoints = apiEndpoints,
+                services = endpoints.services,
+                urls = endpoints.urls,
+                crypto = io.cdxgen.kosi.schema.CryptoEvidence(
+                    libraries = crypto.libraries,
+                    assets = crypto.assets,
+                    operations = crypto.operations,
+                    materials = crypto.materials,
+                    protocols = crypto.protocols,
+                    findings = crypto.findings,
+                ),
             )
         }
+    }
+
+    /**
+     * The declaration annotations WITH VALUES, keyed by canonical name and
+     * carrying the RESOLVED fqn the KIR holds: the detector matches on type
+     * identity, so a PSI short name alone never stands for the framework's
+     * annotation. A short name the KIR resolves to several fqns yields one
+     * entry per fqn — only the framework's own matches, which is the
+     * homonym rule doing the disambiguation.
+     */
+    private fun declarationAnnotations(
+        drafts: List<DeclarationDraft>,
+        kirModule: io.cdxgen.kosi.kir.KirModule,
+    ): Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>> {
+        val fqnsByShort = HashMap<String, MutableSet<String>>()
+        for (fn in kirModule.functions) {
+            for (annotation in fn.annotations + fn.ownerAnnotations) {
+                fqnsByShort.getOrPut(annotation.substringAfterLast('.')) { mutableSetOf() }.add(annotation)
+            }
+        }
+        val out = LinkedHashMap<String, MutableList<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>()
+        for (draft in drafts) {
+            if (draft.annotations.isEmpty()) continue
+            val entries = out.getOrPut(draft.canonicalName) { mutableListOf() }
+            for (annotation in draft.annotations) {
+                val fqns = fqnsByShort[annotation.name].orEmpty().ifEmpty { setOf(annotation.name) }
+                for (fqn in fqns.sorted()) {
+                    entries.add(
+                        io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
+                            fqn = fqn,
+                            value = annotation.value?.removeSurrounding("\"")?.removeSurrounding("'"),
+                            line = annotation.position.line,
+                        ),
+                    )
+                }
+            }
+        }
+        return out
+    }
+
+    /** The config table's key -> value view the crypto collector folds against. */
+    private fun configValuesForCrypto(root: java.nio.file.Path): Map<String, String> {
+        val table = io.cdxgen.kosi.endpoints.ConfigResolver.load(root)
+        return table.keys().mapNotNull { key -> table[key]?.value?.let { key to it } }.toMap()
     }
 
     /**
@@ -764,6 +891,10 @@ object Analyzer {
         stats: Stats,
         callGraph: io.cdxgen.kosi.schema.CallGraph? = null,
         dataFlow: io.cdxgen.kosi.schema.DataFlowEvidence? = null,
+        apiEndpoints: List<io.cdxgen.kosi.schema.ApiEndpoint> = emptyList(),
+        services: List<io.cdxgen.kosi.schema.ServiceRef> = emptyList(),
+        urls: List<io.cdxgen.kosi.schema.UrlEvidence> = emptyList(),
+        crypto: io.cdxgen.kosi.schema.CryptoEvidence = io.cdxgen.kosi.schema.CryptoEvidence(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
     ): KosiReport {
         val moduleRefs = modules.map { vm ->
             val m = vm.module
@@ -887,12 +1018,12 @@ object Analyzer {
             declarations = declarationsOut,
             usages = usagesOut,
             securitySignals = emptyList(),
-            crypto = CryptoEvidence(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()),
+            crypto = crypto,
             callGraph = callGraph,
             dataFlow = dataFlow,
-            apiEndpoints = emptyList(),
-            services = emptyList(),
-            urls = emptyList(),
+            apiEndpoints = apiEndpoints,
+            services = services,
+            urls = urls,
             diagnostics = diagnosticsOut,
             stats = stats,
         )
