@@ -143,13 +143,13 @@ $(build_dir):
 
 fat_jar := modules/kosi-cli/build/dist/kosi-all.jar
 
-# The build JVM heap gets an explicit FLOOR (default 6g; the linux-arm64
+# The build JVM heap gets an explicit FLOOR (default 8g; the linux-arm64
 # build overrides to 12g): native-image defaults to a quarter of physical
 # RAM, which on 7GB CI runners is ~1.75GB and even 16GB arm runners yield
 # only 4GB — the points-to analysis of the Kotlin compiler OOMs at both
 # with a bare OutOfMemoryError (measured on the linux-arm64 build). The
 # cap is not a reservation: darwin builds that peak lower are unaffected.
-KOSI_NATIVE_HEAP ?= 6g
+KOSI_NATIVE_HEAP ?= 8g
 
 # Extra flags a platform may need at link time (e.g. the musl build's zlib
 # search path; set by the native-builds workflow).
