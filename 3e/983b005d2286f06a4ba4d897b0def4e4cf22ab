@@ -1,0 +1,20 @@
+thirdparty/kosi/modules/kosi-bytecode/build.gradle.kts
+  h_6a4cc5cdf68def 1-7,9-15
+thirdparty/kosi/modules/kosi-bytecode/src/main/kotlin/io/cdxgen/kosi/bytecode/BytecodeLowerer.kt
+  h_6a4cc5cdf68def 1-1150
+thirdparty/kosi/modules/kosi-bytecode/src/main/kotlin/io/cdxgen/kosi/bytecode/KotlinDemangler.kt
+  h_6a4cc5cdf68def 1-102
+thirdparty/kosi/modules/kosi-bytecode/src/test/kotlin/io/cdxgen/kosi/bytecode/BytecodeLowererTest.kt
+  h_6a4cc5cdf68def 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3e983b005d2286f06a4ba4d897b0def4e4cf22ab",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
