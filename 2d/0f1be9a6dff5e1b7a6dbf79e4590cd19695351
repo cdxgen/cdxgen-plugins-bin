@@ -1,0 +1,14 @@
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 149,203-210,301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d0f1be9a6dff5e1b7a6dbf79e4590cd19695351",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
