@@ -1,0 +1,14 @@
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 215-224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85b4e9c0057a33e1f73f7a637d456013c1c61ecf",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
