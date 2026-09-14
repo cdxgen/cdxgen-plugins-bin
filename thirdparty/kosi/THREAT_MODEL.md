@@ -38,15 +38,32 @@ Same discipline as rusi's, applied to a Kotlin front end.
 5. **Deterministic output is a security property.** Two runs on the same tree
    are byte-identical (`cmp`-verified), so a diff between runs is always a
    real signal, and report artifacts can be integrity-checked.
-6. **Dependencies are allowlisted.** kotlin-stdlib,
-   kotlin-compiler-embeddable, analysis-api-for-ide,
-   analysis-api-standalone-for-ide, kotlin-test. The native image is built
-   with a pinned GraalVM CE 25 toolchain and SHA-256 sidecars; no UPX
-   (packed binaries segfault on macOS — docs/BUILD.md §4).
+6. **Dependencies are allowlisted.** kotlin-stdlib, the unrelocated
+   `-for-ide` Analysis API artifacts plus the IntelliJ platform modules the
+   standalone session needs (the recorded P1 amendment), kotlin-test for
+   tests. The native image is built with a pinned GraalVM CE 25 toolchain —
+   every CI install is sha-pinned since R66 — and SHA-256 sidecars; no UPX
+   (packed binaries segfault on macOS — docs/BUILD.md §4). The image
+   initialises `java.awt.Toolkit` at build time (R66): a JDK native library's
+   `JNI_OnLoad` must never run at image startup, where AWT classes are
+   absent.
+7. **Committed third-party binaries are pinned and provenance-named.** The
+   dependency-tier fixtures and the sample app commit real published jars
+   (e.g. Timber 5.0.1's `classes.jar`). Each is documented next to its
+   `classpath.txt`, never rebuilt and never fetched at analysis time; the
+   corpus tier that reads them runs offline.
+8. **The evinse bridge inherits the cdxrs discipline.** cdxgen spawns kosi
+   read-only (`analyze` never executes the analysed build), honours
+   `CDXGEN_KOSI_DISABLE=1` by skipping kosi entirely (a valid BOM without
+   any kosi artifact — asserted by `scripts/kosi-e2e.sh`), and never lets a
+   kosi failure abort SBOM generation.
 
 ## What kosi will never do
 
 - Execute or evaluate `build.gradle(.kts)`/`pom.xml` logic.
+- Run at image startup any code path that needs AWT (R66: the
+  `Toolkit` static initializer loads `libawt`, whose linux `JNI_OnLoad`
+  requires classes an image does not ship — see docs/BUILD.md).
 - Send any data anywhere (no telemetry, no network in default tiers).
 - Copy source file contents into reports.
 - Report findings without positions, or slices without connected witness

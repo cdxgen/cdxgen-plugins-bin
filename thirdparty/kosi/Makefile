@@ -121,6 +121,10 @@ bootstrap-darwin bootstrap-linux bootstrap-windows:
 # in scripts/plugin-platform-support.sh (never silently skipped):
 #   ppc64le, 32-bit arm - not Native Image platforms at all
 #   riscv64             - best-effort LLVM backend, not built at this phase
+# R66's cause and fix are recorded once, on the linux rule below, where the
+# flag they produced is set. (An earlier draft of the narrative lived here
+# too and was superseded mid-phase — it credited the `awt.toolkit` property
+# route, which JDK 25 does not read.)
 define build_native
 	$(graal_env) native-image -jar $(fat_jar) \
 	  -Os --gc=serial \
@@ -128,6 +132,7 @@ define build_native
 	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
 	  -H:+UnlockExperimentalVMOptions \
 	  -H:+AddAllCharsets \
+	  $(KOSI_AWT_FLAG) \
 	  --add-opens java.base/jdk.internal.jimage=ALL-UNNAMED \
 	  --enable-monitoring=jfr \
 	  -J-Xmx$(KOSI_NATIVE_HEAP) -J-Xms1g \
@@ -181,6 +186,25 @@ $(build_dir)/kosi-linux-arm64: KOSI_NATIVE_HEAP = 12g
 $(build_dir)/kosi-linuxmusl-amd64: KOSI_NATIVE_HEAP = 12g
 $(build_dir)/kosi-darwin-arm64: KOSI_NATIVE_HEAP = 8g
 
+# R66's AWT fix is LINUX-ONLY, and it is THREE facts measured in a local
+# arm64 container running the exact CI recipe:
+#  1. JDK 25 removed the awt.toolkit property: linux PlatformGraphicsInfo
+#    .createToolkit() constructs XToolkit UNCONDITIONALLY, whose <clinit>
+#     calls getLocalGraphicsEnvironment -> X11GraphicsEnvironment.<clinit>
+#     -> System.loadLibrary("awt"), and libawt.so's AWT_OnLoad does
+#     FindClass("java/awt/GraphicsEnvironment") + GetStaticMethodID
+#     isHeadless in an image that ships no AWT classes — fatal.
+#  2. Baking HEADLESS at build time (-Djava.awt.headless=true +
+#     GraphicsEnvironment in the build-time-init list) makes the baked
+#     isHeadless() return true, so AWT_OnLoad dlopens libawt_headless.so
+#     instead of libawt_xawt.so — no X11 needed, the event queue works.
+#  3. The image must JNI-register java.awt.GraphicsEnvironment and its
+#     isHeadless() method for AWT_OnLoad's lookups (the reachability
+#     metadata entry; merge-agent-metadata.py preserves it).
+# On darwin the same initialize-at-build-time flag BAKES a default
+# LWCToolkit into the image heap and every probe fails — darwin needs no
+# flag (libawt.dylib has no JNI_OnLoad) and none is set.
+$(build_dir)/kosi-linux-%: KOSI_AWT_FLAG = -Djava.awt.headless=true --initialize-at-build-time=java.awt.Toolkit,java.awt.GraphicsEnvironment
 $(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
 
@@ -271,7 +295,7 @@ native-metadata:
 	@$(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
 	  -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/version \
 	  -jar $(fat_jar) version
-	@for f in fixtures/*/; do \
+	@for f in fixtures/*/ examples/*/; do \
 	  slug=$$(basename $$f); \
 	  $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
 	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug \

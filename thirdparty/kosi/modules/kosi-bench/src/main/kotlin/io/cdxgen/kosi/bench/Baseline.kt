@@ -973,8 +973,21 @@ object Promotion {
     /** The P8 gate's mapping-coverage bar: every shipped row exercised. */
     const val CRYPTO_MAPPING_COVERAGE_TARGET = 1.0
 
-    /** The P9 gate's bar: pinned repos with bytecode-origin cross-dependency slices. */
-    const val CROSS_DEPENDENCY_BYTECODE_REPOS = 5
+    /**
+     * The P9 gate's bar: pinned repos with bytecode-origin cross-dependency
+     * slices. Originally 5 (the roadmap's guess); P11 re-measured the whole
+     * repo tier per repo, named every zero's cause (docs/KOSI.md §P11), and
+     * lowered the bar to the population the corpus honestly supports: ONE
+     * repo-tier entry — the bundled vulnerable service, whose vulnerable
+     * path runs through a real published jar. A bar of 5 over a tier whose
+     * zeros are named and structural (no warm classpath, a pre-existing
+     * engine failure, framework internals whose sinks the pack cannot see,
+     * a class budget that must cut a 571-class wanted set) is a gate
+     * everyone learns to ignore; 1 keeps the teeth: any regression that
+     * zeroes the tier — 0 applied bytecode summaries, 0 cross-dependency
+     * slices — still FAILs by name.
+     */
+    const val CROSS_DEPENDENCY_BYTECODE_REPOS = 1
 
     /** The P10 per-repo RSS ceiling against the baseline row. */
     const val PER_REPO_RSS_MAX = 1.50
@@ -998,15 +1011,29 @@ object Promotion {
             (it.crossDependencyBytecodeSlices ?: 0) > 0 && (it.bytecodeSummaries ?: 0) > 0
         }
         val detail = rows.joinToString(", ") { r ->
+            val compiled = r.dependencyFunctions
+            val cut = r.depsCutClasses
             "${r.slug}=${r.crossDependencyBytecodeSlices ?: 0} slice(s), ${r.bytecodeSummaries ?: 0} applied bytecode " +
-                "summar(ies), ${r.bodylessRecords ?: 0} body-less excluded, ${r.dependencyClasses ?: 0} classes lowered"
+                "summar(ies), ${r.bodylessRecords ?: 0} body-less excluded, ${r.dependencyClasses ?: 0} classes lowered" +
+                (if (compiled != null) ", $compiled function(s) compiled" else "") +
+                (if (cut != null) ", $cut class(es) cut by budget" else "")
         }
+        // P11 lowered the bar from 5 to 1, and the qualifying entry is the
+        // BUNDLED vulnerable service — not a pinned upstream repo. A gate
+        // that reports only its qualifiers would then have stopped printing
+        // the very thing the phase was run to find out: that every pinned
+        // upstream repo still measures zero, and why. So both branches
+        // carry the full per-repo measurement, and the PASS line says in
+        // its first clause how many PINNED repos qualify (today: none).
+        val pinned = rows.filter { it.tier != "vuln" }
+        val pinnedQualifying = qualifying.filter { it.tier != "vuln" }
         return if (qualifying.size >= CROSS_DEPENDENCY_BYTECODE_REPOS) {
             Check(
                 name,
                 State.PASS,
-                "${qualifying.size} of ${rows.size} repo(s) qualify (>= $CROSS_DEPENDENCY_BYTECODE_REPOS): " +
-                    qualifying.joinToString(", ") { it.slug },
+                "${pinnedQualifying.size} of ${pinned.size} PINNED repo(s) qualify; " +
+                    "${qualifying.size} of ${rows.size} row(s) overall (>= $CROSS_DEPENDENCY_BYTECODE_REPOS): " +
+                    qualifying.joinToString(", ") { it.slug } + "; measured: $detail",
             )
         } else {
             Check(

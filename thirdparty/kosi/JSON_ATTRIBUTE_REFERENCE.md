@@ -200,7 +200,7 @@ rather than a negative expectation that passes vacuously.
 | `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
 | `deps-bodyless` | info | P9 `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
 | `deps-class-not-found` | info | P9: workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
-| `deps-class-limit` | warning | P9: the `--deps-max-classes` budget capped the lowered dependency set; summaries through unlowered classes are absent |
+| `deps-class-limit` | warning | P9/R70: the `--deps-max-classes` budget capped the LOWERED dependency set; `count` is the number of selected classes CUT (named, first few in the message), never a silent zero of the tier — R70 made the budget bound the lowered set, not the selection |
 | `bytecode-unlowered` | warning | P9: constructs the bytecode lowering declined, itemised in the message and merged into `stats.loweringFailures{}` under `bytecode:` keys; every affected method is treated as body-less and excluded, never summarised from a half-body |
 | `analysis-time-budget` | warning | P10: the `--max-analysis-seconds` budget tripped; the run degraded WITHOUT discarding computed evidence (`count` is functions skipped after the trip) |
 | `rss-budget` | warning | P10: the `--max-rss-mb` budget tripped; same degradation contract |
@@ -336,6 +336,15 @@ The four-way breakdown, a DISJOINT partition (synthetic first, then local,
 then stdlib, then dependency; edges classify by target): `localNodes`,
 `stdlibNodes`, `dependencyNodes`, `syntheticNodes`, and the same four for
 edges. The parts sum to the totals — the promotion gate checks that.
+
+### --sarif-out <file> (sidecar, P11)
+
+SARIF 2.1.0 export of `dataFlow.slices[]`: one RULE per slice rule id, one
+RESULT per slice — the sink is the result location, the trace is the
+RELATED LOCATIONS in walk order, and the same walk renders as a `codeFlow`.
+Slice properties (`flowKey`, `taintKinds`, `origins`, `confidence`,
+`riskScore`, `crossesDependency`) ride `result.properties`. Usage error (not
+an empty file) when the run produced no data-flow evidence.
 
 ### --reachable-symbols <file> (sidecar)
 

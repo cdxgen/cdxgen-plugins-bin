@@ -116,9 +116,11 @@ jobs:
           mkdir -p "$HOME/tools"
           curl -sL -o /tmp/graalvm.tar.gz \
             https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
-          # Integrity comes from the HTTPS-pinned release asset; a truncated
-          # tar fails extraction. Record the sha256 in docs/BUILD.md at the
-          # first successful run so it can be pinned like the macOS one.
+          # Pinned since R66: the toolchain is part of the build contract,
+          # and this job's tarball was never pinned because its first
+          # successful run never happened (the AWT failure below). Same
+          # release asset family as the macOS pin above.
+          echo "b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  /tmp/graalvm.tar.gz" | sha256sum -c -
           tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
           "$HOME/tools"/graalvm-community-*/bin/native-image --version
       - name: make linux

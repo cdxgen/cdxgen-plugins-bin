@@ -51,11 +51,7 @@ plugin_platform_exemption() {
       return 0
       ;;
     windows-amd64|windows-arm64)
-      echo "MSVC-toolchain build lands with the release phase (docs/BUILD.md §6)"
-      return 0
-      ;;
-    darwin-amd64)
-      echo "macos-intel release runner lands with the release phase (docs/BUILD.md §6)"
+      echo "no Windows runner job wires the MSVC-toolchain build yet (docs/BUILD.md §6 documents the recipe); the JVM-jar fallback covers Windows consumers"
       return 0
       ;;
     *)

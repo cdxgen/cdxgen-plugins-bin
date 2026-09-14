@@ -123,8 +123,8 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
         configure(this)
     }
 
-kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async ratchets, no network.") {
-    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async", "--repo-root", rootDir.absolutePath)
+kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async + vuln ratchets, no network.") {
+    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async,vuln", "--repo-root", rootDir.absolutePath)
 }
 
 kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {
@@ -136,8 +136,9 @@ kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required fo
         // Every tier the manifest actually carries. The old list named
         // `vuln` and `ported`, which have never existed, and omitted
         // `medium`, `android`, `kmp` and `hybrid` — four of the five pinned
-        // repos — so the "full" run measured one of them (R64).
-        "bench", "--tier", "fixtures,async,small,medium,android,kmp,hybrid",
+        // repos — so the "full" run measured one of them (R64). `vuln`
+        // exists since P11 (the bundled vulnerable service).
+        "bench", "--tier", "fixtures,async,vuln,small,medium,android,kmp,hybrid",
         "--repo-root", rootDir.absolutePath,
         "--skip-missing-repos",
     )

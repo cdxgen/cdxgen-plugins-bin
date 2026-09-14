@@ -1,0 +1,3 @@
+# Deterministic classpath for kosi analysis of the sample app (offline,
+# no build executed). The Gradle files are the human-facing shape.
+libs/timber-5.0.1.jar

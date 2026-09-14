@@ -165,6 +165,14 @@ object BenchRunner {
         /** P9: classes lowered from the jars (the tier's denominator). */
         val dependencyClasses: Int? = null,
         /**
+         * P11: dependency methods lowered WITH bodies (what summaries were
+         * computed over) and classes selected but CUT by the budget — the
+         * two numbers that tell a zero apart from an absent tier (R70's
+         * 571-classes-zero-functions shape) from a cap truncation.
+         */
+        val dependencyFunctions: Int? = null,
+        val depsCutClasses: Int? = null,
+        /**
          * P10: this slot's peak RSS window (max of the samples around the
          * run). Process-cumulative peak stays on [BenchResult]; the per-repo
          * criterion needs a per-row number. Null for rows that predate the
@@ -269,6 +277,8 @@ object BenchRunner {
             crossDependencyBytecodeSlices?.let { w.num("crossDependencyBytecodeSlices", it) }
             bodylessRecords?.let { w.num("bodylessRecords", it) }
             dependencyClasses?.let { w.num("dependencyClasses", it) }
+            dependencyFunctions?.let { w.num("dependencyFunctions", it) }
+            depsCutClasses?.let { w.num("depsCutClasses", it) }
             w.num("xfail", xfail)
             w.num("xpass", xpass)
             w.str("tier", tier)
@@ -477,6 +487,8 @@ object BenchRunner {
                         crossDependencyBytecodeSlices = r.long("crossDependencyBytecodeSlices")?.toInt(),
                         bodylessRecords = r.long("bodylessRecords")?.toInt(),
                         dependencyClasses = r.long("dependencyClasses")?.toInt(),
+                        dependencyFunctions = r.long("dependencyFunctions")?.toInt(),
+                        depsCutClasses = r.long("depsCutClasses")?.toInt(),
                         peakRssBytes = r.long("peakRssBytes"),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
@@ -757,6 +769,10 @@ object BenchRunner {
             crossDependencyBytecodeSlices = report.dataFlow?.stats?.crossDependencyBytecodeSlices,
             bodylessRecords = report.stats.bodylessRecords.takeIf { it > 0 },
             dependencyClasses = report.stats.dependencyClasses.takeIf { it > 0 },
+            dependencyFunctions = report.stats.dependencyFunctions.takeIf { it > 0 },
+            depsCutClasses = report.diagnostics
+                .firstOrNull { it.code == io.cdxgen.kosi.schema.DiagnosticCodes.DEPS_CLASS_LIMIT }
+                ?.count?.takeIf { it > 0 },
             peakRssBytes = maxOf(rssBefore, rssAfter),
             digest = digest,
             failures = failureDetails,

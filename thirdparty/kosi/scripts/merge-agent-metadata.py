@@ -45,7 +45,14 @@ def merge():
     # native image itself (docs/KOSI.md defect 3: the jimage reader for the
     # resolved tier's JDK). The tracing agent runs on the JVM, where that
     # code path never executes, so regeneration would silently drop them.
-    # Seed the union from the checked-in output before merging agent runs.
+    # R66 adds the second member of that class: java.awt.GraphicsEnvironment
+    # is registered for JNI access so libawt's AWT_OnLoad (FindClass +
+    # GetStaticMethodID isHeadless) succeeds inside the linux image — the
+    # agent records no such registration, because on the JVM the same load
+    # resolves against the real AWT. Seed the union from the checked-in
+    # output before merging agent runs.
+    hand_seeded_prefixes = ("jdk.internal.",)
+    hand_seeded_types = {"java.awt.GraphicsEnvironment"}
     if os.path.exists(out_path):
         previous = json.load(open(out_path))
         for entry in previous.get("resources", []):
@@ -53,7 +60,9 @@ def merge():
             resources[canon(entry)] = entry
         for entry in previous.get("reflection", []):
             t = entry.get("type")
-            if isinstance(t, str) and t.startswith("jdk.internal."):
+            if isinstance(t, str) and (
+                t.startswith(hand_seeded_prefixes) or t in hand_seeded_types
+            ):
                 reflection.setdefault(("type", t), {k: v for k, v in entry.items() if k != "type"} | {"type": t})
     for slug in sorted(os.listdir(root)):
         path = os.path.join(root, slug, "reachability-metadata.json")

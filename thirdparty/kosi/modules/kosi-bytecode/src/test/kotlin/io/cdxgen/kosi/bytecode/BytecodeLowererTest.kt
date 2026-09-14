@@ -68,4 +68,49 @@ class BytecodeLowererTest {
         println("readSetting calls: $calleeFqns")
         assertTrue("kotlin.io.readLine" in calleeFqns)
     }
+
+    /**
+     * R70: the wanted phase is unbounded, so a wanted set LARGER than the
+     * budget once filled `selected` past `maxClasses` and the closure loop's
+     * first guard broke before anything was lowered — the tier shipped zero
+     * functions behind a cap diagnostic (anki-android: 571 classes, 0
+     * compiled functions). The budget bounds the LOWERED set: exactly
+     * `maxClasses` classes lower, in the same deterministic order, and the
+     * cut is named.
+     */
+    @Test
+    fun aWantedSetLargerThanTheBudgetStillLowersTheBudget() {
+        val jar = fixtureDir.resolve("libs").resolve("dep-helper.jar")
+        val wanted = setOf(
+            "dev.kosi.helper.Db.runQuery",
+            "dev.kosi.helper.Db.runUpdate",
+            "dev.kosi.helper.Db.hashOf",
+            "dev.kosi.helper.Console.readSetting",
+            "dev.kosi.helper.Provider.provide",
+            "dev.kosi.helper.AuditLog.record",
+        )
+        val result = BytecodeLowerer.lower(
+            jars = listOf(BytecodeLowerer.JarSpec(jar, "pkg:maven/dev.kosi/dep-helper@1.0")),
+            wantedCallables = wanted,
+            maxClasses = 2,
+        )
+        assertEquals(2, result.classCount, "the budget caps the LOWERED set, not the selection")
+        assertTrue(result.classLimitHit, "a wanted set over the budget is a named cap hit")
+        assertTrue(result.classesNotLowered.isNotEmpty(), "the cut is a named row, never a silent absence")
+        val loweredNames = result.module.functions.map { it.canonicalName }
+        assertTrue(loweredNames.isNotEmpty(), "a cap under the wanted set must not zero the tier")
+        // Deterministic order: the first classes in sorted order lower; the
+        // rest are named. The helper's sorted order is AuditLog, Console, Db,
+        // Provider — so Db is CUT here, and that cut is exactly what the
+        // diagnostic must name.
+        assertEquals(
+            listOf("dev/kosi/helper/Db", "dev/kosi/helper/Provider"),
+            result.classesNotLowered,
+        )
+        assertEquals(
+            setOf("dev.kosi.helper.AuditLog", "dev.kosi.helper.Console"),
+            result.module.functions.mapNotNull { it.enclosingClass }.toSet(),
+            "only the classes the budget admitted are in the module",
+        )
+    }
 }

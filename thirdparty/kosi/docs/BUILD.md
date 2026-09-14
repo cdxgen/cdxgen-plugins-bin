@@ -183,6 +183,60 @@ wherever they apply, never silent.
 
 CI: `.github/workflows/kosi-test.yml` runs the JVM gates on every change and
 the darwin-arm64 native build on every change; a `workflow_dispatch`-only
-`make linux` job exercises the linux-amd64 path. Record the linux-amd64
-GraalVM tarball sha256 here at its first successful run so it can be pinned
-like the macOS one.
+`make linux` job exercises the linux-amd64 path. The linux-amd64 GraalVM
+tarball sha256 has been pinned since R66 (the job downloaded an unpinned
+tarball because its first successful run never happened):
+
+```
+b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
+```
+
+### The linux AWT startup failure (R66, root-caused)
+
+The linux-amd64 smoke aborted at image startup with
+`NoClassDefFoundError: java/awt/GraphicsEnvironment` raised inside a JDK
+native library's `JNI_OnLoad`, while the same jar, flags and metadata built
+and ran green on darwin. The cause is in the JDK's own natives:
+
+- `java.awt.Toolkit`'s `<clinit>` (`initStatic()` → `loadLibraries()`)
+  calls `System.loadLibrary("awt")` UNCONDITIONALLY, before any
+  `awt.toolkit` property read. The path that reaches it is the IntelliJ
+  platform's mock application scheduling one Swing runnable while the
+  analysis environment is created — the same finding the P1 no-op toolkit
+  works around.
+- linux `libawt.so` defines a `JNI_OnLoad` that calls
+  `FindClass("java/awt/GraphicsEnvironment")` at load; an image ships no
+  AWT classes, so the load is fatal.
+- darwin `libawt.dylib` defines **no `JNI_OnLoad`** (`nm -D
+  --defined-only`), so the identical path is harmless there. The
+  "registration difference" between the platforms was never in kosi's
+  flags.
+
+The fix, verified in a local arm64 container running the exact CI recipe,
+is THREE facts (linux targets only, via `KOSI_AWT_FLAG` in the Makefile):
+
+1. JDK 25 removed the `awt.toolkit` property: linux
+   `PlatformGraphicsInfo.createToolkit()` constructs XToolkit
+   unconditionally, whose `<clinit>` calls `getLocalGraphicsEnvironment()`
+   -> `X11GraphicsEnvironment.<clinit>` -> `System.loadLibrary("awt")`,
+   and libawt.so's `AWT_OnLoad` does
+   `FindClass("java/awt/GraphicsEnvironment")` + `GetStaticMethodID
+   isHeadless` in an image that ships no AWT classes — fatal.
+2. `-Djava.awt.headless=true` at BUILD time plus
+   `java.awt.GraphicsEnvironment` in the build-time-init list bakes
+   `isHeadless() == true`, so `AWT_OnLoad` dlopens `libawt_headless.so`
+   instead of `libawt_xawt.so` — no X11, and the event queue works.
+3. The image JNI-registers `java.awt.GraphicsEnvironment` + `isHeadless()`
+   (a hand-seeded reachability entry `scripts/merge-agent-metadata.py`
+   preserves) so `AWT_OnLoad`'s lookups succeed.
+
+The flags are deliberately NOT applied to darwin: baking Toolkit at build
+time there ships a default `LWCToolkit` in the image heap and every probe
+fails (measured). Darwin needs no flag — its `libawt.dylib` has no
+`JNI_OnLoad`, so nothing there is fatal; `java.awt.headless=true`, set in
+`main`, is the whole of its mechanism. (It was believed to be a no-op
+`Toolkit` selected through `awt.toolkit`; JDK 25 never reads that property
+— see R71.) To reproduce the verification locally:
+`docker run --platform linux/arm64 ubuntu:24.04` + the pinned
+linux-aarch64 GraalVM + `zlib1g-dev`, then the `native-image` command from
+the Makefile's linux rule against the checked-in fat jar and metadata.

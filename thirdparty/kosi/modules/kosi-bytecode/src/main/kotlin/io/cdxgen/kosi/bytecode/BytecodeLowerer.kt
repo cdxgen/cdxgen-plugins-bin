@@ -93,6 +93,15 @@ object BytecodeLowerer {
         val classesNotFound: List<String>,
         /** True when the class budget capped the lowered set. */
         val classLimitHit: Boolean,
+        /**
+         * Classes the workspace calls (or the closure reached) that the
+         * budget CUT after lowering stopped: named here so a cap truncation
+         * is a counted row, never a silent zero. R70: when the wanted set
+         * alone exceeded the budget, the old check stopped the loop before
+         * ANY class was lowered and the whole tier shipped empty behind a
+         * cap diagnostic.
+         */
+        val classesNotLowered: List<String>,
         /** Purls of the jars that actually contributed classes. */
         val purlsUsed: Set<String>,
         /** Demangled aliases: alias canonical name -> primary canonical names, tried in order. */
@@ -182,11 +191,17 @@ object BytecodeLowerer {
         var classLimitHit = false
         var rounds = 0
         val frontier = selected.toMutableList()
+        // R70: the budget bounds the LOWERED set, not the selected set. The
+        // wanted phase above is unbounded by design (index lookups only);
+        // when it alone filled `selected` past maxClasses, the old
+        // `selected.size >= maxClasses` guard broke the loop before the
+        // first class was lowered and the whole tier shipped empty — 571
+        // classes "lowered", zero functions compiled, on anki-android.
         while (frontier.isNotEmpty() && rounds < 4) {
             rounds++
             val nextFrontier = sortedSetOf<String>()
             for (internal in frontier) {
-                if (selected.size >= maxClasses) {
+                if (loweredBodies.size >= maxClasses) {
                     classLimitHit = true
                     break
                 }
@@ -209,8 +224,11 @@ object BytecodeLowerer {
                 }
             }
             frontier.clear()
-            frontier.addAll(nextFrontier.filter { !selected.contains(it) && selected.size < maxClasses })
+            frontier.addAll(nextFrontier.filter { !loweredBodies.containsKey(it) && loweredBodies.size < maxClasses })
         }
+        // Every selected class the budget cut, in the same deterministic
+        // order the loop would have lowered them: the truncation's named row.
+        val classesNotLowered = selected.filter { !loweredBodies.containsKey(it) }
 
         // ---- assemble the module ------------------------------------------------
         val functions = mutableListOf<KirFunction>()
@@ -242,7 +260,7 @@ object BytecodeLowerer {
             ))
         return Result(
             module = module,
-            classCount = selected.size,
+            classCount = loweredBodies.size,
             functionCount = functionCount,
             bodylessRecords = bodyless,
             constructorsSkipped = constructorsSkipped,
@@ -251,6 +269,7 @@ object BytecodeLowerer {
             unlowered = unlowered,
             classesNotFound = classesNotFound.toList(),
             classLimitHit = classLimitHit,
+            classesNotLowered = classesNotLowered,
             purlsUsed = purlsUsed,
             aliases = aliases.mapValues { (_, primaries) -> primaries.toList().sorted() },
         )

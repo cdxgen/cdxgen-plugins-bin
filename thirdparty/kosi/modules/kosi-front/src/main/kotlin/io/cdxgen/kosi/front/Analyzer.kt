@@ -693,8 +693,10 @@ object Analyzer {
                                 code = DiagnosticCodes.DEPS_CLASS_LIMIT,
                                 severity = Severity.WARNING,
                                 message = "the --deps-max-classes budget capped the lowered dependency set at " +
-                                    "${depTier.classCount} classes; summaries through unlowered classes are absent",
-                                count = depTier.classCount,
+                                    "${depTier.classCount} classes; ${depTier.classesNotLowered.size} selected class(es) " +
+                                    "were not lowered (first: " + depTier.classesNotLowered.take(5).joinToString(", ") + "); " +
+                                    "summaries through unlowered classes are absent",
+                                count = depTier.classesNotLowered.size,
                             ),
                         )
                     }
@@ -1242,6 +1244,7 @@ object Analyzer {
         val unlowered: Map<String, Int>,
         val classesNotFound: List<String>,
         val classLimitHit: Boolean,
+        val classesNotLowered: List<String>,
     )
 
     /**
@@ -1306,6 +1309,7 @@ object Analyzer {
             unlowered = result.unlowered,
             classesNotFound = result.classesNotFound,
             classLimitHit = result.classLimitHit,
+            classesNotLowered = result.classesNotLowered,
         )
     }
 }

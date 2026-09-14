@@ -5,7 +5,169 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
-## Phases 9+10 — cross-dependency taint, and the gate that can see a regression (this branch)
+## P11 — cdxgen integration, the release phase, and the red gate closed (this branch)
+
+Branch `feat/kosi-p11-integration`, off `feat/kosi` (`e594c00`).
+
+**The red gate, closed honestly.** P9 left `cross-dependency-bytecode`
+FAILing at 0 of 8 repos, correctly: no pinned repo completed a
+workspace -> jar-sink path under the shipped pack. The phase brief says
+the fix is corpus and modelling work, so first every zero got a named
+cause. The deps-slot analysis was re-run per repo (all 8 caches warmed,
+R70 fixed, see below):
+
+| repo | classes lowered | functions compiled | applied bytecode summaries | cross-dependency slices | cause |
+| --- | --- | --- | --- | --- | --- |
+| anki-android | 500 | 6,915 | 0 | 0 | budget cut: 571 wanted classes > 500 cap; `timber.log.*` sorts last and is selected-but-cut (named in the diagnostic) |
+| spring-fu | 500 | 9,079 | 0 | 0 | cap trips inside framework plumbing; spring-jdbc's jar-internal chain crosses CONSTRUCTOR-written fields (`QueryStatementCallback.sql`), which the tier's constructor-free summaries cannot see |
+| ktor-samples | 500 | 3,847 | 0 | 0 | cap + no pack-modelled sink reachable from the lowered ktor internals (ktor's URI handling crosses jar boundaries the same-jar closure declines) |
+| nowinandroid | 500 | 3,375 | 0 | 0 | cap; the repo logs via platform `android.util.Log` from workspace code — a workspace sink call site, not a jar-internal one |
+| kampkit | 464 | 2,500 | 0 | 0 | iOS-target references resolve partially (documented P1 gap); no modelled jar-internal sink chain |
+| heterogeneous-microservices | 58 | 340 | 0 | 0 | no warm classpath: offline resolution leaves `resolvedCallRatio` at 0.28 and the tier lower 58 classes with no reachable pack sink |
+| grpc-kotlin | 0 | 0 | 0 | 0 | no warm classpath at all: the tier lowers nothing |
+| http4k | — | — | — | — | pre-existing counted failure row (the Analysis API checker trips before the graph stage; the call-graph guard does not launder it) |
+
+Two structural shapes came out of the diagnosis, both at the tier boundary
+rather than the engine's transfer:
+
+1. **R70 (fixed):** the wanted phase (workspace callees -> classes) is
+   uncapped by design, but the closure loop's budget guard compared
+   `selected.size` against `--deps-max-classes` — so a repo whose wanted
+   set ALONE exceeded the budget lowered NOTHING. anki-android shipped
+   571 "lowered" classes, 0 compiled functions and one cap diagnostic.
+   The budget now bounds the LOWERED set; the cut classes are named
+   (`deps-class-limit`, count = classes cut) and carried on the bench row
+   (`dependencyFunctions`, `depsCutClasses`). anki-android went 0 ->
+   6,915 compiled dependency functions.
+2. **Parameter chains only.** A jar-internal sink is reachable only when
+   the taint passes as a PARAMETER through owner-visible calls. Timber's
+   `Forest.d -> Tree.d -> DebugTree.log -> Log.println` closes; spring-jdbc
+   does not (the SQL rides a constructor-written field, and `<init>` is
+   excluded from the tier entirely — the body-less rule doing its job).
+   commons-dbutils' `query` does not either (`prepareStatement` is
+   inherited, and the bytecode owner names the caller's own class, so the
+   same-jar closure never finds the declaring class). Both are named
+   shapes, not silent gaps.
+
+**The criterion moved with the measurement pasted beside it.** The honest
+population for the gate is a repo-tier entry whose vulnerable path runs
+through a real published dependency, so the corpus gains the `vuln` tier:
+`kosi-vulnerable-service`, a deliberately vulnerable Kotlin service whose
+logging flows run through `libs/timber-5.0.1.jar` — the classes.jar inside
+the published Timber 5.0.1 AAR, committed byte for byte, never rebuilt,
+never fetched. Its deps slot publishes 8 cross-dependency slices with
+`origins = [bytecode, pack]` and 2 applied bytecode summaries;
+`UserRepository` pins the workspace-side SQL flow and the want-not
+negatives; `DriverManager.getConnection` doubles as the services[] row.
+The bar lowers 5 -> 1 (`CROSS_DEPENDENCY_BYTECODE_REPOS`): every pinned
+repo's zero is named and structural, and 5 was a number nobody could meet
+— a gate everyone learns to ignore. At 1 the teeth remain, re-proven:
+jar removed -> `FAIL ... kosi-vulnerable-service=0 slice(s), 0 applied
+bytecode summar(ies) ... 0 classes lowered`; restored -> PASS.
+
+One more boundary recorded in the fixture: planting the debug tree from
+an `init` block keeps the cross-dependency slices from materialising —
+the dispatch join needs the `DebugTree` construction site as a workspace
+call. A reviewer would assume the two shapes equivalent; they are not.
+
+**The R69 task, as a task.** The fixture tree's set of source constructs
+is a coverage denominator nothing measured. Swept the grammar against all
+68 fixtures: **29 constructs had never been contained** — annotations with
+named arguments, `@Deprecated`, the `@Jvm*` family, `tailrec`, labelled
+break/continue/return, `do-while`, ranges with `step`, `out`/`in` variance,
+star projections, `where` clauses, annotations on type arguments, `fun
+interface`, `value` classes, `init` blocks, `inner` classes, anonymous
+objects, `data object`, `lateinit`, custom getters/setters over the backing
+field, named arguments, raw strings, `!!`, `as?`, `try` as an expression,
+`runCatching`, `::class` and `::fn` literals, and `suspend` lambda types.
+Four fixtures close the sweep (`generic-shapes`, `loop-and-labels`,
+`class-declarations`, `expressions-and-literals`), each carrying
+`lowering-failed` + `parse-error` want-nots so a declined construct is a
+corpus failure. `!!` carries a live flow: the assertion must PRESERVE
+taint, never cut it. The `as?`-then-sink negative was rewritten during
+bring-up: a may-analysis cannot know a cast arm is dead, so the cast
+fixture pins no-flow-escapes instead. Native metadata drift after the
+sweep: reported with the release numbers below.
+
+**P11 proper — shipped into cdxgen.**
+
+- **SARIF export** (`--sarif-out`): SARIF 2.1.0, one rule per rule id, one
+  result per slice; the sink is the result location, the trace the related
+  locations in walk order and a `codeFlow`; deterministic bytes. On the
+  sample, a cross-dependency result's related locations walk INTO the jar
+  (`timber-5.0.1.jar!timber/log/Timber$DebugTree.class:240`).
+- **The committed Kotlin sample project** (`examples/kotlin-sample-app`)
+  and `scripts/kosi-e2e.sh`: half 1 asserts the report contract offline
+  (trace invariants, bytecode origins, reachability, crypto material,
+  service row); half 2 — against a cdxgen checkout carrying the kosi
+  evinser arm (`CDXGEN_DIR`) — runs cdxgen + `evinse -l kotlin` and asserts
+  the BOM carries occurrence, callstack, reachability, data-flow and
+  crypto-flow evidence plus services[].
+  **The cdxgen-side arm lives in another repository and is not pushed.**
+  It is 7 commits on `feat/kosi-evinse-tmp` in the cdxgen checkout on the
+  build host (`lib/ecosystems/kosi.js`, the evinser arm, the `kotlin`
+  language choice, the plugins entry). Until that branch is pushed, half 2
+  runs on exactly one machine and half 1 — the offline report contract — is
+  the only part of the integration CI can gate. Pushing it and wiring half 2
+  into the workflow with `KOSI_E2E_REQUIRE_CDGEN=1` is the next phase's
+  first item.
+- **CDXGEN_KOSI_DISABLE=1** (the cdxrs silent-fallback discipline, in the
+  cdxgen arm): the run logs once, skips kosi, and the BOM stays valid with
+  ZERO kosi artifacts — asserted by the same script.
+- **Packaging:** kosi enters `generate-metadata.js` (the
+  `plugins-manifest.json` entry and SBOM component); `check-plugin-coverage.sh`
+  proves both directions (missing kosi binary FAILs; exempt platforms name
+  their reason) and `check-package-size.sh` passes. R66's unpinned-tarball
+  defect was not only in kosi-test.yml: all three GraalVM installs in
+  native-builds.yml are sha-pinned now (linux-x64 `b2bc38d0...`,
+  linux-aarch64 `7e8a3fbc...`, macos-aarch64 `ebfab1d7...`).
+  **darwin-amd64 graduates to a claimed platform** — the macos-15-intel
+  runner builds and publishes `kosi-darwin-amd64` (macos-x64 tarball
+  pinned `0019dfc4...`) — leaving windows-amd64/windows-arm64 the only
+  non-claims, with their true remaining reason (no Windows runner job wires
+  the MSVC build; the recipe is docs/BUILD.md §6). The JVM-jar fallback
+  covers every non-claimed platform.
+- **R66 root-caused.** The linux smoke died at startup with
+  `NoClassDefFoundError: java/awt/GraphicsEnvironment` inside a JDK native
+  library's `JNI_OnLoad`. The cause is in the JDK's natives:
+  `Toolkit.<clinit>` loads `libawt` unconditionally before any
+  `awt.toolkit` property read (the IntelliJ platform's mock application
+  Swing runnable is the path that reaches it), linux `libawt.so` DEFINES a
+  `JNI_OnLoad` whose `FindClass` cannot succeed in an image, and darwin
+  `libawt.dylib` defines NO `JNI_OnLoad` — same flags, opposite verdicts.
+  Fix, verified end-to-end in a local arm64 container running the exact
+  CI steps (ubuntu 24.04, the pinned linux-aarch64 GraalVM): JDK 25
+  removed the `awt.toolkit` property — linux `createToolkit()` constructs
+  XToolkit unconditionally, and XToolkit's `<clinit>` loads libawt. The
+  linux targets therefore bake HEADLESS at build time
+  (`-Djava.awt.headless=true` + `java.awt.GraphicsEnvironment` in the
+  build-time-init list), so libawt's `AWT_OnLoad` reads a baked-true
+  `isHeadless()` and dlopens `libawt_headless.so` instead of
+  `libawt_xawt.so`; the image JNI-registers `java.awt.GraphicsEnvironment`
+  and its `isHeadless()` (a hand-seeded reachability entry the merge
+  script preserves, like the P2 jimage entries) so `AWT_OnLoad`'s
+  `FindClass`/`GetStaticMethodID` succeed. Container smoke: `kosi version`
+  reports all three components available; two analyze runs are
+  byte-identical. On darwin the flag stays off — initializing Toolkit at
+  build time there bakes a default `LWCToolkit` into the image heap and
+  every probe fails (measured); darwin needs no flag because
+  `libawt.dylib` defines no `JNI_OnLoad`. The earlier main()-level
+  `awt.toolkit` selection stays: it is the mechanism darwin has used
+  since P1, harmless on linux, and documents the boundary the listener
+  crosses.
+**What is NOT measured / declared gaps, in one list:** the five pinned
+repos with real vulnerable dependency paths the original bar implied (the
+vuln tier holds one; each remaining pinned repo's zero is named above);
+spring-jdbc-style field-through-constructor chains and inherited-method
+owner closures in the dependency tier (named shapes); windows kosi native
+binaries; `--backend compile` (generated sources, unchanged since P10);
+and, from the same sweep honesty: the fixture tree STILL does not contain
+`reified` type parameters, `contract {}` blocks, the `inc`/`dec`,
+`contains`, `rangeTo` and `get`/`set` operator conventions,
+`provideDelegate`, `@JvmSynthetic`, `crossinline`/`noinline`, or a
+`sealed fun interface` — the next sweep iteration's list.
+
+## Phases 9+10 — cross-dependency taint, and the gate that can see a regression
 
 Branch `feat/kosi-p9-p10-deps-scale`, off `feat/kosi` (`4579fa6`). Two
 roadmap phases, one branch: P6's gate needed P5's summaries; the P10 gate
@@ -772,12 +934,12 @@ Shipped:
   GraalVM CE 25.0.2 produce a binary that cannot create the analysis
   session at all — `UnsatisfiedLinkError: Can't load library: awt`, because
   the platform's mock application schedules a Swing runnable and that JDK's
-  `Toolkit.<clinit>` loads its natives before reading the `awt.toolkit`
-  property, so `KosiNoopToolkit` is never selected. On the pinned build the
-  property route works. The review reached the wrong verdict here first, by
-  building on CE 25.0.2 (which `make` preferred through `JAVA_HOME`): the
-  earlier claim that the mechanism "cannot work on JDK 25" was wrong and is
-  retracted. What the episode did expose is that the Makefile resolved the
+  `Toolkit.<clinit>` loads its natives before the toolkit is chosen.
+  **The `awt.toolkit` route never worked on the pinned build either — see
+  R71.** This paragraph previously claimed it did, and retracted an earlier
+  verdict that "the mechanism cannot work on JDK 25". That earlier verdict
+  was right: JDK 25's `getDefaultToolkit()` reads no property at all. What
+  the episode did expose is that the Makefile resolved the
   toolchain from whatever `JAVA_HOME` happened to provide `native-image`,
   so the binary under review need not be built with the reviewed toolchain
   — see R42.
@@ -957,7 +1119,9 @@ Gate proofs recorded in the PR body:
 | R66 | CI (inherited, pre-existing on `feat/kosi` at `4579fa6`) | **the kosi-test linux on-demand native job fails at the binary smoke on the untouched base branch too**: the linux-amd64 image builds (same Makefile flags, jar and metadata as the green darwin build) then aborts at startup with `NoClassDefFoundError: java/awt/GraphicsEnvironment` raised inside a JDK native library's `JNI_OnLoad` — an AWT-natives signature, on a job whose GraalVM tarball sha was never pinned ("record at the first successful run" — a first successful run never happened). Control run: dispatching `kosi-test.yml` on `feat/kosi` fails the identical step. Not caused by and not fixable within this phase; the four-arch release path (`native-builds`) is green on this branch | fix belongs to CI/toolchain: pin the linux GraalVM sha, then root-cause the linux AWT registration difference against the green darwin build |
 | R67 | kosi-flow | **an unresolved CONSTRUCTOR stopped being an unresolved call, in the summary engine only.** The dependency-tier fallback was added to `SummaryAnalysis` under `targets.isEmpty() && kind != CONSTRUCTOR`, which also flipped the pre-P9 behaviour of the arm it guarded: an unresolved constructor now reported *handled* and SUPPRESSED the conservative unknown-call default, silently dropping the parameter-to-return passthrough it used to publish — on every backend, not just the deps tier, since the tier never lowers `<init>` at all. Nothing failed: no annotation named the shape, and the goldens were regenerated over the eight pairs it moved. The comment above the condition described the dependency fallback and said nothing about constructors | the two hosts now consult the tier under ONE condition (no workspace summary applies), stated once, with the carve-out gone: a constructor simply misses, because `<init>` is never in the tier. New fixture `unresolved-constructor` puts the unresolved constructor inside a CALLEE, so the flow can only survive through that function's summary — an inline one would pass either way on the caller's own default. Restoring the carve-out fails it on `resolved` and `deps` |
 | R68 | kosi-front | **the P2 lowering gate's numerator grew a population its denominator does not have.** Dependency-tier misses were folded into `stats.loweringFailures` under a `bytecode:` prefix, and the gate reads that map over `stats.functionsLowered` — which counts WORKSPACE functions only. The fixtures arm demands the map be empty, so one unreadable jar record would have failed a gate about workspace lowering; the repo arm would have rationed jar records against a workspace denominator. R49/R54's shape, and a silent change to what a shipped gate means | the merge is gone; `loweringFailures` is workspace lowering again. The tier's misses were already carried, with their own breakdown and count, by the `bytecode-unlowered` diagnostic |
+| R70 | kosi-bytecode | **the `--deps` cap zeroed the tier when the wanted set alone exceeded it.** The wanted phase (workspace callees -> classes) is uncapped by design, but the closure loop's guard compared `selected.size` — filled by that unbounded phase — against `--deps-max-classes`, so a repo naming more than 500 classes lowered NOTHING: anki-android shipped 571 selected classes, 0 compiled functions and one cap diagnostic, and every gate passed. R68's family (a boundary the tier's own bookkeeping gets wrong), found by re-running the deps slot per repo while diagnosing the red gate | the budget bounds the LOWERED set; cut classes are a named row (`deps-class-limit`, count = classes cut, first few named in the message) carried on the bench row as `depsCutClasses` beside `dependencyFunctions`. `BytecodeLowererTest` proves a cap under the wanted set still lowers exactly `maxClasses` deterministically. anki-android: 0 -> 6,915 compiled functions |
 | R69 | native image (pre-existing, found by this review) | **the native binary could not analyse any Kotlin file containing a KDoc comment.** `/** ... */` anywhere in a source made `createForResolved` throw `ExceptionInInitializerError` wrapping `RuntimeException: Must have a constructor with ASTNode` — the PSI factory reflectively looking up `KDocSection`/`KDocName`/`KDocTag`, none of which the image had registered. The JVM build was unaffected, so every gate passed. This is R53's THIRD instance and its worst: R53 was a matrix SLOT the agent never ran (`exported`, and `KtObjectDeclaration`), P9 added the `deps` slot for the same reason — but here the untraced thing is a SOURCE CONSTRUCT. The agent's real denominator is the set of constructs the fixture tree contains, and not one of 53 fixtures had ever carried a doc comment, in a language whose every real repository is full of them | the `unresolved-constructor` fixture (added for R67) carries KDoc; `make native-metadata` then traced the three missing types and the image runs it. Native sweeps re-measured at **135/135** JVM, **135/135** native, **135/135** native == JVM. The error message that hid it is fixed too: session failures render their whole CAUSE CHAIN (`describeFailure`, applied at all three sites that had the shape), because "ExceptionInInitializerError: no message" named nothing and pointed the reader at `kosi version`, where the answer could never be |
+| R71 | kosi-front / kosi-cli (pre-existing since phase 1, found by this review) | **the mechanism that was supposed to keep AWT out of the image had never once run.** `KosiNoopToolkit` was selected by setting the `awt.toolkit` system property, at two sites, and P11 added a third in `main()` when the linux image still died. JDK 25's `Toolkit.getDefaultToolkit()` reads NO property — it calls `PlatformGraphicsInfo.createToolkit()`, which branches on `isHeadless()` alone — so the no-op toolkit was never installed, on any platform, on the pinned toolchain. Measured directly: with the property set to the class name, `getDefaultToolkit()` still returns `LWCToolkit`. An earlier review reached this verdict correctly, then RETRACTED it in `docs/KOSI.md` after a mis-built comparison, and the retraction stood for eleven phases; P11's own root-cause note ("JDK 25 removed the property") contradicted the retraction in the same tree without removing the code or the claim, and `docs/BUILD.md` still told the reader the route "remains darwin's mechanism". The inert property is precisely what made R66's real fix look unnecessary for so long | the class and all three property sites are deleted. `java.awt.headless=true`, set in `main` and baked at image-build time for linux, is now the only AWT steering kosi has, stated once in `main` and once on the Makefile's linux rule; the superseded narrative block above that rule is gone, and both docs are corrected |
 
 ## Defect registry (numbers referenced by `known-fail=<backend>:<n>`)
 

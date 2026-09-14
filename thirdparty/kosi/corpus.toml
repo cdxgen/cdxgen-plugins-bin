@@ -471,6 +471,53 @@ tier = "async"
 path = "fixtures/async-stateflow"
 capabilities = ["coroutines", "stateflow", "collect"]
 
+# P11: the R69 construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
+# is a coverage denominator nothing measured — KDoc was found by accident
+# (R69), and the sweep found 29 constructs 68 fixtures had never contained.
+# Four fixtures close the sweep; each names its constructs in capabilities
+# and carries the lowering-failed want-not, so a construct the lowering
+# declines is a corpus failure, not an invisible gap. A construct missing
+# here means the native image could not have run it.
+
+[[fixtures]]
+slug = "generic-shapes"
+tier = "fixtures"
+path = "fixtures/generic-shapes"
+capabilities = ["variance-out", "variance-in", "star-projection", "where-clause", "nested-generics", "annotation-on-type-arg", "fun-interface", "typealias", "value-class"]
+
+[[fixtures]]
+slug = "loop-and-labels"
+tier = "fixtures"
+path = "fixtures/loop-and-labels"
+capabilities = ["labelled-break", "labelled-continue", "labelled-return", "do-while", "ranges", "step", "tailrec", "default-params"]
+
+[[fixtures]]
+slug = "class-declarations"
+tier = "fixtures"
+path = "fixtures/class-declarations"
+capabilities = ["init-block", "inner-class", "anonymous-object", "data-object", "protected-visibility", "lateinit", "custom-getter-setter", "named-args", "annotation-named-args", "deprecated-annot", "jvmname-annot", "jvmstatic-annot", "jvmfield-annot", "jvmoverloads-annot", "companion-jvmfield"]
+
+[[fixtures]]
+slug = "expressions-and-literals"
+tier = "fixtures"
+path = "fixtures/expressions-and-literals"
+capabilities = ["raw-string", "notnull-assert", "safe-cast", "try-expression", "run-catching", "reflection-literal", "function-reference", "suspend-lambda"]
+
+# P11: the vuln tier — the honest population for the cross-dependency gate.
+# A purpose-built Kotlin service whose vulnerable path runs through a REAL
+# published dependency (libs/timber-5.0.1.jar, the classes.jar inside the
+# AAR, committed verbatim), so a workspace source -> jar-internal sink chain
+# exists under the shipped pack. The eight pinned repos were pinned for
+# other phases' questions and carry named zero-causes (docs/KOSI.md, P11
+# section); this entry is the repo-tier row the gate can measure.
+
+[[fixtures]]
+slug = "kosi-vulnerable-service"
+tier = "vuln"
+path = "fixtures/kosi-vulnerable-service"
+classpath_file = "classpath.txt"
+capabilities = ["deps", "bytecode-summaries", "cross-dependency", "vulnerable-service", "log-injection", "sql-query", "services"]
+
 [[fixtures]]
 slug = "ktor-samples"
 tier = "small"

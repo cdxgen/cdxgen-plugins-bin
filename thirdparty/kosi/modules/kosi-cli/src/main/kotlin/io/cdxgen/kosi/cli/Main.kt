@@ -86,7 +86,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
-        "classpath", "classpath-file", "jdk-home", "reachable-symbols",
+        "classpath", "classpath-file", "jdk-home", "reachable-symbols", "sarif-out",
         "max-analysis-seconds", "max-rss-mb", "deps-max-classes",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
@@ -160,6 +160,21 @@ object Main {
             val target = Path.of(reachableSymbols)
             target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
             Files.writeString(target, io.cdxgen.kosi.graph.WitnessPaths.write(graph, options.maxPathsPerSymbol))
+        }
+        // P11: SARIF export of the data-flow slices, the trace as related
+        // locations. A sidecar beside the report, the shape evinse and
+        // SARIF consumers read; a run with no dataFlow writes no file.
+        parsed.value("sarif-out")?.let { sarifOut ->
+            val dataFlow = report.dataFlow ?: throw UsageException(
+                "--sarif-out needs data-flow evidence: run with --dataflow security or all " +
+                    "(the none mode produces no slices to export)",
+            )
+            val target = Path.of(sarifOut)
+            target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+            Files.writeString(
+                target,
+                io.cdxgen.kosi.export.Sarif.write(dataFlow, report.tool.name, report.tool.version),
+            )
         }
         // Error-severity diagnostics mean the analysis is incomplete; surface
         // them without failing the run (they are data, not a crash).
@@ -615,6 +630,18 @@ fun main(args: Array<String>) {
     for ((key, value) in listOf("java.awt.headless" to "true", "apple.awt.UIElement" to "true")) {
         if (System.getProperty(key) == null) System.setProperty(key, value)
     }
+    // `java.awt.headless` above is the ONLY property that steers AWT on the
+    // pinned toolchain. There used to be a second one here and in
+    // AnalysisEnvironment: `awt.toolkit`, pointing at a hand-written no-op
+    // Toolkit. JDK 25's `Toolkit.getDefaultToolkit()` never reads that
+    // property — it calls `PlatformGraphicsInfo.createToolkit()`, which
+    // branches on `isHeadless()` alone — so the no-op toolkit was never
+    // once selected on this toolchain, on any platform (measured: with the
+    // property set, `getDefaultToolkit()` still returns `LWCToolkit`). It
+    // is removed rather than left as a comfort: R66's real linux fix is the
+    // build-time headless bake plus the JNI registrations in the Makefile,
+    // and the inert property was what made that fix look unnecessary for
+    // eleven phases.
     // An UNCAUGHT exception must never end main: the IntelliJ substrate
     // leaves a NON-daemon pooled thread behind, and a JVM whose main died
     // naturally then waits for it FOREVER (the http4k corpus run hung two

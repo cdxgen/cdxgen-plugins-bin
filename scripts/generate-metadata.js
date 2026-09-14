@@ -13,6 +13,7 @@ const dosaiVersion = "v4.0.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;
+const kosiVersion = pluginsPackageJson.version;
 
 function pluginComponentMetadata() {
   return {
@@ -102,6 +103,20 @@ function pluginComponentMetadata() {
         { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
       ],
     },
+    kosi: {
+      version: kosiVersion,
+      description:
+        "Kotlin Source Inspector (kosi) lowers Kotlin and dependency bytecode into one IR to produce occurrences, call graphs, reachability, data-flow and crypto evidence for cdxgen.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/kosi@${kosiVersion}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/kosi",
+          type: "vcs",
+        },
+        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+      ],
+    },
     trustinspector: {
       version: trustInspectorVersion,
       description:
@@ -173,7 +188,7 @@ async function main() {
   const allDependencies = [];
   const toolMetadata = pluginComponentMetadata();
   const manifestPlugins = [];
-  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem', 'rusi'];
+  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem', 'rusi', 'kosi'];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
     if (!fs.existsSync(toolDir)) {

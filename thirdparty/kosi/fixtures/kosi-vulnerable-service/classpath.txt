@@ -1,0 +1,5 @@
+# kosi classpath for this fixture. Relative entries resolve against
+# this file's directory. The jar is REAL Timber 5.0.1 (the classes.jar inside
+# the published AAR, committed verbatim) so the vulnerable dependency path
+# is a published binary, never rebuilt and never fetched.
+libs/timber-5.0.1.jar

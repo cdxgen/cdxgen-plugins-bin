@@ -22,3 +22,4 @@
 - [5. BOM validation with cdxrs](LESSON5.md)
 - [6. Trust posture with trustinspector](LESSON6.md)
 - [7. Build, package, and publish the binaries](LESSON7.md)
+- [8. Kotlin evidence with kosi](LESSON8.md)

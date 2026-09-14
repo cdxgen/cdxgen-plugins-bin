@@ -170,14 +170,12 @@ class AnalysisEnvironment private constructor(
          * image.
          */
         private fun materializedExtensionRoot(): String {
-            // The mock application schedules one runnable through Swing; in
-            // an image the macOS AWT natives are absent, so point the JDK at
-            // the no-op toolkit BEFORE anything touches AWT. Set on every
-            // substrate (also lets the tracing agent record the reflective
-            // instantiation for the image); kosi never renders anything.
-            if (System.getProperty(KosiNoopToolkit.Companion.PROPERTY) == null) {
-                System.setProperty(KosiNoopToolkit.Companion.PROPERTY, KosiNoopToolkit.Companion.CLASS_NAME)
-            }
+            // The mock application schedules one runnable through Swing. A
+            // no-op Toolkit used to be selected here through the
+            // `awt.toolkit` property; JDK 25 does not read that property at
+            // all, so the selection never happened (see `main`). What keeps
+            // the image off the AWT natives is `java.awt.headless`, set in
+            // `main` and baked at build time for linux.
             val descriptors = listOf(
                 "META-INF/extensions/compiler-cli-root.xml",
                 "META-INF/extensions/compiler.xml",

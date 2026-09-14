@@ -3,3 +3,4 @@ build/
 .corpus-cache/
 !gradle/wrapper/gradle-wrapper.jar
 baseline.json
+.kotlin/

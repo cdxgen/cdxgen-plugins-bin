@@ -61,20 +61,28 @@ class P9P10GateTest {
     // ---- P9: cross-dependency-bytecode --------------------------------------
 
     @Test
-    fun theCrossDependencyGatePassesAtFiveQualifyingRepos() {
+    fun theCrossDependencyGatePassesWhenTheBarIsMet() {
+        // The bar is 1 since P11's per-repo re-measurement (docs/KOSI.md
+        // carries the breakdown that lowered it from 5); any qualifying
+        // repo must PASS and be named.
         val repos = (1..5).map { row("repo$it") }
         val report = Promotion.evaluate(result(*repos.toTypedArray()), baseline = null)
         val check = report.checks.first { it.name == "cross-dependency-bytecode" }
         assertEquals(State.PASS, check.state, check.detail)
-        assertTrue("5 of 5" in check.detail, check.detail)
+        assertTrue("5 of 5 PINNED repo(s) qualify" in check.detail, check.detail)
+        // A PASS must still publish the per-repo measurement. The bar is 1
+        // and the corpus' one qualifier is the BUNDLED vulnerable service,
+        // so a PASS line that printed only its qualifiers would hide the
+        // pinned repos' zeros — the finding P11 was run to produce.
+        assertTrue("measured: repo1=" in check.detail, check.detail)
     }
 
     @Test
     fun theCrossDependencyGateFailsNamingTheZeroRepos() {
-        val repos = (1..5).map { row("repo$it", bytecodeSlices = if (it == 1) 0 else 2) }
+        val repos = (1..5).map { row("repo$it", bytecodeSlices = 0, bytecodeSummaries = 0) }
         val report = Promotion.evaluate(result(*repos.toTypedArray()), baseline = null)
         val check = report.checks.first { it.name == "cross-dependency-bytecode" }
-        assertEquals(State.FAIL, check.state, "4 of 5 qualifying repos must FAIL the gate")
+        assertEquals(State.FAIL, check.state, "0 qualifying repos must FAIL the gate")
         assertTrue("repo1=0 slice(s)" in check.detail, "the zero repo must be named: ${check.detail}")
     }
 
