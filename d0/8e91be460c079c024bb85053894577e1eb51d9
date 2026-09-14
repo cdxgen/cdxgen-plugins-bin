@@ -1,0 +1,18 @@
+.github/workflows/kosi-test.yml
+  h_6a4cc5cdf68def 119-123
+thirdparty/kosi/Makefile
+  h_6a4cc5cdf68def 124-141,149
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 186-219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d08e91be460c079c024bb85053894577e1eb51d9",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
