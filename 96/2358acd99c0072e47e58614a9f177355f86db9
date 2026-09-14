@@ -1,0 +1,14 @@
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  h_6a4cc5cdf68def 558-574,592-608,830-880,915-931,949-965,983-1016,1068-1078,1112-1122,1143-1176,1211-1221,1244-1254,1266-1276,1310-1331,1343-1353,1365-1375,1462,1475-1485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "962358acd99c0072e47e58614a9f177355f86db9",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
