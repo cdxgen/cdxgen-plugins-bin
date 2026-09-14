@@ -1,0 +1,30 @@
+thirdparty/kosi/examples/kotlin-sample-app/build.gradle.kts
+  h_6a4cc5cdf68def 1-17
+thirdparty/kosi/examples/kotlin-sample-app/classpath.txt
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/examples/kotlin-sample-app/pom.xml
+  h_6a4cc5cdf68def 1-37
+thirdparty/kosi/examples/kotlin-sample-app/settings.gradle.kts
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/examples/kotlin-sample-app/src/main/kotlin/com/example/audit/AuditService.kt
+  h_6a4cc5cdf68def 1-32
+thirdparty/kosi/examples/kotlin-sample-app/src/main/kotlin/com/example/audit/Main.kt
+  h_6a4cc5cdf68def 1-14
+thirdparty/kosi/examples/kotlin-sample-app/src/main/kotlin/com/example/audit/UserRepository.kt
+  h_6a4cc5cdf68def 1-49
+thirdparty/kosi/scripts/kosi-e2e.sh
+  h_6a4cc5cdf68def 1-181
+thirdparty/kosi/thirdparty/kosi/examples/kotlin-sample-app/classpath.txt
+  h_6a4cc5cdf68def 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a39ad109c45b921e13d297a7c14930e9f72dcd77",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
