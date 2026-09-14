@@ -594,6 +594,30 @@ object Analyzer {
                         skipGenerated = options.dataflowSkipGenerated,
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
+                        // The framework's own statement about which handler
+                        // parameters carry attacker input (P12).
+                        endpointParameterCategories = if (options.endpointSources) {
+                            io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
+                                .flatMap { it.parameterAnnotations }
+                                .associate { it.pattern to it.category }
+                        } else {
+                            emptyMap()
+                        },
+                        endpointHandlerFrameworks = if (options.endpointSources) {
+                            endpoints.apiEndpoints
+                                .filter { it.handlerCanonicalName.isNotEmpty() }
+                                .associate { it.handlerCanonicalName to it.framework }
+                        } else {
+                            emptyMap()
+                        },
+                        endpointFrameworksWithParameterSemantics = if (options.endpointSources) {
+                            io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
+                                .filter { it.parameterAnnotations.isNotEmpty() }
+                                .map { it.id }
+                                .toSet()
+                        } else {
+                            emptySet()
+                        },
                         depsModule = depTier?.module,
                         depsPurls = depTier?.purlsUsed ?: emptySet(),
                         depsAliases = depTier?.aliases ?: emptyMap(),

@@ -189,6 +189,32 @@ object TaintEngine {
          */
         val endpointSources: Map<String, String> = emptyMap(),
         /**
+         * Framework PARAMETER annotations: annotation FQN -> the taint
+         * category that annotation introduces (`@RequestParam`,
+         * `@PathVariable`, `@RequestBody`, `@QueryParam`, `@Payload`).
+         *
+         * When a handler annotates any parameter with one of these, ONLY
+         * those parameters are seeded, each with its own category. A Spring
+         * controller method takes its injected repository and the
+         * authenticated principal in the same signature as the query string;
+         * seeding all of them — the only thing possible before the KIR
+         * carried parameter annotations — taints the dependency container.
+         * Handlers with no modelled annotation keep the all-parameters
+         * behaviour, which is what Ktor and the servlet shapes need.
+         */
+        val endpointParameterCategories: Map<String, String> = emptyMap(),
+        /** Handler canonical name -> the framework id that detected it. */
+        val endpointHandlerFrameworks: Map<String, String> = emptyMap(),
+        /**
+         * Framework ids that STATE which parameters carry input. For these,
+         * a handler's unannotated parameters are dependencies, not
+         * transports, and are not seeded — that is the whole semantic
+         * difference between reading a framework and pattern-matching it.
+         * A framework absent from this set (Ktor, servlet, the DSL shapes)
+         * says nothing about parameters, so every parameter is still seeded.
+         */
+        val endpointFrameworksWithParameterSemantics: Set<String> = emptySet(),
+        /**
          * P9 `--deps`: the dependency tier, already lowered to the SAME KIR
          * by kosi-bytecode. Its functions are compiled with site ids
          * continuing after the workspace's, summarised by the SAME
@@ -834,8 +860,23 @@ object TaintEngine {
 
         override fun entryBindings(): List<Pair<String, TaintFact>> {
             val category = context.options.endpointSources[compiled.function.canonicalName] ?: return emptyList()
-            return compiled.function.params.filter { !it.receiver }
-                .map { it.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category) }
+            val valueParams = compiled.function.params.filter { !it.receiver }
+            val categories = context.options.endpointParameterCategories
+            val framework = context.options.endpointHandlerFrameworks[compiled.function.canonicalName]
+            if (framework != null && framework in context.options.endpointFrameworksWithParameterSemantics) {
+                // This framework names its transports. Seed exactly what it
+                // named — including nothing, when a handler takes only
+                // injected collaborators.
+                return valueParams.mapNotNull { param ->
+                    val matched = param.annotations.firstNotNullOfOrNull { annotation ->
+                        categories.entries.firstOrNull { (pattern, _) ->
+                            PatternMatcher.matches(pattern, annotation)
+                        }?.value
+                    }
+                    matched?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it) }
+                }
+            }
+            return valueParams.map { it.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category) }
         }
 
         override fun entryBlockId(): String? = compiled.blocks.firstOrNull()?.id

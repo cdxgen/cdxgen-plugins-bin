@@ -61,6 +61,15 @@ data class KirParam(
     val name: String?,
     val type: String?,
     val receiver: Boolean,
+    /**
+     * Fully-qualified annotations ON THE PARAMETER, sorted. Framework
+     * semantics live here: `@RequestParam`, `@PathVariable`, `@RequestBody`,
+     * `@QueryParam` say WHICH parameters of a handler carry attacker input
+     * and which are injected dependencies. Without them the taint engine
+     * could only seed EVERY parameter of an endpoint handler, which taints
+     * the injected repository beside the query string.
+     */
+    val annotations: List<String> = emptyList(),
 )
 
 /**

@@ -87,10 +87,24 @@ object EndpointDetector {
         val functions = input.module.functions.sortedWith(
             compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" }, { it.file }, { it.line }),
         )
+        // Which framework packages this module demonstrably uses, from every
+        // RESOLVED callee it names. Unresolved route calls are attributed
+        // with this rather than with the pack's list order.
+        val resolvedPackages: Set<String> = buildSet {
+            for (fn in input.module.functions) {
+                for (block in fn.body?.blocks.orEmpty()) {
+                    for (ins in block.instructions) {
+                        val fqn = (ins as? KirCall)?.callee?.fqn ?: continue
+                        val segments = fqn.split('.')
+                        if (segments.size >= 2) add(segments.take(2).joinToString("."))
+                    }
+                }
+            }
+        }
         for (fn in functions) {
             detectAnnotated(fn, input, pack, ::add)
             detectGrpc(fn, pack, ::add)
-            detectDsl(fn, input, pack, ::add)
+            detectDsl(fn, input, pack, resolvedPackages, ::add)
         }
         return byKey.values.sortedWith(
             compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }),
@@ -151,10 +165,21 @@ object EndpointDetector {
 
     // ---- dsl kind (Ktor routing, WebFlux router, http4k bind) ---------------
 
+    /**
+     * The two-segment package roots a framework's DSL patterns name
+     * (`io.ktor.server.routing.get` -> `io.ktor`): the evidence that decides
+     * which framework an UNRESOLVED route call belongs to.
+     */
+    private fun FrameworkModel.dslPackages(): Set<String> =
+        dslFunctions.mapNotNullTo(mutableSetOf()) { mapping ->
+            mapping.pattern.split('.').take(2).takeIf { it.size == 2 }?.joinToString(".")
+        }
+
     private fun detectDsl(
         fn: KirFunction,
         input: Input,
         pack: EndpointsPack,
+        resolvedPackages: Set<String>,
         add: (Candidate) -> Unit,
     ) {
         val body = fn.body ?: return
@@ -174,9 +199,21 @@ object EndpointDetector {
                     // (the legacy fixture's own `get`) is a KirCall whose
                     // fqn the suffix rule rejects, so resolved type identity
                     // still wins over name matching.
-                    is KirDynamicCall -> pack.frameworks.firstOrNull { f ->
-                        f.dslFunctions.any { it.pattern.substringAfterLast('.') == ins.name && !it.nesting } &&
-                            hasRouteShape(fn, ins, input)
+                    is KirDynamicCall -> {
+                        // Name-only matching cannot tell `get` from `get`:
+                        // Ktor, Javalin, Spark and Vert.x all have one, so
+                        // the framework a route is ATTRIBUTED to used to be
+                        // whichever sat first in the pack — list order
+                        // deciding a reported fact. Prefer the framework
+                        // this module actually uses, evidenced by its
+                        // package appearing in some RESOLVED symbol; fall
+                        // back to first-match only when nothing is present.
+                        val byName = pack.frameworks.filter { f ->
+                            f.dslFunctions.any { it.pattern.substringAfterLast('.') == ins.name && !it.nesting } &&
+                                hasRouteShape(fn, ins, input)
+                        }
+                        byName.firstOrNull { f -> f.dslPackages().any { it in resolvedPackages } }
+                            ?: byName.firstOrNull()
                     }
 
                     else -> null
@@ -387,11 +424,23 @@ object EndpointDetector {
     ) {
         val supertypes = fn.supertypes
         if (supertypes.isEmpty() || fn.syntheticCause != null) return
-        val grpc: FrameworkModel = pack.frameworks.firstOrNull { it.kind == "supertype" } ?: return
-        val base = supertypes.firstOrNull { supertype ->
-            grpc.supertypeSuffixes.any { supertype.endsWith(it) } &&
-                grpc.supertypeMarkers.any { supertype.contains(it) }
-        } ?: return
+        // EVERY supertype framework, not just the first one in the pack:
+        // with gRPC alone in this kind the `firstOrNull` was invisible, and
+        // the moment a second one (AWS Lambda's RequestHandler) was added it
+        // silently took gRPC's place and every gRPC endpoint disappeared.
+        var matched: Pair<FrameworkModel, String>? = null
+        for (candidate in pack.frameworks.filter { it.kind == "supertype" }) {
+            val hit = supertypes.firstOrNull { supertype ->
+                (candidate.supertypeSuffixes.isEmpty() || candidate.supertypeSuffixes.any { supertype.endsWith(it) }) &&
+                    (candidate.supertypeMarkers.isEmpty() || candidate.supertypeMarkers.any { supertype.contains(it) }) &&
+                    (candidate.supertypeSuffixes.isNotEmpty() || candidate.supertypeMarkers.isNotEmpty())
+            }
+            if (hit != null) {
+                matched = candidate to hit
+                break
+            }
+        }
+        val (grpc, base) = matched ?: return
         // The RPC path is `/<Service>/<Method>`; the service names out of
         // the generated base's simple name minus its suffix
         // (`GreeterImplBase` -> `Greeter`, the proto service's name).

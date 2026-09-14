@@ -40,7 +40,12 @@ object KirWriter {
         out.appendLine("  returns ${qn(f.returnType)}")
         for (p in f.params) {
             out.appendLine(
-                "  param ${p.register} name=${qn(p.name)} type=${qn(p.type)} receiver=${p.receiver}",
+                "  param ${p.register} name=${qn(p.name)} type=${qn(p.type)} receiver=${p.receiver}" +
+                    if (p.annotations.isEmpty()) {
+                        ""
+                    } else {
+                        " annotations=" + p.annotations.sorted().joinToString(" ") { q(it) }
+                    },
             )
         }
         val body = f.body ?: return

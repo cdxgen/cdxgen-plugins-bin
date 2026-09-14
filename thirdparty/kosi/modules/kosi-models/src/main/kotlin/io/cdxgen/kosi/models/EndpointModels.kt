@@ -28,6 +28,26 @@ data class FrameworkModel(
     val supertypeMarkers: List<String> = emptyList(),
     val supertypeSuffixes: List<String> = emptyList(),
     val manifestComponents: List<String> = emptyList(),
+    /**
+     * Which annotated parameters of a handler carry attacker input, and what
+     * KIND of input. Without this the taint engine can only seed EVERY
+     * parameter of an endpoint handler — tainting the injected repository
+     * and the authenticated principal beside the query string — and the
+     * report cannot say whether a finding entered through the path, the
+     * query, a header or the body.
+     */
+    val parameterAnnotations: List<ParameterAnnotation> = emptyList(),
+)
+
+/**
+ * One handler-parameter annotation: the framework annotation's FQN, the
+ * taint category it introduces, and the transport slot it names (`path`,
+ * `query`, `header`, `cookie`, `body`, `form`) for the report.
+ */
+data class ParameterAnnotation(
+    val pattern: String,
+    val category: String,
+    val kind: String,
 )
 
 /** One outbound client call shape: callee pattern plus where the URL argument sits. */
@@ -90,6 +110,13 @@ object EndpointModels {
                 supertypeMarkers = f.arr("supertypeMarkers")?.strings() ?: emptyList(),
                 supertypeSuffixes = f.arr("supertypeSuffixes")?.strings() ?: emptyList(),
                 manifestComponents = f.arr("manifestComponents")?.strings() ?: emptyList(),
+                parameterAnnotations = f.arr("parameterAnnotations")?.objects()?.map { a ->
+                    ParameterAnnotation(
+                        pattern = require(a.str("pattern"), "frameworks[].parameterAnnotations[].pattern"),
+                        category = require(a.str("category"), "frameworks[].parameterAnnotations[].category"),
+                        kind = require(a.str("kind"), "frameworks[].parameterAnnotations[].kind"),
+                    )
+                } ?: emptyList(),
             )
         } ?: emptyList()
         val outbound = root.arr("outbound")?.objects()?.map { o ->

@@ -503,6 +503,37 @@ tier = "fixtures"
 path = "fixtures/expressions-and-literals"
 capabilities = ["raw-string", "notnull-assert", "safe-cast", "try-expression", "run-catching", "reflection-literal", "function-reference", "suspend-lambda"]
 
+# P12: the Android taint shapes, and the lowering rule that makes them
+# visible. `editText.text` and `intent.dataString` are Kotlin reads of JAVA
+# GETTERS; lowering them as field reads hid every getter-backed API from the
+# model packs, which is why two intentionally-vulnerable Kotlin apps reported
+# zero findings. The stub jar carries only the platform classes named here.
+
+[[fixtures]]
+slug = "android-taint"
+tier = "fixtures"
+path = "fixtures/android-taint"
+classpath_file = "classpath.txt"
+capabilities = ["synthetic-java-property", "android-intent", "android-sql", "android-webview", "insecure-storage", "deep-link"]
+
+[[fixtures]]
+slug = "server-side-taint"
+tier = "fixtures"
+path = "fixtures/server-side-taint"
+capabilities = ["jndi-injection", "xxe", "code-execution", "deserialization", "ssrf", "static-method-sink", "sanitizers"]
+
+[[fixtures]]
+slug = "endpoint-parameter-semantics"
+tier = "fixtures"
+path = "fixtures/endpoint-parameter-semantics"
+capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
+
+[[fixtures]]
+slug = "endpoint-base-path"
+tier = "fixtures"
+path = "fixtures/endpoint-base-path"
+capabilities = ["endpoints", "context-path", "framework-semantics", "config-resolution"]
+
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the

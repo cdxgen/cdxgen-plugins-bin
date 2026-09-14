@@ -49,9 +49,15 @@ pull_artifacts() {
   mkdir -p "$scratch"
   cp "$out" "$scratch/coords.txt"
   cat >"$scratch/build.gradle.kts" <<'SCRATCH'
+// Kotlin requires imports BEFORE any other statement: with this line under
+// `plugins {}` the script failed to COMPILE, resolveAll never ran, and the
+// `|| true` plus the `grep -E "downloaded"` filter swallowed it silently —
+// so every repo warmed its coordinate list and downloaded NOTHING. That is
+// the "no warm classpath" cause behind pinned repos measuring zero.
+import org.gradle.api.attributes.Attribute
+
 plugins { base }
 repositories { google(); mavenCentral() }
-import org.gradle.api.attributes.Attribute
 
 val coords = File(rootProject.projectDir, "coords.txt").readLines()
     .map { it.trim() }.filter { it.isNotEmpty() && it.split(":").size >= 3 }
@@ -86,7 +92,19 @@ tasks.register("resolveAll") { doLast {
 } }
 SCRATCH
   echo 'rootProject.name = "kosi-resolve-scratch"' >"$scratch/settings.gradle.kts"
-  (cd "$repo_root" && ./gradlew -p "$scratch" -q resolveAll --console=plain 2>&1 | { grep -E "downloaded" || true; } || true)
+  # The resolve is allowed to have per-coordinate failures — that is the
+  # point of the detached configurations — but the TASK not running at all
+  # is a warming failure, and it used to be indistinguishable from silence.
+  local log="$scratch/resolve.log"
+  (cd "$repo_root" && ./gradlew -p "$scratch" -q resolveAll --console=plain >"$log" 2>&1 || true)
+  if grep -qE "^downloaded [0-9]+" "$log"; then
+    grep -E "^downloaded [0-9]+" "$log"
+  else
+    echo "  WARNING: artifact resolution did not run for $slug — no jars were" >&2
+    echo "  downloaded, so the resolved backend will report classpath-partial." >&2
+    echo "  Last lines of $log:" >&2
+    tail -5 "$log" >&2
+  fi
   rm -rf "$scratch"
 }
 

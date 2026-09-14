@@ -123,6 +123,39 @@ object KirLowering {
         val descriptor: String?,
         val isSuspend: Boolean,
         val isOperator: Boolean,
+        /**
+         * True when this site is a Kotlin SYNTHETIC JAVA PROPERTY read —
+         * `editText.text`, `intent.data`, `uri.host` — and [symbol] is the
+         * Java getter it compiles to (`getText`, `getData`, `getHost`).
+         *
+         * Kotlin lets you read a Java getter as a property, and the lowering
+         * used to take that syntax at face value: a plain name selector
+         * became a `fieldget` whose path is the LOCAL VARIABLE's name
+         * (`ve.text`), carrying neither the declaring type nor the fact that
+         * a method runs. Model packs match callee symbols, so every such API
+         * was invisible to them — and it is the dominant source idiom in
+         * Android code, where `EditText.text` is how user input enters an
+         * app. Lowering it as the call it actually is on the JVM puts
+         * `android.widget.TextView.getText` in front of the matcher.
+         *
+         * Only synthetic JAVA properties take this route. A Kotlin property
+         * read stays a field access, because the field-sensitivity work in
+         * P4/P5 keys on those paths.
+         */
+        val syntheticJavaProperty: Boolean = false,
+        /**
+         * True for a JAVA STATIC method. `Class.forName(name)` is written
+         * with a qualifier, and the lowering used to take that qualifier as
+         * a RECEIVER — emitting `kind=virtual recv=<the class>` and shifting
+         * every argument index by one, because index 0 means the receiver
+         * when there is one. Model packs index arguments that way, so every
+         * static-method model silently matched nothing: `Class.forName`,
+         * `URI.create`, `Files.*`, `Base64.getDecoder`, the factory methods
+         * most SDKs are built from. Constructors were unaffected, which is
+         * why the shipped pack — whose every index-0 entry is a constructor
+         * — never showed it.
+         */
+        val isStatic: Boolean = false,
     )
 
     /**
@@ -146,6 +179,14 @@ object KirLowering {
         val ownerVisibility: String?,
         val jvmDescriptor: String?,
         val factsAvailable: Boolean,
+        /**
+         * Resolved annotation FQNs per VALUE parameter, in declaration
+         * order. This is where framework semantics enter the KIR:
+         * `@RequestParam` / `@PathVariable` / `@RequestBody` / `@QueryParam`
+         * distinguish the parameters of an endpoint handler that carry
+         * attacker input from the ones a container injects.
+         */
+        val paramAnnotations: List<List<String>> = emptyList(),
     )
 
     private val NO_FACTS = Facts(
@@ -183,6 +224,49 @@ object KirLowering {
             // operations: they resolve only lexically inside this block, so
             // they are captured here and handed to the body lowering as a
             // plain function value.
+            fun descriptorOf(symbol: KaCallableSymbol): String? =
+                (symbol as? KaFunctionSymbol)?.let {
+                    JvmSignatures.methodDescriptor(
+                        it.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT),
+                        buildList {
+                            it.receiverParameter?.let { r ->
+                                add(r.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                            }
+                            it.valueParameters.forEach { p ->
+                                add(p.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                            }
+                        },
+                    )
+                }
+
+            /**
+             * A plain `a.b` name selector, resolved. Returns non-null ONLY
+             * when `b` is a synthetic Java property, in which case the
+             * CallInfo describes the Java GETTER the read compiles to (see
+             * [CallInfo.syntheticJavaProperty]); a Kotlin property read
+             * returns null and stays a field access.
+             */
+            fun resolveProperty(psi: KtNameReferenceExpression): CallInfo? = try {
+                val call: org.jetbrains.kotlin.analysis.api.resolution.KaSingleCall<*, *> =
+                    psi.resolveCall() ?: return null
+                val synthetic = call.signature.symbol
+                    as? org.jetbrains.kotlin.analysis.api.symbols.KaSyntheticJavaPropertySymbol
+                val getter = synthetic?.javaGetterSymbol
+                if (getter == null) {
+                    null
+                } else {
+                    CallInfo(
+                        symbol = getter,
+                        descriptor = descriptorOf(getter),
+                        isSuspend = false,
+                        isOperator = false,
+                        syntheticJavaProperty = true,
+                    )
+                }
+            } catch (_: Exception) {
+                null
+            }
+
             fun resolve(psi: KtCallExpression): CallInfo? = try {
                 val call = psi.resolveCall() ?: return null
                 val symbol = call.symbol as? KaCallableSymbol ?: return null
@@ -204,6 +288,7 @@ object KirLowering {
                     descriptor = descriptor,
                     isSuspend = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isSuspend == true,
                     isOperator = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isOperator == true,
+                    isStatic = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isStatic == true,
                 )
             } catch (_: Exception) {
                 null
@@ -281,6 +366,17 @@ object KirLowering {
                         psi.annotationEntries.mapNotNull { it.shortName?.asString() }
                     }
                     ?: psi.annotationEntries.mapNotNull { it.shortName?.asString() }
+                val paramAnnotations = (psi as? KtNamedFunction)?.valueParameters?.map { parameter ->
+                    val resolved = (parameter.symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
+                        ?.annotations
+                        ?.mapNotNull { it.classId?.asSingleFqName()?.asString() }
+                        ?.distinct()
+                        .orEmpty()
+                    // Same discipline as declaration annotations: an
+                    // annotation kosi could not resolve keeps its PSI short
+                    // name, which cannot match a framework FQN pattern.
+                    resolved.ifEmpty { parameter.annotationEntries.mapNotNull { it.shortName?.asString() } }
+                }.orEmpty()
                 val owner = generateSequence(psi.parent) { it.parent }
                     .firstOrNull { it is org.jetbrains.kotlin.psi.KtClassOrObject }
                     as? org.jetbrains.kotlin.psi.KtClassOrObject
@@ -318,17 +414,18 @@ object KirLowering {
                     ownerVisibility = ownerFacts.visibility,
                     jvmDescriptor = descriptor,
                     factsAvailable = true,
+                    paramAnnotations = paramAnnotations,
                 )
             } catch (_: Exception) {
                 symbolFactFailures++
                 NO_FACTS
             }
 
-            val lambdaContext = LambdaContext(failures, ::resolve)
+            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty)
             for (file in files) {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
-                    lowerFunction(functionLike, failures, ::resolve, ::factsFor, lambdaContext)?.let { functions.add(it) }
+                    lowerFunction(functionLike, failures, ::resolve, ::resolveProperty, ::factsFor, lambdaContext)?.let { functions.add(it) }
                 }
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
@@ -469,6 +566,7 @@ object KirLowering {
     internal class LambdaContext(
         val failures: MutableMap<String, Int>,
         val resolve: (KtCallExpression) -> CallInfo?,
+        val resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -478,6 +576,7 @@ object KirLowering {
         psi: org.jetbrains.kotlin.psi.KtDeclaration,
         failures: MutableMap<String, Int>,
         resolve: (KtCallExpression) -> CallInfo?,
+        resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
         factsFor: (org.jetbrains.kotlin.psi.KtDeclaration) -> Facts,
         lambdaContext: LambdaContext,
     ): KirFunction? {
@@ -492,7 +591,7 @@ object KirLowering {
         val canonical = listOf(pkg, chain, name).filter { it.isNotEmpty() }.joinToString(".")
 
         val facts = factsFor(psi)
-        val lower = BodyLower(failures, resolve, psi, lambdaContext, enclosingCanonical = canonical)
+        val lower = BodyLower(failures, resolve, resolveProperty, psi, lambdaContext, enclosingCanonical = canonical)
         val bodyPsi: KtExpression? = when (psi) {
             is KtNamedFunction -> psi.bodyExpression
             is KtPropertyAccessor -> psi.bodyExpression
@@ -524,7 +623,7 @@ object KirLowering {
             file = psi.containingFile?.virtualFile?.path ?: "<memory>",
             line = psi.line(),
             column = psi.column(),
-            params = signatureParams(psi),
+            params = signatureParams(psi, facts),
             returnType = null,
             modifiers = facts.modifiers,
             visibility = facts.visibility,
@@ -541,7 +640,10 @@ object KirLowering {
         )
     }
 
-    private fun signatureParams(psi: org.jetbrains.kotlin.psi.KtDeclaration): List<KirParam> {
+    private fun signatureParams(
+        psi: org.jetbrains.kotlin.psi.KtDeclaration,
+        facts: Facts = NO_FACTS,
+    ): List<KirParam> {
         val receiverType: KtTypeReference? = when (psi) {
             is KtNamedFunction -> psi.receiverTypeReference
             is KtPropertyAccessor -> (psi.parent as? KtProperty)?.receiverTypeReference
@@ -554,8 +656,16 @@ object KirLowering {
             params.add(KirParam("%${index++}", "this", null, receiver = true))
         }
         if (psi is KtNamedFunction) {
-            for (p in psi.valueParameters) {
-                params.add(KirParam("%${index++}", p.name, p.typeReference?.text, receiver = false))
+            for ((position, p) in psi.valueParameters.withIndex()) {
+                params.add(
+                    KirParam(
+                        "%${index++}",
+                        p.name,
+                        p.typeReference?.text,
+                        receiver = false,
+                        annotations = facts.paramAnnotations.getOrElse(position) { emptyList() },
+                    ),
+                )
             }
         }
         return params
@@ -584,6 +694,8 @@ object KirLowering {
     private class BodyLower(
         private val failures: MutableMap<String, Int>,
         private val resolveCallInfo: (KtCallExpression) -> CallInfo?,
+        /** Resolves a plain `a.b` selector; non-null only for synthetic Java properties. */
+        private val resolvePropertyInfo: (KtNameReferenceExpression) -> CallInfo?,
         /** The lowered function's PSI: the fallback position for synthesized calls. */
         private val functionPsi: org.jetbrains.kotlin.psi.KtDeclaration,
         /** Non-null when extracted standalone lambdas land somewhere (the `lower()` run's context). */
@@ -1635,9 +1747,31 @@ object KirLowering {
 
         private fun dotChain(psi: KtDotQualifiedExpression): String {
             val selector = psi.selectorExpression
-            // A plain name selector is a field read: compose the whole
-            // qualifier chain into one path instead of one temp per hop.
+            // A plain name selector is USUALLY a field read: compose the
+            // whole qualifier chain into one path instead of one temp per
+            // hop. The exception is a synthetic Java property — `e.text`
+            // for `e.getText()` — which is a method call on the JVM and
+            // must lower as one, or no model pack can see it (see
+            // CallInfo.syntheticJavaProperty).
             if (selector is KtNameReferenceExpression) {
+                val propertyInfo = resolvePropertyInfo(selector)
+                if (propertyInfo != null) {
+                    val receiverReg = lowerExpr(psi.receiverExpression, Pos.NESTED)
+                    val fqn = propertyInfo.symbol.callableId?.asSingleFqName()?.asString()
+                    if (fqn != null) {
+                        val reg = t()
+                        emit(
+                            KirCall(
+                                reg,
+                                KirCallee(fqn, propertyInfo.descriptor, CallKind.VIRTUAL),
+                                receiverReg,
+                                emptyList(),
+                                line = psi.line(),
+                            ),
+                        )
+                        return reg
+                    }
+                }
                 val (base, path) = fieldAccess(psi.receiverExpression, selector.getReferencedName())
                 val reg = t()
                 emit(KirFieldGet(reg, base, path))
@@ -1770,6 +1904,11 @@ object KirLowering {
                 hookEmitSink(receiver, simpleName, argRegs)
                 return reg
             }
+            // A Java static method written with its class qualifier is NOT
+            // a receiver call: drop the qualifier register so argument
+            // indexes line up with the pack's convention (index 0 is the
+            // first argument when there is no receiver).
+            val receiver = if (info.isStatic) null else receiver
             val kind: CallKind
             val fqn: String
             when (symbol) {
@@ -2046,6 +2185,7 @@ object KirLowering {
             val bodyLower = BodyLower(
                 context.failures,
                 context.resolve,
+                context.resolveProperty,
                 functionPsi,
                 lambdaContext = context,
                 enclosingCanonical = canonical,

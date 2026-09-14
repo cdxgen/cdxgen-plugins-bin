@@ -70,7 +70,21 @@ object Endpoints {
         val manifests = if (includeManifests) AndroidManifestParser.parse(root) else emptyList()
         val manifestCandidates = manifestEndpoints(module, manifests, pack)
 
+        // The DEPLOYMENT base path. A handler's annotation or DSL call names
+        // a path relative to the application; what a client actually calls
+        // is that path under the context path the deployment configures.
+        // Reporting `/users` for an app served at `/api/users` is a wrong
+        // URL, not a partial one — and the value is sitting in the same
+        // application.properties the config table already read.
+        val basePath = basePathFrom(configTable)
         val all = (candidates + manifestCandidates)
+            .map { candidate ->
+                if (basePath.isEmpty() || candidate.framework == "android") {
+                    candidate
+                } else {
+                    candidate.copy(pathTemplate = joinPaths(basePath, candidate.pathTemplate))
+                }
+            }
             .sortedWith(compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }))
 
         val apiEndpoints = all.mapIndexed { index, candidate ->
@@ -245,6 +259,36 @@ object Endpoints {
         }
         return links
     }
+    /**
+     * The configured context path, by framework, first match wins in a fixed
+     * order. Each key is the one that framework documents; a project that
+     * sets none reports application-relative paths, as before.
+     */
+    private val BASE_PATH_KEYS = listOf(
+        "server.servlet.context-path",
+        "spring.webflux.base-path",
+        "micronaut.server.context-path",
+        "quarkus.http.root-path",
+        "ktor.deployment.rootPath",
+        "server.base-path",
+    )
+
+    internal fun basePathFrom(configTable: ConfigResolver.ConfigTable): String {
+        for (key in BASE_PATH_KEYS) {
+            val value = configTable[key]?.value?.trim().orEmpty()
+            if (value.isNotEmpty() && value != "/") return value
+        }
+        return ""
+    }
+
+    /** `/api` + `/users` -> `/api/users`, with no doubled or missing slash. */
+    internal fun joinPaths(base: String, path: String): String {
+        val left = base.removeSuffix("/")
+        val right = path.removePrefix("/")
+        val prefix = if (left.startsWith("/")) left else "/$left"
+        return if (right.isEmpty()) prefix else "$prefix/$right"
+    }
+
 }
 
 /** Workspace `const val` name -> value, only for names with a UNIQUE value. */
@@ -262,4 +306,5 @@ object ConstTable {
         }
         return byName.filterValues { it.size == 1 }.mapValues { (_, vs) -> vs.first() }
     }
+
 }
