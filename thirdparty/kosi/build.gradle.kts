@@ -100,7 +100,12 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
                 // Heap, metaspace and direct memory are all pinned so the
                 // fork's total RSS stays bounded; ExitOnOutOfMemoryError
                 // makes exhaustion a LOUD failure, not a vanished runner.
-                "-Xmx2g",
+                // 3g, recalibrated in P9: the --deps tier adds the lowered
+                // dependency KIR and its summaries to the workspace session,
+                // and at 2g the pinned repo tiers OOMed the fork (loud, via
+                // ExitOnOutOfMemoryError, but dead). ~4 GiB total still fits
+                // the CI runners the matrix runs on.
+                "-Xmx3g",
                 "-XX:MaxMetaspaceSize=512m",
                 "-XX:MaxDirectMemorySize=256m",
                 "-XX:+ExitOnOutOfMemoryError",

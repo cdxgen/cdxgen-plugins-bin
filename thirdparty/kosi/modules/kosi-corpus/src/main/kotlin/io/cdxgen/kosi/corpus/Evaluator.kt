@@ -125,6 +125,7 @@ object Evaluator {
             Annotation.Kind.ENDPOINT -> endpointSatisfied(report, ann)
             Annotation.Kind.CRYPTO -> cryptoSatisfied(report, ann)
             Annotation.Kind.SERVICE -> serviceSatisfied(report, ann)
+            Annotation.Kind.SIGNAL -> signalSatisfied(report, ann)
         }
         // Negative expectations (want-not) never get known-fail protection:
         // a violated negative is a false positive of the engine, and hiding
@@ -157,6 +158,7 @@ object Evaluator {
         Annotation.Kind.ENDPOINT -> "endpoint ${ann.framework} ${ann.path ?: ""} ${ann.fn ?: ""}"
         Annotation.Kind.CRYPTO -> "crypto ${ann.name}"
         Annotation.Kind.SERVICE -> "service ${ann.protocol} ${ann.name ?: ""}"
+        Annotation.Kind.SIGNAL -> "signal ${ann.code} ${ann.fn ?: ""}"
     }
 
     // ---- per-kind satisfaction -------------------------------------------
@@ -274,6 +276,20 @@ object Evaluator {
                 matches(ann.name, service.name) &&
                 matches(ann.resolution, service.resolution) &&
                 (ann.path == null || service.endpoints.any { matches(ann.path, it) })
+        }
+        val expected = ann.count ?: 1
+        return matched.size >= expected
+    }
+
+    /**
+     * Signal expectations against `securitySignals[]`: the signal code plus
+     * the attaching symbol (`fn=`, matched against `symbol`) — the same
+     * on-one-function / absent-from-its-sibling shape every other evidence
+     * array supports.
+     */
+    private fun signalSatisfied(report: KosiReport, ann: Annotation): Boolean {
+        val matched = report.securitySignals.filter { signal ->
+            matches(ann.code, signal.code) && matches(ann.fn, signal.symbol)
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

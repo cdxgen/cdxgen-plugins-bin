@@ -58,7 +58,18 @@ object ClasspathResolver {
                         // (build-produced classpath files list g:a:v lines).
                         val parts = trimmed.split(':')
                         when {
-                            trimmed.endsWith(".jar") -> add(Path.of(trimmed))
+                            trimmed.endsWith(".jar") -> {
+                                // RELATIVE entries resolve against the
+                                // classpath file's own directory, so a
+                                // committed fixture file stays portable
+                                // (warm repo files carry absolute paths and
+                                // are unaffected).
+                                val raw = Path.of(trimmed)
+                                val resolved = if (raw.isAbsolute) raw else {
+                                    explicitFile.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw
+                                }
+                                add(resolved)
+                            }
                             parts.size >= 3 -> fileCoordinates.putIfAbsent(
                                 // Gradle tree lines can carry
                                 // `requested -> resolved` version chains

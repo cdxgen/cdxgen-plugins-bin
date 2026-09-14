@@ -217,6 +217,7 @@ class FlowGateTest {
                 row("a", slot = MatrixSlot.RESOLVED_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.EXPORTED_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.ENDPOINT_LABEL, functionsAnalysed = 1),
+                row("a", slot = MatrixSlot.DEPS_LABEL, functionsAnalysed = 1),
             ),
         )
         val report = Promotion.evaluate(current, null)

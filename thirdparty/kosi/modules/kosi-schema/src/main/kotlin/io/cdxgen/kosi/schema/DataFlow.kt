@@ -277,10 +277,24 @@ data class DataFlowStats(
     val suspendCrossingSlices: Int = 0,
     /** P5: dispatch joins by candidate width, e.g. {"2": 5}. */
     val dispatchJoins: Map<String, Int> = emptyMap(),
+    /**
+     * P9: summaries derived from dependency bytecode (`origin=bytecode`) that
+     * a workspace call site actually applied — the gate's numerator is taken
+     * over THESE, never over every jar function summarised.
+     */
+    val bytecodeSummaries: Int = 0,
+    /**
+     * P9: slices whose trace enters a dependency jar AND whose boundary moves
+     * carry `origin=bytecode` — the cross-dependency taint the whole phase
+     * exists to measure, with both producers named.
+     */
+    val crossDependencyBytecodeSlices: Int = 0,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
+        w.num("bytecodeSummaries", bytecodeSummaries)
         w.dbl("connectivity", connectivity)
+        w.num("crossDependencyBytecodeSlices", crossDependencyBytecodeSlices)
         w.num("crossDependencySlices", crossDependencySlices)
         w.num("crossModuleSlices", crossModuleSlices)
         w.beginObject("dispatchJoins")

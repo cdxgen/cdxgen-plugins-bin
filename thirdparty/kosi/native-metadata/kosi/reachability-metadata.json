@@ -921,6 +921,17 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.kdoc.psi.impl.KDocSection"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtArrayAccessExpression"
     },
     {
@@ -2110,6 +2121,12 @@
     },
     {
       "type": "org.jetbrains.kotlin.idea.references.ReadWriteAccessChecker"
+    },
+    {
+      "type": "org.jetbrains.kotlin.kdoc.psi.impl.KDocName"
+    },
+    {
+      "type": "org.jetbrains.kotlin.kdoc.psi.impl.KDocTag"
     },
     {
       "type": "org.jetbrains.kotlin.load.java.structure.impl.JavaClassifierTypeImpl"

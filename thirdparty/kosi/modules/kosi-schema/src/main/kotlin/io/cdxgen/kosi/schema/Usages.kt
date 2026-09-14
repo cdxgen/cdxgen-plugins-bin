@@ -46,6 +46,14 @@ data class SecuritySignal(
     val purl: String,
     val filePath: String,
     val position: Position,
+    /**
+     * P9: the symbol the signal attaches to (the `external fun`'s canonical
+     * name, the function containing the `loadLibrary` call), so corpus
+     * annotations can demand a signal ON one function and the ABSENCE of the
+     * same signal on its sibling — the same negative shape every other
+     * evidence array has.
+     */
+    val symbol: String? = null,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -55,6 +63,7 @@ data class SecuritySignal(
         w.str("modulePath", modulePath)
         w.str("purl", purl)
         position.writeJson(w, "position")
+        symbol?.let { w.str("symbol", it) }
         w.endObject()
     }
 

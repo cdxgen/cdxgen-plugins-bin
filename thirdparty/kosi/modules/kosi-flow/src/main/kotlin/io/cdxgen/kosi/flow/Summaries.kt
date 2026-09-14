@@ -22,13 +22,16 @@ import io.cdxgen.kosi.models.ModelPack
  * JSON_ATTRIBUTE_REFERENCE.md:
  *   computed         — a real fixpoint over the callee's body;
  *   pack             — a model-pack entry supplied the effect;
+ *   bytecode         — the fixpoint ran over a dependency jar's lowered
+ *                      class file (P9, `--deps`);
  *   recursive-approx — the SCC hit its iteration budget and this is the
  *                      last iterate;
  *   default          — the `--unknown-call` fallback, no body was seen.
  */
-internal object SummaryOrigin {
+object SummaryOrigin {
     const val COMPUTED = "computed"
     const val PACK = "pack"
+    const val BYTECODE = "bytecode"
     const val RECURSIVE_APPROX = "recursive-approx"
     const val DEFAULT = "default"
 }
@@ -340,6 +343,19 @@ internal class Summarizer(
     private val callIndex: CallIndex,
     private val pack: ModelPack,
     private val options: TaintEngine.Options,
+    /**
+     * The origin stamped on every summary this run computes: `computed` for
+     * the workspace tier, `bytecode` for the `--deps` tier (P9) — the label
+     * the promotion gate reads, so a jar-derived summary is never mistaken
+     * for a workspace one.
+     */
+    private val originLabel: String = SummaryOrigin.COMPUTED,
+    /**
+     * The P9 `--deps` tier, when present: workspace call sites whose callees
+     * resolve to no workspace function look up dependency summaries here, so
+     * a workspace summary composes the effects of a call that enters a jar.
+     */
+    private val deps: TaintEngine.DepsTier? = null,
 ) {
     class Result(
         val table: Map<String, FunctionSummary>,
@@ -347,6 +363,8 @@ internal class Summarizer(
         val sccIterationCapHits: Int,
         /** Functions whose summary was skipped: oversized body or state. */
         val skipped: Map<String, Int>,
+        /** The diagnostic code whose budget stopped the run early, when one did. */
+        val stoppedBy: String? = null,
     )
 
     private val byCanonical: Map<String, CompiledFunction> =
@@ -371,7 +389,14 @@ internal class Summarizer(
         val table = HashMap<String, FunctionSummary>()
         val skipped = sortedMapOf<String, Int>()
         var capHits = 0
+        var stoppedBy: String? = null
         for (scc in sccs) {
+            // The P10 budget is checked between SCCs: a trip keeps every
+            // summary already converged and ships them, and the run says so.
+            options.shouldStop?.invoke()?.let {
+                stoppedBy = it
+                break
+            }
             val members = scc.sorted()
             var changed = true
             var rounds = 0
@@ -411,17 +436,24 @@ internal class Summarizer(
                 }
             }
             if (rounds > options.summaryIterationBudget) {
-                // The last iterate is what callers saw: honest, but labelled.
-                for (member in members) {
-                    table[member]?.let { current ->
-                        if (current.origin == SummaryOrigin.COMPUTED) {
-                            table[member] = current.withOrigin(SummaryOrigin.RECURSIVE_APPROX)
+                // The last iterate is what callers saw: honest, but labelled
+                // — on the WORKSPACE tier. The `--deps` tier keeps
+                // `origin=bytecode` (the PRODUCER the gate reads; flipping it
+                // would hide which summaries come from jars at all): its
+                // approximation stays visible in sccIterationCapHits over
+                // sccsProcessed, which the tier publishes.
+                if (originLabel == SummaryOrigin.COMPUTED) {
+                    for (member in members) {
+                        table[member]?.let { current ->
+                            if (current.origin == SummaryOrigin.COMPUTED) {
+                                table[member] = current.withOrigin(SummaryOrigin.RECURSIVE_APPROX)
+                            }
                         }
                     }
                 }
             }
         }
-        return Result(table, sccs.size, capHits, skipped)
+        return Result(table, sccs.size, capHits, skipped, stoppedBy)
     }
 
     private fun FunctionSummary.withOrigin(origin: String): FunctionSummary = FunctionSummary(
@@ -436,7 +468,7 @@ internal class Summarizer(
      * unknown default). Escapes are recorded in the final sweep, at fixpoint.
      */
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): Pair<FunctionSummary, Boolean> {
-        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options)
+        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
         analysis.run()
         return analysis.toSummary() to analysis.stateOverBudget
     }
@@ -525,6 +557,10 @@ internal class SummaryAnalysis(
     private val callIndex: CallIndex,
     pack: ModelPack,
     private val options: TaintEngine.Options,
+    /** The origin this tier's summaries carry (`computed`, or `bytecode` for the `--deps` tier). */
+    private val originLabel: String = SummaryOrigin.COMPUTED,
+    /** The P9 `--deps` tier, for call sites whose callee lives in a jar. */
+    private val deps: TaintEngine.DepsTier? = null,
 ) : TransferHost<SummaryFact, Boolean> {
     override val ops = SummaryFactOps
     override val pack = pack
@@ -814,14 +850,26 @@ internal class SummaryAnalysis(
     ): Boolean {
         val fqn = ins.callee.fqn
         val targets = callIndex.targets(fqn, ins.callee.descriptor, ins.callee.kind)
-        if (targets.isEmpty()) {
-            // No dispatch target: the shared unknown default runs.
-            return false
+        val applicable = targets.mapNotNull { target -> table[target.canonicalName] }
+        if (applicable.isEmpty()) {
+            // No WORKSPACE summary applies here — the same condition the
+            // taint host uses before it consults the tier, so a call site
+            // that reaches a jar in one engine reaches it in the other. A
+            // constructor callee simply misses: the lowerer never emits
+            // `<init>` into the tier, so no carve-out is needed for it.
+            // P9: a workspace function whose body passes taint THROUGH a
+            // dependency method must record the composed effect in its own
+            // summary, exactly as it does for a workspace callee.
+            val dep = deps?.summaries(ins.callee.fqn)
+            if (dep != null) {
+                applySummary(dep, ins.receiver, ins.args, ins.result, site, dep.origin, state, chain)
+                return true
+            }
+            // With no dispatch target either, the shared unknown default runs.
+            return targets.isNotEmpty()
         }
-        val originByTarget = targets.associate { it.canonicalName to (table[it.canonicalName]?.origin ?: SummaryOrigin.COMPUTED) }
-        for (target in targets) {
-            val summary = table[target.canonicalName] ?: continue
-            applySummary(summary, ins.receiver, ins.args, ins.result, site, originByTarget.getValue(target.canonicalName), state, chain)
+        for (summary in applicable) {
+            applySummary(summary, ins.receiver, ins.args, ins.result, site, summary.origin, state, chain)
         }
         return true
     }
@@ -971,7 +1019,7 @@ internal class SummaryAnalysis(
         }.filterValues { it.isNotEmpty() },
         sanitizes = sanitizes.toSet(),
         invokedParams = invokedParams.toSet(),
-        origin = if (capHit) SummaryOrigin.RECURSIVE_APPROX else SummaryOrigin.COMPUTED,
+        origin = if (capHit && originLabel == SummaryOrigin.COMPUTED) SummaryOrigin.RECURSIVE_APPROX else originLabel,
     )
 }
 

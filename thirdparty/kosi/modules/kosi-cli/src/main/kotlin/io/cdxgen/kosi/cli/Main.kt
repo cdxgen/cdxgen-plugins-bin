@@ -87,9 +87,11 @@ object Main {
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
         "classpath", "classpath-file", "jdk-home", "reachable-symbols",
+        "max-analysis-seconds", "max-rss-mb", "deps-max-classes",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
         "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
+        "deps",
     )
     private val BENCH_VALUE_FLAGS = setOf("tier", "only", "repo-root", "baseline", "compare")
     private val BENCH_BOOLEAN_FLAGS =
@@ -172,7 +174,7 @@ object Main {
     private fun optionsFrom(parsed: ParsedArgs): AnalyzeOptions {
         val defaults = AnalyzeOptions()
         val backend = parsed.value("backend")?.let {
-            Backend.fromId(it) ?: throw UsageException("unknown backend '$it' (syntax, resolved)")
+            Backend.fromId(it) ?: throw UsageException("unknown backend '$it' (syntax, resolved, compile)")
         } ?: defaults.backend
         val dataflow = parsed.value("dataflow")?.let {
             DataflowMode.fromId(it) ?: throw UsageException("unknown dataflow mode '$it'")
@@ -209,6 +211,10 @@ object Main {
             maxPathsPerSymbol = parsed.value("max-paths-per-symbol")?.toIntOrNull() ?: defaults.maxPathsPerSymbol,
             includeStdlib = parsed.bool("include-stdlib", defaults.includeStdlib),
             endpointSources = parsed.bool("endpoint-sources", defaults.endpointSources),
+            deps = parsed.bool("deps", defaults.deps),
+            depsMaxClasses = parsed.value("deps-max-classes")?.toIntOrNull() ?: defaults.depsMaxClasses,
+            maxAnalysisSeconds = parsed.value("max-analysis-seconds")?.toIntOrNull() ?: defaults.maxAnalysisSeconds,
+            maxRssMb = parsed.value("max-rss-mb")?.toIntOrNull() ?: defaults.maxRssMb,
             unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
                 if (it != "propagate" && it != "drop") {
                     throw UsageException("--unknown-call must be propagate|drop")
@@ -540,10 +546,20 @@ object Main {
               --classpath <jar>               repeatable: explicit classpath jar for the resolved backend
               --classpath-file <file>         file of jar paths (one per line, # comments)
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
-              --backend <syntax|resolved>     analysis tier (resolved needs no build execution)
+              --backend <syntax|resolved|compile>
+                                              analysis tier; `compile` is a DECLARED GAP: it runs the
+                                              resolved tier and stamps compile-backend-gap on the report
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
               --endpoint-sources              seed handler parameters as taint sources (P7); endpoint-rooted
                                               slices then carry the endpoint they enter through
+              --deps                          analyse dependency jars from the resolved classpath: their
+                                              bodies lower to the same KIR, summaries carry origin=bytecode,
+                                              and cross-dependency slices are added (P9); --dataflow
+                                              security-deps implies this
+              --deps-max-classes <n>          cap on dependency classes lowered per run (default 500)
+              --max-analysis-seconds <n>      wall-clock budget; tripping emits a named diagnostic and the
+                                              partial report still ships (P10; 0 trips at the first boundary)
+              --max-rss-mb <n>                peak-RSS budget; same degradation contract (P10)
               --reachable-symbols <file>      write shortest witness paths for reached symbols (JSON)
               --format <fmt>                  json (full report), graphml or gexf (call graph)
               --pretty                        indented JSON

@@ -18,9 +18,21 @@ class ReportSerializationTest {
         val w = JsonWriter()
         AnalyzeOptions().writeJson(w)
         val json = JsonReader.parse(w.render()).asObject()
+        // A NULL option (the P10 budgets when off) has no effective value to
+        // echo — its absence IS the echo. Every non-null field must appear.
+        val options = AnalyzeOptions()
         val missing = AnalyzeOptions::class.java.declaredFields
-            .map { it.name }
-            .filterNot { fieldName -> json.members.containsKey(fieldName) }
+            .map { field ->
+                val value = try {
+                    field.isAccessible = true
+                    field.get(options)
+                } catch (_: Exception) {
+                    null
+                }
+                field.name to value
+            }
+            .filterNot { (name, value) -> json.members.containsKey(name) || value == null }
+            .map { (name, _) -> name }
         assertEquals(emptyList(), missing, "options JSON must carry every effective option (missing: $missing)")
     }
 

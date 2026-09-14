@@ -26,8 +26,10 @@ checked=0
 # Both graph-bearing slots, not just `resolved`. R53's lesson generalises: a
 # slot the sweep never runs is a code path the sweep proves nothing about,
 # and `exported` is exactly the slot whose missing reflection entry killed
-# the P3 image while its own comparison reported 30 of 30 identical.
-SLOTS="resolved exported"
+# the P3 image while its own comparison reported 30 of 30 identical. P9 adds
+# `deps` for the fixture that carries the committed helper jar: the tier's
+# lowering + metadata machinery is a code path the image must prove too.
+SLOTS="resolved exported deps"
 printf '%-28s %-9s %8s %8s %8s %9s\n' "fixture" "slot" "slices" "nodes" "edges" "match"
 for dir in "$ROOT"/fixtures/*/; do
  slug=$(basename "$dir")
@@ -35,6 +37,9 @@ for dir in "$ROOT"/fixtures/*/; do
  for slot in $SLOTS; do
   case "$slot" in
     exported) slot_args="--backend resolved --roots exported";;
+    deps)
+      if [ ! -f "$dir/libs/dep-helper.jar" ]; then continue; fi
+      slot_args="--backend resolved --deps --classpath $dir/libs/dep-helper.jar";;
     *)        slot_args="--backend resolved";;
   esac
   a=$(mktemp); b=$(mktemp)

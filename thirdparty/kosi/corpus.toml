@@ -200,6 +200,42 @@ tier = "eap"
 path = "fixtures/future-syntax"
 capabilities = ["version-ceiling", "eap"]
 
+# P9: cross-dependency taint. The dependency is a COMMITTED jar
+# (libs/dep-helper.jar, built by helper-src/build.sh from the Kotlin source
+# beside it); classpath.txt names it, and the `deps` matrix slot lowers it
+# into the KIR and summarises it (origin=bytecode). The body-less records
+# (an interface method, an abstract method) are the phase's most important
+# negative: they must be excluded entirely, never summarised as "no flow".
+
+[[fixtures]]
+slug = "dep-taint-through-lib"
+tier = "fixtures"
+path = "fixtures/dep-taint-through-lib"
+classpath_file = "classpath.txt"
+capabilities = ["deps", "bytecode-summaries", "cross-dependency", "bodyless-records", "source-returns"]
+
+# P9 regression guard: an unresolved CONSTRUCTOR is an unresolved call. The
+# branch that added the dependency tier briefly made it "handled" instead,
+# suppressing the conservative unknown-call default across every backend.
+# Positive and near-miss negative differ only in what enters the constructor.
+
+[[fixtures]]
+slug = "unresolved-constructor"
+tier = "fixtures"
+path = "fixtures/unresolved-constructor"
+capabilities = ["unknown-call-default", "constructors", "summaries"]
+
+# P9: the Kotlin/Native + JNI/cinterop seam as native-interop evidence.
+# Positives: an external fun, a loadLibrary binding site, a cinterop .def.
+# Negatives: plain functions with native-looking names, a commented-out
+# loadLibrary, a .def file outside the cinterop directories.
+
+[[fixtures]]
+slug = "native-interop"
+tier = "fixtures"
+path = "fixtures/native-interop"
+capabilities = ["native-interop", "jni", "cinterop", "security-signals"]
+
 # P3 call-graph fixtures: dispatch modes, sealed narrowing, exported roots
 # and framework-registration roots. Each carries a negative half naming what
 # a plausibly wrong dispatcher would emit.

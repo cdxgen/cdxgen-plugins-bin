@@ -589,6 +589,54 @@
       "severity": "medium"
     },
     {
+      "category": "log-injection",
+      "pattern": "android.util.Log.v",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.d",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.i",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.w",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.e",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.wtf",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
       "category": "deserialization",
       "pattern": "java.io.ObjectInputStream.readObject",
       "severity": "critical"
@@ -615,6 +663,14 @@
       "pattern": "javax.crypto.spec.PBEKeySpec",
       "relevantArguments": [
         0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.println",
+      "relevantArguments": [
+        2
       ],
       "severity": "medium"
     }

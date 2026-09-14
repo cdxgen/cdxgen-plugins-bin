@@ -260,7 +260,11 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 ## `KtObjectDeclaration` and died on any fixture containing an `object` —
 ## invisible in the phase's own native-vs-JVM proof, because a failed run
 ## leaves the previous `--out` file on disk and `cmp` then compares a report
-## with itself (R53).
+## with itself (R53). P9 added the `deps` slot for the same reason: the tier
+## touches the metadata reader and the ASM tree API, and an image that never
+## ran it dies on the first --deps analysis. The slot runs over the dep
+## fixture (the one carrying the committed helper jar), so the agent path is
+## deterministic — no dependency on a build machine's caches.
 native-metadata:
 	@rm -rf /tmp/kosi-agent-run && mkdir -p /tmp/kosi-agent-run
 	$(graal_env) $(gradle) :kosi-cli:kosiFatJar
@@ -283,6 +287,13 @@ native-metadata:
 	    -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-endpoint \
 	    -jar $(fat_jar) analyze --backend resolved --endpoint-sources \
 	    --dir $$f --out /dev/null; \
+	  if [ -f "$$f/libs/dep-helper.jar" ]; then \
+	    $(graal_env) "$(GRAAL_HOME)/bin/java" -Duser.language=en -Duser.country=US \
+	      -agentlib:native-image-agent=config-output-dir=/tmp/kosi-agent-run/$$slug-deps \
+	      -jar $(fat_jar) analyze --backend resolved --deps \
+	      --classpath "$$f/libs/dep-helper.jar" \
+	      --dir $$f --out /dev/null; \
+	  fi; \
 	done
 	python3 scripts/merge-agent-metadata.py /tmp/kosi-agent-run native-metadata/kosi/reachability-metadata.json
 

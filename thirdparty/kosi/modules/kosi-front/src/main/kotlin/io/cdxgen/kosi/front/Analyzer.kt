@@ -47,9 +47,32 @@ object Analyzer {
 
     class AnalysisException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
+    /**
+     * A failure rendered as its CAUSE CHAIN, not just its outermost frame.
+     * A wrapper carries no message of its own — `ExceptionInInitializerError`
+     * is the one that matters here, because that is how a native image
+     * reports a class whose initializer it could not run, and the class it
+     * could not initialise is the entire content of the report. Rendering
+     * only the wrapper printed "ExceptionInInitializerError: no message",
+     * which named nothing and sent the reader to `kosi version`, where the
+     * answer was never going to be.
+     */
+    internal fun describeFailure(t: Throwable, limit: Int = 200): String {
+        val parts = mutableListOf<String>()
+        var current: Throwable? = t
+        val seen = java.util.IdentityHashMap<Throwable, Boolean>()
+        while (current != null && seen.put(current, true) == null && parts.size < 4) {
+            val name = current::class.qualifiedName ?: current::class.simpleName ?: "error"
+            val message = current.message?.take(limit)
+            parts.add(if (message.isNullOrBlank()) name else "$name: $message")
+            current = current.cause
+        }
+        return parts.joinToString(" <- ")
+    }
+
     fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport = when (options.backend) {
         Backend.SYNTAX -> analyzeSyntax(root, options, commit)
-        Backend.RESOLVED -> analyzeResolved(root, options, commit)
+        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit)
     }
 
     // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
@@ -136,7 +159,7 @@ object Analyzer {
         } catch (t: Throwable) {
             throw AnalysisException(
                 "syntax backend: the analysis session could not be created " +
-                    "(${t::class.simpleName}: ${t.message?.take(200) ?: "no message"}); " +
+                    "(${describeFailure(t)}); " +
                     "run `kosi version` to see which components are available on this build",
                 t,
             )
@@ -228,6 +251,24 @@ object Analyzer {
     // ---- resolved tier (P1) -------------------------------------------------
 
     private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
+        // P10: the budgets (time, RSS) live across the whole resolved run and
+        // degrade it — never panic, never discard computed evidence. Off by
+        // default; when both budgets are unset no sampler thread exists and
+        // shouldStop() is a constant null.
+        val budgets = Budgets.of(options)
+        try {
+            return analyzeResolvedInner(root, options, commit, budgets)
+        } finally {
+            budgets.close()
+        }
+    }
+
+    private fun analyzeResolvedInner(
+        root: Path,
+        options: AnalyzeOptions,
+        commit: String,
+        budgets: Budgets,
+    ): KosiReport {
         val discovery = ProjectDiscovery.discover(root)
         val (versionedModules, versionDiagnostics, overrideDiagnostics) =
             discoverVersionPolicy(root, discovery.modules, options)
@@ -335,7 +376,7 @@ object Analyzer {
         } catch (t: Throwable) {
             throw AnalysisException(
                 "resolved backend: the analysis session could not be created " +
-                    "(${t::class.simpleName}: ${t.message?.take(200) ?: "no message"}); " +
+                    "(${describeFailure(t)}); " +
                     "run `kosi version` to see which components are available on this build",
                 t,
             )
@@ -391,22 +432,39 @@ object Analyzer {
             // kosi-graph (compiler types stop at this module's boundary).
             // `--callgraph none` publishes no graph at all — `options`
             // already records that nothing was requested.
+            //
+            // P10, golem's guardAlgorithm lesson: a call-graph crash must
+            // not discard the already-computed evidence report. The failure
+            // becomes a NAMED diagnostic and the report ships without the
+            // graph; it is never swallowed into a green result.
+            var callgraphFailure: String? = null
             val graphResult = if (options.callgraph != io.cdxgen.kosi.schema.CallGraphMode.NONE) {
-                io.cdxgen.kosi.graph.CallGraphBuilder.build(
-                    io.cdxgen.kosi.kir.KirModule(kir.functions),
-                    io.cdxgen.kosi.graph.GraphOptions(
-                        mode = options.callgraph,
-                        roots = io.cdxgen.kosi.graph.GraphOptions.rootsOf(options.roots),
-                        includeStdlib = options.includeStdlib,
-                        dependencyDetail = options.dependencyDetail,
-                        maxPathsPerSymbol = options.maxPathsPerSymbol,
-                        timeoutSeconds = options.callgraphTimeoutSeconds,
-                    ),
-                    io.cdxgen.kosi.graph.CallGraphBuilder.Attribution(
-                        byAbsoluteFilePath = fileRelPathByAbsolute,
-                        purlByModulePath = purlByModulePath,
-                    ),
-                )
+                if (budgets.shouldStop() != null) {
+                    callgraphFailure = "the analysis budget tripped before the call graph could be built"
+                    null
+                } else {
+                    try {
+                        io.cdxgen.kosi.graph.CallGraphBuilder.build(
+                            io.cdxgen.kosi.kir.KirModule(kir.functions),
+                            io.cdxgen.kosi.graph.GraphOptions(
+                                mode = options.callgraph,
+                                roots = io.cdxgen.kosi.graph.GraphOptions.rootsOf(options.roots),
+                                includeStdlib = options.includeStdlib,
+                                dependencyDetail = options.dependencyDetail,
+                                maxPathsPerSymbol = options.maxPathsPerSymbol,
+                                timeoutSeconds = options.callgraphTimeoutSeconds,
+                            ),
+                            io.cdxgen.kosi.graph.CallGraphBuilder.Attribution(
+                                byAbsoluteFilePath = fileRelPathByAbsolute,
+                                purlByModulePath = purlByModulePath,
+                            ),
+                        )
+                    } catch (t: Throwable) {
+                        callgraphFailure = (t.message ?: t::class.simpleName ?: "error").take(300)
+                        if (System.getenv("KOSI_TRACE") != null) t.printStackTrace()
+                        null
+                    }
+                }
             } else {
                 null
             }
@@ -511,9 +569,19 @@ object Analyzer {
             // intersects the slices with the call graph's reachability from
             // the roots — a slice whose function no root reaches is not
             // published, and the surviving ones carry the flag.
+            //
+            // P9 `--deps`: when the run asks for it, the resolved classpath
+            // jars are lowered to the SAME KIR by kosi-bytecode and handed to
+            // the SAME engine, whose summaries then carry `origin=bytecode`.
+            val depsEnabled = options.deps || options.dataflow == io.cdxgen.kosi.schema.DataflowMode.SECURITY_DEPS
+            val depTier = if (depsEnabled) {
+                buildDependencyTier(kirModule, resolution, options)
+            } else {
+                null
+            }
             val flowResult = if (options.dataflow != io.cdxgen.kosi.schema.DataflowMode.NONE) {
                 io.cdxgen.kosi.flow.TaintEngine.analyze(
-                    io.cdxgen.kosi.kir.KirModule(kir.functions),
+                    kirModule,
                     io.cdxgen.kosi.models.ModelPacks.loadBuiltin(),
                     io.cdxgen.kosi.flow.TaintEngine.Attribution(fileRelPathByAbsolute, purlByModulePath),
                     io.cdxgen.kosi.flow.TaintEngine.Options(
@@ -526,6 +594,13 @@ object Analyzer {
                         skipGenerated = options.dataflowSkipGenerated,
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
+                        depsModule = depTier?.module,
+                        depsPurls = depTier?.purlsUsed ?: emptySet(),
+                        depsAliases = depTier?.aliases ?: emptyMap(),
+                        depsClassCount = depTier?.classCount ?: 0,
+                        depsBodylessRecords = depTier?.bodylessRecords ?: 0,
+                        shouldStop = budgets::shouldStop,
+                        dataflowWorkers = options.dataflowWorkers,
                     ),
                 )
             } else {
@@ -583,6 +658,98 @@ object Analyzer {
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
+            // P9 dependency-tier diagnostics: every miss is a counted,
+            // named row, never a silent gap in the tier.
+            val depsDiagnostics = if (depTier != null) {
+                buildList {
+                    if (depTier.bodylessRecords > 0) {
+                        add(
+                            Diagnostic(
+                                code = DiagnosticCodes.DEPS_BODYLESS,
+                                severity = Severity.INFO,
+                                message = "${depTier.bodylessRecords} dependency record(s) carry no body " +
+                                    "(abstract, interface, native or stripped) and were EXCLUDED from the " +
+                                    "dependency tier — an empty body is indistinguishable from a no-op, so " +
+                                    "none was summarised",
+                                count = depTier.bodylessRecords,
+                            ),
+                        )
+                    }
+                    if (depTier.classesNotFound.isNotEmpty()) {
+                        add(
+                            Diagnostic(
+                                code = DiagnosticCodes.DEPS_CLASS_NOT_FOUND,
+                                severity = Severity.INFO,
+                                message = "${depTier.classesNotFound.size} workspace call(s) name classes absent " +
+                                    "from every classpath jar; their summaries cannot be computed: " +
+                                    depTier.classesNotFound.take(10).joinToString(", "),
+                                count = depTier.classesNotFound.size,
+                            ),
+                        )
+                    }
+                    if (depTier.classLimitHit) {
+                        add(
+                            Diagnostic(
+                                code = DiagnosticCodes.DEPS_CLASS_LIMIT,
+                                severity = Severity.WARNING,
+                                message = "the --deps-max-classes budget capped the lowered dependency set at " +
+                                    "${depTier.classCount} classes; summaries through unlowered classes are absent",
+                                count = depTier.classCount,
+                            ),
+                        )
+                    }
+                    if (depTier.unlowered.isNotEmpty()) {
+                        val breakdown = depTier.unlowered.entries.sortedWith(compareBy({ it.key }, { it.value }))
+                            .joinToString(", ") { "${it.key}=${it.value}" }
+                        add(
+                            Diagnostic(
+                                code = DiagnosticCodes.BYTECODE_UNLOWERED,
+                                severity = Severity.WARNING,
+                                message = "the bytecode lowering declined $breakdown record(s); each is treated " +
+                                    "as body-less and excluded, never summarised from a partial body",
+                                count = depTier.unlowered.values.sum(),
+                            ),
+                        )
+                    }
+                }
+            } else {
+                emptyList()
+            }
+            val compileGapDiagnostic = if (options.backend == Backend.COMPILE) {
+                Diagnostic(
+                    code = DiagnosticCodes.COMPILE_BACKEND_GAP,
+                    severity = Severity.WARNING,
+                    message = "--backend compile is a DECLARED GAP in this release: kosi cannot execute the " +
+                        "analysed build offline to obtain generated sources (KSP/Compose/Room), so this " +
+                        "report is the RESOLVED tier's; generated sources were NOT analysed and no generated " +
+                        "declaration appears in it",
+                    position = Position(".", 1, 1),
+                    count = 1,
+                )
+            } else {
+                null
+            }
+            val callgraphDiagnostic = callgraphFailure?.let {
+                Diagnostic(
+                    code = DiagnosticCodes.CALLGRAPH_FAILED,
+                    severity = Severity.ERROR,
+                    message = "the call graph crashed and is ABSENT from this report; the already-computed " +
+                        "evidence still ships: $it",
+                    position = Position(".", 1, 1),
+                    count = 1,
+                )
+            }
+            val budgetDiagnostic = budgets.tripCode()?.let { code ->
+                Diagnostic(
+                    code = code,
+                    severity = Severity.WARNING,
+                    message = "the ${if (code == DiagnosticCodes.ANALYSIS_TIME_BUDGET) "--max-analysis-seconds" else "--max-rss-mb"} " +
+                        "budget tripped during the run; the report degraded without discarding computed evidence",
+                    position = Position(".", 1, 1),
+                    count = 1,
+                )
+            }
+
             // Symbol operations that threw are counted, never swallowed: a
             // report whose declarations lost their JVM evidence because the
             // Analysis API failed underneath must say so, otherwise a
@@ -630,8 +797,8 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic) +
-                    diagnostics + (flowResult?.diagnostics ?: emptyList()),
+                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic) +
+                    diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
                 stats = Stats(
                     fileCount = fileCount,
                     declarationCount = drafts.size,
@@ -646,6 +813,15 @@ object Analyzer {
                     // the conservative default's precision cost.
                     unknownCallPropagations = flowResult?.unknownCallPropagations
                         ?: graphResult?.unresolvedCalls ?: 0,
+                    // Workspace lowering only. The dependency tier's misses
+                    // are NOT folded in here: `loweringFailures` is the P2
+                    // gate's numerator over `functionsLowered`, which counts
+                    // workspace functions alone — adding jar records to the
+                    // numerator and none to the denominator is the R49/R54
+                    // shape, and it would silently change what the gate
+                    // means (empty on every fixture slot). The tier's misses
+                    // are carried by the BYTECODE_UNLOWERED diagnostic, with
+                    // their own breakdown and their own count.
                     loweringFailures = kir.failures,
                     functionsLowered = kir.functionCount,
                     fixpointCapHits = flowResult?.fixpointCapHits ?: 0,
@@ -659,11 +835,19 @@ object Analyzer {
                     sccsProcessed = flowResult?.sccsProcessed ?: 0,
                     sccIterationCapHits = flowResult?.sccIterationCapHits ?: 0,
                     suspendCrossingSliceCount = dataFlow?.stats?.suspendCrossingSlices ?: 0,
+                    bodylessRecords = flowResult?.bodylessRecords ?: 0,
+                    dependencyClasses = flowResult?.dependencyClasses ?: 0,
+                    dependencyFunctions = flowResult?.dependencyFunctions ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
                 ),
                 callGraph = graphResult?.callGraph,
                 dataFlow = dataFlow,
+                securitySignals = io.cdxgen.kosi.evidence.NativeInterop.collect(
+                    root,
+                    kirModule,
+                    io.cdxgen.kosi.evidence.NativeInterop.Attribution(fileRelPathByAbsolute, purlByModulePath),
+                ),
                 apiEndpoints = apiEndpoints,
                 services = endpoints.services,
                 urls = endpoints.urls,
@@ -891,6 +1075,7 @@ object Analyzer {
         stats: Stats,
         callGraph: io.cdxgen.kosi.schema.CallGraph? = null,
         dataFlow: io.cdxgen.kosi.schema.DataFlowEvidence? = null,
+        securitySignals: List<io.cdxgen.kosi.schema.SecuritySignal> = emptyList(),
         apiEndpoints: List<io.cdxgen.kosi.schema.ApiEndpoint> = emptyList(),
         services: List<io.cdxgen.kosi.schema.ServiceRef> = emptyList(),
         urls: List<io.cdxgen.kosi.schema.UrlEvidence> = emptyList(),
@@ -1017,7 +1202,7 @@ object Analyzer {
             imports = imports.sortedWith(ImportUsage.COMPARATOR),
             declarations = declarationsOut,
             usages = usagesOut,
-            securitySignals = emptyList(),
+            securitySignals = securitySignals,
             crypto = crypto,
             callGraph = callGraph,
             dataFlow = dataFlow,
@@ -1045,6 +1230,84 @@ object Analyzer {
     fun isNativeImage(): Boolean =
         System.getProperty("org.graalvm.nativeimage.enabled") != null ||
             System.getProperty("org.graalvm.nativeimage.imagecode") != null
+
+    // ---- P9: the --deps dependency tier ---------------------------------------
+
+    private class DepTierBuild(
+        val module: io.cdxgen.kosi.kir.KirModule,
+        val classCount: Int,
+        val purlsUsed: Set<String>,
+        val aliases: Map<String, List<String>>,
+        val bodylessRecords: Int,
+        val unlowered: Map<String, Int>,
+        val classesNotFound: List<String>,
+        val classLimitHit: Boolean,
+    )
+
+    /**
+     * Platform APIs live in the JDK image (or the Android platform jar), not
+     * in the resolved classpath jars, and the shipped pack models their
+     * shapes already — the tier excludes them BY PREFIX and the exclusion is
+     * published (docs/KOSI.md names the shapes this population misses).
+     */
+    private val PLATFORM_PREFIXES = listOf(
+        "java.", "javax.", "jdk.", "sun.", "com.sun.", "kotlin.", "kotlinx.", "android.",
+    )
+
+    /**
+     * Selects and lowers the dependency classes the workspace actually calls
+     * into. The wanted set is the workspace's resolved callees that are NOT
+     * workspace functions and NOT platform APIs; the jars come from the same
+     * offline classpath resolution the resolved tier already used, so the
+     * tier never widens what the run can see.
+     */
+    private fun buildDependencyTier(
+        kirModule: io.cdxgen.kosi.kir.KirModule,
+        resolution: ClasspathResolver.Result,
+        options: AnalyzeOptions,
+    ): DepTierBuild? {
+        if (resolution.jars.isEmpty()) return null
+        val workspaceCanonicals = kirModule.functions.mapTo(HashSet()) { it.canonicalName }
+        val workspaceClasses = kirModule.functions.mapNotNullTo(HashSet()) { it.enclosingClass }
+        val wanted = sortedSetOf<String>()
+        for (function in kirModule.functions) {
+            val body = function.body ?: continue
+            for (block in body.blocks) {
+                for (ins in block.instructions) {
+                    if (ins !is io.cdxgen.kosi.kir.KirCall) continue
+                    // CONSTRUCTOR callees ARE wanted: the constructor itself
+                    // has no summary to apply, but lowering the class makes
+                    // its methods available as dispatch targets (a planted
+                    // DebugTree is how Timber's chain reaches a Log sink).
+                    val fqn = ins.callee.fqn
+                    if (fqn.isEmpty() || fqn.startsWith("<")) continue
+                    if (fqn in workspaceCanonicals) continue
+                    // Property-callable shapes name the owner class rather
+                    // than the accessor's JVM method: skip anything whose
+                    // class prefix is a workspace class.
+                    if (fqn.substringBeforeLast('.') in workspaceClasses) continue
+                    if (PLATFORM_PREFIXES.any { fqn.startsWith(it) }) continue
+                    wanted.add(fqn)
+                }
+            }
+        }
+        if (wanted.isEmpty()) return null
+        val jars = resolution.jars.map {
+            io.cdxgen.kosi.bytecode.BytecodeLowerer.JarSpec(it.jar, it.purl)
+        }
+        val result = io.cdxgen.kosi.bytecode.BytecodeLowerer.lower(jars, wanted, options.depsMaxClasses)
+        if (result.classCount == 0) return null
+        return DepTierBuild(
+            module = result.module,
+            classCount = result.classCount,
+            purlsUsed = result.purlsUsed,
+            aliases = result.aliases,
+            bodylessRecords = result.bodylessRecords,
+            unlowered = result.unlowered,
+            classesNotFound = result.classesNotFound,
+            classLimitHit = result.classLimitHit,
+        )
+    }
 }
 
 /** True when a declared version is below FIRST_SUPPORTED (vs above the ceiling). */

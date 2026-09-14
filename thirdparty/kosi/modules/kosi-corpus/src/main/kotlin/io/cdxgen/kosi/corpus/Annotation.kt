@@ -13,6 +13,7 @@ import io.cdxgen.kosi.schema.DiagnosticCodes
  *
  * kinds and keys:
  *   flow        source=<category> sink=<category> [count=N] [mode=M] [fn=<function>]
+ *   signal      code=<signal-code> [fn=<symbol>]   securitySignals[] evidence
  *   edge        from=<symbol> to=<symbol> [calltype=T]
  *   reachable   symbol=<symbol> [from=<symbol>] [maxdepth=N]
  *   usage       name=<name> [kind=call|operator|reference]
@@ -80,6 +81,7 @@ data class Annotation(
         ENDPOINT("endpoint"),
         CRYPTO("crypto"),
         SERVICE("service"),
+        SIGNAL("signal"),
         ;
 
         companion object {
@@ -103,9 +105,6 @@ data class Annotation(
                 }
             }
         }
-        if (kind != Kind.FLOW && kind != Kind.ENDPOINT && fn != null) {
-            errors.add("fn= is only valid on flow and endpoint expectations")
-        }
         if (kind == Kind.EDGE && (from == null || to == null)) errors.add("edge requires from= and to=")
         if (kind == Kind.REACHABLE && symbol == null) errors.add("reachable requires symbol=")
         if (kind == Kind.USAGE && name == null) errors.add("usage requires name=")
@@ -128,6 +127,13 @@ data class Annotation(
         if (kind == Kind.SERVICE && protocol == null && name == null && path == null) {
             errors.add("service requires protocol=, name= or path=")
         }
+        if (kind == Kind.SIGNAL && code == null) errors.add("signal requires code=")
+        if (kind == Kind.SIGNAL && code != null && !code.startsWith("~") && code !in SIGNAL_CODES) {
+            errors.add("unknown signal code '$code'; known: ${SIGNAL_CODES.sorted()}")
+        }
+        if (kind != Kind.FLOW && kind != Kind.ENDPOINT && kind != Kind.SIGNAL && fn != null) {
+            errors.add("fn= is only valid on flow, endpoint and signal expectations")
+        }
         if (form != null && form !in FORMS) {
             errors.add("form must be one of $FORMS, got $form")
         }
@@ -143,7 +149,10 @@ data class Annotation(
         if (declKind != null && declKind !in DECLARATION_KINDS) {
             errors.add("declaration kind must be one of $DECLARATION_KINDS, got $declKind")
         }
-        if (code != null && !code.startsWith("~") && code !in DiagnosticCodes.ALL) {
+        // `code=` carries TWO vocabularies: `diagnostic` expectations validate
+        // against the engine's diagnostic codes, `signal` expectations against
+        // the securitySignals vocabulary above. Each validates against its own.
+        if (code != null && !code.startsWith("~") && kind == Kind.DIAGNOSTIC && code !in DiagnosticCodes.ALL) {
             errors.add(
                 "unknown diagnostic code '$code'; known: ${DiagnosticCodes.ALL.sorted()} " +
                     "(register it in DiagnosticCodes when the engine starts emitting it)",
@@ -160,7 +169,18 @@ data class Annotation(
         val USAGE_KINDS = setOf("call", "operator", "reference")
 
         /** The bench matrix slots an annotation may scope itself to. */
-        val MODES = setOf("security", "all", "resolved", "exported", "endpoint")
+        val MODES = setOf("security", "all", "resolved", "exported", "endpoint", "deps")
+
+        /**
+         * The closed `securitySignals[].code` vocabulary
+         * (02-ARCHITECTURE.md §8); only `native-interop` emits today.
+         */
+        val SIGNAL_CODES = setOf(
+            "native-interop", "unsafe-interop", "webview-config", "permissive-cors",
+            "csrf-disabled", "debuggable", "cleartext-traffic", "reflection",
+            "dynamic-code-load", "external-process", "serialization-config",
+            "hardcoded-material",
+        )
 
         /** The endpoint `foundBy`/framework vocabulary comes from the shipped pack. */
         val FORMS = setOf("literal", "const", "template", "config", "unresolved")

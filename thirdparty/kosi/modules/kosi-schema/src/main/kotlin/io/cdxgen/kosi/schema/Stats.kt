@@ -57,11 +57,27 @@ data class Stats(
     val sccIterationCapHits: Int = 0,
     /** P6: slices whose source and sink are separated by a suspend boundary. */
     val suspendCrossingSliceCount: Int = 0,
+    /**
+     * P9, the `--deps` tier: class-file records whose body does not exist —
+     * abstract/interface/native methods, stripped or non-`-parameters` classes,
+     * methods the bytecode lowering declines. They are IGNORED ENTIRELY, never
+     * concluded about: an empty body is indistinguishable from a no-op, so a
+     * record summarised as "no flow" would be an invented sanitiser. The count
+     * is the population excluded from every dependency-tier denominator.
+     */
+    val bodylessRecords: Int = 0,
+    /** P9: classes actually lowered from dependency jars (the tier's denominator). */
+    val dependencyClasses: Int = 0,
+    /** P9: dependency methods lowered WITH bodies (the summary count's denominator). */
+    val dependencyFunctions: Int = 0,
     val truncations: Map<String, Int>,
     val degraded: String?,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
+        w.num("bodylessRecords", bodylessRecords)
+        w.num("dependencyClasses", dependencyClasses)
+        w.num("dependencyFunctions", dependencyFunctions)
         w.num("callsResolved", callsResolved)
         w.num("callsTotal", callsTotal)
         w.num("crossDependencySliceCount", crossDependencySliceCount)

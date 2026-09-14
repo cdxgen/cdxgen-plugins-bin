@@ -56,6 +56,10 @@ dependencies {
     implementation(project(":kosi-flow"))
     implementation(project(":kosi-endpoints"))
     implementation(project(":kosi-crypto"))
+    // P9: the dependency-jar tier (lowering) and the native-interop
+    // evidence collector.
+    implementation(project(":kosi-bytecode"))
+    implementation(project(":kosi-evidence"))
     implementation(project(":kosi-models"))
     implementation(libs.kotlin.stdlib)
 

@@ -315,6 +315,24 @@ object Promotion {
         // exemption list.
         checks.add(resolvedRatioCheck(current, baseline))
 
+        // 10b. P9's own gate, the phase's headline number: cross-dependency
+        // slices whose boundary moves carry `origin=bytecode`, on at least
+        // [CROSS_DEPENDENCY_BYTECODE_REPOS] pinned repos — with the applied
+        // bytecode-summary count beside it, so the numerator names its
+        // producer instead of hiding behind a count.
+        checks.add(crossDependencyBytecodeCheck(current))
+
+        // 10c. P9's recorded cost: per-repo time and RSS deltas of the deps
+        // slot against the plain resolved slot, measured in the SAME session
+        // (a ratio against a number from a different machine or session is
+        // not a measurement). Published with both sides; not a pass/fail bar.
+        checks.add(depsDeltaCheck(current))
+
+        // 10d. P10 per-repo peak RSS: a repo may not exceed 1.5x its
+        // baseline row's RSS window. The golem SEAM lesson, memory-shaped:
+        // an aggregate RSS number cannot see one repo exploding.
+        checks.add(perRepoRssCheck(current, baseline))
+
         // 11. the P2 lowering gate: loweringFailures empty on every fixture
         // slot, and below LOWERING_FAILURE_RATE_MAX of the functions lowered
         // on the repo tiers. Enforced here rather than measured by hand once
@@ -954,6 +972,119 @@ object Promotion {
 
     /** The P8 gate's mapping-coverage bar: every shipped row exercised. */
     const val CRYPTO_MAPPING_COVERAGE_TARGET = 1.0
+
+    /** The P9 gate's bar: pinned repos with bytecode-origin cross-dependency slices. */
+    const val CROSS_DEPENDENCY_BYTECODE_REPOS = 5
+
+    /** The P10 per-repo RSS ceiling against the baseline row. */
+    const val PER_REPO_RSS_MAX = 1.50
+
+    /**
+     * P9's headline gate. `crossDependencySliceCount > 0 with
+     * summaries[].origin=bytecode` per pinned repo — BOTH counts read from
+     * the deps-slot row the bench recorded. Fewer than
+     * [CROSS_DEPENDENCY_BYTECODE_REPOS] qualifying repos FAILs, naming the
+     * repos that measured zero; no deps rows at all is NOT_EVALUATED.
+     */
+    private fun crossDependencyBytecodeCheck(current: BenchRunner.BenchResult): Check {
+        val name = "cross-dependency-bytecode"
+        val rows = current.results
+            .filter { it.tier in REPO_TIERS && it.slug != "TOTAL" && it.slot == MatrixSlot.DEPS_LABEL }
+            .sortedBy { it.slug }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no repo-tier deps slot in this run (run --tier with repos)")
+        }
+        val qualifying = rows.filter {
+            (it.crossDependencyBytecodeSlices ?: 0) > 0 && (it.bytecodeSummaries ?: 0) > 0
+        }
+        val detail = rows.joinToString(", ") { r ->
+            "${r.slug}=${r.crossDependencyBytecodeSlices ?: 0} slice(s), ${r.bytecodeSummaries ?: 0} applied bytecode " +
+                "summar(ies), ${r.bodylessRecords ?: 0} body-less excluded, ${r.dependencyClasses ?: 0} classes lowered"
+        }
+        return if (qualifying.size >= CROSS_DEPENDENCY_BYTECODE_REPOS) {
+            Check(
+                name,
+                State.PASS,
+                "${qualifying.size} of ${rows.size} repo(s) qualify (>= $CROSS_DEPENDENCY_BYTECODE_REPOS): " +
+                    qualifying.joinToString(", ") { it.slug },
+            )
+        } else {
+            Check(
+                name,
+                State.FAIL,
+                "${qualifying.size} of ${rows.size} repo(s) qualify (< $CROSS_DEPENDENCY_BYTECODE_REPOS): " +
+                    qualifying.joinToString(", ") { it.slug } + "; measured: $detail",
+            )
+        }
+    }
+
+    /**
+     * The recorded cost of the tier, per repo, both sides re-measured in
+     * THIS run: deps-slot wall and RSS against the plain resolved slot's.
+     * The detail line is the record the phase gate asks for; the check only
+     * demands the numbers exist.
+     */
+    private fun depsDeltaCheck(current: BenchRunner.BenchResult): Check {
+        val name = "deps-delta"
+        val resolved = current.results
+            .filter { it.tier in REPO_TIERS && it.slug != "TOTAL" && it.slot == MatrixSlot.RESOLVED_LABEL }
+            .associateBy { it.slug }
+        val deps = current.results
+            .filter { it.tier in REPO_TIERS && it.slug != "TOTAL" && it.slot == MatrixSlot.DEPS_LABEL }
+            .sortedBy { it.slug }
+        if (deps.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no repo-tier deps slot in this run")
+        }
+        val deltas = deps.mapNotNull { d ->
+            val r = resolved[d.slug] ?: return@mapNotNull null
+            val wall = if (r.wallMillis > 0) String.format("%.2fx", d.wallMillis.toDouble() / r.wallMillis) else "n/a"
+            val rss = if (r.peakRssBytes != null && d.peakRssBytes != null && r.peakRssBytes!! > 0) {
+                String.format("%.2fx", d.peakRssBytes!!.toDouble() / r.peakRssBytes!!)
+            } else {
+                "n/a"
+            }
+            "${d.slug} wall=${d.wallMillis}ms ($wall resolved), rss=${d.peakRssBytes ?: -1}B ($rss resolved)"
+        }
+        return Check(name, State.PASS, "same-session deltas, deps vs resolved: " + deltas.joinToString("; "))
+    }
+
+    /**
+     * P10's per-repo memory criterion: every repo-tier row's RSS window may
+     * not exceed [PER_REPO_RSS_MAX] of its baseline row's. Rows whose
+     * baseline carries no RSS (written before the field) are skipped and the
+     * check says so rather than passing silently.
+     */
+    private fun perRepoRssCheck(current: BenchRunner.BenchResult, baseline: BenchRunner.BenchResult?): Check {
+        val name = "per-repo-rss"
+        val rows = current.results.filter { it.tier in REPO_TIERS && it.slug != "TOTAL" && it.peakRssBytes != null }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no repo-tier row recorded an RSS window in this run")
+        }
+        val baseByKey = baseline?.results
+            ?.filter { it.peakRssBytes != null && (it.peakRssBytes ?: 0) > 0 }
+            ?.associateBy { it.slug + "/" + it.slot }
+        if (baseByKey.isNullOrEmpty()) {
+            val measured = rows.sortedBy { it.slug }.joinToString(", ") { "${it.slug}/${it.slot}=${it.peakRssBytes}B" }
+            return Check(
+                name,
+                State.NOT_EVALUATED,
+                "the baseline carries no per-row RSS to ratchet against; measured: $measured",
+            )
+        }
+        val over = mutableListOf<String>()
+        for (row in rows) {
+            val base = baseByKey[row.slug + "/" + row.slot] ?: continue
+            val limit = base.peakRssBytes!! * PER_REPO_RSS_MAX
+            if ((row.peakRssBytes ?: 0) > limit) {
+                over.add("${row.slug}/${row.slot} ${base.peakRssBytes}B -> ${row.peakRssBytes}B (limit ${limit.toLong()}B)")
+            }
+        }
+        return if (over.isEmpty()) {
+            Check(name, State.PASS, "all ${rows.size} repo-tier row(s) within $PER_REPO_RSS_MAX of baseline")
+        } else {
+            Check(name, State.FAIL, over.joinToString("; "))
+        }
+    }
 
     /**
      * P7: endpoint recall PER FRAMEWORK, never pooled - eight frameworks in

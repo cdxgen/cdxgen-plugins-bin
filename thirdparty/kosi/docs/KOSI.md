@@ -5,6 +5,192 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
+## Phases 9+10 — cross-dependency taint, and the gate that can see a regression (this branch)
+
+Branch `feat/kosi-p9-p10-deps-scale`, off `feat/kosi` (`4579fa6`). Two
+roadmap phases, one branch: P6's gate needed P5's summaries; the P10 gate
+needed P9's tier to be worth gating on.
+
+**What ships (P9).** `kosi-bytecode` lowers dependency jars into the SAME
+KIR the source front end produces, and `kosi-flow` summarises them with
+the SAME `Summarizer` — origin `bytecode` — applying them at workspace
+call sites exactly like workspace summaries. There is no second transfer
+anywhere: the tier is a `KirModule` whose site ids continue after the
+workspace's, so ONE trace walks into the jar and back out, and slice
+traces render jar frames (`dep-helper.jar!dev/kosi/helper/Db.class:32`).
+`--deps` enables the tier; `--dataflow security-deps` implies it. The
+demangler reads `@kotlin.Metadata` (JvmProtoBufUtil from
+kotlin-compiler-common-for-ide, already shipped — the allowlist did not
+grow) and maps JVM names to source callable ids: hash-mangled overloads,
+property accessors, `*Kt` facades, `$Companion`/nested classes. Overrides
+are resolved inside the lowered set by JVM name+descriptor on selected
+supertypes — without it, a jar body calling an abstract supertype method
+(Timber's `Tree.log` -> `DebugTree.log`) dies into the unknown default
+exactly one hop before the sink.
+
+**Body-less records are ignored ENTIRELY, never concluded about** —
+rusi's rule, and the phase's most important sentence. An
+abstract/interface/native/stripped method lowers to `body = null`, which
+the engine never compiles; each is counted (`stats.bodylessRecords`) with
+a `deps-bodyless` diagnostic, and the population is excluded from every
+dependency denominator. `dep-taint-through-lib` pins it from both sides:
+a flow THROUGH an abstract `Provider.provide` must exist on every backend
+(unknown-propagation without the tier, labelled with it), and a
+`Db.hashOf` must never sink.
+
+**The tier's summaries keep `origin=bytecode` even when an SCC hits the
+iteration budget.** The `recursive-approx` relabel is guarded on the
+workspace origin, because the label is what the gate reads to tell a
+jar-derived summary from a workspace one — losing that would hide which
+summaries come from jars at all. An under-converged tier stays visible in
+`stats.sccIterationCapHits` over `stats.sccsProcessed` instead. The tier
+runs on the SAME per-SCC budget as the workspace: it briefly carried a 4x
+one justified as protecting that label, which the label never needed.
+
+**crossesDependency stops being collinear with crossesModule** (the P5/P6
+caveat): it is now set when the TRACE enters a jar the tier lowered —
+dependency purls are the marker set — and stays false for a
+workspace-module crossing, however many purls differ between the ends.
+The fixture that existed to make the P5 gate nonzero (`summary-cross-module`)
+keeps its crossModule flags and loses its crossDependency ones, which is
+the point: the flags answer different questions now.
+
+**Excluded shapes, named** (the R63 clause for this phase): JDK and
+Android platform APIs are excluded by prefix (`java.`, `kotlin.`,
+`android.`, ...) and stay pack-modeled; `@JvmName`-renamed facades and
+multi-file facades are found only through the call closure; overload
+summaries collapse per canonical name (the workspace CallIndex has the
+same collapse; Kotlin vararg bridge descriptors never match raw JVM ones
+so descriptors disambiguate nothing); AARs are read through their
+extracted `classes.jar` (the resolver's, reused); `suspend` state machines
+lower as ordinary control flow with the transfer treating the artifacts
+conservatively; cross-jar closure is unbounded on fat classpaths, so the
+closure is same-jar and budget-capped (`--deps-max-classes`, 500, a
+`deps-class-limit` diagnostic when it trips).
+
+**Gate, determinism (this branch, re-measured after the tier landed).**
+Native binary 97,611,856 B on the pinned GraalVM CE 25.3.4.1 (+1.47 MB
+over P7/P8: the ASM tree API and the metadata reader); all three
+components `available`; `nativeImage: true`. Determinism:
+`scripts/determinism-sweep.sh` grew the deps slot (R53: a slot the sweep
+never runs proves nothing) over the dep fixture — **135 of 135**
+fixture/slot pairs byte-identical across two JVM runs, **135 of 135** in
+the native image, **135 of 135** native == JVM with `tool.commit`
+normalised; the deps rows show the tier producing the same 4 slices on
+both binaries. `make native-metadata` re-ran the agent loop (now covering
+the deps slot) and produced no drift for the TIER — it is reflection-free
+(direct ASM + protobuf calls), which is why the image needed no new
+registrations to run it. It did produce three, for the KDoc PSI types
+R69 names: a defect of the fixture tree's construct coverage, not of this
+phase's code, and the reason the review added a fixture carrying KDoc.
+
+**What ships (P10).** `--max-analysis-seconds` and `--max-rss-mb` DEGRADE
+the run: between SCCs, between functions, and at stage boundaries a
+tripped budget emits `analysis-time-budget`/`rss-budget` and the partial
+report still ships — golem's `guardAlgorithm` lesson is pinned twice, in
+the budgets and in the call-graph guard (`callgraph-failed`, severity
+error: a graph crash names itself and the evidence report survives; the
+http4k failure row still fails — the guard sits AFTER the resolution
+stage that throws). An already-exceeded RSS budget trips synchronously at
+construction (an absurd budget must degrade deterministically, not race
+the sampler). `--dataflow-workers` parallelises the per-function
+analysis behind synchronized context mutations and a compiled-order fold:
+evidence is identical at widths 1/4/8 (`WorkerDeterminismTest`). The
+bench records a per-row RSS window (samples bracketing the slot) and the
+promotion gate adds the real-repo criteria: `per-repo-rss` (1.5x vs the
+baseline row, FAIL naming the repo), `deps-delta` (per-repo wall and RSS
+ratios of the deps slot against the resolved slot, measured in the same
+session — recorded, published, not a bar), and `cross-dependency-bytecode`
+(P9's gate: at least 5 pinned repos with cross-dependency slices whose
+origins carry `bytecode` and applied bytecode summaries; FAIL names the
+zero repos).
+
+`--backend compile` is a DECLARED GAP: kosi cannot execute the analysed
+build offline to obtain generated sources (KSP/Compose/Room), so the flag
+runs the resolved tier and stamps `compile-backend-gap` on the report —
+the gap is named where a consumer sees it, and no report claims generated
+sources were analysed.
+
+**The pack grew one family for the tier to be real:** `android.util.Log`
+(v/d/i/w/e/wtf/println, log-injection). Real Android dependencies sink
+through Log (Timber's chain bottoms out in `DebugTree.log` ->
+`Log.println`), and a jar-internal boundary the models cannot see is a
+boundary the tier cannot measure. The rows are validated by the same
+pattern-notation test as every other row; no bundled JVM fixture
+exercises them (android.jar is not on fixture classpaths) — the pinned
+Android repos are their exercising corpus, and until a repo completes a
+flow through one, they are measured by nothing at repo scale.
+
+**Gate, measured (darwin-arm64, M4 Pro, one session, both sides
+re-measured).** The P9 gate — cross-dependency slices with
+`origin=bytecode` on >= 5 pinned repos — is implemented, armed, and
+FAILS today, honestly:
+
+```
+FAIL   cross-dependency-bytecode  0 of 8 repo(s) qualify (< 5):
+       measured: anki-android=0 slice(s), 0 applied bytecode summar(ies),
+       grpc-kotlin=..., heterogeneous-microservices=..., http4k=..., ...
+```
+
+The engine is proven where a source->jar-sink path EXISTS: the committed
+`dep-taint-through-lib` fixture's deps slot publishes 4 slices, 3 of them
+cross-dependency with `origins=[bytecode, pack]` (workspace readLine ->
+`Db.runQuery` -> `Statement.executeQuery` inside the jar; jar-side
+`Console.readLine` -> workspace `ProcessBuilder`); a synthetic probe
+against the real Timber 5.0.1 AAR publishes 4 cross-dependency
+`log-injection` slices whose trace walks `Timber.Forest.d` ->
+`Timber$Tree.d` -> `DebugTree.log` -> `Log.println` with `origins=
+[bytecode, pack]`. But NO pinned repo completes a source -> jar-sink
+path under the shipped models: entry-point seeding exists on the deps
+slot (P7 handlers), and no seeded fact reaches a jar-internal sink — the
+same finding P5/P6 recorded for workspace flows ("none of the five calls
+a pack source in a function whose transitive callees reach a pack
+sink"), now measured one boundary further out. Closing it is corpus and
+model work (a vulnerable Kotlin service fixture; per-repo source/sink
+modeling), not engine work — manufacturing per-repo pack entries to
+make the gate pass would be inventing reach, which the standing rules
+forbid. The gate stays FAIL and names every zero repo until then.
+
+What the tier DOES measure at repo scale (deps slot, same-session deltas
+against the resolved slot — the `deps-delta` record):
+
+| repo | classes lowered | wall resolved -> deps | delta |
+| --- | --- | --- | --- |
+| anki-android | 571 (cap 500 + closure) | 226.0s -> 220.8s | 0.98x |
+| spring-fu | <= 500 + closure | 9.8s -> ~20s | ~2x |
+| nowinandroid | <= 500 + closure | 34.4s -> ~44s | ~1.3x |
+| ktor-samples | <= 500 + closure | 16.2s -> ~18s | ~1.1x |
+| kampkit | <= 500 + closure | 2.9s -> ~4s | ~1.3x |
+| heterogeneous-microservices | 58 | 0.20s -> 0.26s | 1.31x |
+
+(Anki's row is the one re-measured after the cap moved to 500 — the class
+cap exists because a 2000-class tier OOMed the pinned 2 GiB corpus JVM
+(`ExitOnOutOfMemoryError` fired: loud, but dead); the other rows are the
+2000-cap run's walls, quoted as ~ until re-measured. The caps bound the
+tier's memory: the corpus JVM must survive the whole matrix.)
+
+grpc-kotlin's cache carries no warm classpath (its tier resolves empty —
+offline resolution, gaps diagnosed); http4k stays a counted failure row
+(a pasted-failure investigation, see P7/P8) — the call-graph guard does
+NOT launder it: its Analysis API checker trips before the graph stage.
+Three repos hit the `--deps-max-classes` cap (at the 2000 it then
+carried; the default is 500 now, so more repos will) with
+`deps-class-limit` naming it; spring-fu's 6093 body-less records are the
+tier's largest excluded population. All 48 corpus rows: 0 failed
+expectations, 0 XPASS.
+
+**What is NOT measured / declared gaps, in one list:** the 5-repo
+cross-dependency-bytecode criterion (above); `--backend compile`
+(generated sources — named gap, `compile-backend-gap`); platform-API
+jar bodies (JDK/Android excluded by prefix — pack-modeled); `@JvmName`
+facades, multi-file facades, overload-disambiguated jar summaries
+(canonical-collapse, same as workspace); per-row peak-RSS windows are
+process-cumulative-contaminated on long single-JVM runs (the bench runs
+~390 sessions in one JVM), so the deps-vs-resolved DELTA in the same
+session and isolated single-slot runs are the meaningful readings; the
+native image's deps slot is exercised by the agent over the dep fixture
+only.
+
 ## Phases 7+8 — frameworks/endpoints and crypto/CBOM (this branch)
 
 Branch `feat/kosi-p7-p8-endpoints-crypto`, off `feat/kosi` (`be924c9`). Two
@@ -768,6 +954,10 @@ Gate proofs recorded in the PR body:
 | R63 | kosi-front | **every access path deeper than one field was invisible, and recall read 1.000 anyway.** `AccessPath` has carried `elements: List<Element>` with a depth-5 cap since P2, and both engines join those elements into the state key — but the lowering only ever emitted length-ONE paths. `o.inner.a = readLine()` became `t4 = fieldget vo vo.inner; fieldset t4 t4.a`, while the read `o.inner.a` hung off a *different* temporary: the write and the read never met, intraprocedurally or across a summary. Nothing in 50 fixtures used a two-level path, so `accessPathDepth: 5` was advertised in the options, honoured by the engines, and unreachable — and the P5 clean-sibling negatives were vacuous below depth one | the lowering composes a syntactic `a.b.c` qualifier chain into ONE path off the chain's base register, for reads, writes and compound assignments alike; `AccessPath.of` still collapses past the cap. Both engines are fixed by the one change. New fixture `nested-field-path` carries the positive, the interprocedural positive and the depth-two clean sibling; restoring the defect fails all four (two positives x two slots) |
 | R64 | kosi-corpus | **`corpusFull` measured one of the five pinned repos and exited zero.** The task asked for tiers `fixtures,async,small,vuln,ported`: `vuln` and `ported` have never existed in `corpus.toml`, and the four tiers that hold the other repos — `medium`, `android`, `kmp`, `hybrid` — were not named. `select` filtered an unknown tier to nothing and said nothing, so the documented full-corpus command silently covered `ktor-samples` alone. The repo evidence in the P5/P6 report came from ad-hoc `--tier` invocations, not from the command the docs give a reader | the task names every tier the manifest carries, and `select` now REQUIRES each requested tier to exist — a typo'd tier is an error, not a quiet reduction in coverage |
 | R65 | kosi-flow | **the two transfer functions are a copy of each other with the fact type changed** (`TaintFact` vs `SummaryFact`): the same joins, field and index handling, unknown-call default and sink matching, ~700 lines each, and they must agree or a summary describes a function differently from the engine consuming it. R62 is what the drift looks like when it is small. Not fixed here — unification is a phase of its own | `TransferParityTest` pins the cheapest observable that catches the likeliest drift: an opcode one transfer learned and the other did not fails the build naming the opcode. Recorded as the first item of P7 |
+| R66 | CI (inherited, pre-existing on `feat/kosi` at `4579fa6`) | **the kosi-test linux on-demand native job fails at the binary smoke on the untouched base branch too**: the linux-amd64 image builds (same Makefile flags, jar and metadata as the green darwin build) then aborts at startup with `NoClassDefFoundError: java/awt/GraphicsEnvironment` raised inside a JDK native library's `JNI_OnLoad` — an AWT-natives signature, on a job whose GraalVM tarball sha was never pinned ("record at the first successful run" — a first successful run never happened). Control run: dispatching `kosi-test.yml` on `feat/kosi` fails the identical step. Not caused by and not fixable within this phase; the four-arch release path (`native-builds`) is green on this branch | fix belongs to CI/toolchain: pin the linux GraalVM sha, then root-cause the linux AWT registration difference against the green darwin build |
+| R67 | kosi-flow | **an unresolved CONSTRUCTOR stopped being an unresolved call, in the summary engine only.** The dependency-tier fallback was added to `SummaryAnalysis` under `targets.isEmpty() && kind != CONSTRUCTOR`, which also flipped the pre-P9 behaviour of the arm it guarded: an unresolved constructor now reported *handled* and SUPPRESSED the conservative unknown-call default, silently dropping the parameter-to-return passthrough it used to publish — on every backend, not just the deps tier, since the tier never lowers `<init>` at all. Nothing failed: no annotation named the shape, and the goldens were regenerated over the eight pairs it moved. The comment above the condition described the dependency fallback and said nothing about constructors | the two hosts now consult the tier under ONE condition (no workspace summary applies), stated once, with the carve-out gone: a constructor simply misses, because `<init>` is never in the tier. New fixture `unresolved-constructor` puts the unresolved constructor inside a CALLEE, so the flow can only survive through that function's summary — an inline one would pass either way on the caller's own default. Restoring the carve-out fails it on `resolved` and `deps` |
+| R68 | kosi-front | **the P2 lowering gate's numerator grew a population its denominator does not have.** Dependency-tier misses were folded into `stats.loweringFailures` under a `bytecode:` prefix, and the gate reads that map over `stats.functionsLowered` — which counts WORKSPACE functions only. The fixtures arm demands the map be empty, so one unreadable jar record would have failed a gate about workspace lowering; the repo arm would have rationed jar records against a workspace denominator. R49/R54's shape, and a silent change to what a shipped gate means | the merge is gone; `loweringFailures` is workspace lowering again. The tier's misses were already carried, with their own breakdown and count, by the `bytecode-unlowered` diagnostic |
+| R69 | native image (pre-existing, found by this review) | **the native binary could not analyse any Kotlin file containing a KDoc comment.** `/** ... */` anywhere in a source made `createForResolved` throw `ExceptionInInitializerError` wrapping `RuntimeException: Must have a constructor with ASTNode` — the PSI factory reflectively looking up `KDocSection`/`KDocName`/`KDocTag`, none of which the image had registered. The JVM build was unaffected, so every gate passed. This is R53's THIRD instance and its worst: R53 was a matrix SLOT the agent never ran (`exported`, and `KtObjectDeclaration`), P9 added the `deps` slot for the same reason — but here the untraced thing is a SOURCE CONSTRUCT. The agent's real denominator is the set of constructs the fixture tree contains, and not one of 53 fixtures had ever carried a doc comment, in a language whose every real repository is full of them | the `unresolved-constructor` fixture (added for R67) carries KDoc; `make native-metadata` then traced the three missing types and the image runs it. Native sweeps re-measured at **135/135** JVM, **135/135** native, **135/135** native == JVM. The error message that hid it is fixed too: session failures render their whole CAUSE CHAIN (`describeFailure`, applied at all three sites that had the shape), because "ExceptionInInitializerError: no message" named nothing and pointed the reader at `kosi version`, where the answer could never be |
 
 ## Defect registry (numbers referenced by `known-fail=<backend>:<n>`)
 

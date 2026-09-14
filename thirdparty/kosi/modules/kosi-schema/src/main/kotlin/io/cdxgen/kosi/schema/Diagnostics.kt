@@ -110,6 +110,47 @@ object DiagnosticCodes {
     const val NO_SOURCES = "no-sources"
     const val UNREADABLE_SOURCE = "unreadable-source"
 
+    /**
+     * P9 `--deps`: a body-less class-file record (abstract/interface/native,
+     * stripped, or declined by the lowering) was counted and EXCLUDED from
+     * the dependency tier — never summarised as "no flow".
+     */
+    const val DEPS_BODYLESS = "deps-bodyless"
+
+    /** P9: a workspace call names a class absent from every classpath jar. */
+    const val DEPS_CLASS_NOT_FOUND = "deps-class-not-found"
+
+    /** P9: the dependency-class budget capped the lowered set; the rest is absent. */
+    const val DEPS_CLASS_LIMIT = "deps-class-limit"
+
+    /**
+     * P9: constructs the bytecode lowering could not translate (itemised by
+     * construct in `stats.loweringFailures`'s deps map); a method whose body
+     * cannot be fully lowered is treated as BODY-LESS — ignored, never
+     * concluded about.
+     */
+    const val BYTECODE_UNLOWERED = "bytecode-unlowered"
+
+    /**
+     * P10: the `--max-analysis-seconds` budget tripped. The run DEGRADED:
+     * the named diagnostic ships and the partial report with it — never a
+     * panic, never a discarded evidence report.
+     */
+    const val ANALYSIS_TIME_BUDGET = "analysis-time-budget"
+
+    /** P10: the `--max-rss-mb` budget tripped; same degradation contract. */
+    const val RSS_BUDGET = "rss-budget"
+
+    /**
+     * P10, golem's guardAlgorithm lesson: the call graph crashed, so the
+     * graph section is absent NAMED as such while the already-computed
+     * evidence report still ships.
+     */
+    const val CALLGRAPH_FAILED = "callgraph-failed"
+
+    /** P9: `--backend compile` runs the resolved tier; this names the gap. */
+    const val COMPILE_BACKEND_GAP = "compile-backend-gap"
+
     val ALL: Set<String> = setOf(
         PARSE_ERROR,
         SYNTAX_BACKEND_NO_RESOLUTION,
@@ -133,6 +174,14 @@ object DiagnosticCodes {
         NO_BUILD_FILES,
         NO_SOURCES,
         UNREADABLE_SOURCE,
+        DEPS_BODYLESS,
+        DEPS_CLASS_NOT_FOUND,
+        DEPS_CLASS_LIMIT,
+        BYTECODE_UNLOWERED,
+        ANALYSIS_TIME_BUDGET,
+        RSS_BUDGET,
+        CALLGRAPH_FAILED,
+        COMPILE_BACKEND_GAP,
     )
 }
 

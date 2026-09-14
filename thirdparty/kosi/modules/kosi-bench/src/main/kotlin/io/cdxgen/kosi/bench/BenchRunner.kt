@@ -152,6 +152,25 @@ object BenchRunner {
         val cryptoFlowSlices: Int? = null,
         /** Per-form Cipher mode/padding extraction: form -> [extracted, total]. */
         val cryptoModePaddingByForm: Map<String, List<Int>> = emptyMap(),
+        /**
+         * P9 `--deps` facts: summaries the workspace applied from the
+         * bytecode tier, and the slices whose trace enters a jar with a
+         * `bytecode` boundary origin — the cross-dependency gate's two
+         * counts. Null for slots that never asked for the tier.
+         */
+        val bytecodeSummaries: Int? = null,
+        val crossDependencyBytecodeSlices: Int? = null,
+        /** P9: body-less records excluded from the tier (never summarised). */
+        val bodylessRecords: Int? = null,
+        /** P9: classes lowered from the jars (the tier's denominator). */
+        val dependencyClasses: Int? = null,
+        /**
+         * P10: this slot's peak RSS window (max of the samples around the
+         * run). Process-cumulative peak stays on [BenchResult]; the per-repo
+         * criterion needs a per-row number. Null for rows that predate the
+         * field.
+         */
+        val peakRssBytes: Long? = null,
         val digest: Digests.FixtureDigest,
         val failures: List<String> = emptyList(),
     ) {
@@ -244,7 +263,12 @@ object BenchRunner {
             w.endObject()
             w.str("slot", slot)
             w.str("slug", slug)
+            peakRssBytes?.let { w.num("peakRssBytes", it) }
             w.num("wallMillis", wallMillis)
+            bytecodeSummaries?.let { w.num("bytecodeSummaries", it) }
+            crossDependencyBytecodeSlices?.let { w.num("crossDependencyBytecodeSlices", it) }
+            bodylessRecords?.let { w.num("bodylessRecords", it) }
+            dependencyClasses?.let { w.num("dependencyClasses", it) }
             w.num("xfail", xfail)
             w.num("xpass", xpass)
             w.str("tier", tier)
@@ -449,6 +473,11 @@ object BenchRunner {
                             .mapValues { (_, v) ->
                                 (v as? io.cdxgen.kosi.schema.JsonArr)?.items?.map { it.asLong().toInt() } ?: emptyList()
                             },
+                        bytecodeSummaries = r.long("bytecodeSummaries")?.toInt(),
+                        crossDependencyBytecodeSlices = r.long("crossDependencyBytecodeSlices")?.toInt(),
+                        bodylessRecords = r.long("bodylessRecords")?.toInt(),
+                        dependencyClasses = r.long("dependencyClasses")?.toInt(),
+                        peakRssBytes = r.long("peakRssBytes"),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
                     )
                 } ?: emptyList()
@@ -636,10 +665,13 @@ object BenchRunner {
             ?.let { slot.options().copy(classpathFile = it.toString()) }
             ?: slot.options()
         // Wall clock is measured OUTSIDE the report: the report itself must
-        // stay byte-identical across runs on the same input.
+        // stay byte-identical across runs on the same input. The P10 per-row
+        // RSS window brackets the run the same way.
+        val rssBefore = PeakRss.currentBytes()
         val start = System.nanoTime()
         val report = Analyzer.analyze(dir, options, commit)
         val wallMillis = (System.nanoTime() - start) / 1_000_000
+        val rssAfter = PeakRss.currentBytes()
         val evaluation = Evaluator.evaluate(report, annotations, mode = slot.label, backend = options.backend.id)
         val failureDetails = (evaluation.fail + evaluation.xpass).map { outcome ->
             val status = if (outcome.status == Evaluator.Status.XPASS) "XPASS" else "FAIL"
@@ -721,6 +753,11 @@ object BenchRunner {
             cryptoMappingHits = report.crypto.assets.flatMap { CryptoMetrics.mappingKeys(it) }.distinct().sorted(),
             cryptoFlowSlices = report.dataFlow?.slices?.count { CryptoMetrics.isCryptoFlow(it) },
             cryptoModePaddingByForm = CryptoMetrics.modePaddingByForm(report),
+            bytecodeSummaries = report.dataFlow?.stats?.bytecodeSummaries,
+            crossDependencyBytecodeSlices = report.dataFlow?.stats?.crossDependencyBytecodeSlices,
+            bodylessRecords = report.stats.bodylessRecords.takeIf { it > 0 },
+            dependencyClasses = report.stats.dependencyClasses.takeIf { it > 0 },
+            peakRssBytes = maxOf(rssBefore, rssAfter),
             digest = digest,
             failures = failureDetails,
         )

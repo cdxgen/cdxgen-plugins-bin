@@ -25,9 +25,10 @@ class DefaultsSyncTest {
                     backend = slotOptions.backend,
                     roots = slotOptions.roots,
                     endpointSources = slotOptions.endpointSources,
+                    deps = slotOptions.deps,
                 ),
                 slotOptions,
-                "slot ${slot.label} overrides more than its own dataflow/backend/roots/endpointSources",
+                "slot ${slot.label} overrides more than its own dataflow/backend/roots/endpointSources/deps",
             )
         }
     }

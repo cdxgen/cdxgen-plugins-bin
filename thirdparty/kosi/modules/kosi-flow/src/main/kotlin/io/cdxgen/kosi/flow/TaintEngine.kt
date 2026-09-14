@@ -188,6 +188,36 @@ object TaintEngine {
          * from the handler's own signature.
          */
         val endpointSources: Map<String, String> = emptyMap(),
+        /**
+         * P9 `--deps`: the dependency tier, already lowered to the SAME KIR
+         * by kosi-bytecode. Its functions are compiled with site ids
+         * continuing after the workspace's, summarised by the SAME
+         * [Summarizer] with `origin=bytecode`, and applied at workspace call
+         * sites exactly like workspace summaries. Null = workspace-only run:
+         * every code path below is a no-op and the report is byte-identical
+         * to a run without the tier (the invariance the corpus asserts).
+         */
+        val depsModule: KirModule? = null,
+        /** P9: purls of the jars [depsModule] was lowered from — the cross-dependency marker set. */
+        val depsPurls: Set<String> = emptySet(),
+        /** P9: demangled aliases (alias canonical name -> primary canonical names, tried in order). */
+        val depsAliases: Map<String, List<String>> = emptyMap(),
+        /** P9: classes lowered from the jars (the tier's published denominator). */
+        val depsClassCount: Int = 0,
+        /**
+         * P9: body-less dependency records the lowerer EXCLUDED. Supplied by
+         * the lowerer rather than recounted here: one number, one producer —
+         * the engine cannot see the records at all, because a body-less one
+         * is never put in the module it receives.
+         */
+        val depsBodylessRecords: Int = 0,
+        /**
+         * P10: called between analysis steps; returns a diagnostic code when
+         * the run must DEGRADE now (the report still ships), null to carry on.
+         */
+        val shouldStop: (() -> String?)? = null,
+        /** P10: worker parallelism for the per-function main analysis (deterministic at any width). */
+        val dataflowWorkers: Int = 1,
     )
 
     data class Result(
@@ -211,6 +241,12 @@ object TaintEngine {
         val dispatchJoins: Map<Int, Int>,
         /** P6: slices whose trace crosses a suspend boundary. */
         val suspendCrossingSlices: Int,
+        /** P9 `--deps`: body-less records the tier EXCLUDED (never summarised). */
+        val bodylessRecords: Int = 0,
+        /** P9: classes lowered from the dependency jars. */
+        val dependencyClasses: Int = 0,
+        /** P9: dependency methods lowered WITH bodies (summaries were computed over these). */
+        val dependencyFunctions: Int = 0,
     )
 
     // ---- the per-run context --------------------------------------------------
@@ -219,6 +255,9 @@ object TaintEngine {
      * What every per-function analysis needs beyond its own CFG: the
      * module-wide site table (site ids are GLOBAL, so one trace can span
      * functions), the resolved callee sets, and the converged summaries.
+     * With `--deps` (P9) the site table also carries the dependency tier's
+     * sites — one trace can walk into a jar and back — and [deps] exposes
+     * the tier's summaries for boundary application.
      */
     internal class EngineContext(
         val pack: ModelPack,
@@ -228,15 +267,70 @@ object TaintEngine {
         val lambdaDefs: Map<String, Map<String, String>>,
         val captures: Map<String, Map<String, List<String>>>,
         val options: Options,
+        val deps: DepsTier? = null,
     ) {
+        private val lock = Any()
         var joinOverruns: Int = 0
+            private set
         var lambdaUnresolved: Int = 0
+            private set
         val joinWidths: java.util.TreeMap<Int, Int> = java.util.TreeMap()
         /** Callee FQNs where a pack entry actually moved taint (pack-origin summaries). */
         val packAppliedSources = sortedSetOf<String>()
         val packAppliedPassthroughs = sortedSetOf<String>()
         /** source-return births: the caller fact -> the callee's internal source path. */
         val sourceReturnPaths = HashMap<TaintFact, List<Int>>()
+        /** P9: dependency summaries that actually moved taint at a workspace call site. */
+        val bytecodeAppliedFqns = sortedSetOf<String>()
+
+        // Mutations are guarded so the P10 worker parallelism stays
+        // deterministic at any width: outcomes are merged in compiled order
+        // regardless of which worker produced them.
+        fun recordJoin(width: Int) = synchronized(lock) { joinWidths.merge(width, 1, Int::plus) }
+        fun recordJoinOverrun() = synchronized(lock) { joinOverruns += 1 }
+        fun recordSourceReturn(fact: TaintFact, path: List<Int>) = synchronized(lock) { sourceReturnPaths[fact] = path }
+        fun recordPackSource(fqn: String) = synchronized(lock) { packAppliedSources.add(fqn) }
+        fun recordPackPassthrough(fqn: String) = synchronized(lock) { packAppliedPassthroughs.add(fqn) }
+        fun recordLambdaUnresolved() = synchronized(lock) { lambdaUnresolved += 1 }
+        fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
+    }
+
+    /**
+     * The P9 `--deps` tier: the dependency module's compiled functions (site
+     * ids continuing after the workspace's), its own call index, and the
+     * summaries the SAME summariser computed over them with
+     * `origin=bytecode`. A workspace call site resolves into the tier by
+     * canonical name (through the demangler's aliases) plus descriptor.
+     */
+    internal class DepsTier(
+        val compiled: List<CompiledFunction>,
+        val callIndex: CallIndex,
+        val table: Map<String, FunctionSummary>,
+        val aliases: Map<String, List<String>>,
+        val purls: Set<String>,
+        val classCount: Int,
+        val functionCount: Int,
+        val bodylessRecords: Int,
+        val summarised: Summarizer.Result,
+    ) {
+        /**
+         * Resolves a workspace call into the tier's summary by canonical
+         * name (direct, then demangler aliases). There is deliberately no
+         * descriptor parameter: the summariser keys summaries by canonical
+         * name, so overloads of one name are already one summary — the same
+         * collapse the workspace CallIndex has always had — and Kotlin
+         * `vararg`/`Unit`-bridge call descriptors never equal the raw JVM
+         * ones the class file carries. A canonical whose overloads genuinely
+         * disagree is a named limitation (docs/KOSI.md), not a silently
+         * wrong pick.
+         */
+        fun summaries(fqn: String): FunctionSummary? {
+            table[fqn]?.let { return it }
+            for (alias in aliases[fqn].orEmpty()) {
+                table[alias]?.let { return it }
+            }
+            return null
+        }
     }
 
     fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
@@ -250,6 +344,8 @@ object TaintEngine {
         var sinkSites = 0
         var unknownCallPropagations = 0
         var sliceCapReported = false
+        // P10: the budget whose trip degraded this run (a diagnostic code), if any.
+        var stopCode: String? = null
 
         // ---- compile everything once, with GLOBAL site ids ------------------
         val functions = module.functions
@@ -269,11 +365,67 @@ object TaintEngine {
 
         // ---- P5: resolve callees, condense SCCs, compute summaries -----------
         val callIndex = CallIndex(compiled, options.dispatchMode)
-        val summarizer = Summarizer(compiled, callIndex, pack, options)
+
+        // ---- P9: the `--deps` tier, summarised BEFORE the workspace's -------
+        // (dependencies never call back into the workspace, so their
+        // summaries need nothing from it — while workspace functions whose
+        // bodies pass taint THROUGH a dependency compose the jar's effects
+        // into their own summaries). The tier's functions are compiled with
+        // site ids CONTINUING after the workspace's — one global site space,
+        // so one trace can walk into the jar and back out. Body-less records
+        // never reach this loop: they have no body to compile and are
+        // counted, never concluded about.
+        val depsFunctions = options.depsModule?.functions
+            ?.filter { it.body != null }
+            ?.sortedWith(compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" }, { it.file }, { it.line }))
+            .orEmpty()
+        val depsCompiled = mutableListOf<CompiledFunction>()
+        if (options.depsModule != null) {
+            var depSite = nextSite
+            for (function in depsFunctions) {
+                val cf = compile(function, depSite) ?: continue
+                depSite += cf.siteById.size
+                depsCompiled.add(cf)
+            }
+        }
+        val depsTier = options.depsModule?.let {
+            val depCallIndex = CallIndex(depsCompiled, options.dispatchMode)
+            // The tier runs on the SAME per-SCC iteration budget as the
+            // workspace. It briefly carried a 4x one, justified as keeping
+            // the `bytecode` label from degrading to `recursive-approx` —
+            // which the label cannot do (the relabel below is guarded on the
+            // workspace origin), so the constant bought nothing the corpus
+            // could see. An under-converged tier stays visible instead, in
+            // the sccIterationCapHits the run publishes over sccsProcessed.
+            val depSummary = Summarizer(depsCompiled, depCallIndex, pack, options, SummaryOrigin.BYTECODE).compute()
+            for ((kind, count) in depSummary.skipped) {
+                truncations.merge(kind, count, Int::plus)
+            }
+            if (stopCode == null) depSummary.stoppedBy?.let { stopCode = it }
+            DepsTier(
+                compiled = depsCompiled,
+                callIndex = depCallIndex,
+                table = depSummary.table,
+                aliases = options.depsAliases,
+                purls = options.depsPurls,
+                classCount = options.depsClassCount,
+                functionCount = depsCompiled.size,
+                bodylessRecords = options.depsBodylessRecords,
+                summarised = depSummary,
+            )
+        }
+        if (depsTier != null) {
+            for (cf in depsCompiled) {
+                for ((id, site) in cf.siteById) siteIndex[id] = cf to site
+            }
+        }
+
+        val summarizer = Summarizer(compiled, callIndex, pack, options, deps = depsTier)
         val summaryResult = summarizer.compute()
         for ((kind, count) in summaryResult.skipped) {
             truncations.merge(kind, count, Int::plus)
         }
+        if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 
         val lambdaDefs = compiled.associate { it.function.canonicalName to lambdaDefsOf(it) }
         val captures = compiled.associate { cf ->
@@ -293,22 +445,56 @@ object TaintEngine {
             lambdaDefs = lambdaDefs,
             captures = captures,
             options = options,
+            deps = depsTier,
         )
 
         // ---- the per-function main analysis ----------------------------------
-        for (cf in compiled) {
+        // P10: the per-function work runs on [options.dataflowWorkers] workers
+        // and is folded back in COMPILED ORDER, so candidates, node ids and
+        // slice ids are identical at any worker width. The budget hook runs
+        // per function; a trip keeps everything already analysed, counts what
+        // is being dropped, and ships the partial result.
+        data class Slot(val cf: CompiledFunction, val outcome: FunctionOutcome?, val skippedKind: String?)
+
+        fun analyseSlot(cf: CompiledFunction): Slot {
             val function = cf.function
             if (options.skipGenerated && function.syntheticCause != null) {
-                truncations.merge("generated-functions", 1, Int::plus)
-                continue
+                return Slot(cf, null, "generated-functions")
             }
             val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
             if (instructionCount > options.maxFunctionInstructions) {
-                truncations.merge("function-instructions", 1, Int::plus)
+                return Slot(cf, null, "function-instructions")
+            }
+            options.shouldStop?.invoke()?.let { code ->
+                return Slot(cf, null, code)
+            }
+            return Slot(cf, analyseFunction(cf, context), null)
+        }
+
+        val slots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {
+            val width = minOf(options.dataflowWorkers, compiled.size)
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(width)
+            try {
+                val futures = compiled.map { cf -> pool.submit(java.util.concurrent.Callable { analyseSlot(cf) }) }
+                futures.map { it.get() }
+            } finally {
+                pool.shutdown()
+            }
+        } else {
+            compiled.map { analyseSlot(it) }
+        }
+        for (slot in slots) {
+            val outcome = slot.outcome
+            if (outcome == null) {
+                val kind = slot.skippedKind ?: "dataflow-truncated"
+                truncations.merge(kind, 1, Int::plus)
+                if (kind == DiagnosticCodes.ANALYSIS_TIME_BUDGET || kind == DiagnosticCodes.RSS_BUDGET) {
+                    stopCode = kind
+                }
                 continue
             }
+            val cf = slot.cf
             functionsAnalysed++
-            val outcome = analyseFunction(cf, context)
             if (outcome.capHit) fixpointCapHits++
             sourceSites += outcome.sourceSites
             sinkSites += outcome.sinkSites
@@ -403,13 +589,34 @@ object TaintEngine {
             )
         }
 
+        if (stopCode != null) {
+            diagnostics.add(
+                Diagnostic(
+                    code = stopCode!!,
+                    severity = Severity.WARNING,
+                    message = "the analysis budget was exceeded; the run degraded without discarding computed " +
+                        "evidence: $functionsAnalysed of ${compiled.size} workspace function(s) analysed, " +
+                        "${summaryResult.table.size} workspace and ${depsTier?.table?.size ?: 0} dependency " +
+                        "summary(ies) converged before the trip; everything after the trip is absent",
+                    count = compiled.size - functionsAnalysed,
+                ),
+            )
+        }
+
+        val bytecodeSummaries = depsTier
+            ?.table
+            ?.entries
+            ?.filter { it.key in context.bytecodeAppliedFqns }
+            ?.map { it.value.toSchema() }
+            .orEmpty()
         val allSummaries = buildList {
             addAll(summaryResult.table.values.map { it.toSchema() })
             addAll(packOriginSummaries(context))
+            addAll(bytecodeSummaries)
         }.sortedBy { it.functionId }
 
         return Result(
-            evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context),
+            evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size),
             functionsAnalysed = functionsAnalysed,
             fixpointCapHits = fixpointCapHits,
             sourceSites = sourceSites,
@@ -422,6 +629,9 @@ object TaintEngine {
             sccIterationCapHits = summaryResult.sccIterationCapHits,
             dispatchJoins = context.joinWidths.mapValues { it.value },
             suspendCrossingSlices = candidates.count { it.suspendCrossing },
+            bodylessRecords = depsTier?.bodylessRecords ?: 0,
+            dependencyClasses = depsTier?.classCount ?: 0,
+            dependencyFunctions = depsTier?.functionCount ?: 0,
         )
     }
 
@@ -569,14 +779,14 @@ object TaintEngine {
         override fun onSourceApplied(fqn: String, site: Int, fact: TaintFact, resultKey: TaintKey, collect: TransferEvents?) {
             if (collect != null) {
                 collect.sourceSites += 1
-                context.packAppliedSources.add(fqn)
+                context.recordPackSource(fqn)
             }
         }
 
         override fun onSanitizerCleared(cleared: List<String>, collect: TransferEvents?) {}
 
         override fun onPackPassthroughApplied(fqn: String, collect: TransferEvents?) {
-            if (collect != null) context.packAppliedPassthroughs.add(fqn)
+            if (collect != null) context.recordPackPassthrough(fqn)
         }
 
         override fun onSinkMatched(collect: TransferEvents?) {
@@ -669,12 +879,25 @@ object TaintEngine {
                 // the P3 graph applies.
                 targets = context.callIndex.narrowByReceiverType(compiled.function.canonicalName, ins.receiver, targets)
             }
-            val applicable = targets.mapNotNull { target -> context.table[target.canonicalName]?.let { target to it } }
-            if (applicable.isEmpty()) return false
+            val applicable = targets.mapNotNull { target -> context.table[target.canonicalName]?.let { target to it } }.toMutableList()
+            // P9 boundary: when no WORKSPACE target has a summary, the `--deps`
+            // tier may have one. The per-summary application below is shared
+            // verbatim — a dependency summary is applied exactly like a
+            // workspace one, with its own origin (`bytecode`) stamped on every
+            // boundary move and its `paramToSink` effects materialising as
+            // interprocedural sink hits whose traces walk into the jar.
+            var depOnly = false
+            if (applicable.isEmpty()) {
+                val dep = context.deps?.summaries(ins.callee.fqn)
+                if (dep == null) return false
+                applicable.add(dep.function to dep)
+                depOnly = true
+            }
 
             val width = applicable.size
-            context.joinWidths.merge(width, 1, Int::plus)
-            if (width > options.dispatchJoinBudget) context.joinOverruns += 1
+            context.recordJoin(width)
+            if (width > options.dispatchJoinBudget) context.recordJoinOverrun()
+            var moved = false
 
             // Summary parameter index -> the caller's register. A receiver-less
             // call to a member function binds its implicit this to the CALLER's
@@ -705,6 +928,7 @@ object TaintEngine {
                         val facts = state.factsOf(fromKey)
                         if (facts.isEmpty()) continue
                         state.addFacts(resultKey, facts)
+                        moved = true
                         for (fact in facts) {
                             chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin)
                         }
@@ -715,8 +939,9 @@ object TaintEngine {
                     // build so the trace still starts at the real source.
                     for ((category, path) in summary.sourceReturns) {
                         val fact = TaintFact(site, category)
-                        context.sourceReturnPaths[fact] = path
+                        context.recordSourceReturn(fact, path)
                         state.addFacts(resultKey, listOf(fact))
+                        moved = true
                         chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
                     }
                 }
@@ -727,7 +952,7 @@ object TaintEngine {
                     val fromReg = mapParam(summary, from) ?: continue
                     for (to in tos.sorted()) {
                         val toReg = mapParam(summary, to) ?: continue
-                        moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, ""), site, "summary", origin)
+                        moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, ""), site, "summary", origin) || moved
                     }
                 }
 
@@ -739,7 +964,7 @@ object TaintEngine {
                     for ((to, suffixes) in tos) {
                         val toReg = mapParam(summary, to) ?: continue
                         for (suffix in suffixes.sorted()) {
-                            moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, suffix), site, "summary", origin)
+                            moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, suffix), site, "summary", origin) || moved
                         }
                     }
                 }
@@ -756,6 +981,7 @@ object TaintEngine {
                     val argKey = TaintKey(fromReg, effect.paramPath)
                     val facts = state.factsOf(argKey)
                     if (facts.isEmpty()) continue
+                    moved = true
                     collect?.interHits?.add(InterSinkHit(site, argKey, java.util.TreeSet(facts), effect, origin))
                 }
 
@@ -769,7 +995,7 @@ object TaintEngine {
                     if (lambdaCanonical == null) {
                         // A callable reference or local function: no extracted
                         // body, so no summary — counted, never silent.
-                        collect?.let { context.lambdaUnresolved += 1 }
+                        collect?.let { context.recordLambdaUnresolved() }
                         continue
                     }
                     val lambdaSummary = context.table[lambdaCanonical] ?: continue
@@ -781,9 +1007,17 @@ object TaintEngine {
                         val captureKey = TaintKey(captureReg, effect.paramPath)
                         val facts = state.factsOf(captureKey)
                         if (facts.isEmpty()) continue
+                        moved = true
                         collect?.interHits?.add(InterSinkHit(site, captureKey, java.util.TreeSet(facts), effect, lambdaOrigin))
                     }
                 }
+            }
+            // The applied-summary publication (P9 gate denominator) counts
+            // dependency summaries that MOVED something at a workspace call
+            // site, never every jar function that happened to be summarised.
+            if (depOnly && moved) {
+                applicable.filter { it.second.origin == SummaryOrigin.BYTECODE }
+                    .forEach { context.recordBytecodeApplied(it.second.function.canonicalName) }
             }
             return true
         }
@@ -899,7 +1133,20 @@ object TaintEngine {
             pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
         }
         val literalBirth = !entryFact && sourceSite?.ins is KirStore
-        if (!entryFact && !literalBirth && sourcePattern == null) return null
+        // P9: a source-return birth from the --deps tier was born at a call
+        // that RETURNED jar-sourced taint — the real source call sits at the
+        // head of the recorded upstream path (inside the jar), so the birth
+        // site itself need not match the pack. The head is validated below
+        // before the slice is allowed to stand.
+        val upstreamSites = context.sourceReturnPaths[fact].orEmpty()
+        val upstreamBirth = upstreamSites.isNotEmpty() && sourcePattern == null
+        if (upstreamBirth) {
+            val head = siteIndex[upstreamSites.first()] ?: return null
+            val headIns = head.second.ins as? KirCall ?: return null
+            val headSource = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, headIns.callee.fqn) }
+            if (headSource == null || headSource.category != fact.category) return null
+        }
+        if (!entryFact && !literalBirth && sourcePattern == null && !upstreamBirth) return null
         if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
@@ -907,7 +1154,6 @@ object TaintEngine {
         // The upstream path of a source-return birth: taint that came back
         // from a callee's internal source starts its trace THERE, not at the
         // call that returned it.
-        val upstreamSites = context.sourceReturnPaths[fact].orEmpty()
 
         // Walk the provenance chain from the sink back to the source. The
         // chain is the fixpoint's last-move graph: guarded against cycles and
@@ -1065,8 +1311,14 @@ object TaintEngine {
             ).joinToString("|"),
         )
 
+        // crossModule compares the two ENDS' module paths. crossesDependency
+        // is NOT its twin (the P5/P6 caveat resolved in P9): it is set when
+        // the TRACE enters a real external jar — a dependency purl the --deps
+        // tier was lowered from — and stays false for a slice that only
+        // crosses workspace modules, whose Gradle purls differ per module.
         val crossesModule = sourceModulePath.isNotEmpty() && sinkModulePath.isNotEmpty() && sourceModulePath != sinkModulePath
-        val crossesDependency = sourcePurl.isNotEmpty() && sinkPurl.isNotEmpty() && sourcePurl != sinkPurl
+        val depPurls = context.deps?.purls ?: emptySet()
+        val crossesDependency = depPurls.isNotEmpty() && traceNodes.any { it.purl in depPurls }
 
         return SliceCandidate(
             flowKey = flowKey,
@@ -1316,8 +1568,13 @@ object TaintEngine {
             ).joinToString("|"),
         )
 
+        // Same provenance rule as the intraprocedural slice (P9): the flags
+        // are computed from what the trace actually touches — crossModule
+        // from the two ends' module paths, crossesDependency from the trace
+        // entering a jar the --deps tier was lowered from.
         val crossesModule = sourceModulePath.isNotEmpty() && sinkModulePath.isNotEmpty() && sourceModulePath != sinkModulePath
-        val crossesDependency = sourcePurl.isNotEmpty() && sinkPurl.isNotEmpty() && sourcePurl != sinkPurl
+        val depPurls = context.deps?.purls ?: emptySet()
+        val crossesDependency = depPurls.isNotEmpty() && traceNodes.any { it.purl in depPurls }
 
         return SliceCandidate(
             flowKey = flowKey,
@@ -1373,6 +1630,7 @@ object TaintEngine {
         options: Options,
         summaries: List<io.cdxgen.kosi.schema.FlowSummary>,
         context: EngineContext,
+        bytecodeSummaryCount: Int,
     ): DataFlowEvidence {
         // Deterministic ids: nodes sorted by (file, line, kind, name, site),
         // edges deduplicated by (from, to, kind), slices ordered by source
@@ -1510,6 +1768,10 @@ object TaintEngine {
                     slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
                 },
                 dispatchJoins = context.joinWidths.mapValues { it.value }.mapKeys { it.key.toString() },
+                bytecodeSummaries = bytecodeSummaryCount,
+                crossDependencyBytecodeSlices = slicesOut.count {
+                    it.crossesDependency && SummaryOrigin.BYTECODE in it.origins
+                },
             ),
             diagnostics = emptyList(),
         )

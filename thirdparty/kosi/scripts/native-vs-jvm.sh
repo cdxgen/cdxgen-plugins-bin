@@ -26,9 +26,14 @@ printf '%-28s %-9s %8s %10s\n' "fixture" "slot" "bytes" "verdict"
 for dir in "$ROOT"/fixtures/*/; do
   slug=$(basename "$dir")
   case "$slug" in .corpus-cache) continue;; esac
-  for slot in resolved exported; do
+  for slot in resolved exported deps; do
     if [ "$slot" = exported ]; then
       set -- --backend resolved --roots exported
+    elif [ "$slot" = deps ]; then
+      # P9: the tier's lowering + metadata machinery, over the one fixture
+      # whose committed helper jar makes the run deterministic.
+      if [ ! -f "$dir/libs/dep-helper.jar" ]; then continue; fi
+      set -- --backend resolved --deps --classpath "$dir/libs/dep-helper.jar"
     else
       set -- --backend resolved
     fi

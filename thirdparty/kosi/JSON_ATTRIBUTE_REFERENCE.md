@@ -72,7 +72,12 @@ Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
 `classpathFile` (one jar path per line, `#` comments), `jdkHome`,
-`pretty`, `format`.
+`pretty`, `format`, plus the P9/P10 flags: `deps` (`--deps`: the
+dependency-jar tier — implied by `--dataflow security-deps`),
+`depsMaxClasses` (the tier's class budget, 500), `maxAnalysisSeconds`
+and `maxRssMb` (P10 budgets; `null` = off — an absent key IS off — a
+tripped budget degrades the run with a named diagnostic and the partial
+report still ships).
 An explicit `--classpath`/`--classpath-file` replaces offline resolution
 entirely (02-ARCHITECTURE.md §3 acquisition order); otherwise the resolved
 backend scans build files as text and locates coordinates in the local
@@ -193,6 +198,14 @@ rather than a negative expectation that passes vacuously.
 | `summary-iteration-cap` | warning | the P5 summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
 | `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
+| `deps-bodyless` | info | P9 `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
+| `deps-class-not-found` | info | P9: workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
+| `deps-class-limit` | warning | P9: the `--deps-max-classes` budget capped the lowered dependency set; summaries through unlowered classes are absent |
+| `bytecode-unlowered` | warning | P9: constructs the bytecode lowering declined, itemised in the message and merged into `stats.loweringFailures{}` under `bytecode:` keys; every affected method is treated as body-less and excluded, never summarised from a half-body |
+| `analysis-time-budget` | warning | P10: the `--max-analysis-seconds` budget tripped; the run degraded WITHOUT discarding computed evidence (`count` is functions skipped after the trip) |
+| `rss-budget` | warning | P10: the `--max-rss-mb` budget tripped; same degradation contract |
+| `callgraph-failed` | error | P10, golem's guardAlgorithm lesson: the call graph crashed and is ABSENT from the report — named as such while the already-computed evidence still ships; never swallowed into a green result |
+| `compile-backend-gap` | warning | P9: `--backend compile` is a declared gap — kosi cannot execute the analysed build offline for generated sources, so the report is the RESOLVED tier's and no generated declaration appears in it |
 
 ## stats
 
@@ -224,6 +237,10 @@ summary fixpoint's population and its cap count — a cap without its
 population is not a result), `suspendCrossingSliceCount` (P6: slices whose
 source and sink are separated by a suspend boundary),
 `truncations{}`,
+`bodylessRecords` (P9: dependency records with no body — excluded from the
+tier entirely, the population every dependency denominator excludes),
+`dependencyClasses` / `dependencyFunctions` (P9: classes lowered from jars
+and methods lowered WITH bodies — the tier's denominators),
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy
 resolution fallout — never read such a report as facts about the code).
 
@@ -403,6 +420,17 @@ reach the source — the trace cap, a cycle, or a transfer that moved a fact
 without recording provenance — the source is prepended and the slice is
 marked `elided` rather than published as a shorter complete trace (R54).
 
+### crossesDependency vs crossesModule (P9)
+
+The two flags answer different questions and are computed from different
+facts. `crossesModule` compares the two slice ENDS' module paths (a
+multi-module workspace crossing). `crossesDependency` is set when the
+TRACE enters a real external jar — a purl the `--deps` tier was lowered
+from — and stays `false` for a slice that only crosses workspace modules,
+however many purls differ between its ends. Trace nodes carried in from a
+jar keep the jar's purl and a `jar-name!class/path` filePath; they are not
+workspace files and are not attributed to any module.
+
 ### dataFlow.stats
 
 `sliceCount`, `uniqueFlows` (distinct `flowKey`s), `crossDependencySlices`,
@@ -420,14 +448,23 @@ slices whose trace crossed at least one summary BOUNDARY;
 `defaultOriginSlices` — those whose boundary origins are ALL `default`
 (blanket propagation carried them); `dispatchJoins{}` — the histogram of
 dispatch-join widths at virtual sites; `suspendCrossingSlices` — slices
-whose trace crosses a suspend boundary (P6).
+whose trace crosses a suspend boundary (P6). Since P9:
+`bytecodeSummaries` — dependency summaries (origin `bytecode`) that a
+workspace call site actually applied with a taint move — the gate's
+producer-named numerator, never a count of every jar function summarised;
+`crossDependencyBytecodeSlices` — slices whose trace enters a jar the tier
+lowered AND whose boundary origins carry `bytecode`.
 
 ### dataFlow.summaries[] — FlowSummary (P5)
 
 One entry per workspace function the summary fixpoint ran over (origin
 `computed`, or `recursive-approx` when its SCC hit the iteration budget),
 plus one per pack entry that actually moved taint at a call site (origin
-`pack`, shaped by the pack entry itself). Parameter ids are `p<i>` over the
+`pack`, shaped by the pack entry itself), plus — P9, `--deps` — one per
+dependency summary a workspace call site actually applied (origin
+`bytecode`: a fixpoint over a jar's lowered body; the tier's approximation
+state stays visible in `stats.sccIterationCapHits` over `stats.sccsProcessed`).
+Parameter ids are `p<i>` over the
 function's parameter list (dispatch receiver first when present).
 
 | Attribute | Type | Purpose |
@@ -441,7 +478,7 @@ function's parameter list (dispatch receiver first when present).
 | `sourceReturns[]` | string[] | categories born at a source call inside the body and returned |
 | `sanitizes[]` | string[] | categories a pack sanitizer inside the body clears |
 | `accessPaths{}` | map<string, string> | parameter -> the receiver access-path suffixes its taint is written to (`\|`-separated) |
-| `origin` | string | `computed` (a real fixpoint over the body), `pack` (a pack entry supplied the effect), `recursive-approx` (the SCC hit its iteration budget; last iterate), `default` (the `--unknown-call` fallback at a call site, no body seen) |
+| `origin` | string | `computed` (a real fixpoint over the body), `pack` (a pack entry supplied the effect), `bytecode` (P9: a fixpoint over a dependency jar's lowered class file), `recursive-approx` (the workspace SCC hit its iteration budget; last iterate), `default` (the `--unknown-call` fallback at a call site, no body seen) |
 
 A higher-order note: a lambda VALUE passed to a workspace callee is itself
 summarised (the lowering extracts the body; `KirLambda.captures` name the
@@ -495,6 +532,23 @@ a `const val` or a string template), `config` (resolved through
 `System.getenv` read — the KEY is the evidence; kosi never reads the
 analysed build's environment), or `unresolved` (never a guess). `urls[]`
 carries the same values with their enclosing symbol.
+
+## securitySignals — SecuritySignal (P9)
+
+| Attribute | Type | Purpose |
+| --- | --- | --- |
+| `code` | string | closed vocabulary (02-ARCHITECTURE.md §8); `native-interop` emits today |
+| `message` | string | human explanation naming the seam |
+| `modulePath`, `purl` | string | attribution (empty for cinterop `.def` files, which are not module sources) |
+| `filePath` | string | relative path, or the `.def` file's repo-relative path |
+| `position` | Position | 1-based |
+| `symbol` | string? | the attaching symbol (the `external fun`'s canonical name, the function containing the `loadLibrary` call, the `.def` file path) — the key corpus `fn=` matching uses |
+
+Emitted by structure, never by name heuristics: an `external` MODIFIER on a
+lowered function (JNI seam), a RESOLVED `System/Runtime.loadLibrary|load`
+call (the binding site), and `.def` files under the conventional cinterop
+source-set directories (`nativeInterop/cinterop`, `cinterop`). A function
+merely NAMED like a native one is a corpus negative, not a finding.
 
 ## crypto — CryptoEvidence (resolved tier, P8)
 

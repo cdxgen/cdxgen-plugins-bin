@@ -21,6 +21,7 @@ data class MatrixSlot(
     val backend: Backend,
     val roots: List<String>? = null,
     val endpointSources: Boolean = false,
+    val deps: Boolean = false,
 ) {
     /** Slot options derived from the CLI defaults, overriding only what the label names. */
     fun options(): AnalyzeOptions = AnalyzeOptions(
@@ -28,6 +29,7 @@ data class MatrixSlot(
         backend = backend,
         roots = roots ?: AnalyzeOptions().roots,
         endpointSources = endpointSources,
+        deps = deps,
     )
 
     companion object {
@@ -36,6 +38,7 @@ data class MatrixSlot(
         const val RESOLVED_LABEL = "resolved"
         const val EXPORTED_LABEL = "exported"
         const val ENDPOINT_LABEL = "endpoint"
+        const val DEPS_LABEL = "deps"
     }
 }
 
@@ -81,6 +84,21 @@ object Matrix {
             label = MatrixSlot.ENDPOINT_LABEL,
             dataflow = DataflowMode.SECURITY,
             backend = Backend.RESOLVED,
+            endpointSources = true,
+        ),
+        // P9: the dependency tier. The resolved backend plus --deps: classpath
+        // jars lower to the SAME KIR and summarise with origin=bytecode, so
+        // the gate reads cross-dependency slices and their producer per repo.
+        // Endpoint parameters seed entry-point facts (P7): at repo scale the
+        // security-relevant sources ARE the handlers, and without a seed no
+        // cross-dependency flow can exist to measure. Time and RSS ride the
+        // same row as the `resolved` slot's, which is what makes the
+        // with/without---deps delta a same-machine measurement.
+        MatrixSlot(
+            label = MatrixSlot.DEPS_LABEL,
+            dataflow = DataflowMode.SECURITY_DEPS,
+            backend = Backend.RESOLVED,
+            deps = true,
             endpointSources = true,
         ),
     )

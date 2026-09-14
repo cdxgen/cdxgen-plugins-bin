@@ -63,7 +63,7 @@ object KirDumper {
         } catch (t: Throwable) {
             throw Analyzer.AnalysisException(
                 "kir dump: the analysis session could not be created " +
-                    "(${t::class.simpleName}: ${t.message?.take(200) ?: "no message"})",
+                    "(${Analyzer.describeFailure(t)})",
                 t,
             )
         }
