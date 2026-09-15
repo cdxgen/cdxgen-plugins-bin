@@ -1,0 +1,33 @@
+packages/linux-arm64/build-linux-arm64.sh
+  s_9d783fb1e8d1fd::t_a3f1d33105d5de 13-21
+packages/linuxmusl-amd64/build-linuxmusl-amd64.sh
+  s_9d783fb1e8d1fd::t_a3f1d33105d5de 12-20
+packages/linux-amd64/build-linux-amd64.sh
+  s_9d783fb1e8d1fd::t_a3f1d33105d5de 9-17
+.github/workflows/test.yml
+  s_9d783fb1e8d1fd::t_988dae5e990a02 392-406,413-416
+  s_9d783fb1e8d1fd::t_13105718dbb1dd 207-312,321-323
+  s_9d783fb1e8d1fd::t_249817168bb901 442-448
+packages/linuxmusl-arm64/build-linuxmusl-arm64.sh
+  s_9d783fb1e8d1fd::t_a4cc926c2e26b6 12-14
+packages/darwin-arm64/build-darwin-arm64.sh
+  s_9d783fb1e8d1fd::t_a3f1d33105d5de 13-21
+build.sh
+  s_9d783fb1e8d1fd::t_7e364ab0da99e7 12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1c98b24ec464ad25264b9b7d72a14475c023758d",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
