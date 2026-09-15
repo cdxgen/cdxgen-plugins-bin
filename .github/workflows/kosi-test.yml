@@ -118,11 +118,17 @@ jobs:
           tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
       - name: make native
         run: make native
-      - name: Binary smoke (version + determinism)
+      - name: Binary smoke (isolated; version + determinism)
         run: |
-          ./build/kosi-darwin-arm64 version
-          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
-          ./build/kosi-darwin-arm64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          # Run it the way it SHIPS — one file, no build directory around it
+          # (R97). See the linux job for why.
+          mkdir -p /tmp/kosi-isolated
+          cp ./build/kosi-darwin-arm64 /tmp/kosi-isolated/
+          cd /tmp/kosi-isolated
+          ./kosi-darwin-arm64 version | tee /tmp/version.json
+          python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+          ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/a.json
+          ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/b.json
           cmp /tmp/a.json /tmp/b.json
       - name: Reachability metadata drift check
         run: make native-metadata-check
@@ -155,7 +161,20 @@ jobs:
         run: make linux
       - name: Binary smoke
         run: |
-          ./build/kosi-linux-amd64 version
-          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/a.json
-          ./build/kosi-linux-amd64 analyze --dir fixtures/weak-crypto --out /tmp/b.json
+          # ISOLATED, and that is the whole point (R97): native-image emits
+          # libawt*.so BESIDE the binary, and a smoke run from ./build finds
+          # them there. kosi ships ONE file, so the shipped binary must be
+          # exercised the way it is shipped — alone. `version` asserting
+          # every component available is what catches an AWT native creeping
+          # back into the run-time path.
+          mkdir -p /tmp/kosi-isolated
+          cp ./build/kosi-linux-amd64 /tmp/kosi-isolated/
+          cd /tmp/kosi-isolated
+          ./kosi-linux-amd64 version | tee /tmp/version.json
+          python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+          ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/a.json
+          ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/b.json
           cmp /tmp/a.json /tmp/b.json
+          ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" \
+            --backend resolved --dataflow all --out /tmp/c.json
+          grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json

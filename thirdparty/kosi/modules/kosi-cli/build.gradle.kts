@@ -20,6 +20,10 @@ dependencies {
     implementation(project(":kosi-export"))
     implementation(project(":kosi-models"))
     implementation(libs.kotlin.stdlib)
+    // Substitutions only: the annotations are consumed by native-image, never
+    // loaded at run time (the JVM tier runs the same jar without this on the
+    // classpath). Pinned to the same GraalVM the Makefile pins.
+    compileOnly("org.graalvm.nativeimage:svm:25.0.4.1")
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly(libs.junit.platform.launcher)

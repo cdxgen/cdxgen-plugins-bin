@@ -256,6 +256,19 @@ jobs:
         pushd thirdparty/kosi
         make linux linuxmusl
         popd
+    - name: Isolated binary smoke (kosi-linux-amd64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-linux-amd64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-linux-amd64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
     - name: Upload kosi Linux helper artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
@@ -289,6 +302,19 @@ jobs:
         pushd thirdparty/kosi
         make linux
         popd
+    - name: Isolated binary smoke (kosi-linux-arm64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-linux-arm64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-linux-arm64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-linux-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
     - name: Upload kosi Linux arm64 helper artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
@@ -321,6 +347,19 @@ jobs:
         pushd thirdparty/kosi
         make darwin
         popd
+    - name: Isolated binary smoke (kosi-darwin-arm64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-darwin-arm64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-darwin-arm64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
     - name: Upload kosi Darwin helper artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
