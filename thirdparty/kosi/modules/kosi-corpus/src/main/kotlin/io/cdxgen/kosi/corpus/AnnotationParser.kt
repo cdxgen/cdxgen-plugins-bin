@@ -97,6 +97,9 @@ object AnnotationParser {
             var framework: String? = null
             var pathParam: String? = null
             var queryParam: String? = null
+            var consumes: String? = null
+            var produces: String? = null
+            var authentication: String? = null
             var path: String? = null
             var method: String? = null
             var cipherMode: String? = null
@@ -147,6 +150,9 @@ object AnnotationParser {
                     "method" -> method = rawValue
                     "pathparam" -> pathParam = rawValue
                     "queryparam" -> queryParam = rawValue
+                    "consumes" -> consumes = rawValue
+                    "produces" -> produces = rawValue
+                    "authentication" -> authentication = rawValue
                     "ciphermode" -> cipherMode = rawValue
                     "padding" -> padding = rawValue
                     "form" -> form = rawValue
@@ -220,6 +226,9 @@ object AnnotationParser {
                 method = method,
                 pathParam = pathParam,
                 queryParam = queryParam,
+                consumes = consumes,
+                produces = produces,
+                authentication = authentication,
                 cipherMode = cipherMode,
                 padding = padding,
                 form = form,

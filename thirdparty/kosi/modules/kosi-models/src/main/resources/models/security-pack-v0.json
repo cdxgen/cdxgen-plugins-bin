@@ -2142,6 +2142,24 @@
     },
     {
       "category": "ssrf",
+      "pattern": "okhttp3.HttpUrl.Companion.toHttpUrl",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "okhttp3.HttpUrl.Companion.toHttpUrlOrNull",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
       "pattern": "okhttp3.Request.Builder.url",
       "receiverType": null,
       "relevantArguments": [
@@ -2876,6 +2894,10 @@
     {
       "category": "untrusted-input",
       "pattern": "javax.ws.rs.core.UriInfo.getQueryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.ws.rs.core.UriInfo.getPathParameters"
     },
     {
       "category": "untrusted-input",

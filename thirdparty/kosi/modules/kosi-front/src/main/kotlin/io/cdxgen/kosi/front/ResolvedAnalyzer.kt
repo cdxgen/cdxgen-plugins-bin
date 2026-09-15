@@ -251,6 +251,18 @@ object ResolvedAnalyzer {
                                 .mapNotNull { arg -> arg.expression }
                                 .mapNotNull { v -> (v as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue)?.value?.toString() }
                                 .firstOrNull(),
+                            // The argument's NAME is the difference between
+                            // `consumes` and `produces`; without this map the
+                            // endpoint detector cannot tell them apart (P14).
+                            // A POSITIONAL argument lands under `value` — the
+                            // JAX-RS spellings (`@Consumes("application/json")`,
+                            // `@RolesAllowed(["admin"])`) read theirs from
+                            // there.
+                            namedValues = it.arguments.mapNotNull { arg ->
+                                val argName = arg.name?.asString() ?: "value"
+                                val constants = constantValuesOf(arg.expression) ?: return@mapNotNull null
+                                argName to constants
+                            }.toMap(),
                             // Placeholder: the real offset comes from the
                             // declaration's PSI annotation entry at emission.
                             position = positionAt(lines, relativePath, 0),
@@ -619,6 +631,24 @@ object ResolvedAnalyzer {
 
     private fun positionAt(lines: SyntaxAnalyzer.LineIndex, filename: String, offset: Int): Position =
         lines.positionAt(offset).copy(filename = filename)
+
+    /**
+     * The constant STRINGS one annotation argument carries, flattening array
+     * arguments (`consumes = ["application/json"]` -> the elements). Null when
+     * the argument is not constant-backed — an unprovable value is reported
+     * as nothing rather than as a guess.
+     */
+    private fun constantValuesOf(value: org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue?): List<String>? {
+        if (value == null) return null
+        val constants = when (value) {
+            is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue ->
+                listOfNotNull(value.value?.toString())
+            is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ArrayValue ->
+                value.values.flatMap { constantValuesOf(it) ?: emptyList() }
+            else -> null
+        }
+        return constants?.map { it.removeSurrounding("\"") }?.ifEmpty { null }
+    }
 
     /** Kind/signature from PSI text, matching the syntax tier's forms. */
     private fun declarationShapes(declaration: KtDeclaration): Shape? = when (declaration) {

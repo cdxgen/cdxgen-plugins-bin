@@ -5,6 +5,231 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
+## P14 — real repos, framework generations, and the findings ratchet (this branch)
+
+Branch `feat/kosi-p14-real-repos`, off `feat/kosi` (`0443465`). The one
+rule that governed the phase: **a capability no fixture exercises is a
+capability you have not shipped, and a number no gate ratchets is a number
+that will silently rot.**
+
+**§1 — the five pinned repos re-measured, every classpath warmed from
+scratch.** The P1-era ratios were recorded before R81's locator fix, so
+every number was measured against a classpath that could not find KMP
+artifacts. Re-warmed and re-measured on the PRISTINE branch state (a
+worktree at `0443465`, jars fetched from an empty resolve), resolved slot:
+
+| repo | recorded (P1) | re-measured (P14) | note |
+|---|---|---|---|
+| spring-fu | 0.9405 | 0.9405 (3763/4001) | unchanged; 3 unlocatable: 2 BOMs (no artifact) + junit-jupiter-params:5.8.2 |
+| anki-android | 0.9232 | 0.9232 (60644/65692) | unchanged; 149 unlocatable, all AAR/`-android` variants |
+| ktor-samples | 0.9024 | 0.9024 (5093/5644) | unchanged; 50 unlocatable, sample-specific deps the resolver failed on |
+| nowinandroid | 0.7564 | 0.7564 (4763/6297) | UNCHANGED — see below |
+| kampkit | 0.6639 | **0.7551** (447/592) | +0.09: the KMP `-jvm` jars (kotlinx, ktor-client) now attach via R81 |
+
+The honest headline: the R81 fix recovered **kampkit only**. nowinandroid
+is unchanged to FOUR DECIMALS, and its gap is what the old paragraph said
+it was — now re-derived from the current run instead of copied forward:
+266 named unlocatable coordinates, of which 104 are `-android` variants
+(on disk as AARs, which no locator rule names), 108 pre-release
+alpha/beta AndroidX builds, and the rest parent coordinates whose
+on-disk artifact is the AAR. kampkit's remaining 292 are 167 ios/native
+variants (no JVM artifact exists — inherent to JVM-tier analysis), 40
+`-android` variants, and 85 AndroidX compose parents. No repo crossed the
+0.90 target, so no gate membership changed. **R85** records that the
+"0.23 -> 1.0" one-app result does not generalise to repos whose misses are
+AAR-shaped, not name-shaped.
+
+**§2 — framework GENERATIONS.** The audit of both packs for
+generation-encoding FQNs, against the real artifacts (ktor-server-core-jvm
+3.0.0, httpclient5 5.3.1, okhttp 4.12.0):
+
+- servlet/JMS/persistence: both generations already modelled;
+  HttpClient 4 AND 5 already modelled (P12) — but pinned by no fixture
+  until `framework-generations`.
+- **Missing, added**: `javax.ws.rs.PATCH` (jakarta twin shipped, javax did
+  not), `javax.ws.rs.BeanParam`, `javax.ws.rs.core.UriInfo.getPathParameters`
+  (jakarta shipped BOTH readers, javax only one), and OkHttp 4/5's Kotlin
+  generation — `okhttp3.HttpUrl.Companion.toHttpUrl`/`toHttpUrlOrNull`
+  beside the OkHttp 3 Java static `HttpUrl.parse`.
+- **Ktor 3 (checked, no pack change needed)**: the verb builders stay at
+  Ktor 2's FQNs (`io.ktor.server.routing.get`, verified against the 3.0.0
+  artifact's `RoutingBuilderKt`); what moved is the handler RECEIVER
+  (`RoutingContext`, whose `call` is §4's own bare-name accessor shape).
+  `RoutingCall.pathParameters` was already modelled. The fixture pins a
+  Ktor-3-shaped app end to end.
+- **jakarta.mail / Bouncy Castle providers / android.support**: nothing is
+  modelled in ANY generation — these families are entirely outside the
+  pack's surface (a pack-surface fact, not a generation gap; recorded so
+  the next audit does not re-derive it).
+- **AndroidX vs support-lib**: every modelled `android.*` API is a
+  framework class that never moved; no modelled API has a support-lib
+  twin.
+
+Fixtures: `framework-generations` (both JAX-RS generations' routing +
+UriInfo readers + media/auth, jakarta servlet, OkHttp 3 and 4/5,
+HttpClient 4 and 5, Ktor 3) — six flows and five endpoints, each with its
+near-miss. Teeth: stripping the four added pack entries fails exactly
+three resolved-slot expectations (the UriInfo twin flow, the PATCH
+endpoint, the toHttpUrl sink); restored, all pass.
+
+**§2.3 — a miss is never a WRONG answer.** R84 handed Ktor 1.x routes to
+Vert.x; R74's evidence-preference still fell back to first-match when NO
+framework's package was present. The fallback is gone: an unevidenced
+name-match publishes under the reserved pseudo-framework `unattributed`
+(`foundBy = "dsl-unattributed"`, no verb list — a verb would name a
+framework's builder, which is exactly the claim that cannot be made).
+`unattributed` is a reserved id in the corpus vocabulary, so fixtures can
+pin it. Fixture `unattributed-route`: a module with unresolved `get`/`post`
+route calls and no framework packages anywhere. Teeth: restoring the
+`?: byName.firstOrNull()` fallback fails the resolved slot three ways —
+`unattributed /legacy` not found, `unattributed /api/data` not found, and
+`javalin /legacy` FOUND (the wrong answer, by pack list order).
+
+**§3 — the findings ratchet.** The vuln tier existed but nothing pinned
+what it must FIND: a change could take any deliberately vulnerable app to
+zero with a green build, which is how P11 shipped zero findings everywhere.
+Now:
+
+- `corpus.toml` carries `min_findings` per vuln-repo entry, and the
+  `vuln-finding-floor` promotion check enforces it TWO-WAY over the
+  resolved slot: below the floor FAILS; MATERIALLY above it (more than
+  max(2 slices, 25%) over) FAILS until the floor is raised, so an
+  improvement is recorded rather than absorbed; a DECLARED classpath file
+  that is missing FAILS (R73's shape — a floor measured against an empty
+  classpath is a floor nobody measured). `VulnFindingFloorGateTest` covers
+  all eight outcomes.
+- The `vuln-repo` tier (separate from `vuln`, so corpusQuick keeps its
+  no-network population): AndroGoat, InsecureShop, and
+  `tsp-vulnerable-app-kotlin-ktor` — the single-file Ktor 1.6.7 app that
+  exposed R80–R84, pinned as their regression anchor. Measured (bench,
+  resolved slot, warmed): androgoat **16** slices / 33 endpoints,
+  insecureshop **7** / 12, tsp **2** / 2 — and tsp's ratio is exactly
+  **1.0**, reproducing R81's headline on the anchor app. The floors are
+  these measurements.
+- `warm-corpus-classpath.sh --tier <name>` reads the slugs from
+  corpus.toml; a warm that downloads nothing EXITS 1 (R73's silent
+  WARNING is gone — measured: androgoat with a broken extraction arm
+  fails the script, the fixed arm passes).
+
+**R86 — the textual warming arm's direct-only list (found by §3's own
+floor).** The Android vuln repos' builds (AGP 3.x, JDK 8) cannot run their
+dependency reports on any JVM this machine has, so the warm script gained
+a textual fallback that reads `group:artifact:version` literals from the
+build files. The first version listed only DIRECTS — and a direct-only
+classpath leaves the transitive tree unattached: InsecureShop's
+`AppCompatActivity` degraded with MISSING_DEPENDENCY_SUPERCLASS (its
+appcompat needs androidx.fragment/core), and the app measured **0 slices
+against a warm-looking classpath** — R73's failure mode, reproduced by a
+warmer that worked. The scratch resolver now prints each coordinate's
+RESOLVED transitive closure and the script merges it into the list
+(InsecureShop's list went 14 -> 184 entries, its findings 0 -> 7 — the
+P13 number — and its ratio 0.674 -> 0.915).
+
+**R87 — six colliding `<accessor>` functions (pre-existing since P5,
+found promoting InsecureShop).** Every `KtPropertyAccessor` lowered as
+`<accessor>` — no name of its own — so a class with several custom
+accessors produced N functions with ONE canonical name: InsecureShop's
+`Prefs` object carried six `com.insecureshop.util.Prefs.<accessor>`
+functions, the KIR validator named the duplicates, and `kir dump` refused
+the module outright. Accessors now take the JVM name of the property they
+belong to (`getData`/`setData`). Still open on this repo: five
+`unreachable-but-emitted block` validation findings (ChooserActivity,
+LoginActivity, SendingDataViaActionActivity, Util) — named, not fixed;
+nothing in this phase asked for engine work.
+
+**§4 — the bare-name accessor read (R80's sibling).** `resolveProperty`
+was wired into `dotChain` only, so a bare-name read of an accessor-backed
+property — `call` inside a Ktor route lambda, `parameters` inside an
+extension on ApplicationCall — lowered as `fieldget vthis vthis.call`,
+invisible to every pack. `reference()` now resolves the reference and
+lowers as a call ONLY when the property demonstrably has no backing field
+(a member/extension accessor runs against the implicit receiver; a
+top-level one is static); a property WITH a backing field keeps its access
+path. Fixture `bare-accessor-source` pins the accessor flow (`ApplicationCall.parameters`
+read bare through an extension receiver — the pack's own source pattern)
+beside the backing-field half (a bare member read through an inlined
+`with` receiver still flows through its FIELD path, clean sibling stays
+clean). Unit teeth: `aBareNameAccessorReadLowersAsTheCallItIs` fails on
+the restored defect; corpus teeth: the fixture's resolved slot fails its
+`queryEcho` flow with the defect restored while the field flow keeps
+passing. **Corpus slice counts did not move: 480 of 480 fixture/slot pairs
+identical between the pristine jar and this branch** (both runs 0 fail /
+0 xpass) — R80's proof shape, at P13's fixture count. No findings
+improvement is claimed from this item (nothing shipped models such a
+property as a source before the fixture).
+
+**§5 — `consumes`, `produces`, `authentication`.** These were
+`emptyList()` on every endpoint kosi had ever emitted; all three are
+filled from the pack as data, from where the frameworks themselves put
+them:
+
+- NAMED annotation arguments (Spring's `@RequestMapping(consumes=..)`) —
+  a new named-argument channel through the annotation evidence, because
+  the argument's NAME is the only difference between consumes and
+  produces. A method-level declaration REPLACES the class default for its
+  kind (Spring's own routing rule; the first implementation appended both
+  — caught by the fixture, fixed before commit).
+- POSITIONAL value arguments (JAX-RS `@Consumes`/`@Produces`, Micronaut).
+- Auth annotations on the handler or its class (`@PreAuthorize`,
+  `@RolesAllowed`, `@Secured`), value carried: `@PreAuthorize(hasRole('AUDITOR'))`.
+- Ktor's `authenticate("basic") { }` — the requirement sits on the
+  ENCLOSING nesting call, collected by walking the same lambda links the
+  route prefixes use: `authenticate(basic)`.
+
+Fixture `endpoint-media-auth` (Spring, JAX-RS, Micronaut, Ktor in one
+tree). Honest empties: servlet has no media/auth annotations to read, and
+a bare DSL route declares none — those lists stay empty because nothing
+declares them. Teeth: reverting the three fields to `emptyList()` fails
+10 resolved-slot expectations; restored, all pass.
+
+
+**Gate, measured (JVM, darwin-aarch64; corpus classpaths warmed):**
+
+- `test`: green — 250 unit tests, 0 failures, including the 8
+  `VulnFindingFloorGateTest` outcomes and the two §4 lowering tests.
+- `corpusQuick` (fixtures + frameworks + crypto + async + vuln): **510
+  rows** (85 fixtures x 6 slots), **0 fail, 0 XPASS**, pass 2253,
+  structural recall **1.0000 (931 of 931)**.
+- `corpusFull` including the vuln tier AND the new `vuln-repo` tier:
+  **green, 504 rows, 0 fail, 0 XPASS** (39 min at the 8g/1g ceilings).
+  Per-repo findings printed by the run and held by the floors:
+  **androgoat 16 slices / 33 endpoints (ratio 0.9464), insecureshop 7 /
+  12 (0.9147), tsp-vulnerable-app-kotlin-ktor 2 / 2 (ratio 1.0)**;
+  kosi-vulnerable-service deps 9 slices / 8 bytecode-origin
+  cross-dependency / 2 applied bytecode summaries (the P11 bar holds).
+  AndroGoat's deps slot runs at its pinned 50-class cap; http4k keeps its
+  documented offline row (its monorepo resolves 16k coordinates — warming
+  it is named as future work, not forced).
+- `golden`: **432 pairs, 0 problems** after regeneration. Every moved
+  pair accounted: 272 `dataFlow` digests are the pack-growth provenance
+  shift — proven benign by the slice-count comparison below — 8
+  `callGraph` digests are exactly two fixtures (`class-declarations`:
+  R87's accessor renames; `ktor-context-semantics`: §4's bare `call`
+  reads becoming call nodes), and the 4 `stats` digests ride the same
+  two fixtures' counts. **"Goldens regenerated" is not the account — the
+  480-of-480 slice-count identity between the pristine jar and this
+  branch is.**
+- §4's proof the lowering change moved no behaviour: the pristine jar
+  (a worktree at `0443465`) and this branch, over the same 80 pre-P14
+  fixtures x 6 slots = **480 pairs, identical slice counts in every
+  pair** (both runs 0 fail / 0 xpass).
+- Determinism: JVM **173/173** byte-identical, native **173/173**
+  byte-identical, native == JVM **173/173** (fixtures x both graph
+  slots), on the pinned GraalVM CE 25.3.4.1.
+- Native metadata: regenerated (+34 lines: `KtImportAlias`,
+  `KtCollectionLiteralExpression`, stubs — R89); `native-metadata-check`
+  clean after commit.
+- Teeth, restored-defect-by-restored-defect: §2's pack entries stripped
+  -> 3 resolved-slot expectations fail; §2.3's first-match fallback
+  restored -> `javalin /legacy` found (the wrong answer) and both
+  `unattributed` routes missing; §5's three fields reverted to
+  `emptyList()` -> 10 expectations fail; §4's lowering reverted -> the
+  `queryEcho` flow fails while the backing-field flow keeps passing; the
+  findings floor's eight outcomes are unit-pinned in both directions;
+  the warm script's broken arm fails the script (exit 1, measured on
+  androgoat before the per-arm `|| true` fix).
+
+
 ## P11 — cdxgen integration, the release phase, and the red gate closed (this branch)
 
 Branch `feat/kosi-p11-integration`, off `feat/kosi` (`e594c00`).
@@ -165,7 +390,9 @@ and, from the same sweep honesty: the fixture tree STILL does not contain
 `reified` type parameters, `contract {}` blocks, the `inc`/`dec`,
 `contains`, `rangeTo` and `get`/`set` operator conventions,
 `provideDelegate`, `@JvmSynthetic`, `crossinline`/`noinline`, or a
-`sealed fun interface` — the next sweep iteration's list.
+`sealed fun interface` — the next sweep iteration's list. (P14 removed
+two from an earlier list's neighbourhood: aliased companion-member
+imports and array-valued annotation arguments are now contained — R89.)
 
 ## Phases 9+10 — cross-dependency taint, and the gate that can see a regression
 
@@ -1098,6 +1325,17 @@ Gate proofs recorded in the PR body:
    fact types. Unification is P7's first item; until then
    `TransferParityTest` fails the build when one learns an opcode the other
    does not. (R65)
+
+## Defects found and fixed during P14
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R85 | kosi-bench / docs (found by §1's re-measurement) | **the recorded per-repo ratios were stale in the direction everyone assumed: re-warming changed ONE repo of five.** R81's locator fix took a real Ktor app 0.23 -> 1.0, and the P13-era writeup implied nowinandroid and kampkit's below-target ratios were partly the same bug's fault. Re-measured on the pristine branch state with every classpath warmed from scratch: kampkit 0.6639 -> **0.7551** (the KMP `-jvm` jars attach), and spring-fu 0.9405, anki 0.9232, ktor-samples 0.9024, nowinandroid 0.7564 all UNCHANGED to four decimals — the one-app result does not generalise to repos whose misses are AAR-shaped (104 `-android` variants, 108 alpha/beta AndroidX builds) rather than name-shaped. The docs paragraph was rewritten from the current run's named unlocatable coordinates, not copied forward | the docs paragraph and this row; no locator change was warranted (the remaining misses name AAR/variant shapes, which is the recorded follow-up lever) |
+| R86 | scripts (P14, found by §3's own floor) | **the textual warming arm listed only DIRECT coordinates, and a direct-only classpath measures zero against a warm-looking cache.** InsecureShop's AGP-3.x build cannot run its dependency report on any JVM this machine has, so the new textual fallback extracted the build file's literals — 14 coordinates, no transitives. The jars for appcompat's own dependencies never attached, every activity degraded with MISSING_DEPENDENCY_SUPERCLASS, and the app published **0 slices** with the floor green-lighted by a classpath file that existed and resolved — R73's failure mode reproduced by a warmer that worked | the scratch resolver prints each coordinate's RESOLVED transitive closure and the script merges it into the list (InsecureShop 14 -> 184 entries: findings 0 -> 7, the P13 number; ratio 0.674 -> 0.915). The P13-era "InsecureShop 7 / AndroGoat 17" ad-hoc measurements are now bench rows anyone can ratchet |
+| R87 | kosi-front (pre-existing since P5, found promoting InsecureShop into the corpus) | **every custom property accessor lowered as the same function name.** `KtPropertyAccessor` has no PSI name, so the lowering used the constant `<accessor>` — a class with N accessor-bodied properties produced N functions with ONE canonical name. InsecureShop's `Prefs` object carried six `com.insecureshop.util.Prefs.<accessor>` functions; the KIR validator named the duplicates and `kir dump` refused the module. Nothing in fifty fixtures had two custom accessors on one class | accessors take the JVM name of their property (`getData`/`setData`), which is unique per class and matches what the JVM actually calls them. Still open on the same repo, named: five `unreachable-but-emitted block` findings in four functions |
+| R90 | kosi-front (review of P14) | **a top-level EXTENSION property read by bare name lowered without its receiver.** §4's fix sent the implicit `this` only when the property's `callableId` named a class, so a member accessor carried its receiver and a top-level extension accessor did not — and extension properties are how Ktor spells most of its request readers (`val ApplicationRequest.uri`). Taint arriving on the receiver stopped at every such accessor; no fixture had one, so 432 goldens and 510 corpus rows held either way | the call carries the implicit receiver whenever the symbol has one, while its `CallKind` stays STATIC (the JVM getter is static, but it reads the receiver). Two unit tests added for capabilities P14 shipped without one: this receiver, and R87's accessor renaming (six colliding `<accessor>` functions had no test at all) — both proven by restoring their defect |
+| R89 | native image (found by §2/§5's own fixtures) | **two source constructs the fixture tree had never contained made the image refuse to analyse the new fixtures** — R53's fourth instance, found this time before any green run could hide it: `import okhttp3.HttpUrl.Companion.toHttpUrl` creates a `KtImportAlias` PSI node (a companion-MEMBER import, never written in 82 fixtures), and `@RequestMapping(consumes = ["application/json"])` — §5's own input syntax — creates a `KtCollectionLiteralExpression`. The native sweep failed both fixtures' resolved slots with `MissingReflectionRegistrationError` until the agent re-ran | `make native-metadata` re-traced the fixture tree (34 metadata lines), the image rebuilt, and both fixtures analyse natively (framework-generations: 5 endpoints, 6 slices, identical to the JVM). The construct-sweep list in the P11 section gains both entries | 
+| R88 | build + corpus (found by §1's own corpusFull, three times) | **warmed classpaths outgrew the corpus JVM's memory ceilings.** First death: 65 minutes in, at report time, `NoClassDefFoundError` naming a class that was always on the classpath — the 512m `MaxMetaspaceSize` ceiling (set in P9 for a different failure) ran out as every resolved session attached far more dependency classes; every slot had already completed, so the measurement existed and was lost. Second death: once the vuln-repo tier's TRANSITIVE classpaths attached (R86's fix), AndroGoat's deps slot filled the whole 3g heap — with `ExitOnOutOfMemoryError` the JVM terminated instead of letting runSlot catch it as a named failure row, and 3g -> 4g -> 6g all died the same way | metaspace 512m -> 1g, heap 3g -> 8g, both causes recorded beside the flags; and the corpus manifest gained a per-entry `deps_max_classes` — AndroGoat's deps slot is the tier's known heavyweight (161 attached coordinates against an uncapped wanted phase, R70's design), and MEASURED: a 50-class lowering fits, 150 fills an 8g heap — so the entry pins 50 and the `deps-class-limit` diagnostic names what was cut. The engine's per-class cost over a large attached classpath is named as the next phase's own |
 
 ## Defects found and fixed during the P5/P6 implementation
 

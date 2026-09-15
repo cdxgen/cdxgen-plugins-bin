@@ -303,6 +303,10 @@
       "kind": "dsl"
     },
     {
+      "authenticationDsl": [
+        "io.ktor.server.auth.authenticate",
+        "io.ktor.auth.authenticate"
+      ],
       "contextReaders": [
         {
           "indexed": true,
@@ -572,6 +576,24 @@
       "kind": "dsl"
     },
     {
+      "authenticationAnnotations": [
+        {
+          "pattern": "io.micronaut.security.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "io.micronaut.security.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
       "classMarkers": [
         "io.micronaut.http.annotation.Controller"
       ],
@@ -612,6 +634,16 @@
         {
           "methods": [],
           "pattern": "io.micronaut.http.annotation.HttpMethod"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "kind": "consumes",
+          "pattern": "io.micronaut.http.annotation.Consumes"
+        },
+        {
+          "kind": "produces",
+          "pattern": "io.micronaut.http.annotation.Produces"
         }
       ],
       "parameterAnnotations": [
@@ -655,6 +687,24 @@
         "javax.ws.rs.ApplicationPath",
         "jakarta.ws.rs.ApplicationPath"
       ],
+      "authenticationAnnotations": [
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.DenyAll",
+          "scheme": "@DenyAll"
+        },
+        {
+          "pattern": "javax.annotation.security.DenyAll",
+          "scheme": "@DenyAll"
+        }
+      ],
       "classMarkers": [
         "jakarta.ws.rs.Path",
         "javax.ws.rs.Path"
@@ -665,9 +715,21 @@
       "mappingAnnotations": [
         {
           "methods": [
+            "DELETE"
+          ],
+          "pattern": "jakarta.ws.rs.DELETE"
+        },
+        {
+          "methods": [
             "GET"
           ],
           "pattern": "jakarta.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "jakarta.ws.rs.PATCH"
         },
         {
           "methods": [
@@ -685,19 +747,19 @@
           "methods": [
             "DELETE"
           ],
-          "pattern": "jakarta.ws.rs.DELETE"
-        },
-        {
-          "methods": [
-            "PATCH"
-          ],
-          "pattern": "jakarta.ws.rs.PATCH"
+          "pattern": "javax.ws.rs.DELETE"
         },
         {
           "methods": [
             "GET"
           ],
           "pattern": "javax.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "javax.ws.rs.PATCH"
         },
         {
           "methods": [
@@ -710,49 +772,31 @@
             "PUT"
           ],
           "pattern": "javax.ws.rs.PUT"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "kind": "consumes",
+          "pattern": "jakarta.ws.rs.Consumes"
         },
         {
-          "methods": [
-            "DELETE"
-          ],
-          "pattern": "javax.ws.rs.DELETE"
+          "kind": "produces",
+          "pattern": "jakarta.ws.rs.Produces"
+        },
+        {
+          "kind": "consumes",
+          "pattern": "javax.ws.rs.Consumes"
+        },
+        {
+          "kind": "produces",
+          "pattern": "javax.ws.rs.Produces"
         }
       ],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
-          "kind": "query",
-          "pattern": "javax.ws.rs.QueryParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "query",
-          "pattern": "jakarta.ws.rs.QueryParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "path",
-          "pattern": "javax.ws.rs.PathParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "path",
-          "pattern": "jakarta.ws.rs.PathParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "header",
-          "pattern": "javax.ws.rs.HeaderParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "header",
-          "pattern": "jakarta.ws.rs.HeaderParam"
-        },
-        {
-          "category": "untrusted-input",
-          "kind": "cookie",
-          "pattern": "javax.ws.rs.CookieParam"
+          "kind": "body",
+          "pattern": "jakarta.ws.rs.BeanParam"
         },
         {
           "category": "untrusted-input",
@@ -762,12 +806,47 @@
         {
           "category": "untrusted-input",
           "kind": "form",
-          "pattern": "javax.ws.rs.FormParam"
+          "pattern": "jakarta.ws.rs.FormParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "jakarta.ws.rs.HeaderParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "jakarta.ws.rs.MatrixParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "jakarta.ws.rs.PathParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "query",
+          "pattern": "jakarta.ws.rs.QueryParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "javax.ws.rs.BeanParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "cookie",
+          "pattern": "javax.ws.rs.CookieParam"
         },
         {
           "category": "untrusted-input",
           "kind": "form",
-          "pattern": "jakarta.ws.rs.FormParam"
+          "pattern": "javax.ws.rs.FormParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "javax.ws.rs.HeaderParam"
         },
         {
           "category": "untrusted-input",
@@ -777,12 +856,12 @@
         {
           "category": "untrusted-input",
           "kind": "path",
-          "pattern": "jakarta.ws.rs.MatrixParam"
+          "pattern": "javax.ws.rs.PathParam"
         },
         {
           "category": "untrusted-input",
-          "kind": "body",
-          "pattern": "jakarta.ws.rs.BeanParam"
+          "kind": "query",
+          "pattern": "javax.ws.rs.QueryParam"
         }
       ],
       "pathPrefixAnnotations": [
@@ -1094,6 +1173,24 @@
       ]
     },
     {
+      "authenticationAnnotations": [
+        {
+          "pattern": "org.springframework.security.access.prepost.PreAuthorize",
+          "scheme": "@PreAuthorize"
+        },
+        {
+          "pattern": "org.springframework.security.access.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
       "classMarkers": [
         "org.springframework.web.bind.annotation.RestController",
         "org.springframework.web.bind.annotation.Controller"
@@ -1135,6 +1232,68 @@
         {
           "methods": [],
           "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
         }
       ],
       "parameterAnnotations": [
@@ -1198,6 +1357,24 @@
       ]
     },
     {
+      "authenticationAnnotations": [
+        {
+          "pattern": "org.springframework.security.access.prepost.PreAuthorize",
+          "scheme": "@PreAuthorize"
+        },
+        {
+          "pattern": "org.springframework.security.access.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
       "contextReaders": [
         {
           "kind": "path",
@@ -1247,7 +1424,69 @@
       ],
       "handlerInput": "context",
       "id": "spring-webflux",
-      "kind": "dsl"
+      "kind": "dsl",
+      "mediaAnnotations": [
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        }
+      ]
     },
     {
       "dependencyMarkers": [

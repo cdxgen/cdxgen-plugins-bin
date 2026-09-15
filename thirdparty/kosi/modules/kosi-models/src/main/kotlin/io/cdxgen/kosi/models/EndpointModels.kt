@@ -132,6 +132,29 @@ data class FrameworkModel(
      * context handler the same parameter inventory an annotated one has.
      */
     val contextReaders: List<ContextReader> = emptyList(),
+    /**
+     * Annotations that name the media types a handler accepts and produces:
+     * Spring's `@RequestMapping(consumes = [...], produces = [...])` and
+     * JAX-RS's `@Consumes`/`@Produces`. P14: `consumes`/`produces` were
+     * `emptyList()` on every endpoint kosi had ever emitted, for every
+     * framework — the information sat in annotations the detector already
+     * read, and nothing looked at it.
+     */
+    val mediaAnnotations: List<MediaAnnotation> = emptyList(),
+    /**
+     * Annotations that declare a handler's authentication requirement:
+     * `@PreAuthorize`, `@RolesAllowed`, `@Secured`. The reported
+     * `authentication` list names the matched annotation and its value — an
+     * endpoint nobody protects is the fact an attacker wants first.
+     */
+    val authenticationAnnotations: List<AuthAnnotation> = emptyList(),
+    /**
+     * DSL nesting calls that wrap a route tree in authentication (Ktor's
+     * `authenticate("basic") { get { .. } }`). Unlike an annotation, the
+     * requirement sits on the ENCLOSING call, so it is collected by walking
+     * the lambda-nesting chain the route prefixes already use.
+     */
+    val authenticationDsl: List<String> = emptyList(),
 )
 
 /**
@@ -157,6 +180,34 @@ data class ContextReader(
     val kind: String,
     val nameArgument: Int = -1,
     val indexed: Boolean = false,
+)
+
+/**
+ * One media-type annotation: the framework annotation's FQN, whether it
+ * names [consumes][KIND_CONSUMES] or [produces][KIND_PRODUCES], and where
+ * the media types sit in the annotation. [argument] `""` (the default)
+ * reads the annotation's positional `value` arguments — JAX-RS's
+ * `@Consumes("application/json")`; any other string names the argument —
+ * Spring's `@RequestMapping(consumes = [...])`.
+ */
+data class MediaAnnotation(
+    val pattern: String,
+    val kind: String,
+    val argument: String = "",
+)
+
+/** Media kinds, shared by [MediaAnnotation.kind]. */
+const val KIND_CONSUMES: String = "consumes"
+const val KIND_PRODUCES: String = "produces"
+
+/**
+ * One authentication annotation: the framework annotation's FQN plus the
+ * scheme name reported in `authentication[]` (the annotation's own simple
+ * name, e.g. `@PreAuthorize`).
+ */
+data class AuthAnnotation(
+    val pattern: String,
+    val scheme: String,
 )
 
 /** Transport slots, shared by [ContextReader.kind] and [ParameterAnnotation.kind]. */
@@ -276,6 +327,20 @@ object EndpointModels {
                         indexed = c.bool("indexed") ?: false,
                     )
                 } ?: emptyList(),
+                mediaAnnotations = f.arr("mediaAnnotations")?.objects()?.map { m ->
+                    MediaAnnotation(
+                        pattern = require(m.str("pattern"), "frameworks[].mediaAnnotations[].pattern"),
+                        kind = require(m.str("kind"), "frameworks[].mediaAnnotations[].kind"),
+                        argument = m.str("argument") ?: "",
+                    )
+                } ?: emptyList(),
+                authenticationAnnotations = f.arr("authenticationAnnotations")?.objects()?.map { a ->
+                    AuthAnnotation(
+                        pattern = require(a.str("pattern"), "frameworks[].authenticationAnnotations[].pattern"),
+                        scheme = require(a.str("scheme"), "frameworks[].authenticationAnnotations[].scheme"),
+                    )
+                } ?: emptyList(),
+                authenticationDsl = f.arr("authenticationDsl")?.strings() ?: emptyList(),
                 handlerMethodNames = f.arr("handlerMethodNames")?.objects()?.map { h ->
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),

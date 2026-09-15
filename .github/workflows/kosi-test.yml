@@ -65,6 +65,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - name: Warm repo classpaths (P14: the vuln-repo finding floors are
+          # measured against warmed classpaths; a declared classpath that is
+          # missing FAILS its bench row, so CI warms before it benches)
+        run: |
+          for tier in vuln-repo small medium android kmp hybrid; do
+            ./scripts/warm-corpus-classpath.sh --tier "$tier" || \
+              echo "WARNING: warming tier $tier failed; corpusFull will name the rows"
+          done
+        working-directory: thirdparty/kosi
       - name: Corpus full tier
         run: ./gradlew corpusFull --no-daemon
 

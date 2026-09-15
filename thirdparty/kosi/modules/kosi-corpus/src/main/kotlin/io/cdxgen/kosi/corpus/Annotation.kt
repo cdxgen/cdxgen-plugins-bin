@@ -68,6 +68,10 @@ data class Annotation(
      */
     val pathParam: String?,
     val queryParam: String?,
+    /** P14: media types / auth the endpoint must carry (or, negated, must not). */
+    val consumes: String?,
+    val produces: String?,
+    val authentication: String?,
     val cipherMode: String?,
     val padding: String?,
     val form: String?,
@@ -129,6 +133,10 @@ data class Annotation(
                 "unknown framework '$framework'; known: ${Frameworks.all().sorted()} " +
                     "(add it to the shipped endpoints pack when the detector starts emitting it)",
             )
+        }
+        // The media/auth keys only mean something on an endpoint expectation.
+        if (kind != Kind.ENDPOINT && (consumes != null || produces != null || authentication != null)) {
+            errors.add("consumes=/produces=/authentication= are only valid on endpoint expectations")
         }
         if (kind == Kind.CRYPTO && name == null) errors.add("crypto requires name=")
         if (kind == Kind.SERVICE && protocol == null && name == null && path == null) {
@@ -210,9 +218,17 @@ data class Annotation(
 
 /** The closed framework vocabulary endpoint expectations validate against (the shipped pack's ids). */
 object Frameworks {
+    /**
+     * Reserved pseudo-ids the DETECTOR emits but no pack models:
+     * `unattributed` is a route whose shape matched but whose framework
+     * could not be evidenced (P14) — valid in expectations, so a fixture
+     * can pin that a miss is never a wrong attribution.
+     */
+    val RESERVED: Set<String> = setOf("unattributed")
+
     private val ids: Set<String> by lazy { EndpointModels.loadBuiltin().frameworkIds }
 
-    fun all(): Set<String> = ids
+    fun all(): Set<String> = ids + RESERVED
 
-    fun isValid(framework: String): Boolean = framework in ids
+    fun isValid(framework: String): Boolean = framework in all()
 }

@@ -113,6 +113,16 @@ data class AnnotationEvidence(
     val name: String,
     val value: String?,
     val position: Position,
+    /**
+     * Every NAMED argument's constant values (`consumes` -> the media
+     * types, `roles` -> the role list), flattened out of array arguments.
+     * Not serialised: the report's `value` stays the first positional
+     * constant; this map is the channel the endpoint detector reads media
+     * types and auth requirements from (P14), where the argument's NAME is
+     * the difference between `@RequestMapping(consumes=[..])` and
+     * `@RequestMapping(produces=[..])`.
+     */
+    val namedValues: Map<String, List<String>> = emptyMap(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)

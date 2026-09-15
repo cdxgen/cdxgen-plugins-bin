@@ -12,10 +12,58 @@
 # classpath-partial.
 #
 # Usage: scripts/warm-corpus-classpath.sh <slug> [more slugs...]
+#        scripts/warm-corpus-classpath.sh --tier <tier-name>
+#
+# `--tier vuln-repo` is how the vulnerable-repo tier's classpaths get
+# warmed (P14): the slugs come from corpus.toml, so a repo added to the
+# tier is warmed the moment it is pinned. A warm that produces no
+# coordinate list and no downloads FAILS the script (exit 1) — R73's
+# silent-warning shape is how four phases measured zero against empty
+# classpaths without noticing, and the P14 finding floors are measured
+# against exactly these classpaths.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cache_root="$repo_root/.corpus-cache"
+
+slugs=()
+tier_repos=""
+if [ "${1:-}" = "--tier" ]; then
+  tier="${2:?usage: warm-corpus-classpath.sh --tier <tier>}"
+  # slug<TAB>repo<TAB>sha<TAB>tier: the manifest's repo entries carry their
+  # own pins, so --tier can also FETCH a cache that is not on disk yet (the
+  # CI corpus job warms before it benches; the bench itself fetches too, but
+  # only when it runs).
+  # Records flush at the NEXT table (or EOF): a table's repo/sha lines can
+  # follow its tier line, so emitting at the tier line itself would see an
+  # empty repo (measured: `--tier small` found nothing).
+  tier_repos=$(awk '
+    function flush() { if (slug != "" && repo != "") print slug "\t" repo "\t" sha "\t" tier }
+    /^\[\[fixtures\]\]/ { flush(); slug=""; repo=""; sha=""; tier="" }
+    /^slug *=/ { gsub(/[" ]/, "", $3); slug=$3 }
+    /^repo *=/ { gsub(/[" ]/, "", $3); repo=$3 }
+    /^sha *=/  { gsub(/[" ]/, "", $3); sha=$3 }
+    /^tier *=/ { gsub(/[" ]/, "", $3); tier=$3 }
+    END { flush() }
+  ' "$repo_root/corpus.toml")
+  while IFS=$'\t' read -r slug repo sha entry_tier; do
+    [ "$entry_tier" = "$tier" ] || continue
+    cache="$cache_root/$slug"
+    if [ ! -d "$cache" ] && [ -n "$repo" ]; then
+      echo "fetching $slug @ $sha"
+      mkdir -p "$cache_root"
+      git clone --quiet "$repo" "$cache"
+      git -C "$cache" checkout --quiet --force "$sha"
+    fi
+    slugs+=("$slug")
+  done <<<"$tier_repos"
+  if [ ${#slugs[@]} -eq 0 ]; then
+    echo "no corpus.toml entry carries tier '$tier'" >&2
+    exit 1
+  fi
+else
+  slugs=("$@")
+fi
 
 # Pinned repos bundle Gradle wrappers old enough to reject very new JDK
 # class files; run them on 21 when one is installed.
@@ -55,36 +103,51 @@ pull_artifacts() {
 // so every repo warmed its coordinate list and downloaded NOTHING. That is
 // the "no warm classpath" cause behind pinned repos measuring zero.
 import org.gradle.api.attributes.Attribute
+import org.gradle.api.artifacts.ResolvedDependency
 
 plugins { base }
 repositories { google(); mavenCentral() }
 
 val coords = File(rootProject.projectDir, "coords.txt").readLines()
     .map { it.trim() }.filter { it.isNotEmpty() && it.split(":").size >= 3 }
+
+// The RESOLVED transitive closure, printed so the caller can list it: the
+// textual fallback arm extracts a build file's DIRECT declarations, and a
+// direct-only classpath leaves the transitive tree (appcompat without
+// fragment/core, ktor without kotlinx) unattached — InsecureShop's
+// activities then degrade with MISSING_DEPENDENCY_SUPERCLASS and its
+// finding floor measures zero against a warm-looking classpath (P14).
+fun ResolvedDependency.walk(seen: MutableSet<String>) {
+    val id = "$moduleGroup:$moduleName:$moduleVersion"
+    if (seen.add(id)) children.forEach { it.walk(seen) }
+}
+
 tasks.register("resolveAll") { doLast {
     var ok = 0
     var failed = 0
     val androidJvm = Attribute.of("org.jetbrains.kotlin.platform.type", String::class.java)
     val libraryElements = Attribute.of("org.gradle.libraryelements", String::class.java)
     val category = Attribute.of("org.gradle.category", String::class.java)
-    for (c in coords) {
+    fun resolve(c: String, aar: Boolean) {
         val dep = configurations.detachedConfiguration(dependencies.create(c))
         dep.isTransitive = true
+        if (aar) dep.attributes {
+            attribute(androidJvm, "androidJvm")
+            attribute(libraryElements, "aar")
+            attribute(category, "library")
+        }
+        val seen = linkedSetOf<String>()
+        dep.resolvedConfiguration.firstLevelModuleDependencies.forEach { it.walk(seen) }
+        seen.forEach { println("resolved $it") }
+    }
+    for (c in coords) {
         try {
-            dep.files; ok++
+            resolve(c, aar = false); ok++
         } catch (t: Throwable) {
             // AndroidX multiplatform artifacts publish AAR variants a plain
             // JVM consumer cannot match; retry with AAR variant attributes.
             try {
-                val dep2 = configurations.detachedConfiguration(dependencies.create(c))
-                dep2.isTransitive = true
-                dep2.attributes {
-                    attribute(androidJvm, "androidJvm")
-                    attribute(libraryElements, "aar")
-                    attribute(category, "library")
-                }
-                dep2.files
-                ok++
+                resolve(c, aar = true); ok++
             } catch (t2: Throwable) { failed++ }
         }
     }
@@ -97,18 +160,61 @@ SCRATCH
   # is a warming failure, and it used to be indistinguishable from silence.
   local log="$scratch/resolve.log"
   (cd "$repo_root" && ./gradlew -p "$scratch" -q resolveAll --console=plain >"$log" 2>&1 || true)
-  if grep -qE "^downloaded [0-9]+" "$log"; then
+  if grep -qE "^downloaded [1-9]" "$log"; then
     grep -E "^downloaded [0-9]+" "$log"
+    # Merge the RESOLVED transitive closure into the coordinate list: a
+    # direct-only list attaches only the direct jars (see the scratch
+    # script's comment above).
+    grep -E "^resolved " "$log" | sed -E 's/^resolved //' | sort -u >"$out.new"
+    cat "$out" | grep -v "android-all.jar" >>"$out.new"
+    sort -u "$out.new" -o "$out.new"
+    mv "$out.new" "$out"
+    echo "  coordinate list now $(wc -l <"$out" | tr -d ' ') entries (directs + resolved transitives)"
   else
-    echo "  WARNING: artifact resolution did not run for $slug — no jars were" >&2
-    echo "  downloaded, so the resolved backend will report classpath-partial." >&2
+    # `downloaded 0, failed 0` means the coordinate list itself was empty —
+    # the report arm produced nothing and the warming did not happen. R73
+    # let this pass with a WARNING; P14 fails it, because the vuln tier's
+    # finding floors are measured against these classpaths.
+    echo "  ERROR: artifact resolution downloaded nothing for $slug" >&2
     echo "  Last lines of $log:" >&2
     tail -5 "$log" >&2
+    rm -rf "$scratch"
+    exit 1
   fi
   rm -rf "$scratch"
 }
 
-for slug in "${@:?usage: warm-corpus-classpath.sh <slug> [more slugs...]}"; do
+# The TEXTUAL fallback (P14): old Android builds (AGP 3.x wants a JDK 8 no
+# modern machine ships) and wrapper-less builds cannot run their dependency
+# reports, and the declarations in their build files are still plain
+# group:artifact:version literals — with the Kotlin version riding one
+# variable. The scratch resolver above pulls each coordinate's TRANSITIVE
+# closure into the cache, so the direct list is enough to warm a classpath
+# kosi's locator can use.
+textual_coordinates() {
+  local dir="$1"
+  local kotlin_ver
+  # `|| true` inside the substitution: a project without an ext.kotlin_version
+  # (every Kotlin DSL build) makes the grep fail, and under `set -e` an
+  # assignment whose substitution fails kills the script before the
+  # extraction arms even run (measured on the Ktor app).
+  kotlin_ver=$(grep -rhoE "ext[.]kotlin_version *= *['\"][^'\"]+" "$dir" --include=build.gradle 2>/dev/null \
+    | head -1 | sed -E "s/.*['\"]//" || true)
+  find "$dir" \( -name '*.gradle' -o -name '*.gradle.kts' \) 2>/dev/null | LC_ALL=C sort | while read -r f; do
+    # `|| true` per arm: a build file exercises one syntax or the other, and
+    # under `set -e -o pipefail` the first non-matching grep would otherwise
+    # kill the subshell before the other arm runs (measured: the Kotlin DSL
+    # arm never executed for a .kts-only project).
+    grep -hoE "(implementation|api|compile|classpath|testImplementation|androidTestImplementation)[[:space:]]+['\"][^'\"]+['\"]" "$f" 2>/dev/null \
+      | sed -E "s/.*[[:space:]]['\"]//; s/['\"]\$//" || true
+    grep -hoE "(implementation|api|testImplementation|androidTestImplementation)\(['\"][^'\"]+['\"]\)" "$f" 2>/dev/null \
+      | sed -E "s/.*\(['\"]//; s/['\"]\)\$//" || true
+  done | grep -vE 'project[(]|fileTree|files[(]' \
+    | sed -E "s/[$][{]?kotlin_version[}]?/${kotlin_ver:-UNKNOWN}/" \
+    | grep -E "$coord_re" || true
+}
+
+for slug in "${slugs[@]}"; do
   dir="$cache_root/$slug"
   if [ ! -d "$dir" ]; then
     echo "no cache for '$slug'; run the bench once to fetch it (kosi bench --tier <its tier>)" >&2
@@ -176,6 +282,21 @@ for slug in "${@:?usage: warm-corpus-classpath.sh <slug> [more slugs...]}"; do
     sort -u "$out" -o "$out"
     echo "$(wc -l <"$out" | tr -d ' ') coordinate(s)"
     rm -f "$dir/projects.txt"
+  fi
+
+  # The report arms above run the project's own build tooling; old Android
+  # and wrapper-less builds cannot (P14), and their declarations are still
+  # plain literals — so an empty list falls back to reading them as text
+  # (kosi's own philosophy for build files: parse, never execute).
+  if [ ! -s "$out" ]; then
+    echo "  dependency report produced nothing; falling back to textual extraction" >&2
+    textual_coordinates "$dir" | sort -u >"$out"
+    echo "$(wc -l <"$out" | tr -d ' ') coordinate(s) (textual)"
+  fi
+  if [ ! -s "$out" ]; then
+    echo "  ERROR: $slug produced no coordinates from either arm — the finding" >&2
+    echo "  floors would measure against an empty classpath" >&2
+    exit 1
   fi
 
   pull_artifacts "$dir" "$out"

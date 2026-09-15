@@ -571,6 +571,45 @@ path = "fixtures/implicit-routes"
 classpath_file = "classpath.txt"
 capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
 
+# P14 §2: framework GENERATIONS — the packs model one version of
+# everything, and every package rename is a silent zero (R84). javax AND
+# jakarta JAX-RS/servlet side by side, OkHttp 3 and 4/5, HttpClient 4 and
+# 5, Ktor 3's moved handler receiver.
+
+[[fixtures]]
+slug = "framework-generations"
+tier = "fixtures"
+path = "fixtures/framework-generations"
+capabilities = ["generations", "jaxrs", "servlet", "okhttp", "httpclient", "ktor3", "endpoints"]
+
+# P14 §2.3: a route whose framework cannot be evidenced is published under
+# the reserved pseudo-framework `unattributed` — a miss is never a WRONG
+# answer.
+
+[[fixtures]]
+slug = "unattributed-route"
+tier = "fixtures"
+path = "fixtures/unattributed-route"
+capabilities = ["endpoints", "attribution", "unattributed"]
+
+# P14 §5: consumes/produces/authentication, from the annotations the
+# detector already reads and from Ktor's enclosing authenticate wrapper.
+
+[[fixtures]]
+slug = "endpoint-media-auth"
+tier = "fixtures"
+path = "fixtures/endpoint-media-auth"
+capabilities = ["endpoints", "media-types", "authentication", "spring", "jaxrs", "micronaut", "ktor"]
+
+# P14 §4: the BARE-NAME read of an accessor-backed property (R80's
+# sibling), and the backing-field half that keeps field sensitivity.
+
+[[fixtures]]
+slug = "bare-accessor-source"
+tier = "fixtures"
+path = "fixtures/bare-accessor-source"
+capabilities = ["lowering", "accessor-property", "bare-name", "field-sensitivity", "ktor"]
+
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the
@@ -585,6 +624,57 @@ tier = "vuln"
 path = "fixtures/kosi-vulnerable-service"
 classpath_file = "classpath.txt"
 capabilities = ["deps", "bytecode-summaries", "cross-dependency", "vulnerable-service", "log-injection", "sql-query", "services"]
+
+# P14 §3: the findings ratchet as a tier. Three deliberately vulnerable
+# real applications, SHA-pinned, whose measured slices are the only
+# repo-tier numbers a change could silently zero — which is how kosi
+# arrived at P11 reporting zero findings everywhere. Each carries
+# `min_findings` (enforced two-way by the `vuln-finding-floor` promotion
+# check: below FAILS, and materially above FAILS until the floor is
+# raised, so an improvement is recorded rather than absorbed) and a
+# `classpath_file` that MUST be warmed
+# (`scripts/warm-corpus-classpath.sh --tier vuln-repo`) — the floor check
+# fails a repo whose declared classpath is missing, because a floor
+# measured against an empty classpath is a floor nobody measured. The tier
+# is separate from `vuln` so corpusQuick (no network) keeps its bundled
+# population while corpusFull measures these. `min_findings` values are
+# the P14 measurements on this machine; kosi-vulnerable-app-kotlin-ktor is
+# the single-file Ktor app that exposed R80-R84, kept as their regression
+# anchor.
+
+[[fixtures]]
+slug = "androgoat"
+tier = "vuln-repo"
+repo = "https://github.com/satishpatnayak/AndroGoat"
+sha = "77996f239587a8ed2691629777374b5f4a364589"
+classpath_file = "classpath.txt"
+min_findings = 16
+# The transitive-warmed classpath (161 AndroidX coordinates) makes the
+# default 500-class deps lowering fill the corpus JVM's whole heap. 50
+# classes keep the slot measurable, with the cut named by the
+# deps-class-limit diagnostic (R88); 150 was measured filling an 8g heap,
+# so the per-class cost over 161 attached jars is the engine's to own,
+# not this phase's.
+deps_max_classes = 50
+capabilities = ["vuln", "android", "webview", "insecure-transport", "sql"]
+
+[[fixtures]]
+slug = "insecureshop"
+tier = "vuln-repo"
+repo = "https://github.com/hax0rgb/InsecureShop"
+sha = "76ed1772a12c61a60f4a685770482e0e1f6cf4a7"
+classpath_file = "classpath.txt"
+min_findings = 7
+capabilities = ["vuln", "android", "webview", "insecure-storage"]
+
+[[fixtures]]
+slug = "tsp-vulnerable-app-kotlin-ktor"
+tier = "vuln-repo"
+repo = "https://github.com/kartikdedhia/tsp-vulnerable-app-kotlin-ktor"
+sha = "3fcc258b102cf98f8c9275f94a409cf02abd621e"
+classpath_file = "classpath.txt"
+min_findings = 2
+capabilities = ["vuln", "ktor", "xss", "kmp-classpath"]
 
 [[fixtures]]
 slug = "ktor-samples"

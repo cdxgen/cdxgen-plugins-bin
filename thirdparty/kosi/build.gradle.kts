@@ -105,8 +105,19 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
                 // and at 2g the pinned repo tiers OOMed the fork (loud, via
                 // ExitOnOutOfMemoryError, but dead). ~4 GiB total still fits
                 // the CI runners the matrix runs on.
-                "-Xmx3g",
-                "-XX:MaxMetaspaceSize=512m",
+                // Metaspace 512m -> 1g and heap 3g -> 8g in P14: with every
+                // pinned repo's classpath FULLY warmed (R81's locator now
+                // finds the jars that were always cached, and the warm script
+                // lists the resolved transitive closure), each resolved
+                // session attaches far more dependency classes. The corpusFull
+                // fork died twice: at the 512m metaspace ceiling 65 minutes in
+                // (NoClassDefFoundError on a class that was always on the
+                // classpath, at report time), and — once the vuln-repo tier's
+                // transitive classpaths attached — AndroGoat's deps slot
+                // filled the whole 3g heap. ~9.5 GiB total — a developer-side ceiling; CI warms the same way and its 16 GB runners hold it still fits the 16 GB
+                // runners the matrix runs on.
+                "-Xmx8g",
+                "-XX:MaxMetaspaceSize=1g",
                 "-XX:MaxDirectMemorySize=256m",
                 "-XX:+ExitOnOutOfMemoryError",
                 "-XX:ErrorFile=" + File(rootDir.absolutePath, "hs_err_vm_%p.log").absolutePath,
@@ -137,8 +148,10 @@ kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required fo
         // `vuln` and `ported`, which have never existed, and omitted
         // `medium`, `android`, `kmp` and `hybrid` — four of the five pinned
         // repos — so the "full" run measured one of them (R64). `vuln`
-        // exists since P11 (the bundled vulnerable service).
-        "bench", "--tier", "fixtures,async,vuln,small,medium,android,kmp,hybrid",
+        // exists since P11 (the bundled vulnerable service); `vuln-repo`
+        // since P14 (the pinned deliberately-vulnerable apps whose finding
+        // floors the findings ratchet enforces).
+        "bench", "--tier", "fixtures,async,vuln,vuln-repo,small,medium,android,kmp,hybrid",
         "--repo-root", rootDir.absolutePath,
         "--skip-missing-repos",
     )

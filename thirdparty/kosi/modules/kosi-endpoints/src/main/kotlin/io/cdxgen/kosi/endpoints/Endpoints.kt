@@ -113,6 +113,7 @@ object Endpoints {
                 }
             }
             .map { candidate -> withTransportParameters(candidate, module, pack, folder) }
+            .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, annotationValues) }
             .sortedWith(compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }))
 
         val apiEndpoints = all.mapIndexed { index, candidate ->
@@ -125,9 +126,9 @@ object Endpoints {
                 pathTemplate = candidate.pathTemplate,
                 pathParameters = candidate.pathParameters,
                 queryParameters = candidate.queryParameters,
-                consumes = emptyList(),
-                produces = emptyList(),
-                authentication = emptyList(),
+                consumes = candidate.consumes,
+                produces = candidate.produces,
+                authentication = candidate.authentication,
                 handlerSymbol = candidate.handlerSymbol,
                 handlerCanonicalName = candidate.handlerSymbol,
                 modulePath = modulePath,
@@ -223,6 +224,156 @@ object Endpoints {
 
     /** The category an endpoint handler's parameters carry when the run asks for endpoint sources. */
     const val SOURCE_CATEGORY = "untrusted-input"
+
+    /**
+     * A candidate's `consumes`/`produces`/`authentication`, filled from the
+     * same places the frameworks themselves read them (P14). These three
+     * lists were `emptyList()` on every endpoint kosi had ever emitted —
+     * the information was in annotations the detector already loaded, and
+     * in Ktor's case in the ENCLOSING call, and nothing looked at either.
+     *
+     *  - ANNOTATED frameworks: the handler's own annotations first, then
+     *    the owning class's (a class-level `@RequestMapping(consumes=..)`
+     *    covers every handler Spring would route to it).
+     *  - DSL frameworks: authentication sits on the nesting chain —
+     *    `authenticate("basic") { get { .. } }` — collected by walking the
+     *    same lambda links the route prefixes use. Media annotations do not
+     *    exist for a bare DSL route (the handler is a lambda with no
+     *    annotations), so an honest empty stays empty.
+     *
+     * A framework the pack gives no media/auth annotations to reports empty
+     * lists — empty because nothing declares them, which is the truth, not
+     * a gap nobody has looked at.
+     */
+    private fun withMediaAndAuthentication(
+        candidate: EndpointDetector.Candidate,
+        module: KirModule,
+        pack: EndpointsPack,
+        folder: KirValueFolder,
+        lambdaLinks: Map<String, EndpointDetector.LambdaLink>,
+        annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>>,
+    ): EndpointDetector.Candidate {
+        val framework = pack.frameworks.firstOrNull { it.id == candidate.framework }
+        if (framework == null) return candidate
+        val handler = candidate.handlerSymbol
+        val owner = handler.substringBeforeLast('.')
+        val handlerAnnotations = if (handler.isNotEmpty()) annotationValues[handler].orEmpty() else emptyList()
+        val ownerAnnotations = if (handler.isNotEmpty()) annotationValues[owner].orEmpty() else emptyList()
+
+        val consumes = sortedSetOf<String>()
+        val produces = sortedSetOf<String>()
+        val authentication = sortedSetOf<String>()
+        // Media kinds are resolved as a SET across the framework's patterns
+        // first: Spring's method-level composed annotation (@GetMapping)
+        // REPLACES the class default (@RequestMapping) for its kind — and
+        // matching each pattern independently would append the class default
+        // beside the method's own, which Spring never routes.
+        for (kind in listOf(io.cdxgen.kosi.models.KIND_CONSUMES, io.cdxgen.kosi.models.KIND_PRODUCES)) {
+            val patterns = framework.mediaAnnotations.filter { it.kind == kind }
+            if (patterns.isEmpty()) continue
+            val target = when (kind) {
+                io.cdxgen.kosi.models.KIND_CONSUMES -> consumes
+                else -> produces
+            }
+            val methodValues = patterns.flatMap { media ->
+                handlerAnnotations.filter { EndpointDetector.matches(it.fqn, media.pattern) }
+                    .flatMap { mediaValuesOf(it, media) }
+            }
+            if (methodValues.isNotEmpty()) {
+                target.addAll(methodValues)
+            } else {
+                target.addAll(
+                    patterns.flatMap { media ->
+                        ownerAnnotations.filter { EndpointDetector.matches(it.fqn, media.pattern) }
+                            .flatMap { mediaValuesOf(it, media) }
+                    },
+                )
+            }
+        }
+        for (auth in framework.authenticationAnnotations) {
+            val hit = handlerAnnotations.firstOrNull { EndpointDetector.matches(it.fqn, auth.pattern) }
+                ?: ownerAnnotations.firstOrNull { EndpointDetector.matches(it.fqn, auth.pattern) }
+                ?: continue
+            // An array-valued requirement (`@RolesAllowed(["a","b"])`) names
+            // every entry; a single constant falls back to the plain value.
+            val declared = hit.namedValues["value"] ?: listOfNotNull(hit.value)
+            authentication.add(if (declared.isEmpty()) auth.scheme else "${auth.scheme}(${declared.joinToString(",")})")
+        }
+        authentication.addAll(authenticationChain(handler, framework, module, folder, lambdaLinks))
+        if (consumes.isEmpty() && produces.isEmpty() && authentication.isEmpty()) return candidate
+        return candidate.copy(
+            consumes = consumes.toList(),
+            produces = produces.toList(),
+            authentication = authentication.toList(),
+        )
+    }
+
+    /**
+     * The media types one annotation declares: the NAMED argument the pack
+     * names (Spring's `consumes = [...]`), or the annotation's positional
+     * value arguments when the pack names none (JAX-RS's
+     * `@Consumes("application/json")`).
+     */
+    private fun mediaValuesOf(
+        annotation: EndpointDetector.DeclAnnotation?,
+        media: io.cdxgen.kosi.models.MediaAnnotation,
+    ): List<String> {
+        annotation ?: return emptyList()
+        if (media.argument.isNotEmpty()) {
+            return annotation.namedValues[media.argument].orEmpty()
+        }
+        // The positional `value` arguments: namedValues carries a `value`
+        // entry when written as `Consumes(value = [...])`, and the bare
+        // positional form reduces to the single carried value.
+        val named = annotation.namedValues["value"]
+        if (named != null) return named
+        return listOfNotNull(annotation.value)
+    }
+
+    /**
+     * Authentication a DSL route inherits from its ENCLOSING nesting calls:
+     * Ktor's `authenticate("basic") { get("/x") { .. } }` puts the handler
+     * two lambda hops from the call that names the scheme. The walk is the
+     * one [EndpointDetector] uses for route prefixes, over the same links,
+     * collecting any hop whose creating call is the framework's
+     * authentication wrapper.
+     */
+    private fun authenticationChain(
+        handlerCanonical: String,
+        framework: io.cdxgen.kosi.models.FrameworkModel,
+        module: KirModule,
+        folder: KirValueFolder,
+        lambdaLinks: Map<String, EndpointDetector.LambdaLink>,
+    ): List<String> {
+        if (framework.authenticationDsl.isEmpty() || handlerCanonical.isEmpty()) return emptyList()
+        val out = mutableListOf<String>()
+        var current: String? = handlerCanonical
+        var hops = 0
+        while (current != null && hops < 8) {
+            hops++
+            val link = lambdaLinks[current] ?: break
+            val call = link.creationCall
+            val name = EndpointDetector.callName(call)
+            if (name != null && framework.authenticationDsl.any { it.substringAfterLast('.') == name }) {
+                val parent = module.functions.firstOrNull { it.canonicalName == link.parentFunction }
+                val block = parent?.body?.blocks?.firstOrNull { it.instructions.any { it === call } }
+                val index = block?.instructions?.indexOfFirst { it === call } ?: -1
+                val args = when (call) {
+                    is KirCall -> call.args
+                    is KirDynamicCall -> call.args
+                    else -> emptyList()
+                }
+                val folded = if (parent != null && block != null && index >= 0) {
+                    args.firstOrNull()?.let { folder.valueAt(parent, block, index, it) }?.value
+                } else {
+                    null
+                }
+                out.add(if (folded.isNullOrEmpty()) name!! else "$name($folded)")
+            }
+            current = link.parentFunction
+        }
+        return out.reversed()
+    }
 
     /**
      * The filter chain's handler. A filter serves EVERY verb, so its

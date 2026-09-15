@@ -942,6 +942,7 @@ object Analyzer {
                             fqn = fqn,
                             value = annotation.value?.removeSurrounding("\"")?.removeSurrounding("'"),
                             line = annotation.position.line,
+                            namedValues = annotation.namedValues,
                         ),
                     )
                 }

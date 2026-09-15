@@ -449,9 +449,43 @@ class SyntaxAnalyzer(
                     name = entry.shortName?.asString() ?: entry.text.normalized(),
                     value = entry.valueArgumentList?.arguments?.firstOrNull()
                         ?.argumentStringTemplateExpression()?.text?.normalized()?.removeSurrounding("\""),
+                    // The same named-argument channel the resolved tier
+                    // carries: `consumes = [..]` vs `produces = [..]` differ
+                    // only in the argument's name (P14). A positional
+                    // argument lands under `value`, matching the resolved
+                    // tier's mapping.
+                    namedValues = entry.valueArgumentList?.arguments?.mapNotNull { argument ->
+                        val name = argument.getArgumentName()?.asName?.asString() ?: "value"
+                        val constants = constantStringsOf(argument) ?: return@mapNotNull null
+                        name to constants
+                    }?.toMap() ?: emptyMap(),
                     position = pos(entry),
                 )
             }
+
+        /**
+         * The constant strings one annotation argument names, flattening
+         * collections. Null when the argument is not a literal or a
+         * collection of literals — the syntax tier guesses nothing.
+         */
+        private fun constantStringsOf(argument: KtValueArgument): List<String>? {
+            val expression = argument.getArgumentExpression() ?: return null
+            val elements = when (expression) {
+                is org.jetbrains.kotlin.psi.KtCollectionLiteralExpression -> expression.getInnerExpressions()
+                else -> listOf(expression)
+            }
+            val out = elements.mapNotNull { element ->
+                when (element) {
+                    is org.jetbrains.kotlin.psi.KtStringTemplateExpression ->
+                        (if (element.entries.size == 1 && element.entries[0] is org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry)
+                            (element.entries[0] as org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry).text else null)
+                            ?.removeSurrounding("\"")
+                    is org.jetbrains.kotlin.psi.KtNameReferenceExpression -> element.getReferencedName()
+                    else -> null
+                }
+            }
+            return out.ifEmpty { null }
+        }
 
         private fun visibilityOf(element: KtModifierListOwner): String? = when {
             element.hasModifier(KtTokens.PRIVATE_KEYWORD) -> "private"

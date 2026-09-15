@@ -232,9 +232,11 @@ object Evaluator {
     /**
      * Endpoint expectations: framework (required), path template and handler
      * (`fn=`, matched against the handler symbol) with `~` substring
-     * semantics; `method=` narrows to the endpoint's httpMethod list. A
-     * NEGATIVE endpoint expectation — the lookalike half every framework
-     * fixture carries — passes only when NO endpoint matches.
+     * semantics; `method=` narrows to the endpoint's httpMethod list, and
+     * `pathparam=`/`queryparam=`/`consumes=`/`produces=`/`authentication=`
+     * each demand one carried value (P14). A NEGATIVE endpoint expectation —
+     * the lookalike half every framework fixture carries — passes only when
+     * NO endpoint matches.
      */
     private fun endpointSatisfied(report: KosiReport, ann: Annotation): Boolean {
         val matched = report.apiEndpoints.filter { endpoint ->
@@ -243,7 +245,10 @@ object Evaluator {
                 matches(ann.fn, endpoint.handlerSymbol) &&
                 (ann.method == null || endpoint.httpMethods.any { matches(ann.method, it) }) &&
                 (ann.pathParam == null || endpoint.pathParameters.any { matches(ann.pathParam, it) }) &&
-                (ann.queryParam == null || endpoint.queryParameters.any { matches(ann.queryParam, it) })
+                (ann.queryParam == null || endpoint.queryParameters.any { matches(ann.queryParam, it) }) &&
+                (ann.consumes == null || endpoint.consumes.any { matches(ann.consumes, it) }) &&
+                (ann.produces == null || endpoint.produces.any { matches(ann.produces, it) }) &&
+                (ann.authentication == null || endpoint.authentication.any { matches(ann.authentication, it) })
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

@@ -624,7 +624,13 @@ object KirLowering {
     ): KirFunction? {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
-            is KtPropertyAccessor -> psi.name ?: "<accessor>"
+            // An accessor has no PSI name of its own; the JVM name is
+            // get/setX after its PROPERTY. `<accessor>` gave every custom
+            // accessor of one class the SAME canonical name — InsecureShop's
+            // Prefs object lowered six colliding `Prefs.<accessor>` functions
+            // (P14, found promoting the repo into the corpus; the validator
+            // named the duplicates and `kir dump` refused the module).
+            is KtPropertyAccessor -> psi.name ?: accessorName(psi)
             is KtSecondaryConstructor -> "<init>"
             else -> return null
         }
@@ -719,6 +725,19 @@ object KirLowering {
             .toList()
             .reversed()
             .joinToString(".") { it.name ?: "<anonymous>" }
+
+    /**
+     * The JVM name of a property accessor: `getData` / `setData` after the
+     * property it belongs to. The accessor PSI node carries no name of its
+     * own, and a constant placeholder made every custom accessor of one
+     * class COLLIDE on the same canonical name (P14: InsecureShop's `Prefs`
+     * lowered six `Prefs.<accessor>` functions).
+     */
+    private fun accessorName(accessor: org.jetbrains.kotlin.psi.KtPropertyAccessor): String {
+        val property = accessor.property.name ?: "property"
+        val prefix = if (accessor.isGetter) "get" else "set"
+        return prefix + property.replaceFirstChar { it.uppercaseChar() }
+    }
 
     private fun com.intellij.psi.PsiElement.line(): Int {
         val file = containingFile ?: return 1
@@ -1367,23 +1386,58 @@ object KirLowering {
 
         private fun reference(psi: KtNameReferenceExpression): String {
             val name = psi.getReferencedName()
-            return if (isLocalReference(psi)) {
-                "v$name"
-            } else {
-                // Not a local: a member (or top-level) property read, carried
-                // by the access path over the CURRENT `this` (a scope
-                // function's receiver when inside an inlined apply/run/with).
-                val thisReg = currentThis()
-                val reg = t()
-                emit(
-                    KirFieldGet(
-                        reg,
-                        thisReg,
-                        AccessPath.of(thisReg, listOf(AccessPath.Element.Field(name))),
-                    ),
-                )
-                reg
+            if (isLocalReference(psi)) {
+                return "v$name"
             }
+            // Not a local. A BARE-NAME read can still RUN A METHOD on the JVM
+            // — R80's sibling: `call` inside a Ktor route lambda is an
+            // implicit-receiver property whose getter runs, and lowering it
+            // as `fieldget vthis vthis.call` hides the callee from every
+            // pack exactly the way `a.b` did before R80. The same rule as
+            // dotChain: resolve the reference, and lower as a call only when
+            // the property demonstrably has NO backing field. A property with
+            // a backing field keeps its access path, so P4/P5 field
+            // sensitivity is untouched.
+            val propertyInfo = resolvePropertyInfo(psi)
+            if (propertyInfo != null) {
+                val fqn = propertyInfo.symbol.callableId?.asSingleFqName()?.asString()
+                if (fqn != null) {
+                    // A member property's getter dispatches virtually. A
+                    // TOP-LEVEL EXTENSION property's getter is static on the
+                    // JVM but still READS its receiver — `val
+                    // ApplicationRequest.uri` is exactly that shape — so it
+                    // takes the implicit receiver even though its kind is
+                    // static. Only a receiverless top-level property gets
+                    // neither, or taint arriving on the receiver would stop
+                    // at every extension accessor.
+                    val member = propertyInfo.symbol.callableId?.className != null
+                    val extension = propertyInfo.symbol.receiverParameter != null
+                    val reg = t()
+                    emit(
+                        KirCall(
+                            reg,
+                            KirCallee(fqn, propertyInfo.descriptor, if (member) CallKind.VIRTUAL else CallKind.STATIC),
+                            if (member || extension) currentThis() else null,
+                            emptyList(),
+                            line = psi.line(),
+                        ),
+                    )
+                    return reg
+                }
+            }
+            // A stored field read, carried by the access path over the
+            // CURRENT `this` (a scope function's receiver when inside an
+            // inlined apply/run/with).
+            val thisReg = currentThis()
+            val reg = t()
+            emit(
+                KirFieldGet(
+                    reg,
+                    thisReg,
+                    AccessPath.of(thisReg, listOf(AccessPath.Element.Field(name))),
+                ),
+            )
+            return reg
         }
 
         /**

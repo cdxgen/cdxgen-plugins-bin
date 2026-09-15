@@ -180,6 +180,22 @@ object BenchRunner {
          */
         val peakRssBytes: Long? = null,
         val digest: Digests.FixtureDigest,
+        /**
+         * The entry's declared `min_findings` floor (P14), carried across
+         * the bench boundary so the promotion gate reads it from the row it
+         * measures — the same pattern as `tier`. Null on entries that
+         * declare none.
+         */
+        val minFindings: Int? = null,
+        /**
+         * True when the entry DECLARES a `classpath_file` that is not on
+         * disk: a warm-classpath step that never ran (R73's shape). The
+         * vuln tier's finding floors are measured against a warmed
+         * classpath; measuring them against an empty one quietly reports
+         * zero findings with a green build — the exact failure mode P11
+         * shipped. Null on rows written before P14.
+         */
+        val classpathFileMissing: Boolean? = null,
         val failures: List<String> = emptyList(),
     ) {
         fun toJson(w: JsonWriter, key: String? = null) {
@@ -283,6 +299,8 @@ object BenchRunner {
             w.num("xpass", xpass)
             w.str("tier", tier)
             crossDependencySlices?.let { w.num("crossDependencySlices", it) }
+            minFindings?.let { w.num("minFindings", it) }
+            classpathFileMissing?.let { w.bool("classpathFileMissing", it) }
             w.endObject()
         }
 
@@ -491,6 +509,8 @@ object BenchRunner {
                         depsCutClasses = r.long("depsCutClasses")?.toInt(),
                         peakRssBytes = r.long("peakRssBytes"),
                         digest = Digests.FixtureDigest(r.str("slug") ?: "", r.str("slot") ?: "", emptyMap()),
+                        minFindings = r.long("minFindings")?.toInt(),
+                        classpathFileMissing = r.bool("classpathFileMissing"),
                     )
                 } ?: emptyList()
                 return BenchResult(
@@ -670,18 +690,33 @@ object BenchRunner {
     ): FixtureResult {
         // A build-produced classpath file (warm-corpus-classpath.sh) rides
         // the entry; kosi itself never executes the project's build to make
-        // one. Absent file -> offline resolution, gaps diagnosed.
-        val options = entry.classpathFile
-            ?.let { entryDir -> dir.resolve(entryDir) }
+        // one. Absent file -> offline resolution, gaps diagnosed. A DECLARED
+        // file that is missing is not a quiet condition: R73's warming
+        // script failure downloaded nothing for every repo while the runs
+        // looked fine, so the row carries the fact and the vuln tier's
+        // finding-floor gate fails on it (P14).
+        val declaredClasspath = entry.classpathFile?.let { entryDir -> dir.resolve(entryDir) }
+        val classpathFileMissing = declaredClasspath != null && !Files.isRegularFile(declaredClasspath)
+        val options = declaredClasspath
             ?.takeIf { Files.isRegularFile(it) }
             ?.let { slot.options().copy(classpathFile = it.toString()) }
             ?: slot.options()
+        // A per-entry deps-class cap keeps one heavyweight repo's deps slot
+        // measurable instead of terminal: with AndroGoat's transitive
+        // classpath the default 500-class lowering fills any heap the
+        // corpus JVM can spare, `ExitOnOutOfMemoryError` then ends the
+        // whole run mid-tier, and the cut is still named by the
+        // deps-class-limit diagnostic (P14).
+        val optionsWithCaps = entry.depsMaxClasses
+            ?.takeIf { slot.deps }
+            ?.let { options.copy(depsMaxClasses = it) }
+            ?: options
         // Wall clock is measured OUTSIDE the report: the report itself must
         // stay byte-identical across runs on the same input. The P10 per-row
         // RSS window brackets the run the same way.
         val rssBefore = PeakRss.currentBytes()
         val start = System.nanoTime()
-        val report = Analyzer.analyze(dir, options, commit)
+        val report = Analyzer.analyze(dir, optionsWithCaps, commit)
         val wallMillis = (System.nanoTime() - start) / 1_000_000
         val rssAfter = PeakRss.currentBytes()
         val evaluation = Evaluator.evaluate(report, annotations, mode = slot.label, backend = options.backend.id)
@@ -689,6 +724,22 @@ object BenchRunner {
             val status = if (outcome.status == Evaluator.Status.XPASS) "XPASS" else "FAIL"
             "${outcome.annotation.file}:${outcome.annotation.line}: $status ${outcome.annotation.kind.id} " +
                 "(${outcome.detail}) [${outcome.annotation.want} at line ${outcome.annotation.line}]"
+        }.toMutableList()
+        // A DECLARED classpath that is missing fails the row itself — for
+        // the entries whose MEASUREMENT the classpath makes or breaks: the
+        // floor-carrying vuln tier, which would otherwise ratchet a number
+        // nobody measured (R73's shape, P14). Entries without a floor keep
+        // the documented offline behaviour: the detail line below names the
+        // gap, their analysis failures stay counted rows, and pathological
+        // monorepos (http4k's build resolves 16k coordinates) are not
+        // forced into a warm they cannot survive.
+        val classpathFailureCount = if (classpathFileMissing && entry.minFindings != null) 1 else 0
+        if (classpathFileMissing) {
+            failureDetails.add(
+                "corpus.toml: ${entry.slug} declares classpath_file '${entry.classpathFile}' which is not on disk — " +
+                    "run scripts/warm-corpus-classpath.sh ${entry.slug}; measuring this tier against an empty classpath " +
+                    "reports zero findings with a green build",
+            )
         }
         val connectivity = Connectivity.of(report)
         val integrity = Connectivity.integrityViolations(report)
@@ -709,7 +760,7 @@ object BenchRunner {
             pass = evaluation.pass.size,
             positivesPassed = evaluation.pass.count { it.annotation.want },
             positivesRecallDenominator = evaluation.outcomes.count { it.annotation.want && it.annotation.knownFailFor(options.backend.id) == null },
-            fail = evaluation.fail.size,
+            fail = evaluation.fail.size + classpathFailureCount,
             xfail = evaluation.xfail.size,
             xpass = evaluation.xpass.size,
             recall = evaluation.recall(options.backend.id),
@@ -776,6 +827,8 @@ object BenchRunner {
             peakRssBytes = maxOf(rssBefore, rssAfter),
             digest = digest,
             failures = failureDetails,
+            minFindings = entry.minFindings,
+            classpathFileMissing = classpathFileMissing.takeIf { it },
         )
     }
 }
@@ -787,7 +840,7 @@ object BenchRunner {
  * repo mass would let micro-fixtures hold a repo gate (or fail it) for the
  * wrong reason.
  */
-val REPO_TIERS: Set<String> = setOf("small", "medium", "large", "android", "kmp", "hybrid", "vuln", "ported")
+val REPO_TIERS: Set<String> = setOf("small", "medium", "large", "android", "kmp", "hybrid", "vuln", "vuln-repo", "ported")
 
 /**
  * Call-graph metrics read from a slot's report (the artifact production

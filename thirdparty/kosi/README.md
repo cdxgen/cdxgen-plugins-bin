@@ -148,6 +148,12 @@ make native            # GraalVM native image (see docs/BUILD.md)
 make size              # staged binary sizes
 ```
 
+Before the first `corpusFull`, warm the repo classpaths
+(`scripts/warm-corpus-classpath.sh --tier vuln-repo`, or per slug): the
+vuln-repo tier's `min_findings` floors are measured against WARMED
+classpaths, and an entry whose declared classpath file is missing fails its
+bench rows rather than ratcheting a number measured against nothing.
+
 The corpus is a two-way ratchet: a regressed expectation fails the build and
 a `known-fail` that starts passing fails the build (XPASS). Scoped markers
 (`known-fail=syntax:1`) describe per-backend defects; the numbers reference

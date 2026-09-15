@@ -27,6 +27,25 @@ data class CorpusEntry(
      * diagnosed as classpath-partial.
      */
     val classpathFile: String?,
+    /**
+     * The FINDING FLOOR (P14): the minimum slices this entry's resolved
+     * slot must publish. The vuln tier carries one per repo — a change that
+     * takes a deliberately vulnerable app to zero findings currently does so
+     * with a green build, which is exactly how kosi arrived at P11
+     * reporting zero findings on every real repo. Two-way, like every
+     * ratchet: below FAILS, and materially above FAILS too until the floor
+     * is raised, so an improvement is recorded rather than absorbed.
+     */
+    val minFindings: Int? = null,
+    /**
+     * A per-entry override of `--deps-max-classes` for the deps slot (P14).
+     * AndroGoat's TRANSITIVE-warmed classpath (161 coordinates of AndroidX)
+     * makes the default 500-class lowering fill any heap the corpus JVM can
+     * spare; a per-entry cap keeps the slot measurable instead of letting
+     * `ExitOnOutOfMemoryError` terminate a 70-minute run mid-tier. The
+     * deps-class-limit diagnostic still names what was cut.
+     */
+    val depsMaxClasses: Int? = null,
 ) {
     fun validate() {
         if (path == null && repo == null) {
@@ -88,6 +107,9 @@ data class CorpusManifest(
                     Regex(""""([^"]*)"""").findAll(value).map { it.groupValues[1] }.toList()
                 } else if (value.startsWith("\"")) {
                     value.removeSurrounding("\"")
+                } else if (value.toIntOrNull() != null) {
+                    // Integers: the vuln tier's min_findings floor (P14).
+                    value.toInt()
                 } else {
                     throw IllegalArgumentException("corpus.toml:$lineNo: unsupported value for $key: $value")
                 }
@@ -104,6 +126,7 @@ data class CorpusManifest(
 
         private fun entryFrom(table: LinkedHashMap<String, Any?>): CorpusEntry {
             fun str(key: String): String? = table[key] as? String
+            fun int(key: String): Int? = table[key] as? Int
             @Suppress("UNCHECKED_CAST")
             fun list(key: String): List<String> = (table[key] as? List<String>) ?: emptyList()
             return CorpusEntry(
@@ -116,6 +139,8 @@ data class CorpusManifest(
                 expectedFlows = str("expected_flows"),
                 features = list("features"),
                 classpathFile = str("classpath_file"),
+                minFindings = int("min_findings"),
+                depsMaxClasses = int("deps_max_classes"),
             )
         }
     }

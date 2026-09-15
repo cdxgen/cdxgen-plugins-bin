@@ -478,4 +478,143 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
     val viaCall = result.instructionsOf("viaCall").filterIsInstance<KirFieldGet>()
     assertEquals(listOf(listOf("inner", "a")), viaCall.map { fields(it.path) }, "composition stops at the call")
 }
+
+    // ---- bare-name accessor reads (P14, R80's sibling) ----------------------
+
+    @Test
+    fun aBareNameAccessorReadLowersAsTheCallItIs() {
+        // `parameters` inside an extension on ApplicationCall is read by
+        // BARE NAME through the implicit extension receiver. R80 fixed the
+        // `a.b` spelling; this spelling stayed a field read whose path was
+        // the RECEIVER's register, so no pack could ever see the callee —
+        // and it is exactly what `call` is inside a Ktor route lambda.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/io/ktor/server/application/ApplicationCall.kt" to """
+                    package io.ktor.server.application
+
+                    interface ApplicationCall {
+                        val parameters: Map<String, String>
+                    }
+                """.trimIndent(),
+                "src/main/kotlin/App.kt" to """
+                    package app
+
+                    import io.ktor.server.application.ApplicationCall
+
+                    fun ApplicationCall.queryEcho(): String = parameters["q"].orEmpty()
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        assertEquals(emptyMap(), result.failures, "every construct here lowers")
+        val calls = result.instructionsOf("queryEcho").filterIsInstance<KirCall>()
+        assertTrue(
+            calls.any { it.callee.fqn == "io.ktor.server.application.ApplicationCall.parameters" },
+            "the bare `parameters` read must lower as the accessor call the packs match, got: " +
+                calls.joinToString { it.callee.fqn },
+        )
+    }
+
+    @Test
+    fun aBareNameBackingFieldReadStaysAFieldAccess() {
+        // The negative half: a stored member read by bare name KEEPS its
+        // access path, or P4/P5 field sensitivity stops meeting writes.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/Panel.kt" to """
+                    package app
+
+                    class Panel {
+                        var query: String = ""
+
+                        fun read(): String = query
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        val reads = result.instructionsOf("read").filterIsInstance<KirFieldGet>()
+        assertEquals(1, reads.size, "a backing-field member read is one field read")
+        val names = reads.single().path.elements
+            .filterIsInstance<io.cdxgen.kosi.kir.AccessPath.Element.Field>()
+            .map { it.name }
+        assertEquals(listOf("query"), names, "the access path names the field")
+        assertEquals(
+            0,
+            result.instructionsOf("read").filterIsInstance<KirCall>().size,
+            "no call is invented for a stored field",
+        )
+    }
+
+    @Test
+    fun aTopLevelExtensionPropertyReadCarriesItsReceiver() {
+        // `val ApplicationRequest.uri` is a TOP-LEVEL extension property:
+        // its getter is static on the JVM, but it reads the receiver. A
+        // receiverless call here would stop taint arriving on the receiver
+        // at every extension accessor — and extension properties are how
+        // Ktor spells most of its request readers.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/io/ktor/server/request/ApplicationRequest.kt" to """
+                    package io.ktor.server.request
+
+                    interface ApplicationRequest
+
+                    val ApplicationRequest.uri: String get() = ""
+                """.trimIndent(),
+                "src/main/kotlin/App.kt" to """
+                    package app
+
+                    import io.ktor.server.request.ApplicationRequest
+                    import io.ktor.server.request.uri
+
+                    fun ApplicationRequest.echo(): String = uri
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        val call = result.instructionsOf("echo").filterIsInstance<KirCall>()
+            .firstOrNull { it.callee.fqn == "io.ktor.server.request.uri" }
+        assertTrue(call != null, "the bare extension-property read lowers as its accessor call")
+        assertTrue(call!!.receiver != null, "and carries the receiver its getter reads")
+    }
+
+    @Test
+    fun customAccessorsOfOneClassTakeDistinctJvmNames() {
+        // R87: every KtPropertyAccessor lowered under ONE placeholder name,
+        // so a class with several custom accessors emitted colliding
+        // canonical names and the KIR validator refused the module
+        // (InsecureShop's `Prefs` carried six). The JVM names are distinct.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/Prefs.kt" to """
+                    package app
+
+                    object Prefs {
+                        private var stored: String = ""
+
+                        var token: String
+                            get() = stored
+                            set(value) { stored = value }
+
+                        var user: String
+                            get() = stored
+                            set(value) { stored = value }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        val accessors = result.functions
+            .map { it.canonicalName }
+            .filter { it.startsWith("app.Prefs.get") || it.startsWith("app.Prefs.set") }
+            .sorted()
+        assertEquals(
+            listOf("app.Prefs.getToken", "app.Prefs.getUser", "app.Prefs.setToken", "app.Prefs.setUser"),
+            accessors,
+            "each accessor takes its own JVM name, got all functions: " +
+                result.functions.joinToString { it.canonicalName },
+        )
+    }
 }

@@ -85,6 +85,8 @@ class FixtureResultJsonTest {
         dependencyClasses = 68,
         dependencyFunctions = 72,
         depsCutClasses = 73,
+        minFindings = 17,
+        classpathFileMissing = true,
         peakRssBytes = 123456789L,
         endpointRecallByFramework = linkedMapOf("ktor" to listOf(4, 5), "spring-mvc" to listOf(6, 6)),
         configValuesTotal = 8,

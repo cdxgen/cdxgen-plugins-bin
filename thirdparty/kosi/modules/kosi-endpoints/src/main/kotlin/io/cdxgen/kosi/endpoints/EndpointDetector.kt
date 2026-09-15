@@ -40,11 +40,17 @@ import io.cdxgen.kosi.schema.Position
  */
 object EndpointDetector {
 
-    /** A declaration annotation the resolved front end carried: fqn + first constant value. */
+    /**
+     * A declaration annotation the resolved front end carried: fqn + first
+     * constant value, plus every NAMED argument's constants — the channel
+     * `@RequestMapping(consumes = [...], produces = [...])` needs, where the
+     * argument's name is the only difference between the two lists.
+     */
     data class DeclAnnotation(
         val fqn: String,
         val value: String?,
         val line: Int,
+        val namedValues: Map<String, List<String>> = emptyMap(),
     )
 
     class Input(
@@ -69,6 +75,14 @@ object EndpointDetector {
         else -> null
     }
 
+    /**
+     * The reserved pseudo-framework an endpoint carries when the ROUTE is
+     * real but no framework's package is demonstrably present to attribute
+     * it to. A consumer can tell "found a route, could not name the
+     * framework" from both "found nothing" and any wrong attribution.
+     */
+    const val UNATTRIBUTED_FRAMEWORK: String = "unattributed"
+
     data class Candidate(
         val framework: String,
         val httpMethods: List<String>,
@@ -82,6 +96,12 @@ object EndpointDetector {
         val exported: Boolean?,
         val permissions: List<String>?,
         val deepLinkHosts: List<String>?,
+        /** Media types the handler's annotations name it as accepting (P14). */
+        val consumes: List<String> = emptyList(),
+        /** Media types the handler's annotations name it as producing (P14). */
+        val produces: List<String> = emptyList(),
+        /** Authentication requirements, from annotations or the enclosing DSL (P14). */
+        val authentication: List<String> = emptyList(),
     )
 
     fun detect(input: Input, pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin()): List<Candidate> {
@@ -219,10 +239,19 @@ object EndpointDetector {
         val body = fn.body ?: return
         for (block in body.blocks) {
             for ((index, ins) in block.instructions.withIndex()) {
-                val framework = when (ins) {
-                    is KirCall -> pack.frameworks.firstOrNull { f ->
-                        f.dslFunctions.any { matches(ins.callee.fqn, it.pattern) } ||
-                            f.bindFunctions.any { matchesCallName(ins, it.pattern) }
+                when (ins) {
+                    is KirCall -> {
+                        val framework = pack.frameworks.firstOrNull { f ->
+                            f.dslFunctions.any { matches(ins.callee.fqn, it.pattern) } ||
+                                f.bindFunctions.any { matchesCallName(ins, it.pattern) }
+                        } ?: continue
+                        val mapping = framework.dslFunctions.firstOrNull { matches(ins.callee.fqn, it.pattern) }
+                        if (mapping != null) {
+                            if (mapping.nesting) continue
+                            detectRouteCall(fn, block, index, ins, framework, mapping.methods, input, add)
+                        } else {
+                            detectBindCall(fn, block, index, ins, framework, input, add)
+                        }
                     }
 
                     // An UNRESOLVED extension lowers as a dynamic call that
@@ -235,38 +264,33 @@ object EndpointDetector {
                     // still wins over name matching.
                     is KirDynamicCall -> {
                         // Name-only matching cannot tell `get` from `get`:
-                        // Ktor, Javalin, Spark and Vert.x all have one, so
-                        // the framework a route is ATTRIBUTED to used to be
-                        // whichever sat first in the pack — list order
-                        // deciding a reported fact. Prefer the framework
-                        // this module actually uses, evidenced by its
-                        // package appearing in some RESOLVED symbol; fall
-                        // back to first-match only when nothing is present.
+                        // Ktor, Javalin, Spark and Vert.x all have one. The
+                        // framework a route is ATTRIBUTED to must be
+                        // EVIDENCED — some resolved symbol in this module
+                        // names that framework's package — and when nothing
+                        // does, the route is published under the reserved
+                        // pseudo-framework `unattributed` rather than handed
+                        // to whichever framework sat first in the pack. R84
+                        // showed the wrong-framework answer in production: a
+                        // Ktor 1.x app's routes reported as Vert.x. A miss
+                        // is never a WRONG answer.
                         val byName = pack.frameworks.filter { f ->
                             f.dslFunctions.any { it.pattern.substringAfterLast('.') == ins.name && !it.nesting } &&
                                 hasRouteShape(fn, ins, input)
                         }
-                        byName.firstOrNull { f -> f.dslPackages().any { it in resolvedPackages } }
-                            ?: byName.firstOrNull()
-                    }
-
-                    else -> null
-                } ?: continue
-                when (ins) {
-                    is KirCall -> {
-                        val mapping = framework.dslFunctions.firstOrNull { matches(ins.callee.fqn, it.pattern) }
-                        if (mapping != null) {
-                            if (mapping.nesting) continue
-                            detectRouteCall(fn, block, index, ins, framework, mapping.methods, input, add)
+                        if (byName.isEmpty()) continue
+                        val evidenced = byName.firstOrNull { f -> f.dslPackages().any { it in resolvedPackages } }
+                        if (evidenced != null) {
+                            val mapping = evidenced.dslFunctions.firstOrNull {
+                                it.pattern.substringAfterLast('.') == ins.name && !it.nesting
+                            } ?: continue
+                            detectRouteCall(fn, block, index, ins, evidenced, mapping.methods, input, add)
                         } else {
-                            detectBindCall(fn, block, index, ins, framework, input, add)
-                        }
-                    }
-
-                    is KirDynamicCall -> {
-                        val mapping = framework.dslFunctions.firstOrNull { it.pattern.substringAfterLast('.') == ins.name }
-                        if (mapping != null && !mapping.nesting) {
-                            detectRouteCall(fn, block, index, ins, framework, mapping.methods, input, add)
+                            // No framework's package is demonstrably present:
+                            // publish the ROUTE (the path and handler are
+                            // real) with no framework claim and no verb list
+                            // — a verb would name a framework's builder.
+                            detectRouteCall(fn, block, index, ins, null, emptyList(), input, add)
                         }
                     }
 
@@ -282,7 +306,7 @@ object EndpointDetector {
         block: KirBlock,
         index: Int,
         ins: KirIns,
-        framework: FrameworkModel,
+        framework: FrameworkModel?,
         methods: List<String>,
         input: Input,
         add: (Candidate) -> Unit,
@@ -299,7 +323,7 @@ object EndpointDetector {
         // `Article`. The path argument this function otherwise reads simply
         // does not exist, so such a route used to resolve to nothing.
         val typeArguments = (ins as? KirCall)?.typeArguments.orEmpty()
-        if (framework.resourceAnnotations.isNotEmpty() && typeArguments.isNotEmpty()) {
+        if (framework?.resourceAnnotations?.isNotEmpty() == true && typeArguments.isNotEmpty()) {
             val resourcePath = resourcePathOf(typeArguments.first(), framework, input)
             if (resourcePath != null) {
                 val handler = handlerOfRegs(fn, callArgs, input)
@@ -411,7 +435,7 @@ object EndpointDetector {
 
     private fun publish(
         add: (Candidate) -> Unit,
-        framework: FrameworkModel,
+        framework: FrameworkModel?,
         methods: List<String>,
         path: String,
         handler: String,
@@ -420,12 +444,16 @@ object EndpointDetector {
     ) {
         add(
             Candidate(
-                framework = framework.id,
+                // Null framework = the route SHAPE matched but no framework
+                // could be evidenced (see detectDsl): the reserved
+                // pseudo-framework `unattributed` says so in the report
+                // instead of naming whichever framework has a `get`.
+                framework = framework?.id ?: UNATTRIBUTED_FRAMEWORK,
                 httpMethods = methods,
                 pathTemplate = normalizePath(path),
                 pathParameters = pathParametersOf(path),
                 handlerSymbol = handler,
-                foundBy = foundBy,
+                foundBy = if (framework == null) "$foundBy-unattributed" else foundBy,
                 position = Position(at.file, at.line, at.line),
                 exported = null,
                 permissions = null,

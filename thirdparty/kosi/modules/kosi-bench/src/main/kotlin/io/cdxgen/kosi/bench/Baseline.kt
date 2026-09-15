@@ -333,6 +333,16 @@ object Promotion {
         // an aggregate RSS number cannot see one repo exploding.
         checks.add(perRepoRssCheck(current, baseline))
 
+        // 10e. P14: the findings ratchet. The vuln tier's deliberately
+        // vulnerable apps are the only repo-tier rows whose FINDINGS are
+        // the point — and until now a change could take any of them to zero
+        // with a green build, which is exactly how kosi arrived at P11
+        // reporting zero findings on every real repo. Two-way, like every
+        // other ratchet: below the floor FAILS, and materially above it
+        // fails too until the floor is raised, so an improvement is
+        // recorded rather than absorbed.
+        checks.add(vulnFindingFloorCheck(current))
+
         // 11. the P2 lowering gate: loweringFailures empty on every fixture
         // slot, and below LOWERING_FAILURE_RATE_MAX of the functions lowered
         // on the repo tiers. Enforced here rather than measured by hand once
@@ -991,6 +1001,64 @@ object Promotion {
 
     /** The P10 per-repo RSS ceiling against the baseline row. */
     const val PER_REPO_RSS_MAX = 1.50
+
+    /**
+     * How far over its floor a vuln entry may measure before the floor is
+     * STALE (P14). Absorbing an improvement silently is the other half of
+     * the ratchet: the floor exists so the next regression has a number to
+     * fall below, and a floor left two phases behind measures nothing. A
+     * small overshoot (a couple of slices, or a quarter) is re-modelling
+     * noise, not a finding.
+     */
+    const val FINDING_FLOOR_STALE_SLICES = 2
+    const val FINDING_FLOOR_STALE_RATIO = 1.25
+
+    /**
+     * The P14 findings ratchet over the vuln tiers' resolved slots. Each
+     * row that carries a declared `min_findings` floor is checked three
+     * ways, each named: a DECLARED classpath file that is missing (the tier
+     * is being measured against nothing — R73, which cost four phases), a
+     * count BELOW the floor (the regression the floor exists to catch), and
+     * a count MATERIALLY above it (the floor is stale; raise it).
+     */
+    private fun vulnFindingFloorCheck(current: BenchRunner.BenchResult): Check {
+        val name = "vuln-finding-floor"
+        val rows = current.results
+            .filter { it.minFindings != null && it.slug != "TOTAL" && it.slot == MatrixSlot.RESOLVED_LABEL }
+            .sortedBy { it.slug }
+        if (rows.isEmpty()) {
+            return Check(name, State.NOT_EVALUATED, "no entry in this run carries a min_findings floor")
+        }
+        val problems = mutableListOf<String>()
+        val measured = mutableListOf<String>()
+        for (row in rows) {
+            val floor = row.minFindings!!
+            measured.add("${row.slug}=${row.sliceCount} (floor $floor)")
+            if (row.classpathFileMissing == true) {
+                problems.add(
+                    "${row.slug}: declares a classpath_file that is missing — warm it " +
+                        "(scripts/warm-corpus-classpath.sh ${row.slug}); a finding floor measured " +
+                        "against an empty classpath is a floor nobody measured",
+                )
+                continue
+            }
+            when {
+                row.sliceCount < floor ->
+                    problems.add("${row.slug}: ${row.sliceCount} slice(s) < floor $floor — findings regressed to zero territory")
+                row.sliceCount > floor + maxOf(FINDING_FLOOR_STALE_SLICES, (floor * (FINDING_FLOOR_STALE_RATIO - 1)).toInt()) ->
+                    problems.add(
+                        "${row.slug}: ${row.sliceCount} slice(s) materially above floor $floor — " +
+                            "raise the floor in corpus.toml so the improvement is recorded, not absorbed",
+                    )
+                else -> {}
+            }
+        }
+        return if (problems.isEmpty()) {
+            Check(name, State.PASS, "floors hold: ${measured.joinToString(", ")}")
+        } else {
+            Check(name, State.FAIL, problems.joinToString("; ") + "; measured: ${measured.joinToString(", ")}")
+        }
+    }
 
     /**
      * P9's headline gate. `crossDependencySliceCount > 0 with
