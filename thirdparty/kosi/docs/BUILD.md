@@ -211,9 +211,13 @@ riscv64). The per-platform exemption table shared by staging and coverage
 lives in `scripts/plugin-platform-support.sh`; exemptions are printed
 wherever they apply, never silent.
 
-CI: `.github/workflows/kosi-test.yml` runs the JVM gates on every change and
-the darwin-arm64 native build on every change; a `workflow_dispatch`-only
-`make linux` job exercises the linux-amd64 path.
+CI: `.github/workflows/kosi-test.yml` runs one job on every change — unit
+tests, the fixture-tier corpus ratchet (`corpusQuick`, both modes) and the
+digest goldens, a few minutes end to end. Everything heavier is
+`workflow_dispatch`-only and belongs to the phase gate run locally: the
+darwin-arm64 and linux-amd64 native builds, and `corpusFull`. The rule is
+deliberate — big measurements run on the machine that can hold them, and
+the small deterministic subset guards every push.
 
 `corpusFull` is `workflow_dispatch`-only for the same reason it always
 should have been: the pinned-repo matrix does not fit a hosted runner.

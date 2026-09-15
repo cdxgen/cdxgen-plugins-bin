@@ -91,12 +91,17 @@ jobs:
       - name: Corpus full tier
         run: ./gradlew corpusFull --no-daemon
 
-  # The native-image spike must keep working: build the host binary, verify it
-  # runs and that its output is byte-identical across runs. The build peaks
-  # well under 2 GiB (serial GC, -Os), so standard runners suffice. Linux runs
-  # on demand (workflow_dispatch) to keep per-push CI time unchanged.
+  # ON DEMAND (workflow_dispatch). The native-image spike must keep working —
+  # the binary builds, runs, and its output is byte-identical across runs —
+  # but a ~30-minute macOS image build on every push is not a per-push gate.
+  # It is run locally per phase (`make native`, `scripts/determinism-sweep.sh`,
+  # `make native-metadata-check`, and `scripts/native-vs-jvm.sh` when
+  # reflection, resources or lowering changed) and reported in that phase's
+  # docs/KOSI.md section. Per-push CI keeps the fast, deterministic subset:
+  # unit tests, the fixture-tier corpus ratchet, and the digest goldens.
   native:
-    name: make native (darwin-arm64)
+    name: make native (darwin-arm64, on demand)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     permissions:
       contents: read
