@@ -1,0 +1,125 @@
+.github/workflows/kosi-test.yml
+  h_6a4cc5cdf68def 5-8,71-74
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 108-129
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 613-644,684-693
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 8-37,45-46,48-50,54-193,200-201
+  s_9d783fb1e8d1fd::t_3b3ba050246b94 38-44,47,51-53,1523-1531
+  s_9d783fb1e8d1fd::t_41d33b164bc77f 194-199
+  s_9d783fb1e8d1fd::t_283dde3dd6bcdd 1532
+thirdparty/kosi/fixtures/catch-handler-flow/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/catch-handler-flow/src/main/kotlin/fixtures/catchflow/CatchFlow.kt
+  h_6a4cc5cdf68def 1-136
+thirdparty/kosi/fixtures/dsl-media-auth/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/DslRoutes.kt
+  h_6a4cc5cdf68def 1-95
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/Servlets.kt
+  h_6a4cc5cdf68def 1-20
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/http/Http.kt
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/http/JavalinStubs.kt
+  h_6a4cc5cdf68def 1-12
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/security/RouteRole.kt
+  h_6a4cc5cdf68def 1-7
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/core/Handler.kt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/ext/web/VertxStubs.kt
+  h_6a4cc5cdf68def 1-23
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/javax/servlet/http/ServletStubs.kt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/org/http4k/core/Http4kStubs.kt
+  h_6a4cc5cdf68def 1-26
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/webapp/WEB-INF/web.xml
+  h_6a4cc5cdf68def 1-63
+thirdparty/kosi/goldens/catch-handler-flow-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 176-181
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  h_6a4cc5cdf68def 353-356,360,363-440,442-513,580-590,592-594,605-607,625-627
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/Endpoints.kt
+  h_6a4cc5cdf68def 79,523,527-533,552-562,575,584-611
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/WebXmlParser.kt
+  h_6a4cc5cdf68def 39-56,78-121
+thirdparty/kosi/modules/kosi-export/src/main/kotlin/io/cdxgen/kosi/export/Sarif.kt
+  h_6a4cc5cdf68def 22-27,59-67,69,110-124
+  s_9d783fb1e8d1fd::t_e1020cde6505e6 68,70
+thirdparty/kosi/modules/kosi-export/src/test/kotlin/io/cdxgen/kosi/export/SarifTest.kt
+  h_6a4cc5cdf68def 92-131
+  s_9d783fb1e8d1fd::t_10f3a6886a87f1 132-165
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  h_6a4cc5cdf68def 421-426,469-470,472,475,600-601,608-609,611-616,619-624,647-649,661-665,670-673
+  s_9d783fb1e8d1fd::t_3bcb2223846950 602-607
+  s_9d783fb1e8d1fd::t_c6ad84e33c7a01 610
+  s_9d783fb1e8d1fd::t_800deb6b57c1a6 632-646
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 184-191,195-199
+  s_9d783fb1e8d1fd::t_c6ad84e33c7a01 192-194
+thirdparty/kosi/modules/kosi-flow/src/test/kotlin/io/cdxgen/kosi/flow/InterproceduralEngineTest.kt
+  h_6a4cc5cdf68def 404-407,409-411,418,422-425,427-429,432,435-438,453,456-457,462-463,466,467-508
+  s_9d783fb1e8d1fd::t_7ffd37024e567b 509-532
+  s_9d783fb1e8d1fd::t_47b62223c0c5f9 408,412-417,419-421,426,430-431,433-434,439-452,454-455,458-461,464-465
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  h_6a4cc5cdf68def 827-881,1259-1278,1280-1282,1284-1318
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/KirLoweringTest.kt
+  h_6a4cc5cdf68def 620-706
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/EndpointModels.kt
+  h_6a4cc5cdf68def 158-177,233-244,376-383
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 197-198,304-306,979,1607-1609,1612-1623
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  h_6a4cc5cdf68def 257-269,281-287,293,297-298,302-314,442,449-478,480-499
+  s_9d783fb1e8d1fd::t_1f793eb49c0dc1 288-292,299-301,479
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/ClasspathResolverTest.kt
+  h_6a4cc5cdf68def 243-381
+thirdparty/kosi/scripts/warm-corpus-classpath.sh
+  h_6a4cc5cdf68def 182,201-204,206,221-224,226-227,229-240,242,248-254,257,260,265,269-274,279,281,357-358,361-367,368-373,387-392,397-398
+  s_9d783fb1e8d1fd::t_fc096b332939a2 225,228,241,243-247,255-256,258-259,261-264,266-268,280,395-396
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b932e4bb3fc72d7c9cc5b003877286b0d7b70156",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
