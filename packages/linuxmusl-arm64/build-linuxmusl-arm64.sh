@@ -9,8 +9,9 @@ bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins
 sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
-# kosi natives ride the oras cache (native-builds.yml builds them on
-# kosi PRs and workflow dispatch); the release consumes this cache.
+# No kosi native here: GraalVM does not support musl static images on
+# linux-aarch64, a declared exemption in scripts/plugin-platform-support.sh;
+# these consumers get the kosi-portable.jar fallback.
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 

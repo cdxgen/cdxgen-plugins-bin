@@ -10,16 +10,15 @@ rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/c
 mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/sourcekitten/
-# kosi natives ride the oras cache (native-builds.yml builds them on
-# kosi PRs and workflow dispatch); the release consumes this cache.
-# Retry while the concurrent native-builds run pushes the cache tag.
-for attempt in 1 2 3 4 5 6; do
-  oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-arm64 -o ../../plugins/kosi/ && break
-  echo "kosi cache tag kosi-linux-arm64 not ready (attempt $attempt)"; sleep 60
-done
-oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-linux-arm64 -o ../../plugins/kosi/
-# tolerate nested layer paths from older cache pushes
-find plugins/kosi -mindepth 2 -type f -name "kosi-*" -exec mv {} plugins/kosi/ \; 2>/dev/null || true
+# kosi natives are staged into ../../plugins/kosi by build.sh, from
+# thirdparty/kosi/build - built there (test.yml's kosi_*_prebuild jobs) or
+# pulled from the ghcr cache (release.yml). This script no longer races a
+# concurrent native-builds run for a cache tag; a missing binary is a loud
+# failure here and in check-plugin-coverage.sh, never a quiet omission.
+[ -f "../../plugins/kosi/kosi-linux-arm64" ] || {
+  echo "kosi-linux-arm64 missing from plugins/kosi; the caller must stage it first" >&2
+  exit 1
+}
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/
 
