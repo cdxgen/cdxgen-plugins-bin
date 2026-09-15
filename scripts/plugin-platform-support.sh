@@ -18,8 +18,11 @@
 #   - linuxmusl-arm64: GraalVM does not support musl static images on
 #     linux-aarch64 (build aborts: "LINUX_AARCH64 (target libc: musl) is
 #     not supported on your platform").
-#   - windows-amd64 / windows-arm64 / darwin-amd64: build jobs land with the
-#     release phase (MSVC toolchain / macos-intel runner; docs/BUILD.md §6).
+#   - darwin-amd64: GraalVM publishes no macOS x64 build for JDK 25 (neither
+#     Community nor Oracle), and native-image cannot cross-compile from the
+#     arm64 runner, so there is nothing to build with.
+#   - windows-amd64 / windows-arm64: build jobs land with the release phase
+#     (MSVC toolchain; docs/BUILD.md §6).
 #
 # Keys are the binary filename fragments (after scripts/check-plugin-coverage.sh
 # maps the ppc64 package directory to ppc64le).
@@ -48,6 +51,10 @@ plugin_platform_exemption() {
       ;;
     linuxmusl-arm64)
       echo "GraalVM does not support musl static images on linux-aarch64"
+      return 0
+      ;;
+    darwin-amd64)
+      echo "no GraalVM for JDK 25 ships a macOS x64 build and native-image cannot cross-compile; the JVM-jar fallback covers darwin-amd64 consumers"
       return 0
       ;;
     windows-amd64|windows-arm64)

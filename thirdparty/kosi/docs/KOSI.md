@@ -540,12 +540,11 @@ sweep: reported with the release numbers below.
   defect was not only in kosi-test.yml: all three GraalVM installs in
   native-builds.yml are sha-pinned now (linux-x64 `b2bc38d0...`,
   linux-aarch64 `7e8a3fbc...`, macos-aarch64 `ebfab1d7...`).
-  **darwin-amd64 graduates to a claimed platform** — the macos-15-intel
-  runner builds and publishes `kosi-darwin-amd64` (macos-x64 tarball
-  pinned `0019dfc4...`) — leaving windows-amd64/windows-arm64 the only
-  non-claims, with their true remaining reason (no Windows runner job wires
-  the MSVC build; the recipe is docs/BUILD.md §6). The JVM-jar fallback
-  covers every non-claimed platform.
+  **darwin-amd64 was claimed here and the claim was false (R96)** — see the
+  P15 review table; it is a named exemption again, alongside
+  windows-amd64/windows-arm64 (no Windows runner job wires the MSVC build;
+  the recipe is docs/BUILD.md §6). The JVM-jar fallback covers every
+  non-claimed platform.
 - **R66 root-caused.** The linux smoke died at startup with
   `NoClassDefFoundError: java/awt/GraphicsEnvironment` inside a JDK native
   library's `JNI_OnLoad`. The cause is in the JDK's natives:
@@ -1529,6 +1528,7 @@ Gate proofs recorded in the PR body:
 | R93 | scripts (review of P15) | the per-repo failure list was a bash ARRAY read as `${#failed[@]}` under `set -u` — on bash 3.2 (still the system bash on macOS) an empty array is an unbound variable, so the arm that reports failures would itself abort the script on the happy path | a plain string accumulator, checked with `[ -n "${failed# }" ]` |
 | R94 | kosi-export (review of P15) | the endpoint-per-slice map said "the first (lowest id) wins deterministically" and did the opposite: `.toMap()` keeps the LAST pair, so ascending order left the HIGHEST id | sorted descending so the lowest id survives, pinned by a test that writes the same two endpoints in both orders and asserts identical bytes |
 | R95 | cdxgen (the §4 consumer question, completed here) | kosi's `apiEndpoints` — the whole INBOUND route surface, with the authentication P14/P15 worked to model — was dropped by cdxgen's SaaSBOM arm: `collectKosiServices` reads only the OUTBOUND `services[]` rows | `collectKosiApiEndpoints` in `lib/ecosystems/kosi.js`, wired into evinser beside the services collector: one service per route, named as `detectServicesFromOpenAPI` names its own so a spec and a kosi run converge on one entry, with `authenticated`/`x-trust-boundary` set only when a requirement was DECLARED (an empty list is "nothing declared", not "open") and the framework, handler and media types as properties |
+| R96 | `.github/workflows/native-builds.yml`, `scripts/plugin-platform-support.sh` | The darwin-amd64 kosi native was "graduated to a claimed platform" by a job that had never once run (R53). Its GraalVM URL 404s — GraalVM ships NO macOS x64 build for JDK 25, in Community or Oracle — and the sha256 it was pinned to, `0019dfc4…`, is the hash of GitHub's nine-byte `Not Found` body, so the pin VERIFIED the error page and `tar: Unrecognized archive format` was the first complaint, on PR #93 | The build and publish steps deleted, darwin-amd64 a named exemption again with its true reason, the release's oras pull loop no longer asking for a tag nothing produces, and every GraalVM download in all three workflows moved to `curl -fsSL` so an HTTP error fails at the download instead of being pinned and unpacked |
 
 ## Defects found and fixed during P14
 
