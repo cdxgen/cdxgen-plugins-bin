@@ -54,8 +54,18 @@ jobs:
 
   # Pinned real-repo tiers. Fetches through git into .corpus-cache/ at exact
   # SHAs; a repo that moves upstream still resolves because of the pin.
+  # ON DEMAND (workflow_dispatch). The pinned-repo matrix does not fit a
+  # hosted runner: the warm step alone took 52 minutes on 2026-09-15
+  # (http4k's monorepo 42 of them), and the job was SIGTERM'd (exit 143)
+  # 56 minutes in, during nowinandroid's warm, without reaching a single
+  # bench row. corpusFull is measured per phase on the corpus machine and
+  # its numbers — rows, fail/XPASS, the vuln finding floors, every repo's
+  # resolvedCallRatio — are reported in docs/KOSI.md for that phase; that
+  # is where the gate lives. Keeping a job here that has never once
+  # completed only teaches everyone to ignore a red tick.
   corpus-full:
-    name: corpusFull (fixtures + pinned repos)
+    name: corpusFull (fixtures + pinned repos, on demand)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read

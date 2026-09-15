@@ -213,7 +213,17 @@ wherever they apply, never silent.
 
 CI: `.github/workflows/kosi-test.yml` runs the JVM gates on every change and
 the darwin-arm64 native build on every change; a `workflow_dispatch`-only
-`make linux` job exercises the linux-amd64 path. The linux-amd64 GraalVM
+`make linux` job exercises the linux-amd64 path.
+
+`corpusFull` is `workflow_dispatch`-only for the same reason it always
+should have been: the pinned-repo matrix does not fit a hosted runner.
+Measured 2026-09-15 on `ubuntu-latest`: the WARM step alone ran 52 minutes
+(http4k's monorepo 42 of them) and the job was killed (exit 143) 56 minutes
+in, during nowinandroid's warm, before a single bench row ran. The gate
+itself has not moved — `corpusFull` is run per phase on the corpus machine,
+with rows, fail/XPASS counts, the vuln finding floors and every repo's
+resolvedCallRatio recorded in that phase's `docs/KOSI.md` section. A red
+tick nobody can make green is not a gate; the phase report is. The linux-amd64 GraalVM
 tarball sha256 has been pinned since R66 (the job downloaded an unpinned
 tarball because its first successful run never happened):
 
