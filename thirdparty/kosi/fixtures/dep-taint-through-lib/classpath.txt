@@ -1,0 +1,3 @@
+# kosi classpath for this fixture (see 02-ARCHITECTURE.md §3): the committed
+# helper jar. Relative entries resolve against this file's directory.
+libs/dep-helper.jar

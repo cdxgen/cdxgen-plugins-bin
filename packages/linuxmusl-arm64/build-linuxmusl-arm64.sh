@@ -2,17 +2,20 @@
 set -e  # Exit on error
 
 # Remove old plugin directories to ensure a clean build
-rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
-mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins/dosai/dosai
 sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/trivy/
+# No kosi native here: GraalVM does not support musl static images on
+# linux-aarch64, a declared exemption in scripts/plugin-platform-support.sh;
+# these consumers get the kosi-portable.jar fallback.
 rm -f plugins/trivy/sourcekitten*
 ls -l plugins/trivy/
 
-for plug in trustinspector golem rusi cdxui cdxrs
+for plug in trustinspector golem rusi kosi cdxui cdxrs
 do
   bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linuxmusl-arm64"
 done

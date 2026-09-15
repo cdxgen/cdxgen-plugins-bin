@@ -1,0 +1,1 @@
+// a .def-looking file OUTSIDE the cinterop directories must not be evidence

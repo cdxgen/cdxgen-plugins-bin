@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app>
+  <!-- The P15 half: <security-constraint> is the deployment descriptor's
+       own authentication requirement, parsed for mappings since P13 and
+       parsed PAST for access control until now. -->
+  <servlet>
+    <servlet-name>legacy</servlet-name>
+    <servlet-class>fixtures.dslmedia.LegacyServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>legacy</servlet-name>
+    <url-pattern>/legacy/*</url-pattern>
+  </servlet-mapping>
+  <servlet>
+    <servlet-name>public</servlet-name>
+    <servlet-class>fixtures.dslmedia.PublicServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>public</servlet-name>
+    <url-pattern>/public</url-pattern>
+  </servlet-mapping>
+  <servlet>
+    <servlet-name>denied</servlet-name>
+    <servlet-class>fixtures.dslmedia.DeniedServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>denied</servlet-name>
+    <url-pattern>/denied</url-pattern>
+  </servlet-mapping>
+
+  <!-- /legacy/* requires admin or auditor. -->
+  <security-constraint>
+    <web-resource-collection>
+      <web-resource-name>legacy</web-resource-name>
+      <url-pattern>/legacy/*</url-pattern>
+    </web-resource-collection>
+    <auth-constraint>
+      <role-name>admin</role-name>
+      <role-name>auditor</role-name>
+    </auth-constraint>
+  </security-constraint>
+
+  <!-- A constraint with NO auth-constraint constrains transport only, not
+       access: /public carries no authentication requirement. -->
+  <security-constraint>
+    <web-resource-collection>
+      <web-resource-name>public</web-resource-name>
+      <url-pattern>/public</url-pattern>
+    </web-resource-collection>
+    <user-data-constraint>
+      <transport-guarantee>CONFIDENTIAL</transport-guarantee>
+    </user-data-constraint>
+  </security-constraint>
+
+  <!-- An EMPTY auth-constraint is the descriptor's DENY-ALL. -->
+  <security-constraint>
+    <web-resource-collection>
+      <web-resource-name>denied</web-resource-name>
+      <url-pattern>/denied</url-pattern>
+    </web-resource-collection>
+    <auth-constraint/>
+  </security-constraint>
+</web-app>

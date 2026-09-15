@@ -6,6 +6,15 @@ rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/
 mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxrs
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/sourcekitten/
+# kosi natives are staged into ../../plugins/kosi by build.sh, from
+# thirdparty/kosi/build - built there (test.yml's kosi_*_prebuild jobs) or
+# pulled from the ghcr cache (release.yml). This script no longer races a
+# concurrent native-builds run for a cache tag; a missing binary is a loud
+# failure here and in check-plugin-coverage.sh, never a quiet omission.
+[ -f "../../plugins/kosi/kosi-linux-amd64" ] || {
+  echo "kosi-linux-amd64 missing from plugins/kosi; the caller must stage it first" >&2
+  exit 1
+}
 sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
 rm -f plugins/sourcekitten/trivy-cdxgen-*
 ls -l plugins/sourcekitten/
@@ -18,7 +27,7 @@ sha256sum plugins/osquery/osqueryi-linux-amd64 > plugins/osquery/osqueryi-linux-
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-amd64 plugins/dosai/dosai-linux-amd64
 sha256sum plugins/dosai/dosai-linux-amd64 > plugins/dosai/dosai-linux-amd64.sha256
 
-for plug in trivy trustinspector golem rusi cdxui cdxrs
+for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do
     mkdir -p "plugins/$plug"
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-amd64"

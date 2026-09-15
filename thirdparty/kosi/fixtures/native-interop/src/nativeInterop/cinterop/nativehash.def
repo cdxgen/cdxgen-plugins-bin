@@ -1,0 +1,5 @@
+// The Kotlin/Native cinterop definition: binds the nativehash C library.
+// Its PRESENCE is the evidence (see NativeInterop); kosi never reads the
+// contents beyond counting the file.
+headers = nativehash.h
+headerFilter = nativehash.*

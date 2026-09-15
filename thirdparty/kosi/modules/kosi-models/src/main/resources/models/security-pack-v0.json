@@ -1,0 +1,3047 @@
+{
+  "description": "The taint model pack. Sources, sinks, passthroughs, sanitizers and effects are DATA: the engine matches callee symbols against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a rule. Argument-index convention: 0 is the RECEIVER when the callee has one, otherwise the first argument; n is the n-th element of that (receiver,) arguments sequence; -1 is the call's result. Constructor callees render as the class FQN (no <init> suffix). P4 is the first phase that executes this pack, which is why several P0 seed entries carry corrected indexes.",
+  "effects": [
+    {
+      "pattern": "kotlin.io.copyTo",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "java.lang.ProcessBuilder.redirectOutput",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "kotlin.collections.MutableList.add",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "kotlinx.coroutines.channels.Channel.send",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "kotlinx.coroutines.channels.SendChannel.send",
+      "writesToArguments": [
+        1
+      ]
+    }
+  ],
+  "literalSources": [
+    {
+      "category": "hardcoded-secret",
+      "namePattern": "(?i).*(password|passwd|pwd|secret|apikey|api[_-]?key|token|private[_-]?key|signing[_-]?key|encryption[_-]?key).*"
+    }
+  ],
+  "name": "security-pack-v0",
+  "passthroughs": [
+    {
+      "category": "android-wrapper",
+      "flows": [
+        [
+          2,
+          -1
+        ]
+      ],
+      "pattern": "android.content.ClipData.newPlainText"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "android.net.Uri.parse"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "com.google.gson.Gson.fromJson"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "io.ktor.http.Url"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.net.URLDecoder.decode"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.util.Base64.Decoder.decode"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.util.Base64.Encoder.encodeToString"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.io.encoding.Base64.decode"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlinx.serialization.json.Json.decodeFromString"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "org.json.JSONObject"
+    },
+    {
+      "category": "format-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "org.json.JSONObject.getString"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "androidx.compose.runtime.LaunchedEffect"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.also"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.apply"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.collections.contains"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.collections.hasNext"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.iterator"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.listOf"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.map"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ],
+        [
+          2,
+          -1
+        ],
+        [
+          3,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.mutableListOf"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.next"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.split"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.toList"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.toTypedArray"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.component1"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.component2"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.component3"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.component4"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.component5"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.equals"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.isNull"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.let"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.plus"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.run"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.lowercase"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.plus"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.replace"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.split"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.substring"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.trim"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.uppercase"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.use"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlin.with"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlinx.coroutines.Deferred.await"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.async"
+    },
+    {
+      "category": "iterator-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "flows": [],
+      "pattern": "kotlinx.coroutines.channels.Channel.receive"
+    },
+    {
+      "category": "iterator-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "flows": [],
+      "pattern": "kotlinx.coroutines.channels.ReceiveChannel.receive"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "kotlinx.coroutines.flow.MutableStateFlow"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.channelFlow"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.collect"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.collectLatest"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.filter"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.first"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.flow"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.last"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.map"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.mapNotNull"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.onEach"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.single"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.flow.transform"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.launch"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.runBlocking"
+    },
+    {
+      "category": "iterator-adapter",
+      "flows": [],
+      "pattern": "kotlinx.coroutines.withContext"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.io.BufferedReader"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.io.ByteArrayInputStream"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.io.InputStreamReader"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.getBytes"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.byteInputStream"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.io.bufferedReader"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.io.inputStream"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.io.reader"
+    },
+    {
+      "category": "stream-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.toByteArray"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.concat"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.format"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.replace"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.substring"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.toLowerCase"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.toUpperCase"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.trim"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.String.valueOf"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuffer.append"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuilder.append"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.Any.toString"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.collections.joinToString"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.format"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.joinToString"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.padEnd"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.padStart"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.removePrefix"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.removeSuffix"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.repeat"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.reversed"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.toString"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.trimIndent"
+    }
+  ],
+  "sanitizers": [
+    {
+      "clears": [
+        "path-traversal"
+      ],
+      "pattern": "java.io.File.getCanonicalPath"
+    },
+    {
+      "clears": [
+        "untrusted-input",
+        "xss",
+        "open-redirect"
+      ],
+      "pattern": "java.net.URLEncoder.encode"
+    },
+    {
+      "clears": [
+        "path-traversal"
+      ],
+      "pattern": "java.nio.file.Path.normalize"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.security.MessageDigest.digest"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.util.UUID.fromString"
+    },
+    {
+      "clears": [
+        "sql-query"
+      ],
+      "pattern": "java.util.regex.Pattern.quote"
+    },
+    {
+      "clears": [
+        "xss"
+      ],
+      "pattern": "org.apache.commons.lang3.StringEscapeUtils.escapeHtml4"
+    },
+    {
+      "clears": [
+        "xss"
+      ],
+      "pattern": "org.apache.commons.text.StringEscapeUtils.escapeHtml4"
+    },
+    {
+      "clears": [
+        "xss"
+      ],
+      "pattern": "org.owasp.encoder.Encode.forHtml"
+    },
+    {
+      "clears": [
+        "xss"
+      ],
+      "pattern": "org.owasp.encoder.Encode.forJavaScript"
+    },
+    {
+      "clears": [
+        "xss",
+        "open-redirect",
+        "ssrf"
+      ],
+      "pattern": "org.owasp.encoder.Encode.forUriComponent"
+    },
+    {
+      "clears": [
+        "xss"
+      ],
+      "pattern": "org.springframework.web.util.HtmlUtils.htmlEscape"
+    }
+  ],
+  "sinks": [
+    {
+      "category": "xss",
+      "pattern": "io.ktor.response.respond",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "open-redirect",
+      "pattern": "io.ktor.response.respondRedirect",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "io.ktor.response.respondText",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "code-execution",
+      "pattern": "java.lang.Class.forName",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "code-execution",
+      "pattern": "java.lang.ClassLoader.loadClass",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "code-execution",
+      "pattern": "java.lang.reflect.Method.invoke",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "code-execution",
+      "pattern": "javax.script.ScriptEngine.eval",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "code-execution",
+      "pattern": "javax.tools.JavaCompiler.run",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "java.security.MessageDigest.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.Cipher.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.PBEKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "crypto-asset",
+      "pattern": "javax.crypto.spec.SecretKeySpec",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readTree",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue",
+      "receiverType": "com.fasterxml.jackson.databind.ObjectMapper",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "com.google.gson.Gson.fromJson",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "com.thoughtworks.xstream.XStream.fromXML",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "java.beans.XMLDecoder.readObject",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "java.io.ObjectInputStream.readObject",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "kotlinx.serialization.json.Json.decodeFromString",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "deserialization",
+      "pattern": "org.yaml.snakeyaml.Yaml.load",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "android.content.ClipboardManager.setPrimaryClip",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "android.content.SharedPreferences.Editor.putString",
+      "receiverType": null,
+      "relevantArguments": [
+        2
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "java.io.FileOutputStream.write",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "java.io.FileWriter.write",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "java.io.OutputStream.write",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "java.io.Writer.write",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "kotlin.io.appendText",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-storage",
+      "pattern": "kotlin.io.writeText",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "insecure-tls",
+      "pattern": "javax.net.ssl.SSLContext.getInstance",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "intent-redirection",
+      "pattern": "android.app.Activity.startActivity",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "intent-redirection",
+      "pattern": "android.content.Context.startActivity",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "jndi-injection",
+      "pattern": "javax.naming.Context.lookup",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "jndi-injection",
+      "pattern": "javax.naming.InitialContext.lookup",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "jndi-injection",
+      "pattern": "javax.naming.directory.DirContext.search",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "jndi-injection",
+      "pattern": "javax.naming.ldap.LdapContext.search",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "js-injection",
+      "pattern": "android.webkit.WebView.evaluateJavascript",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.d",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.e",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.i",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.println",
+      "relevantArguments": [
+        2
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.v",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.w",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "android.util.Log.wtf",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "kotlin.io.println",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "org.apache.kafka.clients.producer.KafkaProducer.send",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "org.slf4j.Logger.info",
+      "receiverType": "org.slf4j.Logger",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "log-injection",
+      "pattern": "org.springframework.kafka.core.KafkaTemplate.send",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "co.elastic.clients.elasticsearch.ElasticsearchClient.search",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "com.datastax.oss.driver.api.core.CqlSession.execute",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "com.mongodb.client.MongoCollection.aggregate",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "com.mongodb.client.MongoCollection.find",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "io.lettuce.core.api.sync.RedisCommands.eval",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "org.bson.Document.parse",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "org.neo4j.driver.Session.run",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "org.springframework.data.mongodb.core.MongoTemplate.find",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "nosql-query",
+      "pattern": "redis.clients.jedis.Jedis.eval",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "open-redirect",
+      "pattern": "jakarta.servlet.http.HttpServletResponse.sendRedirect",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "open-redirect",
+      "pattern": "javax.servlet.http.HttpServletResponse.sendRedirect",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "com.google.cloud.storage.BlobId.of",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.File",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.FileOutputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.FileWriter",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "software.amazon.awssdk.services.s3.model.GetObjectRequest.Builder.key",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "software.amazon.awssdk.services.s3.model.PutObjectRequest.Builder.key",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "software.amazon.awssdk.services.ssm.model.GetParameterRequest.Builder.name",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "process-exec",
+      "pattern": "java.lang.ProcessBuilder",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "process-exec",
+      "pattern": "java.lang.Runtime.exec",
+      "receiverType": "java.lang.Runtime",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "process-exec",
+      "pattern": "java.lang.System.exit",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "com.anthropic.models.MessageCreateParams.Builder.messages",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "com.google.genai.Models.generateContent",
+      "receiverType": null,
+      "relevantArguments": [
+        2
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "com.openai.models.ChatCompletionCreateParams.Builder.messages",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "com.openai.services.blocking.ChatService.completions",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "dev.langchain4j.data.message.UserMessage.from",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "dev.langchain4j.model.chat.ChatLanguageModel.generate",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "io.modelcontextprotocol.kotlin.sdk.CallToolResult",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "io.modelcontextprotocol.kotlin.sdk.TextContent",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "medium"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "org.springframework.ai.chat.client.ChatClient.prompt",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "prompt-injection",
+      "pattern": "org.springframework.ai.chat.prompt.Prompt",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "android.database.sqlite.SQLiteDatabase.execSQL",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "android.database.sqlite.SQLiteDatabase.rawQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "android.database.sqlite.SQLiteQueryBuilder.query",
+      "receiverType": null,
+      "relevantArguments": [
+        2
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "io.r2dbc.spi.Connection.createStatement",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "jakarta.persistence.EntityManager.createNativeQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "jakarta.persistence.EntityManager.createQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Connection.prepareCall",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Connection.prepareStatement",
+      "receiverType": "java.sql.Connection",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.addBatch",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.execute",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.executeLargeUpdate",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.executeQuery",
+      "receiverType": "java.sql.Statement",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "java.sql.Statement.executeUpdate",
+      "receiverType": "java.sql.Statement",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "javax.persistence.EntityManager.createNativeQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "javax.persistence.EntityManager.createQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.hibernate.Session.createNativeQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.hibernate.Session.createQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.hibernate.Session.createSQLQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.jetbrains.exposed.sql.exec",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.jooq.DSLContext.execute",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.jooq.DSLContext.fetch",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.jooq.DSLContext.resultQuery",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.springframework.jdbc.core.JdbcTemplate.execute",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.springframework.jdbc.core.JdbcTemplate.query",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.springframework.jdbc.core.JdbcTemplate.queryForList",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.springframework.jdbc.core.JdbcTemplate.queryForObject",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
+      "pattern": "org.springframework.jdbc.core.JdbcTemplate.update",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "io.grpc.Grpc.newChannelBuilder",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "io.grpc.ManagedChannelBuilder.forTarget",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "io.ktor.client.request.HttpRequestBuilder.url",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "io.ktor.client.request.url",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "java.net.URI.create",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "java.net.URL",
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "java.net.http.HttpRequest.Builder.uri",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "okhttp3.HttpUrl.parse",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "okhttp3.HttpUrl.Companion.toHttpUrl",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "okhttp3.HttpUrl.Companion.toHttpUrlOrNull",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "okhttp3.Request.Builder.url",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.apache.hc.client5.http.classic.methods.HttpGet",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.apache.http.client.methods.HttpGet",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.springframework.web.client.RestTemplate.exchange",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.springframework.web.client.RestTemplate.getForObject",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.springframework.web.client.RestTemplate.postForObject",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "org.springframework.web.reactive.function.client.WebClient.RequestHeadersUriSpec.uri",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "retrofit2.Retrofit.Builder.baseUrl",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "template-injection",
+      "pattern": "freemarker.template.Configuration.getTemplate",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "template-injection",
+      "pattern": "org.apache.velocity.app.VelocityEngine.evaluate",
+      "receiverType": null,
+      "relevantArguments": [
+        4
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "template-injection",
+      "pattern": "org.thymeleaf.TemplateEngine.process",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "webview-load",
+      "pattern": "android.webkit.WebView.loadData",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "webview-load",
+      "pattern": "android.webkit.WebView.loadDataWithBaseURL",
+      "receiverType": null,
+      "relevantArguments": [
+        2
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "webview-load",
+      "pattern": "android.webkit.WebView.loadUrl",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "webview-load",
+      "pattern": "android.webkit.WebView.postUrl",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "io.ktor.server.response.respond",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "io.ktor.server.response.respondText",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "java.io.PrintWriter.print",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "java.io.PrintWriter.println",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "java.io.PrintWriter.write",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "org.springframework.http.ResponseEntity.ok",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "org.springframework.web.servlet.ModelAndView.addObject",
+      "receiverType": null,
+      "relevantArguments": [
+        2
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xxe",
+      "pattern": "javax.xml.parsers.DocumentBuilder.parse",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xxe",
+      "pattern": "javax.xml.parsers.SAXParser.parse",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xxe",
+      "pattern": "javax.xml.stream.XMLInputFactory.createXMLStreamReader",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xxe",
+      "pattern": "javax.xml.transform.Transformer.transform",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xxe",
+      "pattern": "org.xmlpull.v1.XmlPullParser.setInput",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    }
+  ],
+  "sources": [
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getAction"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getBooleanExtra"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getData"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getDataString"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getExtras"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getIntExtra"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getParcelableExtra"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getSerializableExtra"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.content.Intent.getStringExtra"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.net.Uri.getLastPathSegment"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.net.Uri.getPath"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.net.Uri.getQueryParameter"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.os.Bundle.getString"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.webkit.WebResourceRequest.getUrl"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "android.content.SharedPreferences.getString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "android.database.Cursor.getString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "android.widget.EditText.getText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "android.widget.TextView.getText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent.getHeaders"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent.getPathParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent.getQueryStringParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.anthropic.models.Message.content"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.google.cloud.storage.Blob.getContent"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.microsoft.azure.functions.HttpRequestMessage.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.openai.models.ChatCompletion.choices"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "com.rabbitmq.client.Delivery.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "dev.langchain4j.model.chat.ChatLanguageModel.generate"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "dev.langchain4j.service.AiServices.create"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.grpc.Metadata.get"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.attribute"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsBytes"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsClass"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsInputStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.cookieMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.headerMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.pathParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.pathParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.application.ApplicationCall.parameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.http.Parameters.get"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.queryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receive"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveChannel"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.application.ApplicationCall.parameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.ApplicationRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.ApplicationRequest.queryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receive"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receiveChannel"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receiveNullable"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receiveParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receiveStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.receiveText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.micronaut.http.HttpRequest.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.micronaut.http.HttpRequest.getParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.modelcontextprotocol.kotlin.sdk.CallToolRequest.arguments"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest.arguments"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.modelcontextprotocol.spec.McpSchema.CallToolRequest.arguments"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.absoluteURI"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.bodyAsJson"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.bodyAsString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getHeader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.params"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.path"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.query"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.uri"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RequestBody.asJsonObject"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RequestBody.asString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.pathParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.queryParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.jms.TextMessage.getText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.Cookie.getValue"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getHeader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getInputStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getParameter"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getParameterValues"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getPathInfo"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getQueryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getReader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getRemoteUser"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getRequestURI"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.http.HttpServletRequest.getRequestURL"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.ws.rs.core.UriInfo.getPathParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.ws.rs.core.UriInfo.getQueryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "java.io.BufferedReader.readLine"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "java.net.Socket.getInputStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.jms.TextMessage.getText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.Cookie.getValue"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getHeader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getInputStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getParameter"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getParameterValues"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getPathInfo"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getQueryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getReader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getRemoteUser"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getRequestURI"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.http.HttpServletRequest.getRequestURL"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.ws.rs.core.UriInfo.getQueryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.ws.rs.core.UriInfo.getPathParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "kotlin.io.readLine"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "kotlin.io.readLines"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "kotlin.io.readText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.apache.kafka.clients.consumer.ConsumerRecord.key"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.apache.kafka.clients.consumer.ConsumerRecord.value"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.bodyString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.form"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.path"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.query"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.ai.chat.model.ChatModel.call"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.http.server.reactive.ServerHttpRequest.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyToFlux"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyToMono"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathVariable"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.queryParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.queryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.util.UriComponentsBuilder.build"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "software.amazon.awssdk.services.s3.S3Client.getObject"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.attribute"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.bodyAsBytes"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.params"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.queryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.splat"
+    }
+  ]
+}

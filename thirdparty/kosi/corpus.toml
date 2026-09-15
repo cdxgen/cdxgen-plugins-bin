@@ -1,0 +1,787 @@
+# kosi corpus manifest. Modeled on rusi's corpus.toml (06-CORPUS.md).
+#
+# Tiers:
+#   fixtures - bundled micro-projects under fixtures/, no network, run on every change
+#   small    - small real repos, SHA-pinned, fetched into .corpus-cache/<slug>/, run on every change
+#   medium   - larger repos, per phase / nightly (entries land with their enabling phase)
+#   large    - on demand
+#   android / kmp / hybrid - per phase
+#   vuln     - intentionally vulnerable, ground truth, every change
+#   ported   - DroidBench/Ghera cases rewritten in idiomatic Kotlin, every change
+#
+# capabilities are recorded, not enforced. expected_flows points at a JSONL
+# file of hand-annotated ground truth for pinned repos; bundled fixtures carry
+# their expectations as kosi:want annotations in the sources themselves.
+
+[[fixtures]]
+slug = "scope-functions"
+tier = "fixtures"
+path = "fixtures/scope-functions"
+capabilities = ["scope-functions", "null-safety"]
+
+[[fixtures]]
+slug = "null-safety"
+tier = "fixtures"
+path = "fixtures/null-safety"
+capabilities = ["elvis-join", "safe-call"]
+
+[[fixtures]]
+slug = "string-template"
+tier = "fixtures"
+path = "fixtures/string-template"
+capabilities = ["string-template", "taint-concat"]
+
+# P4 taint fixtures: intraprocedural, field-sensitive flows over the CFG.
+# field-sensitivity carries the corpus's most valuable negative: the clean
+# SIBLING field of a partly-tainted object must not report.
+
+[[fixtures]]
+slug = "field-sensitivity"
+tier = "fixtures"
+path = "fixtures/field-sensitivity"
+capabilities = ["taint", "field-sensitivity", "access-path"]
+
+[[fixtures]]
+slug = "taint-sanitizer"
+tier = "fixtures"
+path = "fixtures/taint-sanitizer"
+capabilities = ["taint", "sanitizer"]
+
+[[fixtures]]
+slug = "collection-passthrough"
+tier = "fixtures"
+path = "fixtures/collection-passthrough"
+capabilities = ["taint", "collection-passthrough", "effects"]
+
+[[fixtures]]
+slug = "scope-function-flow"
+tier = "fixtures"
+path = "fixtures/scope-function-flow"
+capabilities = ["taint", "scope-functions", "receiver"]
+
+[[fixtures]]
+slug = "taint-loop-fixpoint"
+tier = "fixtures"
+path = "fixtures/taint-loop-fixpoint"
+capabilities = ["taint", "fixpoint", "loop-carried"]
+
+[[fixtures]]
+slug = "data-class-copy"
+tier = "fixtures"
+path = "fixtures/data-class-copy"
+capabilities = ["data-class", "copy"]
+
+[[fixtures]]
+slug = "sealed-when"
+tier = "fixtures"
+path = "fixtures/sealed-when"
+capabilities = ["sealed", "when-exhaustive"]
+
+[[fixtures]]
+slug = "coroutine-suspend"
+tier = "fixtures"
+path = "fixtures/coroutine-suspend"
+capabilities = ["coroutines", "suspend", "structured-concurrency"]
+
+[[fixtures]]
+slug = "sqli-jdbc-concat"
+tier = "fixtures"
+path = "fixtures/sqli-jdbc-concat"
+capabilities = ["sqli", "jdbc"]
+
+[[fixtures]]
+slug = "command-exec"
+tier = "fixtures"
+path = "fixtures/command-exec"
+capabilities = ["command-exec", "process"]
+# known-fail=1 lives in the fixture sources: no flow engine exists at the
+# syntax tier yet.
+
+[[fixtures]]
+slug = "delegated-properties"
+tier = "fixtures"
+path = "fixtures/delegated-properties"
+capabilities = ["delegated-properties"]
+
+[[fixtures]]
+slug = "destructuring"
+tier = "fixtures"
+path = "fixtures/destructuring"
+capabilities = ["destructuring"]
+
+[[fixtures]]
+slug = "for-iterable"
+tier = "fixtures"
+path = "fixtures/for-iterable"
+capabilities = ["for-iterable"]
+
+[[fixtures]]
+slug = "operators"
+tier = "fixtures"
+path = "fixtures/operators"
+capabilities = ["operators"]
+
+[[fixtures]]
+slug = "use-close"
+tier = "fixtures"
+path = "fixtures/use-close"
+capabilities = ["use-close"]
+
+[[fixtures]]
+slug = "weak-crypto"
+tier = "fixtures"
+path = "fixtures/weak-crypto"
+capabilities = ["crypto", "weak-digest", "ecb"]
+
+[[fixtures]]
+slug = "log-injection"
+tier = "fixtures"
+path = "fixtures/log-injection"
+capabilities = ["log-injection"]
+
+[[fixtures]]
+slug = "parse-error-reporting"
+tier = "fixtures"
+path = "fixtures/parse-error-reporting"
+capabilities = ["diagnostics", "parse-error"]
+
+[[fixtures]]
+slug = "java-interop"
+tier = "fixtures"
+path = "fixtures/java-interop"
+capabilities = ["java-interop", "mixed-sources"]
+
+[[fixtures]]
+slug = "multi-module-gradle"
+tier = "fixtures"
+path = "fixtures/multi-module-gradle"
+capabilities = ["gradle-multi-module", "version-clamp"]
+
+[[fixtures]]
+slug = "maven-project"
+tier = "fixtures"
+path = "fixtures/maven-project"
+capabilities = ["maven", "jvm-target"]
+
+[[fixtures]]
+slug = "kmp-jvm-android"
+tier = "fixtures"
+path = "fixtures/kmp-jvm-android"
+capabilities = ["kmp", "expect-actual", "source-sets"]
+
+[[fixtures]]
+slug = "android-compose-app"
+tier = "fixtures"
+path = "fixtures/android-compose-app"
+capabilities = ["android", "variants", "log"]
+
+[[fixtures]]
+slug = "empty-classpath"
+tier = "fixtures"
+path = "fixtures/empty-classpath"
+capabilities = ["classpath-partial", "offline-resolution"]
+
+[[fixtures]]
+slug = "old-language-version"
+tier = "fixtures"
+path = "fixtures/old-language-version"
+capabilities = ["version-clamp", "language-version-band"]
+
+[[fixtures]]
+slug = "latest-syntax"
+tier = "fixtures"
+path = "fixtures/latest-syntax"
+capabilities = ["context-parameters", "explicit-backing-fields"]
+
+[[fixtures]]
+# Run only by the EAP CI job (tier eap): uses the next version's syntax.
+slug = "future-syntax"
+tier = "eap"
+path = "fixtures/future-syntax"
+capabilities = ["version-ceiling", "eap"]
+
+# P9: cross-dependency taint. The dependency is a COMMITTED jar
+# (libs/dep-helper.jar, built by helper-src/build.sh from the Kotlin source
+# beside it); classpath.txt names it, and the `deps` matrix slot lowers it
+# into the KIR and summarises it (origin=bytecode). The body-less records
+# (an interface method, an abstract method) are the phase's most important
+# negative: they must be excluded entirely, never summarised as "no flow".
+
+[[fixtures]]
+slug = "dep-taint-through-lib"
+tier = "fixtures"
+path = "fixtures/dep-taint-through-lib"
+classpath_file = "classpath.txt"
+capabilities = ["deps", "bytecode-summaries", "cross-dependency", "bodyless-records", "source-returns"]
+
+# P9 regression guard: an unresolved CONSTRUCTOR is an unresolved call. The
+# branch that added the dependency tier briefly made it "handled" instead,
+# suppressing the conservative unknown-call default across every backend.
+# Positive and near-miss negative differ only in what enters the constructor.
+
+[[fixtures]]
+slug = "unresolved-constructor"
+tier = "fixtures"
+path = "fixtures/unresolved-constructor"
+capabilities = ["unknown-call-default", "constructors", "summaries"]
+
+# P9: the Kotlin/Native + JNI/cinterop seam as native-interop evidence.
+# Positives: an external fun, a loadLibrary binding site, a cinterop .def.
+# Negatives: plain functions with native-looking names, a commented-out
+# loadLibrary, a .def file outside the cinterop directories.
+
+[[fixtures]]
+slug = "native-interop"
+tier = "fixtures"
+path = "fixtures/native-interop"
+capabilities = ["native-interop", "jni", "cinterop", "security-signals"]
+
+# P3 call-graph fixtures: dispatch modes, sealed narrowing, exported roots
+# and framework-registration roots. Each carries a negative half naming what
+# a plausibly wrong dispatcher would emit.
+
+# Access paths deeper than one field (R63): the corpus was entirely flat, so
+# the depth-5 cap `AccessPath` has carried since P2 was never exercised and a
+# lowering that emitted length-one paths only read 1.000 recall.
+
+[[fixtures]]
+slug = "nested-field-path"
+tier = "fixtures"
+path = "fixtures/nested-field-path"
+capabilities = ["taint", "field-sensitivity", "summaries", "clean-sibling"]
+
+# P5 summary fixtures: interprocedural flows, negatives first.
+
+[[fixtures]]
+slug = "summary-clean-sibling"
+tier = "fixtures"
+path = "fixtures/summary-clean-sibling"
+capabilities = ["taint", "summaries", "field-sensitivity", "clean-sibling"]
+
+[[fixtures]]
+slug = "summary-sanitized-callee"
+tier = "fixtures"
+path = "fixtures/summary-sanitized-callee"
+capabilities = ["taint", "summaries", "sanitizer"]
+
+[[fixtures]]
+slug = "summary-param-to-return"
+tier = "fixtures"
+path = "fixtures/summary-param-to-return"
+capabilities = ["taint", "summaries", "param-to-return"]
+
+[[fixtures]]
+slug = "summary-param-to-param"
+tier = "fixtures"
+path = "fixtures/summary-param-to-param"
+capabilities = ["taint", "summaries", "param-to-param", "effects"]
+
+[[fixtures]]
+slug = "summary-param-to-receiver"
+tier = "fixtures"
+path = "fixtures/summary-param-to-receiver"
+capabilities = ["taint", "summaries", "param-to-receiver", "receiver"]
+
+[[fixtures]]
+slug = "summary-recursive"
+tier = "fixtures"
+path = "fixtures/summary-recursive"
+capabilities = ["taint", "summaries", "recursion", "scc"]
+
+[[fixtures]]
+slug = "summary-virtual-dispatch"
+tier = "fixtures"
+path = "fixtures/summary-virtual-dispatch"
+capabilities = ["taint", "summaries", "dispatch", "rta"]
+
+[[fixtures]]
+slug = "summary-higher-order"
+tier = "fixtures"
+path = "fixtures/summary-higher-order"
+capabilities = ["taint", "summaries", "higher-order", "lambdas"]
+
+# The cross-module fixture that makes `dependency-crossing-flows` real (R55).
+
+[[fixtures]]
+slug = "summary-cross-module"
+tier = "fixtures"
+path = "fixtures/summary-cross-module"
+capabilities = ["taint", "summaries", "cross-module", "gradle-multi-module"]
+
+[[fixtures]]
+slug = "sealed-dispatch"
+tier = "fixtures"
+path = "fixtures/sealed-dispatch"
+capabilities = ["call-graph", "sealed-narrowing", "dispatch"]
+
+[[fixtures]]
+slug = "virtual-dispatch"
+tier = "fixtures"
+path = "fixtures/virtual-dispatch"
+capabilities = ["call-graph", "cha", "library-interface"]
+
+[[fixtures]]
+slug = "library-api"
+tier = "fixtures"
+path = "fixtures/library-api"
+capabilities = ["call-graph", "exported-roots", "public-api"]
+
+[[fixtures]]
+# The only fixture whose reachability travels an edge: every other one
+# reaches nothing but its own roots, so the edge-connectivity gate had no
+# denominator to divide by.
+slug = "reachable-depth"
+tier = "fixtures"
+path = "fixtures/reachable-depth"
+capabilities = ["call-graph", "exported-roots", "reachability"]
+
+[[fixtures]]
+slug = "framework-handlers"
+tier = "fixtures"
+path = "fixtures/framework-handlers"
+capabilities = ["call-graph", "framework-roots", "type-resolved"]
+
+# P7 framework tier: one bundled fixture per framework, each carrying its
+# positive endpoints AND its lookalike negatives (an annotated DTO, a
+# private method with a mapping-shaped name, a commented-out route, a
+# marker class with no mapped methods). Run by corpusQuick alongside the
+# fixture tier, so the per-framework endpoint ratchet is exercised on every
+# change.
+
+[[fixtures]]
+slug = "spring-mvc-app"
+tier = "frameworks"
+path = "fixtures/spring-mvc-app"
+capabilities = ["spring-mvc", "endpoints", "homonym-negative"]
+
+[[fixtures]]
+slug = "spring-webflux-app"
+tier = "frameworks"
+path = "fixtures/spring-webflux-app"
+capabilities = ["spring-webflux", "endpoints", "lookalike-negative"]
+
+[[fixtures]]
+slug = "ktor-app"
+tier = "frameworks"
+path = "fixtures/ktor-app"
+capabilities = ["ktor", "endpoints", "dsl", "outbound", "config-resolution"]
+
+[[fixtures]]
+slug = "micronaut-app"
+tier = "frameworks"
+path = "fixtures/micronaut-app"
+capabilities = ["micronaut", "endpoints", "homonym-negative"]
+
+[[fixtures]]
+slug = "quarkus-app"
+tier = "frameworks"
+path = "fixtures/quarkus-app"
+capabilities = ["quarkus", "jaxrs", "endpoints", "empty-resource-negative"]
+
+[[fixtures]]
+slug = "http4k-app"
+tier = "frameworks"
+path = "fixtures/http4k-app"
+capabilities = ["http4k", "contract-routes", "endpoints"]
+
+[[fixtures]]
+slug = "grpc-service"
+tier = "frameworks"
+path = "fixtures/grpc-service"
+capabilities = ["grpc", "rpc", "endpoints", "implbase-negative"]
+
+[[fixtures]]
+slug = "android-manifest-app"
+tier = "frameworks"
+path = "fixtures/android-manifest-app"
+capabilities = ["android", "manifest", "endpoints", "deep-links"]
+
+# P8 crypto tier: transform forms, TLS/JWT/keystore, and material flows.
+# Every shipped mapping row is exercised somewhere in this tier, which the
+# crypto-mapping-coverage gate enforces at 1.000.
+
+[[fixtures]]
+slug = "crypto-transform-forms"
+tier = "crypto"
+path = "fixtures/crypto-transform-forms"
+capabilities = ["crypto", "transforms", "const-folding", "config-resolution"]
+
+[[fixtures]]
+slug = "crypto-algorithms"
+tier = "crypto"
+path = "fixtures/crypto-algorithms"
+capabilities = ["crypto", "digests", "signatures", "asymmetric"]
+
+[[fixtures]]
+slug = "crypto-tls-jwt"
+tier = "crypto"
+path = "fixtures/crypto-tls-jwt"
+capabilities = ["crypto", "tls", "jwt", "keystore", "trust-all"]
+
+[[fixtures]]
+slug = "crypto-material-flow"
+tier = "crypto"
+path = "fixtures/crypto-material-flow"
+capabilities = ["crypto", "materials", "crypto-flow", "pbkdf2", "ec-curve"]
+
+# P6 async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
+# its own task (`corpusAsync`) AND by the bench/gate run, so `async-recall`
+# has its own denominator while the sweeps and the native metadata agent see
+# every fixture directory.
+
+[[fixtures]]
+slug = "async-flow-collect"
+tier = "async"
+path = "fixtures/async-flow-collect"
+capabilities = ["coroutines", "flow", "collect", "sanitizer"]
+
+[[fixtures]]
+slug = "async-await"
+tier = "async"
+path = "fixtures/async-await"
+capabilities = ["coroutines", "async", "await"]
+
+[[fixtures]]
+slug = "async-channel"
+tier = "async"
+path = "fixtures/async-channel"
+capabilities = ["coroutines", "channel", "send-receive"]
+
+[[fixtures]]
+slug = "async-launch-scope"
+tier = "async"
+path = "fixtures/async-launch-scope"
+capabilities = ["coroutines", "launch", "scope"]
+
+[[fixtures]]
+slug = "async-withcontext"
+tier = "async"
+path = "fixtures/async-withcontext"
+capabilities = ["coroutines", "withcontext", "dispatchers"]
+
+[[fixtures]]
+slug = "async-android-scopes"
+tier = "async"
+path = "fixtures/async-android-scopes"
+capabilities = ["coroutines", "android", "viewmodelscope", "launchedeffect"]
+
+[[fixtures]]
+slug = "async-stateflow"
+tier = "async"
+path = "fixtures/async-stateflow"
+capabilities = ["coroutines", "stateflow", "collect"]
+
+# P11: the R69 construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
+# is a coverage denominator nothing measured — KDoc was found by accident
+# (R69), and the sweep found 29 constructs 68 fixtures had never contained.
+# Four fixtures close the sweep; each names its constructs in capabilities
+# and carries the lowering-failed want-not, so a construct the lowering
+# declines is a corpus failure, not an invisible gap. A construct missing
+# here means the native image could not have run it.
+
+[[fixtures]]
+slug = "generic-shapes"
+tier = "fixtures"
+path = "fixtures/generic-shapes"
+capabilities = ["variance-out", "variance-in", "star-projection", "where-clause", "nested-generics", "annotation-on-type-arg", "fun-interface", "typealias", "value-class"]
+
+[[fixtures]]
+slug = "loop-and-labels"
+tier = "fixtures"
+path = "fixtures/loop-and-labels"
+capabilities = ["labelled-break", "labelled-continue", "labelled-return", "do-while", "ranges", "step", "tailrec", "default-params"]
+
+[[fixtures]]
+slug = "class-declarations"
+tier = "fixtures"
+path = "fixtures/class-declarations"
+capabilities = ["init-block", "inner-class", "anonymous-object", "data-object", "protected-visibility", "lateinit", "custom-getter-setter", "named-args", "annotation-named-args", "deprecated-annot", "jvmname-annot", "jvmstatic-annot", "jvmfield-annot", "jvmoverloads-annot", "companion-jvmfield"]
+
+[[fixtures]]
+slug = "expressions-and-literals"
+tier = "fixtures"
+path = "fixtures/expressions-and-literals"
+capabilities = ["raw-string", "notnull-assert", "safe-cast", "try-expression", "run-catching", "reflection-literal", "function-reference", "suspend-lambda"]
+
+# P12: the Android taint shapes, and the lowering rule that makes them
+# visible. `editText.text` and `intent.dataString` are Kotlin reads of JAVA
+# GETTERS; lowering them as field reads hid every getter-backed API from the
+# model packs, which is why two intentionally-vulnerable Kotlin apps reported
+# zero findings. The stub jar carries only the platform classes named here.
+
+[[fixtures]]
+slug = "android-taint"
+tier = "fixtures"
+path = "fixtures/android-taint"
+classpath_file = "classpath.txt"
+capabilities = ["synthetic-java-property", "android-intent", "android-sql", "android-webview", "insecure-storage", "deep-link"]
+
+[[fixtures]]
+slug = "server-side-taint"
+tier = "fixtures"
+path = "fixtures/server-side-taint"
+capabilities = ["jndi-injection", "xxe", "code-execution", "deserialization", "ssrf", "static-method-sink", "sanitizers"]
+
+[[fixtures]]
+slug = "endpoint-parameter-semantics"
+tier = "fixtures"
+path = "fixtures/endpoint-parameter-semantics"
+capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
+
+[[fixtures]]
+slug = "endpoint-base-path"
+tier = "fixtures"
+path = "fixtures/endpoint-base-path"
+capabilities = ["endpoints", "context-path", "framework-semantics", "config-resolution"]
+
+[[fixtures]]
+slug = "handler-input-semantics"
+tier = "fixtures"
+path = "fixtures/handler-input-semantics"
+capabilities = ["endpoint-sources", "context-frameworks", "servlet", "class-declared-routes", "framework-semantics"]
+
+[[fixtures]]
+slug = "path-normalisation"
+tier = "fixtures"
+path = "fixtures/path-normalisation"
+capabilities = ["endpoints", "path-templates", "framework-semantics"]
+
+[[fixtures]]
+slug = "ktor-resources"
+tier = "fixtures"
+path = "fixtures/ktor-resources"
+capabilities = ["endpoints", "typed-routing", "resource-annotations", "type-arguments", "framework-semantics"]
+
+[[fixtures]]
+slug = "ktor-context-semantics"
+tier = "fixtures"
+path = "fixtures/ktor-context-semantics"
+capabilities = ["endpoints", "hocon-config", "base-path", "context-parameters", "framework-semantics"]
+
+[[fixtures]]
+slug = "descriptor-routes"
+tier = "fixtures"
+path = "fixtures/descriptor-routes"
+capabilities = ["endpoints", "web-xml", "application-path", "servlet", "jaxrs", "framework-semantics"]
+
+[[fixtures]]
+slug = "implicit-routes"
+tier = "fixtures"
+path = "fixtures/implicit-routes"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
+
+# P14 §2: framework GENERATIONS — the packs model one version of
+# everything, and every package rename is a silent zero (R84). javax AND
+# jakarta JAX-RS/servlet side by side, OkHttp 3 and 4/5, HttpClient 4 and
+# 5, Ktor 3's moved handler receiver.
+
+[[fixtures]]
+slug = "framework-generations"
+tier = "fixtures"
+path = "fixtures/framework-generations"
+capabilities = ["generations", "jaxrs", "servlet", "okhttp", "httpclient", "ktor3", "endpoints"]
+
+# P14 §2.3: a route whose framework cannot be evidenced is published under
+# the reserved pseudo-framework `unattributed` — a miss is never a WRONG
+# answer.
+
+[[fixtures]]
+slug = "unattributed-route"
+tier = "fixtures"
+path = "fixtures/unattributed-route"
+capabilities = ["endpoints", "attribution", "unattributed"]
+
+# P14 §5: consumes/produces/authentication, from the annotations the
+# detector already reads and from Ktor's enclosing authenticate wrapper.
+
+[[fixtures]]
+slug = "endpoint-media-auth"
+tier = "fixtures"
+path = "fixtures/endpoint-media-auth"
+capabilities = ["endpoints", "media-types", "authentication", "spring", "jaxrs", "micronaut", "ktor"]
+
+# P14 §4: the BARE-NAME read of an accessor-backed property (R80's
+# sibling), and the backing-field half that keeps field sensitivity.
+
+[[fixtures]]
+slug = "bare-accessor-source"
+tier = "fixtures"
+path = "fixtures/bare-accessor-source"
+capabilities = ["lowering", "accessor-property", "bare-name", "field-sensitivity", "ktor"]
+
+# P15 §2: catch handlers were emitted with NO incoming CFG edge — the CFG
+# has no exceptional-edge instruction — so every `catch` body was structurally
+# unreachable, never analysed, and taint through it silently dropped (found as
+# five `unreachable-but-emitted block` validator findings on InsecureShop).
+# The fixture reduces InsecureShop's four functions to the smallest Kotlin
+# that reproduces each, pins the dropped flow (source before the try, sink
+# inside the handler) and the two negative halves an over-broad exceptional
+# edge would fail (sanitized-before-try, born-after-try). Cause B — the dead
+# trailing block an all-paths-returned construct used to emit — is pinned by
+# KirLoweringTest via the kir dump's CFG validation.
+
+[[fixtures]]
+slug = "catch-handler-flow"
+tier = "fixtures"
+path = "fixtures/catch-handler-flow"
+capabilities = ["try-catch", "exceptional-edges", "catch-handler-flow", "dead-block"]
+
+# P15 §4: media and auth for the frameworks P14 did not model — declared at
+# three sites that are neither annotations nor named arguments: Vert.x
+# chains them on the ROUTE OBJECT (router.get("/x").produces(..).handler {}),
+# Javalin's route builder carries them as the vararg RouteRole tail, and the
+# servlet deployment descriptor's <security-constraint> names url-patterns
+# and the roles that may reach them (parsed for mappings since P13, parsed
+# PAST for access control). http4k's core DSL has no declaration site — the
+# pack's own comment says so, and the fixture pins the empties are real.
+
+[[fixtures]]
+slug = "dsl-media-auth"
+tier = "fixtures"
+path = "fixtures/dsl-media-auth"
+capabilities = ["endpoints", "media-types", "authentication", "vertx", "javalin", "servlet", "web-xml", "security-constraint", "http4k"]
+
+# P11: the vuln tier — the honest population for the cross-dependency gate.
+# A purpose-built Kotlin service whose vulnerable path runs through a REAL
+# published dependency (libs/timber-5.0.1.jar, the classes.jar inside the
+# AAR, committed verbatim), so a workspace source -> jar-internal sink chain
+# exists under the shipped pack. The eight pinned repos were pinned for
+# other phases' questions and carry named zero-causes (docs/KOSI.md, P11
+# section); this entry is the repo-tier row the gate can measure.
+
+[[fixtures]]
+slug = "kosi-vulnerable-service"
+tier = "vuln"
+path = "fixtures/kosi-vulnerable-service"
+classpath_file = "classpath.txt"
+capabilities = ["deps", "bytecode-summaries", "cross-dependency", "vulnerable-service", "log-injection", "sql-query", "services"]
+
+# P14 §3: the findings ratchet as a tier. Three deliberately vulnerable
+# real applications, SHA-pinned, whose measured slices are the only
+# repo-tier numbers a change could silently zero — which is how kosi
+# arrived at P11 reporting zero findings everywhere. Each carries
+# `min_findings` (enforced two-way by the `vuln-finding-floor` promotion
+# check: below FAILS, and materially above FAILS until the floor is
+# raised, so an improvement is recorded rather than absorbed) and a
+# `classpath_file` that MUST be warmed
+# (`scripts/warm-corpus-classpath.sh --tier vuln-repo`) — the floor check
+# fails a repo whose declared classpath is missing, because a floor
+# measured against an empty classpath is a floor nobody measured. The tier
+# is separate from `vuln` so corpusQuick (no network) keeps its bundled
+# population while corpusFull measures these. `min_findings` values are
+# the P14 measurements on this machine; kosi-vulnerable-app-kotlin-ktor is
+# the single-file Ktor app that exposed R80-R84, kept as their regression
+# anchor.
+
+[[fixtures]]
+slug = "androgoat"
+tier = "vuln-repo"
+repo = "https://github.com/satishpatnayak/AndroGoat"
+sha = "77996f239587a8ed2691629777374b5f4a364589"
+classpath_file = "classpath.txt"
+min_findings = 16
+# P14 pinned deps_max_classes = 50 here: the transitive classpath's
+# 500-class lowering filled the 8g corpus heap. P15 removed the cause —
+# composed summary sink-effects multiplied through unbounded param-path
+# joins (FragmentManagerImpl's recursive cluster grew one function's escape
+# set to 68M entries / ~8GB); the joins are now capped at the engine's
+# access-path depth (deeper effects can never match a fact key) and the
+# escape set is budgeted like the state (R58's drop-whole degradation,
+# counted in stats.truncations as summary-effect-budget). The default
+# 500-class cap now runs this classpath at a ~1 GiB peak in ~16 s, and the
+# cap entry is deleted — a cap nobody needs is a number nobody measures.
+capabilities = ["vuln", "android", "webview", "insecure-transport", "sql"]
+
+[[fixtures]]
+slug = "insecureshop"
+tier = "vuln-repo"
+repo = "https://github.com/hax0rgb/InsecureShop"
+sha = "76ed1772a12c61a60f4a685770482e0e1f6cf4a7"
+classpath_file = "classpath.txt"
+min_findings = 7
+capabilities = ["vuln", "android", "webview", "insecure-storage"]
+
+[[fixtures]]
+slug = "tsp-vulnerable-app-kotlin-ktor"
+tier = "vuln-repo"
+repo = "https://github.com/kartikdedhia/tsp-vulnerable-app-kotlin-ktor"
+sha = "3fcc258b102cf98f8c9275f94a409cf02abd621e"
+classpath_file = "classpath.txt"
+min_findings = 2
+capabilities = ["vuln", "ktor", "xss", "kmp-classpath"]
+
+[[fixtures]]
+slug = "ktor-samples"
+tier = "small"
+# Pinned 2026-09-07 to main.
+repo = "https://github.com/ktorio/ktor-samples"
+sha = "69dcff3fa81daa85f936cfb7f17007761363c303"
+classpath_file = "classpath.txt"
+capabilities = ["ktor", "web", "coroutines"]
+
+# P1 gate: five pinned real repos spanning Spring / Ktor / Android / KMP /
+# mixed-Java. resolvedCallRatio is reported PER REPO against these (never an
+# average), and the hybrid entry declares old language versions so the clamp
+# path is exercised on real code (08-VERSION-POLICY.md §4). Pinned
+# 2026-09-08.
+
+[[fixtures]]
+slug = "spring-fu"
+tier = "medium"
+repo = "https://github.com/spring-attic/spring-fu"
+sha = "8f8775ec5a5e69e9835fff356804e0b183161333"
+classpath_file = "classpath.txt"
+capabilities = ["spring", "dsl", "coroutines"]
+
+[[fixtures]]
+slug = "nowinandroid"
+tier = "android"
+repo = "https://github.com/android/nowinandroid"
+sha = "12f80da6518e161ed16a06a68e71fb8a873576d6"
+classpath_file = "classpath.txt"
+capabilities = ["android", "compose", "hilt", "multi-module"]
+
+[[fixtures]]
+slug = "kampkit"
+tier = "kmp"
+repo = "https://github.com/touchlab/KaMPKit"
+sha = "93f563a05de78f5b6512c0572e704ceb23b37aab"
+classpath_file = "classpath.txt"
+capabilities = ["kmp", "ios", "sqliter"]
+
+[[fixtures]]
+slug = "anki-android"
+tier = "hybrid"
+repo = "https://github.com/ankidroid/Anki-Android"
+sha = "b1d3c81dfe304c19bf544a33923ab1042e28fe4b"
+classpath_file = "classpath.txt"
+capabilities = ["android", "mixed-java", "legacy-language-version"]
+
+# P7: one pinned repo per framework tier. heterogeneous-microservices is
+# one Kotlin codebase implementing the same service on Spring Boot, Ktor,
+# Micronaut and Quarkus - four frameworks' endpoints in one pinned tree.
+
+[[fixtures]]
+slug = "heterogeneous-microservices"
+tier = "medium"
+repo = "https://github.com/rkudryashov/heterogeneous-microservices"
+sha = "55d89ff829dfdb412916e0163aa95cf3bcc5d75d"
+classpath_file = "classpath.txt"
+capabilities = ["spring", "ktor", "micronaut", "quarkus", "endpoints"]
+
+[[fixtures]]
+slug = "http4k"
+tier = "medium"
+repo = "https://github.com/http4k/http4k"
+sha = "b051f89d35ab9190385a244e9e77149e77c55f4d"
+classpath_file = "classpath.txt"
+capabilities = ["http4k", "contract-routes", "endpoints"]
+
+[[fixtures]]
+slug = "grpc-kotlin"
+tier = "small"
+repo = "https://github.com/grpc/grpc-kotlin"
+sha = "fffe0320d3c6af86e466f96bb3ec424f1c36a063"
+classpath_file = "classpath.txt"
+capabilities = ["grpc", "rpc", "endpoints"]

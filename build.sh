@@ -2,14 +2,16 @@
 set -e
 
 rm -rf plugins/trivy plugins/osquery plugins/dosai plugins/sourcekitten
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-for plug in trivy trustinspector golem rusi cdxui cdxrs
+for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]] || [[ "$plug" == "cdxrs" ]]; } && find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
+    # `find -print -quit` exits 0 whether or not it matched, so the presence
+    # test has to look at what it PRINTED, not at its status.
+    if { [[ "$plug" == "rusi" ]] || [[ "$plug" == "cdxui" ]] || [[ "$plug" == "cdxrs" ]] || [[ "$plug" == "kosi" ]]; } && [[ -n "$(find build -maxdepth 1 -type f -name "${plug}-*" ! -name '*.sha256' -print -quit 2>/dev/null)" ]]; then
         make sbom
     else
         make all

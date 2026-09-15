@@ -1,0 +1,1 @@
+pinned-source: JetBrains/kotlin@4d1f6aaf3c0e2e47b2da9f7829ccdf551774bd26 prepare/compiler-native-image/resources/META-INF/native-image/org/jetbrains/kotlin/kotlin-compiler-embeddable/reachability-metadata.json

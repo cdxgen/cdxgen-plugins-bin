@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+#shellcheck source=plugin-platform-support.sh
+source "$(dirname "$0")/plugin-platform-support.sh"
+
 print_usage() {
   cat <<'EOF'
 Usage:
@@ -59,6 +62,18 @@ main() {
   if [[ $# -lt 3 || $# -gt 4 ]]; then
     print_usage >&2
     exit 1
+  fi
+
+  local plugin_name platform_fragment reason
+  plugin_name="$(basename "$1")"
+  platform_fragment="$3"
+  reason="$(plugin_platform_exemption "$plugin_name" "$platform_fragment" || true)"
+  if [[ -n "$reason" ]]; then
+    # A plugin that cannot exist on this platform is skipped with its named
+    # reason (single table shared with check-plugin-coverage.sh) — never a
+    # silent gap and never a failed staging step for an impossible build.
+    echo "Note: no $plugin_name binary for $platform_fragment — exempt: $reason" >&2
+    return 0
   fi
 
   stage_plugin_files "$1" "$2" "$3" "${4:-}"

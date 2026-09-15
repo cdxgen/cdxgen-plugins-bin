@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The sample's component manifest for cdxgen: parsed as text, never
+  executed (kosi's own threat model forbids executing the analysed build,
+  and the e2e stays deterministic offline). The jars kosi actually reads
+  are committed under libs/ and named by classpath.txt; the coordinates
+  below describe the same third parties for the BOM's components[].
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>kotlin-sample-app</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <properties>
+    <kotlin.version>2.4.0</kotlin.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>${kotlin.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jakewharton.timber</groupId>
+      <artifactId>timber</artifactId>
+      <version>5.0.1</version>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <version>2.4.240</version>
+    </dependency>
+  </dependencies>
+</project>

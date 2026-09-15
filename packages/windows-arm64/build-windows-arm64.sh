@@ -5,7 +5,7 @@ set -euo pipefail
 rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs
+rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxrs
 
 bash ../../scripts/thirdparty-downloads.sh install-osquery windows-arm64 plugins/osquery/osqueryi-windows-arm64.exe
@@ -14,7 +14,7 @@ sha256sum plugins/osquery/osqueryi-windows-arm64.exe > plugins/osquery/osqueryi-
 bash ../../scripts/thirdparty-downloads.sh install-dosai windows-arm64 plugins/dosai/dosai-windows-arm64.exe
 sha256sum plugins/dosai/dosai-windows-arm64.exe > plugins/dosai/dosai-windows-arm64.exe.sha256
 
-for plug in trivy trustinspector golem rusi cdxui cdxrs
+for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do
   mkdir -p "plugins/$plug"
   bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "windows-arm64"

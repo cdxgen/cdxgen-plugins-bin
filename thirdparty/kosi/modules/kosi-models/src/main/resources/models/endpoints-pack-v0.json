@@ -1,0 +1,1818 @@
+{
+  "configReaders": [
+    {
+      "argument": 1,
+      "pattern": "com.typesafe.config.Config.getString"
+    },
+    {
+      "argument": 0,
+      "pattern": "io.ktor.server.config.ApplicationConfig.property"
+    },
+    {
+      "argument": 0,
+      "pattern": "java.lang.System.getProperty"
+    },
+    {
+      "argument": 0,
+      "pattern": "java.lang.System.getenv"
+    },
+    {
+      "argument": 0,
+      "pattern": "java.util.Properties.getProperty"
+    },
+    {
+      "argument": 0,
+      "pattern": "kotlin.system.getenv"
+    },
+    {
+      "argument": 1,
+      "pattern": "org.springframework.core.env.Environment.getProperty"
+    }
+  ],
+  "description": "The framework registry for endpoint, service and URL detection (P7). The detector matches RESOLVED annotation FQNs, DSL callee FQNs and supertype names against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a framework. A framework the pack does not name is invisible by construction, and every pattern here is validated by a build-time test. annotation FQNs must resolve through the workspace declarations or a real classpath: an unresolved annotation keeps its PSI short name and only matches when the pack pattern is itself a short name, which is never \u2014 type identity, not name matching, is what keeps a homonym annotation from becoming an endpoint.",
+  "frameworks": [
+    {
+      "handlerInput": "all",
+      "id": "android",
+      "kind": "manifest",
+      "manifestComponents": [
+        "activity",
+        "service",
+        "receiver",
+        "provider"
+      ]
+    },
+    {
+      "handlerInput": "all",
+      "id": "aws-lambda",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "com.amazonaws.services.lambda.runtime.RequestHandler",
+        "com.amazonaws.services.lambda.runtime.RequestStreamHandler"
+      ],
+      "supertypeSuffixes": []
+    },
+    {
+      "handlerInput": "annotated",
+      "id": "azure-functions",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "com.microsoft.azure.functions.annotation.FunctionName"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "com.microsoft.azure.functions.annotation.HttpTrigger"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "com.microsoft.azure.functions.annotation.QueueTrigger"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "com.microsoft.azure.functions.annotation.BindingName"
+        }
+      ]
+    },
+    {
+      "dslFunctions": [
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "androidx.navigation.compose.composable"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "androidx.navigation.compose.dialog"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "androidx.navigation.compose.navigation"
+        }
+      ],
+      "handlerInput": "all",
+      "id": "compose-navigation",
+      "kind": "dsl"
+    },
+    {
+      "classMarkers": [
+        "org.springframework.stereotype.Controller"
+      ],
+      "handlerInput": "annotated",
+      "id": "graphql",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.graphql.data.method.annotation.QueryMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.graphql.data.method.annotation.MutationMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.graphql.data.method.annotation.SubscriptionMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.graphql.data.method.annotation.SchemaMapping"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "org.springframework.graphql.data.method.annotation.Argument"
+        }
+      ]
+    },
+    {
+      "handlerInput": "all",
+      "id": "grpc",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "GrpcKt",
+        "Grpc"
+      ],
+      "supertypeSuffixes": [
+        "CoroutineImplBase",
+        "ImplBase"
+      ]
+    },
+    {
+      "bindFunctions": [
+        {
+          "methods": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH"
+          ],
+          "pattern": "bind"
+        }
+      ],
+      "contextReaders": [
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.query"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.header"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.cookie"
+        },
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "org.http4k.routing.path"
+        },
+        {
+          "kind": "body",
+          "pattern": "org.http4k.core.Request.bodyString"
+        }
+      ],
+      "handlerInput": "context",
+      "id": "http4k",
+      "kind": "dsl",
+      "_p15_comment": "P15: http4k's core DSL has NO media/auth declaration site. The handler is a plain function; content types live in lenses and responses, neither of which the router reads; contract meta {} is OpenAPI documentation, not routing; auth is a Filter - code applied per request, not a declaration attributable to one route. The empty lists are the truth, not a gap nobody has looked at."
+    },
+    {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.pathParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.queryParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.queryParams"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.formParam"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.formParams"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.header"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.cookie"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.javalin.http.Context.body"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.javalin.http.Context.bodyAsClass"
+        }
+      ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.Javalin.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.Javalin.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.Javalin.put"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.Javalin.patch"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.Javalin.delete"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.apibuilder.ApiBuilder.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.javalin.apibuilder.ApiBuilder.post"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.javalin.apibuilder.ApiBuilder.path"
+        }
+      ],
+      "handlerInput": "context",
+      "id": "javalin",
+      "kind": "dsl",
+      "roleArgumentStart": 2,
+      "_p15_comment": "P15: the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty."
+    },
+    {
+      "authenticationDsl": [
+        "io.ktor.server.auth.authenticate",
+        "io.ktor.auth.authenticate"
+      ],
+      "contextReaders": [
+        {
+          "indexed": true,
+          "kind": "merged",
+          "pattern": "io.ktor.application.ApplicationCall.parameters"
+        },
+        {
+          "indexed": true,
+          "kind": "cookie",
+          "pattern": "io.ktor.request.ApplicationRequest.cookies"
+        },
+        {
+          "indexed": true,
+          "kind": "header",
+          "pattern": "io.ktor.request.ApplicationRequest.headers"
+        },
+        {
+          "indexed": true,
+          "kind": "query",
+          "pattern": "io.ktor.request.ApplicationRequest.queryParameters"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.ktor.request.header"
+        },
+        {
+          "kind": "query",
+          "pattern": "io.ktor.request.queryString"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.request.receive"
+        },
+        {
+          "kind": "form",
+          "pattern": "io.ktor.request.receiveParameters"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.request.receiveText"
+        },
+        {
+          "indexed": true,
+          "kind": "merged",
+          "pattern": "io.ktor.server.application.ApplicationCall.parameters"
+        },
+        {
+          "indexed": true,
+          "kind": "cookie",
+          "pattern": "io.ktor.server.request.ApplicationRequest.cookies"
+        },
+        {
+          "indexed": true,
+          "kind": "header",
+          "pattern": "io.ktor.server.request.ApplicationRequest.headers"
+        },
+        {
+          "indexed": true,
+          "kind": "query",
+          "pattern": "io.ktor.server.request.ApplicationRequest.queryParameters"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.ktor.server.request.header"
+        },
+        {
+          "kind": "query",
+          "pattern": "io.ktor.server.request.queryString"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.server.request.receive"
+        },
+        {
+          "kind": "form",
+          "pattern": "io.ktor.server.request.receiveParameters"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.server.request.receiveText"
+        },
+        {
+          "indexed": true,
+          "kind": "path",
+          "pattern": "io.ktor.server.routing.RoutingCall.pathParameters"
+        }
+      ],
+      "dslFunctions": [
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.routing.accept"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.delete"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.get"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.options"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.patch"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.put"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.routing.route"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.resources.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.resources.post"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.ktor.server.routing.delete"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.ktor.server.routing.get"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.ktor.server.routing.head"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.routing.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.ktor.server.routing.options"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.routing.options"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.ktor.server.routing.patch"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "io.ktor.server.routing.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.ktor.server.routing.put"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.server.routing.route"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.websocket.webSocket"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.websocket.webSocket"
+        }
+      ],
+      "handlerInput": "context",
+      "id": "ktor",
+      "kind": "dsl",
+      "resourceAnnotations": [
+        "io.ktor.resources.Resource"
+      ]
+    },
+    {
+      "dslFunctions": [
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addTool"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addPrompt"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addResource"
+        }
+      ],
+      "handlerInput": "all",
+      "id": "mcp",
+      "kind": "dsl"
+    },
+    {
+      "authenticationAnnotations": [
+        {
+          "pattern": "io.micronaut.security.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "io.micronaut.security.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
+      "classMarkers": [
+        "io.micronaut.http.annotation.Controller"
+      ],
+      "handlerInput": "annotated",
+      "id": "micronaut",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.micronaut.http.annotation.Get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "io.micronaut.http.annotation.Post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.micronaut.http.annotation.Put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.micronaut.http.annotation.Delete"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.micronaut.http.annotation.Patch"
+        },
+        {
+          "methods": [],
+          "pattern": "io.micronaut.http.annotation.HttpMethod"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "kind": "consumes",
+          "pattern": "io.micronaut.http.annotation.Consumes"
+        },
+        {
+          "kind": "produces",
+          "pattern": "io.micronaut.http.annotation.Produces"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "query",
+          "pattern": "io.micronaut.http.annotation.QueryValue"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "io.micronaut.http.annotation.PathVariable"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "io.micronaut.http.annotation.Body"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "io.micronaut.http.annotation.Header"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "cookie",
+          "pattern": "io.micronaut.http.annotation.CookieValue"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "form",
+          "pattern": "io.micronaut.http.annotation.Part"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "io.micronaut.http.annotation.Controller"
+      ]
+    },
+    {
+      "applicationPathAnnotations": [
+        "javax.ws.rs.ApplicationPath",
+        "jakarta.ws.rs.ApplicationPath"
+      ],
+      "authenticationAnnotations": [
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.DenyAll",
+          "scheme": "@DenyAll"
+        },
+        {
+          "pattern": "javax.annotation.security.DenyAll",
+          "scheme": "@DenyAll"
+        }
+      ],
+      "classMarkers": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ],
+      "handlerInput": "annotated",
+      "id": "quarkus",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "jakarta.ws.rs.DELETE"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "jakarta.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "jakarta.ws.rs.PATCH"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "jakarta.ws.rs.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "jakarta.ws.rs.PUT"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "javax.ws.rs.DELETE"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "javax.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "javax.ws.rs.PATCH"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "javax.ws.rs.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "javax.ws.rs.PUT"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "kind": "consumes",
+          "pattern": "jakarta.ws.rs.Consumes"
+        },
+        {
+          "kind": "produces",
+          "pattern": "jakarta.ws.rs.Produces"
+        },
+        {
+          "kind": "consumes",
+          "pattern": "javax.ws.rs.Consumes"
+        },
+        {
+          "kind": "produces",
+          "pattern": "javax.ws.rs.Produces"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "jakarta.ws.rs.BeanParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "cookie",
+          "pattern": "jakarta.ws.rs.CookieParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "form",
+          "pattern": "jakarta.ws.rs.FormParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "jakarta.ws.rs.HeaderParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "jakarta.ws.rs.MatrixParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "jakarta.ws.rs.PathParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "query",
+          "pattern": "jakarta.ws.rs.QueryParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "javax.ws.rs.BeanParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "cookie",
+          "pattern": "javax.ws.rs.CookieParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "form",
+          "pattern": "javax.ws.rs.FormParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "javax.ws.rs.HeaderParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "javax.ws.rs.MatrixParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "javax.ws.rs.PathParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "query",
+          "pattern": "javax.ws.rs.QueryParam"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
+      ]
+    },
+    {
+      "classMappingAnnotations": [
+        "jakarta.servlet.annotation.WebFilter",
+        "jakarta.servlet.annotation.WebServlet",
+        "javax.servlet.annotation.WebFilter",
+        "javax.servlet.annotation.WebServlet"
+      ],
+      "classMarkers": [
+        "jakarta.servlet.annotation.WebFilter",
+        "jakarta.servlet.annotation.WebServlet",
+        "javax.servlet.annotation.WebFilter",
+        "javax.servlet.annotation.WebServlet"
+      ],
+      "contextReaders": [
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getParameterValues"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getHeader"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getParameterValues"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getHeader"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.ServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.ServletRequest.getParameter"
+        }
+      ],
+      "handlerInput": "context",
+      "handlerMethodNames": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "name": "doGet"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "name": "doPost"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "name": "doPut"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "name": "doDelete"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "name": "doHead"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "name": "doOptions"
+        },
+        {
+          "methods": [],
+          "name": "service"
+        },
+        {
+          "methods": [],
+          "name": "doFilter"
+        }
+      ],
+      "id": "servlet",
+      "kind": "annotation",
+      "_p15_comment": "P15: media has no declaration site for servlets - the content type is a response header the handler sets. Authentication IS declared, in the deployment descriptor's <security-constraint>, which the web.xml parser reads (P15) and attaches per url-pattern; it is not an annotation.",
+      "mappingAnnotations": [],
+      "pathPrefixAnnotations": []
+    },
+    {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "spark.Request.params"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "spark.Request.queryParams"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "spark.Request.headers"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "spark.Request.cookie"
+        },
+        {
+          "kind": "body",
+          "pattern": "spark.Request.body"
+        }
+      ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "spark.Spark.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "spark.Spark.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "nesting": false,
+          "pattern": "spark.Spark.put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "nesting": false,
+          "pattern": "spark.Spark.delete"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "spark.Spark.path"
+        }
+      ],
+      "handlerInput": "context",
+      "id": "sparkjava",
+      "kind": "dsl"
+    },
+    {
+      "dependencyMarkers": [
+        "spring-boot-starter-actuator",
+        "spring-boot-actuator"
+      ],
+      "handlerInput": "all",
+      "id": "spring-actuator",
+      "implicitBasePathDefault": "/actuator",
+      "implicitBasePathKeys": [
+        "management.endpoints.web.base-path"
+      ],
+      "implicitRoutes": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": ""
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/health"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/info"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/metrics"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/env"
+        },
+        {
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "path": "/loggers"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/threaddump"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/heapdump"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/mappings"
+        }
+      ],
+      "kind": "annotation"
+    },
+    {
+      "classMarkers": [],
+      "handlerInput": "annotated",
+      "id": "spring-messaging",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.messaging.handler.annotation.MessageMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.messaging.simp.annotation.SubscribeMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.kafka.annotation.KafkaListener"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.amqp.rabbit.annotation.RabbitListener"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.jms.annotation.JmsListener"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "io.awspring.cloud.sqs.annotation.SqsListener"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.scheduling.annotation.Scheduled"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "org.springframework.messaging.handler.annotation.Payload"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "org.springframework.messaging.handler.annotation.DestinationVariable"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "org.springframework.messaging.handler.annotation.Header"
+        }
+      ]
+    },
+    {
+      "authenticationAnnotations": [
+        {
+          "pattern": "org.springframework.security.access.prepost.PreAuthorize",
+          "scheme": "@PreAuthorize"
+        },
+        {
+          "pattern": "org.springframework.security.access.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
+      "classMarkers": [
+        "org.springframework.web.bind.annotation.RestController",
+        "org.springframework.web.bind.annotation.Controller"
+      ],
+      "handlerInput": "annotated",
+      "id": "spring-mvc",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "methods": [],
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        }
+      ],
+      "mediaAnnotations": [
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        }
+      ],
+      "parameterAnnotations": [
+        {
+          "category": "untrusted-input",
+          "kind": "query",
+          "pattern": "org.springframework.web.bind.annotation.RequestParam"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "org.springframework.web.bind.annotation.PathVariable"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "body",
+          "pattern": "org.springframework.web.bind.annotation.RequestBody"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "header",
+          "pattern": "org.springframework.web.bind.annotation.RequestHeader"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "cookie",
+          "pattern": "org.springframework.web.bind.annotation.CookieValue"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "form",
+          "pattern": "org.springframework.web.bind.annotation.RequestPart"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "path",
+          "pattern": "org.springframework.web.bind.annotation.MatrixVariable"
+        },
+        {
+          "category": "untrusted-input",
+          "kind": "form",
+          "pattern": "org.springframework.web.bind.annotation.ModelAttribute"
+        }
+      ],
+      "pathPrefixAnnotations": [
+        "org.springframework.web.bind.annotation.RequestMapping"
+      ],
+      "repositoryMethods": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "repositorySupertypes": [
+        "org.springframework.data.repository.CrudRepository",
+        "org.springframework.data.repository.PagingAndSortingRepository",
+        "org.springframework.data.repository.ListCrudRepository",
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "org.springframework.data.rest.core.annotation.RepositoryRestResource"
+      ]
+    },
+    {
+      "authenticationAnnotations": [
+        {
+          "pattern": "org.springframework.security.access.prepost.PreAuthorize",
+          "scheme": "@PreAuthorize"
+        },
+        {
+          "pattern": "org.springframework.security.access.annotation.Secured",
+          "scheme": "@Secured"
+        },
+        {
+          "pattern": "javax.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        },
+        {
+          "pattern": "jakarta.annotation.security.RolesAllowed",
+          "scheme": "@RolesAllowed"
+        }
+      ],
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathVariable"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.queryParam"
+        },
+        {
+          "kind": "body",
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyToMono"
+        }
+      ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.PUT"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.DELETE"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
+        }
+      ],
+      "handlerInput": "context",
+      "id": "spring-webflux",
+      "kind": "dsl",
+      "mediaAnnotations": [
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.GetMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PostMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PutMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.DeleteMapping"
+        },
+        {
+          "argument": "consumes",
+          "kind": "consumes",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        },
+        {
+          "argument": "produces",
+          "kind": "produces",
+          "pattern": "org.springframework.web.bind.annotation.PatchMapping"
+        }
+      ]
+    },
+    {
+      "dependencyMarkers": [
+        "springdoc-openapi",
+        "springfox-swagger"
+      ],
+      "handlerInput": "all",
+      "id": "springdoc",
+      "implicitRoutes": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/v3/api-docs"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/v3/api-docs.yaml"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/swagger-ui.html"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/swagger-ui/index.html"
+        }
+      ],
+      "kind": "annotation"
+    },
+    {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "io.vertx.ext.web.RoutingContext.pathParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.vertx.ext.web.RoutingContext.queryParam"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getParam"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getHeader"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getCookie"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getFormAttribute"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.vertx.ext.web.RoutingContext.body"
+        }
+      ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.vertx.ext.web.Router.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.vertx.ext.web.Router.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "nesting": false,
+          "pattern": "io.vertx.ext.web.Router.put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "nesting": false,
+          "pattern": "io.vertx.ext.web.Router.delete"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "io.vertx.ext.web.Router.route"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.vertx.ext.web.Router.mountSubRouter"
+        }
+      ],
+      "handlerDsl": [
+        "io.vertx.ext.web.Route.handler"
+      ],
+      "handlerInput": "context",
+      "id": "vertx",
+      "kind": "dsl",
+      "mediaDsl": [
+        {
+          "kind": "produces",
+          "pattern": "io.vertx.ext.web.Route.produces"
+        },
+        {
+          "kind": "consumes",
+          "pattern": "io.vertx.ext.web.Route.consumes"
+        }
+      ],
+      "_p15_comment": "P15: media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls. Auth in Vert.x is a handler the router wraps (JWTAuthHandler and friends) - a VALUE the KIR cannot attribute to one route, so authentication stays an honest empty until a declarative shape exists."
+    }
+  ],
+  "name": "endpoints-pack-v0",
+  "outbound": [
+    {
+      "clientLibrary": "elasticsearch",
+      "kind": "client",
+      "pattern": "co.elastic.clients.transport.rest_client.RestClientTransport",
+      "protocol": "http",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "google-cloud",
+      "kind": "client",
+      "pattern": "com.google.cloud.storage.StorageOptions.getDefaultInstance",
+      "protocol": "gcp",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "mongo-driver",
+      "kind": "client",
+      "pattern": "com.mongodb.ConnectionString",
+      "protocol": "mongodb",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "openai",
+      "kind": "client",
+      "pattern": "com.openai.client.okhttp.OpenAIOkHttpClient.builder",
+      "protocol": "http",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "langchain4j",
+      "kind": "client",
+      "pattern": "dev.langchain4j.model.openai.OpenAiChatModel.builder",
+      "protocol": "http",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "grpc-java",
+      "kind": "client",
+      "pattern": "io.grpc.ManagedChannelBuilder.forAddress",
+      "protocol": "grpc",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "grpc-java",
+      "kind": "client",
+      "pattern": "io.grpc.ManagedChannelBuilder.forTarget",
+      "protocol": "grpc",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "constructor",
+      "pattern": "io.ktor.client.HttpClient",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.get",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.post",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "ktor-client",
+      "kind": "extension",
+      "pattern": "io.ktor.client.request.request",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "lettuce",
+      "kind": "static",
+      "pattern": "io.lettuce.core.RedisClient.create",
+      "protocol": "redis",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "mcp-kotlin",
+      "kind": "client",
+      "pattern": "io.modelcontextprotocol.kotlin.sdk.client.Client.connect",
+      "protocol": "mcp",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "java.net.URI",
+      "kind": "constructor",
+      "pattern": "java.net.URI",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "java.net.URL",
+      "kind": "constructor",
+      "pattern": "java.net.URL",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "java.net.http",
+      "kind": "static",
+      "pattern": "java.net.http.HttpClient.newHttpClient",
+      "protocol": "https",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "jdk-httpclient",
+      "kind": "client",
+      "pattern": "java.net.http.HttpRequest.Builder.uri",
+      "protocol": "http",
+      "urlArgument": 1
+    },
+    {
+      "clientLibrary": "java.sql.DriverManager",
+      "kind": "static",
+      "pattern": "java.sql.DriverManager.getConnection",
+      "protocol": "jdbc",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "okhttp3",
+      "kind": "virtual",
+      "pattern": "okhttp3.Request.Builder.url",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "apache-httpclient5",
+      "kind": "client",
+      "pattern": "org.apache.hc.client5.http.classic.methods.HttpGet",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "kafka-clients",
+      "kind": "constructor",
+      "pattern": "org.apache.kafka.clients.producer.KafkaProducer",
+      "protocol": "kafka",
+      "urlArgument": -1
+    },
+    {
+      "clientLibrary": "neo4j-driver",
+      "kind": "client",
+      "pattern": "org.neo4j.driver.GraphDatabase.driver",
+      "protocol": "bolt",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "spring-web",
+      "kind": "virtual",
+      "pattern": "org.springframework.web.client.RestTemplate.getForObject",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "spring-webclient",
+      "kind": "client",
+      "pattern": "org.springframework.web.reactive.function.client.WebClient.create",
+      "protocol": "http",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "jedis",
+      "kind": "client",
+      "pattern": "redis.clients.jedis.JedisPool",
+      "protocol": "redis",
+      "urlArgument": 1
+    },
+    {
+      "clientLibrary": "retrofit2",
+      "kind": "virtual",
+      "pattern": "retrofit2.Retrofit.Builder.baseUrl",
+      "protocol": "https",
+      "urlArgument": 0
+    },
+    {
+      "clientLibrary": "aws-sdk-v2",
+      "kind": "client",
+      "pattern": "software.amazon.awssdk.services.s3.S3Client.builder",
+      "protocol": "aws",
+      "urlArgument": -1
+    }
+  ]
+}

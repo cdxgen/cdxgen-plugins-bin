@@ -204,6 +204,170 @@ jobs:
           thirdparty/cdxrs/build/cdxrs-darwin-*.sha256
         if-no-files-found: error
         retention-days: 1
+  # kosi builds its own natives here, like every other built plugin, instead
+  # of waiting on native-builds.yml to push a ghcr cache tag: that run takes
+  # 30-60 minutes and the flavour scripts waited six, so PR packaging raced a
+  # workflow it could never win against. Every platform kosi CLAIMS
+  # (scripts/plugin-platform-support.sh) is built by one of these three jobs;
+  # the rest are named exemptions served by the kosi-portable.jar fallback.
+  kosi_linux_prebuild:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+    - name: Build musl zlib (the musl static link needs -lz against musl)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
+        # zlib's ./configure chokes on the musl-gcc wrapper ('compiler error
+        # reporting is too harsh'), so compile the objects directly — the
+        # distro's zlib1g-dev is glibc-linked and useless to the musl image.
+        curl -fsSL -o /tmp/zlib.tar.gz \
+          https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+        mkdir -p /tmp/zlibsrc
+        tar xzf /tmp/zlib.tar.gz -C /tmp/zlibsrc --strip-components=1
+        pushd /tmp/zlibsrc
+        objs=''
+        for src in adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback inffast inflate inftrees trees uncompr zutil; do
+          musl-gcc -O2 -D_LARGEFILE64_SOURCE=1 -c "$src.c"
+          objs="$objs $src.o"
+        done
+        ar rc libz.a $objs
+        mkdir -p "$HOME/musl-zlib/lib"
+        cp libz.a "$HOME/musl-zlib/lib/"
+        popd
+        echo "KOSI_NATIVE_LINKER_FLAGS=-H:NativeLinkerOption=-L$HOME/musl-zlib/lib" >> "$GITHUB_ENV"
+    - name: Build kosi linux-amd64 and linuxmusl-amd64 natives
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -fsSL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
+        # R66: the toolchain is part of the build contract; pinned here to the
+        # same digest native-builds.yml uses.
+        echo "b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  /tmp/graalvm.tar.gz" | sha256sum -c -
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        pushd thirdparty/kosi
+        make linux linuxmusl
+        popd
+    - name: Isolated binary smoke (kosi-linux-amd64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-linux-amd64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-linux-amd64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
+    - name: Upload kosi Linux helper artifacts
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: kosi-build-linux
+        path: |
+          thirdparty/kosi/build/kosi-linux-amd64*
+          thirdparty/kosi/build/kosi-linuxmusl-amd64*
+        if-no-files-found: error
+        retention-days: 1
+  kosi_linux_arm64_prebuild:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+    - name: Build kosi linux-arm64 native
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -fsSL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-aarch64_bin.tar.gz
+        echo "7e8a3fbc2e4c28566107039a298cef690d86a37599a8e50536fc5a65b7f1bd56  /tmp/graalvm.tar.gz" | sha256sum -c -
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        # No linuxmusl here: GraalVM does not support musl static images on
+        # linux-aarch64, which is why linuxmusl-arm64 is a declared exemption.
+        pushd thirdparty/kosi
+        make linux
+        popd
+    - name: Isolated binary smoke (kosi-linux-arm64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-linux-arm64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-linux-arm64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-linux-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
+    - name: Upload kosi Linux arm64 helper artifacts
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: kosi-build-linux-arm64
+        path: |
+          thirdparty/kosi/build/kosi-linux-arm64*
+        if-no-files-found: error
+        retention-days: 1
+  kosi_darwin_prebuild:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165  # v5
+      with:
+        distribution: temurin
+        java-version: 21
+    - name: Build kosi darwin-arm64 native
+      run: |
+        mkdir -p "$HOME/tools"
+        curl -fsSL -o /tmp/graalvm.tar.gz \
+          https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_macos-aarch64_bin.tar.gz
+        echo "ebfab1d74420f355a459076162012d6835fa6068bd9d2f230f1fcaf7ee0dd923  /tmp/graalvm.tar.gz" | shasum -a 256 -c -
+        tar xzf /tmp/graalvm.tar.gz -C "$HOME/tools/"
+        # darwin-amd64 has no GraalVM at all for JDK 25, in Community or
+        # Oracle; it is an exemption, not a build this job is missing.
+        pushd thirdparty/kosi
+        make darwin
+        popd
+    - name: Isolated binary smoke (kosi-darwin-arm64)
+      run: |
+        # kosi ships as ONE file, so it is smoke-tested as one file: copied
+        # away from the build directory native-image fills with libawt*
+        # jdk_library artifacts (R97 — every published binary before this
+        # reported all components unavailable outside ./build).
+        mkdir -p /tmp/kosi-isolated
+        cp thirdparty/kosi/build/kosi-darwin-arm64 /tmp/kosi-isolated/
+        cd /tmp/kosi-isolated
+        ./kosi-darwin-arm64 version | tee /tmp/version.json
+        python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
+        ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
+        grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
+    - name: Upload kosi Darwin helper artifacts
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: kosi-build-darwin
+        path: |
+          thirdparty/kosi/build/kosi-darwin-arm64*
+        if-no-files-found: error
+        retention-days: 1
   pkg:
     needs:
     - rusi_linux_prebuild
@@ -212,6 +376,9 @@ jobs:
     - cdxui_darwin_prebuild
     - cdxrs_linux_prebuild
     - cdxrs_darwin_prebuild
+    - kosi_linux_prebuild
+    - kosi_linux_arm64_prebuild
+    - kosi_darwin_prebuild
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -280,12 +447,31 @@ jobs:
       with:
         name: cdxrs-build-darwin
         path: thirdparty/cdxrs/build
+    - name: Download kosi Linux helper artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: kosi-build-linux
+        path: thirdparty/kosi/build
+    - name: Download kosi Linux arm64 helper artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: kosi-build-linux-arm64
+        path: thirdparty/kosi/build
+    - name: Download kosi Darwin helper artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: kosi-build-darwin
+        path: thirdparty/kosi/build
     - name: Build
       run: |
         npm install -g @cyclonedx/cdxgen
         bash ./scripts/thirdparty-downloads.sh install-upx linux-amd64 ./upx
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
+        # kosi arrives prebuilt from the three kosi_*_prebuild jobs, so
+        # build.sh takes its `make sbom` path and no GraalVM toolchain is
+        # needed in this job.
+        chmod +x thirdparty/kosi/build/kosi-*
         bash build.sh
         [[ -f packages/linuxmusl-amd64/plugins/golem/golem-linuxmusl-amd64 ]]
         [[ -f packages/linuxmusl-amd64/plugins/golem/golem-linuxmusl-amd64.sha256 ]]
@@ -311,6 +497,13 @@ jobs:
         [[ -f packages/windows-amd64/plugins/rusi/rusi-windows-amd64.exe.sha256 ]]
         [[ -f packages/windows-amd64/plugins/cdxui/cdxui-windows-amd64.exe ]]
         [[ -f packages/windows-amd64/plugins/cdxui/cdxui-windows-amd64.exe.sha256 ]]
+        # kosi on every platform it claims. check-plugin-coverage.sh inside
+        # build.sh is the authority, but it reads its exemptions from a table
+        # someone can edit; these four lines are the second opinion.
+        for kosi_platform in linux-amd64 linux-arm64 linuxmusl-amd64 darwin-arm64; do
+          [[ -f "packages/$kosi_platform/plugins/kosi/kosi-$kosi_platform" ]]
+          [[ -f "packages/$kosi_platform/plugins/kosi/kosi-$kosi_platform.sha256" ]]
+        done
         bash ./scripts/root-package-publish.test.sh
         npm publish --dry-run
       env:
