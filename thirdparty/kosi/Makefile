@@ -128,7 +128,7 @@ bootstrap-darwin bootstrap-linux bootstrap-windows:
 define build_native
 	$(graal_env) native-image -jar $(fat_jar) \
 	  -Os --gc=serial \
-	  -H:ConfigurationFileDirectories=native-metadata/kosi \
+	  -H:ConfigurationFileDirectories=native-metadata/kosi,native-metadata/kosi-psi \
 	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$' \
 	  -H:+UnlockExperimentalVMOptions \
 	  -H:+AddAllCharsets \
@@ -266,6 +266,27 @@ linuxmusl: check-linuxmusl-host $(build_dir)/kosi-linuxmusl-$(host_arch)
 
 ## windows: host-arch Windows binary (MSVC toolchain; docs/BUILD.md §6).
 windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
+
+## psi-metadata: regenerate the PSI reflection metadata from the JAR.
+## The PSI factory builds one class per Kotlin SYNTAX KIND reflectively, so
+## an agent-traced list is a list of the syntax the fixtures happen to
+## contain: the published binaries crashed with "Cannot reflectively invoke
+## constructor org.jetbrains.kotlin.psi.KtAnnotatedExpression" on ordinary
+## Kotlin (measured on kosi's own sources). This set is derivable from the
+## jar, so it is derived, not traced.
+.PHONY: psi-metadata psi-metadata-check
+psi-metadata: $(fat_jar)
+	@mkdir -p native-metadata/kosi-psi
+	$(graal_env) java -cp $(fat_jar) scripts/GenPsiReflection.java \
+	  $(fat_jar) native-metadata/kosi-psi/reachability-metadata.json
+
+## psi-metadata-check: the committed PSI metadata still matches the jar.
+psi-metadata-check: $(fat_jar)
+	@$(graal_env) java -cp $(fat_jar) scripts/GenPsiReflection.java \
+	  $(fat_jar) /tmp/kosi-psi-metadata.json >/dev/null
+	@diff -u native-metadata/kosi-psi/reachability-metadata.json /tmp/kosi-psi-metadata.json \
+	  || { echo "PSI reflection metadata is stale; run 'make psi-metadata'"; exit 1; }
+	@echo "psi-metadata-check: committed metadata matches the jar"
 
 ## native-metadata: re-run the tracing agent over the whole fixture tree —
 ## syntax AND resolved backends (the resolved pass exercises the Analysis

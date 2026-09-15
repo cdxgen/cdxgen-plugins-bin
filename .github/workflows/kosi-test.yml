@@ -49,6 +49,11 @@ jobs:
         run: ./gradlew corpusQuick --no-daemon
       - name: Digest goldens
         run: ./gradlew golden --no-daemon
+      - name: PSI reflection metadata is current
+        # Derived from the jar, not traced from a run: a Kotlin syntax kind
+        # the fixtures do not contain used to kill the native binary at the
+        # first file that used it (R98).
+        run: make psi-metadata-check
       - name: Tier task presence
         run: ./gradlew corpusTierList --no-daemon --console=plain -q
 
