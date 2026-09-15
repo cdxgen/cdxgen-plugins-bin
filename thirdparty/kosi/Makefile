@@ -275,14 +275,18 @@ windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 ## Kotlin (measured on kosi's own sources). This set is derivable from the
 ## jar, so it is derived, not traced.
 .PHONY: psi-metadata psi-metadata-check
-psi-metadata: $(fat_jar)
+## Neither target needs GraalVM — any JDK 21+ can read the jar — so they
+## build the jar WITHOUT graal_env and run in the plain unit-test CI job.
+psi-metadata:
 	@mkdir -p native-metadata/kosi-psi
-	$(graal_env) java -cp $(fat_jar) scripts/GenPsiReflection.java \
+	@$(gradle) :kosi-cli:kosiFatJar
+	java -cp $(fat_jar) scripts/GenPsiReflection.java \
 	  $(fat_jar) native-metadata/kosi-psi/reachability-metadata.json
 
 ## psi-metadata-check: the committed PSI metadata still matches the jar.
-psi-metadata-check: $(fat_jar)
-	@$(graal_env) java -cp $(fat_jar) scripts/GenPsiReflection.java \
+psi-metadata-check:
+	@$(gradle) :kosi-cli:kosiFatJar
+	@java -cp $(fat_jar) scripts/GenPsiReflection.java \
 	  $(fat_jar) /tmp/kosi-psi-metadata.json >/dev/null
 	@diff -u native-metadata/kosi-psi/reachability-metadata.json /tmp/kosi-psi-metadata.json \
 	  || { echo "PSI reflection metadata is stale; run 'make psi-metadata'"; exit 1; }
