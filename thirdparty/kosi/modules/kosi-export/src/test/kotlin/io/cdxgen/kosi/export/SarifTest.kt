@@ -89,4 +89,78 @@ class SarifTest {
     fun outputIsDeterministic() {
         assertEquals(Sarif.write(dataFlow(), "kosi", "0.2.0"), Sarif.write(dataFlow(), "kosi", "0.2.0"))
     }
+
+    /**
+     * P15: a slice that entered through an endpoint carries the endpoint's
+     * DECLARATION into the export — the authentication requirement above
+     * all, which was a fact kosi computed and threw away at the SARIF
+     * boundary. Restore the defect (endpoints not passed to the writer) and
+     * the endpoint property is absent: this fails.
+     */
+    @Test
+    fun anEndpointLinkedSliceCarriesItsAuthenticationIntoTheExport() {
+        val endpoint = io.cdxgen.kosi.schema.ApiEndpoint(
+            id = "ep-000001",
+            framework = "servlet",
+            httpMethods = listOf("GET"),
+            pathTemplate = "/legacy/report",
+            pathParameters = emptyList(),
+            queryParameters = emptyList(),
+            consumes = listOf("application/xml"),
+            produces = listOf("application/json"),
+            authentication = listOf("security-constraint(admin)"),
+            handlerSymbol = "t.LegacyServlet.doGet",
+            handlerCanonicalName = "t.LegacyServlet.doGet",
+            modulePath = ".",
+            purl = "",
+            position = null,
+            exported = true,
+            permissions = emptyList(),
+            deepLinkHosts = emptyList(),
+            reachableSources = emptyList(),
+            sliceIds = listOf("slice-000001"),
+        )
+        val sarif = Sarif.write(dataFlow(), "kosi", "0.2.0", listOf(endpoint))
+        assertTrue("\"endpoint\":" in sarif, "the result carries its endpoint")
+        assertTrue(sarif.contains("security-constraint(admin)"), "the authentication requirement survives")
+        assertTrue(sarif.contains("/legacy/report"), "the endpoint's path survives")
+        assertTrue(sarif.contains("application/xml"), "the media types survive")
+        // A slice linked to NO endpoint adds no endpoint property.
+        val plain = Sarif.write(dataFlow(), "kosi", "0.2.0", emptyList())
+        assertTrue(!plain.contains("\"endpoint\":"), "unlinked slices stay unannotated")
+    }
+
+    @Test
+    fun twoEndpointsOnOneSliceResolveToTheLowestIdDeterministically() {
+        // Two routes can reach the same handler (an alias mapping, a
+        // method-level and a class-level publish), and the export must not
+        // depend on the order the detector emitted them.
+        fun ep(id: String, path: String) = io.cdxgen.kosi.schema.ApiEndpoint(
+            id = id,
+            framework = "servlet",
+            httpMethods = listOf("GET"),
+            pathTemplate = path,
+            pathParameters = emptyList(),
+            queryParameters = emptyList(),
+            consumes = emptyList(),
+            produces = emptyList(),
+            authentication = emptyList(),
+            handlerSymbol = "t.S.doGet",
+            handlerCanonicalName = "t.S.doGet",
+            modulePath = ".",
+            purl = "",
+            position = null,
+            exported = true,
+            permissions = emptyList(),
+            deepLinkHosts = emptyList(),
+            reachableSources = emptyList(),
+            sliceIds = listOf("slice-000001"),
+        )
+        val first = ep("ep-000001", "/one")
+        val second = ep("ep-000002", "/two")
+        val a = Sarif.write(dataFlow(), "kosi", "0.2.0", listOf(first, second))
+        val b = Sarif.write(dataFlow(), "kosi", "0.2.0", listOf(second, first))
+        assertEquals(a, b, "the link does not depend on emission order")
+        assertTrue(a.contains("/one") && !a.contains("/two"), "the lowest endpoint id wins")
+    }
 }

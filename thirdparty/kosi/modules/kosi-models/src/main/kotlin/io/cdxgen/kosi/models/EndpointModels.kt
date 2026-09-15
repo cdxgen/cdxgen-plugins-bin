@@ -155,6 +155,26 @@ data class FrameworkModel(
      * the lambda-nesting chain the route prefixes already use.
      */
     val authenticationDsl: List<String> = emptyList(),
+    /**
+     * P15: chained DSL calls that declare media on the ROUTE OBJECT between
+     * the route call and its handler — Vert.x's
+     * `router.get("/x").produces("application/json").handler { .. }`. The
+     * value is the call's first (folded) argument.
+     */
+    val mediaDsl: List<MediaDsl> = emptyList(),
+    /**
+     * P15: the chained DSL call that attaches the real handler to a route
+     * object (Vert.x's `Route.handler { .. }`) — for route builders whose
+     * route call takes only the path.
+     */
+    val handlerDsl: List<String> = emptyList(),
+    /**
+     * P15: route-builder calls whose arguments from this index on name the
+     * REQUIRED ROLES (Javalin's `get("/x", handler, Role.ADMIN)` — the
+     * vararg `RouteRole...` tail). The handler is the last argument BEFORE
+     * the roles begin.
+     */
+    val roleArgumentStart: Int = -1,
 )
 
 /**
@@ -208,6 +228,18 @@ const val KIND_PRODUCES: String = "produces"
 data class AuthAnnotation(
     val pattern: String,
     val scheme: String,
+)
+
+/**
+ * P15: chained DSL calls that declare a route's media on the ROUTE OBJECT
+ * after the route call itself — Vert.x's
+ * `router.get("/x").produces("application/json").handler { .. }`. The media
+ * is not an annotation and not an argument of the route call; it is a call
+ * in the receiver chain between the route and the handler.
+ */
+data class MediaDsl(
+    val pattern: String,
+    val kind: String,
 )
 
 /** Transport slots, shared by [ContextReader.kind] and [ParameterAnnotation.kind]. */
@@ -341,6 +373,14 @@ object EndpointModels {
                     )
                 } ?: emptyList(),
                 authenticationDsl = f.arr("authenticationDsl")?.strings() ?: emptyList(),
+                mediaDsl = f.arr("mediaDsl")?.objects()?.map { m ->
+                    MediaDsl(
+                        pattern = require(m.str("pattern"), "frameworks[].mediaDsl[].pattern"),
+                        kind = require(m.str("kind"), "frameworks[].mediaDsl[].kind"),
+                    )
+                } ?: emptyList(),
+                handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
+                roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
                 handlerMethodNames = f.arr("handlerMethodNames")?.objects()?.map { h ->
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),

@@ -240,4 +240,143 @@ class ClasspathResolverTest {
             zos.closeEntry()
         }
     }
+
+    // ---- P15: Gradle Module Metadata file names, and AndroidX variant siblings
+
+    /**
+     * A publisher may name its artifact file anything — `Turbine-jvm.jar`,
+     * `window-core.aar` — and the `.module` beside it is the publisher's
+     * own declaration of those names. noneinandroid's 266 unlocatable
+     * coordinates included exactly this shape, with the jar already in the
+     * cache. Gradle stores each file under its own content hash, so the
+     * `.module` and the artifact it names sit in DIFFERENT hash
+     * directories; the search must span the whole version directory. The
+     * metadata-usage variant (kotlin-metadata) is never picked even when
+     * its file is the only one present.
+     */
+    @Test
+    fun locatesArtifactsThroughGradleModuleMetadataFileNames() {
+        val root = Files.createTempDirectory("kosi-cp-gmm")
+        val module = root.resolve("app")
+        Files.createDirectories(module)
+        module.resolve("build.gradle.kts").writeText(
+            """
+            dependencies {
+                implementation("io.example:turbine:1.2.0")
+                implementation("io.example:meta-only:1.2.0")
+            }
+            """.trimIndent(),
+        )
+        // turbine: the .module in hash A declares Turbine-jvm.jar, which
+        // lives in hash B; the metadata-usage variant declares a metadata
+        // jar that ALSO exists — the java-api file must win.
+        val metaDir = root.resolve(".gradle/io.example/turbine/1.2.0/aaaa")
+        Files.createDirectories(metaDir)
+        metaDir.resolve("turbine-1.2.0.module").writeText(
+            """
+            {
+              "formatVersion": "1.1",
+              "module": { "org.gradle.module": "io.example:turbine:1.2.0" },
+              "variants": [
+                {
+                  "name": "jvmApiElements-published",
+                  "attributes": { "org.gradle.usage": "java-api" },
+                  "files": [ { "name": "Turbine-jvm.jar", "url": "Turbine-jvm.jar", "size": 1 } ]
+                },
+                {
+                  "name": "metadataApiElements",
+                  "attributes": { "org.gradle.usage": "kotlin-metadata" },
+                  "files": [ { "name": "turbine-metadata-1.2.0.jar", "url": "x", "size": 1 } ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+        val jarDir = root.resolve(".gradle/io.example/turbine/1.2.0/bbbb")
+        Files.createDirectories(jarDir)
+        writeJar(jarDir.resolve("Turbine-jvm.jar"), "app/cash/turbine/TurbineKt.class")
+        writeJar(jarDir.resolve("turbine-metadata-1.2.0.jar"), "META-INF/turbine.kotlin_module")
+
+        // meta-only: the single declared file belongs to a kotlin-metadata
+        // usage variant — not a binary root, so the coordinate is missing.
+        val metaOnly = root.resolve(".gradle/io.example/meta-only/1.2.0/aaaa")
+        Files.createDirectories(metaOnly)
+        metaOnly.resolve("meta-only-1.2.0.module").writeText(
+            """
+            {
+              "formatVersion": "1.1",
+              "variants": [
+                {
+                  "name": "metadataApiElements",
+                  "attributes": { "org.gradle.usage": "kotlin-metadata" },
+                  "files": [ { "name": "meta-only-metadata-1.2.0.jar", "url": "x", "size": 1 } ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+        writeJar(metaOnly.resolve("meta-only-metadata-1.2.0.jar"), "META-INF/m.kotlin_module")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(module))
+        val turbine = result.jars.firstOrNull { it.coordinate?.artifact == "turbine" }
+        assertEquals(
+            "Turbine-jvm.jar",
+            turbine?.jar?.fileName?.toString(),
+            "the metadata-declared file name is located across hash dirs, got ${result.jars.map { it.jar.fileName }}",
+        )
+        assertTrue(
+            result.missing.contains("io.example:meta-only:1.2.0"),
+            "a metadata-only variant's jar is not a binary root; missing=${result.missing}",
+        )
+    }
+
+    /**
+     * AndroidX multiplatform publishing: the SAME API ships under sibling
+     * variant modules (`anim`, `anim-android` AAR, `anim-desktop`,
+     * `anim-jvmstubs`). A variant whose binary was never downloaded —
+     * the alpha/beta AndroidX builds in nowinandroid's classpath — is
+     * still locatable through a sibling that WAS. The sibling chain only
+     * strips/extends the known variant suffixes: a DIFFERENT library in
+     * the same group is never picked up (the negative half).
+     */
+    @Test
+    fun locatesAndroidxVariantSiblingsWhenTheDeclaredVariantHasNoBinary() {
+        val root = Files.createTempDirectory("kosi-cp-sib")
+        val module = root.resolve("app")
+        Files.createDirectories(module)
+        module.resolve("build.gradle.kts").writeText(
+            """
+            dependencies {
+                implementation("io.example:anim-android:1.0.0")
+                implementation("io.example:unrelated-lib:1.0.0")
+            }
+            """.trimIndent(),
+        )
+        // anim-android carries only metadata; the jvmstubs sibling has the jar.
+        val android = root.resolve(".gradle/io.example/anim-android/1.0.0/aaaa")
+        Files.createDirectories(android)
+        android.resolve("anim-android-1.0.0.module").writeText(
+            """
+            { "formatVersion": "1.1", "variants": [
+                { "name": "androidApiElements", "attributes": { "org.gradle.usage": "java-api" },
+                  "files": [ { "name": "anim-android-1.0.0.aar", "url": "x", "size": 1 } ] } ] }
+            """.trimIndent(),
+        )
+        val stubs = root.resolve(".gradle/io.example/anim-jvmstubs/1.0.0/bbbb")
+        Files.createDirectories(stubs)
+        writeJar(stubs.resolve("anim-jvmstubs-1.0.0.jar"), "io/example/anim/AnimatedVisibilityKt.class")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(module))
+        val anim = result.jars.firstOrNull { it.coordinate?.artifact == "anim-android" }
+        assertEquals(
+            "anim-jvmstubs-1.0.0.jar",
+            anim?.jar?.fileName?.toString(),
+            "the declared variant's sibling supplies the binary, got ${result.jars.map { it.jar.fileName }}",
+        )
+        // The sibling never widens to a different library of the same group.
+        assertTrue(
+            result.missing.contains("io.example:unrelated-lib:1.0.0"),
+            "a same-group library with a different base is NOT a variant sibling; missing=${result.missing}",
+        )
+    }
 }

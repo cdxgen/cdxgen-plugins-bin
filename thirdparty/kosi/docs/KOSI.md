@@ -5,6 +5,200 @@ measured numbers, and the numbered defects that `known-fail=<n>` corpus
 markers refer to. Defects stay numbered; closing one requires the XPASS
 ratchet proof.
 
+## P15 — the engine under a real classpath (this branch)
+
+Branch `feat/kosi-p15-engine-under-load`, off `feat/kosi` (`8e578f6`).
+
+**§1 — the per-class cost of a large attached classpath, measured and
+fixed.** The dominant retainer was neither the KIR nor the Analysis API
+session nor the summaries' published form — it was kosi's own COMPOSED
+summary sink-effects. Measured with a mid-run `GC.class_histogram`
+polled every 1.5s while AndroGoat's warmed classpath lowered its whole
+wanted closure (fresh JVM, JDK 21):
+
+| deps classes lowered | peak live heap | outcome |
+|---|---|---|
+| 0 (resolved slot only) | 465 MB | completes, 5.4 s |
+| 25 | 494 MB | completes |
+| 50 | 903 MB | completes |
+| 100 | 1067 MB | completes |
+| 200 | > 8 GB | GC death (25 min, killed) |
+| 500 (the default cap) | 8.5 GB at OOM | **OOM even on a 12g heap** |
+
+The histogram at the peak: **68,292,827 `SummarySinkEffect` instances
+(3.8 GB) + 23M byte[]/String (3.8 GB)** — the KIR itself was 13k KirCall
+instances, the PSI/session invisible at this scale. The mechanism:
+`recordComposedSinkEffects` re-records every callee effect joined with
+every live fact, KEYED BY THE JOINED param path, and `joinPath` is
+unbounded — so a recursive cluster composes ever-deeper paths and every
+deeper join is a NEW map key. The instrumented run named it:
+`androidx.fragment.app.FragmentManagerImpl.moveToState` grew 8k → 1M
+effects across SCC iterations while its param paths deepened
+`mActive.mChildFragmentManager.mTmpRecords.mIndex` → depth 15. Every one
+of those effects is UNFIREABLE: a fact key's path is one LOWERED access
+path, and `AccessPath.of` keeps at most five elements and appends `*`
+when it cuts — so six segments is the deepest key either engine can
+spell, and an effect whose param path is deeper can never match any
+fact. (The bound is the lowering's, NOT `Options.accessPathDepth`, which
+only switches field sensitivity on and off; reading it off the option
+cost a real flow — R91.)
+
+Two bounds, both in `SummaryAnalysis.recordEffect` and both unit-pinned
+(`composedParamPathsNoFactKeyCanSpellAreDropped`,
+`anEscapeSetPastItsBudgetDropsTheWholeSummary` — each fails with its
+bound restored):
+
+1. A composed param path deeper than the deepest path the lowering can
+   put on a fact key is DROPPED, exactly — it can never match one at
+   application time.
+2. The effect map is budgeted like the state (R58's rule):
+   `maxSummarySinkEffects` (8192) trips `stateOverBudget`, the summary
+   is dropped WHOLE, and the run counts it in `stats.truncations` as
+   `summary-effect-budget` (AndroGoat's 500-class closure: 25 trips,
+   loudly).
+
+After: AndroGoat's 161-jar classpath lowers its whole 300-class wanted
+closure at a **~1 GB peak in ~16 s** (500-class cap never trips; the
+closure is 300). `deps_max_classes = 50` is DELETED from corpus.toml and
+the corpus JVM heap comes down 8g → **6g** (metaspace stays 1g). The
+honest accounting of what the remaining 6g buys: ~500 sessions share one
+JVM and the Analysis API's per-session caches accumulate (the pre-P9
+note in the build file), and the from-empty warm attaches each repo's
+FULL transitive closure — 20-40% more jars than the stale partial lists
+P14's 8g run measured against (anki 710 → 1010 coordinates, nowinandroid
+918 → 1100). At 3g and at 4g the warmed matrix GC-thrashed without
+dying (measured, 20+ minutes of 1000%-CPU full GCs); 6g completes. The
+SINGLE-SESSION driver — the 8.5 GB deps-slot spike that pinned the cap —
+is gone. Proof the fix changes nothing where nothing exploded:
+kosi-vulnerable-service's deps slot is byte-identical pristine-vs-fixed
+(`dataFlow` including `summaries`, and `stats`), and the 432 pre-P15
+golden digests did not move — the 12 new goldens are this phase's two
+new fixtures.
+
+**§2 — the five `unreachable-but-emitted block` findings on InsecureShop,
+root-caused as TWO defects.** Reduced to InsecureShop's four functions
+(five findings: ChooserActivity.makeTempCopy x2, LoginActivity.onLogin,
+SendingDataViaActionActivity.onSendData, Util.verifyUserNamePassword):
+
+1. **Missing exceptional edges (cause A) — NOT harmless.** Catch
+   handlers lowered as standalone blocks with NO incoming edge: the CFG
+   has no exceptional-edge instruction, so every `catch` body was
+   structurally unreachable, never analysed, and taint through it
+   silently dropped (onLogin's `catch (e) { throw RuntimeException(e) }`,
+   makeTempCopy's `catch { return null }`). Fixed in `lowerTry`: two
+   may-edges into a DISPATCH CHAIN over the handlers — from the try
+   body's entry (a throw at the first call; the only edge possible when
+   the body ends terminated) and from the body's open end — so every
+   handler is reachable with the fork's state, no handler flows into
+   another (the exception's type picks one at run time; the KIR cannot
+   express that, so all are alternatives), and the transfer's
+   may-successor treatment of branch arms makes a true-condition branch
+   exactly this edge.
+2. **Dead tail blocks (cause B) — harmless noise, now not emitted.** An
+   all-paths-returned construct (both if/else arms return; try body and
+   handler both return) still started its join/continuation block.
+   `finish()` now drops unreachable blocks (ids stable, no renumbering)
+   and strips their phi inputs.
+
+Success condition met: `kosi kir dump` on InsecureShop validates CLEAN.
+Fixture `catch-handler-flow` pins the dropped flow (source before the
+try, sink INSIDE the handler — with cause A restored the slice is
+absent) and the negatives (sanitized-before-try stays clean; the
+handler's clean sibling stays clean). KirLoweringTest pins both causes
+through the kir dump's own CFG validation (restored defects: the dump
+REFUSES the module). InsecureShop's floor did NOT move (its catch
+handlers carry no pack source-to-sink path) — measured, not assumed.
+
+**§3 — nowinandroid's 266 unlocatable coordinates, mapped per cause
+before any code.** Of the 266: 1 carried an AAR and 2 carried jars ON
+DISK under file names no rule derives (`window-core.aar`,
+`Turbine-jvm.jar`, `roborazzi-painter-jvm.jar`) — the Gradle Module
+Metadata `.module` beside them declares those names, and Gradle stores
+each file under its OWN content hash, so the `.module` and the artifact
+sit in different hash directories; 229 had no binary under their own
+coordinate but a same-base sibling variant did (`animation-android`'s
+alpha carries no AAR anywhere, `animation-jvmstubs` carries the API
+jar); 34 have no binary at any variant at that version (never
+downloaded). Two rules added to the resolver, each covered by a
+`ClasspathResolverTest` case on a synthetic cache layout (P13's
+pattern), both failing with their rule restored:
+
+1. `.module`-declared artifact FILE names, searched across the whole
+   version directory, metadata/docs-usage variants excluded (a
+   kotlin-metadata jar is not a binary root).
+2. Same-base variant siblings in preference order — the real JVM code
+   first (`-desktop`), then `-jvm`, the umbrella, the JVM API stubs
+   (`-jvmstubs`), the Android AAR last — never widening to a different
+   library of the same group.
+
+nowinandroid: **0.7564 → 0.8150** (5132/6297), missing 266 → 94 — the 94
+are the no-binary-anywhere set, unfixable without downloading (kosi is
+offline by design; the warm script's job, not the resolver's). No repo
+crossed 0.90, so no gate membership changed.
+
+**§4 — media and auth beyond the four frameworks that had it.** Three
+new declaration sites, all pack-driven, each pinned by fixture
+`dsl-media-auth` with its negative half (restore-the-defect proven: all
+three channels off → every field empty → the wants FAIL):
+
+- **Vert.x**: media sits on the ROUTE OBJECT between the route call and
+  the handler (`router.get("/x").produces("application/json").handler {}
+  — read from the chained calls (pack `mediaDsl`/`handlerDsl`), folding
+  each media argument at its own call site and seeing through the
+  SAM-constructor wrapper around the handler lambda.
+- **Javalin**: the route builder's vararg RouteRole tail IS the
+  requirement (`get("/x", handler, Role.ADMIN)` — pack
+  `roleArgumentStart`); the handler is the argument BEFORE the roles,
+  which the last-argument read used to lose entirely.
+- **web.xml `<security-constraint>`**: the deployment descriptor's own
+  authentication requirement, parsed (P13 parsed the element past it)
+  and attached per url-pattern with servlet-spec matching — roles
+  (`security-constraint(admin,auditor)`), the empty `<auth-constraint/>`
+  DENY-ALL, the `*` wildcard, and the transport-only constraint (no
+  auth-constraint element) correctly attaching NOTHING.
+- **http4k, servlet media, Vert.x auth**: genuinely no declaration site
+  in the shapes the KIR can attribute to one route — said so in the
+  PACK'S OWN `_p15_comment` rather than leaving the empties ambiguous.
+
+The consumer question: **the SARIF writer now carries the endpoint on
+every result that entered through one** (`properties.endpoint`:
+authentication/consumes/produces/framework/path, pinned by
+`anEndpointLinkedSliceCarriesItsAuthenticationIntoTheExport`) — before
+P15 the three fields were facts kosi computed and threw away at the
+first export boundary. The cdxgen SaaSBOM arm
+(`lib/ecosystems/kosi.js`, cdxgen checkout, `feat/kosi-evinse-tmp`)
+still drops `apiEndpoints` entirely — it reads `services[]` only; fixing
+that belongs to that repo's branch and is named as the follow-up.
+
+**§5 — the corpus warm, reproducible.** `warm-corpus-classpath.sh`:
+
+- **The monorepo bound**: a merged tree carrying many VERSIONS of the
+  same group:artifact (http4k's killed-mid-run state: 10,923 lines,
+  1466 of them the IDENTICAL `kotlin-stdlib:2.4.0`, 253 unique
+  group:artifact pairs) is collapsed to ONE version per pair — the
+  HIGHEST, numeric segment-wise, the rule Gradle's own conflict
+  resolution applies — then hard-capped (`KOSI_WARM_MAX_COORDS`, default
+  2000, the cut printed). The bound runs BEFORE the artifact pull
+  (bounding the resolve input) and AGAIN AFTER (the transitive-closure
+  merge re-introduces the other versions).
+- **SIGPIPE removed**: the one early-exiting pipe consumer
+  (`head -1` after a grep, under `set -o pipefail`) is now `sed -n 1p`.
+- **Honest exit codes on every arm**: a multi-repo warm records
+  per-repo failures, warms the REST (one broken repo no longer leaves
+  the tier's other floors measuring against cold caches), and exits 1
+  naming every failure; an Android-shaped classpath whose framework jar
+  cannot be fetched FAILS (the floors are measured against it).
+
+Full warm from an EMPTY `.corpus-cache`: every tier re-fetched at its
+pinned SHA and warmed clean, exit 0 per tier — per-repo coordinate
+counts in the phase report. Those counts were produced BEFORE R92: the
+numeric bound never ran and a leftover string comparison pruned the
+lists instead, so a handful of coordinates were pinned to a lower
+version (`2.4.0` over `2.10.0`). The lists must be re-warmed and the
+per-repo counts and ratios re-measured on the corpus machine — named in
+the P16 prompt as its first task.
+
+
 ## P14 — real repos, framework generations, and the findings ratchet (this branch)
 
 Branch `feat/kosi-p14-real-repos`, off `feat/kosi` (`0443465`). The one
@@ -1325,6 +1519,16 @@ Gate proofs recorded in the PR body:
    fact types. Unification is P7's first item; until then
    `TransferParityTest` fails the build when one learns an opcode the other
    does not. (R65)
+
+## Defects found and fixed during the P15 review
+
+| # | Area | Defect | Fix |
+|---|------|--------|-----|
+| R91 | kosi-flow (review of P15) | **§1's composed-path bound was read off `Options.accessPathDepth`, which NOTHING enforces.** That option only switches field sensitivity on and off; a fact key's path is one lowered `AccessPath`, which `AccessPath.of` cuts at five elements and marks with `*` — so `job.a.b.c.d.e.f` is the key `a.b.c.d.e.*`, SIX segments, formable on both sides of a call. Capping composed paths at the option's 5 dropped that escape and lost the flow with it; GLM's own unit test pinned the wrong bound (it asserted a depth-3 path is unfireable at `accessPathDepth = 2`, which the lowering never made true) | the cap is `AccessPath.DEFAULT_DEPTH + 1` — the deepest path the lowering can spell — with the lost flow pinned by `aCollapsedAccessPathEscapeStillFiresAcrossTheBoundary` (it fails against the shipped bound) and the bound test rewritten to grow a composed path one field per level until it passes six. The effect BUDGET, which is what actually bounds the heap, is depth-independent and unchanged |
+| R92 | scripts (review of P15) | **§5's monorepo bound never ran, and the dedup that did run was the one §5 said it was replacing.** `grep -E "$coord_re" "$out" \|\| true \| awk ...` parses as `grep \|\| (true \| awk ...)`: on a SUCCESSFUL grep the awk never runs, so `bound_coordinates` wrote back the unbounded list. The pruning actually in force was a leftover inline block comparing versions as STRINGS — it keeps `2.4.0` over `2.10.0`, the exact defect the new numeric `vercmp` was written for, and it also mangles the jar-path lines the function preserves | the coordinate and non-coordinate halves are split into files before filtering, the numeric bound applied to the coordinate half only, and the leftover inline block deleted. Checked on a list holding `kotlin-stdlib` at 1.9.0/2.4.0/2.10.0 plus a jar path: 2.10.0 survives, the jar path passes through |
+| R93 | scripts (review of P15) | the per-repo failure list was a bash ARRAY read as `${#failed[@]}` under `set -u` — on bash 3.2 (still the system bash on macOS) an empty array is an unbound variable, so the arm that reports failures would itself abort the script on the happy path | a plain string accumulator, checked with `[ -n "${failed# }" ]` |
+| R94 | kosi-export (review of P15) | the endpoint-per-slice map said "the first (lowest id) wins deterministically" and did the opposite: `.toMap()` keeps the LAST pair, so ascending order left the HIGHEST id | sorted descending so the lowest id survives, pinned by a test that writes the same two endpoints in both orders and asserts identical bytes |
+| R95 | cdxgen (the §4 consumer question, completed here) | kosi's `apiEndpoints` — the whole INBOUND route surface, with the authentication P14/P15 worked to model — was dropped by cdxgen's SaaSBOM arm: `collectKosiServices` reads only the OUTBOUND `services[]` rows | `collectKosiApiEndpoints` in `lib/ecosystems/kosi.js`, wired into evinser beside the services collector: one service per route, named as `detectServicesFromOpenAPI` names its own so a spec and a kosi run converge on one entry, with `authenticated`/`x-trust-boundary` set only when a requirement was DECLARED (an empty list is "nothing declared", not "open") and the framework, handler and media types as properties |
 
 ## Defects found and fixed during P14
 

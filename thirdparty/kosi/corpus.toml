@@ -610,6 +610,38 @@ tier = "fixtures"
 path = "fixtures/bare-accessor-source"
 capabilities = ["lowering", "accessor-property", "bare-name", "field-sensitivity", "ktor"]
 
+# P15 §2: catch handlers were emitted with NO incoming CFG edge — the CFG
+# has no exceptional-edge instruction — so every `catch` body was structurally
+# unreachable, never analysed, and taint through it silently dropped (found as
+# five `unreachable-but-emitted block` validator findings on InsecureShop).
+# The fixture reduces InsecureShop's four functions to the smallest Kotlin
+# that reproduces each, pins the dropped flow (source before the try, sink
+# inside the handler) and the two negative halves an over-broad exceptional
+# edge would fail (sanitized-before-try, born-after-try). Cause B — the dead
+# trailing block an all-paths-returned construct used to emit — is pinned by
+# KirLoweringTest via the kir dump's CFG validation.
+
+[[fixtures]]
+slug = "catch-handler-flow"
+tier = "fixtures"
+path = "fixtures/catch-handler-flow"
+capabilities = ["try-catch", "exceptional-edges", "catch-handler-flow", "dead-block"]
+
+# P15 §4: media and auth for the frameworks P14 did not model — declared at
+# three sites that are neither annotations nor named arguments: Vert.x
+# chains them on the ROUTE OBJECT (router.get("/x").produces(..).handler {}),
+# Javalin's route builder carries them as the vararg RouteRole tail, and the
+# servlet deployment descriptor's <security-constraint> names url-patterns
+# and the roles that may reach them (parsed for mappings since P13, parsed
+# PAST for access control). http4k's core DSL has no declaration site — the
+# pack's own comment says so, and the fixture pins the empties are real.
+
+[[fixtures]]
+slug = "dsl-media-auth"
+tier = "fixtures"
+path = "fixtures/dsl-media-auth"
+capabilities = ["endpoints", "media-types", "authentication", "vertx", "javalin", "servlet", "web-xml", "security-constraint", "http4k"]
+
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the
@@ -649,13 +681,16 @@ repo = "https://github.com/satishpatnayak/AndroGoat"
 sha = "77996f239587a8ed2691629777374b5f4a364589"
 classpath_file = "classpath.txt"
 min_findings = 16
-# The transitive-warmed classpath (161 AndroidX coordinates) makes the
-# default 500-class deps lowering fill the corpus JVM's whole heap. 50
-# classes keep the slot measurable, with the cut named by the
-# deps-class-limit diagnostic (R88); 150 was measured filling an 8g heap,
-# so the per-class cost over 161 attached jars is the engine's to own,
-# not this phase's.
-deps_max_classes = 50
+# P14 pinned deps_max_classes = 50 here: the transitive classpath's
+# 500-class lowering filled the 8g corpus heap. P15 removed the cause —
+# composed summary sink-effects multiplied through unbounded param-path
+# joins (FragmentManagerImpl's recursive cluster grew one function's escape
+# set to 68M entries / ~8GB); the joins are now capped at the engine's
+# access-path depth (deeper effects can never match a fact key) and the
+# escape set is budgeted like the state (R58's drop-whole degradation,
+# counted in stats.truncations as summary-effect-budget). The default
+# 500-class cap now runs this classpath at a ~1 GiB peak in ~16 s, and the
+# cap entry is deleted — a cap nobody needs is a number nobody measures.
 capabilities = ["vuln", "android", "webview", "insecure-transport", "sql"]
 
 [[fixtures]]

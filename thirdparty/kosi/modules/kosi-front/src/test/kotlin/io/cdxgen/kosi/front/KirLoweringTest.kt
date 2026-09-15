@@ -617,4 +617,91 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
                 result.functions.joinToString { it.canonicalName },
         )
     }
+
+    // ---- P15 §2: exceptional may-edges and dead-block emission ---------------
+
+    /**
+     * `loweredFunctions` goes through `kir dump`, which REFUSES a module whose
+     * CFG validates dirty — so both tests below fail the moment either defect
+     * returns: unreachable handlers (no exceptional edge) or an
+     * unreachable-but-emitted tail block are validator findings, and the dump
+     * throws instead of returning.
+     */
+    @Test
+    fun catchHandlersAreReachableThroughExceptionalMayEdges() {
+        val root = project(
+            mapOf(
+                "src/main/kotlin/Catch.kt" to """
+                    package t
+
+                    private fun risky(): String = checkNotNull(readLine())
+
+                    fun emptyHandler(): String {
+                        return try {
+                            risky()
+                        } catch (e: IllegalStateException) {
+                            "fallback"
+                        }
+                    }
+
+                    fun rethrowHandler(): String {
+                        try {
+                            risky()
+                        } catch (e: Exception) {
+                            throw RuntimeException(e)
+                        }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        // Pre-P15 both functions lowered with catch-handler blocks no edge
+        // reached; KirValidator named them and the dump failed. Reaching here
+        // at all is the pin — and the handler BODIES must still be present,
+        // not optimised away: the rethrow handler carries its KirThrow.
+        val result = loweredFunctions(root)
+        assertEquals(emptyMap(), result.failures, "every construct here lowers")
+        assertTrue(
+            result.instructionsOf("rethrowHandler").any { it is io.cdxgen.kosi.kir.KirThrow },
+            "the handler's rethrow is emitted — reachable, not dropped",
+        )
+    }
+
+    @Test
+    fun anAllPathsReturnedConstructEmitsNoUnreachableTailBlock() {
+        // Util.verifyUserNamePassword reduced (InsecureShop): an if/else whose
+        // both arms return. The lowering used to start the join block anyway
+        // and terminate it with a bare implicit return — an
+        // unreachable-but-emitted block the validator rejects. The dump this
+        // test goes through fails while the dead block is emitted.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/Tail.kt" to """
+                    package t
+
+                    fun bothReturn(a: Boolean): Int {
+                        if (a) {
+                            return 1
+                        } else {
+                            return 2
+                        }
+                    }
+
+                    fun tryBothReturn(): Int? {
+                        return try {
+                            1
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        assertEquals(emptyMap(), result.failures, "every construct here lowers")
+        val returns = result.instructionsOf("bothReturn").filterIsInstance<io.cdxgen.kosi.kir.KirReturn>()
+        // Exactly the two arm returns — no third bare return from a dead tail.
+        assertEquals(2, returns.size, "no unreachable implicit-return block is emitted, got: $returns")
+        val tryReturns = result.instructionsOf("tryBothReturn").filterIsInstance<io.cdxgen.kosi.kir.KirReturn>()
+        assertTrue(tryReturns.isNotEmpty(), "the try expression's return is still emitted")
+    }
 }

@@ -254,6 +254,19 @@ object ClasspathResolver {
      * under the `-jvm`-suffixed module name; without the fallback every
      * coroutines/ktor dependency read `classpath-partial` even against a
      * warm cache. The DECLARED coordinate keeps naming the purl.
+     *
+     * P15 adds the next layer, both driven by nowinandroid's 266 named
+     * unlocatable coordinates: (1) Gradle Module Metadata — a publisher may
+     * name its artifact file anything (`androidx.window:window-core-android`
+     * ships `window-core.aar`, `app.cash.turbine:turbine-jvm` ships
+     * `Turbine-jvm.jar`), and the `.module` file beside the artifact is the
+     * publisher's own declaration of those names; (2) AndroidX multiplatform
+     * publishing — the same API ships under sibling variant modules
+     * (`animation`, `animation-android` AAR, `animation-desktop` jar,
+     * `animation-jvmstubs` jar), and a variant whose binary was never
+     * downloaded may still be locatable through a sibling that was. The
+     * sibling chain only strips/extends the KNOWN variant suffixes, so a
+     * different library in the same group is never picked up.
      */
     fun locate(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
         val artifactNames = if (coordinate.artifact.endsWith("-jvm")) {
@@ -265,8 +278,39 @@ object ClasspathResolver {
             val found = locateArtifact(coordinate.copy(artifact = artifact), root, moduleDirs)
             if (found != null) return found
         }
+        // Same-base variant siblings, in preference order: the real JVM
+        // implementation first (desktop), then the plain JVM variant, the
+        // umbrella, the JVM API stubs AndroidX publishes, and finally the
+        // Android AAR (extracted by [usableArtifact]). The declared
+        // coordinate was already tried above, so a sibling only wins when
+        // the requested variant itself has no binary on disk.
+        val base = variantBase(coordinate.artifact)
+        for (suffix in VARIANT_SIBLING_SUFFIXES) {
+            val sibling = base + suffix
+            if (sibling == coordinate.artifact) continue
+            val found = locateArtifact(coordinate.copy(artifact = sibling), root, moduleDirs)
+            if (found != null) return found
+        }
         return null
     }
+
+    /**
+     * The multiplatform variant suffixes: `animation-android` and the
+     * umbrella `animation` share the base `animation`. An unsuffixed
+     * artifact is its own base, and the suffix STRIPPING only applies once,
+     * so `foo-android-release` is not mangled.
+     */
+    private fun variantBase(artifact: String): String {
+        for (suffix in listOf("-androidRelease", "-android", "-jvmstubs", "-desktop", "-jvm")) {
+            if (artifact.endsWith(suffix) && artifact.length > suffix.length) {
+                return artifact.removeSuffix(suffix)
+            }
+        }
+        return artifact
+    }
+
+    /** Sibling variant order: real JVM code first, API stubs before extraction. */
+    private val VARIANT_SIBLING_SUFFIXES = listOf("-desktop", "-jvm", "", "-jvmstubs", "-android")
 
     private fun locateArtifact(coordinate: Coordinate, root: Path, moduleDirs: Set<Path>): Path? {
         val version = coordinate.version
@@ -395,13 +439,64 @@ object ClasspathResolver {
             }
         }
         if (exact.isNotEmpty()) return exact
-        return hashDirs.flatMap { hashDir ->
+        val suffixed = hashDirs.flatMap { hashDir ->
             KMP_TARGET_SUFFIXES.flatMap { suffix ->
                 listOf("$artifact-$suffix-$version.jar", "$artifact-$suffix-$version.aar").mapNotNull { name ->
                     hashDir.resolve(name).takeIf { Files.isRegularFile(it) }
                 }
             }
         }
+        if (suffixed.isNotEmpty()) return suffixed
+        // The publisher's own file names, from the Gradle Module Metadata
+        // beside the artifact (P15): `window-core.aar`, `Turbine-jvm.jar`,
+        // `roborazzi-painter-jvm.jar` — none derivable from the module
+        // name, all declared in the `.module` file a warm cache always
+        // carries. Variants whose usage is metadata-only (kotlin-metadata,
+        // docs) are skipped: their files are not binary roots. Gradle
+        // stores EACH file under its own content hash, so the `.module`
+        // and the artifact it names usually sit in DIFFERENT hash
+        // directories — the declared names are searched across the whole
+        // version directory, not beside the metadata file.
+        val declaredNames = hashDirs.flatMap { hashDir -> moduleDeclaredArtifactNames(hashDir) }
+        if (declaredNames.isNotEmpty()) {
+            val found = hashDirs.flatMap { hashDir ->
+                declaredNames.mapNotNull { name -> hashDir.resolve(name).takeIf { Files.isRegularFile(it) } }
+            }
+            if (found.isNotEmpty()) return found
+        }
+        return emptyList()
+    }
+
+    /**
+     * Artifact FILE names the `.module` metadata in [hashDir] declares,
+     * jar before aar, deterministic. A `.module` that is absent or
+     * unparseable declares nothing — the caller falls through to the next
+     * rule. Metadata-only and docs variants are excluded: their declared
+     * files (kotlin-metadata jars, apiLevels.json, aggregated sources) are
+     * not binary roots a session can load.
+     */
+    private fun moduleDeclaredArtifactNames(hashDir: Path): List<String> {
+        val module = runCatching { Files.list(hashDir).use { it.toList() } }.getOrElse { emptyList() }
+            .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".module") }
+            .sortedBy { it.fileName.toString() }
+            .firstOrNull() ?: return emptyList()
+        val declared = try {
+            val root = io.cdxgen.kosi.schema.JsonReader.parse(Files.readString(module)).asObject()
+            (root.arr("variants")?.objects() ?: emptyList())
+                .filterNot { variant ->
+                    val usage = variant.obj("attributes")?.str("org.gradle.usage") ?: ""
+                    usage.contains("metadata") || usage.contains("docs")
+                }
+                .flatMap { variant -> variant.arr("files")?.objects() ?: emptyList() }
+                .mapNotNull { file -> file.str("name") }
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return declared
+            .filter { it.endsWith(".jar") || it.endsWith(".aar") }
+            .filter { !it.endsWith("-sources.jar") && !it.endsWith("-javadoc.jar") }
+            .sortedWith(compareBy({ !it.endsWith(".jar") }, { it }))
+            .distinct()
     }
 
     /** Kotlin multiplatform target suffixes a JVM consumer can load. */

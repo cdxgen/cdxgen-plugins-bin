@@ -401,4 +401,133 @@ class InterproceduralEngineTest {
         val wrap = result.summaries.first { it.functionId == "test.wrap" }
         assertEquals(listOf("p0"), wrap.paramToReturn)
     }
+
+    // ---- P15: the composed-escape bounds ---------------------------------------------
+
+    @Test
+    fun composedParamPathsNoFactKeyCanSpellAreDropped() {
+        // The P15 explosion, reduced: composition joins every callee effect
+        // with every live fact, keyed by the JOINED param path, and a
+        // recursive cluster (FragmentManagerImpl) grew one function's escape
+        // set to 68M entries that way — every join one segment deeper. The
+        // bound is the deepest path the LOWERING can put on a fact key
+        // (AccessPath.DEFAULT_DEPTH elements, plus `*` when it cuts = 6),
+        // NOT `accessPathDepth`, which only switches field sensitivity on
+        // and off: see aCollapsedAccessPathEscapeStillFiresAcrossTheBoundary
+        // for the flow a depth-5 cap lost.
+        //
+        // deep sinks param.a (depth 1); each wrapper reads one more field of
+        // its own parameter before passing it on, so the composed path grows
+        // a segment per level. Seven levels puts it past six.
+        fun deep() = fn(
+            "test.deep",
+            KirStore("vobj", "%0"),
+            KirFieldGet("t0", "vobj", AccessPath.field("vobj", "a")),
+            sink("t0", 3),
+            KirReturn(null),
+            params = listOf(KirParam("%0", "obj", "Obj", receiver = false)),
+        )
+        fun wrapper(level: Int, callee: String) = fn(
+            "test.w$level",
+            KirStore("vobj", "%0"),
+            KirFieldGet("t0", "vobj", AccessPath.field("vobj", "f$level")),
+            KirCall("t1", KirCallee(callee, null, CallKind.STATIC), null, listOf("t0"), 2),
+            KirReturn(null),
+            params = listOf(KirParam("%0", "obj", "Obj", receiver = false)),
+        )
+
+        fun chain(levels: Int): List<KirFunction> {
+            val fns = mutableListOf(deep())
+            var callee = "test.deep"
+            for (level in 1..levels) {
+                fns.add(wrapper(level, callee))
+                callee = "test.w$level"
+            }
+            return fns
+        }
+
+        // Five wrappers: the outermost composes f5.f4.f3.f2.f1.a — six
+        // segments, exactly the deepest key a collapsed access path spells,
+        // so it survives and is published.
+        val atCap = analyze(*chain(5).toTypedArray())
+        assertTrue(
+            atCap.summaries.first { it.functionId == "test.w5" }.paramToSink.isNotEmpty(),
+            "a six-segment composed path is still a key the lowering can form",
+        )
+
+        // Six wrappers: seven segments, a path no key can spell. Dropped —
+        // and with it the unbounded growth. Restore the defect (no depth
+        // check) and this publishes again: the assertion fails.
+        val pastCap = analyze(*chain(6).toTypedArray())
+        assertEquals(
+            emptyMap(),
+            pastCap.summaries.first { it.functionId == "test.w6" }.paramToSink,
+            "a composed path deeper than any fact key can never match and is dropped",
+        )
+    }
+
+    @Test
+    fun anEscapeSetPastItsBudgetDropsTheWholeSummary() {
+        // The bound that guarantees the memory ceiling even for path-legal
+        // explosions: past maxSummarySinkEffects the summary is dropped
+        // WHOLE (R58's rule — never a partial escape set), counted in
+        // truncations under its own label. Restore the defect (no budget)
+        // and the summary publishes with all its effects: this fails.
+        fun manySinks() = fn(
+            "test.manysinks",
+            KirStore("vraw", "%0"),
+            sink("vraw", 3),
+            sink("vraw", 5),
+            KirReturn(null),
+            params = listOf(KirParam("%0", "raw", "String", receiver = false)),
+        )
+        fun caller() = fn(
+            "test.budgetcaller",
+            source("t0", 10),
+            KirStore("vraw", "t0"),
+            KirCall("t1", KirCallee("test.manysinks", null, CallKind.STATIC), null, listOf("vraw"), 11),
+            KirReturn(null),
+        )
+        val tight = options().copy(maxSummarySinkEffects = 1)
+        val result = analyze(manySinks(), caller(), options = tight)
+        assertTrue(
+            result.summaries.none { it.functionId == "test.manysinks" },
+            "an over-budget escape set publishes NO summary, got: ${result.summaries.map { it.functionId }}",
+        )
+        assertEquals(
+            1,
+            result.truncations["summary-effect-budget"],
+            "the trip is counted under its own label",
+        )
+        // The same functions under the default budget publish normally.
+        val roomy = analyze(manySinks(), caller(), options = options())
+        assertTrue(
+            roomy.summaries.any { it.functionId == "test.manysinks" },
+            "the default budget never trips on two effects",
+        )
+    }
+
+    @Test
+    fun aCollapsedAccessPathEscapeStillFiresAcrossTheBoundary() {
+        val deep = arrayOf("a", "b", "c", "d", "e", "f", "g")
+        val callee = fn(
+            "test.sinkDeep",
+            KirStore("vjob", "%0"),
+            KirFieldGet("t0", "vjob", AccessPath.field("vjob", *deep)),
+            sink("t0", 3),
+            KirReturn(null),
+            params = listOf(KirParam("%0", "job", "Job", receiver = false)),
+        )
+        val caller = fn(
+            "test.caller",
+            KirNew("j0", "test.Job", emptyList(), 10),
+            KirStore("vjob", "j0"),
+            source("t1", 11),
+            KirFieldSet("vjob", AccessPath.field("vjob", *deep), "t1"),
+            KirCall(null, KirCallee("test.sinkDeep", null, CallKind.STATIC), null, listOf("vjob"), 12),
+            KirReturn(null),
+        )
+        val result = analyze(caller, callee)
+        assertEquals(1, result.evidence.slices.size, "a collapsed six-segment path is a key both sides can form")
+    }
 }

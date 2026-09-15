@@ -182,6 +182,22 @@ object TaintEngine {
          */
         val maxSummaryStateEntries: Int = 60000,
         /**
+         * P15: the same honest degradation for the summary's ESCAPE SET.
+         * Composed sink effects multiply through summary application (each
+         * application joins every callee effect with every live fact, keyed
+         * by the joined access path), and a recursive AndroidX cluster
+         * (FragmentManagerImpl) grew ONE function's effect map to 68M
+         * entries — ~8 GB — filling any heap the corpus JVM could spare,
+         * which is why `deps_max_classes` was pinned at 50 (P14). Two
+         * bounds fix it: composed param paths deeper than the deepest path
+         * the lowering can put on a fact key are dropped (they can never
+         * match one — see SummaryAnalysis.paramPathCap), and the effect map itself is
+         * budgeted like the state (R58): a function whose escapes exceed
+         * this publishes NO summary rather than a partial one, and callers
+         * fall to the labelled unknown default.
+         */
+        val maxSummarySinkEffects: Int = 8192,
+        /**
          * P7 endpoint-rooted taint, when the run asks for it: handler
          * canonical name -> the category its parameters carry. Seeds live
          * at the synthetic entry site (-1) so endpoint-rooted slices walk

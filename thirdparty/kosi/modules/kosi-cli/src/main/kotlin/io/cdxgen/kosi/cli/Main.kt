@@ -173,7 +173,12 @@ object Main {
             target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
             Files.writeString(
                 target,
-                io.cdxgen.kosi.export.Sarif.write(dataFlow, report.tool.name, report.tool.version),
+                io.cdxgen.kosi.export.Sarif.write(
+                    dataFlow,
+                    report.tool.name,
+                    report.tool.version,
+                    report.apiEndpoints,
+                ),
             )
         }
         // Error-severity diagnostics mean the analysis is incomplete; surface

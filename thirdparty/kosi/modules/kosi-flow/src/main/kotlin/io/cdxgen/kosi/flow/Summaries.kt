@@ -418,12 +418,12 @@ internal class Summarizer(
                         continue
                     }
                     val analysis = computeSummary(cf, table)
-                    if (analysis.second) {
-                        // The state exploded past the budget: publish NO
-                        // summary rather than a partial one — callers then
-                        // fall to the labelled unknown default instead of a
-                        // silently truncated summary.
-                        skipped.merge("summary-state-budget", 1, Int::plus)
+                    if (analysis.third) {
+                        // The state or the escape set exploded past its
+                        // budget: publish NO summary rather than a partial
+                        // one — callers then fall to the labelled unknown
+                        // default instead of a silently truncated summary.
+                        skipped.merge(analysis.second, 1, Int::plus)
                         table.remove(member)
                         continue
                     }
@@ -466,11 +466,13 @@ internal class Summarizer(
      * main engine runs, seeded with a fact per parameter and driven by the
      * summary handler (pack entries first, then callee summaries, then the
      * unknown default). Escapes are recorded in the final sweep, at fixpoint.
+     * Returns the summary, the over-budget LABEL (which budget tripped), and
+     * whether any budget tripped — a tripped budget drops the summary whole.
      */
-    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): Pair<FunctionSummary, Boolean> {
+    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): Triple<FunctionSummary, String, Boolean> {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
         analysis.run()
-        return analysis.toSummary() to analysis.stateOverBudget
+        return Triple(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget)
     }
 }
 
@@ -595,14 +597,55 @@ internal class SummaryAnalysis(
      * a recursive body produces a witness per unrolling, and publishing all
      * of them is N slices for ONE flow. The shortest path wins — the most
      * direct trace, and the value that STABILIZES under path truncation.
+     *
+     * P15 bounds, both applied before the map grows:
+     * 1. A composed `paramPath` deeper than [paramPathCap] — the deepest
+     *    path the LOWERING can put on a fact key — is DROPPED, exactly. At
+     *    application time the caller looks up
+     *    `TaintKey(register, effect.paramPath)`, so an effect whose path no
+     *    key can spell never matches a fact, in either engine. This was the
+     *    fuel of the P15 explosion: composing
+     *    FragmentManagerImpl's recursive cluster appended another
+     *    `.mActive.mChildFragmentManager...` segment per iteration
+     *    (depth 8 -> 15 while the cap is 6), every deeper join a NEW map
+     *    key, 8k entries -> 68M in one function.
+     * 2. The map itself is budgeted like the state (R58): past
+     *    [TaintEngine.Options.maxSummarySinkEffects] entries the summary is
+     *    marked over-budget and dropped WHOLE by the Summarizer — callers
+     *    fall to the labelled unknown default; a partial escape set is
+     *    never published.
      */
     private fun recordEffect(effect: SummarySinkEffect) {
+        if (paramPathDepth(effect.paramPath) > paramPathCap) return
+        if (sinkEffects.size >= options.maxSummarySinkEffects) {
+            stateOverBudget = true
+            overBudgetLabel = "summary-effect-budget"
+            return
+        }
         val canonical = effect.copy(path = emptyList(), paramPath = effect.paramPath)
         val existing = sinkEffects[canonical]
         if (existing == null || effect.path.size < existing.path.size) {
             sinkEffects[canonical] = effect
         }
     }
+
+    /**
+     * The deepest path a FACT KEY can carry, which is what an effect's
+     * `paramPath` is looked up against. It is set by the LOWERING, not by
+     * `Options.accessPathDepth` (which only switches field sensitivity on
+     * and off — nothing truncates a key to it): every key path renders one
+     * [AccessPath], and `AccessPath.of` keeps at most
+     * [AccessPath.DEFAULT_DEPTH] elements and appends `*` when it cuts. So
+     * `job.a.b.c.d.e.f` is the key `a.b.c.d.e.*` — SIX segments, formable
+     * on both sides of a call — and capping at the option's 5 dropped that
+     * escape and lost the flow with it (pinned by
+     * `aCollapsedAccessPathEscapeStillFiresAcrossTheBoundary`). Deeper than
+     * this is unformable, so dropping it is exact; composition only ever
+     * makes a path longer, so dropping early is monotone-safe.
+     */
+    private val paramPathCap: Int = AccessPath.DEFAULT_DEPTH + 1
+
+    private fun paramPathDepth(path: String): Int = if (path.isEmpty()) 0 else path.count { it == '.' } + 1
 
     /** Caps a composed path at the trace budget, keeping the SINK end: the source side is re-anchored at slice build. */
     private fun stabilize(path: List<Int>): Pair<List<Int>, Boolean> =
@@ -615,13 +658,17 @@ internal class SummaryAnalysis(
 
     /**
      * True when the analysis state (registers x facts) blew past
-     * [TaintEngine.Options.maxSummaryStateEntries]: real-repo functions can
-     * push the summary state into gigabytes, and an OOM crash is the one
-     * degradation worse than a missing summary. The summary is then dropped
-     * entirely (callers fall to the labelled default), never partially
-     * published.
+     * [TaintEngine.Options.maxSummaryStateEntries], or the escape set past
+     * [TaintEngine.Options.maxSummarySinkEffects]: real-repo functions can
+     * push either into gigabytes, and an OOM crash is the one degradation
+     * worse than a missing summary. The summary is then dropped entirely
+     * (callers fall to the labelled default), never partially published.
      */
     var stateOverBudget: Boolean = false
+        private set
+
+    /** Which budget tripped — the skipped-count label the run publishes. */
+    var overBudgetLabel: String = "summary-state-budget"
         private set
 
     /** v-register -> parameter index, from the entry parameter stores. */

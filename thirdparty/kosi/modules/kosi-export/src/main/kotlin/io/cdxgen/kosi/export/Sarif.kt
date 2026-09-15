@@ -19,7 +19,12 @@ object Sarif {
     const val VERSION = "2.1.0"
     const val SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 
-    fun write(dataFlow: DataFlowEvidence, toolName: String, toolVersion: String): String {
+    fun write(
+        dataFlow: DataFlowEvidence,
+        toolName: String,
+        toolVersion: String,
+        apiEndpoints: List<io.cdxgen.kosi.schema.ApiEndpoint> = emptyList(),
+    ): String {
         val w = JsonWriter(false)
         // JsonWriter sorts object keys: the bytes are deterministic across
         // runs, which the corpus' byte-identity gates read, even though
@@ -51,6 +56,18 @@ object Sarif {
         w.endObject()
         w.endObject()
         val byId = dataFlow.nodes.associateBy { it.id }
+        // A slice that entered through an endpoint carries the endpoint's
+        // declaration into the export (P15): without this, the
+        // authentication requirement and media types were facts kosi
+        // computed and threw away at the first export boundary — a result
+        // about a route nobody protects is exactly the fact a SARIF
+        // consumer wants first. Endpoint ids are stable; a slice links to
+        // at most one endpoint in practice, and the first (lowest id) wins
+        // deterministically if several do.
+        val endpointBySliceId = apiEndpoints
+            .sortedByDescending { it.id }
+            .flatMap { ep -> ep.sliceIds.map { it to ep } }
+            .toMap() // later pairs win, so descending order leaves the LOWEST id
         w.beginArray("results")
         for (slice in dataFlow.slices) {
             w.beginObject()
@@ -90,6 +107,21 @@ object Sarif {
             w.beginArray("origins")
             for (o in slice.origins.sorted()) w.str(o)
             w.endArray()
+            endpointBySliceId[slice.id]?.let { ep ->
+                w.beginObject("endpoint")
+                w.beginArray("authentication")
+                for (a in ep.authentication) w.str(a)
+                w.endArray()
+                w.beginArray("consumes")
+                for (c in ep.consumes) w.str(c)
+                w.endArray()
+                w.str("framework", ep.framework)
+                w.str("path", ep.pathTemplate)
+                w.beginArray("produces")
+                for (p in ep.produces) w.str(p)
+                w.endArray()
+                w.endObject()
+            }
             w.str("confidence", slice.confidence)
             w.bool("crossesDependency", slice.crossesDependency)
             w.bool("crossesModule", slice.crossesModule)

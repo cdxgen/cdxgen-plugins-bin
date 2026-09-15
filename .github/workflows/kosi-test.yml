@@ -2,7 +2,10 @@ name: kosi test
 
 on:
   push:
-    branches: [main]
+    # feat/kosi is the kosi integration branch: phase branches squash-merge
+    # into it and the tests must hold THERE, not only on main (the two failed
+    # runs after the P14 merge were pushes to feat/kosi nobody was watching).
+    branches: [main, feat/kosi]
     paths:
       - "thirdparty/kosi/**"
       - ".github/workflows/kosi-test.yml"

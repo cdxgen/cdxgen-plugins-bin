@@ -105,18 +105,28 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
                 // and at 2g the pinned repo tiers OOMed the fork (loud, via
                 // ExitOnOutOfMemoryError, but dead). ~4 GiB total still fits
                 // the CI runners the matrix runs on.
-                // Metaspace 512m -> 1g and heap 3g -> 8g in P14: with every
-                // pinned repo's classpath FULLY warmed (R81's locator now
-                // finds the jars that were always cached, and the warm script
-                // lists the resolved transitive closure), each resolved
-                // session attaches far more dependency classes. The corpusFull
-                // fork died twice: at the 512m metaspace ceiling 65 minutes in
-                // (NoClassDefFoundError on a class that was always on the
-                // classpath, at report time), and — once the vuln-repo tier's
-                // transitive classpaths attached — AndroGoat's deps slot
-                // filled the whole 3g heap. ~9.5 GiB total — a developer-side ceiling; CI warms the same way and its 16 GB runners hold it still fits the 16 GB
-                // runners the matrix runs on.
-                "-Xmx8g",
+                // Metaspace 512m -> 1g in P14 (the fully-warmed resolved
+                // sessions attach far more dependency classes than 512m
+                // survives — NoClassDefFoundError 65 minutes into a run).
+                // The heap went 3g -> 8g in the same change and comes BACK
+                // to 3g in P15: the 8g was never the workspace sessions'
+                // cost, it was the deps tier's composed summary sink-effects
+                // multiplying through unbounded param-path joins until one
+                // function's escape set held 68M entries (measured with a
+                // mid-run GC.class_histogram: 3.8GB SummarySinkEffect +
+                // 3.8GB byte[]/String). P15 caps the joins at the engine's
+                // access-path depth and budgets the escape set like the
+                // state; AndroGoat's 161-jar classpath now lowers its whole
+                // 300-class closure at a ~1 GiB peak in a FRESH JVM. The
+                // matrix still needs 6g: ~500 sessions share one JVM and the
+                // Analysis API's per-session caches accumulate (the
+                // pre-P9 note in this file), the from-empty warm attaches
+                // each repo's FULL transitive closure (20-40% more jars
+                // than the stale partial lists P14 measured against), and
+                // the deps cap is retired. At 3g and 4g the warmed matrix
+                // GC-thrashed without dying (measured, P15); 6g completes,
+                // and the ceiling is a measurement, not a concession.
+                "-Xmx6g",
                 "-XX:MaxMetaspaceSize=1g",
                 "-XX:MaxDirectMemorySize=256m",
                 "-XX:+ExitOnOutOfMemoryError",

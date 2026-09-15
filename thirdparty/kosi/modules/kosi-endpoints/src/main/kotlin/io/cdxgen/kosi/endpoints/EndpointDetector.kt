@@ -350,18 +350,167 @@ object EndpointDetector {
         }
         val folded = input.folder.valueAt(fn, block, index, pathReg)
         val foldedPath = folded?.value
-        if (foldedPath == null) {
-            // An unresolvable path is UNRESOLVED evidence, not a silently
-            // dropped endpoint: the raw register rendering is the template.
-            publish(add, framework, methods, joinPaths(prefix, rawOf(fn, block, index, pathReg)), fn.canonicalName, fn, "dsl")
-            return
-        }
-        val handler = handlerOfRegs(fn, callArgs, input)
         val boundMethod: String? = when (ins) {
             is KirCall -> boundMethodName(fn, block, index, ins)
             else -> null
         }
-        publish(add, framework, boundMethod?.let { listOf(it) } ?: methods, joinPaths(prefix, foldedPath), handler ?: "", fn, "dsl")
+        if (foldedPath == null) {
+            // An unresolvable path is UNRESOLVED evidence, not a silently
+            // dropped endpoint: the raw register rendering is the template.
+            publish(add, framework, boundMethod?.let { listOf(it) } ?: methods, joinPaths(prefix, rawOf(fn, block, index, pathReg)), fn.canonicalName, fn, "dsl")
+            return
+        }
+        // P15: Vert.x builds routes as a CHAIN —
+        // `router.get("/x").produces("application/json").handler { .. }` —
+        // so the media declarations and the real handler sit on calls that
+        // CONSUME this call's result. Javalin declares auth as the route
+        // call's trailing role arguments. Both are read here, where the
+        // route call is in hand; frameworks without the pack channels keep
+        // the plain candidate.
+        val chained = chainedRouteFacts(fn, block, index, ins, framework, input)
+        val roles = roleArguments(fn, block, index, ins, framework, input)
+        val handler = chained.handler ?: handlerOfRegs(fn, callArgs, input, framework)
+        publish(
+            add,
+            framework,
+            boundMethod?.let { listOf(it) } ?: methods,
+            joinPaths(prefix, foldedPath),
+            handler ?: "",
+            fn,
+            "dsl",
+            consumes = chained.consumes,
+            produces = chained.produces,
+            authentication = roles,
+        )
+    }
+
+    /**
+     * Media and handler declared on the ROUTE OBJECT'S receiver chain
+     * (Vert.x): the route call's result flows through `.produces(..)` /
+     * `.consumes(..)` calls before `.handler { .. }` attaches the real
+     * handler. The walk follows the receiver chain one call at a time — a
+     * `.produces` result is the input of the NEXT chained call — and stops
+     * at the first call that consumes the chain without producing a route
+     * (the handler attach).
+     */
+    private class ChainedRouteFacts(
+        val handler: String?,
+        val consumes: List<String>,
+        val produces: List<String>,
+    )
+
+    private fun chainedRouteFacts(
+        fn: KirFunction,
+        block: KirBlock,
+        index: Int,
+        ins: KirIns,
+        framework: FrameworkModel?,
+        input: Input,
+    ): ChainedRouteFacts {
+        if (framework == null || (framework.mediaDsl.isEmpty() && framework.handlerDsl.isEmpty())) {
+            return ChainedRouteFacts(null, emptyList(), emptyList())
+        }
+        val result = (ins as? KirCall)?.result ?: return ChainedRouteFacts(null, emptyList(), emptyList())
+        var consumes = mutableListOf<String>()
+        var produces = mutableListOf<String>()
+        var handler: String? = null
+        var current = result
+        var hops = 0
+        while (hops < 8) {
+            hops++
+            val rest = block.instructions.drop(index + 1)
+            val nextIndex = rest.indexOfFirst { it is KirCall && it.receiver == current }
+            if (nextIndex < 0) break
+            val next = rest[nextIndex] as KirCall
+            val nextAt = index + 1 + nextIndex
+            val media = framework.mediaDsl.firstOrNull { matches(next.callee.fqn, it.pattern) }
+            if (media != null) {
+                // Folded at the MEDIA CALL's own index: the constant it
+                // reads is defined between the route call and here, and the
+                // folder scans backwards from the index it is given.
+                input.folder.valueAt(fn, block, nextAt, next.args.firstOrNull() ?: "")?.value
+                    ?.let { value -> if (media.kind == io.cdxgen.kosi.models.KIND_CONSUMES) consumes.add(value) else produces.add(value) }
+                current = next.result ?: break
+                continue
+            }
+            if (framework.handlerDsl.any { matches(next.callee.fqn, it) }) {
+                handler = chainedHandlerOf(fn, block, nextAt, next, input)
+                break
+            }
+            break
+        }
+        return ChainedRouteFacts(handler, consumes, produces)
+    }
+
+    /**
+     * The handler a chained `.handler(x)` call attaches: `x` is either the
+     * lambda itself or — Vert.x's common SAM-constructor shape — the result
+     * of wrapping one (`Handler<RoutingContext> { .. }` lowers to a call
+     * whose argument IS the lambda register). The wrapper is seen through
+     * so the published handler names the lambda's own function.
+     */
+    private fun chainedHandlerOf(
+        fn: KirFunction,
+        block: KirBlock,
+        at: Int,
+        call: KirCall,
+        input: Input,
+    ): String? {
+        val direct = call.args.firstOrNull()?.let { reg -> LambdaResolver.resolve(fn, reg, input) }
+        if (direct != null) return direct
+        val wrapped = call.args.firstOrNull() ?: return null
+        for (i in at - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is KirCall && candidate.result == wrapped) {
+                return candidate.args.firstOrNull()?.let { reg -> LambdaResolver.resolve(fn, reg, input) }
+            }
+        }
+        return null
+    }
+
+    /**
+     * The route call's trailing ROLE arguments (Javalin's
+     * `get("/x", handler, Role.ADMIN)`): from [FrameworkModel.roleArgumentStart]
+     * on, every argument names a required role — a folded constant or an
+     * enum entry read from its fieldget, the same read
+     * [boundMethodName] uses. The handler itself is the argument just
+     * before the roles begin, which [handlerOfRegs] cannot know.
+     */
+    private fun roleArguments(
+        fn: KirFunction,
+        block: KirBlock,
+        index: Int,
+        ins: KirIns,
+        framework: FrameworkModel?,
+        input: Input,
+    ): List<String> {
+        val start = framework?.roleArgumentStart ?: -1
+        if (start < 0) return emptyList()
+        val args = when (ins) {
+            is KirCall -> ins.args
+            is KirDynamicCall -> ins.args
+            else -> return emptyList()
+        }
+        if (args.size <= start) return emptyList()
+        val roles = mutableListOf<String>()
+        for (reg in args.drop(start)) {
+            val folded = input.folder.valueAt(fn, block, index, reg)?.value
+            if (folded != null) {
+                roles.add(folded)
+                continue
+            }
+            // An enum entry (`Role.ADMIN`) lowers as a fieldget: the field
+            // name is the role.
+            for (i in index - 1 downTo 0) {
+                val candidate = block.instructions.getOrNull(i) ?: continue
+                if (candidate is io.cdxgen.kosi.kir.KirFieldGet && candidate.result == reg) {
+                    (candidate.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)
+                        ?.let { roles.add(it.name) }
+                    break
+                }
+            }
+        }
+        return if (roles.isEmpty()) emptyList() else listOf("role(${roles.joinToString(",")})")
     }
 
     /** The route shape: a path-valued first argument plus a lambda last argument. */
@@ -428,9 +577,21 @@ object EndpointDetector {
         return null
     }
 
-    private fun handlerOfRegs(fn: KirFunction, args: List<String>, input: Input): String? {
+    /**
+     * The handler register: the LAST argument, or — when the framework's
+     * route builder carries trailing ROLE arguments (Javalin) — the one
+     * just before the roles begin.
+     */
+    private fun handlerOfRegs(
+        fn: KirFunction,
+        args: List<String>,
+        input: Input,
+        framework: FrameworkModel? = null,
+    ): String? {
         if (args.size < 2) return null
-        return LambdaResolver.resolve(fn, args.last(), input)
+        val start = framework?.roleArgumentStart ?: -1
+        val handlerReg = if (start in 1..args.lastIndex) args[start - 1] else args.last()
+        return LambdaResolver.resolve(fn, handlerReg, input)
     }
 
     private fun publish(
@@ -441,6 +602,9 @@ object EndpointDetector {
         handler: String,
         at: KirFunction,
         foundBy: String,
+        consumes: List<String> = emptyList(),
+        produces: List<String> = emptyList(),
+        authentication: List<String> = emptyList(),
     ) {
         add(
             Candidate(
@@ -458,6 +622,9 @@ object EndpointDetector {
                 exported = null,
                 permissions = null,
                 deepLinkHosts = null,
+                consumes = consumes,
+                produces = produces,
+                authentication = authentication,
             ),
         )
     }

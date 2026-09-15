@@ -824,9 +824,61 @@ object KirLowering {
         private fun terminates(): Boolean =
             current.lastOrNull() is KirReturn || current.lastOrNull() is KirThrow || current.lastOrNull() is KirBranch
 
-        fun finish(): KirBody = KirBody(
-            blocks.map { (id, instructions) -> KirBlock(id, id == "b0", instructions) },
-        )
+        fun finish(): KirBody {
+            // The emitted block list can contain blocks no edge reaches —
+            // an all-paths-returned `if/else` still starts its join block,
+            // and a `try` whose body and handlers all returned still starts
+            // its continuation. A block nothing reaches is not dead SOURCE
+            // (the source never runs it either); it is emitted noise the KIR
+            // validator rejects and the engines simply never analyse — but
+            // noise that will mask a REAL unreachable block (a lowering bug)
+            // the day one appears. Drop unreachable blocks here, and strip
+            // their ids from phis so the remaining inputs name only real
+            // predecessors. Ids stay as emitted (no renumbering): every
+            // consumer that names a block by id stays stable.
+            val ordered = blocks.map { (id, instructions) -> KirBlock(id, id == "b0", instructions) }
+            val byId = ordered.associateBy { it.id }
+            val indexOf = ordered.withIndex().associate { (i, b) -> b.id to i }
+            val reachable = HashSet<String>()
+            val work = ArrayDeque<String>()
+            work.add("b0")
+            while (work.isNotEmpty()) {
+                val id = work.removeFirst()
+                if (!reachable.add(id)) continue
+                val block = byId[id] ?: continue
+                var terminates = false
+                for (ins in block.instructions) {
+                    when (ins) {
+                        is KirBranch -> {
+                            work.add(ins.thenBlock)
+                            work.add(ins.elseBlock)
+                            terminates = true
+                        }
+                        is KirReturn, is KirThrow -> terminates = true
+                        else -> {}
+                    }
+                }
+                if (terminates) continue
+                ordered.getOrNull((indexOf[id] ?: continue) + 1)?.let { work.add(it.id) }
+            }
+            if (reachable.size == ordered.size) {
+                return KirBody(ordered)
+            }
+            val cleaned = ordered.filter { it.id in reachable }.map { block ->
+                if (block.instructions.none { it is KirPhi }) block else KirBlock(
+                    block.id,
+                    block.entry,
+                    block.instructions.map { ins ->
+                        if (ins is KirPhi && ins.inputs.keys.any { it !in reachable }) {
+                            ins.copy(inputs = ins.inputs.filterKeys { it in reachable })
+                        } else {
+                            ins
+                        }
+                    },
+                )
+            }
+            return KirBody(cleaned)
+        }
 
         /** A terminator is already in place; do not add a second return. */
         fun returnIfOpen() {
@@ -1204,13 +1256,66 @@ object KirLowering {
         private fun lowerTry(psi: KtTryExpression) {
             // try body, one catch path per clause, finally last — the shape
             // `use` lowering produces directly and source try lowers into.
+            //
+            // P15: the CFG has no exceptional-edge instruction, so catch
+            // handlers lowered as standalone blocks had NO incoming edge at
+            // all — structurally unreachable, never analysed, and taint
+            // through them silently dropped (InsecureShop's
+            // `catch (e) { throw RuntimeException(e) }` and
+            // `catch (e: Exception) { return null }` were dead code to the
+            // engine). The fix is an explicit may-edge into a DISPATCH CHAIN
+            // over the handlers: any call in the try body may throw, and
+            // which handler runs depends on the exception's type, which the
+            // KIR cannot express — so every handler is reachable from the
+            // chain and no handler flows into another (running h1 to
+            // completion does not run h2). Two may-edges feed the chain:
+            // from the try body's ENTRY (a throw at the first call carries
+            // the pre-body state; the only edge possible when the body ends
+            // terminated) and from the body's open END (a throw at the last
+            // call; over-approximates mid-body throws — conservative for a
+            // may-analysis). The transfer treats a branch's two arms as
+            // may-successors without evaluating the condition, so a
+            // true-condition branch is exactly this may-edge.
             val finallyId = newId()
-            psi.tryBlock?.let { lowerStatement(it) }
-            goto(finallyId)
-            for (catch in psi.catchClauses) {
-                startBlock(newId())
-                catch.catchBody?.let { lowerStatement(it) }
+            val catches = psi.catchClauses
+            if (catches.isEmpty()) {
+                psi.tryBlock?.let { lowerStatement(it) }
                 goto(finallyId)
+            } else {
+                val dispatchId = newId()
+                val bodyId = newId()
+                // ENTRY fork: continue into the body, or (may-)throw now.
+                val entryCond = t()
+                emit(KirLoad(entryCond, KirConstant.Bool(true)))
+                emit(KirBranch(entryCond, bodyId, dispatchId))
+                startBlock(bodyId)
+                psi.tryBlock?.let { lowerStatement(it) }
+                // END fork, only when the body's last block is still open.
+                if (!terminates()) {
+                    val endCond = t()
+                    emit(KirLoad(endCond, KirConstant.Bool(true)))
+                    emit(KirBranch(endCond, finallyId, dispatchId))
+                }
+                // The dispatch chain: one block per handler step, each
+                // branching to its handler and to the next step.
+                var step = dispatchId
+                for ((index, catch) in catches.withIndex()) {
+                    val handlerId = newId()
+                    startBlock(step)
+                    val cond = t()
+                    if (index == catches.lastIndex) {
+                        emit(KirLoad(cond, KirConstant.Bool(true)))
+                        emit(KirBranch(cond, handlerId, handlerId))
+                    } else {
+                        val nextStep = newId()
+                        emit(KirLoad(cond, KirConstant.Bool(true)))
+                        emit(KirBranch(cond, handlerId, nextStep))
+                        step = nextStep
+                    }
+                    startBlock(handlerId)
+                    catch.catchBody?.let { lowerStatement(it) }
+                    goto(finallyId)
+                }
             }
             startBlock(finallyId)
             psi.finallyBlock?.finalExpression?.let { lowerStatement(it) }

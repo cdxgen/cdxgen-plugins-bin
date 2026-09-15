@@ -194,7 +194,8 @@
       ],
       "handlerInput": "context",
       "id": "http4k",
-      "kind": "dsl"
+      "kind": "dsl",
+      "_p15_comment": "P15: http4k's core DSL has NO media/auth declaration site. The handler is a plain function; content types live in lenses and responses, neither of which the router reads; contract meta {} is OpenAPI documentation, not routing; auth is a Filter - code applied per request, not a declaration attributable to one route. The empty lists are the truth, not a gap nobody has looked at."
     },
     {
       "contextReaders": [
@@ -300,7 +301,9 @@
       ],
       "handlerInput": "context",
       "id": "javalin",
-      "kind": "dsl"
+      "kind": "dsl",
+      "roleArgumentStart": 2,
+      "_p15_comment": "P15: the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty."
     },
     {
       "authenticationDsl": [
@@ -973,6 +976,7 @@
       ],
       "id": "servlet",
       "kind": "annotation",
+      "_p15_comment": "P15: media has no declaration site for servlets - the content type is a response header the handler sets. Authentication IS declared, in the deployment descriptor's <security-constraint>, which the web.xml parser reads (P15) and attaches per url-pattern; it is not an annotation.",
       "mappingAnnotations": [],
       "pathPrefixAnnotations": []
     },
@@ -1600,9 +1604,23 @@
           "pattern": "io.vertx.ext.web.Router.mountSubRouter"
         }
       ],
+      "handlerDsl": [
+        "io.vertx.ext.web.Route.handler"
+      ],
       "handlerInput": "context",
       "id": "vertx",
-      "kind": "dsl"
+      "kind": "dsl",
+      "mediaDsl": [
+        {
+          "kind": "produces",
+          "pattern": "io.vertx.ext.web.Route.produces"
+        },
+        {
+          "kind": "consumes",
+          "pattern": "io.vertx.ext.web.Route.consumes"
+        }
+      ],
+      "_p15_comment": "P15: media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls. Auth in Vert.x is a handler the router wraps (JWTAuthHandler and friends) - a VALUE the KIR cannot attribute to one route, so authentication stays an honest empty until a declarative shape exists."
     }
   ],
   "name": "endpoints-pack-v0",

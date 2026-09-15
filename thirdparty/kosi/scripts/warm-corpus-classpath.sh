@@ -179,7 +179,7 @@ SCRATCH
     echo "  Last lines of $log:" >&2
     tail -5 "$log" >&2
     rm -rf "$scratch"
-    exit 1
+    return 1
   fi
   rm -rf "$scratch"
 }
@@ -198,8 +198,12 @@ textual_coordinates() {
   # (every Kotlin DSL build) makes the grep fail, and under `set -e` an
   # assignment whose substitution fails kills the script before the
   # extraction arms even run (measured on the Ktor app).
+  # sed -n 1p, NOT head -1: head exits after the first line and the upstream
+  # grep then dies on SIGPIPE, which under `set -o pipefail` fails the whole
+  # substitution arm (the P14 grpc-kotlin warm failure). sed reads the pipe
+  # to the end.
   kotlin_ver=$(grep -rhoE "ext[.]kotlin_version *= *['\"][^'\"]+" "$dir" --include=build.gradle 2>/dev/null \
-    | head -1 | sed -E "s/.*['\"]//" || true)
+    | sed -n '1p' | sed -E "s/.*['\"]//" || true)
   find "$dir" \( -name '*.gradle' -o -name '*.gradle.kts' \) 2>/dev/null | LC_ALL=C sort | while read -r f; do
     # `|| true` per arm: a build file exercises one syntax or the other, and
     # under `set -e -o pipefail` the first non-matching grep would otherwise
@@ -214,11 +218,67 @@ textual_coordinates() {
     | grep -E "$coord_re" || true
 }
 
+# A multi-repo warm records per-repo failures and warms the REST — one
+# broken repo must not leave the tier's other floors measuring against cold
+# caches — and the exit code at the end names every failure. A single-repo
+# warm fails immediately, exactly as before.
+failed=""
+fail() {
+  echo "  ERROR: $*" >&2
+  failed="$failed $slug"
+}
+
+# P15: the monorepo bound. A 100-subproject repo's merged tree carries many
+# VERSIONS of the same group:artifact (compat matrices, samples on older
+# stacks) — http4k's warm merged ~16k coordinates, a list nobody can attach
+# and no floor is measured against. Two deterministic cuts: ONE version per
+# group:artifact, the HIGHEST (the rule Gradle's own conflict resolution
+# applies to a merged classpath), then a hard cap with the cut printed. The
+# count before and after is always reported. Non-coordinate lines (jar
+# paths) pass through untouched.
+bound_coordinates() {
+  local out="$1"
+  local before after coords max_coords
+  before=$(wc -l <"$out" | tr -d ' ')
+  # Split first, then filter: `grep ... || true | awk ...` parses as
+  # `grep ... || (true | awk ...)`, so on a SUCCESSFUL grep the awk never
+  # runs at all and the "bound" list is the unbounded one.
+  { grep -vE "$coord_re" "$out" || true; } >"$out.keep"
+  { grep -E "$coord_re" "$out" || true; } | awk -F: '
+      function vercmp(a, b,   ai, bi, i, n) {
+        n = split(a, ai, "."); split(b, bi, ".")
+        for (i = 1; i <= n || i <= length(bi); i++) {
+          if ((ai[i] + 0) != (bi[i] + 0)) return (ai[i] + 0) > (bi[i] + 0) ? 1 : -1
+        }
+        return 0
+      }
+      { key = $1 ":" $2
+        if (!(key in best) || vercmp($3, best[key]) > 0) best[key] = $3 }
+      END { for (k in best) print k ":" best[k] }
+    ' | LC_ALL=C sort >"$out.coords"
+  coords=$(wc -l <"$out.coords" | tr -d ' ')
+  max_coords="${KOSI_WARM_MAX_COORDS:-2000}"
+  if [ "$coords" -gt "$max_coords" ]; then
+    echo "  capped coordinate list $coords -> $max_coords (KOSI_WARM_MAX_COORDS raises the bound)" >&2
+    head -n "$max_coords" "$out.coords" >"$out.capped"
+    mv "$out.capped" "$out.coords"
+  fi
+  cat "$out.keep" "$out.coords" >"$out.bounded"
+  rm -f "$out.keep" "$out.coords"
+  mv "$out.bounded" "$out"
+  after=$(wc -l <"$out" | tr -d ' ')
+  if [ "$before" != "$after" ]; then
+    echo "  coordinate list $before -> $after entries (one version per group:artifact, the highest)"
+  fi
+}
+
 for slug in "${slugs[@]}"; do
   dir="$cache_root/$slug"
   if [ ! -d "$dir" ]; then
     echo "no cache for '$slug'; run the bench once to fetch it (kosi bench --tier <its tier>)" >&2
-    exit 1
+    [ ${#slugs[@]} -eq 1 ] && exit 1
+    failed="$failed $slug"
+    continue
   fi
   out="$dir/classpath.txt"
   echo "warming $slug -> $out (JAVA_HOME=${JAVA_HOME:-default})"
@@ -294,12 +354,23 @@ for slug in "${slugs[@]}"; do
     echo "$(wc -l <"$out" | tr -d ' ') coordinate(s) (textual)"
   fi
   if [ ! -s "$out" ]; then
-    echo "  ERROR: $slug produced no coordinates from either arm — the finding" >&2
-    echo "  floors would measure against an empty classpath" >&2
-    exit 1
+    fail "$slug produced no coordinates from either arm — the finding floors would measure against an empty classpath"
+    continue
   fi
 
-  pull_artifacts "$dir" "$out"
+  # P15: the monorepo bound. A 100-subproject repo's merged tree carries
+  # many VERSIONS of the same group:artifact (compat matrices, samples on
+  # older stacks) — http4k's warm merged ~16k coordinates, a list nobody
+  # can attach and no floor is measured against. Two deterministic cuts:
+  # ONE version per group:artifact, the HIGHEST (the rule Gradle's own
+  # conflict resolution applies to a merged classpath), then a hard cap
+  # with the cut printed. The count before and after is always reported.
+  bound_coordinates "$out"
+  pull_artifacts "$dir" "$out" || { fail "$slug: artifact resolution failed"; continue; }
+  # pull_artifacts merges the RESOLVED TRANSITIVE closure back in, which
+  # re-introduces the other versions the first bound removed — the final
+  # list is bounded again after the merge.
+  bound_coordinates "$out"
 
   # Android framework classes (android.*): AndroidX/Android code extends and
   # calls them; without them every Android repo resolves as broken. The
@@ -313,6 +384,16 @@ for slug in "${slugs[@]}"; do
   if [ -s "$framework_jar" ]; then
     echo "$framework_jar" >>"$out"
     sort -u "$out" -o "$out"
+  elif grep -qE '^(androidx?|com\.android)' "$out"; then
+    # The framework jar is load-bearing for an Android repo: without it every
+    # platform class resolves as broken and the finding floor measures
+    # against a classpath that cannot resolve the app's own superclass.
+    fail "$slug: android framework jar unavailable and the classpath is Android-shaped"
+    continue
   fi
 done
+if [ -n "${failed# }" ]; then
+  echo "FAILED:$failed" >&2
+  exit 1
+fi
 echo "done"

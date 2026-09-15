@@ -76,7 +76,7 @@ object Endpoints {
         )
         val manifests = if (includeManifests) AndroidManifestParser.parse(root) else emptyList()
         val manifestCandidates = manifestEndpoints(module, manifests, pack)
-        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root), pack)
+        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root), pack, root)
         val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable)
 
         // The DEPLOYMENT base path. A handler's annotation or DSL call names
@@ -520,9 +520,17 @@ object Endpoints {
         module: KirModule,
         mappings: List<WebXmlParser.ServletMapping>,
         pack: EndpointsPack,
+        root: Path,
     ): List<EndpointDetector.Candidate> {
         if (mappings.isEmpty()) return emptyList()
         val servlet = pack.frameworks.firstOrNull { it.handlerMethodNames.isNotEmpty() } ?: return emptyList()
+        // The descriptor's own authentication requirements (P15): a
+        // `<security-constraint>` names url-patterns and the roles that may
+        // reach them — servlet spec 13.8 matching, exact / prefix / extension
+        // — and every descriptor endpoint whose pattern matches carries the
+        // requirement. The XML was already parsed for mappings; the
+        // constraint element had been parsed past since P13.
+        val constraints = WebXmlParser.securityConstraints(root)
         val out = mutableListOf<EndpointDetector.Candidate>()
         for (mapping in mappings) {
             // A filter's handler is `doFilter` and nothing else; a servlet's
@@ -541,6 +549,17 @@ object Endpoints {
                     .firstOrNull { it.name == fn.canonicalName.substringAfterLast('.') }
                     ?.methods.orEmpty()
                 for (pattern in mapping.urlPatterns) {
+                    val auth = constraints
+                        .filter { c -> c.urlPatterns.any { cp -> urlPatternMatches(pattern, cp) } }
+                        .map { c ->
+                            when {
+                                c.denyAll -> "security-constraint(denied)"
+                                c.roles == listOf("*") -> "security-constraint(authenticated)"
+                                else -> "security-constraint(${c.roles.joinToString(",")})"
+                            }
+                        }
+                        .distinct()
+                        .sorted()
                     out.add(
                         EndpointDetector.Candidate(
                             framework = servlet.id,
@@ -553,12 +572,41 @@ object Endpoints {
                             exported = true,
                             permissions = emptyList(),
                             deepLinkHosts = emptyList(),
+                            authentication = auth,
                         ),
                     )
                 }
             }
         }
         return out
+    }
+
+    /**
+     * Servlet url-pattern matching (spec 13.8.2): a path MAPPED endpoint
+     * (`/legacy` + wildcard) is constrained by a constraint pattern that is
+     * an EXACT match or a PREFIX of it (`/legacy` + wildcard covers
+     * `/legacy/report`); an EXTENSION mapping (star-dot form) matches a
+     * constraint pattern of the same extension or the catch-all root
+     * wildcard. Both sides are descriptor patterns, so the comparison is
+     * pattern-to-pattern with the stricter (more specific) mapping winning:
+     * a constraint on `/legacy` + wildcard constrains the endpoint mapped
+     * at `/legacy/report`.
+     */
+    internal fun urlPatternMatches(mapping: String, constraint: String): Boolean {
+        if (constraint == "/*") return true
+        if (mapping == constraint) return true
+        val constraintPrefix = constraint.removeSuffix("/*")
+        if (constraint.endsWith("/*")) {
+            if (mapping.startsWith("$constraintPrefix/")) return true
+            // `/legacy/*` also covers the exact path `/legacy` itself.
+            if (mapping == constraintPrefix) return true
+        }
+        if (constraint.startsWith("*.")) {
+            if (mapping.endsWith(constraint.removePrefix("*"))) return true
+            // Both patterns name the same extension.
+            if (mapping.startsWith("*.") && mapping.removePrefix("*.") == constraint.removePrefix("*.")) return true
+        }
+        return false
     }
 
     private fun manifestEndpoints(
