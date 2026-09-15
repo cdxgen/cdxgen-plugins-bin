@@ -206,14 +206,12 @@ object TaintEngine {
         /** Handler canonical name -> the framework id that detected it. */
         val endpointHandlerFrameworks: Map<String, String> = emptyMap(),
         /**
-         * Framework ids that STATE which parameters carry input. For these,
-         * a handler's unannotated parameters are dependencies, not
-         * transports, and are not seeded — that is the whole semantic
-         * difference between reading a framework and pattern-matching it.
-         * A framework absent from this set (Ktor, servlet, the DSL shapes)
-         * says nothing about parameters, so every parameter is still seeded.
+         * Framework id -> how it hands input to a handler: `annotated`,
+         * `context` or `all` (see FrameworkModel.handlerInput). A framework
+         * missing from this map seeds every parameter, which is the
+         * behaviour every framework had before P13.
          */
-        val endpointFrameworksWithParameterSemantics: Set<String> = emptySet(),
+        val endpointHandlerInput: Map<String, String> = emptyMap(),
         /**
          * P9 `--deps`: the dependency tier, already lowered to the SAME KIR
          * by kosi-bytecode. Its functions are compiled with site ids
@@ -863,11 +861,11 @@ object TaintEngine {
             val valueParams = compiled.function.params.filter { !it.receiver }
             val categories = context.options.endpointParameterCategories
             val framework = context.options.endpointHandlerFrameworks[compiled.function.canonicalName]
-            if (framework != null && framework in context.options.endpointFrameworksWithParameterSemantics) {
-                // This framework names its transports. Seed exactly what it
-                // named — including nothing, when a handler takes only
-                // injected collaborators.
-                return valueParams.mapNotNull { param ->
+            return when (context.options.endpointHandlerInput[framework]) {
+                // The framework names its transports: seed exactly those —
+                // including nothing, when a handler takes only injected
+                // collaborators.
+                "annotated" -> valueParams.mapNotNull { param ->
                     val matched = param.annotations.firstNotNullOfOrNull { annotation ->
                         categories.entries.firstOrNull { (pattern, _) ->
                             PatternMatcher.matches(pattern, annotation)
@@ -875,8 +873,15 @@ object TaintEngine {
                     }
                     matched?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it) }
                 }
+
+                // The parameter is a request CONTEXT, not data. Its reader
+                // methods are the modelled sources; seeding the context
+                // itself would taint the response object handed in beside
+                // it, and every unrelated value reachable through it.
+                "context" -> emptyList()
+
+                else -> valueParams.map { it.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category) }
             }
-            return valueParams.map { it.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category) }
         }
 
         override fun entryBlockId(): String? = compiled.blocks.firstOrNull()?.id

@@ -368,19 +368,44 @@ object ClasspathResolver {
     /**
      * Gradle's modules-2 layout stores each version under content hashes:
      * <cache>/<group>/<artifact>/<version>/<hash>/<artifact>-<version>.jar.
+     *
+     * A KOTLIN MULTIPLATFORM library breaks that name. `io.ktor:ktor-server-core`
+     * resolves, for a JVM consumer, to the artifact `ktor-server-core-jvm` —
+     * and Gradle files it under the PARENT's directory, so the jar sitting in
+     * `ktor-server-core/1.6.7/<hash>/` is called
+     * `ktor-server-core-jvm-1.6.7.jar`. Looking only for the exact name meant
+     * every multiplatform dependency was reported as an unlocatable
+     * coordinate even with the jar already in the cache — and that is most of
+     * the modern Kotlin ecosystem: all of Ktor, all of kotlinx. A real Ktor
+     * application analysed against a fully warmed classpath still resolved a
+     * third of its calls, because its own framework was missing.
+     *
+     * The platform-suffixed name is accepted only when the exact one is
+     * absent, and only for the suffixes Kotlin's own publishing emits, so a
+     * differently-named neighbour in the same directory is never picked up.
      */
     private fun gradleHashDirs(versionDir: Path, artifact: String, version: String): List<Path> {
         if (!Files.isDirectory(versionDir)) return emptyList()
         val hashDirs = Files.list(versionDir).use { it.toList() }
             .filter { Files.isDirectory(it) }
             .sortedBy { it.fileName.toString() }
-        return hashDirs.flatMap { hashDir ->
+        val exact = hashDirs.flatMap { hashDir ->
             listOf("$artifact-$version.jar", "$artifact-$version.aar").mapNotNull { name ->
-                val candidate = hashDir.resolve(name)
-                candidate.takeIf { Files.isRegularFile(it) }
+                hashDir.resolve(name).takeIf { Files.isRegularFile(it) }
+            }
+        }
+        if (exact.isNotEmpty()) return exact
+        return hashDirs.flatMap { hashDir ->
+            KMP_TARGET_SUFFIXES.flatMap { suffix ->
+                listOf("$artifact-$suffix-$version.jar", "$artifact-$suffix-$version.aar").mapNotNull { name ->
+                    hashDir.resolve(name).takeIf { Files.isRegularFile(it) }
+                }
             }
         }
     }
+
+    /** Kotlin multiplatform target suffixes a JVM consumer can load. */
+    private val KMP_TARGET_SUFFIXES = listOf("jvm", "android", "androidRelease")
 
     private fun gradleCacheRoots(root: Path): List<Path> {
         val roots = mutableListOf<Path>()

@@ -32,6 +32,7 @@
   "description": "The framework registry for endpoint, service and URL detection (P7). The detector matches RESOLVED annotation FQNs, DSL callee FQNs and supertype names against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a framework. A framework the pack does not name is invisible by construction, and every pattern here is validated by a build-time test. annotation FQNs must resolve through the workspace declarations or a real classpath: an unresolved annotation keeps its PSI short name and only matches when the pack pattern is itself a short name, which is never \u2014 type identity, not name matching, is what keeps a homonym annotation from becoming an endpoint.",
   "frameworks": [
     {
+      "handlerInput": "all",
       "id": "android",
       "kind": "manifest",
       "manifestComponents": [
@@ -42,6 +43,7 @@
       ]
     },
     {
+      "handlerInput": "all",
       "id": "aws-lambda",
       "kind": "supertype",
       "supertypeMarkers": [
@@ -51,6 +53,7 @@
       "supertypeSuffixes": []
     },
     {
+      "handlerInput": "annotated",
       "id": "azure-functions",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -96,6 +99,7 @@
           "pattern": "androidx.navigation.compose.navigation"
         }
       ],
+      "handlerInput": "all",
       "id": "compose-navigation",
       "kind": "dsl"
     },
@@ -103,6 +107,7 @@
       "classMarkers": [
         "org.springframework.stereotype.Controller"
       ],
+      "handlerInput": "annotated",
       "id": "graphql",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -136,6 +141,7 @@
       ]
     },
     {
+      "handlerInput": "all",
       "id": "grpc",
       "kind": "supertype",
       "supertypeMarkers": [
@@ -143,6 +149,7 @@
         "Grpc"
       ],
       "supertypeSuffixes": [
+        "CoroutineImplBase",
         "ImplBase"
       ]
     },
@@ -159,10 +166,82 @@
           "pattern": "bind"
         }
       ],
+      "contextReaders": [
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.query"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.header"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "org.http4k.core.Request.cookie"
+        },
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "org.http4k.routing.path"
+        },
+        {
+          "kind": "body",
+          "pattern": "org.http4k.core.Request.bodyString"
+        }
+      ],
+      "handlerInput": "context",
       "id": "http4k",
       "kind": "dsl"
     },
     {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.pathParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.queryParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.queryParams"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.formParam"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.formParams"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.header"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "io.javalin.http.Context.cookie"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.javalin.http.Context.body"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.javalin.http.Context.bodyAsClass"
+        }
+      ],
       "dslFunctions": [
         {
           "methods": [
@@ -219,16 +298,217 @@
           "pattern": "io.javalin.apibuilder.ApiBuilder.path"
         }
       ],
+      "handlerInput": "context",
       "id": "javalin",
       "kind": "dsl"
     },
     {
+      "contextReaders": [
+        {
+          "indexed": true,
+          "kind": "merged",
+          "pattern": "io.ktor.application.ApplicationCall.parameters"
+        },
+        {
+          "indexed": true,
+          "kind": "cookie",
+          "pattern": "io.ktor.request.ApplicationRequest.cookies"
+        },
+        {
+          "indexed": true,
+          "kind": "header",
+          "pattern": "io.ktor.request.ApplicationRequest.headers"
+        },
+        {
+          "indexed": true,
+          "kind": "query",
+          "pattern": "io.ktor.request.ApplicationRequest.queryParameters"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.ktor.request.header"
+        },
+        {
+          "kind": "query",
+          "pattern": "io.ktor.request.queryString"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.request.receive"
+        },
+        {
+          "kind": "form",
+          "pattern": "io.ktor.request.receiveParameters"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.request.receiveText"
+        },
+        {
+          "indexed": true,
+          "kind": "merged",
+          "pattern": "io.ktor.server.application.ApplicationCall.parameters"
+        },
+        {
+          "indexed": true,
+          "kind": "cookie",
+          "pattern": "io.ktor.server.request.ApplicationRequest.cookies"
+        },
+        {
+          "indexed": true,
+          "kind": "header",
+          "pattern": "io.ktor.server.request.ApplicationRequest.headers"
+        },
+        {
+          "indexed": true,
+          "kind": "query",
+          "pattern": "io.ktor.server.request.ApplicationRequest.queryParameters"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.ktor.server.request.header"
+        },
+        {
+          "kind": "query",
+          "pattern": "io.ktor.server.request.queryString"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.server.request.receive"
+        },
+        {
+          "kind": "form",
+          "pattern": "io.ktor.server.request.receiveParameters"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.ktor.server.request.receiveText"
+        },
+        {
+          "indexed": true,
+          "kind": "path",
+          "pattern": "io.ktor.server.routing.RoutingCall.pathParameters"
+        }
+      ],
       "dslFunctions": [
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.routing.accept"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.delete"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.get"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.options"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.patch"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.routing.put"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "pattern": "io.ktor.routing.route"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.resources.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.resources.post"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.ktor.server.routing.delete"
+        },
         {
           "methods": [
             "GET"
           ],
           "pattern": "io.ktor.server.routing.get"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.ktor.server.routing.head"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.routing.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.ktor.server.routing.options"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "nesting": false,
+          "pattern": "io.ktor.server.routing.options"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.ktor.server.routing.patch"
         },
         {
           "methods": [
@@ -241,30 +521,6 @@
             "PUT"
           ],
           "pattern": "io.ktor.server.routing.put"
-        },
-        {
-          "methods": [
-            "DELETE"
-          ],
-          "pattern": "io.ktor.server.routing.delete"
-        },
-        {
-          "methods": [
-            "PATCH"
-          ],
-          "pattern": "io.ktor.server.routing.patch"
-        },
-        {
-          "methods": [
-            "HEAD"
-          ],
-          "pattern": "io.ktor.server.routing.head"
-        },
-        {
-          "methods": [
-            "OPTIONS"
-          ],
-          "pattern": "io.ktor.server.routing.options"
         },
         {
           "methods": [],
@@ -283,32 +539,15 @@
             "GET"
           ],
           "nesting": false,
-          "pattern": "io.ktor.server.resources.get"
-        },
-        {
-          "methods": [
-            "POST"
-          ],
-          "nesting": false,
-          "pattern": "io.ktor.server.resources.post"
-        },
-        {
-          "methods": [
-            "HEAD"
-          ],
-          "nesting": false,
-          "pattern": "io.ktor.server.routing.head"
-        },
-        {
-          "methods": [
-            "OPTIONS"
-          ],
-          "nesting": false,
-          "pattern": "io.ktor.server.routing.options"
+          "pattern": "io.ktor.websocket.webSocket"
         }
       ],
+      "handlerInput": "context",
       "id": "ktor",
-      "kind": "dsl"
+      "kind": "dsl",
+      "resourceAnnotations": [
+        "io.ktor.resources.Resource"
+      ]
     },
     {
       "dslFunctions": [
@@ -328,6 +567,7 @@
           "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addResource"
         }
       ],
+      "handlerInput": "all",
       "id": "mcp",
       "kind": "dsl"
     },
@@ -335,6 +575,7 @@
       "classMarkers": [
         "io.micronaut.http.annotation.Controller"
       ],
+      "handlerInput": "annotated",
       "id": "micronaut",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -410,10 +651,15 @@
       ]
     },
     {
+      "applicationPathAnnotations": [
+        "javax.ws.rs.ApplicationPath",
+        "jakarta.ws.rs.ApplicationPath"
+      ],
       "classMarkers": [
         "jakarta.ws.rs.Path",
         "javax.ws.rs.Path"
       ],
+      "handlerInput": "annotated",
       "id": "quarkus",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -545,27 +791,139 @@
       ]
     },
     {
-      "classMarkers": [
-        "javax.servlet.annotation.WebServlet",
-        "jakarta.servlet.annotation.WebServlet"
+      "classMappingAnnotations": [
+        "jakarta.servlet.annotation.WebFilter",
+        "jakarta.servlet.annotation.WebServlet",
+        "javax.servlet.annotation.WebFilter",
+        "javax.servlet.annotation.WebServlet"
       ],
-      "id": "servlet",
-      "kind": "annotation",
-      "mappingAnnotations": [
+      "classMarkers": [
+        "jakarta.servlet.annotation.WebFilter",
+        "jakarta.servlet.annotation.WebServlet",
+        "javax.servlet.annotation.WebFilter",
+        "javax.servlet.annotation.WebServlet"
+      ],
+      "contextReaders": [
         {
-          "methods": [],
-          "nesting": false,
-          "pattern": "javax.servlet.annotation.WebServlet"
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getParameterValues"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.http.HttpServletRequest.getHeader"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getParameterValues"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.http.HttpServletRequest.getHeader"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "jakarta.servlet.ServletRequest.getParameter"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "javax.servlet.ServletRequest.getParameter"
+        }
+      ],
+      "handlerInput": "context",
+      "handlerMethodNames": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "name": "doGet"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "name": "doPost"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "name": "doPut"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "name": "doDelete"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "name": "doHead"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "name": "doOptions"
         },
         {
           "methods": [],
-          "nesting": false,
-          "pattern": "jakarta.servlet.annotation.WebServlet"
+          "name": "service"
+        },
+        {
+          "methods": [],
+          "name": "doFilter"
         }
       ],
+      "id": "servlet",
+      "kind": "annotation",
+      "mappingAnnotations": [],
       "pathPrefixAnnotations": []
     },
     {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "spark.Request.params"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "spark.Request.queryParams"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "spark.Request.headers"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "spark.Request.cookie"
+        },
+        {
+          "kind": "body",
+          "pattern": "spark.Request.body"
+        }
+      ],
       "dslFunctions": [
         {
           "methods": [
@@ -601,11 +959,83 @@
           "pattern": "spark.Spark.path"
         }
       ],
+      "handlerInput": "context",
       "id": "sparkjava",
       "kind": "dsl"
     },
     {
+      "dependencyMarkers": [
+        "spring-boot-starter-actuator",
+        "spring-boot-actuator"
+      ],
+      "handlerInput": "all",
+      "id": "spring-actuator",
+      "implicitBasePathDefault": "/actuator",
+      "implicitBasePathKeys": [
+        "management.endpoints.web.base-path"
+      ],
+      "implicitRoutes": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": ""
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/health"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/info"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/metrics"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/env"
+        },
+        {
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "path": "/loggers"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/threaddump"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/heapdump"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/mappings"
+        }
+      ],
+      "kind": "annotation"
+    },
+    {
       "classMarkers": [],
+      "handlerInput": "annotated",
       "id": "spring-messaging",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -668,6 +1098,7 @@
         "org.springframework.web.bind.annotation.RestController",
         "org.springframework.web.bind.annotation.Controller"
       ],
+      "handlerInput": "annotated",
       "id": "spring-mvc",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -750,9 +1181,39 @@
       ],
       "pathPrefixAnnotations": [
         "org.springframework.web.bind.annotation.RequestMapping"
+      ],
+      "repositoryMethods": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "repositorySupertypes": [
+        "org.springframework.data.repository.CrudRepository",
+        "org.springframework.data.repository.PagingAndSortingRepository",
+        "org.springframework.data.repository.ListCrudRepository",
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "org.springframework.data.rest.core.annotation.RepositoryRestResource"
       ]
     },
     {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathVariable"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.queryParam"
+        },
+        {
+          "kind": "body",
+          "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyToMono"
+        }
+      ],
       "dslFunctions": [
         {
           "methods": [
@@ -784,10 +1245,82 @@
           "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
         }
       ],
+      "handlerInput": "context",
       "id": "spring-webflux",
       "kind": "dsl"
     },
     {
+      "dependencyMarkers": [
+        "springdoc-openapi",
+        "springfox-swagger"
+      ],
+      "handlerInput": "all",
+      "id": "springdoc",
+      "implicitRoutes": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/v3/api-docs"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/v3/api-docs.yaml"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/swagger-ui.html"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "path": "/swagger-ui/index.html"
+        }
+      ],
+      "kind": "annotation"
+    },
+    {
+      "contextReaders": [
+        {
+          "kind": "path",
+          "nameArgument": 0,
+          "pattern": "io.vertx.ext.web.RoutingContext.pathParam"
+        },
+        {
+          "kind": "query",
+          "nameArgument": 0,
+          "pattern": "io.vertx.ext.web.RoutingContext.queryParam"
+        },
+        {
+          "kind": "merged",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getParam"
+        },
+        {
+          "kind": "header",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getHeader"
+        },
+        {
+          "kind": "cookie",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getCookie"
+        },
+        {
+          "kind": "form",
+          "nameArgument": 0,
+          "pattern": "io.vertx.core.http.HttpServerRequest.getFormAttribute"
+        },
+        {
+          "kind": "body",
+          "pattern": "io.vertx.ext.web.RoutingContext.body"
+        }
+      ],
       "dslFunctions": [
         {
           "methods": [
@@ -828,6 +1361,7 @@
           "pattern": "io.vertx.ext.web.Router.mountSubRouter"
         }
       ],
+      "handlerInput": "context",
       "id": "vertx",
       "kind": "dsl"
     }

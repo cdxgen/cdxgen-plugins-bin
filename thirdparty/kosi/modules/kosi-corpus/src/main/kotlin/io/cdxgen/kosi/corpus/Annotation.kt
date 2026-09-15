@@ -61,6 +61,13 @@ data class Annotation(
     val framework: String?,
     val path: String?,
     val method: String?,
+    /**
+     * A parameter the endpoint must carry, and the transport it arrived on.
+     * `path=` pins the route; these pin what the handler READS out of it —
+     * the half a context framework declares nowhere in its signature.
+     */
+    val pathParam: String?,
+    val queryParam: String?,
     val cipherMode: String?,
     val padding: String?,
     val form: String?,

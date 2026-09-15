@@ -38,6 +38,14 @@ data class KirCall(
     val receiver: String?,
     val args: List<String>,
     val line: Int = KIR_NO_LINE,
+    /**
+     * Resolved TYPE arguments, in declaration order. A reified type argument
+     * can be the only thing a call says: Ktor's typed routing is
+     * `get<Article> { }`, where the route's path lives on `@Resource` on the
+     * `Article` class and there is no path argument at all. Without the type
+     * argument in the KIR such a route has no path to resolve.
+     */
+    val typeArguments: List<String> = emptyList(),
 ) : KirIns
 
 /**

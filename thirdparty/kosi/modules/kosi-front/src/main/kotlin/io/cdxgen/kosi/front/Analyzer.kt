@@ -533,9 +533,30 @@ object Analyzer {
                 module = kirModule,
                 root = root,
                 sourceTexts = sourceTexts,
-                annotationValues = declarationAnnotations(drafts, kirModule),
+                annotationValues = declarationAnnotations(
+                    drafts,
+                    kirModule,
+                    // Resolution's own short-name -> FQN map. Scanning KIR
+                    // FUNCTION annotations cannot reach a class with no
+                    // functions, and framework matching is on the FQN.
+                    facts.fold(mutableMapOf<String, MutableSet<String>>()) { acc, f ->
+                        for ((short, fqns) in f.annotationFqnsByShortName) {
+                            acc.getOrPut(short) { mutableSetOf() }.addAll(fqns)
+                        }
+                        acc
+                    },
+                ),
                 attribution = io.cdxgen.kosi.endpoints.Endpoints.Attribution(fileRelPathByAbsolute, purlByModulePath),
                 includeManifests = true,
+                // The resolved classpath, as coordinates: some routes exist
+                // because a dependency is present and for no other reason.
+                dependencyCoordinates = buildSet {
+                    for (jar in resolution.jars) {
+                        jar.coordinate?.let { add("${'$'}{it.group}:${'$'}{it.artifact}") }
+                        add(jar.jar.fileName.toString())
+                    }
+                    addAll(resolution.missing)
+                },
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(
@@ -610,13 +631,11 @@ object Analyzer {
                         } else {
                             emptyMap()
                         },
-                        endpointFrameworksWithParameterSemantics = if (options.endpointSources) {
+                        endpointHandlerInput = if (options.endpointSources) {
                             io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
-                                .filter { it.parameterAnnotations.isNotEmpty() }
-                                .map { it.id }
-                                .toSet()
+                                .associate { it.id to it.handlerInput }
                         } else {
-                            emptySet()
+                            emptyMap()
                         },
                         depsModule = depTier?.module,
                         depsPurls = depTier?.purlsUsed ?: emptySet(),
@@ -900,8 +919,12 @@ object Analyzer {
     private fun declarationAnnotations(
         drafts: List<DeclarationDraft>,
         kirModule: io.cdxgen.kosi.kir.KirModule,
+        resolvedFqnsByShort: Map<String, Set<String>> = emptyMap(),
     ): Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>> {
         val fqnsByShort = HashMap<String, MutableSet<String>>()
+        for ((short, fqns) in resolvedFqnsByShort) {
+            fqnsByShort.getOrPut(short) { mutableSetOf() }.addAll(fqns)
+        }
         for (fn in kirModule.functions) {
             for (annotation in fn.annotations + fn.ownerAnnotations) {
                 fqnsByShort.getOrPut(annotation.substringAfterLast('.')) { mutableSetOf() }.add(annotation)

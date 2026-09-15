@@ -156,6 +156,8 @@ object KirLowering {
          * — never showed it.
          */
         val isStatic: Boolean = false,
+        /** Resolved type arguments in declaration order (`get<Article>()`). */
+        val typeArguments: List<String> = emptyList(),
     )
 
     /**
@@ -240,28 +242,64 @@ object KirLowering {
                 }
 
             /**
-             * A plain `a.b` name selector, resolved. Returns non-null ONLY
-             * when `b` is a synthetic Java property, in which case the
-             * CallInfo describes the Java GETTER the read compiles to (see
-             * [CallInfo.syntheticJavaProperty]); a Kotlin property read
+             * A plain `a.b` name selector, resolved. Returns non-null when
+             * reading `b` RUNS A METHOD on the JVM, in which case the
+             * CallInfo describes that accessor; a read of a stored field
              * returns null and stays a field access.
+             *
+             * Two shapes run a method:
+             *
+             *  - a synthetic Java property — `editText.text` for
+             *    `getText()`; [CallInfo.symbol] is the Java getter.
+             *  - a Kotlin property with NO BACKING FIELD — an `abstract val`
+             *    or one with a custom getter. `ApplicationCall.parameters`,
+             *    `ApplicationRequest.queryParameters` and
+             *    `RoutingContext.body` are all of this shape, and they are
+             *    how request data enters a Ktor or Vert.x handler. Lowering
+             *    them as field reads put a path made of the LOCAL
+             *    VARIABLE's name (`vcall.parameters`) in front of a matcher
+             *    that matches callees, so every one of the pack's Ktor
+             *    sources was dead: the patterns shipped, and no Ktor
+             *    application could produce a single taint slice.
+             *
+             * A property WITH a backing field is a real field on the JVM and
+             * keeps its access path, so field sensitivity over data classes
+             * and workspace state is unchanged.
              */
             fun resolveProperty(psi: KtNameReferenceExpression): CallInfo? = try {
                 val call: org.jetbrains.kotlin.analysis.api.resolution.KaSingleCall<*, *> =
                     psi.resolveCall() ?: return null
-                val synthetic = call.signature.symbol
-                    as? org.jetbrains.kotlin.analysis.api.symbols.KaSyntheticJavaPropertySymbol
-                val getter = synthetic?.javaGetterSymbol
-                if (getter == null) {
-                    null
-                } else {
-                    CallInfo(
-                        symbol = getter,
-                        descriptor = descriptorOf(getter),
-                        isSuspend = false,
-                        isOperator = false,
-                        syntheticJavaProperty = true,
-                    )
+                when (val symbol = call.signature.symbol) {
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaSyntheticJavaPropertySymbol -> {
+                        val getter = symbol.javaGetterSymbol
+                        CallInfo(
+                            symbol = getter,
+                            descriptor = descriptorOf(getter),
+                            isSuspend = false,
+                            isOperator = false,
+                            syntheticJavaProperty = true,
+                        )
+                    }
+
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaKotlinPropertySymbol -> {
+                        // The property's OWN callableId is the name the model
+                        // packs carry (`...ApplicationCall.parameters`), which
+                        // is also how a Kotlin reader names it; the getter
+                        // supplies the descriptor.
+                        if (symbol.hasBackingField) {
+                            null
+                        } else {
+                            CallInfo(
+                                symbol = symbol,
+                                descriptor = symbol.getter?.let { descriptorOf(it) },
+                                isSuspend = false,
+                                isOperator = false,
+                                syntheticJavaProperty = true,
+                            )
+                        }
+                    }
+
+                    else -> null
                 }
             } catch (_: Exception) {
                 null
@@ -289,6 +327,10 @@ object KirLowering {
                     isSuspend = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isSuspend == true,
                     isOperator = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isOperator == true,
                     isStatic = (symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol)?.isStatic == true,
+                    typeArguments = call.typeArgumentsMapping.values.mapNotNull { type ->
+                        (type as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                            ?.classId?.asSingleFqName()?.asString()
+                    },
                 )
             } catch (_: Exception) {
                 null
@@ -1930,7 +1972,16 @@ object KirLowering {
                 }
             }
             val reg = t()
-            emit(KirCall(reg, KirCallee(fqn, info.descriptor, kind), receiver, argRegs, line = psi.line()))
+            emit(
+                KirCall(
+                    reg,
+                    KirCallee(fqn, info.descriptor, kind),
+                    receiver,
+                    argRegs,
+                    line = psi.line(),
+                    typeArguments = info.typeArguments,
+                ),
+            )
             if (info.isSuspend) emit(KirSuspendPoint(reg))
             hookEmitSink(receiver, simpleName, argRegs)
             return reg

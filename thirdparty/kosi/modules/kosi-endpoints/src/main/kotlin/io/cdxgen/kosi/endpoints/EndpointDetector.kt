@@ -6,6 +6,10 @@ import io.cdxgen.kosi.kir.KirDynamicCall
 import io.cdxgen.kosi.kir.KirIns
 import io.cdxgen.kosi.kir.KirCall
 import io.cdxgen.kosi.kir.KirFunction
+import io.cdxgen.kosi.kir.KirIndexGet
+import io.cdxgen.kosi.models.TRANSPORT_MERGED
+import io.cdxgen.kosi.models.TRANSPORT_PATH
+import io.cdxgen.kosi.models.TRANSPORT_QUERY
 import io.cdxgen.kosi.kir.KirLambda
 import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirModule
@@ -71,6 +75,8 @@ object EndpointDetector {
         val pathTemplate: String,
         val pathParameters: List<String>,
         val handlerSymbol: String,
+        /** Query-string parameters the handler demonstrably reads (see [transportParameters]). */
+        val queryParameters: List<String> = emptyList(),
         val foundBy: String,
         val position: Position?,
         val exported: Boolean?,
@@ -121,10 +127,38 @@ object EndpointDetector {
     ) {
         if (fn.syntheticCause != null) return
         val annotations = input.annotationValues[fn.canonicalName].orEmpty()
-        if (annotations.isEmpty()) return
         val ownerAnnotations = fn.ownerAnnotations
         val ownerCanonical = fn.canonicalName.substringBeforeLast('.')
         val ownerDeclAnnotations = input.annotationValues[ownerCanonical].orEmpty()
+
+        // Class-declared routes with convention-named handlers: the servlet
+        // shape, where `@WebServlet("/run")` sits on the class and `doGet`
+        // is the handler. The mapping-on-the-function rule below cannot see
+        // these at all.
+        for (framework in pack.frameworks) {
+            if (framework.classMappingAnnotations.isEmpty() || framework.handlerMethodNames.isEmpty()) continue
+            val simpleName = fn.canonicalName.substringAfterLast('.')
+            val handler = framework.handlerMethodNames.firstOrNull { it.name == simpleName } ?: continue
+            val classMapping = ownerDeclAnnotations.firstOrNull { ann ->
+                framework.classMappingAnnotations.any { matches(ann.fqn, it) }
+            } ?: continue
+            val path = classMapping.value?.trim()?.removeSurrounding("\"").orEmpty()
+            add(
+                Candidate(
+                    framework = framework.id,
+                    httpMethods = handler.methods,
+                    pathTemplate = normalizePath(path),
+                    pathParameters = pathParametersOf(path),
+                    handlerSymbol = fn.canonicalName,
+                    foundBy = "annotation",
+                    position = Position(fn.file, fn.line, fn.line),
+                    exported = true,
+                    permissions = emptyList(),
+                    deepLinkHosts = emptyList(),
+                ),
+            )
+        }
+        if (annotations.isEmpty()) return
 
         for (framework in pack.frameworks) {
             if (framework.kind != "annotation") continue
@@ -148,7 +182,7 @@ object EndpointDetector {
                     Candidate(
                         framework = framework.id,
                         httpMethods = mapping.methods,
-                        pathTemplate = path,
+                        pathTemplate = normalizePath(path),
                         pathParameters = pathParametersOf(path),
                         handlerSymbol = fn.canonicalName,
                         foundBy = "annotation",
@@ -258,8 +292,38 @@ object EndpointDetector {
             is KirDynamicCall -> ins.args
             else -> emptyList()
         }
-        val pathReg = callArgs.firstOrNull() ?: return
         val prefix = prefixChain(fn.canonicalName, input)
+
+        // A TYPED route names its path on a class, not at the call site:
+        // `get<Article> { }` with `@Resource("/articles/{id}")` on
+        // `Article`. The path argument this function otherwise reads simply
+        // does not exist, so such a route used to resolve to nothing.
+        val typeArguments = (ins as? KirCall)?.typeArguments.orEmpty()
+        if (framework.resourceAnnotations.isNotEmpty() && typeArguments.isNotEmpty()) {
+            val resourcePath = resourcePathOf(typeArguments.first(), framework, input)
+            if (resourcePath != null) {
+                val handler = handlerOfRegs(fn, callArgs, input)
+                publish(add, framework, methods, joinPaths(prefix, resourcePath), handler ?: "", fn, "dsl")
+                return
+            }
+        }
+
+        val pathReg = callArgs.firstOrNull() ?: return
+
+        // `route("/hello") { get { .. } }` — the verb builder takes ONLY a
+        // lambda, and the route's path is entirely the enclosing prefix.
+        // Reading the first argument as a path here folds the LAMBDA
+        // register, which resolves to nothing, and the route was published
+        // with the register's own name as a path segment (`/hello/t7`) — a
+        // URL that exists nowhere, on the most common Ktor nesting idiom.
+        if (callArgs.size == 1) {
+            val only = LambdaResolver.resolve(fn, pathReg, input)
+            if (only != null && input.module.functions.any { it.canonicalName == only }) {
+                val path = joinPaths(prefix, "").ifEmpty { "/" }
+                publish(add, framework, methods, path, only, fn, "dsl")
+                return
+            }
+        }
         val folded = input.folder.valueAt(fn, block, index, pathReg)
         val foldedPath = folded?.value
         if (foldedPath == null) {
@@ -358,7 +422,7 @@ object EndpointDetector {
             Candidate(
                 framework = framework.id,
                 httpMethods = methods,
-                pathTemplate = path,
+                pathTemplate = normalizePath(path),
                 pathParameters = pathParametersOf(path),
                 handlerSymbol = handler,
                 foundBy = foundBy,
@@ -444,8 +508,18 @@ object EndpointDetector {
         // The RPC path is `/<Service>/<Method>`; the service names out of
         // the generated base's simple name minus its suffix
         // (`GreeterImplBase` -> `Greeter`, the proto service's name).
-        val suffix = grpc.supertypeSuffixes.firstOrNull { base.endsWith(it) } ?: "ImplBase"
-        val service = base.substringAfterLast('.').removeSuffix(suffix)
+        // LONGEST suffix first: gRPC's Kotlin generator emits
+        // `GreeterCoroutineImplBase`, and stripping only `ImplBase` names
+        // the service `GreeterCoroutine` — a service that does not exist, so
+        // the reported RPC path `/GreeterCoroutine/sayHello` matches no
+        // traffic and no proto.
+        val suffix = grpc.supertypeSuffixes.filter { base.endsWith(it) }.maxByOrNull { it.length } ?: "ImplBase"
+        val simple = base.substringAfterLast('.').removeSuffix(suffix)
+        // The Kotlin stub is nested in `<Service>GrpcKt`; when the nested
+        // name is now empty the outer class carries the service name.
+        val service = simple.ifEmpty {
+            base.substringBeforeLast('.').substringAfterLast('.').removeSuffix("GrpcKt").removeSuffix("Grpc")
+        }
         val method = fn.canonicalName.substringAfterLast('.')
         if (method == "<init>") return
         add(
@@ -491,8 +565,168 @@ object EndpointDetector {
         else -> prefix.trimEnd('/') + "/" + path.trimStart('/')
     }
 
+    /**
+     * The path a `@Resource`-annotated class declares, composed with its
+     * enclosing resource when nested — Ktor nests `@Resource("{id}")`
+     * inside `@Resource("/articles")` to mean `/articles/{id}`.
+     */
+    private fun resourcePathOf(typeName: String, framework: FrameworkModel, input: Input): String? {
+        val parts = ArrayDeque<String>()
+        var current: String? = typeName
+        var guard = 0
+        while (current != null && guard++ < 8) {
+            val annotation = input.annotationValues[current].orEmpty().firstOrNull { ann ->
+                framework.resourceAnnotations.any { matches(ann.fqn, it) }
+            } ?: break
+            val value = annotation.value?.trim()?.removeSurrounding("\"").orEmpty()
+            if (value.isNotEmpty()) parts.addFirst(value)
+            val outer = current.substringBeforeLast('.', "")
+            current = outer.takeIf { it.isNotEmpty() && input.annotationValues.containsKey(it) }
+        }
+        if (parts.isEmpty()) return null
+        return parts.reduce { outerPath, innerPath -> joinPaths(outerPath, innerPath) }
+    }
+
+    /** A handler's URL parameters, split by the transport that carries them. */
+    data class TransportParameters(val path: List<String>, val query: List<String>) {
+        companion object {
+            val EMPTY = TransportParameters(emptyList(), emptyList())
+        }
+    }
+
+    /**
+     * The parameters a CONTEXT handler actually reads, recovered from its
+     * body.
+     *
+     * A framework whose handlers are annotated declares its parameters in
+     * the signature, and [annotatedParameters] reads them there. A context
+     * framework declares nothing: `ctx.pathParam("id")` and
+     * `call.parameters["id"]` are ordinary calls, and the name is a string
+     * literal argument — so the inventory is recovered by folding that
+     * argument through the same [KirValueFolder] the route paths use, which
+     * means a name built from a `const val` resolves exactly as a literal
+     * does and an unprovable name is reported as nothing rather than as a
+     * guess.
+     *
+     * [routeTemplate] settles the transport for a `merged` reader. Ktor's
+     * `call.parameters` and the servlet API's `getParameter` read the path
+     * and query parameters from ONE map, and the map cannot say which is
+     * which — but the route can: a name the route declares as `{name}` came
+     * from the path, and a name it does not declare could only have come
+     * from the query string.
+     */
+    internal fun transportParameters(
+        fn: KirFunction,
+        framework: FrameworkModel,
+        folder: KirValueFolder,
+        routeTemplate: String,
+    ): TransportParameters {
+        if (framework.contextReaders.isEmpty()) return TransportParameters.EMPTY
+        val declared = pathParametersOf(routeTemplate).toSet()
+        val path = sortedSetOf<String>()
+        val query = sortedSetOf<String>()
+        fun record(kind: String, name: String) {
+            if (name.isEmpty()) return
+            when (kind) {
+                TRANSPORT_PATH -> path.add(name)
+                TRANSPORT_QUERY -> query.add(name)
+                TRANSPORT_MERGED -> if (name in declared) path.add(name) else query.add(name)
+                // A header, cookie, form field or body is attacker input and
+                // the security pack seeds it, but it is not a URL parameter
+                // and this list is the URL's.
+                else -> Unit
+            }
+        }
+        for (block in fn.body?.blocks.orEmpty()) {
+            for ((index, ins) in block.instructions.withIndex()) {
+                val call = ins as? KirCall ?: continue
+                val reader = framework.contextReaders
+                    .firstOrNull { matches(call.callee.fqn, it.pattern) } ?: continue
+                if (reader.indexed) {
+                    // `call.parameters["id"]`: the reader yields the map and
+                    // the name is the index of a get against it.
+                    val map = call.result ?: continue
+                    for ((at, other) in block.instructions.withIndex()) {
+                        val get = other as? KirIndexGet ?: continue
+                        if (get.receiver != map) continue
+                        val folded = folder.valueAt(fn, block, at, get.index) ?: continue
+                        if (folded.resolved) record(reader.kind, folded.value.orEmpty())
+                    }
+                } else if (reader.nameArgument >= 0) {
+                    val argument = call.args.getOrNull(reader.nameArgument) ?: continue
+                    val folded = folder.valueAt(fn, block, index, argument) ?: continue
+                    if (folded.resolved) record(reader.kind, folded.value.orEmpty())
+                }
+            }
+        }
+        return TransportParameters(path.toList(), query.toList())
+    }
+
+    /**
+     * The parameters an ANNOTATED handler declares, from the parameter
+     * annotations the KIR carries. The name is the parameter's own, which is
+     * what every one of these frameworks defaults to when the annotation
+     * names none.
+     */
+    internal fun annotatedParameters(fn: KirFunction, framework: FrameworkModel): TransportParameters {
+        if (framework.parameterAnnotations.isEmpty()) return TransportParameters.EMPTY
+        val path = sortedSetOf<String>()
+        val query = sortedSetOf<String>()
+        for (param in fn.params) {
+            if (param.receiver) continue
+            val kind = param.annotations.firstNotNullOfOrNull { annotation ->
+                framework.parameterAnnotations.firstOrNull { matches(annotation, it.pattern) }?.kind
+            } ?: continue
+            // A parameter the KIR could not name contributes nothing: an
+            // unnamed entry in this list is worse than a shorter list.
+            val name = param.name?.takeIf { it.isNotEmpty() } ?: continue
+            when (kind) {
+                TRANSPORT_PATH -> path.add(name)
+                TRANSPORT_QUERY -> query.add(name)
+                else -> Unit
+            }
+        }
+        return TransportParameters(path.toList(), query.toList())
+    }
+
     private fun pathParametersOf(path: String): List<String> =
-        Regex("\\{([^}:]+)}").findAll(path).map { it.groupValues[1].trim() }.sorted().toList()
+        Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim() }.sorted().toList()
+
+    /**
+     * ONE path-template spelling across frameworks. The same route is
+     * written four ways on the JVM — Spring's `{id:[0-9]+}`, JAX-RS's
+     * `{id: \\d+}`, Vert.x's and Spark's `:id`, Ktor's `{id?}` and `{...}` —
+     * and reporting each verbatim means a consumer cannot match two
+     * frameworks' routes against one another, or against traffic, without
+     * re-implementing every framework's syntax.
+     *
+     * The normal form is `{name}` for a variable and `*` for a wildcard
+     * segment. The REGEX CONSTRAINT is dropped from the template, not
+     * ignored: it constrains values, and `pathParameters` names the
+     * variable either way.
+     */
+    internal fun normalizePath(path: String): String {
+        if (path.isEmpty()) return path
+        val segments = path.split('/').map { segment ->
+            when {
+                // Vert.x / Spark / Javalin v3: `:id`
+                segment.startsWith(":") && segment.length > 1 -> "{" + segment.removePrefix(":") + "}"
+                // Spring `**`, Ktor `{...}` tailcard: any remaining path.
+                segment == "**" || segment == "{...}" -> "**"
+                segment == "*" -> "*"
+                segment.startsWith("{") && segment.endsWith("}") -> {
+                    val inner = segment.removeSurrounding("{", "}")
+                    // Spring `{id:[0-9]+}` / JAX-RS `{id: \\d+}`: the name is
+                    // everything before the first colon. Ktor's `{id?}`
+                    // marks the variable optional; the name is the same.
+                    "{" + inner.substringBefore(':').removeSuffix("?").trim() + "}"
+                }
+
+                else -> segment
+            }
+        }
+        return segments.joinToString("/")
+    }
 }
 
 /**

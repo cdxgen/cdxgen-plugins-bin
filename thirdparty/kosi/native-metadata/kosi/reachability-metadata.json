@@ -1381,6 +1381,17 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtParenthesizedExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtPostfixExpression"
     },
     {
@@ -1459,6 +1470,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtThisExpression"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtThrowExpression"
     },
     {
       "methods": [
@@ -2177,6 +2199,9 @@
       "type": "java.util.Map.Entry"
     },
     {
+      "type": "java.util.Set"
+    },
+    {
       "type": "jdk.internal.jrtfs.JrtFileSystemProvider"
     },
     {
@@ -2627,9 +2652,6 @@
       "type": "org.jetbrains.kotlin.psi.KtParameter[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtParenthesizedExpression"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtPrimaryConstructor[]"
     },
     {
@@ -2679,9 +2701,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtSuperTypeList[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtThrowExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtTypeAlias[]"

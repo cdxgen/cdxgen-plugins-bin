@@ -97,6 +97,16 @@ object ResolvedAnalyzer {
          * merely looks like the syntax tier.
          */
         val symbolFailures: Int,
+        /**
+         * Annotation SHORT name -> the fully-qualified names it resolved to
+         * in this file. Declarations carry only the short name (the report's
+         * `AnnotationEvidence`), and the endpoint detector matches framework
+         * patterns on the FQN, so the two were bridged by scanning KIR
+         * FUNCTION annotations — which cannot see a class whose only members
+         * are properties. Ktor's `@Resource("/articles")` on such a class
+         * then resolved to the bare name `Resource`, matching no pattern.
+         */
+        val annotationFqnsByShortName: Map<String, Set<String>> = emptyMap(),
     )
 
     fun run(
@@ -192,6 +202,7 @@ object ResolvedAnalyzer {
             val overridesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
             val supertypesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
             val annotationsOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<AnnotationEvidence>>()
+            val annotationFqns = HashMap<String, MutableSet<String>>()
             val modifiersOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
             val jvmOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, Pair<String?, String?>>()
             for ((_, symbol) in resolved) {
@@ -225,6 +236,13 @@ object ResolvedAnalyzer {
                 annotationsOf[symbol] = try {
                     (symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
                         ?.annotations
+                        ?.onEach { annotation ->
+                            val short = annotation.classId?.shortClassName?.asString()
+                            val fqn = annotation.classId?.asSingleFqName()?.asString()
+                            if (short != null && fqn != null) {
+                                annotationFqns.getOrPut(short) { mutableSetOf() }.add(fqn)
+                            }
+                        }
                         ?.map { AnnotationEvidence(
                             name = it.classId?.shortClassName?.asString()
                                 ?: it.classId?.asSingleFqName()?.asString()
@@ -397,6 +415,7 @@ object ResolvedAnalyzer {
                     callsResolved = callsResolved,
                     resolutionErrorCodes = errorCodes,
                     symbolFailures = symbolFailures,
+                    annotationFqnsByShortName = annotationFqns.mapValues { (_, v) -> v.toSet() },
                 ),
             )
             continue@fileLoop

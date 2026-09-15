@@ -92,6 +92,36 @@ scripts/native-vs-jvm.sh build/kosi-darwin-arm64 \
   modules/kosi-cli/build/dist/kosi-all.jar
 ```
 
+### When this is worth running
+
+The native pass costs roughly 35 minutes end to end on an M-series laptop:
+~13 min to build the image, ~6 min for the native sweep, ~7 min for
+native-vs-JVM, ~9 min for a metadata check. Running all of it after every
+change is waste, and waste that gets skipped under time pressure is worse
+than a rule nobody pretends to follow. Run what the change can actually
+break:
+
+| the change | what to run |
+|---|---|
+| model packs, `corpus.toml`, docs — DATA only | nothing native. The image cannot be affected: it holds no pack. |
+| new fixtures, or any new Kotlin SOURCE CONSTRUCT | `make native-metadata-check` alone. Drift is the whole signal (R69), and it needs no image. |
+| lowering, KIR shape, reflection, resources, `native-image` flags, the CLI entry | the full pass: rebuild, both sweeps, and the metadata check. |
+| a squash-merge that touched none of those | nothing native. |
+
+**`native-vs-jvm.sh` is the expensive one and it is NOT a per-merge gate.**
+Every divergence it has ever caught — R53 (an image that could not analyse
+an `object`), R69 (one that could not analyse a KDoc comment), R66 (one that
+could not start on linux) — was a REFLECTION or RESOURCE failure, and
+`native-metadata-check` sees that class of problem from a trace, with no
+image build, for a fraction of the cost. So metadata drift is the routine
+gate; the comparison runs only when the change is in the image's own
+surface (the row above), and otherwise on a release build. Running it after
+a data or fixture change buys nothing and costs half an hour.
+
+The discipline is real — a green JVM suite has repeatedly shipped a broken
+image — but it is a reason to watch reflection metadata, not a reason to
+rebuild an image after editing a JSON file.
+
 Both sweeps run **both** graph-bearing slots (`resolved` and `--roots
 exported`), not `resolved` alone: R53's lesson is that a slot nobody runs is
 a code path nobody proves anything about, and `exported` is precisely the

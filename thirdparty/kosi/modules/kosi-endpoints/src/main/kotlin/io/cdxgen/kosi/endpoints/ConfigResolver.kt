@@ -21,7 +21,7 @@ object ConfigResolver {
         val source: Source,
     )
 
-    enum class Source { YAML, PROPERTIES, BUILDCONFIG }
+    enum class Source { YAML, PROPERTIES, BUILDCONFIG, HOCON }
 
     /**
      * The config table: key -> value with its origin file kind. Deterministic
@@ -53,6 +53,7 @@ object ConfigResolver {
                     val name = p.fileName.toString()
                     name == "application.yml" || name == "application.yaml" ||
                         name == "application.properties" || name.endsWith(".properties") ||
+                        name == "application.conf" ||
                         name == "BuildConfig.java" || name == "BuildConfig.kt"
                 }
                 .sorted()
@@ -66,6 +67,9 @@ object ConfigResolver {
 
                 name.endsWith(".properties") ->
                     readProperties(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.PROPERTIES)) }
+
+                name == "application.conf" ->
+                    readHocon(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.HOCON)) }
 
                 else ->
                     readYaml(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.YAML)) }
@@ -106,6 +110,69 @@ object ConfigResolver {
             if (value.isEmpty()) continue // a nested-table parent
             val fullKey = stack.joinToString(".") { it.second }
             out.putIfAbsent(fullKey, value)
+        }
+        out
+    } catch (_: Exception) {
+        emptyMap()
+    }
+
+    /**
+     * HOCON `application.conf` — Ktor's default configuration file.
+     *
+     * `ktor.deployment.rootPath` is already a base-path key, but nothing
+     * could ever supply it: a Ktor project does not have an
+     * `application.properties` or a flat `application.yml`, it has a
+     * BRACE-NESTED `application.conf`. Every Ktor deployment served under a
+     * context path therefore had every one of its routes reported at the
+     * wrong URL.
+     *
+     * The subset HOCON's own grammar makes unambiguous, flattened by brace
+     * depth the way [readYaml] flattens by indentation: `key = value`,
+     * `key value` (the separator is optional before an object), `key {` to
+     * open a table and `}` to close it. Comments are `#` or `//`. An
+     * `include`, a substitution (`${?PORT}`), a list and a multi-line string
+     * are SKIPPED rather than guessed at — an unresolved value is the honest
+     * answer and the config gate already counts it.
+     */
+    private fun readHocon(file: Path): Map<String, String> = try {
+        val out = LinkedHashMap<String, String>()
+        val path = ArrayDeque<String>()
+        for (rawLine in Files.readAllLines(file)) {
+            var line = rawLine.substringBefore('#').substringBefore("//").trim()
+            if (line.isEmpty() || line.startsWith("include")) continue
+            // A closing brace may trail a value (`deployment { port = 8080 }`),
+            // so the line is consumed left to right rather than matched whole.
+            while (line.isNotEmpty()) {
+                if (line.startsWith("}")) {
+                    if (path.isNotEmpty()) path.removeLast()
+                    line = line.removePrefix("}").removePrefix(",").trim()
+                    continue
+                }
+                val open = line.indexOf('{')
+                val separator = line.indexOfFirst { it == '=' || it == ':' }
+                if (open >= 0 && (separator < 0 || open < separator)) {
+                    val key = line.substring(0, open).trim().trimEnd('=', ':').trim()
+                        .removeSurrounding("\"")
+                    if (key.isEmpty()) break
+                    path.addLast(key)
+                    line = line.substring(open + 1).trim()
+                    continue
+                }
+                if (separator <= 0) break
+                val key = line.substring(0, separator).trim().removeSurrounding("\"")
+                var rest = line.substring(separator + 1).trim()
+                // Only the text up to a closing brace belongs to this value.
+                val close = rest.indexOf('}')
+                val value = (if (close >= 0) rest.substring(0, close) else rest).trim().trimEnd(',')
+                rest = if (close >= 0) rest.substring(close) else ""
+                val unquoted = value.removeSurrounding("\"")
+                if (key.isNotEmpty() && unquoted.isNotEmpty() &&
+                    !unquoted.startsWith("[") && !unquoted.startsWith("\${")
+                ) {
+                    out.putIfAbsent((path + key).joinToString("."), unquoted)
+                }
+                line = rest
+            }
         }
         out
     } catch (_: Exception) {

@@ -164,4 +164,80 @@ class ClasspathResolverTest {
         )
         assertTrue(result.jars.isEmpty())
     }
+
+    /**
+     * Kotlin multiplatform publishing files the JVM artifact under the
+     * PARENT's directory: `io.ktor:ktor-server-core` resolves for a JVM
+     * consumer to `ktor-server-core-jvm-<version>.jar`, sitting in
+     * `ktor-server-core/<version>/<hash>/`. Matching only the exact name
+     * reported every such coordinate as unlocatable with the jar already in
+     * the cache — which is all of Ktor and all of kotlinx, so a real Ktor
+     * application resolved a third of its calls because its own framework
+     * was missing from the classpath it had been given.
+     */
+    @Test
+    fun locatesMultiplatformJarsFiledUnderTheParentArtifact() {
+        val root = Files.createTempDirectory("kosi-cp-kmp")
+        val module = root.resolve("app")
+        Files.createDirectories(module)
+        module.resolve("build.gradle.kts").writeText(
+            """
+            dependencies {
+                implementation("io.example:multi-core:1.6.7")
+                implementation("io.example:plain-core:1.6.7")
+            }
+            """.trimIndent(),
+        )
+        // The project-local cache, in files-2.1 layout.
+        val cache = root.resolve(".gradle")
+        val multi = cache.resolve("io.example/multi-core/1.6.7/abc123")
+        Files.createDirectories(multi)
+        writeJar(multi.resolve("multi-core-jvm-1.6.7.jar"), "io/example/multi/Api.class")
+        val plain = cache.resolve("io.example/plain-core/1.6.7/def456")
+        Files.createDirectories(plain)
+        writeJar(plain.resolve("plain-core-1.6.7.jar"), "io/example/plain/Api.class")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(module))
+        val names = result.jars.map { it.jar.fileName.toString() }.sorted()
+        assertTrue(
+            names.contains("multi-core-jvm-1.6.7.jar"),
+            "the multiplatform JVM jar must be located under its parent artifact; got $names",
+        )
+        assertTrue(names.contains("plain-core-1.6.7.jar"), "the exactly-named jar must still be located")
+        assertTrue(result.missing.isEmpty(), "nothing is missing: both jars are in the cache, got ${result.missing}")
+    }
+
+    /**
+     * A neighbouring jar whose suffix is NOT a Kotlin target must not be
+     * picked up: the platform-suffixed name is accepted for the suffixes
+     * Kotlin's own publishing emits, never as a wildcard over the directory.
+     */
+    @Test
+    fun ignoresNeighbouringJarsThatAreNotPlatformVariants() {
+        val root = Files.createTempDirectory("kosi-cp-kmp-neg")
+        val module = root.resolve("app")
+        Files.createDirectories(module)
+        module.resolve("build.gradle.kts").writeText(
+            """dependencies { implementation("io.example:odd-core:1.0.0") }""",
+        )
+        val dir = root.resolve(".gradle/io.example/odd-core/1.0.0/abc123")
+        Files.createDirectories(dir)
+        writeJar(dir.resolve("odd-core-sources-1.0.0.jar"), "io/example/odd/Api.class")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(module))
+        assertTrue(result.jars.isEmpty(), "a sources jar is not the artifact; got ${result.jars}")
+        assertEquals(listOf("io.example:odd-core:1.0.0"), result.missing)
+    }
+
+    /** A minimal but real jar: the resolver rejects anything it cannot open. */
+    private fun writeJar(path: java.nio.file.Path, entry: String) {
+        ZipOutputStream(Files.newOutputStream(path)).use { zos ->
+            zos.putNextEntry(ZipEntry("META-INF/MANIFEST.MF"))
+            zos.write("Manifest-Version: 1.0\n".toByteArray())
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry(entry))
+            zos.write(byteArrayOf(0xCA.toByte(), 0xFE.toByte(), 0xBA.toByte(), 0xBE.toByte()))
+            zos.closeEntry()
+        }
+    }
 }

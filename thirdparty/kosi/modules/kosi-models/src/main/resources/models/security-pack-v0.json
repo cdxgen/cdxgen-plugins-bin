@@ -1142,6 +1142,33 @@
   ],
   "sinks": [
     {
+      "category": "xss",
+      "pattern": "io.ktor.response.respond",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "open-redirect",
+      "pattern": "io.ktor.response.respondRedirect",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "pattern": "io.ktor.response.respondText",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "high"
+    },
+    {
       "category": "code-execution",
       "pattern": "java.lang.Class.forName",
       "receiverType": null,
@@ -2480,7 +2507,123 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.attribute"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsBytes"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsClass"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.bodyAsInputStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.cookieMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.formParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.headerMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.pathParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.pathParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParamMap"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.javalin.http.Context.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.application.ApplicationCall.parameters"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "io.ktor.http.Parameters.get"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.ApplicationRequest.queryParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receive"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveChannel"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveParameters"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.request.receiveText"
     },
     {
       "category": "untrusted-input",
@@ -2537,6 +2680,78 @@
     {
       "category": "untrusted-input",
       "pattern": "io.modelcontextprotocol.spec.McpSchema.CallToolRequest.arguments"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.absoluteURI"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.bodyAsJson"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.bodyAsString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getHeader"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.params"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.path"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.query"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.uri"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RequestBody.asJsonObject"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RequestBody.asString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.pathParam"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.vertx.ext.web.RoutingContext.queryParam"
     },
     {
       "category": "untrusted-input",
@@ -2684,11 +2899,47 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.bodyString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.form"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.header"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.path"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.core.Request.query"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "org.springframework.ai.chat.model.ChatModel.call"
     },
     {
       "category": "untrusted-input",
       "pattern": "org.springframework.http.server.reactive.ServerHttpRequest.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.bodyString"
     },
     {
       "category": "untrusted-input",
@@ -2708,6 +2959,10 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathParameters"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "org.springframework.web.reactive.function.server.ServerRequest.pathVariable"
     },
     {
@@ -2716,11 +2971,55 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "org.springframework.web.reactive.function.server.ServerRequest.queryParameters"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "org.springframework.web.util.UriComponentsBuilder.build"
     },
     {
       "category": "untrusted-input",
       "pattern": "software.amazon.awssdk.services.s3.S3Client.getObject"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.attribute"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.body"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.bodyAsBytes"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.cookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.cookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.params"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.queryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.queryString"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "spark.Request.splat"
     }
   ]
 }

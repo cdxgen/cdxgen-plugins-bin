@@ -65,7 +65,9 @@ object KirWriter {
         is KirFieldSet -> "fieldset ${ins.receiver} ${writePath(ins.path)} = ${ins.value}"
         is KirIndexGet -> "${ins.result} = indexget ${ins.receiver} ${ins.index}"
         is KirIndexSet -> "indexset ${ins.receiver} ${ins.index} = ${ins.value}"
-        is KirCall -> lhs(ins.result) + "call " + writeCall(ins.callee, ins.receiver, ins.args) + lineSuffix(ins.line)
+        is KirCall ->
+            lhs(ins.result) + "call " + writeCall(ins.callee, ins.receiver, ins.args) +
+                writeTypeArgs(ins.typeArguments) + lineSuffix(ins.line)
         is KirDynamicCall ->
             lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args) + lineSuffix(ins.line)
         is KirNew -> "${ins.result} = new ${qn(ins.type)}${writeArgs(ins.args)}${lineSuffix(ins.line)}"
@@ -98,6 +100,10 @@ object KirWriter {
 
     private fun writeArgs(args: List<String>): String =
         if (args.isEmpty()) "" else " args=(" + args.joinToString(",") + ")"
+
+    /** Emitted only when present, so every call without one is unchanged. */
+    private fun writeTypeArgs(typeArguments: List<String>): String =
+        if (typeArguments.isEmpty()) "" else " typeargs=(" + typeArguments.joinToString(",") + ")"
 
     private fun writePath(path: AccessPath): String =
         path.base + path.elements.joinToString("") { element ->

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app>
+  <!-- The oldest way to map a URL on the JVM, and still how most inherited
+       applications do it: no annotation appears anywhere in the source. -->
+  <servlet>
+    <servlet-name>legacy</servlet-name>
+    <servlet-class>fixtures.descriptorroutes.LegacyServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>legacy</servlet-name>
+    <url-pattern>/legacy/*</url-pattern>
+    <url-pattern>/old/report</url-pattern>
+  </servlet-mapping>
+  <!-- A mapping whose servlet element does not exist must be dropped, not
+       guessed at. -->
+  <servlet-mapping>
+    <servlet-name>ghost</servlet-name>
+    <url-pattern>/ghost</url-pattern>
+  </servlet-mapping>
+
+  <!-- Filters: the descriptor half that sees every request BEFORE any
+       servlet does. One mapped by URL pattern, one mapped indirectly
+       through the servlet it wraps. -->
+  <filter>
+    <filter-name>audit</filter-name>
+    <filter-class>fixtures.descriptorroutes.AuditFilter</filter-class>
+  </filter>
+  <filter-mapping>
+    <filter-name>audit</filter-name>
+    <url-pattern>/admin/*</url-pattern>
+  </filter-mapping>
+  <filter>
+    <filter-name>wrapper</filter-name>
+    <filter-class>fixtures.descriptorroutes.WrappingFilter</filter-class>
+  </filter>
+  <!-- No url-pattern at all: the patterns are the wrapped servlet's. -->
+  <filter-mapping>
+    <filter-name>wrapper</filter-name>
+    <servlet-name>legacy</servlet-name>
+  </filter-mapping>
+  <!-- A filter-mapping with no filter element names no class: dropped. -->
+  <filter-mapping>
+    <filter-name>phantom</filter-name>
+    <url-pattern>/phantom</url-pattern>
+  </filter-mapping>
+</web-app>

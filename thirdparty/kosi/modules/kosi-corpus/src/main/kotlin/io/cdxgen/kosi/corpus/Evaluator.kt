@@ -241,7 +241,9 @@ object Evaluator {
             matches(ann.framework, endpoint.framework) &&
                 matches(ann.path, endpoint.pathTemplate) &&
                 matches(ann.fn, endpoint.handlerSymbol) &&
-                (ann.method == null || endpoint.httpMethods.any { matches(ann.method, it) })
+                (ann.method == null || endpoint.httpMethods.any { matches(ann.method, it) }) &&
+                (ann.pathParam == null || endpoint.pathParameters.any { matches(ann.pathParam, it) }) &&
+                (ann.queryParam == null || endpoint.queryParameters.any { matches(ann.queryParam, it) })
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

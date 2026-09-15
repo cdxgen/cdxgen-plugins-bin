@@ -534,6 +534,43 @@ tier = "fixtures"
 path = "fixtures/endpoint-base-path"
 capabilities = ["endpoints", "context-path", "framework-semantics", "config-resolution"]
 
+[[fixtures]]
+slug = "handler-input-semantics"
+tier = "fixtures"
+path = "fixtures/handler-input-semantics"
+capabilities = ["endpoint-sources", "context-frameworks", "servlet", "class-declared-routes", "framework-semantics"]
+
+[[fixtures]]
+slug = "path-normalisation"
+tier = "fixtures"
+path = "fixtures/path-normalisation"
+capabilities = ["endpoints", "path-templates", "framework-semantics"]
+
+[[fixtures]]
+slug = "ktor-resources"
+tier = "fixtures"
+path = "fixtures/ktor-resources"
+capabilities = ["endpoints", "typed-routing", "resource-annotations", "type-arguments", "framework-semantics"]
+
+[[fixtures]]
+slug = "ktor-context-semantics"
+tier = "fixtures"
+path = "fixtures/ktor-context-semantics"
+capabilities = ["endpoints", "hocon-config", "base-path", "context-parameters", "framework-semantics"]
+
+[[fixtures]]
+slug = "descriptor-routes"
+tier = "fixtures"
+path = "fixtures/descriptor-routes"
+capabilities = ["endpoints", "web-xml", "application-path", "servlet", "jaxrs", "framework-semantics"]
+
+[[fixtures]]
+slug = "implicit-routes"
+tier = "fixtures"
+path = "fixtures/implicit-routes"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
+
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the

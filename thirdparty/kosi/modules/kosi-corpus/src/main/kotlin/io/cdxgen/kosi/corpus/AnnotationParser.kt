@@ -95,6 +95,8 @@ object AnnotationParser {
             var maxDepth: Int? = null
             var knownFailAll: Int? = null
             var framework: String? = null
+            var pathParam: String? = null
+            var queryParam: String? = null
             var path: String? = null
             var method: String? = null
             var cipherMode: String? = null
@@ -143,6 +145,8 @@ object AnnotationParser {
                     "framework" -> framework = rawValue
                     "path" -> path = rawValue
                     "method" -> method = rawValue
+                    "pathparam" -> pathParam = rawValue
+                    "queryparam" -> queryParam = rawValue
                     "ciphermode" -> cipherMode = rawValue
                     "padding" -> padding = rawValue
                     "form" -> form = rawValue
@@ -214,6 +218,8 @@ object AnnotationParser {
                 framework = framework,
                 path = path,
                 method = method,
+                pathParam = pathParam,
+                queryParam = queryParam,
                 cipherMode = cipherMode,
                 padding = padding,
                 form = form,
