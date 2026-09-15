@@ -1,0 +1,72 @@
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 474-505
+thirdparty/kosi/fixtures/class-declarations/src/main/kotlin/ClassDeclarations.kt
+  h_6a4cc5cdf68def 1-108
+thirdparty/kosi/fixtures/expressions-and-literals/src/main/kotlin/ExpressionsAndLiterals.kt
+  h_6a4cc5cdf68def 1-67
+thirdparty/kosi/fixtures/generic-shapes/src/main/kotlin/GenericShapes.kt
+  h_6a4cc5cdf68def 1-77
+thirdparty/kosi/fixtures/kosi-vulnerable-service/src/main/kotlin/dev/kosi/service/UserRepository.kt
+  h_6a4cc5cdf68def 12-13
+thirdparty/kosi/fixtures/loop-and-labels/src/main/kotlin/LoopAndLabels.kt
+  h_6a4cc5cdf68def 1-73
+thirdparty/kosi/goldens/class-declarations-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-security.json
+  h_6a4cc5cdf68def 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c57f0dfb091532ddcbed48b674f36c20fa676639",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 126-127,139-141
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 474-488
+thirdparty/kosi/fixtures/kosi-vulnerable-service/README.md
+  h_6a4cc5cdf68def 1-25
+thirdparty/kosi/fixtures/kosi-vulnerable-service/build.gradle.kts
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/kosi-vulnerable-service/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/kosi-vulnerable-service/settings.gradle.kts
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/fixtures/kosi-vulnerable-service/src/main/kotlin/dev/kosi/service/AuditService.kt
+  h_6a4cc5cdf68def 1-57
+thirdparty/kosi/fixtures/kosi-vulnerable-service/src/main/kotlin/dev/kosi/service/UserRepository.kt
+  h_6a4cc5cdf68def 1-47
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Baseline.kt
+  h_6a4cc5cdf68def 976-990,1014-1015,1017-1019
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/BenchRunner.kt
+  h_6a4cc5cdf68def 167-174,280-281,490-491,772-775
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/FixtureResultJsonTest.kt
+  h_6a4cc5cdf68def 86-87
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/P9P10GateTest.kt
+  h_6a4cc5cdf68def 64-67,72,77,80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ba2cf757f54ea1b4e868da4bd513152159d922fc",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+.github/workflows/kosi-test.yml
+  h_6a4cc5cdf68def 5-8,71-74
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 108-129
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 613-644,684-693
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 8-191
+thirdparty/kosi/fixtures/catch-handler-flow/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/catch-handler-flow/src/main/kotlin/fixtures/catchflow/CatchFlow.kt
+  h_6a4cc5cdf68def 1-136
+thirdparty/kosi/fixtures/dsl-media-auth/build.gradle.kts
+  h_6a4cc5cdf68def 1-3
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/DslRoutes.kt
+  h_6a4cc5cdf68def 1-95
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/Servlets.kt
+  h_6a4cc5cdf68def 1-20
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/http/Http.kt
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/http/JavalinStubs.kt
+  h_6a4cc5cdf68def 1-12
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/javalin/security/RouteRole.kt
+  h_6a4cc5cdf68def 1-7
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/core/Handler.kt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/ext/web/VertxStubs.kt
+  h_6a4cc5cdf68def 1-23
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/javax/servlet/http/ServletStubs.kt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/org/http4k/core/Http4kStubs.kt
+  h_6a4cc5cdf68def 1-26
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/webapp/WEB-INF/web.xml
+  h_6a4cc5cdf68def 1-63
+thirdparty/kosi/goldens/catch-handler-flow-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 176-181
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  h_6a4cc5cdf68def 353-356,360,363-440,442-513,580-590,592-594,605-607,625-627
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/Endpoints.kt
+  h_6a4cc5cdf68def 79,523,527-533,552-562,575,584-611
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/WebXmlParser.kt
+  h_6a4cc5cdf68def 39-56,78-121
+thirdparty/kosi/modules/kosi-export/src/main/kotlin/io/cdxgen/kosi/export/Sarif.kt
+  h_6a4cc5cdf68def 22-27,59-70,110-124
+thirdparty/kosi/modules/kosi-export/src/test/kotlin/io/cdxgen/kosi/export/SarifTest.kt
+  h_6a4cc5cdf68def 92-131
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  h_6a4cc5cdf68def 421-426,469-470,472,475,600-616,619-624,632-635,647-651,656-659
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 184-199
+thirdparty/kosi/modules/kosi-flow/src/test/kotlin/io/cdxgen/kosi/flow/InterproceduralEngineTest.kt
+  h_6a4cc5cdf68def 404-509
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  h_6a4cc5cdf68def 827-881,1259-1278,1280-1282,1284-1318
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/KirLoweringTest.kt
+  h_6a4cc5cdf68def 620-706
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/EndpointModels.kt
+  h_6a4cc5cdf68def 158-177,233-244,376-383
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 197-198,304-306,979,1607-1609,1612-1623
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  h_6a4cc5cdf68def 257-269,281-295,299-316,444,451-501
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/ClasspathResolverTest.kt
+  h_6a4cc5cdf68def 243-381
+thirdparty/kosi/scripts/warm-corpus-classpath.sh
+  h_6a4cc5cdf68def 182,201-204,206,221-277,282-284,360-361,364-394,408-413,416-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d39b1d8d03899c737d4fced726ae30a36ce15074",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

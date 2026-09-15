@@ -1,0 +1,22 @@
+docs/LESSON8.md
+  h_6a4cc5cdf68def 1-83
+docs/_sidebar.md
+  h_6a4cc5cdf68def 25
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 203,340-348
+thirdparty/kosi/THREAT_MODEL.md
+  h_6a4cc5cdf68def 41-59,64-66
+thirdparty/kosi/docs/KOSI.md
+  h_6a4cc5cdf68def 8-142,1094
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6320ca9e1ecc32732c941d42534a54abfdcbe654",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
