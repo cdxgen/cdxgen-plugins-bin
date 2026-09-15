@@ -60,7 +60,7 @@ jobs:
   # 56 minutes in, during nowinandroid's warm, without reaching a single
   # bench row. corpusFull is measured per phase on the corpus machine and
   # its numbers — rows, fail/XPASS, the vuln finding floors, every repo's
-  # resolvedCallRatio — are reported in docs/KOSI.md for that phase; that
+  # resolvedCallRatio — are reported in the phase tracker; that
   # is where the gate lives. Keeping a job here that has never once
   # completed only teaches everyone to ignore a red tick.
   corpus-full:
@@ -97,7 +97,7 @@ jobs:
   # It is run locally per phase (`make native`, `scripts/determinism-sweep.sh`,
   # `make native-metadata-check`, and `scripts/native-vs-jvm.sh` when
   # reflection, resources or lowering changed) and reported in that phase's
-  # docs/KOSI.md section. Per-push CI keeps the fast, deterministic subset:
+  # tracker section. Per-push CI keeps the fast, deterministic subset:
   # unit tests, the fixture-tier corpus ratchet, and the digest goldens.
   native:
     name: make native (darwin-arm64, on demand)

@@ -359,7 +359,7 @@ the connectivity gate checks, published for consumers.
 
 Published when `--backend resolved` runs and `--dataflow` is not `none`
 (default `security`); `null` at the syntax tier, which has no KIR and no flow
-engine (docs/KOSI.md defect 1). The engine is field-sensitive taint over each
+engine (defect 1 in the phase tracker). The engine is field-sensitive taint over each
 lowered function's CFG, iterated with a worklist to a real fixpoint
 (`kosi-flow`, compiler-free), plus P5's interprocedural summaries: bottom-up
 over the call graph's SCC condensation, applied at call sites AFTER the pack

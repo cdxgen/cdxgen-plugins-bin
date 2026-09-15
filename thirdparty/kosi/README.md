@@ -157,8 +157,11 @@ bench rows rather than ratcheting a number measured against nothing.
 The corpus is a two-way ratchet: a regressed expectation fails the build and
 a `known-fail` that starts passing fails the build (XPASS). Scoped markers
 (`known-fail=syntax:1`) describe per-backend defects; the numbers reference
-`docs/KOSI.md` §defects.
+the phase tracker
+(`$HOME/kotlin-plans/KOSI-TRACKER.md`, kept outside this repo).
 
 See `docs/BUILD.md` for the native-image spike numbers,
 `JSON_ATTRIBUTE_REFERENCE.md` for the report contract, `THREAT_MODEL.md` for
-the security model, and `docs/KOSI.md` for phase status and defects.
+the security model, and `docs/KOSI.md` for the operator guide. Phase status
+and the numbered defect registry live outside this repo, in
+`$HOME/kotlin-plans/KOSI-TRACKER.md`.

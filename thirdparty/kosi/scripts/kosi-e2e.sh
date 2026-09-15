@@ -1,5 +1,5 @@
 #!/bin/bash
-# The P11 end-to-end gate for kosi (thirdparty/kosi/docs/KOSI.md, P11):
+# The P11 end-to-end gate for kosi (the P11 phase gate):
 # cdxgen/evinse consumes the kosi report for the COMMITTED Kotlin sample
 # project and the BOM carries occurrence, callstack, reachability, data-flow
 # and crypto-flow evidence plus services[]; CDXGEN_KOSI_DISABLE=1 produces a

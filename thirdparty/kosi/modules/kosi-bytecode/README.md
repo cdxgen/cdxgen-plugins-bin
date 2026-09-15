@@ -26,7 +26,7 @@ summariser.
   itemised; a method the lowering aborts on is treated as body-less, never
   summarised from a half-body.
 
-## Named limitations (see docs/KOSI.md for the full list)
+## Named limitations (the full list is in the phase tracker)
 
 - `@JvmName`-renamed file facades and multi-file facades are found only
   through the call closure, never by name.

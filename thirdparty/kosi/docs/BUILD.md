@@ -226,7 +226,7 @@ Measured 2026-09-15 on `ubuntu-latest`: the WARM step alone ran 52 minutes
 in, during nowinandroid's warm, before a single bench row ran. The gate
 itself has not moved — `corpusFull` is run per phase on the corpus machine,
 with rows, fail/XPASS counts, the vuln finding floors and every repo's
-resolvedCallRatio recorded in that phase's `docs/KOSI.md` section. A red
+resolvedCallRatio recorded in that phase's tracker section. A red
 tick nobody can make green is not a gate; the phase report is. The linux-amd64 GraalVM
 tarball sha256 has been pinned since R66 (the job downloaded an unpinned
 tarball because its first successful run never happened):
