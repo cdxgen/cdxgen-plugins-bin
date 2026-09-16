@@ -1,0 +1,196 @@
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 436,443,450,457,464,471,478,655-664,670
+thirdparty/kosi/fixtures/async-android-scopes/classpath.txt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/async-android-scopes/src/main/kotlin/AndroidScopes.kt
+  h_6a4cc5cdf68def 2-8
+thirdparty/kosi/fixtures/async-android-scopes/stub-src/androidx/compose/runtime/ComposeStubs.kt
+  h_6a4cc5cdf68def 1-7
+thirdparty/kosi/fixtures/async-android-scopes/stub-src/androidx/lifecycle/LifecycleStubs.kt
+  h_6a4cc5cdf68def 1-31
+thirdparty/kosi/fixtures/async-android-scopes/stub-src/build.sh
+  h_6a4cc5cdf68def 1-28
+thirdparty/kosi/fixtures/async-await/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/async-channel/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/async-flow-collect/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/async-launch-scope/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/async-stateflow/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/async-withcontext/classpath.txt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/DslRoutes.kt
+  h_6a4cc5cdf68def 12-17,27-36,62-78,89,92-96,98,100-101,105-106,109-110,118-123,144-163
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/ext/auth/authentication/AuthenticationProvider.kt
+  h_6a4cc5cdf68def 1-5
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/io/vertx/ext/web/handler/AuthHandlers.kt
+  h_6a4cc5cdf68def 1-29
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/org/http4k/contract/Contract.kt
+  h_6a4cc5cdf68def 1-34
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/org/http4k/security/Security.kt
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/fixtures/implicit-routes/classpath.txt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/shared-libs/README.md
+  h_6a4cc5cdf68def 1-10
+thirdparty/kosi/fixtures/shared-libs/kotlinx-coroutines-core-jvm-1.8.0.jar.sha256
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 465-478,481-484
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  h_6a4cc5cdf68def 383,394-398,404,415-416,418,421,443-448,454-490,589-601,612-634,646-703
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/EndpointModels.kt
+  h_6a4cc5cdf68def 178-210,417-420
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 167-176,179-192,222-223,1635-1643,1657-1658
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ClasspathResolver.kt
+  h_6a4cc5cdf68def 51-59,70-80,113-119
+thirdparty/kosi/modules/kosi-project/src/test/kotlin/io/cdxgen/kosi/project/ClasspathResolverTest.kt
+  h_6a4cc5cdf68def 168-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0409d465abfd9bcd24db06df54541db2c4565015",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
