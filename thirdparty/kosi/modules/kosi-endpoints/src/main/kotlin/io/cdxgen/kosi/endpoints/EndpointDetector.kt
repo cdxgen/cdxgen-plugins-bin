@@ -646,6 +646,18 @@ object EndpointDetector {
         publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl", authentication = authentication)
     }
 
+    /** True when [register] is last written before [index] by a null literal. */
+    private fun loadsNull(block: KirBlock, index: Int, register: String): Boolean {
+        for (i in index - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is io.cdxgen.kosi.kir.KirLoad && candidate.result == register) {
+                return candidate.constant is io.cdxgen.kosi.kir.KirConstant.Null
+            }
+            if (candidate is KirCall && candidate.result == register) return false
+        }
+        return false
+    }
+
     /** The last call before [index] in [block] whose result is [register]. */
     private fun producerOf(block: KirBlock, index: Int, register: String): KirCall? {
         for (i in index - 1 downTo 0) {
@@ -673,6 +685,14 @@ object EndpointDetector {
      * yields null: the unmodelled producer's own name is reported (the code
      * declares it; the pack merely does not model it), "unknown" when the
      * producer is not even a call.
+     *
+     * With ONE exception, which is the elvis read literally: `security =
+     * null` assigns nothing. `meta.security?.filter ?: security?.filter`
+     * takes the block's arm for a null meta value exactly as it does for an
+     * absent one, so an explicit null is not an unknown requirement — it is
+     * the absence of a per-route requirement, and the block still applies.
+     * Reporting "unknown" there would be R109's own mistake in its other
+     * direction: confident about a site the framework is not confused by.
      */
     private fun securityAssignmentOf(
         lambdaCanonical: String,
@@ -686,6 +706,7 @@ object EndpointDetector {
                 if (ins !is io.cdxgen.kosi.kir.KirFieldSet) continue
                 val field = ins.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field ?: continue
                 if (field.name != "security") continue
+                if (loadsNull(block, at, ins.value)) continue
                 val ctor = producerOf(block, at, ins.value) ?: return "unknown"
                 val modelled = framework.securityConstructors.firstOrNull { matches(ctor.callee.fqn, it) }
                 return modelled?.substringAfterLast('.') ?: ctor.callee.fqn.substringAfterLast('.')

@@ -76,6 +76,14 @@ class KirValueFolder(
                     // keeps the template's source text); strip them.
                     is KirConstant.Str -> FoldedValue(constant.value.removeSurrounding("\""), ValueStatus.LITERAL)
                     is KirConstant.IntConst -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
+                    // Typed since the P18 review's lowering fix: these used
+                    // to arrive as Str of their source text and fold as
+                    // literals, so they keep folding as literals — with the
+                    // exception of Null, which is the absence of a value and
+                    // must not fold to the four characters "null".
+                    is KirConstant.Bool -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
+                    is KirConstant.FloatConst -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
+                    is KirConstant.Null -> null
                     else -> null
                 }
 

@@ -87,6 +87,15 @@
 // kosi:want endpoint framework=http4k path=/custom mode=resolved authentication=~CustomSecurity
 // kosi:want-not endpoint framework=http4k path=/custom authentication=~contract-security
 // kosi:want-not endpoint framework=http4k path=/custom authentication=~ApiKeySecurity
+// An EXPLICIT `security = null` in a route's meta. The framework's elvis
+// (`meta.security?.filter ?: security?.filter`) takes the block's arm for a
+// null meta value exactly as it does for an absent one, so /explicit-null
+// inherits ApiKeySecurity and must NOT be reported as an unknown scheme —
+// the other direction of R109's mistake (P18 review).
+// kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~contract-security
+// kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~ApiKeySecurity
+// kosi:want-not endpoint framework=http4k path=/explicit-null authentication=~meta-security
+// kosi:want-not endpoint framework=http4k path=/explicit-null authentication=~unknown
 // kosi:want endpoint framework=http4k path=/outside mode=resolved
 // kosi:want-not endpoint framework=http4k path=/outside authentication=~
 //
@@ -183,6 +192,9 @@ fun securedContract() = contract {
     } bindContract Method.GET to { req -> contractHandler(req) }
     routes += "/custom" meta {
         security = CustomSecurity("app-defined")
+    } bindContract Method.GET to { req -> contractHandler(req) }
+    routes += "/explicit-null" meta {
+        security = null
     } bindContract Method.GET to { req -> contractHandler(req) }
 }
 

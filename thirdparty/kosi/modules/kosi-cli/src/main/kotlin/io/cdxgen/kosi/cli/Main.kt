@@ -526,18 +526,16 @@ object Main {
                     // absolute path would put this checkout's location into the
                     // `options` digest, so the gate would only ever pass in the
                     // directory the goldens were generated in (P17 review).
-                    // The relocated run resolves the pin against ITS OWN root:
-                    // handing it the primary's resolved paths would make it
-                    // read the checkout's pins — cross-contamination, not a
-                    // portability measurement.
+                    // Both runs get the SAME relative options, and that is
+                    // the point: each resolves the pin against its own root,
+                    // so neither reads the other's jars. An absolute pin here
+                    // would hand the relocated run the checkout's files and
+                    // measure nothing.
                     val slotOptions = entry.classpathFile
                         ?.let { slot.options().copy(classpathFile = it) }
                         ?: slot.options()
-                    val relocatedOptions = entry.classpathFile
-                        ?.let { slot.options().copy(classpathFile = it) }
-                        ?: slot.options()
                     val report = Analyzer.analyze(dir, slotOptions, commit)
-                    val relocatedReport = Analyzer.analyze(relocatedDir, relocatedOptions, commit)
+                    val relocatedReport = Analyzer.analyze(relocatedDir, slotOptions, commit)
                     Digests.sectionDifferences(
                         io.cdxgen.kosi.bench.Digests.FixtureDigest(
                             slug = entry.slug,
@@ -549,8 +547,8 @@ object Main {
                             slot = slot.label,
                             sections = Digests.compute(relocatedReport.toJson(pretty = false), normalizeEnvironmentNaming = false),
                         ),
-                        "at ${dir.fileName}",
-                        "relocated",
+                        "at $dir",
+                        "at $relocatedDir",
                     ).forEach { problems.add("${entry.slug}/${slot.label}: NOT PORTABLE: $it") }
                     val digest = Digests.FixtureDigest(
                         slug = entry.slug,

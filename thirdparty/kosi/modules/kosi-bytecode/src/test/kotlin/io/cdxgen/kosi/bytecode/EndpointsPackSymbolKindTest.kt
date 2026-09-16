@@ -77,14 +77,19 @@ class EndpointsPackSymbolKindTest {
         }
     }
 
-    private fun staticMethodNames(jar: Path, fqn: String): Set<String> {
+    /** Every method [fqn] declares in [jar], static or not. */
+    private fun methodNames(jar: Path, fqn: String): Set<String> = declaredMethods(jar, fqn, staticOnly = false)
+
+    private fun staticMethodNames(jar: Path, fqn: String): Set<String> = declaredMethods(jar, fqn, staticOnly = true)
+
+    private fun declaredMethods(jar: Path, fqn: String, staticOnly: Boolean): Set<String> {
         val entry = ZipFile(jar.toFile()).use { zip -> zip.getEntry(fqn.replace('.', '/') + ".class") }
             ?: return emptySet()
         val names = mutableSetOf<String>()
         ClassReader(ZipFile(jar.toFile()).use { zip -> zip.getInputStream(entry).readBytes() }).accept(
             object : ClassVisitor(Opcodes.ASM9) {
                 override fun visitMethod(access: Int, name: String?, descriptor: String?, signature: String?, exceptions: Array<out String>?): MethodVisitor? {
-                    if (name != null && (access and Opcodes.ACC_STATIC) != 0) names.add(name)
+                    if (name != null && (!staticOnly || (access and Opcodes.ACC_STATIC) != 0)) names.add(name)
                     return null
                 }
             },
@@ -250,12 +255,14 @@ class EndpointsPackSymbolKindTest {
         for (m in fw.dslFunctions.map { it.pattern } + fw.mediaDsl.map { it.pattern }) {
             val owner = m.substringBeforeLast('.')
             val member = m.substringAfterLast('.')
-            val memberDeclared = jars.any { jar ->
-                ZipFile(jar.toFile()).use { zip ->
-                    val entry = zip.getEntry(owner.replace('.', '/') + ".class") ?: return@use false
-                    String(zip.getInputStream(entry).readBytes(), Charsets.ISO_8859_1).contains(member)
-                }
-            }
+            // The owner's METHOD TABLE, not its bytes: a substring search
+            // over the class file passes on any constant-pool mention —
+            // another method's signature, a string literal, the name of a
+            // member that was REMOVED but still appears in a generic
+            // signature. R112 (`mountSubRouter`, gone in Vert.x 5) is
+            // exactly what this check exists to catch, so it may not be
+            // satisfiable by an accident of encoding (P18 review).
+            val memberDeclared = jars.any { jar -> methodNames(jar, owner).contains(member) }
             assertTrue(
                 memberDeclared,
                 "$m: $owner declares no member `$member` in vertx-web $VERTX_PINNED — the DSL names a shape the framework does not have",
@@ -362,6 +369,24 @@ class EndpointsPackSymbolKindTest {
      * happened because `securityConstructors: ["...OAuthSecurity"]` looked
      * exactly as valid as the constructible entries beside it.
      */
+    /** How many of ktor's modelled DSL symbols this machine could actually check. */
+    private fun ktorVerdict(): String {
+        val jars = jars("io.ktor", "ktor-server-core-jvm") + jars("io.ktor", "ktor-server-core") +
+            jars("io.ktor", "ktor-server-auth-jvm") + jars("io.ktor", "ktor-server-auth")
+        val fw = pack.frameworks.first { it.id == "ktor" }
+        val symbols = fw.dslFunctions.map { it.pattern } + fw.authenticationDsl
+        val checked = symbols.count { m ->
+            val pkg = m.substringBeforeLast('.')
+            jars.flatMap { jar -> facades(jar, pkg) }
+                .any { f -> jars.any { jar -> staticMethodNames(jar, f).contains(m.substringAfterLast('.')) } }
+        }
+        return if (checked == 0) {
+            "NO EVIDENCE: 0/${symbols.size} DSL symbols checkable — no held ktor artifact declares their packages"
+        } else {
+            "KIND-CHECKED $checked/${symbols.size} DSL symbols vs held ktor-server artifacts (facade statics)"
+        }
+    }
+
     @Test
     fun everyFrameworkHasAnEvidenceVerdict() {
         val verdicts = sortedMapOf<String, String>()
@@ -374,10 +399,15 @@ class EndpointsPackSymbolKindTest {
                 id == "vertx" ->
                     if (jars("io.vertx", "vertx-web").isNotEmpty()) "KIND-CHECKED vs vertx-web $VERTX_PINNED (factories + DSL)"
                     else "NO EVIDENCE: vertx-web absent from the warm cache"
-                id == "ktor" ->
-                    if (jars("io.ktor", "ktor-server-core-jvm").isNotEmpty() || jars("io.ktor", "ktor-server-core").isNotEmpty()) {
-                        "KIND-CHECKED vs held ktor-server artifacts (facade statics)"
-                    } else "NO EVIDENCE: no ktor-server artifact in the warm cache"
+                // Counted, not inferred from "an artifact is present": a
+                // ktor jar in the cache does not mean the PACKAGES the pack
+                // models are in it (ktor-server-core-jvm holds no
+                // io.ktor.server.routing facade on a machine that has only
+                // the client artifacts), and a verdict line that says
+                // KIND-CHECKED while every symbol was a GAP is the P18
+                // review's own mistake: one machine's evidence state
+                // reported as the gate's (P18 review).
+                id == "ktor" -> ktorVerdict()
                 annotationEvidence.containsKey(id) -> "ANNOTATION-CHECKED vs ${annotationEvidence[id]!!.map { "${it.first}:${it.second}" }}"
                 id == "grpc" ->
                     if (jars("io.grpc", "grpc-stub").isNotEmpty()) "SUFFIX markers; CoroutineImplBase existence checked in CI-held grpc-stub"
