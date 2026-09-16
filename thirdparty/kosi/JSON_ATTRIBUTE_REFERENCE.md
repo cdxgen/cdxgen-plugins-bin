@@ -85,6 +85,20 @@ Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
 defaults to the running JVM. Unknown flags are a usage error, never a silent
 degrade.
 
+**Which option values travel (P18).** The report records every effective
+option verbatim — reproduction needs the real jar paths and JDK home. The
+DIGEST goldens are the consumer that cannot: `classpath` entries and
+`jdkHome` are absolute by construction when set, and an explicitly absolute
+`classpathFile` names one machine just as much. At the digest boundary
+(`Digests.compute`) each ABSOLUTE path value among those three members
+enters as the fixed marker `<absolute-path>`, so two environments running
+the same slot set with their own absolute pins digest equal, while setting
+such an option still differs from leaving it unset and a relative value
+(a committed pin like `classpath.txt`) stays digested as given. The golden
+gate's in-run portability comparison digests `options` RAW on purpose: a
+report whose own bytes name their location is not portable, whatever the
+digest would tolerate.
+
 ## modules — ModuleRef
 
 | Attribute | Type | Purpose |

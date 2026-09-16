@@ -1,5 +1,9 @@
 package io.cdxgen.kosi.bench
 
+import io.cdxgen.kosi.schema.JsonArr
+import io.cdxgen.kosi.schema.JsonObj
+import io.cdxgen.kosi.schema.JsonStr
+import io.cdxgen.kosi.schema.JsonValue
 import io.cdxgen.kosi.schema.JsonWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -80,17 +84,71 @@ object Digests {
         "runtime",
     )
 
-    /** Sections that enter the digest, computed from the rendered report JSON. */
-    fun compute(reportJson: String): Map<String, String> {
+    /**
+     * Option members whose values can name ONE machine's filesystem:
+     * `classpath` entries and `jdkHome` are absolute by construction when a
+     * user passes them, and an explicitly absolute `classpathFile` is the
+     * same choice. The REPORT still records the effective option verbatim —
+     * reproduction needs it — so the exclusion happens at the digest
+     * boundary: each absolute path value enters as a fixed marker. Two
+     * environments that ran the same slot set with different absolute pins
+     * then digest equal, while SETTING such an option still differs from
+     * leaving it unset. Relative values travel and stay digested as given.
+     */
+    private val ENVIRONMENT_NAMING_OPTIONS = setOf("classpath", "classpathFile", "jdkHome")
+    private const val ABSOLUTE_PATH_MARKER = "<absolute-path>"
+
+    /**
+     * Sections that enter the digest, computed from the rendered report JSON.
+     *
+     * @param normalizeEnvironmentNaming pass false to digest the `options`
+     *   section RAW. The golden pin normalizes (two environments may only
+     *   differ in values that name one of them); the in-run portability
+     *   comparison does not — a report whose own bytes name their location
+     *   is not portable, whatever the digest would tolerate.
+     */
+    fun compute(reportJson: String, normalizeEnvironmentNaming: Boolean = true): Map<String, String> {
         val root = io.cdxgen.kosi.schema.JsonReader.parse(reportJson).asObject()
         val sections = linkedMapOf<String, String>()
         for (section in root.members.keys.sorted()) {
             if (section in VOLATILE_SECTIONS) continue
             root[section]?.let { value ->
-                sections[section] = sha256(value.toString())
+                val digested = if (normalizeEnvironmentNaming && section == "options" && value is JsonObj) {
+                    normalizeOptions(value)
+                } else {
+                    value
+                }
+                sections[section] = sha256(digested.toString())
             }
         }
         return sections
+    }
+
+    private fun normalizeOptions(options: JsonObj): JsonObj {
+        var changed = false
+        val members = LinkedHashMap<String, JsonValue>()
+        for ((key, value) in options.members) {
+            val replacement = when {
+                key == "classpath" && value is JsonArr ->
+                    JsonArr(value.items.map(::normalizePathValue).toMutableList())
+                key in ENVIRONMENT_NAMING_OPTIONS -> normalizePathValue(value)
+                else -> value
+            }
+            if (replacement != value) changed = true
+            members[key] = replacement
+        }
+        return if (changed) JsonObj(members) else options
+    }
+
+    private fun normalizePathValue(value: JsonValue): JsonValue = when (value) {
+        is JsonStr -> if (isAbsolutePath(value.value)) JsonStr(ABSOLUTE_PATH_MARKER) else value
+        else -> value
+    }
+
+    private fun isAbsolutePath(text: String): Boolean = try {
+        Path.of(text).isAbsolute
+    } catch (_: java.nio.file.InvalidPathException) {
+        false
     }
 
     fun sha256(text: String): String {
@@ -99,16 +157,24 @@ object Digests {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    fun diff(current: FixtureDigest, golden: FixtureDigest): List<String> {
+    fun diff(current: FixtureDigest, golden: FixtureDigest): List<String> =
+        sectionDifferences(current, golden, "current run", "golden")
+
+    /**
+     * Section-by-section difference between two digests, naming each side —
+     * the golden compare says current/golden, the portability compare says
+     * which LOCATION produced which digest.
+     */
+    fun sectionDifferences(first: FixtureDigest, second: FixtureDigest, firstName: String, secondName: String): List<String> {
         val problems = mutableListOf<String>()
-        val allSections = (current.sections.keys + golden.sections.keys).toSortedSet()
+        val allSections = (first.sections.keys + second.sections.keys).toSortedSet()
         for (section in allSections) {
-            val c = current.sections[section]
-            val g = golden.sections[section]
+            val a = first.sections[section]
+            val b = second.sections[section]
             when {
-                c == null -> problems.add("golden section $section missing from current run")
-                g == null -> problems.add("new section $section (no golden)")
-                c != g -> problems.add("section $section changed: golden=$g current=$c")
+                a == null -> problems.add("section $section missing from $firstName (present in $secondName)")
+                b == null -> problems.add("section $section missing from $secondName (present in $firstName)")
+                a != b -> problems.add("section $section differs: $firstName=$a $secondName=$b")
             }
         }
         return problems
