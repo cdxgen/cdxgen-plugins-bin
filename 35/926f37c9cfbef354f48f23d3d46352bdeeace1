@@ -1,0 +1,34 @@
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 581-594
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 139-173
+thirdparty/kosi/fixtures/implicit-routes-unresolved/classpath.txt
+  h_6a4cc5cdf68def 1-11
+thirdparty/kosi/fixtures/implicit-routes-unresolved/src/main/kotlin/App.kt
+  h_6a4cc5cdf68def 1-31
+thirdparty/kosi/goldens/implicit-routes-unresolved-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-unresolved-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-unresolved-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-unresolved-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-unresolved-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/implicit-routes-unresolved-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 563-568,571-579
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35926f37c9cfbef354f48f23d3d46352bdeeace1",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
