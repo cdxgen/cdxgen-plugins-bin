@@ -166,6 +166,50 @@ class ClasspathResolverTest {
     }
 
     /**
+     * P17 (R105): a classpath file may BIND a coordinate to a committed jar
+     * (`g:a:v=libs/foo.jar`). A bare coordinate resolves against the
+     * machine-local Gradle cache, so a fixture pinning one was
+     * machine-dependent through the classpath-partial diagnostic; the bound
+     * form attaches the jar with the coordinate (maven purl, marker-visible)
+     * and resolves identically on every machine. A bound jar that is missing
+     * is LOUD — a pin nobody can read is a broken pin (R73's shape).
+     */
+    @Test
+    fun boundCoordinateLinesResolveToTheCommittedJar() {
+        val root = Files.createTempDirectory("kosi-cp-bound")
+        val module = root.resolve("app")
+        val libs = module.resolve("libs")
+        Files.createDirectories(libs)
+        val jar = libs.resolve("marker-3.2.0.jar")
+        ZipOutputStream(Files.newOutputStream(jar)).use { zos ->
+            zos.putNextEntry(ZipEntry("META-INF/MANIFEST.MF"))
+            zos.write("Manifest-Version: 1.0\n".toByteArray())
+            zos.closeEntry()
+        }
+        val classpathFile = module.resolve("classpath.txt")
+        classpathFile.writeText(
+            """
+            org.springframework.boot:spring-boot-starter-actuator:3.2.0=libs/marker-3.2.0.jar
+            org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0=libs/absent.jar
+            """.trimIndent() + "\n",
+        )
+        val result = ClasspathResolver.resolve(root, emptyList(), classpathFile, listOf(module))
+        assertEquals(1, result.jars.size, "the bound jar attaches with its coordinate: ${result.jars}")
+        val resolved = result.jars.first()
+        assertEquals(jar, resolved.jar)
+        assertEquals("pkg:maven/org.springframework.boot/spring-boot-starter-actuator@3.2.0", resolved.purl)
+        assertEquals(
+            ClasspathResolver.Coordinate("org.springframework.boot", "spring-boot-starter-actuator", "3.2.0"),
+            resolved.coordinate,
+        )
+        assertEquals(
+            listOf("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0=absent.jar"),
+            result.missing,
+            "a bound jar that is not on disk must be reported, never silently skipped",
+        )
+    }
+
+    /**
      * Kotlin multiplatform publishing files the JVM artifact under the
      * PARENT's directory: `io.ktor:ktor-server-core` resolves for a JVM
      * consumer to `ktor-server-core-jvm-<version>.jar`, sitting in

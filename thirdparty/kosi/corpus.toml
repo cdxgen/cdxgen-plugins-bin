@@ -433,42 +433,49 @@ capabilities = ["crypto", "materials", "crypto-flow", "pbkdf2", "ec-curve"]
 slug = "async-flow-collect"
 tier = "async"
 path = "fixtures/async-flow-collect"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "flow", "collect", "sanitizer"]
 
 [[fixtures]]
 slug = "async-await"
 tier = "async"
 path = "fixtures/async-await"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "async", "await"]
 
 [[fixtures]]
 slug = "async-channel"
 tier = "async"
 path = "fixtures/async-channel"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "channel", "send-receive"]
 
 [[fixtures]]
 slug = "async-launch-scope"
 tier = "async"
 path = "fixtures/async-launch-scope"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "launch", "scope"]
 
 [[fixtures]]
 slug = "async-withcontext"
 tier = "async"
 path = "fixtures/async-withcontext"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "withcontext", "dispatchers"]
 
 [[fixtures]]
 slug = "async-android-scopes"
 tier = "async"
 path = "fixtures/async-android-scopes"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "android", "viewmodelscope", "launchedeffect"]
 
 [[fixtures]]
 slug = "async-stateflow"
 tier = "async"
 path = "fixtures/async-stateflow"
+classpath_file = "classpath.txt"
 capabilities = ["coroutines", "stateflow", "collect"]
 
 # P11: the R69 construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
@@ -645,19 +652,22 @@ capabilities = ["try-catch", "catch-parameter", "exception-object", "wrap-and-re
 
 
 # P15 §4: media and auth for the frameworks P14 did not model — declared at
-# three sites that are neither annotations nor named arguments: Vert.x
-# chains them on the ROUTE OBJECT (router.get("/x").produces(..).handler {}),
-# Javalin's route builder carries them as the vararg RouteRole tail, and the
-# servlet deployment descriptor's <security-constraint> names url-patterns
-# and the roles that may reach them (parsed for mappings since P13, parsed
-# PAST for access control). http4k's core DSL has no declaration site — the
-# pack's own comment says so, and the fixture pins the empties are real.
+# sites that are neither annotations nor named arguments: Vert.x chains them
+# on the ROUTE OBJECT (router.get("/x").produces(..).handler {}), Javalin's
+# route builder carries them as the vararg RouteRole tail, and the servlet
+# deployment descriptor's <security-constraint> names url-patterns and the
+# roles that may reach them (parsed for mappings since P13, parsed PAST for
+# access control). http4k's CORE DSL has no declaration site — the pack's
+# own comment says so, and the fixture pins the empties are real. P17 adds
+# the two REAL auth sites http4k's CONTRACT DSL has (block security +
+# per-route meta security, meta overriding the block) and Vert.x's
+# auth-handler chain.
 
 [[fixtures]]
 slug = "dsl-media-auth"
 tier = "fixtures"
 path = "fixtures/dsl-media-auth"
-capabilities = ["endpoints", "media-types", "authentication", "vertx", "javalin", "servlet", "web-xml", "security-constraint", "http4k"]
+capabilities = ["endpoints", "media-types", "authentication", "vertx", "vertx-auth-handler", "javalin", "servlet", "web-xml", "security-constraint", "http4k", "http4k-contract-security"]
 
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL

@@ -1,2 +1,9 @@
-org.springframework.boot:spring-boot-starter-actuator:3.2.0
-org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0
+# kosi classpath for this fixture (see 02-ARCHITECTURE.md §3): the two
+# dependency-marker coordinates, each BOUND to a committed marker jar
+# (`g:a:v=jar`, P17/R105). A bare coordinate line resolves against the
+# machine-local Gradle cache, which made the classpath-partial diagnostic —
+# and with it this fixture's golden digests — machine-dependent. The marker
+# jars carry no classes: this fixture stubs CrudRepository in-source and
+# needs only the coordinates' presence, deterministically.
+org.springframework.boot:spring-boot-starter-actuator:3.2.0=libs/spring-boot-starter-actuator-3.2.0.jar
+org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0=libs/springdoc-openapi-starter-webmvc-ui-2.3.0.jar
