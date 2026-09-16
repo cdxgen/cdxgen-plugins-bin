@@ -159,7 +159,10 @@ data class CorpusManifest(
                 classpathFile = str("classpath_file"),
                 minFindings = int("min_findings"),
                 depsMaxClasses = int("deps_max_classes"),
-                toleratedResolutionErrors = list("tolerated_resolution_errors"),
+                // NOT the `list()` helper: that coerces an absent key to
+                // emptyList, collapsing "ungated" into "declared clean" —
+                // R116's fix only holds if absence parses as null.
+                toleratedResolutionErrors = table["tolerated_resolution_errors"] as? List<String>,
             )
         }
     }
