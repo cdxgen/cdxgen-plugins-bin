@@ -71,6 +71,12 @@
 // kosi:want endpoint framework=http4k path=/overridden mode=resolved authentication=~meta-security
 // kosi:want endpoint framework=http4k path=/overridden mode=resolved authentication=~BasicAuthSecurity
 // kosi:want-not endpoint framework=http4k path=/overridden authentication=~contract-security
+//
+// An OAuth scheme: OAuthSecurity itself is SEALED and cannot be constructed,
+// so the five constructible subclasses are what the pack models and this
+// route is the one that proves the channel fires on them.
+// kosi:want endpoint framework=http4k path=/oauth mode=resolved authentication=~meta-security
+// kosi:want endpoint framework=http4k path=/oauth mode=resolved authentication=~AuthCodeOAuthSecurity
 // kosi:want endpoint framework=http4k path=/outside mode=resolved
 // kosi:want-not endpoint framework=http4k path=/outside authentication=~
 //
@@ -98,6 +104,7 @@ import org.http4k.core.Method
 import org.http4k.core.Request
 import org.http4k.core.Response
 import org.http4k.security.ApiKeySecurity
+import org.http4k.security.AuthCodeOAuthSecurity
 import org.http4k.security.BasicAuthSecurity
 
 private infix fun String.bind(method: String) = "$this $method"
@@ -151,6 +158,9 @@ fun securedContract() = contract {
     } bindContract Method.GET to { req -> contractHandler(req) }
     routes += "/overridden" meta {
         security = BasicAuthSecurity("realm", "user:pass")
+    } bindContract Method.GET to { req -> contractHandler(req) }
+    routes += "/oauth" meta {
+        security = AuthCodeOAuthSecurity("https://auth.example/authorize", "https://auth.example/token")
     } bindContract Method.GET to { req -> contractHandler(req) }
 }
 

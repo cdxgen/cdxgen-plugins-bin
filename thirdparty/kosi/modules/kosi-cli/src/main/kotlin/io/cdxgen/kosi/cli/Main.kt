@@ -478,8 +478,12 @@ object Main {
             }
             for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
                 checked++
-                val slotOptions = declaredClasspath
-                    ?.let { slot.options().copy(classpathFile = it.toString()) }
+                // The ENTRY-RELATIVE value is what the report records: an
+                // absolute path would put this checkout's location into the
+                // `options` digest, so the gate would only ever pass in the
+                // directory the goldens were generated in (P17 review).
+                val slotOptions = entry.classpathFile
+                    ?.let { slot.options().copy(classpathFile = it) }
                     ?: slot.options()
                 val report = Analyzer.analyze(dir, slotOptions, commit)
                 val digest = Digests.FixtureDigest(

@@ -187,7 +187,11 @@
         "org.http4k.security.BasicAuthSecurity",
         "org.http4k.security.BearerAuthSecurity",
         "org.http4k.security.MutualTLSSecurity",
-        "org.http4k.security.OAuthSecurity",
+        "org.http4k.security.AuthCodeOAuthSecurity",
+        "org.http4k.security.ImplicitOAuthSecurity",
+        "org.http4k.security.UserCredentialsOAuthSecurity",
+        "org.http4k.security.ClientCredentialsOAuthSecurity",
+        "org.http4k.security.DeviceCodeOAuthSecurity",
         "org.http4k.security.OpenIdConnectSecurity"
       ],
       "contextReaders": [
@@ -220,7 +224,7 @@
       "id": "http4k",
       "kind": "dsl",
       "_p15_comment": "P15, corrected in P17: http4k's CORE DSL (`\"/path\" bind METHOD to handler`) has no media/auth declaration site - the handler is a plain function, content types live in lenses and responses. That half was and remains the truth. The P15 claim that contract meta {} is 'OpenAPI documentation, not routing' was WRONG for the security field: see _p17_comment.",
-      "_p17_comment": "P17, sourced against the pinned corpus clone (github.com/http4k/http4k at b051f89d, release 6.59.0.0): the contract DSL has TWO real auth declaration sites, both applied at RUN TIME. (1) The contract block's own `security` - ContractBuilder.security: Security? (core/api/openapi/src/main/kotlin/org/http4k/contract/extensions.kt:33), read by ContractRouteMatcher.kt:46 for every route in the block. (2) A route's meta lambda - RouteMetaDsl.security: Security? (routeMeta.kt:52) carried by RouteMeta.security: Security? (routeMeta.kt:228), attached with `\"/x\" meta { security = .. } bindContract GET to h` (String.meta and String.bindContract, extensions.kt:61-63). Precedence is the framework's own elvis at ContractRouteMatcher.kt:121: `it.meta.security?.filter ?: security?.filter ?: Filter.NoOp` - per-route meta OVERRIDES the block. Scheme constructors (core/security/core/src/main/kotlin/org/http4k/security/): BasicAuthSecurity.kt:8, ApiKeySecurity.kt:19, BearerAuthSecurity.kt:10, MutualTLSSecurity.kt:10, OAuthSecurity.kt:9, OpenIdConnectSecurity.kt:6 (NoSecurity is the absence of a requirement and is deliberately not modelled). ContractRoute.kt:80 applies meta.security?.filter outside a contract block too. meta produces/consumes (routeMeta.kt:43-44) are NOT read by the matcher - they feed the OpenAPI renderer - so media on contract routes stays an honest empty."
+      "_p17_comment": "P17, sourced against the pinned corpus clone (github.com/http4k/http4k at b051f89d, release 6.59.0.0): the contract DSL has TWO real auth declaration sites, both applied at RUN TIME. (1) The contract block's own `security` - ContractBuilder.security: Security? (core/api/openapi/src/main/kotlin/org/http4k/contract/extensions.kt:33), read by ContractRouteMatcher.kt:46 for every route in the block. (2) A route's meta lambda - RouteMetaDsl.security: Security? (routeMeta.kt:52) carried by RouteMeta.security: Security? (routeMeta.kt:228), attached with `\"/x\" meta { security = .. } bindContract GET to h` (String.meta and String.bindContract, extensions.kt:61-63). Precedence is the framework's own elvis at ContractRouteMatcher.kt:121: `it.meta.security?.filter ?: security?.filter ?: Filter.NoOp` - per-route meta OVERRIDES the block. Scheme constructors (core/security/core/src/main/kotlin/org/http4k/security/): BasicAuthSecurity.kt:8, ApiKeySecurity.kt:19, BearerAuthSecurity.kt:10, MutualTLSSecurity.kt:10, OpenIdConnectSecurity.kt:6 (NoSecurity is the absence of a requirement and is deliberately not modelled). P17 review: OAuthSecurity.kt:9 declares a SEALED class - it cannot be constructed, so modelling `org.http4k.security.OAuthSecurity` matched nothing and would never have fired. The constructible OAuth schemes are its five subclasses in the same file (AuthCodeOAuthSecurity:19, ImplicitOAuthSecurity:31, UserCredentialsOAuthSecurity:43, ClientCredentialsOAuthSecurity:65, DeviceCodeOAuthSecurity:87), and those are what is modelled. ContractRoute.kt:80 applies meta.security?.filter outside a contract block too. meta produces/consumes (routeMeta.kt:43-44) are NOT read by the matcher - they feed the OpenAPI renderer - so media on contract routes stays an honest empty."
     },
     {
       "contextReaders": [

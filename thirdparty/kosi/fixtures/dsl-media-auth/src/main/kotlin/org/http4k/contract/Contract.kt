@@ -12,6 +12,7 @@
 package org.http4k.contract
 
 import org.http4k.core.Method
+import org.http4k.security.Security
 
 class RouteMeta(val security: Security? = null)
 
@@ -32,3 +33,10 @@ infix fun String.meta(new: RouteMetaDsl.() -> Unit): ContractRouteSpec0 =
     ContractRouteSpec0(this, RouteMeta(RouteMetaDsl().apply(new).security))
 
 infix fun ContractRouteSpec0.bindContract(method: Method): ContractRouteSpec0 = this
+
+// The spelling `"/outside" bindContract GET to handler` — a contract route
+// declared with NO meta and outside any contract block. Real http4k declares
+// this overload on String (extensions.kt:61); without it the fixture's
+// honest-empty negative would rest on a receiver that does not resolve.
+infix fun String.bindContract(method: Method): ContractRouteSpec0 =
+    ContractRouteSpec0(this, RouteMeta())

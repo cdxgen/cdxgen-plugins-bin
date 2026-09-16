@@ -9,3 +9,8 @@ open class Security
 class BasicAuthSecurity(val realm: String, val credentials: String) : Security()
 
 class ApiKeySecurity(val name: String, val validateKey: (String) -> Boolean) : Security()
+
+// One of OAuthSecurity's five constructible subclasses (OAuthSecurity itself
+// is SEALED at 6.59.0.0 and cannot be built, which is why the pack models the
+// subclasses and not the parent).
+class AuthCodeOAuthSecurity(val authorizationUrl: String, val tokenUrl: String) : Security()

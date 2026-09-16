@@ -16,13 +16,21 @@ import io.vertx.ext.web.RoutingContext
 
 interface AuthenticationHandler : Handler<RoutingContext>
 
+// Each handler IMPLEMENTS `handle`, because the real ones do: an auth
+// handler runs per request like any other. A stub that leaves the member
+// abstract does not typecheck, and a fixture that does not typecheck cannot
+// claim the framework's shape (P17's own rule, applied to the stub).
 class BasicAuthHandler private constructor() : AuthenticationHandler {
+    override fun handle(event: RoutingContext) {}
+
     companion object {
         fun create(authProvider: AuthenticationProvider): BasicAuthHandler = BasicAuthHandler()
     }
 }
 
 class JWTAuthHandler private constructor() : AuthenticationHandler {
+    override fun handle(event: RoutingContext) {}
+
     companion object {
         fun create(jwtAuth: AuthenticationProvider): JWTAuthHandler = JWTAuthHandler()
     }
