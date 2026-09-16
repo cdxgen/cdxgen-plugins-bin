@@ -1,0 +1,18 @@
+thirdparty/kosi/examples/kotlin-sample-app/src/main/kotlin/com/example/audit/ApiRoutes.kt
+  h_6a4cc5cdf68def 1-19
+thirdparty/kosi/examples/kotlin-sample-app/src/main/kotlin/io/ktor/server/routing/Routing.kt
+  h_6a4cc5cdf68def 1-12
+thirdparty/kosi/scripts/kosi-e2e.sh
+  h_6a4cc5cdf68def 89-96,115-118,181-188,192,196-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8be98174f96f814918cf31ba892c856ddc42e486",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
