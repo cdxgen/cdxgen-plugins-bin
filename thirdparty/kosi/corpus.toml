@@ -627,6 +627,23 @@ tier = "fixtures"
 path = "fixtures/catch-handler-flow"
 capabilities = ["try-catch", "exceptional-edges", "catch-handler-flow", "dead-block"]
 
+# P16 §3: the catch handler's own PARAMETER. P15's edges made the handler
+# reachable but bound `e` to nothing — a read of it lowered as a field read
+# on `this`, so `catch (e) { sink("$e") }` after `throw E(userInput)` (the
+# wrap-and-rethrow idiom InsecureShop itself uses) could never report. The
+# parameter is bound at the dispatch edge: a visible throw's thrown register
+# AND its construction arguments (the fresh object is clean; the message is
+# the argument) at the throw site, and an unknown-but-tainted-if-the-body-was
+# seed at the dispatch edge where no throw is visible. Negative halves: a
+# clean visible throw must not report (it suppresses the seed), and a clean
+# body's unknown exception must stay clean.
+[[fixtures]]
+slug = "catch-exception-taint"
+tier = "fixtures"
+path = "fixtures/catch-exception-taint"
+capabilities = ["try-catch", "catch-parameter", "exception-object", "wrap-and-rethrow"]
+
+
 # P15 §4: media and auth for the frameworks P14 did not model — declared at
 # three sites that are neither annotations nor named arguments: Vert.x
 # chains them on the ROUTE OBJECT (router.get("/x").produces(..).handler {}),

@@ -3,6 +3,7 @@ package io.cdxgen.kosi.schema
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 // Negative-first: the determinism contract is the product here. These tests
 // assert the failure modes golem/rusi hit (unsorted keys, duplicate keys,
@@ -92,6 +93,37 @@ class JsonWriterTest {
             "{\n  \"items\": [\n    {\n      \"n\": \"a\"\n    }\n  ],\n  \"missing\": null,\n  \"ok\": true\n}",
             pretty.render(),
         )
+    }
+
+    @Test
+    fun prettyRendersEmptyContainersAsValidJson() {
+        // P16 review: the prettifier emitted the inline `[]`/`{}` and then
+        // re-read the input's own closing bracket as a close, so every
+        // document containing an empty container — every kosi report —
+        // came out of `--pretty` with a stray bracket and did not parse.
+        // The docs promise `--pretty` ONLY re-indents, so the invariant the
+        // test pins is round-trip equality with the minified render.
+        fun write(w: JsonWriter): JsonWriter {
+            w.beginObject()
+            w.beginArray("empty")
+            w.endArray()
+            w.beginObject("emptyObject")
+            w.endObject()
+            w.beginArray("items")
+            w.beginObject()
+            w.beginArray("inner")
+            w.endArray()
+            w.str("n", "a")
+            w.endObject()
+            w.endArray()
+            w.bool("ok", true)
+            w.endObject()
+            return w
+        }
+        val minified = write(JsonWriter()).render()
+        val pretty = write(JsonWriter(pretty = true)).render()
+        assertEquals(JsonReader.parse(minified), JsonReader.parse(pretty))
+        assertTrue("[]" in pretty && "{}" in pretty, "empty containers stay inline: $pretty")
     }
 }
 

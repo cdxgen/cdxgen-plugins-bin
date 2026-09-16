@@ -100,6 +100,16 @@ import org.jetbrains.kotlin.psi.KtWhileExpression
 )
 object KirLowering {
 
+    /**
+     * P16 §3: the reserved dynamic-call name for a thrown exception's
+     * binding to a catch parameter. A dynamic call routes through the
+     * transfer's unknown-value default (receiver and argument taint reach
+     * the result, origin `default`) and the call graph's existing
+     * unresolved-call bucket — no pseudo function enters the graph. Angle
+     * brackets cannot collide with a real callable name.
+     */
+    internal const val THROWN_EXCEPTION = "<thrown>"
+
     data class Result(
         val functions: List<KirFunction>,
         /** construct name -> count of functions the lowering could not perform. */
@@ -791,6 +801,24 @@ object KirLowering {
          */
         private val emitSinks = mutableListOf<String>()
 
+        /**
+         * P16 §3: one frame per lexically enclosing `try` with catch
+         * clauses, innermost LAST. A `throw` lowered while frames are open
+         * binds every frame's catch-parameter registers to the thrown value
+         * (an inner throw can escape to an outer handler); a body that
+         * completes with no visible `throw` seeds the parameters at the
+         * dispatch edge instead, from the body's live registers.
+         */
+        private class TryFrame(val dispatchId: String, val catchParams: List<String>) {
+            val bodyRegs = sortedSetOf<String>()
+            var visibleThrow = false
+        }
+
+        private val tryFrames = ArrayDeque<TryFrame>()
+
+        /** Registers defined by the throw expression currently lowering, or null. */
+        private var throwArgRegs: MutableSet<String>? = null
+
         init {
             blocks["b0"] = mutableListOf()
         }
@@ -803,6 +831,16 @@ object KirLowering {
 
         private fun emit(ins: KirIns) {
             definedRegisters.addAll(ins.defs)
+            // P16 §3: an enclosing try's dispatch seed reads the registers
+            // its body left live, so every instruction emitted under an open
+            // frame contributes its registers to that frame. The throw-site
+            // binding also needs the registers its own thrown expression
+            // defined — the exception OBJECT is a fresh KirNew (clean by the
+            // transfer's rule); its construction ARGUMENTS are where thrown
+            // taint lives (IllegalStateException(tainted)), and they are
+            // captured here while that expression lowers.
+            for (frame in tryFrames) frame.bodyRegs.addAll(ins.defs + ins.uses)
+            throwArgRegs?.addAll(ins.defs)
             current.add(ins)
         }
 
@@ -913,8 +951,48 @@ object KirLowering {
                     emit(KirReturn(value))
                 }
                 is KtThrowExpression -> {
+                    throwArgRegs = sortedSetOf()
                     val value = psi.thrownExpression?.let { lowerExpr(it, Pos.NESTED) } ?: throwNull()
-                    emit(KirThrow(value))
+                    val argRegs = throwArgRegs?.toList() ?: emptyList()
+                    throwArgRegs = null
+                    // P16 §3: bind the exception registers of every enclosing
+                    // try to what this throw threw. The binding is a dynamic
+                    // call over the thrown register AND its construction
+                    // arguments: `throw RuntimeException(userInput)` puts no
+                    // fact on the fresh object's register (KirNew clears it),
+                    // but the exception CARRIES its arguments — the message is
+                    // the argument — so a may-analysis must let argument taint
+                    // reach the handler's parameter. A clean throw binds clean
+                    // registers and the handler's sink stays silent.
+                    if (tryFrames.isNotEmpty()) {
+                        val exc = t()
+                        emit(KirDynamicCall(exc, THROWN_EXCEPTION, value, argRegs, line = psi.line()))
+                        // INNERMOST frame gets the CFG edge (one terminator
+                        // per block): the throw reaches its handlers
+                        // directly. OUTER frames get only the parameter
+                        // store — their handlers are reached through the
+                        // outer body's own may-edges, and the bound state
+                        // travels with them; and the outer seed stays armed,
+                        // because the throw is not ITS body's direct value.
+                        val innermost = tryFrames.last()
+                        innermost.visibleThrow = true
+                        for (frame in tryFrames) {
+                            for (name in frame.catchParams) emit(KirStore("v$name", exc))
+                        }
+                        // The throw itself becomes the exceptional edge: a
+                        // KirThrow terminates its block with no successor,
+                        // and inside a guarded body the throw's DESTINATION
+                        // is exactly the dispatch chain. The may-edge carries
+                        // the freshly bound parameters; a fresh block absorbs
+                        // any (source-dead) trailing statements, and the
+                        // dead-block elimination drops it when empty.
+                        val cond = t()
+                        emit(KirLoad(cond, KirConstant.Bool(true)))
+                        emit(KirBranch(cond, innermost.dispatchId, innermost.dispatchId))
+                        startBlock()
+                    } else {
+                        emit(KirThrow(value))
+                    }
                 }
                 is KtBreakExpression -> {
                     val target = loopExits.lastOrNull() ?: run { fail("break"); return }
@@ -1289,7 +1367,26 @@ object KirLowering {
                 emit(KirLoad(entryCond, KirConstant.Bool(true)))
                 emit(KirBranch(entryCond, bodyId, dispatchId))
                 startBlock(bodyId)
+                // P16 §3: the handler's own PARAMETER is a value a handler is
+                // written to read, and until now it existed nowhere in the KIR —
+                // `catch (e: Exception)` read `e` as a FIELD on `this`. The
+                // parameter is bound on the dispatch chain's edge in two shapes:
+                // at a VISIBLE `throw` site the thrown register (and its
+                // construction arguments) flows into every enclosing handler's
+                // parameter register (see the KtThrowExpression arm); where NO
+                // throw is visible the body may still throw implicitly (a
+                // platform call failing), and the exception object is modelled as
+                // an UNKNOWN value that inherits whatever taint the body left
+                // live on the dispatch edge — tainted-if-the-body-was, the same
+                // sound-leaning default an unresolved call gets, and clean when
+                // the body was clean (a handler for a clean body must not
+                // report). A visible CLEAN throw suppresses the seed: the thrown
+                // value is then known, and blanket body-taint would report flows
+                // the guarded code cannot produce.
+                val frame = TryFrame(dispatchId, catches.mapNotNull { it.catchParameter?.name }.distinct())
+                tryFrames.addLast(frame)
                 psi.tryBlock?.let { lowerStatement(it) }
+                tryFrames.removeLast()
                 // END fork, only when the body's last block is still open.
                 if (!terminates()) {
                     val endCond = t()
@@ -1297,7 +1394,25 @@ object KirLowering {
                     emit(KirBranch(endCond, finallyId, dispatchId))
                 }
                 // The dispatch chain: one block per handler step, each
-                // branching to its handler and to the next step.
+                // branching to its handler and to the next step. The seed
+                // (no visible throw) is emitted at the head of the chain,
+                // where both may-edges join, so it reads the union of the
+                // try-entry and try-end states.
+                startBlock(dispatchId)
+                if (!frame.visibleThrow) {
+                    for (name in frame.catchParams) {
+                        val exc = t()
+                        emit(
+                            KirDynamicCall(
+                                exc,
+                                THROWN_EXCEPTION,
+                                null,
+                                frame.bodyRegs.filter { it != "v$name" }.sorted(),
+                            ),
+                        )
+                        emit(KirStore("v$name", exc))
+                    }
+                }
                 var step = dispatchId
                 for ((index, catch) in catches.withIndex()) {
                     val handlerId = newId()
@@ -1581,6 +1696,14 @@ object KirLowering {
                         // read of it must stay a local read.
                         if (cursor.loopParameter?.name == name) return true
                         if (cursor.destructuringDeclaration?.entries?.any { it.name == name } == true) return true
+                    }
+
+                    // P16 §3: a catch parameter is bound at the dispatch edge
+                    // (`v<name>` <- the thrown value, or the unknown-exception
+                    // seed); a read of it inside the handler is a local read,
+                    // not a field on `this`.
+                    is org.jetbrains.kotlin.psi.KtCatchClause -> {
+                        if (cursor.catchParameter?.name == name) return true
                     }
 
                     is KtBlockExpression, is org.jetbrains.kotlin.psi.KtClassBody -> {

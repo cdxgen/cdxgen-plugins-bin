@@ -168,6 +168,19 @@ check(any(p["name"] == "cdx:kosi:cryptoFlow"
 check(any(c.get("type") == "cryptographic-asset" for c in evinse.get("components", [])),
       "no cryptographic-asset component in the evinse BOM")
 check(len(evinse.get("services", [])) >= 1, "no services[] row in the evinse BOM")
+# P16 §4: INBOUND route rows must carry their HTTP verb when any exist. The
+# collector once read a plural `httpMethods` kosi never emits, so every
+# route fell to "ALL" — the verb lost, and an OpenAPI spec over the same
+# route duplicated the service. This sample declares no web routes (its
+# services[] row is the outbound JDBC one), so the check is conditional:
+# a route row WITHOUT a real verb is always a defect; the sample's shape
+# is pinned by the tsp chain in the phase report.
+route_rows = [s for s in evinse.get("services", [])
+              if any(p["name"] == "cdx:kosi:endpoint:framework"
+                     for p in s.get("properties") or [])]
+check(all(any(p["name"] == "cdx:service:httpMethod" and p["value"] != "ALL"
+              for p in s.get("properties") or []) for s in route_rows),
+      "an inbound route lost its HTTP verb (httpMethod fell to ALL)")
 
 disabled_kinds = bom_kosi_artifacts(disabled)
 check(disabled.get("bomFormat") == "CycloneDX" and disabled.get("components"),

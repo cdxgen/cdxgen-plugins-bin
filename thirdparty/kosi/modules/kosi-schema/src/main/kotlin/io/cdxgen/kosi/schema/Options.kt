@@ -146,6 +146,14 @@ data class AnalyzeOptions(
      */
     val depsMaxClasses: Int = 500,
     /**
+     * P16 §2 (`--max-summary-sink-effects`): the summary escape-set budget
+     * (P15's `summary-effect-budget` degradation). The default is P15's;
+     * the flag exists so the budget's cost is a MEASUREMENT (findings at
+     * default, 4x, 64k) rather than an assumption, reproducible from the
+     * report's own options section.
+     */
+    val dataflowMaxSummarySinkEffects: Int = 8192,
+    /**
      * P10 (`--max-analysis-seconds`): wall-clock budget. Null or omitted =
      * off. When the budget trips the run DEGRADES — every trip emits a named
      * `analysis-time-budget` diagnostic and the partial report still ships;
@@ -189,6 +197,7 @@ data class AnalyzeOptions(
         w.str("dataflow", dataflow.id)
         w.num("dataflowMaxFunctionInstructions", dataflowMaxFunctionInstructions)
         w.num("dataflowMaxSlices", dataflowMaxSlices)
+        w.num("dataflowMaxSummarySinkEffects", dataflowMaxSummarySinkEffects)
         w.num("dataflowMaxTraceEdges", dataflowMaxTraceEdges)
         w.num("dataflowMaxTraceNodes", dataflowMaxTraceNodes)
         w.bool("dataflowSkipGenerated", dataflowSkipGenerated)

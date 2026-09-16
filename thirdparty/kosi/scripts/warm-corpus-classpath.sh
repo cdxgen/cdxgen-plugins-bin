@@ -106,7 +106,10 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.api.artifacts.ResolvedDependency
 
 plugins { base }
-repositories { google(); mavenCentral() }
+// jitpack.io: repositories the corpus repos themselves declare (AndroGoat
+// pulls com.github.yuriy-budiyev:code-scanner from jitpack; without it the
+// closure pull fails the whole arm for one coordinate).
+repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } }
 
 val coords = File(rootProject.projectDir, "coords.txt").readLines()
     .map { it.trim() }.filter { it.isNotEmpty() && it.split(":").size >= 3 }
@@ -128,6 +131,8 @@ tasks.register("resolveAll") { doLast {
     val androidJvm = Attribute.of("org.jetbrains.kotlin.platform.type", String::class.java)
     val libraryElements = Attribute.of("org.gradle.libraryelements", String::class.java)
     val category = Attribute.of("org.gradle.category", String::class.java)
+    val usage = Attribute.of("org.gradle.usage", String::class.java)
+    val jvmEnvironment = Attribute.of("org.gradle.jvm.environment", String::class.java)
     fun resolve(c: String, aar: Boolean) {
         val dep = configurations.detachedConfiguration(dependencies.create(c))
         dep.isTransitive = true
@@ -135,10 +140,46 @@ tasks.register("resolveAll") { doLast {
             attribute(androidJvm, "androidJvm")
             attribute(libraryElements, "aar")
             attribute(category, "library")
+        } else {
+            // P16 §5: an ATTRIBUTE-LESS detached configuration cannot select
+            // a variant from multi-variant Gradle Module Metadata — guava
+            // (jre/android), robolectric, the compose KMP roots all failed
+            // here with VariantSelectionByAttributesException, so their
+            // binaries never entered the cache and kosi reported them
+            // unlocatable with "no binary anywhere on disk" — a WARM defect
+            // wearing a resolver's clothes: every one is published. The JVM
+            // consumer attributes select the standard-jvm runtime variant;
+            // AndroidX AARs still come through the aar arm.
+            dep.attributes {
+                attribute(usage, "java-runtime")
+                attribute(jvmEnvironment, "standard-jvm")
+            }
         }
         val seen = linkedSetOf<String>()
         dep.resolvedConfiguration.firstLevelModuleDependencies.forEach { it.walk(seen) }
         seen.forEach { println("resolved $it") }
+        // P16 §5: dependency metadata resolution does NOT download artifacts
+        // — walking the module tree left BINARY files undownloaded, so the
+        // cache held .module/.pom (and sometimes a sources jar) with no jar
+        // or AAR anywhere on disk, and kosi honestly reported the coordinate
+        // unlocatable. resolve() forces every artifact of the selected
+        // variant to the cache, which is the whole point of warming.
+        dep.resolve()
+    }
+    fun fetchArtifactOnly(c: String) {
+        // Metadata-hostile stragglers: the artifact-only notation fetches
+        // the binary without variant selection (no transitives — the arms
+        // above own transitive warming).
+        for (ext in listOf("jar", "aar")) {
+            try {
+                val dep = configurations.detachedConfiguration(dependencies.create("$c@$ext"))
+                dep.isTransitive = false
+                dep.resolve()
+                println("resolved $c")
+                return
+            } catch (_: Throwable) { }
+        }
+        throw IllegalStateException("no binary at $c")
     }
     for (c in coords) {
         try {
@@ -148,7 +189,11 @@ tasks.register("resolveAll") { doLast {
             // JVM consumer cannot match; retry with AAR variant attributes.
             try {
                 resolve(c, aar = true); ok++
-            } catch (t2: Throwable) { failed++ }
+            } catch (t2: Throwable) {
+                try {
+                    fetchArtifactOnly(c); ok++
+                } catch (_: Throwable) { failed++ }
+            }
         }
     }
     println("downloaded $ok, failed $failed")
@@ -245,10 +290,39 @@ bound_coordinates() {
   # runs at all and the "bound" list is the unbounded one.
   { grep -vE "$coord_re" "$out" || true; } >"$out.keep"
   { grep -E "$coord_re" "$out" || true; } | awk -F: '
-      function vercmp(a, b,   ai, bi, i, n) {
-        n = split(a, ai, "."); split(b, bi, ".")
-        for (i = 1; i <= n || i <= length(bi); i++) {
-          if ((ai[i] + 0) != (bi[i] + 0)) return (ai[i] + 0) > (bi[i] + 0) ? 1 : -1
+      # One VERSION segment, compared per Gradle/Maven ordering: numerics
+      # numerically; a pure numeric (release) segment sorts ABOVE a
+      # pre-release tag (1.10.0 > 1.10.0-rc01 > ... > 1.10.0-alpha04, and a
+      # MISSING segment counts as a release, so 1.10.0 beats 1.10.0-alpha04
+      # too); tags by alpha prefix then numeric suffix. Without the
+      # tag rules, "beta02"+0 == "alpha04"+0 == 0 and the survivor fell back
+      # to first-in-sort-order — which kept 1.10.0-ALPHA04 over
+      # 1.10.0-BETA02 on nowinandroid (P16, R92s follow-up: 63 compose pairs).
+      function segcmp(a, b,   na, nb, ap, bp, ad, bd) {
+        if (a == b) return 0
+        na = a ~ /^[0-9]+$/
+        nb = b ~ /^[0-9]+$/
+        if (na && nb) {
+          if ((a + 0) != (b + 0)) return (a + 0) > (b + 0) ? 1 : -1
+          return 0
+        }
+        if (a == "") return nb ? 0 : 1
+        if (b == "") return na ? 0 : -1
+        if (na) return 1
+        if (nb) return -1
+        ap = a; sub(/[0-9]+$/, "", ap)
+        bp = b; sub(/[0-9]+$/, "", bp)
+        if (ap != bp) return ap > bp ? 1 : -1
+        ad = a; sub(/^[^0-9]*/, "", ad)
+        bd = b; sub(/^[^0-9]*/, "", bd)
+        if ((ad + 0) != (bd + 0)) return (ad + 0) > (bd + 0) ? 1 : -1
+        return 0
+      }
+      function vercmp(a, b,   ai, bi, i, n, m, r) {
+        n = split(a, ai, "."); m = split(b, bi, ".")
+        for (i = 1; i <= n || i <= m; i++) {
+          r = segcmp(ai[i], bi[i])
+          if (r != 0) return r
         }
         return 0
       }
@@ -369,7 +443,14 @@ for slug in "${slugs[@]}"; do
   pull_artifacts "$dir" "$out" || { fail "$slug: artifact resolution failed"; continue; }
   # pull_artifacts merges the RESOLVED TRANSITIVE closure back in, which
   # re-introduces the other versions the first bound removed — the final
-  # list is bounded again after the merge.
+  # list is bounded again after the merge. The merge can also ADD
+  # coordinates (P16 §5: a KMP root's closure names variants the direct
+  # list never had), and a coordinate the list gained after the pull was
+  # never FETCHED — its binary is absent from the cache however published
+  # it is. A second pull over the merged list fetches the newcomers (warm
+  # coordinates are no-ops), then the final bound fixes the list for good.
+  bound_coordinates "$out"
+  pull_artifacts "$dir" "$out" || { fail "$slug: closure artifact resolution failed"; continue; }
   bound_coordinates "$out"
 
   # Android framework classes (android.*): AndroidX/Android code extends and
