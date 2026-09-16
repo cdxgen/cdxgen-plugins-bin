@@ -12,6 +12,13 @@
 # capabilities are recorded, not enforced. expected_flows points at a JSONL
 # file of hand-annotated ground truth for pinned repos; bundled fixtures carry
 # their expectations as kosi:want annotations in the sources themselves.
+#
+# tolerated_resolution_errors (P18): the ERROR-severity resolution classes the
+# entry's sources legitimately carry. A class that appears without being
+# declared fails the row — a fixture whose stub stopped typechecking (R110)
+# otherwise passed every want over code the compiler rejects. An empty list
+# declares "typechecks clean"; repo-tier entries carry no field (real code
+# under partial classpaths resolves legitimately imperfectly).
 
 [[fixtures]]
 slug = "scope-functions"
