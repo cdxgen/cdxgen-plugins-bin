@@ -46,6 +46,19 @@ data class CorpusEntry(
      * deps-class-limit diagnostic still names what was cut.
      */
     val depsMaxClasses: Int? = null,
+    /**
+     * The RESOLUTION-ERROR classes this entry's sources legitimately carry
+     * (P18 §3): the frontend's `resolution-errors` diagnostic names the
+     * ERROR-severity factories the analysis saw, and a class that is NOT
+     * here fails the row — a fixture whose stub stopped typechecking (R110:
+     * a missing import, an unimplemented member) otherwise passed every
+     * want over code the compiler rejects. The list is a RATCHET, not a
+     * licence: adding a class is a reviewed change, and the count rides
+     * the diagnostic for drift both ways. Absent = ungated (repo tiers:
+     * real code under partial classpaths legitimately resolves
+     * imperfectly).
+     */
+    val toleratedResolutionErrors: List<String> = emptyList(),
 ) {
     fun validate() {
         if (path == null && repo == null) {
@@ -141,6 +154,7 @@ data class CorpusManifest(
                 classpathFile = str("classpath_file"),
                 minFindings = int("min_findings"),
                 depsMaxClasses = int("deps_max_classes"),
+                toleratedResolutionErrors = list("tolerated_resolution_errors"),
             )
         }
     }

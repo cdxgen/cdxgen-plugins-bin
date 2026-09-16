@@ -18,18 +18,21 @@ slug = "scope-functions"
 tier = "fixtures"
 path = "fixtures/scope-functions"
 capabilities = ["scope-functions", "null-safety"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "null-safety"
 tier = "fixtures"
 path = "fixtures/null-safety"
 capabilities = ["elvis-join", "safe-call"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "string-template"
 tier = "fixtures"
 path = "fixtures/string-template"
 capabilities = ["string-template", "taint-concat"]
+tolerated_resolution_errors = []
 
 # P4 taint fixtures: intraprocedural, field-sensitive flows over the CFG.
 # field-sensitivity carries the corpus's most valuable negative: the clean
@@ -40,60 +43,70 @@ slug = "field-sensitivity"
 tier = "fixtures"
 path = "fixtures/field-sensitivity"
 capabilities = ["taint", "field-sensitivity", "access-path"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "taint-sanitizer"
 tier = "fixtures"
 path = "fixtures/taint-sanitizer"
 capabilities = ["taint", "sanitizer"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "collection-passthrough"
 tier = "fixtures"
 path = "fixtures/collection-passthrough"
 capabilities = ["taint", "collection-passthrough", "effects"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "scope-function-flow"
 tier = "fixtures"
 path = "fixtures/scope-function-flow"
 capabilities = ["taint", "scope-functions", "receiver"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "taint-loop-fixpoint"
 tier = "fixtures"
 path = "fixtures/taint-loop-fixpoint"
 capabilities = ["taint", "fixpoint", "loop-carried"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "data-class-copy"
 tier = "fixtures"
 path = "fixtures/data-class-copy"
 capabilities = ["data-class", "copy"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "sealed-when"
 tier = "fixtures"
 path = "fixtures/sealed-when"
 capabilities = ["sealed", "when-exhaustive"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "coroutine-suspend"
 tier = "fixtures"
 path = "fixtures/coroutine-suspend"
 capabilities = ["coroutines", "suspend", "structured-concurrency"]
+tolerated_resolution_errors = ["ILLEGAL_SUSPEND_FUNCTION_CALL", "UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "sqli-jdbc-concat"
 tier = "fixtures"
 path = "fixtures/sqli-jdbc-concat"
 capabilities = ["sqli", "jdbc"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "command-exec"
 tier = "fixtures"
 path = "fixtures/command-exec"
 capabilities = ["command-exec", "process"]
+tolerated_resolution_errors = ["CONFLICTING_OVERLOADS"]
 # known-fail=1 lives in the fixture sources: no flow engine exists at the
 # syntax tier yet.
 
@@ -102,96 +115,112 @@ slug = "delegated-properties"
 tier = "fixtures"
 path = "fixtures/delegated-properties"
 capabilities = ["delegated-properties"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "destructuring"
 tier = "fixtures"
 path = "fixtures/destructuring"
 capabilities = ["destructuring"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "for-iterable"
 tier = "fixtures"
 path = "fixtures/for-iterable"
 capabilities = ["for-iterable"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "operators"
 tier = "fixtures"
 path = "fixtures/operators"
 capabilities = ["operators"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "use-close"
 tier = "fixtures"
 path = "fixtures/use-close"
 capabilities = ["use-close"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "weak-crypto"
 tier = "fixtures"
 path = "fixtures/weak-crypto"
 capabilities = ["crypto", "weak-digest", "ecb"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "log-injection"
 tier = "fixtures"
 path = "fixtures/log-injection"
 capabilities = ["log-injection"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "parse-error-reporting"
 tier = "fixtures"
 path = "fixtures/parse-error-reporting"
 capabilities = ["diagnostics", "parse-error"]
+tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
 [[fixtures]]
 slug = "java-interop"
 tier = "fixtures"
 path = "fixtures/java-interop"
 capabilities = ["java-interop", "mixed-sources"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "multi-module-gradle"
 tier = "fixtures"
 path = "fixtures/multi-module-gradle"
 capabilities = ["gradle-multi-module", "version-clamp"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "maven-project"
 tier = "fixtures"
 path = "fixtures/maven-project"
 capabilities = ["maven", "jvm-target"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "kmp-jvm-android"
 tier = "fixtures"
 path = "fixtures/kmp-jvm-android"
 capabilities = ["kmp", "expect-actual", "source-sets"]
+tolerated_resolution_errors = ["CONFLICTING_OVERLOADS", "NOT_A_MULTIPLATFORM_COMPILATION"]
 
 [[fixtures]]
 slug = "android-compose-app"
 tier = "fixtures"
 path = "fixtures/android-compose-app"
 capabilities = ["android", "variants", "log"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "empty-classpath"
 tier = "fixtures"
 path = "fixtures/empty-classpath"
 capabilities = ["classpath-partial", "offline-resolution"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "old-language-version"
 tier = "fixtures"
 path = "fixtures/old-language-version"
 capabilities = ["version-clamp", "language-version-band"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "latest-syntax"
 tier = "fixtures"
 path = "fixtures/latest-syntax"
 capabilities = ["context-parameters", "explicit-backing-fields"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 # Run only by the EAP CI job (tier eap): uses the next version's syntax.
@@ -213,6 +242,7 @@ tier = "fixtures"
 path = "fixtures/dep-taint-through-lib"
 classpath_file = "classpath.txt"
 capabilities = ["deps", "bytecode-summaries", "cross-dependency", "bodyless-records", "source-returns"]
+tolerated_resolution_errors = []
 
 # P9 regression guard: an unresolved CONSTRUCTOR is an unresolved call. The
 # branch that added the dependency tier briefly made it "handled" instead,
@@ -224,6 +254,7 @@ slug = "unresolved-constructor"
 tier = "fixtures"
 path = "fixtures/unresolved-constructor"
 capabilities = ["unknown-call-default", "constructors", "summaries"]
+tolerated_resolution_errors = []
 
 # P9: the Kotlin/Native + JNI/cinterop seam as native-interop evidence.
 # Positives: an external fun, a loadLibrary binding site, a cinterop .def.
@@ -235,6 +266,7 @@ slug = "native-interop"
 tier = "fixtures"
 path = "fixtures/native-interop"
 capabilities = ["native-interop", "jni", "cinterop", "security-signals"]
+tolerated_resolution_errors = []
 
 # P3 call-graph fixtures: dispatch modes, sealed narrowing, exported roots
 # and framework-registration roots. Each carries a negative half naming what
@@ -249,6 +281,7 @@ slug = "nested-field-path"
 tier = "fixtures"
 path = "fixtures/nested-field-path"
 capabilities = ["taint", "field-sensitivity", "summaries", "clean-sibling"]
+tolerated_resolution_errors = []
 
 # P5 summary fixtures: interprocedural flows, negatives first.
 
@@ -257,48 +290,56 @@ slug = "summary-clean-sibling"
 tier = "fixtures"
 path = "fixtures/summary-clean-sibling"
 capabilities = ["taint", "summaries", "field-sensitivity", "clean-sibling"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-sanitized-callee"
 tier = "fixtures"
 path = "fixtures/summary-sanitized-callee"
 capabilities = ["taint", "summaries", "sanitizer"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-param-to-return"
 tier = "fixtures"
 path = "fixtures/summary-param-to-return"
 capabilities = ["taint", "summaries", "param-to-return"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-param-to-param"
 tier = "fixtures"
 path = "fixtures/summary-param-to-param"
 capabilities = ["taint", "summaries", "param-to-param", "effects"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-param-to-receiver"
 tier = "fixtures"
 path = "fixtures/summary-param-to-receiver"
 capabilities = ["taint", "summaries", "param-to-receiver", "receiver"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-recursive"
 tier = "fixtures"
 path = "fixtures/summary-recursive"
 capabilities = ["taint", "summaries", "recursion", "scc"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-virtual-dispatch"
 tier = "fixtures"
 path = "fixtures/summary-virtual-dispatch"
 capabilities = ["taint", "summaries", "dispatch", "rta"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "summary-higher-order"
 tier = "fixtures"
 path = "fixtures/summary-higher-order"
 capabilities = ["taint", "summaries", "higher-order", "lambdas"]
+tolerated_resolution_errors = []
 
 # The cross-module fixture that makes `dependency-crossing-flows` real (R55).
 
@@ -307,24 +348,28 @@ slug = "summary-cross-module"
 tier = "fixtures"
 path = "fixtures/summary-cross-module"
 capabilities = ["taint", "summaries", "cross-module", "gradle-multi-module"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "sealed-dispatch"
 tier = "fixtures"
 path = "fixtures/sealed-dispatch"
 capabilities = ["call-graph", "sealed-narrowing", "dispatch"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "virtual-dispatch"
 tier = "fixtures"
 path = "fixtures/virtual-dispatch"
 capabilities = ["call-graph", "cha", "library-interface"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "library-api"
 tier = "fixtures"
 path = "fixtures/library-api"
 capabilities = ["call-graph", "exported-roots", "public-api"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 # The only fixture whose reachability travels an edge: every other one
@@ -334,12 +379,14 @@ slug = "reachable-depth"
 tier = "fixtures"
 path = "fixtures/reachable-depth"
 capabilities = ["call-graph", "exported-roots", "reachability"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "framework-handlers"
 tier = "fixtures"
 path = "fixtures/framework-handlers"
 capabilities = ["call-graph", "framework-roots", "type-resolved"]
+tolerated_resolution_errors = []
 
 # P7 framework tier: one bundled fixture per framework, each carrying its
 # positive endpoints AND its lookalike negatives (an annotated DTO, a
@@ -353,48 +400,56 @@ slug = "spring-mvc-app"
 tier = "frameworks"
 path = "fixtures/spring-mvc-app"
 capabilities = ["spring-mvc", "endpoints", "homonym-negative"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "spring-webflux-app"
 tier = "frameworks"
 path = "fixtures/spring-webflux-app"
 capabilities = ["spring-webflux", "endpoints", "lookalike-negative"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "ktor-app"
 tier = "frameworks"
 path = "fixtures/ktor-app"
 capabilities = ["ktor", "endpoints", "dsl", "outbound", "config-resolution"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "micronaut-app"
 tier = "frameworks"
 path = "fixtures/micronaut-app"
 capabilities = ["micronaut", "endpoints", "homonym-negative"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "quarkus-app"
 tier = "frameworks"
 path = "fixtures/quarkus-app"
 capabilities = ["quarkus", "jaxrs", "endpoints", "empty-resource-negative"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "http4k-app"
 tier = "frameworks"
 path = "fixtures/http4k-app"
 capabilities = ["http4k", "contract-routes", "endpoints"]
+tolerated_resolution_errors = ["CANNOT_INFER_PARAMETER_TYPE", "CLASSIFIER_REDECLARATION", "CONFLICTING_OVERLOADS", "INAPPLICABLE_CANDIDATE", "OVERLOAD_RESOLUTION_AMBIGUITY", "UNRESOLVED_REFERENCE", "UNRESOLVED_REFERENCE_WRONG_RECEIVER"]
 
 [[fixtures]]
 slug = "grpc-service"
 tier = "frameworks"
 path = "fixtures/grpc-service"
 capabilities = ["grpc", "rpc", "endpoints", "implbase-negative"]
+tolerated_resolution_errors = ["NOTHING_TO_OVERRIDE"]
 
 [[fixtures]]
 slug = "android-manifest-app"
 tier = "frameworks"
 path = "fixtures/android-manifest-app"
 capabilities = ["android", "manifest", "endpoints", "deep-links"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
 # P8 crypto tier: transform forms, TLS/JWT/keystore, and material flows.
 # Every shipped mapping row is exercised somewhere in this tier, which the
@@ -405,24 +460,28 @@ slug = "crypto-transform-forms"
 tier = "crypto"
 path = "fixtures/crypto-transform-forms"
 capabilities = ["crypto", "transforms", "const-folding", "config-resolution"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "crypto-algorithms"
 tier = "crypto"
 path = "fixtures/crypto-algorithms"
 capabilities = ["crypto", "digests", "signatures", "asymmetric"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "crypto-tls-jwt"
 tier = "crypto"
 path = "fixtures/crypto-tls-jwt"
 capabilities = ["crypto", "tls", "jwt", "keystore", "trust-all"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "crypto-material-flow"
 tier = "crypto"
 path = "fixtures/crypto-material-flow"
 capabilities = ["crypto", "materials", "crypto-flow", "pbkdf2", "ec-curve"]
+tolerated_resolution_errors = []
 
 # P6 async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
 # its own task (`corpusAsync`) AND by the bench/gate run, so `async-recall`
@@ -435,6 +494,7 @@ tier = "async"
 path = "fixtures/async-flow-collect"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "flow", "collect", "sanitizer"]
+tolerated_resolution_errors = ["ILLEGAL_SUSPEND_FUNCTION_CALL"]
 
 [[fixtures]]
 slug = "async-await"
@@ -442,6 +502,7 @@ tier = "async"
 path = "fixtures/async-await"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "async", "await"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "async-channel"
@@ -449,6 +510,7 @@ tier = "async"
 path = "fixtures/async-channel"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "channel", "send-receive"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "async-launch-scope"
@@ -456,6 +518,7 @@ tier = "async"
 path = "fixtures/async-launch-scope"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "launch", "scope"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "async-withcontext"
@@ -463,6 +526,7 @@ tier = "async"
 path = "fixtures/async-withcontext"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "withcontext", "dispatchers"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "async-android-scopes"
@@ -470,6 +534,7 @@ tier = "async"
 path = "fixtures/async-android-scopes"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "android", "viewmodelscope", "launchedeffect"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "async-stateflow"
@@ -477,6 +542,7 @@ tier = "async"
 path = "fixtures/async-stateflow"
 classpath_file = "classpath.txt"
 capabilities = ["coroutines", "stateflow", "collect"]
+tolerated_resolution_errors = []
 
 # P11: the R69 construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
 # is a coverage denominator nothing measured — KDoc was found by accident
@@ -491,24 +557,28 @@ slug = "generic-shapes"
 tier = "fixtures"
 path = "fixtures/generic-shapes"
 capabilities = ["variance-out", "variance-in", "star-projection", "where-clause", "nested-generics", "annotation-on-type-arg", "fun-interface", "typealias", "value-class"]
+tolerated_resolution_errors = ["TYPE_VARIANCE_CONFLICT_ERROR"]
 
 [[fixtures]]
 slug = "loop-and-labels"
 tier = "fixtures"
 path = "fixtures/loop-and-labels"
 capabilities = ["labelled-break", "labelled-continue", "labelled-return", "do-while", "ranges", "step", "tailrec", "default-params"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "class-declarations"
 tier = "fixtures"
 path = "fixtures/class-declarations"
 capabilities = ["init-block", "inner-class", "anonymous-object", "data-object", "protected-visibility", "lateinit", "custom-getter-setter", "named-args", "annotation-named-args", "deprecated-annot", "jvmname-annot", "jvmstatic-annot", "jvmfield-annot", "jvmoverloads-annot", "companion-jvmfield"]
+tolerated_resolution_errors = ["INAPPLICABLE_JVM_FIELD", "UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "expressions-and-literals"
 tier = "fixtures"
 path = "fixtures/expressions-and-literals"
 capabilities = ["raw-string", "notnull-assert", "safe-cast", "try-expression", "run-catching", "reflection-literal", "function-reference", "suspend-lambda"]
+tolerated_resolution_errors = []
 
 # P12: the Android taint shapes, and the lowering rule that makes them
 # visible. `editText.text` and `intent.dataString` are Kotlin reads of JAVA
@@ -522,54 +592,63 @@ tier = "fixtures"
 path = "fixtures/android-taint"
 classpath_file = "classpath.txt"
 capabilities = ["synthetic-java-property", "android-intent", "android-sql", "android-webview", "insecure-storage", "deep-link"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "server-side-taint"
 tier = "fixtures"
 path = "fixtures/server-side-taint"
 capabilities = ["jndi-injection", "xxe", "code-execution", "deserialization", "ssrf", "static-method-sink", "sanitizers"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "endpoint-parameter-semantics"
 tier = "fixtures"
 path = "fixtures/endpoint-parameter-semantics"
 capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "endpoint-base-path"
 tier = "fixtures"
 path = "fixtures/endpoint-base-path"
 capabilities = ["endpoints", "context-path", "framework-semantics", "config-resolution"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "handler-input-semantics"
 tier = "fixtures"
 path = "fixtures/handler-input-semantics"
 capabilities = ["endpoint-sources", "context-frameworks", "servlet", "class-declared-routes", "framework-semantics"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "path-normalisation"
 tier = "fixtures"
 path = "fixtures/path-normalisation"
 capabilities = ["endpoints", "path-templates", "framework-semantics"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "ktor-resources"
 tier = "fixtures"
 path = "fixtures/ktor-resources"
 capabilities = ["endpoints", "typed-routing", "resource-annotations", "type-arguments", "framework-semantics"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "ktor-context-semantics"
 tier = "fixtures"
 path = "fixtures/ktor-context-semantics"
 capabilities = ["endpoints", "hocon-config", "base-path", "context-parameters", "framework-semantics"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "descriptor-routes"
 tier = "fixtures"
 path = "fixtures/descriptor-routes"
 capabilities = ["endpoints", "web-xml", "application-path", "servlet", "jaxrs", "framework-semantics"]
+tolerated_resolution_errors = []
 
 [[fixtures]]
 slug = "implicit-routes"
@@ -577,6 +656,7 @@ tier = "fixtures"
 path = "fixtures/implicit-routes"
 classpath_file = "classpath.txt"
 capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
+tolerated_resolution_errors = []
 
 # P18 (R111): the dependency-marker contract from both sides. The present
 # marker is bound to a jar whose FILE NAME does not contain the marker (only
@@ -591,6 +671,7 @@ tier = "fixtures"
 path = "fixtures/implicit-routes-unresolved"
 classpath_file = "classpath.txt"
 capabilities = ["implicit-routes", "dependency-markers", "classpath-partial"]
+tolerated_resolution_errors = []
 
 # P14 §2: framework GENERATIONS — the packs model one version of
 # everything, and every package rename is a silent zero (R84). javax AND
@@ -602,6 +683,7 @@ slug = "framework-generations"
 tier = "fixtures"
 path = "fixtures/framework-generations"
 capabilities = ["generations", "jaxrs", "servlet", "okhttp", "httpclient", "ktor3", "endpoints"]
+tolerated_resolution_errors = []
 
 # P14 §2.3: a route whose framework cannot be evidenced is published under
 # the reserved pseudo-framework `unattributed` — a miss is never a WRONG
@@ -612,6 +694,7 @@ slug = "unattributed-route"
 tier = "fixtures"
 path = "fixtures/unattributed-route"
 capabilities = ["endpoints", "attribution", "unattributed"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
 # P14 §5: consumes/produces/authentication, from the annotations the
 # detector already reads and from Ktor's enclosing authenticate wrapper.
@@ -621,6 +704,7 @@ slug = "endpoint-media-auth"
 tier = "fixtures"
 path = "fixtures/endpoint-media-auth"
 capabilities = ["endpoints", "media-types", "authentication", "spring", "jaxrs", "micronaut", "ktor"]
+tolerated_resolution_errors = ["NO_VALUE_FOR_PARAMETER", "UNRESOLVED_REFERENCE_WRONG_RECEIVER"]
 
 # P14 §4: the BARE-NAME read of an accessor-backed property (R80's
 # sibling), and the backing-field half that keeps field sensitivity.
@@ -630,6 +714,7 @@ slug = "bare-accessor-source"
 tier = "fixtures"
 path = "fixtures/bare-accessor-source"
 capabilities = ["lowering", "accessor-property", "bare-name", "field-sensitivity", "ktor"]
+tolerated_resolution_errors = []
 
 # P15 §2: catch handlers were emitted with NO incoming CFG edge — the CFG
 # has no exceptional-edge instruction — so every `catch` body was structurally
@@ -647,6 +732,7 @@ slug = "catch-handler-flow"
 tier = "fixtures"
 path = "fixtures/catch-handler-flow"
 capabilities = ["try-catch", "exceptional-edges", "catch-handler-flow", "dead-block"]
+tolerated_resolution_errors = ["NO_RETURN_IN_FUNCTION_WITH_BLOCK_BODY"]
 
 # P16 §3: the catch handler's own PARAMETER. P15's edges made the handler
 # reachable but bound `e` to nothing — a read of it lowered as a field read
@@ -663,6 +749,7 @@ slug = "catch-exception-taint"
 tier = "fixtures"
 path = "fixtures/catch-exception-taint"
 capabilities = ["try-catch", "catch-parameter", "exception-object", "wrap-and-rethrow"]
+tolerated_resolution_errors = []
 
 
 # P15 §4: media and auth for the frameworks P14 did not model — declared at
@@ -682,6 +769,7 @@ slug = "dsl-media-auth"
 tier = "fixtures"
 path = "fixtures/dsl-media-auth"
 capabilities = ["endpoints", "media-types", "authentication", "vertx", "vertx-auth-handler", "javalin", "servlet", "web-xml", "security-constraint", "http4k", "http4k-contract-security"]
+tolerated_resolution_errors = ["ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "CANNOT_INFER_VALUE_PARAMETER_TYPE"]
 
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
@@ -697,6 +785,7 @@ tier = "vuln"
 path = "fixtures/kosi-vulnerable-service"
 classpath_file = "classpath.txt"
 capabilities = ["deps", "bytecode-summaries", "cross-dependency", "vulnerable-service", "log-injection", "sql-query", "services"]
+tolerated_resolution_errors = []
 
 # P14 §3: the findings ratchet as a tier. Three deliberately vulnerable
 # real applications, SHA-pinned, whose measured slices are the only

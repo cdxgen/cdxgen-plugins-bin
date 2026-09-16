@@ -743,6 +743,32 @@ object BenchRunner {
                     "reports zero findings with a green build",
             )
         }
+        // P18 §3: a fixture's resolution-error classes are a RATCHET. The
+        // entry declares the ERROR-severity factories its sources carry
+        // (`tolerated_resolution_errors`); a class that appears without
+        // being declared fails the row — R110 shipped a stub package that
+        // did not typecheck (missing import, unimplemented member) and every
+        // want passed over it, because nothing compared the fixture's
+        // compiler diagnostics against what it used to carry. Absent field
+        // = ungated (repo tiers resolve real code under partial classpaths).
+        var undeclaredResolutionErrors = 0
+        if (options.backend.id == "resolved" || options.backend.id == "compile") {
+            val seen = sortedSetOf<String>()
+            for (diag in report.diagnostics) {
+                if (diag.code != io.cdxgen.kosi.schema.DiagnosticCodes.RESOLUTION_ERRORS) continue
+                Regex("([A-Z][A-Z0-9_]+)=\\d+").findAll(diag.message).forEach { seen.add(it.groupValues[1]) }
+            }
+            undeclaredResolutionErrors = seen.count { it !in entry.toleratedResolutionErrors }
+            for (code in seen) {
+                if (code !in entry.toleratedResolutionErrors) {
+                    failureDetails.add(
+                        "${entry.slug}/${slot.label}: UNDECLARED resolution error class $code — the sources no longer " +
+                            "typecheck as declared; fix the fixture or add the class to tolerated_resolution_errors " +
+                            "as a reviewed change (R110's shape)",
+                    )
+                }
+            }
+        }
         val connectivity = Connectivity.of(report)
         val integrity = Connectivity.integrityViolations(report)
         val graphMetrics = GraphMetrics.of(report)
@@ -762,7 +788,7 @@ object BenchRunner {
             pass = evaluation.pass.size,
             positivesPassed = evaluation.pass.count { it.annotation.want },
             positivesRecallDenominator = evaluation.outcomes.count { it.annotation.want && it.annotation.knownFailFor(options.backend.id) == null },
-            fail = evaluation.fail.size + classpathFailureCount,
+            fail = evaluation.fail.size + classpathFailureCount + undeclaredResolutionErrors,
             xfail = evaluation.xfail.size,
             xpass = evaluation.xpass.size,
             recall = evaluation.recall(options.backend.id),
