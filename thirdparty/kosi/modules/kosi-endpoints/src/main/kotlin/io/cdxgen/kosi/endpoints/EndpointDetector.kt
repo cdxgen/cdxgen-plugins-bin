@@ -663,6 +663,16 @@ object EndpointDetector {
      * http4k sites assign a property literally named `security`
      * (`ContractBuilder.security`, `RouteMetaDsl.security`), so the field
      * name is the model's, matched here rather than guessed from the KIR.
+     *
+     * R109's residual, closed (P18): an assignment whose producer matches
+     * NO modelled constructor used to return null here, and the caller fell
+     * back to the CONTRACT BLOCK's scheme — naming the wrong requirement
+     * with confidence, because the framework's own elvis
+     * (`meta.security ?: security`) ignores the block whenever meta declares
+     * ANY security. A lambda that assigns `security` at all therefore never
+     * yields null: the unmodelled producer's own name is reported (the code
+     * declares it; the pack merely does not model it), "unknown" when the
+     * producer is not even a call.
      */
     private fun securityAssignmentOf(
         lambdaCanonical: String,
@@ -676,10 +686,9 @@ object EndpointDetector {
                 if (ins !is io.cdxgen.kosi.kir.KirFieldSet) continue
                 val field = ins.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field ?: continue
                 if (field.name != "security") continue
-                val ctor = producerOf(block, at, ins.value) ?: continue
-                val pattern = framework.securityConstructors.firstOrNull { matches(ctor.callee.fqn, it) }
-                    ?: continue
-                return pattern.substringAfterLast('.')
+                val ctor = producerOf(block, at, ins.value) ?: return "unknown"
+                val modelled = framework.securityConstructors.firstOrNull { matches(ctor.callee.fqn, it) }
+                return modelled?.substringAfterLast('.') ?: ctor.callee.fqn.substringAfterLast('.')
             }
         }
         return null

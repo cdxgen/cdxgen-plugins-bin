@@ -662,10 +662,6 @@
             "PATCH"
           ],
           "pattern": "io.micronaut.http.annotation.Patch"
-        },
-        {
-          "methods": [],
-          "pattern": "io.micronaut.http.annotation.HttpMethod"
         }
       ],
       "mediaAnnotations": [
@@ -1226,7 +1222,7 @@
       ],
       "classMarkers": [
         "org.springframework.web.bind.annotation.RestController",
-        "org.springframework.web.bind.annotation.Controller"
+        "org.springframework.stereotype.Controller"
       ],
       "handlerInput": "annotated",
       "id": "spring-mvc",
@@ -1630,7 +1626,7 @@
         {
           "methods": [],
           "nesting": true,
-          "pattern": "io.vertx.ext.web.Router.mountSubRouter"
+          "pattern": "io.vertx.ext.web.Route.subRouter"
         }
       ],
       "handlerDsl": [
@@ -1659,7 +1655,7 @@
         }
       ],
       "_p15_comment": "P15: media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls.",
-      "_p17_comment": "P17, closing the P15 honest-empty: Vert.x auth IS attributable to one route, because the requirement is attached THROUGH the same chained handler call the media ride - `route.handler(BasicAuthHandler.create(auth))`. Sourced from io.vertx:vertx-web:5.1.7 (the artifact in the corpus warm cache), class files read from the jar: io/vertx/ext/web/Route.class declares `handler(Handler<RoutingContext>)` returning Route (so the chain continues past an auth attach); io/vertx/ext/web/handler/AuthenticationHandler.class `extends Handler<RoutingContext>` - an auth handler IS a handler, no overload involved; the factories are interface statics on each handler class (BasicAuthHandler.create(AuthenticationProvider[, realm]), JWTAuthHandler.create(JWTAuth[, issuer]), DigestAuthHandler.create(Vertx, HtdigestAuth[, timeout]), OAuth2AuthHandler.create(Vertx, OAuth2Auth[, redirectUri]), OtpAuthHandler.create(TotpAuth|HotpAuth), RedirectAuthHandler.create(AuthenticationProvider[, loginRedirectURL]), WebAuthn4JHandler.create(WebAuthn4J)). ChainAuthHandler.all()/any() and AuthorizationHandler.create() are deliberately not modelled: the former builds a composite with no single scheme to name, the latter is authorization (what may you do), not authentication (who are you). The P15 claim that the KIR cannot attribute the value was wrong for THIS shape: the factory call's own callee names the scheme."
+      "_p17_comment": "P17, closing the P15 honest-empty: Vert.x auth IS attributable to one route, because the requirement is attached THROUGH the same chained handler call the media ride - `route.handler(BasicAuthHandler.create(auth))`. Sourced from io.vertx:vertx-web:5.1.7 (the artifact in the corpus warm cache), class files read from the jar: io/vertx/ext/web/Route.class declares `handler(Handler<RoutingContext>)` returning Route (so the chain continues past an auth attach); io/vertx/ext/web/handler/AuthenticationHandler.class `extends Handler<RoutingContext>` - an auth handler IS a handler, no overload involved; the factories are interface statics on each handler class (BasicAuthHandler.create(AuthenticationProvider[, realm]), JWTAuthHandler.create(JWTAuth[, issuer]), DigestAuthHandler.create(Vertx, HtdigestAuth[, timeout]), OAuth2AuthHandler.create(Vertx, OAuth2Auth[, redirectUri]), OtpAuthHandler.create(TotpAuth|HotpAuth), RedirectAuthHandler.create(AuthenticationProvider[, loginRedirectURL]), WebAuthn4JHandler.create(WebAuthn4J)). P18 symbol-kind check (against the same 5.1.7 jar): the nesting entry was io.vertx.ext.web.Router.mountSubRouter - an API Vert.x 5 REMOVED (Router declares no mount* member; the 5.x spelling is Route.subRouter(Router), javap on io/vertx/ext/web/Route.class). The old entry named a symbol the cited evidence does not contain and was inert besides (no fixture exercises it and the prefix walk keys on route/path lambda links); it is replaced by the 5.x spelling. Vert.x sub-router PREFIX composition remains unmodelled for either spelling - a named gap, not a wrong answer. ChainAuthHandler.all()/any() and AuthorizationHandler.create() are deliberately not modelled: the former builds a composite with no single scheme to name, the latter is authorization (what may you do), not authentication (who are you). The P15 claim that the KIR cannot attribute the value was wrong for THIS shape: the factory call's own callee names the scheme."
     }
   ],
   "name": "endpoints-pack-v0",
