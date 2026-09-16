@@ -86,6 +86,14 @@ services = all_report.get("services", [])
 check(any(s.get("protocol") == "jdbc" and s.get("resolution") == "literal"
           for s in services), "the outbound JDBC service row is missing")
 
+# inbound route evidence (P17: the sample now declares one — a Ktor GET
+# /users — so the join's input is gated here too, not only its output)
+endpoints = all_report.get("apiEndpoints", [])
+check(any(e.get("framework") == "ktor" and e.get("pathTemplate") == "/users"
+          and "GET" in (e.get("httpMethod") or [])
+          for e in endpoints),
+      "the sample's /users GET route is missing from apiEndpoints[]")
+
 if problems:
     for problem in problems:
         print("kosi-e2e FAIL:", problem)
@@ -104,8 +112,10 @@ if [ -z "$cdxgen_dir" ] || [ ! -f "$cdxgen_dir/bin/evinse.js" ]; then
   fi
   echo "kosi-e2e: SKIP — $message"
   echo "kosi-e2e: the cdxgen integration is UNVERIFIED by this run. The arm lives"
-  echo "  on the cdxgen branch feat/kosi-evinse-tmp, which is not pushed — so this"
-  echo "  half runs on one machine only and CI cannot gate it yet."
+  echo "  on the cdxgen branch feat/kosi-evinse-tmp (pushed since P17 §4),"
+  echo "  unmerged into cdxgen main — so this half runs only where a checkout"
+  echo "  of that branch is present, and CI gates it only via a caller that"
+  echo "  passes KOSI_E2E_REQUIRE_CDGEN=1 with CDXGEN_DIR set."
   exit 0
 fi
 
@@ -168,19 +178,23 @@ check(any(p["name"] == "cdx:kosi:cryptoFlow"
 check(any(c.get("type") == "cryptographic-asset" for c in evinse.get("components", [])),
       "no cryptographic-asset component in the evinse BOM")
 check(len(evinse.get("services", [])) >= 1, "no services[] row in the evinse BOM")
-# P16 §4: INBOUND route rows must carry their HTTP verb when any exist. The
-# collector once read a plural `httpMethods` kosi never emits, so every
-# route fell to "ALL" — the verb lost, and an OpenAPI spec over the same
-# route duplicated the service. This sample declares no web routes (its
-# services[] row is the outbound JDBC one), so the check is conditional:
-# a route row WITHOUT a real verb is always a defect; the sample's shape
-# is pinned by the tsp chain in the phase report.
+# P16 §4: INBOUND route rows must carry their HTTP verb. Until P17 the
+# sample declared no routes, so this was `all()` over an empty list —
+# honest about it, but by R53 it proved nothing. The sample now carries a
+# Ktor GET /users route, so the assertions are LIVE: a route row without a
+# real verb is always a defect, and the row must arrive under the name
+# cdxgen's own OpenAPI detector would give the same route
+# (service-<path>-<verb>) — the convergence the join exists for, gated
+# rather than described.
 route_rows = [s for s in evinse.get("services", [])
               if any(p["name"] == "cdx:kosi:endpoint:framework"
                      for p in s.get("properties") or [])]
+check(len(route_rows) >= 1, "no inbound route row in the evinse BOM (the sample declares a route)")
 check(all(any(p["name"] == "cdx:service:httpMethod" and p["value"] != "ALL"
               for p in s.get("properties") or []) for s in route_rows),
       "an inbound route lost its HTTP verb (httpMethod fell to ALL)")
+check(any(s.get("name") == "service-users-get" for s in route_rows),
+      "the /users GET route is not named service-users-get — an OpenAPI spec over the same route would duplicate it")
 
 disabled_kinds = bom_kosi_artifacts(disabled)
 check(disabled.get("bomFormat") == "CycloneDX" and disabled.get("components"),
