@@ -1,0 +1,38 @@
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/DslRoutes.kt
+  h_6a4cc5cdf68def 80-89,164-172,184-186
+thirdparty/kosi/fixtures/spring-mvc-app/src/main/kotlin/org/springframework/stereotype/Annotations.kt
+  h_6a4cc5cdf68def 1-8
+thirdparty/kosi/fixtures/spring-mvc-app/src/main/kotlin/org/springframework/web/bind/annotation/Annotations.kt
+  h_6a4cc5cdf68def 3-5
+thirdparty/kosi/goldens/dsl-media-auth-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dsl-media-auth-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-bytecode/build.gradle.kts
+  h_6a4cc5cdf68def 17-20
+thirdparty/kosi/modules/kosi-bytecode/src/test/kotlin/io/cdxgen/kosi/bytecode/EndpointsPackSymbolKindTest.kt
+  h_6a4cc5cdf68def 1-406
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  h_6a4cc5cdf68def 666-675,689-691
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 1225,1629,1658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9982e5d1ee49f9357a335ac26cc73f4c1e6e0640",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
