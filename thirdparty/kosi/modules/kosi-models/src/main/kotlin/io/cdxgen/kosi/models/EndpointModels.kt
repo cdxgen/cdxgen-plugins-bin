@@ -175,6 +175,15 @@ data class FrameworkModel(
      * the roles begin.
      */
     val roleArgumentStart: Int = -1,
+    /**
+     * P16 §4: constructors whose appearance as a bind's `to` target declares
+     * the route's auth requirement (http4k-contract's
+     * `"/secure" bind GET to SecureRoute(BasicAuth("realm"), handler)` —
+     * the security scheme is the construction's FIRST argument, the handler
+     * its last). Core-DSL http4k (`to { .. }`) declares nothing; this is
+     * the one shape the KIR CAN attribute to one route.
+     */
+    val secureRouteConstructors: List<String> = emptyList(),
 )
 
 /**
@@ -381,6 +390,7 @@ object EndpointModels {
                 } ?: emptyList(),
                 handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
                 roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
+                secureRouteConstructors = f.arr("secureRouteConstructors")?.strings() ?: emptyList(),
                 handlerMethodNames = f.arr("handlerMethodNames")?.objects()?.map { h ->
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),

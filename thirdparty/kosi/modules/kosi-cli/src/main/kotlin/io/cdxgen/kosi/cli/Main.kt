@@ -87,7 +87,7 @@ object Main {
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
         "classpath", "classpath-file", "jdk-home", "reachable-symbols", "sarif-out",
-        "max-analysis-seconds", "max-rss-mb", "deps-max-classes",
+        "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
         "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
@@ -233,6 +233,8 @@ object Main {
             endpointSources = parsed.bool("endpoint-sources", defaults.endpointSources),
             deps = parsed.bool("deps", defaults.deps),
             depsMaxClasses = parsed.value("deps-max-classes")?.toIntOrNull() ?: defaults.depsMaxClasses,
+            dataflowMaxSummarySinkEffects = parsed.value("max-summary-sink-effects")?.toIntOrNull()
+                ?: defaults.dataflowMaxSummarySinkEffects,
             maxAnalysisSeconds = parsed.value("max-analysis-seconds")?.toIntOrNull() ?: defaults.maxAnalysisSeconds,
             maxRssMb = parsed.value("max-rss-mb")?.toIntOrNull() ?: defaults.maxRssMb,
             unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
@@ -577,6 +579,10 @@ object Main {
                                               and cross-dependency slices are added (P9); --dataflow
                                               security-deps implies this
               --deps-max-classes <n>          cap on dependency classes lowered per run (default 500)
+              --max-summary-sink-effects <n>  summary escape-set budget; past it a summary is dropped
+                                              whole and callers fall to the labelled default (P15;
+                                              default 8192; the trips are counted in stats.truncations
+                                              as summary-effect-budget)
               --max-analysis-seconds <n>      wall-clock budget; tripping emits a named diagnostic and the
                                               partial report still ships (P10; 0 trips at the first boundary)
               --max-rss-mb <n>                peak-RSS budget; same degradation contract (P10)

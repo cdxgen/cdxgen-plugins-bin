@@ -365,6 +365,8 @@ internal class Summarizer(
         val skipped: Map<String, Int>,
         /** The diagnostic code whose budget stopped the run early, when one did. */
         val stoppedBy: String? = null,
+        /** Composed param paths the depth cap dropped (exact drops; P16 §2). */
+        val composedPathDrops: Int = 0,
     )
 
     private val byCanonical: Map<String, CompiledFunction> =
@@ -389,6 +391,7 @@ internal class Summarizer(
         val table = HashMap<String, FunctionSummary>()
         val skipped = sortedMapOf<String, Int>()
         var capHits = 0
+        var composedPathDrops = 0
         var stoppedBy: String? = null
         for (scc in sccs) {
             // The P10 budget is checked between SCCs: a trip keeps every
@@ -418,16 +421,24 @@ internal class Summarizer(
                         continue
                     }
                     val analysis = computeSummary(cf, table)
-                    if (analysis.third) {
+                    composedPathDrops += analysis.composedPathDrops
+                    if (analysis.overBudget) {
                         // The state or the escape set exploded past its
                         // budget: publish NO summary rather than a partial
                         // one — callers then fall to the labelled unknown
                         // default instead of a silently truncated summary.
-                        skipped.merge(analysis.second, 1, Int::plus)
+                        skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
                         table.remove(member)
+                        // P16 §2 measurement aid: name the functions the
+                        // degradation touches, on stderr, only under
+                        // KOSI_TRACE — a number without names invited nobody
+                        // to ask what the budget cost.
+                        if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
+                            System.err.println("TRACE: summary-effect-budget dropped $member")
+                        }
                         continue
                     }
-                    val next = analysis.first
+                    val next = analysis.summary
                     val previous = table[member]
                     if (previous == null || !next.sameAs(previous)) {
                         table[member] = next
@@ -453,7 +464,7 @@ internal class Summarizer(
                 }
             }
         }
-        return Result(table, sccs.size, capHits, skipped, stoppedBy)
+        return Result(table, sccs.size, capHits, skipped, stoppedBy, composedPathDrops)
     }
 
     private fun FunctionSummary.withOrigin(origin: String): FunctionSummary = FunctionSummary(
@@ -466,13 +477,21 @@ internal class Summarizer(
      * main engine runs, seeded with a fact per parameter and driven by the
      * summary handler (pack entries first, then callee summaries, then the
      * unknown default). Escapes are recorded in the final sweep, at fixpoint.
-     * Returns the summary, the over-budget LABEL (which budget tripped), and
-     * whether any budget tripped — a tripped budget drops the summary whole.
+     * Returns the summary, the over-budget LABEL (which budget tripped),
+     * whether any budget tripped — a tripped budget drops the summary whole —
+     * and how many composed paths the depth cap dropped (P16 §2).
      */
-    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): Triple<FunctionSummary, String, Boolean> {
+    private class SummaryOutcome(
+        val summary: FunctionSummary,
+        val overBudgetLabel: String,
+        val overBudget: Boolean,
+        val composedPathDrops: Int,
+    )
+
+    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): SummaryOutcome {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
         analysis.run()
-        return Triple(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget)
+        return SummaryOutcome(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops)
     }
 }
 
@@ -616,7 +635,16 @@ internal class SummaryAnalysis(
      *    never published.
      */
     private fun recordEffect(effect: SummarySinkEffect) {
-        if (paramPathDepth(effect.paramPath) > paramPathCap) return
+        if (paramPathDepth(effect.paramPath) > paramPathCap) {
+            // P16 §2: the drop is EXACT (an effect deeper than the deepest
+            // fact-key path can never match one), but until now it was also
+            // invisible — a degradation nobody could count. The run publishes
+            // the per-run total as `composed-path-depth` in
+            // stats.truncations, so the cap's cost is a number every report
+            // carries, not an assumption.
+            composedPathDrops++
+            return
+        }
         if (sinkEffects.size >= options.maxSummarySinkEffects) {
             stateOverBudget = true
             overBudgetLabel = "summary-effect-budget"
@@ -669,6 +697,10 @@ internal class SummaryAnalysis(
 
     /** Which budget tripped — the skipped-count label the run publishes. */
     var overBudgetLabel: String = "summary-state-budget"
+        private set
+
+    /** Composed param paths dropped by [paramPathCap] in this analysis (P16 §2). */
+    var composedPathDrops: Int = 0
         private set
 
     /** v-register -> parameter index, from the entry parameter stores. */

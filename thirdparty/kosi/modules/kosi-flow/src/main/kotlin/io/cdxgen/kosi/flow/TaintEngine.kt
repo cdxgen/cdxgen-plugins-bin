@@ -441,6 +441,11 @@ object TaintEngine {
             for ((kind, count) in depSummary.skipped) {
                 truncations.merge(kind, count, Int::plus)
             }
+            // P16 §2: the composed-path depth cap's exact drops, counted per
+            // run — the degradation was real but invisible before.
+            if (depSummary.composedPathDrops > 0) {
+                truncations.merge("composed-path-depth", depSummary.composedPathDrops, Int::plus)
+            }
             if (stopCode == null) depSummary.stoppedBy?.let { stopCode = it }
             DepsTier(
                 compiled = depsCompiled,
@@ -464,6 +469,9 @@ object TaintEngine {
         val summaryResult = summarizer.compute()
         for ((kind, count) in summaryResult.skipped) {
             truncations.merge(kind, count, Int::plus)
+        }
+        if (summaryResult.composedPathDrops > 0) {
+            truncations.merge("composed-path-depth", summaryResult.composedPathDrops, Int::plus)
         }
         if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 

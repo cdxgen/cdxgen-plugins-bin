@@ -195,7 +195,10 @@
       "handlerInput": "context",
       "id": "http4k",
       "kind": "dsl",
-      "_p15_comment": "P15: http4k's core DSL has NO media/auth declaration site. The handler is a plain function; content types live in lenses and responses, neither of which the router reads; contract meta {} is OpenAPI documentation, not routing; auth is a Filter - code applied per request, not a declaration attributable to one route. The empty lists are the truth, not a gap nobody has looked at."
+      "secureRouteConstructors": [
+        "org.http4k.contract.SecureRoute"
+      ],
+      "_p15_comment": "P15: http4k's core DSL has NO media/auth declaration site. The handler is a plain function; content types live in lenses and responses, neither of which the router reads; contract meta {} is OpenAPI documentation, not routing; auth is a Filter - code applied per request, not a declaration attributable to one route. The empty lists are the truth, not a gap nobody has looked at. P16 corrects one claim: contract mode's SecureRoute(security, handler) IS a per-route auth declaration the KIR can attribute - the scheme is the construction's first argument (secureRouteConstructors). Media stays an honest empty in every shape."
     },
     {
       "contextReaders": [

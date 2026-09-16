@@ -269,6 +269,27 @@ jobs:
         python3 -c 'import json,sys; c=json.load(open("/tmp/version.json"))["components"]; bad={k:v for k,v in c.items() if v!="available"}; sys.exit(f"components unavailable in an isolated binary: {bad}" if bad else 0)'
         ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" --backend resolved --dataflow all --out /tmp/c.json
         grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
+    - name: Isolated binary smoke (kosi-linuxmusl-amd64, in alpine)
+      run: |
+        # The musl image is BUILT here and was executed nowhere else — no job
+        # ran it, and alpine is exactly where a static image's assumptions
+        # break. It ships for the musl userland, so it is smoke-tested inside
+        # it: an alpine container, isolated directory, binary only, the same
+        # component + one-resolved-tier-finding assertion the other three
+        # smokes make. The resolved tier needs a modular JDK home on the
+        # machine (JAVA_HOME/--jdk-home) like every kosi image; kosi only
+        # READS <home>/lib/modules, so the distro's JDK is enough.
+        docker run --rm -v "$GITHUB_WORKSPACE/thirdparty/kosi:/kosi:ro" alpine:3.20 sh -c '
+          apk add --no-cache openjdk21 python3 >/dev/null
+          mkdir -p /tmp/kosi-isolated
+          cp /kosi/build/kosi-linuxmusl-amd64 /tmp/kosi-isolated/
+          cd /tmp/kosi-isolated
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+          ./kosi-linuxmusl-amd64 version > /tmp/version.json
+          python3 -c "import json,sys; c=json.load(open(\"/tmp/version.json\"))[\"components\"]; bad={k:v for k,v in c.items() if v!=\"available\"}; sys.exit(\"components unavailable in an isolated binary: \"+str(bad) if bad else 0)"
+          ./kosi-linuxmusl-amd64 analyze --dir /kosi/fixtures/command-exec --backend resolved --dataflow all --out /tmp/c.json
+          grep -q "taint/untrusted-input-to-process-exec" /tmp/c.json
+        '
     - name: Upload kosi Linux helper artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:

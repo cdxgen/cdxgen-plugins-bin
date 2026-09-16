@@ -611,6 +611,7 @@ object Analyzer {
                         maxSlices = options.dataflowMaxSlices,
                         maxTraceNodes = options.dataflowMaxTraceNodes,
                         maxFunctionInstructions = options.dataflowMaxFunctionInstructions,
+                        maxSummarySinkEffects = options.dataflowMaxSummarySinkEffects,
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
                         dispatchMode = options.callgraph.id,
