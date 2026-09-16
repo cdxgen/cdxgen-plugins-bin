@@ -105,16 +105,41 @@ echo "two-environment-proof: leg B — $KOSI_B, HOME and user.home scrubbed to $
 run_leg "$KOSI_B" "$PROOF/goldens-b" env "HOME=$HOME_B" "$JAVA_BIN" "-Duser.home=$HOME_B"
 
 fails=0
-if ! diff -r "$PROOF/goldens-a" "$PROOF/goldens-b" > "$PROOF/legs.diff"; then
-  echo "two-environment-proof: FAIL — the two environments produced different digests:" >&2
-  sed 's/^/  /' "$PROOF/legs.diff" >&2
+# Digest files are one JSON line each; a raw diff dumps both whole lines.
+# Name the FILE and the SECTIONS that differ instead — investigation starts
+# there, not in a wall of hashes.
+section_diff() { # $1 = left digest file, $2 = right digest file
+  python3 - "$1" "$2" <<'PY'
+import json, sys
+def sections(p):
+    return {d["section"]: d["digest"] for d in json.load(open(p))["digests"]}
+a, b = sections(sys.argv[1]), sections(sys.argv[2])
+diff = [k for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+print(", ".join(diff) if diff else "(combined digest only)")
+PY
+}
+report_diff() { # $1 = left dir, $2 = right dir, $3 = diff file, $4 = headline
+  local left="$1" right="$2" diff_file="$3" headline="$4"
+  if ! diff -rq "$left" "$right" > "$diff_file"; then
+    echo "two-environment-proof: FAIL — $headline:" >&2
+    sed 's/^/  /' "$diff_file" >&2
+    echo "two-environment-proof: sections that differ, per file:" >&2
+    grep -E ' differ$' "$diff_file" | sed -E 's/^Files (.*) and (.*) differ$/\1|\2/' | while IFS='|' read -r l r; do
+      printf '  %s: %s\n' "$(basename "$l")" "$(section_diff "$l" "$r")"
+    done
+    return 1
+  fi
+  return 0
+}
+
+if ! report_diff "$PROOF/goldens-a" "$PROOF/goldens-b" "$PROOF/legs.diff" \
+     "the two environments produced different digests"; then
   fails=$((fails + 1))
 else
   echo "two-environment-proof: legs agree ($(ls "$PROOF/goldens-a" | wc -l | tr -d ' ') digest files)"
 fi
-if ! diff -r "$PROOF/goldens-a" "$KOSI_A/goldens" > "$PROOF/pin.diff"; then
-  echo "two-environment-proof: FAIL — both legs disagree with the CHECKED-IN goldens at $COMMIT_SHA:" >&2
-  sed 's/^/  /' "$PROOF/pin.diff" >&2
+if ! report_diff "$PROOF/goldens-a" "$KOSI_A/goldens" "$PROOF/pin.diff" \
+     "both legs disagree with the CHECKED-IN goldens at $COMMIT_SHA"; then
   fails=$((fails + 1))
 else
   echo "two-environment-proof: both legs match the checked-in goldens"
