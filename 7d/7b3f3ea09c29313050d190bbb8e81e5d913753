@@ -1,0 +1,14 @@
+thirdparty/kosi/scripts/two-environment-proof.sh
+  h_6a4cc5cdf68def 108-136,141-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d7b3f3ea09c29313050d190bbb8e81e5d913753",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
