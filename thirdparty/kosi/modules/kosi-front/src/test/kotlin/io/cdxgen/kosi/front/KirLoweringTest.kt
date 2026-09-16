@@ -728,6 +728,10 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
                         }
                     }
 
+                    fun unguardedThrow(input: String): String {
+                        throw IllegalStateException(input)
+                    }
+
                     fun implicitThrow(input: String): String {
                         try {
                             return input.toInt().toString()
@@ -765,8 +769,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
         val store = visible.filterIsInstance<io.cdxgen.kosi.kir.KirStore>().single { it.target == "ve" }
         assertEquals(thrown.result, store.value, "the parameter store reads the thrown binding")
         assertTrue(
-            thrown.receiver != null && thrown.receiver!! in thrown.args ||
-                thrown.args.any { it != thrown.receiver },
+            thrown.args.any { it != thrown.receiver },
             "the binding sees the construction arguments, not only the object register: $thrown",
         )
 
@@ -796,8 +799,13 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
             visibleFn.body?.blocks?.any { b -> b.instructions.any { it is io.cdxgen.kosi.kir.KirThrow } } == false,
             "inside a guarded body the throw lowered to its edge, not to a dead-end KirThrow",
         )
-        val rethrowOutside = loweredFunctions(root).instructionsOf("implicitThrow")
-        assertTrue(rethrowOutside.isNotEmpty(), "the implicit case still lowers")
+        // ... and a throw with no enclosing try still lowers to KirThrow:
+        // the edge replaces the terminator only where a handler can receive
+        // it.
+        assertTrue(
+            result.instructionsOf("unguardedThrow").any { it is io.cdxgen.kosi.kir.KirThrow },
+            "an unguarded throw keeps its KirThrow terminator",
+        )
 
         // Where NO throw is visible, the parameter is seeded from the body's
         // live registers at the dispatch edge (tainted-if-the-body-was).

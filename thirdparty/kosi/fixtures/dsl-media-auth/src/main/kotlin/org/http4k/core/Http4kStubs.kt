@@ -24,4 +24,3 @@ class Response private constructor(val status: Int, val body: String) {
 fun interface HttpHandler {
     fun invoke(request: Request): Response
 }
-

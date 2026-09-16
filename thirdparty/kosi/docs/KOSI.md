@@ -125,11 +125,13 @@ read a result:
   publishes no summary at all, and its callers fall back to the labelled
   unknown-call default; the trips are counted as `summary-effect-budget` in
   `stats.truncations`. Dropping the whole summary is deliberate — half a
-  summary is a wrong summary.
+  summary is a wrong summary. `--max-summary-sink-effects` sets the budget,
+  so what it costs on your code is measurable rather than assumed.
 - **Access-path depth.** Taint is tracked on access paths of bounded depth;
   deeper paths collapse to a `*` element and are tracked as the collapsed
   path, which is sound but coarser. A path deeper than a fact key can spell
-  is dropped from composition rather than approximated.
+  is dropped from composition rather than approximated, and every such drop
+  is counted as `composed-path-depth` in `stats.truncations`.
 - **Unknown calls.** `--unknown-call` decides what happens at a call kosi
   cannot resolve. Whatever it decides, the slices it produces say so in
   `origins[]`, and the corpus gate holds the default-only share of findings

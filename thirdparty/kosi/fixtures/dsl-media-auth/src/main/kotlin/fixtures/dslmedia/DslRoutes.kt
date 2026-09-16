@@ -51,14 +51,6 @@
 // kosi:want-not endpoint framework=http4k path=/simple produces=~
 // kosi:want-not endpoint framework=http4k path=/simple consumes=~
 // kosi:want-not endpoint framework=http4k path=/simple authentication=~
-//
-// http4k contract mode: SecureRoute(security, handler) IS a per-route auth
-// declaration (P16 — P15's "auth is a Filter" claim missed this shape): the
-// scheme rides the construction's first argument, and the core-DSL negatives
-// above stay clean beside it.
-// kosi:want endpoint framework=http4k path=/secure mode=resolved authentication=~SecureRoute
-// kosi:want endpoint framework=http4k path=/secure mode=resolved authentication=~BasicAuth
-// kosi:want-not endpoint framework=http4k path=/secure consumes=~
 package fixtures.dslmedia
 
 import io.javalin.Javalin
@@ -97,13 +89,7 @@ fun buildJavalin(): Javalin {
 
 private fun simpleHandler(request: org.http4k.core.Request): Response = Response.ok(request.uri)
 
-private fun secureHandler(request: org.http4k.core.Request): Response = Response.ok(request.uri)
-
 @Suppress("unused")
-fun http4kApp(): List<Any> = listOf(
+fun http4kApp(): List<String> = listOf(
     "/simple" bind Method.GET to { req -> simpleHandler(req) },
-    "/secure" bind Method.GET to org.http4k.contract.SecureRoute(
-        org.http4k.security.BasicAuth("realm"),
-        { req -> secureHandler(req) },
-    ),
 )

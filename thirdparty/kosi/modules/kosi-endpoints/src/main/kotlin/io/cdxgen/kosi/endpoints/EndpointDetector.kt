@@ -1,6 +1,5 @@
 package io.cdxgen.kosi.endpoints
 
-import io.cdxgen.kosi.kir.CallKind
 import io.cdxgen.kosi.kir.KirAssign
 import io.cdxgen.kosi.kir.KirBlock
 import io.cdxgen.kosi.kir.KirDynamicCall
@@ -554,7 +553,7 @@ object EndpointDetector {
         val path = folded?.value ?: rawOf(fn, block, index, receiver)
         // The handler lives on the `to` call whose receiver is this bind's
         // result, and the method constant is the bind's argument.
-        val target = bindTarget(fn, ins.result, input, framework)
+        val handler = bindHandler(fn, ins.result, input)
         val method = ins.args.firstOrNull()?.let { methodReg ->
             block.instructions.firstOrNull {
                 it is io.cdxgen.kosi.kir.KirFieldGet && it.result == methodReg
@@ -563,66 +562,19 @@ object EndpointDetector {
                     ?.let { e -> (e as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name }
             }
         }
-        publish(add, framework, listOfNotNull(method), path, target?.handler ?: "", fn, "dsl", authentication = target?.authentication ?: emptyList())
+        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl")
     }
 
-    /** A bind's `to` target: the handler, and any auth the target declares. */
-    private class BindTarget(val handler: String?, val authentication: List<String>)
-
-    private fun bindTarget(fn: KirFunction, bindResult: String?, input: Input, framework: FrameworkModel): BindTarget? {
+    private fun bindHandler(fn: KirFunction, bindResult: String?, input: Input): String? {
         if (bindResult == null) return null
         for (block in fn.body?.blocks.orEmpty()) {
             for (ins in block.instructions) {
                 if (ins is KirCall && ins.receiver == bindResult && ins.callee.fqn.substringAfterLast('.') == "to") {
-                    val arg = ins.args.lastOrNull() ?: return BindTarget(null, emptyList())
-                    // P16 §4: contract mode binds `to SecureRoute(security,
-                    // handler)` — the route's auth requirement declared AT the
-                    // route, the scheme being the construction's first
-                    // argument (pack: secureRouteConstructors). Core DSL
-                    // binds a plain lambda and declares nothing.
-                    for (pattern in framework.secureRouteConstructors) {
-                        val construct = constructorOfReg(fn, arg, pattern) ?: continue
-                        val scheme = construct.args.firstOrNull()?.let { secReg ->
-                            securitySchemeOf(fn, block, secReg)
-                        }
-                        val handlerReg = construct.args.lastOrNull()
-                        return BindTarget(
-                            handlerReg?.let { LambdaResolver.resolve(fn, it, input) },
-                            listOfNotNull(scheme?.let { "SecureRoute($it)" }),
-                        )
-                    }
-                    return BindTarget(LambdaResolver.resolve(fn, arg, input), emptyList())
+                    return ins.args.lastOrNull()?.let { reg -> LambdaResolver.resolve(fn, reg, input) }
                 }
             }
         }
         return null
-    }
-
-    /** The constructor call that produced [reg], when its callee matches [pattern]. */
-    private fun constructorOfReg(fn: KirFunction, reg: String, pattern: String): KirCall? {
-        for (block in fn.body?.blocks.orEmpty()) {
-            for (ins in block.instructions) {
-                if (ins is KirCall && ins.result == reg && ins.callee.kind == CallKind.CONSTRUCTOR &&
-                    matches(ins.callee.fqn, pattern)
-                ) {
-                    return ins
-                }
-            }
-        }
-        return null
-    }
-
-    /** The security scheme a SecureRoute's first argument names: its construction's own simple name. */
-    private fun securitySchemeOf(fn: KirFunction, block: KirBlock, reg: String): String? {
-        for (ins in block.instructions) {
-            if (ins is KirCall && ins.result == reg && ins.callee.kind == CallKind.CONSTRUCTOR) {
-                return ins.callee.fqn.substringAfterLast('.')
-            }
-            if (ins is io.cdxgen.kosi.kir.KirNew && ins.result == reg) {
-                return ins.type.substringAfterLast('.')
-            }
-        }
-        return reg.substringAfterLast('.')
     }
 
     /**
