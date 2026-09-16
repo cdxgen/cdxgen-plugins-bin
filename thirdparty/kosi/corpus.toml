@@ -578,6 +578,20 @@ path = "fixtures/implicit-routes"
 classpath_file = "classpath.txt"
 capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
 
+# P18 (R111): the dependency-marker contract from both sides. The present
+# marker is bound to a jar whose FILE NAME does not contain the marker (only
+# the coordinate arm can match); the absent marker is a version no cache
+# holds (missing[] must not publish). Until P18 the coordinate arm rendered
+# a literal template and the missing list counted as presence — the wants on
+# implicit-routes passed through both holes on cold machines.
+
+[[fixtures]]
+slug = "implicit-routes-unresolved"
+tier = "fixtures"
+path = "fixtures/implicit-routes-unresolved"
+classpath_file = "classpath.txt"
+capabilities = ["implicit-routes", "dependency-markers", "classpath-partial"]
+
 # P14 §2: framework GENERATIONS — the packs model one version of
 # everything, and every package rename is a silent zero (R84). javax AND
 # jakarta JAX-RS/servlet side by side, OkHttp 3 and 4/5, HttpClient 4 and

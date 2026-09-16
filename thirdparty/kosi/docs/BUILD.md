@@ -136,6 +136,41 @@ When comparing a native report against a JVM one, normalise `tool.commit`:
 the image bakes in the commit it was built from, the JVM run reads the one
 its jar was built from, and the two differ whenever either is stale.
 
+### The two-environment proof (P18)
+
+`scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted
+form of the check that found R108: the same commit checked out TWICE (two
+git worktrees, different absolute paths), the same kosi jar, and two Gradle
+cache states — leg A with the machine's caches as the runner left them,
+leg B with `HOME` and `-Duser.home` pointed at an empty directory, so the
+offline resolver reads `user.home/.gradle` and `user.home/.m2` and finds
+nothing. Each leg runs `kosi golden --update-goldens` into its own
+directory; the script diffs the two legs' digest files (naming the sections
+that differ, per file) and each leg against the CHECKED-IN goldens at that
+commit. Any difference exits 1.
+
+Run it per phase and before a release; it takes a few minutes (one fat-jar
+build plus two golden passes). Requirements: a clean working tree (the
+proof compares a commit, not a dirty tree), git, a JDK, and either a warm
+Gradle build cache or network for the one jar build — the analysis itself
+never touches the network. On a machine whose Gradle modules-2 cache is
+already empty the cache axis degenerates (the script prints a note) but the
+checkout-location axis still runs; the corpus machine gives the full
+warm-vs-scrubbed contrast.
+
+Its teeth, measured 2026-09-16: against `feat/kosi-part2` (`2a6d232`) the
+proof PASSES — 450 digest files identical across both legs and matching the
+checked-in goldens, i.e. zero environment dependence found; against P16
+(`d317c78`), where the async fixtures were still unpinned, it FAILS exactly
+the way the P17 review's second machine did — the six coroutines fixtures
+differ between the legs (`callGraph, diagnostics, stats` sections: the warm
+cache attaches jars the scrubbed leg cannot), and `async-android-scopes`
+additionally disagrees with its own checked-in goldens (`callGraph,
+diagnostics, imports, stats`), which is R104 verbatim. The golden gate's
+in-run portability check (§ above) covers the checkout-location axis on
+every `kosi golden` run; this script adds the cache axis and the
+against-the-pin comparison.
+
 ## 2. Handled pitfalls (05-BUILD-DIST.md §1 table, with outcomes)
 
 | Pitfall | Handling | Status |
