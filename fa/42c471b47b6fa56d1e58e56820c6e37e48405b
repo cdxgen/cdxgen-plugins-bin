@@ -1,0 +1,14 @@
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  h_6a4cc5cdf68def 157-159,208-210,214-228,231,336,339,903,1558-1568,1660,1855
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fa42c471b47b6fa56d1e58e56820c6e37e48405b",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
