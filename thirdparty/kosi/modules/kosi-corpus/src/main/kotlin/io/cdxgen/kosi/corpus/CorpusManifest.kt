@@ -54,11 +54,16 @@ data class CorpusEntry(
      * a missing import, an unimplemented member) otherwise passed every
      * want over code the compiler rejects. The list is a RATCHET, not a
      * licence: adding a class is a reviewed change, and the count rides
-     * the diagnostic for drift both ways. Absent = ungated (repo tiers:
-     * real code under partial classpaths legitimately resolves
-     * imperfectly).
+     * the diagnostic for drift both ways. NULL = ungated (repo tiers: real
+     * code under partial classpaths legitimately resolves imperfectly —
+     * corpusFull measured ABSTRACT_MEMBER_NOT_IMPLEMENTED and a dozen
+     * inference classes on the pinned repos, none of them a fixture
+     * regression); an EMPTY list is a POSITIVE declaration that the entry
+     * typechecks clean, and the two must not collapse into each other
+     * (the first implementation parsed absent as empty and failed every
+     * repo row — caught by this phase's own corpusFull, not by review).
      */
-    val toleratedResolutionErrors: List<String> = emptyList(),
+    val toleratedResolutionErrors: List<String>? = null,
 ) {
     fun validate() {
         if (path == null && repo == null) {

@@ -752,15 +752,16 @@ object BenchRunner {
         // compiler diagnostics against what it used to carry. Absent field
         // = ungated (repo tiers resolve real code under partial classpaths).
         var undeclaredResolutionErrors = 0
-        if (options.backend.id == "resolved" || options.backend.id == "compile") {
+        val tolerated = entry.toleratedResolutionErrors
+        if (tolerated != null && (options.backend.id == "resolved" || options.backend.id == "compile")) {
             val seen = sortedSetOf<String>()
             for (diag in report.diagnostics) {
                 if (diag.code != io.cdxgen.kosi.schema.DiagnosticCodes.RESOLUTION_ERRORS) continue
                 Regex("([A-Z][A-Z0-9_]+)=\\d+").findAll(diag.message).forEach { seen.add(it.groupValues[1]) }
             }
-            undeclaredResolutionErrors = seen.count { it !in entry.toleratedResolutionErrors }
+            undeclaredResolutionErrors = seen.count { it !in tolerated }
             for (code in seen) {
-                if (code !in entry.toleratedResolutionErrors) {
+                if (code !in tolerated) {
                     failureDetails.add(
                         "${entry.slug}/${slot.label}: UNDECLARED resolution error class $code — the sources no longer " +
                             "typecheck as declared; fix the fixture or add the class to tolerated_resolution_errors " +
