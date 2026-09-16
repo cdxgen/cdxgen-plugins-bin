@@ -1,0 +1,24 @@
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 88-101
+thirdparty/kosi/modules/kosi-bench/src/main/kotlin/io/cdxgen/kosi/bench/Digests.kt
+  h_6a4cc5cdf68def 3-6,87-110,116-121,127-153,160-168,170,172-173,175-177
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/OptionsDigestEnvironmentTest.kt
+  h_6a4cc5cdf68def 1-118
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  h_6a4cc5cdf68def 463-505,507-572,576-577,579-581,589-630
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/ProjectDiscovery.kt
+  h_6a4cc5cdf68def 101-107,110
+thirdparty/kosi/scripts/two-environment-proof.sh
+  h_6a4cc5cdf68def 1-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c2b3a53f36e1262b5fcf0d6d814d6ae0e76ff80f",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
