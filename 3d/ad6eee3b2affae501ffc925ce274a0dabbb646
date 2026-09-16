@@ -1,0 +1,16 @@
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 524
+thirdparty/kosi/modules/kosi-schema/src/test/kotlin/io/cdxgen/kosi/schema/JsonWriterTest.kt
+  h_6a4cc5cdf68def 56-75,80-133,187-192,200,214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3dad6eee3b2affae501ffc925ce274a0dabbb646",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
