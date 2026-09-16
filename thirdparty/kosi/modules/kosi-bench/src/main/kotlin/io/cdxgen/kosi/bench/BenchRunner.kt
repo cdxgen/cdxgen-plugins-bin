@@ -697,9 +697,11 @@ object BenchRunner {
         // finding-floor gate fails on it (P14).
         val declaredClasspath = entry.classpathFile?.let { entryDir -> dir.resolve(entryDir) }
         val classpathFileMissing = declaredClasspath != null && !Files.isRegularFile(declaredClasspath)
+        // Entry-relative, like the golden runner: the recorded option must not
+        // carry this checkout's absolute location into a digest.
         val options = declaredClasspath
             ?.takeIf { Files.isRegularFile(it) }
-            ?.let { slot.options().copy(classpathFile = it.toString()) }
+            ?.let { slot.options().copy(classpathFile = entry.classpathFile) }
             ?: slot.options()
         // A per-entry deps-class cap keeps one heavyweight repo's deps slot
         // measurable instead of terminal: with AndroGoat's transitive

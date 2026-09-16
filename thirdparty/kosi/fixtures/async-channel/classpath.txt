@@ -1,0 +1,5 @@
+# kosi classpath for this fixture (see 02-ARCHITECTURE.md §3): the COMMITTED
+# real coroutines artifact, pinned in P17 (R105) — the six coroutines-only
+# async fixtures read the same coordinate from the machine-local Gradle
+# cache before, stable only while every machine happened to hold it.
+../shared-libs/kotlinx-coroutines-core-jvm-1.8.0.jar

@@ -48,6 +48,15 @@ object ClasspathResolver {
         if (explicitJars.isNotEmpty() || explicitFile != null) {
             explicit = true
             val fileCoordinates = LinkedHashMap<Coordinate, Int>()
+            // P17: a coordinate BOUND to a committed jar
+            // (`g:a:v=libs/foo.jar`). A bare `g:a:v` line resolves against
+            // the machine-local Gradle cache, so a fixture pinning one was
+            // machine-dependent through the very `classpath-partial`
+            // diagnostic the pin was meant to make deterministic (R105).
+            // The bound form attaches the jar WITH the coordinate, so
+            // dependency markers, purls and diagnostics are identical on
+            // every machine.
+            val boundCoordinates = LinkedHashMap<Coordinate, Path>()
             val paths = buildList {
                 addAll(explicitJars)
                 if (explicitFile != null && Files.isRegularFile(explicitFile)) {
@@ -58,6 +67,17 @@ object ClasspathResolver {
                         // (build-produced classpath files list g:a:v lines).
                         val parts = trimmed.split(':')
                         when {
+                            trimmed.endsWith(".jar") && trimmed.contains('=') && trimmed.substringBefore('=').split(':').size >= 3 -> {
+                                val coord = trimmed.substringBefore('=').split(':')
+                                val raw = Path.of(trimmed.substringAfter('='))
+                                val resolved = if (raw.isAbsolute) raw else {
+                                    explicitFile.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw
+                                }
+                                boundCoordinates.putIfAbsent(
+                                    Coordinate(coord[0], coord[1], coord.last()),
+                                    resolved,
+                                )
+                            }
                             trimmed.endsWith(".jar") -> {
                                 // RELATIVE entries resolve against the
                                 // classpath file's own directory, so a
@@ -89,6 +109,13 @@ object ClasspathResolver {
                     add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
                 } else {
                     missing.add(p.toString())
+                }
+            }
+            for ((coordinate, jar) in boundCoordinates) {
+                if (Files.isRegularFile(jar)) {
+                    add(jar, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+                } else {
+                    missing.add("${coordinate}=${jar.fileName}")
                 }
             }
             for (coordinate in fileCoordinates.keys) {

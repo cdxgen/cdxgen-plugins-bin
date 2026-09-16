@@ -380,7 +380,7 @@ object EndpointDetector {
             "dsl",
             consumes = chained.consumes,
             produces = chained.produces,
-            authentication = roles,
+            authentication = roles + chained.authentication,
         )
     }
 
@@ -391,12 +391,17 @@ object EndpointDetector {
      * handler. The walk follows the receiver chain one call at a time — a
      * `.produces` result is the input of the NEXT chained call — and stops
      * at the first call that consumes the chain without producing a route
-     * (the handler attach).
+     * (the handler attach). P17: an attach whose argument is an
+     * authentication handler FACTORY result (Vert.x's
+     * `handler(BasicAuthHandler.create(auth))`) is an authentication
+     * declaration, not the real handler — it is recorded and the chain
+     * CONTINUES, because `Route.handler` returns the route.
      */
     private class ChainedRouteFacts(
         val handler: String?,
         val consumes: List<String>,
         val produces: List<String>,
+        val authentication: List<String>,
     )
 
     private fun chainedRouteFacts(
@@ -407,12 +412,13 @@ object EndpointDetector {
         framework: FrameworkModel?,
         input: Input,
     ): ChainedRouteFacts {
-        if (framework == null || (framework.mediaDsl.isEmpty() && framework.handlerDsl.isEmpty())) {
-            return ChainedRouteFacts(null, emptyList(), emptyList())
+        if (framework == null || (framework.mediaDsl.isEmpty() && framework.handlerDsl.isEmpty() && framework.authHandlerFactories.isEmpty())) {
+            return ChainedRouteFacts(null, emptyList(), emptyList(), emptyList())
         }
-        val result = (ins as? KirCall)?.result ?: return ChainedRouteFacts(null, emptyList(), emptyList())
+        val result = (ins as? KirCall)?.result ?: return ChainedRouteFacts(null, emptyList(), emptyList(), emptyList())
         var consumes = mutableListOf<String>()
         var produces = mutableListOf<String>()
+        var authentication = mutableListOf<String>()
         var handler: String? = null
         var current = result
         var hops = 0
@@ -434,12 +440,54 @@ object EndpointDetector {
                 continue
             }
             if (framework.handlerDsl.any { matches(next.callee.fqn, it) }) {
+                val authScheme = authHandlerSchemeOf(fn, block, nextAt, next, framework)
+                if (authScheme != null) {
+                    authentication.add("auth-handler($authScheme)")
+                    current = next.result ?: break
+                    continue
+                }
                 handler = chainedHandlerOf(fn, block, nextAt, next, input)
                 break
             }
             break
         }
-        return ChainedRouteFacts(handler, consumes, produces)
+        return ChainedRouteFacts(handler, consumes, produces, authentication)
+    }
+
+    /**
+     * The scheme a chained handler attach DECLARED, when the attached value
+     * is the result of one of the framework's authentication-handler
+     * factories (Vert.x's `BasicAuthHandler.create(auth)`): the call that
+     * produced the argument names the scheme, and — unlike the P15 comment
+     * believed — the KIR attributes it to exactly one route, because the
+     * factory result is attached through this route's own chain.
+     */
+    private fun authHandlerSchemeOf(
+        fn: KirFunction,
+        block: KirBlock,
+        at: Int,
+        call: KirCall,
+        framework: FrameworkModel,
+    ): String? {
+        if (framework.authHandlerFactories.isEmpty()) return null
+        val attached = call.args.firstOrNull() ?: return null
+        for (i in at - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is KirCall && candidate.result == attached) {
+                // A Kotlin companion factory renders an extra `Companion`
+                // segment (`BasicAuthHandler.Companion.create`) where the
+                // Java interface static the pack pattern was sourced from
+                // does not; the segment is a resolution artifact, not part
+                // of the API's shape, so it is transparent here.
+                val fqn = candidate.callee.fqn.split('.').filterNot { it == "Companion" }.joinToString(".")
+                val pattern = framework.authHandlerFactories.firstOrNull { matches(fqn, it) }
+                    ?: return null
+                // `io.vertx.ext.web.handler.BasicAuthHandler.create` ->
+                // `BasicAuthHandler`: the owner of the matched factory.
+                return pattern.split('.').dropLast(1).lastOrNull()
+            }
+        }
+        return null
     }
 
     /**
@@ -538,7 +586,19 @@ object EndpointDetector {
         return null
     }
 
-    /** http4k: `"/path" bind GET to { ... }` — receiver is the path, the `to` side the handler. */
+    /**
+     * http4k: `"/path" bind GET to { ... }` — receiver is the path, the `to`
+     * side the handler. P17: the CONTRACT spelling
+     * `"/path" meta { security = .. } bindContract GET to { .. }` puts a
+     * META call between the path and the bind; the bind's receiver is then
+     * the meta call's result, the path is the META call's receiver, and the
+     * meta lambda's own `security` assignment is the route's requirement.
+     * The CONTRACT BLOCK's `security` (the lambda of the `contract { .. }`
+     * call this route is declared inside) applies when the route's meta
+     * declares none — the precedence the framework itself applies
+     * (`it.meta.security?.filter ?: security?.filter ?: Filter.NoOp`,
+     * ContractRouteMatcher.kt:121 at 6.59.0.0).
+     */
     private fun detectBindCall(
         fn: KirFunction,
         block: KirBlock,
@@ -549,8 +609,29 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         val receiver = ins.receiver ?: return
-        val folded = input.folder.valueAt(fn, block, index, receiver)
-        val path = folded?.value ?: rawOf(fn, block, index, receiver)
+        var authentication: List<String> = emptyList()
+        val path: String
+        val metaCall = producerOf(block, index, receiver)
+        // An INFIX call lowers as `kotlin.<name>` (the callee resolves, but
+        // the named-operator lowering keeps only the operation reference), so
+        // the meta infix is matched on its last segment — the same convention
+        // [matchesCallName] uses for the bind itself.
+        if (metaCall != null && framework.routeMetaDsl.any { metaCall.callee.fqn.substringAfterLast('.') == it.substringAfterLast('.') }) {
+            val metaReceiver = metaCall.receiver
+            path = metaReceiver?.let { input.folder.valueAt(fn, block, index, it)?.value ?: rawOf(fn, block, index, it) }
+                ?: rawOf(fn, block, index, receiver)
+            val metaSecurity = metaCall.args.firstOrNull()
+                ?.let { LambdaResolver.resolve(fn, it, input) }
+                ?.let { lambda -> securityAssignmentOf(lambda, input, framework) }
+            if (metaSecurity != null) authentication = listOf("meta-security($metaSecurity)")
+        } else {
+            val folded = input.folder.valueAt(fn, block, index, receiver)
+            path = folded?.value ?: rawOf(fn, block, index, receiver)
+        }
+        if (authentication.isEmpty()) {
+            val blockSecurity = contractBlockSecurity(fn, framework, input)
+            if (blockSecurity != null) authentication = listOf("contract-security($blockSecurity)")
+        }
         // The handler lives on the `to` call whose receiver is this bind's
         // result, and the method constant is the bind's argument.
         val handler = bindHandler(fn, ins.result, input)
@@ -562,7 +643,64 @@ object EndpointDetector {
                     ?.let { e -> (e as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name }
             }
         }
-        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl")
+        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl", authentication = authentication)
+    }
+
+    /** The last call before [index] in [block] whose result is [register]. */
+    private fun producerOf(block: KirBlock, index: Int, register: String): KirCall? {
+        for (i in index - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is KirCall && candidate.result == register) return candidate
+        }
+        return null
+    }
+
+    /**
+     * The SECURITY SCHEME a declaration-site lambda assigns, when it assigns
+     * a modelled security constructor to the DSL's `security` property —
+     * `security = BasicAuthSecurity("realm", creds)` lowers as a field set
+     * whose value register is the constructor call's result. Both real
+     * http4k sites assign a property literally named `security`
+     * (`ContractBuilder.security`, `RouteMetaDsl.security`), so the field
+     * name is the model's, matched here rather than guessed from the KIR.
+     */
+    private fun securityAssignmentOf(
+        lambdaCanonical: String,
+        input: Input,
+        framework: FrameworkModel,
+    ): String? {
+        if (framework.securityConstructors.isEmpty()) return null
+        val lambda = input.module.functions.firstOrNull { it.canonicalName == lambdaCanonical } ?: return null
+        for (block in lambda.body?.blocks.orEmpty()) {
+            for ((at, ins) in block.instructions.withIndex()) {
+                if (ins !is io.cdxgen.kosi.kir.KirFieldSet) continue
+                val field = ins.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field ?: continue
+                if (field.name != "security") continue
+                val ctor = producerOf(block, at, ins.value) ?: continue
+                val pattern = framework.securityConstructors.firstOrNull { matches(ctor.callee.fqn, it) }
+                    ?: continue
+                return pattern.substringAfterLast('.')
+            }
+        }
+        return null
+    }
+
+    /**
+     * The security the CONTRACT BLOCK declares, when [fn] IS the lambda of
+     * one of the framework's contract-builder calls: the block's own
+     * `security = <scheme>(..)` assignment, read from the same function the
+     * routes are declared in.
+     */
+    private fun contractBlockSecurity(
+        fn: KirFunction,
+        framework: FrameworkModel,
+        input: Input,
+    ): String? {
+        if (framework.contractDsl.isEmpty()) return null
+        val link = input.lambdaLinks[fn.canonicalName] ?: return null
+        val call = link.creationCall as? KirCall ?: return null
+        if (framework.contractDsl.none { matches(call.callee.fqn, it) }) return null
+        return securityAssignmentOf(fn.canonicalName, input, framework)
     }
 
     private fun bindHandler(fn: KirFunction, bindResult: String?, input: Input): String? {

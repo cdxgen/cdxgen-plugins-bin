@@ -284,15 +284,25 @@ object Analyzer {
         // A named classpath file that does not exist is an error, not a
         // silently empty classpath: the P0 review's `--compare` defect was
         // exactly this shape — a flag the run echoed but never applied.
-        options.classpathFile?.let { file ->
-            if (!Files.isRegularFile(Path.of(file))) {
-                throw AnalysisException("--classpath-file $file does not exist or is not a regular file")
+        // A RELATIVE --classpath-file resolves against the analysed directory,
+        // not the process's working directory. The recorded option is part of
+        // the report, and an absolute path records the checkout's LOCATION —
+        // which is not an analysis input, and which made the golden gate's
+        // `options` digest differ between two machines analysing the same tree
+        // (P17 review). Absolute paths are unchanged: resolve() returns them
+        // as given.
+        val classpathFile = options.classpathFile?.let { root.resolve(it) }
+        classpathFile?.let { file ->
+            if (!Files.isRegularFile(file)) {
+                throw AnalysisException(
+                    "--classpath-file ${options.classpathFile} does not exist or is not a regular file",
+                )
             }
         }
         val resolution = ClasspathResolver.resolve(
             root = root,
             explicitJars = options.classpath.map { Path.of(it) },
-            explicitFile = options.classpathFile?.let { Path.of(it) },
+            explicitFile = classpathFile,
             moduleDirs = moduleDirs,
         )
         val classpathDiagnostics = buildList {

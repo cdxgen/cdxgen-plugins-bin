@@ -521,7 +521,7 @@ endpoint.
 | --- | --- | --- |
 | `id` | string | `ep-NNNNNN`, assigned after sorting |
 | `framework` | string | pack vocabulary, above |
-| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method) |
+| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method). **Naming quirk, deliberate (P17):** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`; fixed as cdxgen R101), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
 | `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
 | `pathParameters` | string[] | `{id}` template parameters |
 | `handlerSymbol` / `handlerCanonicalName` | string | the KIR canonical name of the handler; EMPTY when the handler could not be resolved (an Android component with no lifecycle method in the workspace) — the resolved-handler gate counts empty as unresolved |

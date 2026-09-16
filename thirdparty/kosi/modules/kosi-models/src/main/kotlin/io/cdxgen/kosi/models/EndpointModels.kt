@@ -175,6 +175,39 @@ data class FrameworkModel(
      * the roles begin.
      */
     val roleArgumentStart: Int = -1,
+    /**
+     * P17: the DSL call that opens a CONTRACT BLOCK whose lambda sets a
+     * block-wide security requirement (http4k's
+     * `contract { security = ApiKeySecurity(..); routes += .. }`). Every
+     * route declared inside the block inherits the requirement, and a
+     * route's own [routeMetaDsl] security overrides it — the precedence the
+     * framework itself applies (`meta.security ?: security ?: NoOp`).
+     */
+    val contractDsl: List<String> = emptyList(),
+    /**
+     * P17: the infix that attaches a route META lambda to a path (http4k's
+     * `"/x" meta { security = BasicAuthSecurity(..) } bindContract GET to h`).
+     * The lambda's own `security` assignment is the route's requirement.
+     */
+    val routeMetaDsl: List<String> = emptyList(),
+    /**
+     * P17: SECURITY implementation constructors — a declaration site that
+     * assigns one of these to `security` names its scheme. Only shapes the
+     * framework itself applies at RUN TIME are modelled (http4k applies
+     * `RouteMeta.security`'s filter per request; its meta `produces`/
+     * `consumes` feed the OpenAPI renderer and are NOT runtime gates, so
+     * they stay an honest empty).
+     */
+    val securityConstructors: List<String> = emptyList(),
+    /**
+     * P17: static factories whose result, passed to the chained handler
+     * attach, IS the route's authentication requirement (Vert.x's
+     * `route.handler(BasicAuthHandler.create(auth))` — an
+     * `AuthenticationHandler`, which IS a `Handler<RoutingContext>`, so it
+     * rides the same attach call as a real handler and the chain continues
+     * past it).
+     */
+    val authHandlerFactories: List<String> = emptyList(),
 )
 
 /**
@@ -381,6 +414,10 @@ object EndpointModels {
                 } ?: emptyList(),
                 handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
                 roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
+                contractDsl = f.arr("contractDsl")?.strings() ?: emptyList(),
+                routeMetaDsl = f.arr("routeMetaDsl")?.strings() ?: emptyList(),
+                securityConstructors = f.arr("securityConstructors")?.strings() ?: emptyList(),
+                authHandlerFactories = f.arr("authHandlerFactories")?.strings() ?: emptyList(),
                 handlerMethodNames = f.arr("handlerMethodNames")?.objects()?.map { h ->
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),

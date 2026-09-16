@@ -1,0 +1,9 @@
+# kosi classpath for this fixture (see 02-ARCHITECTURE.md §3): the COMMITTED
+# real coroutines artifact plus the committed androidx stub jar. Pinned in
+# P17 after the golden digests proved machine-dependent (R105): with no
+# classpath file, the resolver read this fixture's build-file coordinates
+# out of the machine-local Gradle cache, and `classpath-partial`
+# androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0 appeared only on machines
+# whose cache lacked it. Relative entries resolve against this directory.
+../shared-libs/kotlinx-coroutines-core-jvm-1.8.0.jar
+libs/androidx-scope-stubs.jar

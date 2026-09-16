@@ -462,9 +462,30 @@ object Main {
         var checked = 0
         for (entry in entries) {
             val dir = repoRoot.resolve(entry.path!!)
+            // The classpath_file a corpus entry declares is part of the
+            // INPUT the report contract pins: the bench runner already
+            // applies it (BenchRunner.runSlot), but this gate analysed the
+            // bare slot options until P17 — every classpath_file fixture
+            // was golden-checked against the machine-cache scan instead of
+            // its pinned classpath, so its digests were machine-dependent
+            // exactly where the pin existed to make them not (R105). A
+            // declared file that is missing fails the entry outright: a
+            // pin nobody can read is a broken pin.
+            val declaredClasspath = entry.classpathFile?.let { dir.resolve(it) }
+            if (declaredClasspath != null && !Files.isRegularFile(declaredClasspath)) {
+                problems.add("${entry.slug}: declares classpath_file '${entry.classpathFile}' which is not on disk")
+                continue
+            }
             for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
                 checked++
-                val report = Analyzer.analyze(dir, slot.options(), commit)
+                // The ENTRY-RELATIVE value is what the report records: an
+                // absolute path would put this checkout's location into the
+                // `options` digest, so the gate would only ever pass in the
+                // directory the goldens were generated in (P17 review).
+                val slotOptions = entry.classpathFile
+                    ?.let { slot.options().copy(classpathFile = it) }
+                    ?: slot.options()
+                val report = Analyzer.analyze(dir, slotOptions, commit)
                 val digest = Digests.FixtureDigest(
                     slug = entry.slug,
                     slot = slot.label,

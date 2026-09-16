@@ -61,6 +61,13 @@ tell you how well it did:
 - `diagnostics[]` with `classpath-partial`, `classpath-file`,
   `deps-class-not-found` — the specific things that were missing.
 
+`--classpath-file` pins the classpath explicitly. A relative path resolves
+against `--dir`, not the working directory, and that relative form is what the
+report records: where a tree is checked out is not an input to the analysis, so
+it never reaches the output. Each line is a jar path, or a
+`group:artifact:version=jar` binding when what matters is that a coordinate is
+present rather than what it contains.
+
 For repeatable measurement on a corpus, `scripts/warm-corpus-classpath.sh`
 fetches and pins the classpath first; a report taken against a cold cache and
 one taken against a warm cache are not comparable, and a measured finding
