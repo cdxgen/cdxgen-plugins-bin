@@ -615,6 +615,17 @@ path = "fixtures/endpoint-parameter-semantics"
 capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
 tolerated_resolution_errors = []
 
+# P20 §1: the taint source is a PARAMETER, not a function. The pack's
+# `kind`/`category` per parameter annotation change a verdict, and each
+# endpoint-rooted slice names the value-parameter (#N) and transport it
+# entered through.
+[[fixtures]]
+slug = "parameter-taint-sources"
+tier = "fixtures"
+path = "fixtures/parameter-taint-sources"
+capabilities = ["endpoint-sources", "parameter-annotations", "parameter-taint-sources", "spring-mvc"]
+tolerated_resolution_errors = []
+
 [[fixtures]]
 slug = "endpoint-base-path"
 tier = "fixtures"
@@ -785,6 +796,18 @@ slug = "outbound-clients"
 tier = "fixtures"
 path = "fixtures/outbound-clients"
 capabilities = ["endpoints", "outbound", "services", "urls"]
+tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
+
+# P20 §2 (review): the values the fold can only reach by leaving the block
+# — the dominator walk and both verdicts of the conservative phi join. The
+# §0 depth report measured `crossBlock: 0` on all 93 bundled fixtures, so
+# the extension had no corpus evidence and its baseline column could not
+# differ from the shipped one (R63).
+[[fixtures]]
+slug = "cross-block-values"
+tier = "fixtures"
+path = "fixtures/cross-block-values"
+capabilities = ["outbound", "services", "urls", "cross-block-fold"]
 tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
 # P19 §4: the frameworks the pack modelled but no fixture exercised (the

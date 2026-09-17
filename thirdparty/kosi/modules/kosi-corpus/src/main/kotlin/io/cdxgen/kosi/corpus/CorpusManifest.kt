@@ -94,7 +94,10 @@ data class CorpusManifest(
         require(unknown.isEmpty()) {
             "unknown corpus tier(s) ${unknown.joinToString(", ")}; corpus.toml has ${known.sorted().joinToString(", ")}"
         }
-        return entries.filter { it.tier in tiers && (only == null || it.slug == only) }
+        // P20 §5: `only` is a comma-separated slug list — the corpusChanged
+        // middle tier selects many repo rows in one invocation.
+        val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        return entries.filter { it.tier in tiers && (onlySlugs == null || it.slug in onlySlugs) }
     }
 
     companion object {

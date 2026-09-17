@@ -107,6 +107,8 @@ object AnnotationParser {
             var form: String? = null
             var protocol: String? = null
             var resolution: String? = null
+            var sourceParam: String? = null
+            var sourceTransport: String? = null
             val knownFailByBackend = linkedMapOf<String, Int>()
 
             for (token in tokens.drop(1)) {
@@ -158,6 +160,8 @@ object AnnotationParser {
                     "form" -> form = rawValue
                     "protocol" -> protocol = rawValue
                     "resolution" -> resolution = rawValue
+                    "sourceparam" -> sourceParam = rawValue
+                    "sourcetransport" -> sourceTransport = rawValue
                     "maxdepth" -> maxDepth = rawValue.toIntOrNull() ?: run {
                         results.add(Failure("maxdepth must be an integer", lineText, fileName, index + 1))
                         return@forEachIndexed
@@ -234,6 +238,8 @@ object AnnotationParser {
                 form = form,
                 protocol = protocol,
                 resolution = resolution,
+                sourceParam = sourceParam,
+                sourceTransport = sourceTransport,
                 file = fileName,
                 line = index + 1,
             )

@@ -13,6 +13,8 @@ import io.cdxgen.kosi.schema.DiagnosticCodes
  *
  * kinds and keys:
  *   flow        source=<category> sink=<category> [count=N] [mode=M] [fn=<function>]
+ *               [sourceparam=#N] [sourcetransport=T]   (P20 §1: which handler
+ *               parameter a flow entered through, and its transport)
  *   signal      code=<signal-code> [fn=<symbol>]   securitySignals[] evidence
  *   edge        from=<symbol> to=<symbol> [calltype=T]
  *   reachable   symbol=<symbol> [from=<symbol>] [maxdepth=N]
@@ -77,6 +79,10 @@ data class Annotation(
     val form: String?,
     val protocol: String?,
     val resolution: String?,
+    /** P20 §1: the handler value-parameter a flow entered through (`#0` = first non-receiver). */
+    val sourceParam: String?,
+    /** P20 §1: the transport that parameter's annotation names (path/query/header/cookie/form/body). */
+    val sourceTransport: String?,
     val file: String,
     val line: Int,
 ) {
@@ -176,6 +182,16 @@ data class Annotation(
         if (mode != null && mode !in MODES) {
             errors.add("mode must be one of $MODES, got $mode")
         }
+        // The parameter-identity keys only mean something on a flow expectation.
+        if (kind != Kind.FLOW && (sourceParam != null || sourceTransport != null)) {
+            errors.add("sourceparam=/sourcetransport= are only valid on flow expectations")
+        }
+        if (sourceParam != null && !SOURCE_PARAM.matches(sourceParam)) {
+            errors.add("sourceparam must be #N (the handler's value-parameter index), got $sourceParam")
+        }
+        if (sourceTransport != null && sourceTransport !in SOURCE_TRANSPORTS) {
+            errors.add("sourcetransport must be one of $SOURCE_TRANSPORTS, got $sourceTransport")
+        }
         return errors
     }
 
@@ -202,6 +218,10 @@ data class Annotation(
 
         /** The resolution vocabulary (03-SCHEMA.md UrlEvidence.resolution). */
         val RESOLUTIONS = setOf("literal", "folded", "config", "env", "unresolved")
+
+        /** P20 §1: `sourceparam` shape and the transport vocabulary the pack's kinds name. */
+        val SOURCE_PARAM = Regex("#[0-9]+")
+        val SOURCE_TRANSPORTS = setOf("path", "query", "header", "cookie", "form", "body", "merged")
 
         /** `declarations[].kind` vocabulary. */
         val DECLARATION_KINDS = setOf(

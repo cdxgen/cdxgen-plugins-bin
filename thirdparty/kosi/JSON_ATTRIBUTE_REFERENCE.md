@@ -410,6 +410,8 @@ first parameter is index 0.
 | `sourceName`, `sinkName` | string | callee FQNs matched from the pack |
 | `sourceFunction`, `sinkFunction` | string | the function each END lives in — two different functions (and modules) for an interprocedural slice |
 | `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
+| `sourceParameter` | string? | P20 §1: for a slice that entered through an endpoint HANDLER's parameter, the value-parameter it entered through — `#0` is the first non-receiver parameter. `null` for every other birth. Before this field an endpoint-rooted slice could say "this handler is reachable from untrusted input" but never WHICH input |
+| `sourceTransport` | string? | P20 §1: the transport that parameter's annotation names — `path`, `query`, `header`, `cookie`, `form`, `body` (the endpoints pack's `parameterAnnotations[].kind`). `null` when the handler (or framework) names no annotation for it |
 | `taintKinds` | string[] | the categories travelling on the trace |
 | `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
 | `pathLength` | int | `edgeIds.size` |

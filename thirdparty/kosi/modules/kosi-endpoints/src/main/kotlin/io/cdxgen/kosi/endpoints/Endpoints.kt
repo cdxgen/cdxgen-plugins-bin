@@ -59,6 +59,17 @@ object Endpoints {
          * report depends on is a mechanical fact, not an anecdote.
          */
         pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
+        /**
+         * P20 §0: when non-null, every value the consumers ask the folder
+         * for is counted here with its failure reason — the depth report's
+         * value-resolution table. Production passes null and pays nothing.
+         */
+        foldStats: KirValueFolder.FoldStats? = null,
+        /**
+         * P20 §2: `false` restores the pre-P20 block-local scan — the depth
+         * report's baseline column measures both ways over one capture.
+         */
+        crossBlock: Boolean = true,
     ): Result {
         val configTable = ConfigResolver.load(root)
         val configValues = configTable.keys().mapNotNull { key -> configTable[key]?.let { key to it.value!! } }.toMap()
@@ -67,6 +78,8 @@ object Endpoints {
             constValues = ConstTable.fromSources(sourceTexts),
             configReaders = pack.configReaders.map { it.pattern to it.argument },
             configTable = configValues,
+            statsSink = foldStats,
+            crossBlock = crossBlock,
         )
         val lambdaLinks = buildLambdaLinks(module)
 

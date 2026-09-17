@@ -110,7 +110,11 @@ object Evaluator {
     /** The per-slice half of [flowSatisfied]: categories plus the fn= scope. */
     fun sliceMatches(slice: FlowSlice, ann: Annotation): Boolean =
         matches(ann.source, slice.sourceCategory) && matches(ann.sink, slice.sinkCategory) &&
-            (ann.fn == null || matches(ann.fn, slice.sourceFunction) || matches(ann.fn, slice.sinkFunction))
+            (ann.fn == null || matches(ann.fn, slice.sourceFunction) || matches(ann.fn, slice.sinkFunction)) &&
+            // P20 §1: parameter identity. `#0` and `query` are exactly the
+            // strings the slice publishes; a want pins WHICH input.
+            (ann.sourceParam == null || slice.sourceParameter == ann.sourceParam) &&
+            (ann.sourceTransport == null || slice.sourceTransport == ann.sourceTransport)
 
     private fun evaluateOne(report: KosiReport, ann: Annotation, backend: String): Outcome {
         val satisfied = when (ann.kind) {
@@ -147,7 +151,8 @@ object Evaluator {
     }
 
     private fun describe(ann: Annotation): String = when (ann.kind) {
-        Annotation.Kind.FLOW -> "flow ${ann.source}->${ann.sink}"
+        Annotation.Kind.FLOW -> "flow ${ann.source}->${ann.sink}" +
+            (ann.sourceParam?.let { " @$it" } ?: "") + (ann.sourceTransport?.let { " ($it)" } ?: "")
         Annotation.Kind.EDGE -> "edge ${ann.from} -> ${ann.to}"
         Annotation.Kind.REACHABLE -> "reachable ${ann.symbol}"
         Annotation.Kind.USAGE -> "usage ${ann.name}"
