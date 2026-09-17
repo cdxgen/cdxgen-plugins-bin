@@ -53,9 +53,15 @@ if ! git rev-parse --verify "$base" >/dev/null 2>&1; then
 fi
 
 merge_base="$(git merge-base HEAD "$base")"
-changed="$(git diff --name-only "$merge_base" HEAD; git diff --name-only)"
+# Token matching runs over SOURCE-ish changes only: goldens/ are digest
+# artifacts whose names MIRROR fixture slugs (a regenerated golden would
+# otherwise flood the matcher and select every repo — measured in P20's
+# own first real run: 164 golden files turned "coroutines" into a
+# capability), and docs describe, they do not move findings. The golden
+# gate stays the golden gate.
+changed="$( { git diff --name-only --relative "$merge_base" HEAD; git diff --name-only; } | grep -vE '^goldens/|\.md$|^docs/' | sort -u )"
 if [ -z "$changed" ]; then
-  echo "corpus-changed: no changes against $merge_base"
+  echo "corpus-changed: no source changes against $merge_base"
 fi
 
 # ---- the capability vocabulary, read from the manifest ---------------------
