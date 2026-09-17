@@ -82,7 +82,13 @@ for token in $cap_tokens; do
   # Content match: the diff of the changed sources mentions it (a framework
   # id, a transport, a tier name — whatever a repo declared as its
   # capability).
-  if git diff "$merge_base" HEAD -- . 2>/dev/null | grep -qE "(^|[^a-z0-9_-])${token}([^a-z0-9_-]|\$)"; then
+  # Scoped to the SAME filtered file list as the name match, and to the
+  # working tree as well as the commits. Diffing `-- .` re-admitted exactly
+  # what R130 excluded: a regenerated golden or an edited BUILD.md mentions
+  # "endpoints" and "coroutines" in its CONTENT, so filtering those files
+  # out of the name match alone still selected every repo (P20 review).
+  if [ -n "$changed" ] && { git diff "$merge_base" HEAD -- $changed; git diff -- $changed; } 2>/dev/null |
+    grep -qE "(^|[^a-z0-9_-])${token}([^a-z0-9_-]|\$)"; then
     token_hits="$token_hits $token"
   fi
 done

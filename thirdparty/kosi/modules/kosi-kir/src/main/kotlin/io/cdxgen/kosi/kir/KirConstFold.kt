@@ -331,6 +331,11 @@ class KirValueFolder(
 
                 is KirAssign -> fold(fn, block, i, ins.source, depth + 1)
 
+                // The local's value is whatever was stored into it, proved
+                // from ABOVE the store — a store is a strong update, so the
+                // nearest one above the use is the value at the use.
+                is KirStore -> fold(fn, block, i, ins.value, depth + 1)
+
                 is KirPhi -> cfgOf(fn)?.let { foldPhi(fn, it, block, ins, depth) }
                     ?: FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.CROSS_BLOCK)
 
@@ -506,6 +511,7 @@ class KirValueFolder(
 
             is KirStringConcat -> foldConcat(fn, block, index, ins.parts, depth)
             is KirAssign -> fold(fn, block, index, ins.source, depth)
+            is KirStore -> fold(fn, block, index, ins.value, depth)
             is KirFieldGet -> {
                 val name = (ins.path.elements.lastOrNull() as? AccessPath.Element.Field)?.name
                 val constValue = name?.let { constValues[it] }
@@ -543,6 +549,16 @@ class KirValueFolder(
         is KirStringConcat -> ins.result
         is KirFieldGet -> ins.result
         is KirAssign -> ins.result
+        // A local `val`/`var` lowers to a STORE, not an assign, and the
+        // store defines its target — `KirIns.defs` has always said so. This
+        // arm did not, so every register named by a local was invisible to
+        // the fold: the backward scan walked past its own definition, and
+        // §2's dominator walk scanned the dominating block for a def whose
+        // instruction it could not recognise and fell through to
+        // CROSS_BLOCK. The two views of "what defines this register" — the
+        // CFG's `ins.defs` and this function — must be the same view
+        // (P20 review, R131).
+        is KirStore -> ins.target
         is KirCall -> ins.result
         is KirNew -> ins.result
         is KirCast -> ins.result
