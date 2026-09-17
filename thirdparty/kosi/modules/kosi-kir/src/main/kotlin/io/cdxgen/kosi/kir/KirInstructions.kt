@@ -99,12 +99,6 @@ data class KirLambda(val result: String, val function: String, val captures: Lis
  */
 data class KirElvis(val result: String, val value: String, val fallback: String) : KirIns
 
-/**
- * The `?.` operator at a position where the lowering cannot branch; at
- * statement/return positions a safe call lowers to branch + phi per §4.
- */
-data class KirSafeCall(val result: String, val receiver: String, val path: AccessPath) : KirIns
-
 /** A cast; `!!` lowers to a safe cast of a known-non-null value plus a throw branch. */
 data class KirCast(val result: String, val value: String, val type: String, val checked: Boolean) : KirIns
 
@@ -138,7 +132,6 @@ val KirIns.defs: List<String>
         is KirStringConcat -> listOf(result)
         is KirLambda -> listOf(result)
         is KirElvis -> listOf(result)
-        is KirSafeCall -> listOf(result)
         is KirCast -> listOf(result)
         is KirTypeCheck -> listOf(result)
     }
@@ -169,7 +162,6 @@ val KirIns.uses: List<String>
         is KirStringConcat -> parts
         is KirLambda -> captures
         is KirElvis -> listOf(value, fallback)
-        is KirSafeCall -> listOf(receiver) + path.uses
         is KirCast -> listOf(value)
         is KirTypeCheck -> listOf(value)
     }
@@ -231,7 +223,6 @@ fun KirIns.mapRegisters(transform: (String) -> String, defsToo: Boolean): KirIns
         fallback = transform(fallback),
     )
 
-    is KirSafeCall -> copy(result = if (defsToo) transform(result) else result, receiver = transform(receiver), path = path.mapRegisters(transform))
     is KirCast -> copy(result = if (defsToo) transform(result) else result, value = transform(value))
     is KirTypeCheck -> copy(result = if (defsToo) transform(result) else result, value = transform(value))
 }

@@ -80,7 +80,6 @@ object KirWriter {
         is KirStringConcat -> "${ins.result} = concat ${writeArgs(ins.parts)}"
         is KirLambda -> "${ins.result} = lambda ${q(ins.function)}${writeArgs(ins.captures)}"
         is KirElvis -> "${ins.result} = elvis ${ins.value} fallback=${ins.fallback}"
-        is KirSafeCall -> "${ins.result} = safecall ${ins.receiver} ${writePath(ins.path)}"
         is KirCast ->
             "${ins.result} = cast ${ins.value} as ${qn(ins.type)}${if (ins.checked) " checked" else ""}"
         is KirTypeCheck -> "${ins.result} = typeof ${ins.value} is ${qn(ins.type)}"

@@ -13,6 +13,7 @@ import io.cdxgen.kosi.models.TRANSPORT_QUERY
 import io.cdxgen.kosi.kir.KirLambda
 import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirModule
+import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirValueFolder
 import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.models.FrameworkModel
@@ -316,7 +317,9 @@ object EndpointDetector {
             is KirDynamicCall -> ins.args
             else -> emptyList()
         }
-        val prefix = prefixChain(fn.canonicalName, input)
+        // The full prefix is the lambda-link chain (outermost) composed with
+        // the MOUNT prefix a mounted router publishes under (P19 §4).
+        val prefix = joinPaths(prefixChain(fn.canonicalName, input), mountedPrefix(fn, (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver, framework, input))
 
         // A TYPED route names its path on a class, not at the call site:
         // `get<Article> { }` with `@Resource("/articles/{id}")` on
@@ -349,6 +352,23 @@ object EndpointDetector {
             }
         }
         val folded = input.folder.valueAt(fn, block, index, pathReg)
+        // A PROVABLE null path argument is not an unresolvable one: ktor 2's
+        // own builder spells it (`get(path: String? = null, body)`,
+        // RoutingRoot.kt — the no-argument overload of the same generation),
+        // and a null path selects the route at its ENCLOSING level, exactly
+        // as the lambda-only route above. Before the typed constants (R117)
+        // this compiled to the string "null" and published a route at
+        // "/null"; after it, the register fallback would have published the
+        // register's own name as a URL. Neither is a path — P19 §1.
+        if (folded?.status == KirValueFolder.ValueStatus.NULL) {
+            val path = joinPaths(prefix, "").ifEmpty { "/" }
+            // With the framework in hand: a role-tail builder's handler is
+            // the argument BEFORE the roles, and resolving the LAST one
+            // publishes the ROLE register as the handler (P15's defect,
+            // which this arm reintroduced by dropping the argument).
+            publish(add, framework, methods, path, handlerOfRegs(fn, callArgs, input, framework) ?: "", fn, "dsl")
+            return
+        }
         val foldedPath = folded?.value
         val boundMethod: String? = when (ins) {
             is KirCall -> boundMethodName(fn, block, index, ins)
@@ -805,6 +825,56 @@ object EndpointDetector {
             }
         }
         return register
+    }
+
+    /**
+     * The prefix a MOUNTED router publishes under (P19 §4): Vert.x 5's
+     * mount idiom — a wildcard route on the parent router whose subRouter
+     * call takes the mounted router as its argument — puts every route
+     * declared on the mounted router under the wildcard route's path. The
+     * walk is keyed on the MOUNTED ROUTER'S REGISTER (the mount call's
+     * first argument) through one store alias (`val api = Router.router(v)`),
+     * which is the shape the routes are declared against; the lambda-link
+     * chain cannot see it because a sub-router is a VALUE, not a lambda.
+     * The mount route's trailing wildcard marker is the framework's own
+     * "and everything below" spelling and contributes no segment.
+     * Same-function mounts only: a sub-router built in another function
+     * crosses a boundary this walk does not follow — a named gap, recorded
+     * in the pack comment, not a wrong prefix.
+     */
+    private fun mountedPrefix(
+        fn: KirFunction,
+        routeReceiver: String?,
+        framework: FrameworkModel?,
+        input: Input,
+    ): String {
+        if (framework == null || framework.mountFunctions.isEmpty() || routeReceiver == null) return ""
+        val storeSources = HashMap<String, String>()
+        for (block in fn.body?.blocks.orEmpty()) {
+            for (ins in block.instructions) {
+                if (ins is KirStore) storeSources[ins.target] = ins.value
+            }
+        }
+        for (block in fn.body?.blocks.orEmpty()) {
+            for ((at, ins) in block.instructions.withIndex()) {
+                if (ins !is KirCall) continue
+                val fqn = ins.callee.fqn.split('.').filterNot { it == "Companion" }.joinToString(".")
+                if (framework.mountFunctions.none { matches(fqn, it) }) continue
+                val mounted = ins.args.firstOrNull() ?: continue
+                val receiverIsMounted = routeReceiver == mounted || storeSources[routeReceiver] == mounted
+                if (!receiverIsMounted) continue
+                // The mount call's own receiver is the ROUTE the mount hangs
+                // off; its producer is the `router.route("/api/*")` call and
+                // its first argument is the prefix.
+                val routeObject = ins.receiver ?: continue
+                val producer = producerOf(block, at, routeObject) ?: continue
+                if (producer.callee.fqn.substringAfterLast('.') != "route") continue
+                val prefixReg = producer.args.firstOrNull() ?: continue
+                val folded = input.folder.valueAt(fn, block, at, prefixReg)?.value ?: continue
+                return folded.trimEnd('*').trimEnd('/')
+            }
+        }
+        return ""
     }
 
     /**

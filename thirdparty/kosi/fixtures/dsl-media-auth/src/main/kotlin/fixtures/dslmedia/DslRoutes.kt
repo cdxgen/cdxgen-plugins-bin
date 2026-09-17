@@ -35,6 +35,13 @@
 // kosi:want endpoint framework=vertx path=/token mode=resolved authentication=~JWTAuthHandler
 // kosi:want endpoint framework=vertx path=/token mode=resolved fn=~lambda
 //
+// A chained route whose media argument is the null LITERAL (legal against
+// the Java platform type, a warning not an error): a null media type is the
+// ABSENCE of a declaration — no produces entry exists for this route, and
+// certainly not one called "null" (P19 §1).
+// kosi:want endpoint framework=vertx path=/chain-null mode=resolved fn=~lambda
+// kosi:want-not endpoint framework=vertx path=/chain-null produces=null
+//
 // The plain Vert.x route (no chain) declares nothing — an honest empty.
 // kosi:want endpoint framework=vertx path=/plain mode=resolved
 // kosi:want-not endpoint framework=vertx path=/plain authentication=~
@@ -139,6 +146,9 @@ fun buildRouter(): Router {
     router.get("/chain")
         .produces("application/json")
         .consumes("application/xml")
+        .handler(Handler<RoutingContext> { ctx -> chainHandler(ctx) })
+    router.get("/chain-null")
+        .produces(null)
         .handler(Handler<RoutingContext> { ctx -> chainHandler(ctx) })
     router.get("/plain").handler(Handler<RoutingContext> { ctx -> ctx.queryParam("q") })
     router.route("/secure")

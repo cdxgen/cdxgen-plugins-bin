@@ -7,6 +7,11 @@ dependencies {
     implementation(project(":kosi-front"))
     implementation(project(":kosi-corpus"))
     implementation(project(":kosi-models"))
+    // P19 §4 liveness gate: the test re-runs Endpoints.analyze per removed
+    // pack entry, and kosi-endpoints rides kosi-front as an implementation
+    // dependency that tests cannot see.
+    testImplementation(project(":kosi-endpoints"))
+    testImplementation(project(":kosi-kir"))
     implementation(libs.kotlin.stdlib)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit5)

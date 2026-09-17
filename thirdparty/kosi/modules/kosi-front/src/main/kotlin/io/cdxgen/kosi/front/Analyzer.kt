@@ -70,9 +70,33 @@ object Analyzer {
         return parts.joinToString(" <- ")
     }
 
-    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport = when (options.backend) {
+    /**
+     * The endpoint-detection inputs, captured mid-pipeline (P19 §4): the
+     * lowered module, the source texts, the resolved declaration-annotation
+     * values and the resolved dependency coordinates. The pack-entry
+     * liveness gate re-runs [io.cdxgen.kosi.endpoints.Endpoints.analyze]
+     * over one capture per fixture with each pack entry removed, so the
+     * question "does any fixture's report change if this entry goes" is
+     * answered mechanically instead of by anecdote.
+     */
+    class EndpointCapture(
+        val module: io.cdxgen.kosi.kir.KirModule,
+        val sourceTexts: Map<String, String>,
+        val annotationValues: Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>,
+        val dependencyCoordinates: Set<String>,
+    )
+
+    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport =
+        analyze(root, options, commit, endpointCapture = null)
+
+    fun analyze(
+        root: Path,
+        options: AnalyzeOptions,
+        commit: String,
+        endpointCapture: ((EndpointCapture) -> Unit)?,
+    ): KosiReport = when (options.backend) {
         Backend.SYNTAX -> analyzeSyntax(root, options, commit)
-        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit)
+        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit, endpointCapture)
     }
 
     // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
@@ -250,14 +274,14 @@ object Analyzer {
 
     // ---- resolved tier (P1) -------------------------------------------------
 
-    private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
+    private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String, endpointCapture: ((EndpointCapture) -> Unit)? = null): KosiReport {
         // P10: the budgets (time, RSS) live across the whole resolved run and
         // degrade it — never panic, never discard computed evidence. Off by
         // default; when both budgets are unset no sampler thread exists and
         // shouldStop() is a constant null.
         val budgets = Budgets.of(options)
         try {
-            return analyzeResolvedInner(root, options, commit, budgets)
+            return analyzeResolvedInner(root, options, commit, budgets, endpointCapture)
         } finally {
             budgets.close()
         }
@@ -268,6 +292,7 @@ object Analyzer {
         options: AnalyzeOptions,
         commit: String,
         budgets: Budgets,
+        endpointCapture: ((EndpointCapture) -> Unit)? = null,
     ): KosiReport {
         val discovery = ProjectDiscovery.discover(root)
         val (versionedModules, versionDiagnostics, overrideDiagnostics) =
@@ -539,23 +564,50 @@ object Analyzer {
                     ""
                 })
             }
+            val declarationAnnotationValues = declarationAnnotations(
+                drafts,
+                kirModule,
+                // Resolution's own short-name -> FQN map. Scanning KIR
+                // FUNCTION annotations cannot reach a class with no
+                // functions, and framework matching is on the FQN.
+                facts.fold(mutableMapOf<String, MutableSet<String>>()) { acc, f ->
+                    for ((short, fqns) in f.annotationFqnsByShortName) {
+                        acc.getOrPut(short) { mutableSetOf() }.addAll(fqns)
+                    }
+                    acc
+                },
+            )
+            val resolvedDependencyCoordinates = buildSet {
+                for (jar in resolution.jars) {
+                    // The real coordinate, interpolated: this arm read
+                    // `"${'$'}{it.group}:${'$'}{it.artifact}"` since P13,
+                    // which renders the LITERAL `${it.group}:...` — a
+                    // dead arm nobody noticed because the FILE-NAME arm
+                    // below matched every Gradle-cache jar anyway
+                    // (R111b). A bound pin with a custom jar name has no
+                    // filename to fall back on; implicit-routes-
+                    // unresolved pins exactly that shape.
+                    jar.coordinate?.let { add(it.group + ":" + it.artifact) }
+                    add(jar.jar.fileName.toString())
+                }
+            }
+            // P19 §4: the pack-entry liveness gate re-runs endpoint
+            // DETECTION once per removed pack entry over exactly these
+            // captured products, so the front-end analysis runs once per
+            // fixture regardless of how many entries the pack carries.
+            endpointCapture?.invoke(
+                EndpointCapture(
+                    module = kirModule,
+                    sourceTexts = sourceTexts,
+                    annotationValues = declarationAnnotationValues,
+                    dependencyCoordinates = resolvedDependencyCoordinates,
+                ),
+            )
             val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
                 module = kirModule,
                 root = root,
                 sourceTexts = sourceTexts,
-                annotationValues = declarationAnnotations(
-                    drafts,
-                    kirModule,
-                    // Resolution's own short-name -> FQN map. Scanning KIR
-                    // FUNCTION annotations cannot reach a class with no
-                    // functions, and framework matching is on the FQN.
-                    facts.fold(mutableMapOf<String, MutableSet<String>>()) { acc, f ->
-                        for ((short, fqns) in f.annotationFqnsByShortName) {
-                            acc.getOrPut(short) { mutableSetOf() }.addAll(fqns)
-                        }
-                        acc
-                    },
-                ),
+                annotationValues = declarationAnnotationValues,
                 attribution = io.cdxgen.kosi.endpoints.Endpoints.Attribution(fileRelPathByAbsolute, purlByModulePath),
                 includeManifests = true,
                 // The resolved classpath, as coordinates: some routes exist
@@ -566,20 +618,7 @@ object Analyzer {
                 // and treating it as present published the implicit trees on
                 // machines whose cache was cold (R111), the exact
                 // wrong-reason pass implicit-routes-unresolved pins.
-                dependencyCoordinates = buildSet {
-                    for (jar in resolution.jars) {
-                        // The real coordinate, interpolated: this arm read
-                        // `"${'$'}{it.group}:${'$'}{it.artifact}"` since P13,
-                        // which renders the LITERAL `${it.group}:...` — a
-                        // dead arm nobody noticed because the FILE-NAME arm
-                        // below matched every Gradle-cache jar anyway
-                        // (R111b). A bound pin with a custom jar name has no
-                        // filename to fall back on; implicit-routes-
-                        // unresolved pins exactly that shape.
-                        jar.coordinate?.let { add(it.group + ":" + it.artifact) }
-                        add(jar.jar.fileName.toString())
-                    }
-                },
+                dependencyCoordinates = resolvedDependencyCoordinates,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(

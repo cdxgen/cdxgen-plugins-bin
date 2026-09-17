@@ -14,15 +14,7 @@
     },
     {
       "argument": 0,
-      "pattern": "java.lang.System.getenv"
-    },
-    {
-      "argument": 0,
       "pattern": "java.util.Properties.getProperty"
-    },
-    {
-      "argument": 0,
-      "pattern": "kotlin.system.getenv"
     },
     {
       "argument": 1,
@@ -82,28 +74,6 @@
       ]
     },
     {
-      "dslFunctions": [
-        {
-          "methods": [],
-          "nesting": false,
-          "pattern": "androidx.navigation.compose.composable"
-        },
-        {
-          "methods": [],
-          "nesting": false,
-          "pattern": "androidx.navigation.compose.dialog"
-        },
-        {
-          "methods": [],
-          "nesting": true,
-          "pattern": "androidx.navigation.compose.navigation"
-        }
-      ],
-      "handlerInput": "all",
-      "id": "compose-navigation",
-      "kind": "dsl"
-    },
-    {
       "classMarkers": [
         "org.springframework.stereotype.Controller"
       ],
@@ -145,13 +115,14 @@
       "id": "grpc",
       "kind": "supertype",
       "supertypeMarkers": [
-        "GrpcKt",
-        "Grpc"
+        "Grpc",
+        "GrpcKt"
       ],
       "supertypeSuffixes": [
         "CoroutineImplBase",
         "ImplBase"
-      ]
+      ],
+      "_p19_comment": "P19: the substring markers (Grpc, GrpcKt) STAY \u2014 restoring the liveness sweep's first deletion attempt: they are the disambiguator that refuses a homonym ImplBase without Grpc in its supertype name (fixtures/grpc-service's grpcbad half pins it), and each is individually inert only because the other carries the same conjunct for every real generated base."
     },
     {
       "_p15_comment": "P15, corrected in P17: http4k's CORE DSL (`\"/path\" bind METHOD to handler`) has no media/auth declaration site - the handler is a plain function, content types live in lenses and responses. That half was and remains the truth. The P15 claim that contract meta {} is 'OpenAPI documentation, not routing' was WRONG for the security field: see _p17_comment.",
@@ -215,17 +186,9 @@
         "org.http4k.contract.meta"
       ],
       "securityConstructors": [
-        "org.http4k.security.ApiKeySecurity",
-        "org.http4k.security.BasicAuthSecurity",
-        "org.http4k.security.BearerAuthSecurity",
-        "org.http4k.security.MutualTLSSecurity",
-        "org.http4k.security.AuthCodeOAuthSecurity",
-        "org.http4k.security.ImplicitOAuthSecurity",
-        "org.http4k.security.UserCredentialsOAuthSecurity",
-        "org.http4k.security.ClientCredentialsOAuthSecurity",
-        "org.http4k.security.DeviceCodeOAuthSecurity",
-        "org.http4k.security.OpenIdConnectSecurity"
-      ]
+        "org.http4k.security.ApiKeySecurity"
+      ],
+      "_p19_comment": "P19 liveness sweep: securityConstructors collapsed from ten entries to the one that carries the channel's flag. Post-R115 an assignment's rendering is the producer's own name whether the pack models the constructor or not (modelled and unmodelled produce the same string by design \u2014 the /custom route pins an unmodelled CustomSecurity rendering identically to a modelled one), so the ten entries were one boolean with nine inert duplicates; the constructibility evidence for the schemes the channel once listed (the five OAuth subclasses etc.) stays sourced in the _p17_comment."
     },
     {
       "_p15_comment": "P15: the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty. P18, sourced: at javalin-parent-6.7.0 (JavalinDefaultRoutingApi.kt:128-194) every route builder is (path, handler[, vararg roles]) - no content-type parameter exists on any of them; the only contentType in the routing API scopes ERROR handlers (error(status, contentType, handler), :44-96). The empty stands with evidence.",
@@ -524,22 +487,8 @@
         },
         {
           "methods": [
-            "HEAD"
-          ],
-          "nesting": false,
-          "pattern": "io.ktor.server.routing.head"
-        },
-        {
-          "methods": [
             "OPTIONS"
           ],
-          "pattern": "io.ktor.server.routing.options"
-        },
-        {
-          "methods": [
-            "OPTIONS"
-          ],
-          "nesting": false,
           "pattern": "io.ktor.server.routing.options"
         },
         {
@@ -585,29 +534,8 @@
       "kind": "dsl",
       "resourceAnnotations": [
         "io.ktor.resources.Resource"
-      ]
-    },
-    {
-      "dslFunctions": [
-        {
-          "methods": [],
-          "nesting": false,
-          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addTool"
-        },
-        {
-          "methods": [],
-          "nesting": false,
-          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addPrompt"
-        },
-        {
-          "methods": [],
-          "nesting": false,
-          "pattern": "io.modelcontextprotocol.kotlin.sdk.server.Server.addResource"
-        }
       ],
-      "handlerInput": "all",
-      "id": "mcp",
-      "kind": "dsl"
+      "_p19_dedup": "P19 liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed."
     },
     {
       "authenticationAnnotations": [
@@ -1521,8 +1449,7 @@
     },
     {
       "dependencyMarkers": [
-        "springdoc-openapi",
-        "springfox-swagger"
+        "springdoc-openapi"
       ],
       "handlerInput": "all",
       "id": "springdoc",
@@ -1552,7 +1479,8 @@
           "path": "/swagger-ui/index.html"
         }
       ],
-      "kind": "annotation"
+      "kind": "annotation",
+      "_p19_comment": "P19 liveness sweep: the springfox-swagger coordinate marker removed \u2014 springfox is a different, archived project; the springdoc rows are what the fixtures exercise."
     },
     {
       "_p15_comment": "P15: media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls.",
@@ -1635,11 +1563,6 @@
           "methods": [],
           "nesting": false,
           "pattern": "io.vertx.ext.web.Router.route"
-        },
-        {
-          "methods": [],
-          "nesting": true,
-          "pattern": "io.vertx.ext.web.Route.subRouter"
         }
       ],
       "handlerDsl": [
@@ -1657,45 +1580,21 @@
           "kind": "consumes",
           "pattern": "io.vertx.ext.web.Route.consumes"
         }
-      ]
+      ],
+      "mountFunctions": [
+        "io.vertx.ext.web.Route.subRouter"
+      ],
+      "_p19_comment": "P19: the sub-router mount moved here from dslFunctions (it was swapped there from Router.mountSubRouter in P18). Vert.x 5's own spelling (Route.subRouter(Router), javap on io/vertx/ext/web/Route.class in io.vertx:vertx-web:5.1.7): the ROUTE the mount is called on carries the path prefix, and every route declared on the MOUNTED router (the call's first argument) publishes under it, with the mount route's trailing `*` stripped. The entry is exercised by fixtures/vertx-subrouter; the prefix walk keys on the mounted router's register, not on lambda links. Same-function mounts only \u2014 a sub-router built in another function is a named gap."
     }
   ],
   "name": "endpoints-pack-v0",
   "outbound": [
-    {
-      "clientLibrary": "elasticsearch",
-      "kind": "client",
-      "pattern": "co.elastic.clients.transport.rest_client.RestClientTransport",
-      "protocol": "http",
-      "urlArgument": -1
-    },
-    {
-      "clientLibrary": "google-cloud",
-      "kind": "client",
-      "pattern": "com.google.cloud.storage.StorageOptions.getDefaultInstance",
-      "protocol": "gcp",
-      "urlArgument": -1
-    },
     {
       "clientLibrary": "mongo-driver",
       "kind": "client",
       "pattern": "com.mongodb.ConnectionString",
       "protocol": "mongodb",
       "urlArgument": 0
-    },
-    {
-      "clientLibrary": "openai",
-      "kind": "client",
-      "pattern": "com.openai.client.okhttp.OpenAIOkHttpClient.builder",
-      "protocol": "http",
-      "urlArgument": -1
-    },
-    {
-      "clientLibrary": "langchain4j",
-      "kind": "client",
-      "pattern": "dev.langchain4j.model.openai.OpenAiChatModel.builder",
-      "protocol": "http",
-      "urlArgument": -1
     },
     {
       "clientLibrary": "grpc-java",
@@ -1713,13 +1612,6 @@
     },
     {
       "clientLibrary": "ktor-client",
-      "kind": "constructor",
-      "pattern": "io.ktor.client.HttpClient",
-      "protocol": "https",
-      "urlArgument": -1
-    },
-    {
-      "clientLibrary": "ktor-client",
       "kind": "extension",
       "pattern": "io.ktor.client.request.get",
       "protocol": "https",
@@ -1733,25 +1625,11 @@
       "urlArgument": 0
     },
     {
-      "clientLibrary": "ktor-client",
-      "kind": "extension",
-      "pattern": "io.ktor.client.request.request",
-      "protocol": "https",
-      "urlArgument": -1
-    },
-    {
       "clientLibrary": "lettuce",
       "kind": "static",
       "pattern": "io.lettuce.core.RedisClient.create",
       "protocol": "redis",
       "urlArgument": 0
-    },
-    {
-      "clientLibrary": "mcp-kotlin",
-      "kind": "client",
-      "pattern": "io.modelcontextprotocol.kotlin.sdk.client.Client.connect",
-      "protocol": "mcp",
-      "urlArgument": -1
     },
     {
       "clientLibrary": "java.net.URI",
@@ -1768,18 +1646,12 @@
       "urlArgument": 0
     },
     {
-      "clientLibrary": "java.net.http",
-      "kind": "static",
-      "pattern": "java.net.http.HttpClient.newHttpClient",
-      "protocol": "https",
-      "urlArgument": -1
-    },
-    {
       "clientLibrary": "jdk-httpclient",
       "kind": "client",
       "pattern": "java.net.http.HttpRequest.Builder.uri",
       "protocol": "http",
-      "urlArgument": 1
+      "urlArgument": 0,
+      "_p19_comment": "P19: urlArgument was 1, but uri(URI) is the builder call's ONLY argument \u2014 the row could never read a URL and the liveness sweep found it inert for exactly that reason."
     },
     {
       "clientLibrary": "java.sql.DriverManager",
@@ -1801,13 +1673,6 @@
       "pattern": "org.apache.hc.client5.http.classic.methods.HttpGet",
       "protocol": "http",
       "urlArgument": 0
-    },
-    {
-      "clientLibrary": "kafka-clients",
-      "kind": "constructor",
-      "pattern": "org.apache.kafka.clients.producer.KafkaProducer",
-      "protocol": "kafka",
-      "urlArgument": -1
     },
     {
       "clientLibrary": "neo4j-driver",
@@ -1835,7 +1700,8 @@
       "kind": "client",
       "pattern": "redis.clients.jedis.JedisPool",
       "protocol": "redis",
-      "urlArgument": 1
+      "urlArgument": 0,
+      "_p19_comment": "P19: urlArgument was 1 \u2014 JedisPool(host, port)'s PORT. The address argument is the host at 0; reading the port published the service name \"6379\"."
     },
     {
       "clientLibrary": "retrofit2",
@@ -1843,13 +1709,7 @@
       "pattern": "retrofit2.Retrofit.Builder.baseUrl",
       "protocol": "https",
       "urlArgument": 0
-    },
-    {
-      "clientLibrary": "aws-sdk-v2",
-      "kind": "client",
-      "pattern": "software.amazon.awssdk.services.s3.S3Client.builder",
-      "protocol": "aws",
-      "urlArgument": -1
     }
-  ]
+  ],
+  "_p19_outbound_comment": "P19 liveness sweep: nine outbound rows carried urlArgument -1 and OutboundDetector SKIPS models with no URL argument (`if (model.urlArgument < 0) continue`) \u2014 unread vocabulary, deleted: co.elastic.clients.transport.rest_client.RestClientTransport, com.google.cloud.storage.StorageOptions.getDefaultInstance, com.openai.client.okhttp.OpenAIOkHttpClient.builder, dev.langchain4j.model.openai.OpenAiChatModel.builder, io.ktor.client.HttpClient, io.ktor.client.request.request, java.net.http.HttpClient.newHttpClient, org.apache.kafka.clients.producer.KafkaProducer, software.amazon.awssdk.services.s3.S3Client.builder. The remaining rows are exercised by fixtures/outbound-clients."
 }

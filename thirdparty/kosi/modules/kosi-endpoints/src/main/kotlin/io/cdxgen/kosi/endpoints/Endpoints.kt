@@ -52,8 +52,14 @@ object Endpoints {
          * handler anywhere in the application's source.
          */
         dependencyCoordinates: Set<String> = emptySet(),
+        /**
+         * The pack to detect with. Production always loads the builtin; the
+         * P19 liveness gate re-runs THIS analysis once per removed pack
+         * entry over the SAME captured inputs, so an entry no fixture's
+         * report depends on is a mechanical fact, not an anecdote.
+         */
+        pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
     ): Result {
-        val pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin()
         val configTable = ConfigResolver.load(root)
         val configValues = configTable.keys().mapNotNull { key -> configTable[key]?.let { key to it.value!! } }.toMap()
         val folder = KirValueFolder(

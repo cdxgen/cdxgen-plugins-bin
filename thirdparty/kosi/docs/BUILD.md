@@ -136,6 +136,40 @@ When comparing a native report against a JVM one, normalise `tool.commit`:
 the image bakes in the commit it was built from, the JVM run reads the one
 its jar was built from, and the two differ whenever either is stale.
 
+### The committed symbol-evidence extract and the pack liveness gate (P19)
+
+Two tests gate the endpoints pack itself, not the engine:
+
+- `EndpointsPackSymbolEvidenceTest` (kosi-bytecode) checks every modelled
+  symbol against COMMITTED evidence —
+  `modules/kosi-bytecode/src/test/resources/symbol-evidence/endpoints-pack-symbols.json`,
+  ~32 KB of class kinds, member tables and facade statics derived from the
+  pinned artifacts (http4k sources at the pinned SHA, vertx-web 5.1.7,
+  ktor 3.5.2, spring 5.3.18, micronaut 4.10.23, the jakarta/aws/azure
+  jars), never the jars. The pack-vs-extract check runs on EVERY machine
+  (R109/R112/R113/R114's shape fails anywhere); where the pinned evidence
+  is held, the extract is re-derived and must equal the committed bytes.
+  Regenerate after a deliberate pack or evidence-pin change:
+
+      KOSI_UPDATE_SYMBOL_EVIDENCE=1 ./gradlew :kosi-bytecode:test \
+          --tests 'io.cdxgen.kosi.bytecode.EndpointsPackSymbolEvidenceTest'
+
+  The verdict table counts per framework — checked vs committed, gaps
+  recorded with reasons; a framework nobody can check says so, never
+  KIND-CHECKED.
+
+- `EndpointsPackLivenessTest` (kosi-bench) is the R63 gate the pack never
+  had: it removes every pack entry in turn (identity-based, so whole
+  name-classes compose) over one captured front-end analysis per bundled
+  fixture and classifies each entry LIVE (some fixture's detection result
+  changed — the whole `Endpoints.Result`, source handlers and config
+  counts included, so a verdict is never an artefact of which fields the
+  gate compared), ALIAS-COVERED (a same-name sibling of
+  another generation carries the channel) or INERT. An inert entry fails
+  unless `inertAllowance()` in the test records a one-line reason for it —
+  the reviewed-in-diff exit, not a CI suppressor. The sweep takes ~15 s
+  (the front end runs once per fixture; only detection re-runs per entry).
+
 ### The two-environment proof (P18)
 
 `scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted

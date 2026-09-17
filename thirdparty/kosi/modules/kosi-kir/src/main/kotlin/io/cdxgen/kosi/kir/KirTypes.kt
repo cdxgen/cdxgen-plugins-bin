@@ -55,7 +55,10 @@ enum class CallKind {
     /** A resolved call: `fqn` is the callee's fully qualified name. */
     STATIC,
     VIRTUAL,
-    SUPER,
+    // No SUPER: a `super.foo()` call lowers as VIRTUAL on the reserved
+    // `v super` receiver register, and no consumer ever branched on the
+    // distinction — P19's vocabulary audit found the arm produced by
+    // neither tier and read by nothing.
     EXTENSION,
     OPERATOR,
 

@@ -20,7 +20,6 @@ import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirNew
 import io.cdxgen.kosi.kir.KirPhi
 import io.cdxgen.kosi.kir.KirReturn
-import io.cdxgen.kosi.kir.KirSafeCall
 import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirStringConcat
 import io.cdxgen.kosi.kir.KirSuspendPoint
@@ -438,11 +437,6 @@ internal class FlowTransfer<F, C>(
                     // `fun sink(job: Job) = exec(job.command)` records the
                     // extended path while `job.label` (the clean sibling)
                     // stays clean. Key-path facts were already moved above.
-                    deriveFieldRead(ins.receiver, pathSuffix(ins.path), ins.result, state, site.id)
-                }
-
-                is KirSafeCall -> {
-                    moveAll(TaintKey(ins.receiver, pathSuffix(ins.path)), reg(ins.result), site.id, "field", replace = true)
                     deriveFieldRead(ins.receiver, pathSuffix(ins.path), ins.result, state, site.id)
                 }
 

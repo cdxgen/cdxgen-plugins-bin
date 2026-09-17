@@ -19,3 +19,10 @@ fun configUrl(props: Properties): URL = URL(props.getProperty("ktorapp.api.base"
 fun envUrl(): URL = URL(System.getenv("KOSI_FIXTURE_API_BASE"))
 
 fun templatedUrl(props: Properties): URL = URL(props.getProperty("ktorapp.webhook"))
+
+// A null URL literal (legal against the JDK's platform-type String): the
+// call site is real outbound evidence, but there is no endpoint called
+// "null" — the row keeps its endpoint absent and the raw rendering is the
+// literal the code passed (P19 §1), never the register's machine name.
+// kosi:want service protocol=http name=null resolution=unresolved mode=resolved
+fun nullUrl(): URL = URL(null)
