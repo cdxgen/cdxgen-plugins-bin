@@ -42,6 +42,7 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.symbol
+import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.psi.KtBinaryExpression
@@ -1567,15 +1568,41 @@ object KirLowering {
             return reg
         }
 
+        /**
+         * A Kotlin integer literal's VALUE: decimal, hex and binary, with
+         * the underscores and the `L`/`u`/`U` suffixes Kotlin allows. A
+         * literal that does not parse stays its source text (a Str), which
+         * is what every integer literal used to be — losing the digits to a
+         * silent 0 would be worse than the untyped form it replaces.
+         */
+        private fun parseInteger(text: String): KirConstant {
+            val cleaned = text.replace("_", "").removeSuffix("L").removeSuffix("u").removeSuffix("U")
+            val value = when {
+                cleaned.startsWith("0x") || cleaned.startsWith("0X") -> cleaned.drop(2).toLongOrNull(16)
+                cleaned.startsWith("0b") || cleaned.startsWith("0B") -> cleaned.drop(2).toLongOrNull(2)
+                else -> cleaned.toLongOrNull()
+            }
+            return value?.let { KirConstant.IntConst(it) } ?: KirConstant.Str(text)
+        }
+
         private fun constant(psi: KtConstantExpression): String {
             val reg = t()
-            val constant = when (psi.elementType) {
-                KtTokens.INTEGER_LITERAL -> KirConstant.IntConst(psi.text.removeSuffix("L").toLongOrNull() ?: 0)
-                KtTokens.FLOAT_LITERAL ->
+            // A KtConstantExpression's element type is its NODE type
+            // (KtNodeTypes.INTEGER_CONSTANT, ..., NULL) — never the lexer
+            // TOKEN (KtTokens.INTEGER_LITERAL, ...). Matching tokens here
+            // meant every arm missed and every literal lowered through the
+            // `else`: `5`, `true` and `null` all became KirConstant.Str of
+            // their source TEXT, so the typed constants were unreachable and
+            // a null literal was indistinguishable from the string "null"
+            // (P18 review). The distinction is not cosmetic: the contract
+            // DSL's `security = null` is the ABSENCE of a requirement, and
+            // it read as a value.
+            val constant = when (psi.node.elementType) {
+                KtNodeTypes.INTEGER_CONSTANT -> parseInteger(psi.text)
+                KtNodeTypes.FLOAT_CONSTANT ->
                     KirConstant.FloatConst(psi.text.removeSuffix("f").removeSuffix("F").toDoubleOrNull() ?: 0.0)
-                KtTokens.TRUE_KEYWORD, KtTokens.FALSE_KEYWORD ->
-                    KirConstant.Bool(psi.text == "true")
-                KtTokens.NULL_KEYWORD -> KirConstant.Null
+                KtNodeTypes.BOOLEAN_CONSTANT -> KirConstant.Bool(psi.text == "true")
+                KtNodeTypes.NULL -> KirConstant.Null
                 else -> KirConstant.Str(psi.text)
             }
             emit(KirLoad(reg, constant))

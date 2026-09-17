@@ -77,6 +77,25 @@
 // route is the one that proves the channel fires on them.
 // kosi:want endpoint framework=http4k path=/oauth mode=resolved authentication=~meta-security
 // kosi:want endpoint framework=http4k path=/oauth mode=resolved authentication=~AuthCodeOAuthSecurity
+//
+// An UNMODELLED meta scheme (app code implementing Security, not one of the
+// pack's constructors): the requirement EXISTS — http4k's elvis ignores the
+// block whenever meta declares any security — so the fallback must not name
+// the BLOCK's scheme (R109's residual, P18). The entry names the site and
+// the constructor the CODE declares, without claiming the pack models it.
+// kosi:want endpoint framework=http4k path=/custom mode=resolved authentication=~meta-security
+// kosi:want endpoint framework=http4k path=/custom mode=resolved authentication=~CustomSecurity
+// kosi:want-not endpoint framework=http4k path=/custom authentication=~contract-security
+// kosi:want-not endpoint framework=http4k path=/custom authentication=~ApiKeySecurity
+// An EXPLICIT `security = null` in a route's meta. The framework's elvis
+// (`meta.security?.filter ?: security?.filter`) takes the block's arm for a
+// null meta value exactly as it does for an absent one, so /explicit-null
+// inherits ApiKeySecurity and must NOT be reported as an unknown scheme —
+// the other direction of R109's mistake (P18 review).
+// kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~contract-security
+// kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~ApiKeySecurity
+// kosi:want-not endpoint framework=http4k path=/explicit-null authentication=~meta-security
+// kosi:want-not endpoint framework=http4k path=/explicit-null authentication=~unknown
 // kosi:want endpoint framework=http4k path=/outside mode=resolved
 // kosi:want-not endpoint framework=http4k path=/outside authentication=~
 //
@@ -151,6 +170,15 @@ fun http4kApp(): List<String> = listOf(
 
 private fun contractHandler(request: Request): Response = Response.ok(request.uri)
 
+/**
+ * App code implementing http4k's Security — the shape a route's meta can
+ * assign when none of the framework's own scheme constructors fits. The
+ * pack deliberately does NOT model it: the /custom route pins that the
+ * requirement is still reported (site + the constructor the code names)
+ * and that the CONTRACT BLOCK's scheme does not leak in as the answer.
+ */
+class CustomSecurity(val cfg: String) : org.http4k.security.Security()
+
 @Suppress("unused")
 fun securedContract() = contract {
     security = ApiKeySecurity("api") { it == "secret" }
@@ -161,6 +189,12 @@ fun securedContract() = contract {
     } bindContract Method.GET to { req -> contractHandler(req) }
     routes += "/oauth" meta {
         security = AuthCodeOAuthSecurity("https://auth.example/authorize", "https://auth.example/token")
+    } bindContract Method.GET to { req -> contractHandler(req) }
+    routes += "/custom" meta {
+        security = CustomSecurity("app-defined")
+    } bindContract Method.GET to { req -> contractHandler(req) }
+    routes += "/explicit-null" meta {
+        security = null
     } bindContract Method.GET to { req -> contractHandler(req) }
 }
 

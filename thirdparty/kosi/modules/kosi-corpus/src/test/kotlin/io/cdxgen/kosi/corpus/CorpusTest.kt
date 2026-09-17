@@ -147,4 +147,35 @@ class CorpusManifestTest {
         assertEquals("abc123", manifest.entries[1].sha)
         assertEquals(listOf("a"), manifest.select(setOf("fixtures")).map { it.slug })
     }
+
+    /**
+     * R116's regression pin: `tolerated_resolution_errors` ABSENT must parse
+     * as null (ungated — repo tiers), and an EMPTY list must stay empty (a
+     * positive "typechecks clean" declaration). The `list()` helper coerces
+     * absent keys to emptyList, which collapsed the two and gated every
+     * repo row on its legitimate resolution classes; corpusFull caught it.
+     */
+    @Test
+    fun absentToleranceIsNullAndEmptyStaysEmpty() {
+        val manifest = CorpusManifest.parse(
+            """
+            [[fixtures]]
+            slug = "repo-shape"
+            tier = "medium"
+            repo = "https://example/x"
+            sha = "0000000000000000000000000000000000000000"
+
+            [[fixtures]]
+            slug = "clean-fixture"
+            tier = "fixtures"
+            path = "fixtures/clean"
+            capabilities = []
+            tolerated_resolution_errors = []
+            """.trimIndent(),
+        )
+        val repo = manifest.entries.first { it.slug == "repo-shape" }
+        val fixture = manifest.entries.first { it.slug == "clean-fixture" }
+        assertEquals(null, repo.toleratedResolutionErrors, "absent field must parse as null (ungated), not emptyList")
+        assertEquals(emptyList(), fixture.toleratedResolutionErrors, "an explicit empty list is a declaration")
+    }
 }

@@ -560,12 +560,25 @@ object Analyzer {
                 includeManifests = true,
                 // The resolved classpath, as coordinates: some routes exist
                 // because a dependency is present and for no other reason.
+                // PRESENT means the resolver located the artifact — the
+                // missing[] list is deliberately NOT fed here: a marker
+                // coordinate that failed to resolve is an ABSENT dependency,
+                // and treating it as present published the implicit trees on
+                // machines whose cache was cold (R111), the exact
+                // wrong-reason pass implicit-routes-unresolved pins.
                 dependencyCoordinates = buildSet {
                     for (jar in resolution.jars) {
-                        jar.coordinate?.let { add("${'$'}{it.group}:${'$'}{it.artifact}") }
+                        // The real coordinate, interpolated: this arm read
+                        // `"${'$'}{it.group}:${'$'}{it.artifact}"` since P13,
+                        // which renders the LITERAL `${it.group}:...` — a
+                        // dead arm nobody noticed because the FILE-NAME arm
+                        // below matched every Gradle-cache jar anyway
+                        // (R111b). A bound pin with a custom jar name has no
+                        // filename to fall back on; implicit-routes-
+                        // unresolved pins exactly that shape.
+                        jar.coordinate?.let { add(it.group + ":" + it.artifact) }
                         add(jar.jar.fileName.toString())
                     }
-                    addAll(resolution.missing)
                 },
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(

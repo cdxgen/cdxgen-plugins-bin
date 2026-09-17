@@ -46,7 +46,11 @@ Output is minified and byte-identical across runs on the same input;
 `--pretty` only re-indents. Nothing in the report depends on filesystem
 ordering, hash iteration order or wall-clock time — that is a gated property,
 not an aspiration, and reports from two machines on the same input compare
-equal byte for byte.
+equal byte for byte. That last property has teeth in the tool itself:
+`kosi golden` analyses every fixture from two different absolute locations
+in one run and fails on any section that differs, and
+`scripts/two-environment-proof.sh` (see docs/BUILD.md) compares two
+checkouts at the same commit under different Gradle cache states.
 
 ### Classpath
 

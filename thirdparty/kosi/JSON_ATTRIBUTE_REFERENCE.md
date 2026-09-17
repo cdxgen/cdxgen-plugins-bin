@@ -85,6 +85,20 @@ Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
 defaults to the running JVM. Unknown flags are a usage error, never a silent
 degrade.
 
+**Which option values travel (P18).** The report records every effective
+option verbatim — reproduction needs the real jar paths and JDK home. The
+DIGEST goldens are the consumer that cannot: `classpath` entries and
+`jdkHome` are absolute by construction when set, and an explicitly absolute
+`classpathFile` names one machine just as much. At the digest boundary
+(`Digests.compute`) each ABSOLUTE path value among those three members
+enters as the fixed marker `<absolute-path>`, so two environments running
+the same slot set with their own absolute pins digest equal, while setting
+such an option still differs from leaving it unset and a relative value
+(a committed pin like `classpath.txt`) stays digested as given. The golden
+gate's in-run portability comparison digests `options` RAW on purpose: a
+report whose own bytes name their location is not portable, whatever the
+digest would tolerate.
+
 ## modules — ModuleRef
 
 | Attribute | Type | Purpose |
@@ -186,7 +200,7 @@ rather than a negative expectation that passes vacuously.
 | `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists |
 | `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
 | `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
-| `resolution-errors` | warning | frontend resolution reported diagnostics in a file; `message` summarises per-checker counts, `count` is the total |
+| `resolution-errors` | warning | frontend resolution reported ERROR-severity diagnostics in a file; `message` summarises per-checker counts, `count` is the total. P18: only ERROR-severity factories count (warning-severity ones like DEPRECATION used to be included, drowning the signal), and the bundled corpus entries ratchet their fixtures' error classes via corpus.toml `tolerated_resolution_errors` — an undeclared class fails the row (R110: a stub that stopped typechecking passed every want) |
 | `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 | `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |

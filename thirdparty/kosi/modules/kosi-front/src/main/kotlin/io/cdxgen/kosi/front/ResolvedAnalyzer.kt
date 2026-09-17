@@ -13,6 +13,7 @@ import io.cdxgen.kosi.schema.Severity
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
+import org.jetbrains.kotlin.analysis.api.diagnostics.KaSeverity
 import org.jetbrains.kotlin.analysis.api.components.allOverriddenSymbols
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule
 import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
@@ -388,9 +389,15 @@ object ResolvedAnalyzer {
             for (u in unresolvedSample) System.err.println("UNRESOLVED: " + u)
 
             // Resolution diagnostics, summarised: per-error floods would dwarf
-            // the evidence on real projects; the count is the signal.
+            // the evidence on real projects; the count is the signal. Only
+            // ERROR-severity factories count (P18): the summary's own code is
+            // `resolution-errors`, but it used to include DEPRECATION and the
+            // other warning factories, which drowned the signal the §3
+            // corpus gate ratchets on — a stub that stops TYPECHECKING
+            // (R110) is indistinguishable from one that is merely deprecated.
             val fileDiagnostics = try {
                 ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                    .filter { it.severity == KaSeverity.ERROR }
             } catch (_: Exception) {
                 emptyList()
             }
