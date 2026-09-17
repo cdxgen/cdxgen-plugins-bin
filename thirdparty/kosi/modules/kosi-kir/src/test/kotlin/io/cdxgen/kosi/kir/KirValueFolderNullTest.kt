@@ -63,14 +63,18 @@ class KirValueFolderNullTest {
 
     @Test
     fun anUnprovableRegisterReturnsNothingAtAll() {
-        // A parameter's value cannot be proved from the module: valueAt
-        // itself returns null — the third fact, distinct from both a folded
-        // null and a folded literal.
+        // A parameter's value cannot be proved from the module. Since P20
+        // §0 the miss is a NAMED failure (PARAMETER) rather than a silent
+        // null — the depth report counts it as a folding boundary, not a
+        // folding miss — but the value is absent either way, which is what
+        // every consumer reads.
         val fn = function(KirAssign("t0", "%0")).let {
             it.copy(params = listOf(KirParam("%0", "p", "kotlin.String", receiver = false)))
         }
-        val folded = folder(fn).valueAt(fn, fn.body!!.blocks[0], 1, "%0")
-        assertNull(folded)
+        val folded = folder(fn).valueAt(fn, fn.body!!.blocks[0], 1, "%0")!!
+        assertFalse(folded.resolved)
+        assertNull(folded.value)
+        assertEquals(KirValueFolder.FoldFailure.PARAMETER, folded.failure)
     }
 
     @Test

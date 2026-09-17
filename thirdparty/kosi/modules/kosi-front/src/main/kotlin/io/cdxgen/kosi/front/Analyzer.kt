@@ -79,11 +79,28 @@ object Analyzer {
      * question "does any fixture's report change if this entry goes" is
      * answered mechanically instead of by anecdote.
      */
-    class EndpointCapture(
+    data class EndpointCapture(
         val module: io.cdxgen.kosi.kir.KirModule,
         val sourceTexts: Map<String, String>,
         val annotationValues: Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>,
         val dependencyCoordinates: Set<String>,
+        /**
+         * P20 §0: the endpoint pass's OWN result — including the value
+         * folder's fold statistics, the config-resolution counts and the
+         * source-handler map — captured so the depth report and the
+         * liveness gates can measure the consumers without re-running the
+         * front end. Null for runs that disable endpoint detection.
+         */
+        val endpoints: io.cdxgen.kosi.endpoints.Endpoints.Result? = null,
+        /** P20 §0: the value folder's fold counters for this run's consumers. */
+        val foldStats: io.cdxgen.kosi.kir.KirValueFolder.FoldStats = io.cdxgen.kosi.kir.KirValueFolder.FoldStats(),
+        /**
+         * P20 §0: the taint engine's depth scoreboard for this run —
+         * sources seeded, sink hits dropped unprovable, cap-affected hits,
+         * summary-missing call sites, sanitizers that actually fired. Null
+         * when the run asked for no dataflow.
+         */
+        val flowDepth: io.cdxgen.kosi.flow.TaintEngine.DepthStats? = null,
     )
 
     fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport =
@@ -595,13 +612,13 @@ object Analyzer {
             // DETECTION once per removed pack entry over exactly these
             // captured products, so the front-end analysis runs once per
             // fixture regardless of how many entries the pack carries.
-            endpointCapture?.invoke(
-                EndpointCapture(
-                    module = kirModule,
-                    sourceTexts = sourceTexts,
-                    annotationValues = declarationAnnotationValues,
-                    dependencyCoordinates = resolvedDependencyCoordinates,
-                ),
+            // P20 §0: the capture carries the endpoint pass's own Result
+            // (fold statistics included), computed in the same run.
+            val capture = EndpointCapture(
+                module = kirModule,
+                sourceTexts = sourceTexts,
+                annotationValues = declarationAnnotationValues,
+                dependencyCoordinates = resolvedDependencyCoordinates,
             )
             val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
                 module = kirModule,
@@ -619,6 +636,7 @@ object Analyzer {
                 // machines whose cache was cold (R111), the exact
                 // wrong-reason pass implicit-routes-unresolved pins.
                 dependencyCoordinates = resolvedDependencyCoordinates,
+                foldStats = capture.foldStats,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(
@@ -679,11 +697,14 @@ object Analyzer {
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
                         // The framework's own statement about which handler
-                        // parameters carry attacker input (P12).
-                        endpointParameterCategories = if (options.endpointSources) {
+                        // parameters carry attacker input, WHAT KIND of
+                        // input each annotation names, and the category it
+                        // carries (P20 §1: the source is a parameter, not
+                        // a function).
+                        endpointParameterAnnotations = if (options.endpointSources) {
                             io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
                                 .flatMap { it.parameterAnnotations }
-                                .associate { it.pattern to it.category }
+                                .associate { it.pattern to it }
                         } else {
                             emptyMap()
                         },
@@ -712,6 +733,7 @@ object Analyzer {
             } else {
                 null
             }
+            endpointCapture?.invoke(capture.copy(endpoints = endpoints, flowDepth = flowResult?.depth))
             val dataFlow = if (flowResult != null) {
                 val evidence = flowResult.evidence
                 if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {

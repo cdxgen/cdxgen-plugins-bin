@@ -170,6 +170,41 @@ Two tests gate the endpoints pack itself, not the engine:
   the reviewed-in-diff exit, not a CI suppressor. The sweep takes ~15 s
   (the front end runs once per fixture; only detection re-runs per entry).
 
+### The gate-cost policy: corpusChanged, and corpusFull ONCE (P20 §5)
+
+`corpusFull` is the most expensive thing anyone runs here (~50 minutes, a
+warmed cache, one machine), and by P20 it had become the routine answer to
+every question. The policy is now, on evidence:
+
+- **`corpusChanged` (`scripts/corpus-changed.sh [base-ref]`) is the
+  development loop's tier.** The bundled tiers always (they are
+  corpusQuick), the vuln-repo floors always, plus any repo row whose
+  declared `capabilities` intersect a capability token the change mentions
+  — the token vocabulary is read FROM `corpus.toml`, so the mapping is
+  data-driven. `--only` takes a comma-separated slug list;
+  `./gradlew kosiRepoRows -Pkosi.only=...` runs the selected rows.
+- **`corpusFull` runs ONCE per phase**, at the end, on the corpus machine,
+  and its result is what the phase report quotes. Not per commit, not per
+  question.
+- **CI stays the fast deterministic subset** it is today (`kosi-test.yml`:
+  unit tests, corpusQuick, goldens). Bigger tiers stay local — that is the
+  standing instruction and it does not change.
+- **What corpusChanged deliberately does NOT see**, and the gates that do:
+  cross-environment and cache effects (`scripts/two-environment-proof.sh`),
+  bundled-fixture digest drift (`./gradlew golden`), pack-symbol rotness
+  and inert entries (the two liveness sweeps), and repo-tier movement on
+  repos the change's capability tokens do not name (corpusFull, once).
+
+The evidence for the tier boundary (P20 §5, measured over goldens/ and the
+tracker's history): every one of the 17 commits that ever touched goldens
+is a phase squash, and the bundled fixtures' gates caught every movement —
+the bundled tier is the population whose digest history is dense. The REPO
+tier has no goldens at all; its recorded numbers (the floors, the
+per-repo ratios) have moved four times in twenty phases (P14's floors, P14
+kampkit, P16 nowinandroid, P12's pack growth), each time through a warm,
+a resolver, or a pack change — which is exactly the population the
+capability matching selects.
+
 ### The two-environment proof (P18)
 
 `scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted

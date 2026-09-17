@@ -615,6 +615,17 @@ path = "fixtures/endpoint-parameter-semantics"
 capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
 tolerated_resolution_errors = []
 
+# P20 §1: the taint source is a PARAMETER, not a function. The pack's
+# `kind`/`category` per parameter annotation change a verdict, and each
+# endpoint-rooted slice names the value-parameter (#N) and transport it
+# entered through.
+[[fixtures]]
+slug = "parameter-taint-sources"
+tier = "fixtures"
+path = "fixtures/parameter-taint-sources"
+capabilities = ["endpoint-sources", "parameter-annotations", "parameter-taint-sources", "spring-mvc"]
+tolerated_resolution_errors = []
+
 [[fixtures]]
 slug = "endpoint-base-path"
 tier = "fixtures"

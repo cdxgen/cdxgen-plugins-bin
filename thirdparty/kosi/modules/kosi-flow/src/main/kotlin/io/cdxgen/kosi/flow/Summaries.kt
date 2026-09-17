@@ -757,7 +757,7 @@ internal class SummaryAnalysis(
 
     override fun onSourceApplied(fqn: String, site: Int, fact: SummaryFact, resultKey: TaintKey, collect: Boolean?) {}
 
-    override fun onSanitizerCleared(cleared: List<String>, collect: Boolean?) {
+    override fun onSanitizerCleared(fqn: String, cleared: List<String>, collect: Boolean?) {
         if (collect != true) return
         for (category in cleared) sanitizes.add(category)
     }

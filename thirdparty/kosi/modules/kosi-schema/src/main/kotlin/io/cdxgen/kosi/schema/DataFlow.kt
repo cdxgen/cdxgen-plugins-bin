@@ -86,6 +86,17 @@ data class FlowSlice(
      * did.
      */
     val origins: List<String> = emptyList(),
+    /**
+     * P20 §1: for a slice that entered through an ENDPOINT HANDLER's
+     * parameter, the value-parameter it entered through (`#0` = the first
+     * non-receiver parameter) and the transport the parameter's annotation
+     * names (path/query/header/cookie/form/body). Null for every other
+     * birth — before P20 an endpoint-rooted slice could say "this handler
+     * is reachable from untrusted input" but never WHICH parameter, which
+     * is the difference between "guard this input" and "audit the handler".
+     */
+    val sourceParameter: String? = null,
+    val sourceTransport: String? = null,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -128,7 +139,9 @@ data class FlowSlice(
         w.str("sourceId", sourceId)
         w.str("sourceModulePath", sourceModulePath)
         w.str("sourceName", sourceName)
+        if (sourceParameter != null) w.str("sourceParameter", sourceParameter) else w.nul("sourceParameter")
         w.str("sourcePurl", sourcePurl)
+        if (sourceTransport != null) w.str("sourceTransport", sourceTransport) else w.nul("sourceTransport")
         w.str("severity", severity)
         w.str("targetPurl", targetPurl)
         w.beginArray("taintKinds")

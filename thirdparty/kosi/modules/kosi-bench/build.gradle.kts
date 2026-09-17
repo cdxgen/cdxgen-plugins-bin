@@ -12,6 +12,10 @@ dependencies {
     // dependency that tests cannot see.
     testImplementation(project(":kosi-endpoints"))
     testImplementation(project(":kosi-kir"))
+    // P20 §0 depth report: EndpointCapture carries the taint engine's
+    // DepthStats, whose type rides kosi-front as an implementation
+    // dependency that tests cannot see.
+    testImplementation(project(":kosi-flow"))
     implementation(libs.kotlin.stdlib)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit5)
