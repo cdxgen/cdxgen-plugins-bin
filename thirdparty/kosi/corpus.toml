@@ -778,6 +778,37 @@ path = "fixtures/dsl-media-auth"
 capabilities = ["endpoints", "media-types", "authentication", "vertx", "vertx-auth-handler", "javalin", "servlet", "web-xml", "security-constraint", "http4k", "http4k-contract-security"]
 tolerated_resolution_errors = ["ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "CANNOT_INFER_VALUE_PARAMETER_TYPE"]
 
+# P19 §4: the outbound client rows, each called once with a literal URL —
+# the rows the liveness sweep found nothing exercising.
+[[fixtures]]
+slug = "outbound-clients"
+tier = "fixtures"
+path = "fixtures/outbound-clients"
+capabilities = ["endpoints", "outbound", "services", "urls"]
+tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
+
+# P19 §4: the frameworks the pack modelled but no fixture exercised (the
+# liveness sweep's whole-population finding): AWS Lambda's supertype
+# handlers, Azure Functions' annotations, spring-graphql's controller and
+# the spring-messaging listener family.
+[[fixtures]]
+slug = "cloud-and-messaging"
+tier = "fixtures"
+path = "fixtures/cloud-and-messaging"
+capabilities = ["endpoints", "aws-lambda", "azure-functions", "graphql", "spring-messaging"]
+tolerated_resolution_errors = ["VIRTUAL_MEMBER_HIDDEN"]
+
+# P19 §4: the Vert.x 5 sub-router mount, the entry P18 swapped into the pack
+# and left inert (no fixture exercised either spelling, and the prefix walk
+# only knew lambda-shaped nesting). The mounted router's routes publish
+# under the mount route's path, trailing `*` stripped.
+[[fixtures]]
+slug = "vertx-subrouter"
+tier = "fixtures"
+path = "fixtures/vertx-subrouter"
+capabilities = ["endpoints", "vertx", "sub-router-mount", "prefix-composition"]
+tolerated_resolution_errors = []
+
 # P11: the vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the

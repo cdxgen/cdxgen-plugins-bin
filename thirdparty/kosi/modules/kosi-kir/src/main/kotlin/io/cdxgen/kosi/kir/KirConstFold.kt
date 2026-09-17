@@ -32,8 +32,15 @@ class KirValueFolder(
      * publish as the report's `folded` resolution; the finer distinction is
      * the crypto gate's per-FORM denominator (a `const val` read and a
      * string-template concat are different syntactic shapes).
+     *
+     * NULL is the one status whose VALUE is absent on purpose: a null
+     * literal is not the four characters "null" (R117 made it visible to
+     * the fold), and a consumer must be able to tell "the register
+     * provably holds null" from "the value could not be proved" — the
+     * route-path and outbound-URL consumers branch on exactly that
+     * difference (P19 §1).
      */
-    enum class ValueStatus { LITERAL, FOLDED_CONST, FOLDED_TEMPLATE, CONFIG, ENV, UNRESOLVED }
+    enum class ValueStatus { LITERAL, FOLDED_CONST, FOLDED_TEMPLATE, CONFIG, ENV, NULL, UNRESOLVED }
 
     private val configReaderByFqn = configReaders.toMap()
 
@@ -58,7 +65,10 @@ class KirValueFolder(
     /**
      * The provable value of [register], defined at or before instruction
      * [index] of [block] in [fn]'s body. Null when the register is not a
-     * string-shaped value at all (unknown).
+     * string-shaped value at all (unknown). A register that PROVABLY holds
+     * the null literal returns [FoldedValue] with [ValueStatus.NULL] and a
+     * null value — "found null" and "could not prove" are different facts
+     * and the callers that care branch on the status.
      */
     fun valueAt(fn: KirFunction, block: KirBlock, index: Int, register: String): FoldedValue? =
         fold(fn, block, index, register, depth = 0)
@@ -83,7 +93,7 @@ class KirValueFolder(
                     // must not fold to the four characters "null".
                     is KirConstant.Bool -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
                     is KirConstant.FloatConst -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
-                    is KirConstant.Null -> null
+                    is KirConstant.Null -> FoldedValue(null, ValueStatus.NULL)
                     else -> null
                 }
 
@@ -165,7 +175,6 @@ class KirValueFolder(
         is KirAssign -> ins.result
         is KirCall -> ins.result
         is KirNew -> ins.result
-        is KirSafeCall -> ins.result
         is KirCast -> ins.result
         is KirTypeCheck -> ins.result
         is KirElvis -> ins.result

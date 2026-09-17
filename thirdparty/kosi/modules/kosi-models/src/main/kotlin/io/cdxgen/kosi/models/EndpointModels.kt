@@ -169,6 +169,16 @@ data class FrameworkModel(
      */
     val handlerDsl: List<String> = emptyList(),
     /**
+     * P19 §4: a call that MOUNTS one router under another — Vert.x 5's
+     * `Route.subRouter(router)`. The route object it is called ON carries
+     * the prefix every route declared on the mounted router publishes
+     * under. Distinct from a nesting `route("/x") { }` (a LAMBDA-shaped
+     * prefix, walked by the lambda links): a mount's sub-router is a VALUE
+     * (the call's first argument), so the prefix walk keys on the register
+     * the routes are declared against.
+     */
+    val mountFunctions: List<String> = emptyList(),
+    /**
      * P15: route-builder calls whose arguments from this index on name the
      * REQUIRED ROLES (Javalin's `get("/x", handler, Role.ADMIN)` — the
      * vararg `RouteRole...` tail). The handler is the last argument BEFORE
@@ -413,6 +423,7 @@ object EndpointModels {
                     )
                 } ?: emptyList(),
                 handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
+                mountFunctions = f.arr("mountFunctions")?.strings() ?: emptyList(),
                 roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
                 contractDsl = f.arr("contractDsl")?.strings() ?: emptyList(),
                 routeMetaDsl = f.arr("routeMetaDsl")?.strings() ?: emptyList(),

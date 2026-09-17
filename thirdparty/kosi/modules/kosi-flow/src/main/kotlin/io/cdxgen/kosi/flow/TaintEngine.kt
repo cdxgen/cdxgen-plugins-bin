@@ -21,7 +21,6 @@ import io.cdxgen.kosi.kir.KirModule
 import io.cdxgen.kosi.kir.KirNew
 import io.cdxgen.kosi.kir.KirPhi
 import io.cdxgen.kosi.kir.KirReturn
-import io.cdxgen.kosi.kir.KirSafeCall
 import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirStringConcat
 import io.cdxgen.kosi.kir.KirSuspendPoint

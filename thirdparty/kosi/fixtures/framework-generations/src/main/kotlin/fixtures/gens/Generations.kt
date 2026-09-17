@@ -50,12 +50,49 @@
 // kosi:want flow source=untrusted-input sink=ssrf fn=~hc4Target mode=resolved
 //
 // Ktor 3: the routing FQNs are Ktor 2's; the receiver is RoutingContext.
+// kosi:want endpoint framework=ktor path=/ktor3/put mode=resolved method=PUT
+// kosi:want endpoint framework=ktor path=/ktor3/delete mode=resolved method=DELETE
+// kosi:want endpoint framework=ktor path=/ktor3/patch mode=resolved method=PATCH
+// kosi:want endpoint framework=ktor path=/ktor3/head mode=resolved method=HEAD
+// kosi:want endpoint framework=ktor path=/ktor3/options mode=resolved method=OPTIONS
+// kosi:want endpoint framework=ktor path=/ktor3/nested/inner mode=resolved method=GET
+// kosi:want endpoint framework=ktor path=/ktor3/ws mode=resolved
+// kosi:want endpoint framework=ktor path=/ktor1/authed mode=resolved authentication=~authenticate
+// kosi:want endpoint framework=ktor path=/ktor1/get mode=resolved method=GET
+// kosi:want endpoint framework=ktor path=/ktor1/post mode=resolved method=POST
+// kosi:want endpoint framework=ktor path=/ktor1/put mode=resolved method=PUT
+// kosi:want endpoint framework=ktor path=/ktor1/delete mode=resolved method=DELETE
+// kosi:want endpoint framework=ktor path=/ktor1/patch mode=resolved method=PATCH
+// kosi:want endpoint framework=ktor path=/ktor1/head mode=resolved method=HEAD
+// kosi:want endpoint framework=ktor path=/ktor1/options mode=resolved method=OPTIONS
+// kosi:want endpoint framework=ktor path=/ktor1/nested/inner mode=resolved method=GET
+// kosi:want endpoint framework=ktor path=/ktor1/json-only mode=resolved method=GET
+// kosi:want endpoint framework=ktor path=/ktor1/ws mode=resolved
 // kosi:want endpoint framework=ktor path=/ktor3/greeting mode=resolved method=GET
 // kosi:want endpoint framework=ktor path=/ktor3/greeting queryparam=name mode=resolved
 package fixtures.gens
 
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
+import io.ktor.server.routing.head
+import io.ktor.server.routing.options
+import io.ktor.server.routing.patch
+import io.ktor.server.routing.post
+import io.ktor.server.routing.put
+import io.ktor.server.routing.route
+import io.ktor.server.websocket.webSocket
+import io.ktor.auth.authenticate
+import io.ktor.routing.accept
+import io.ktor.routing.delete
+import io.ktor.routing.get
+import io.ktor.routing.head
+import io.ktor.routing.options
+import io.ktor.routing.patch
+import io.ktor.routing.post
+import io.ktor.routing.put
+import io.ktor.routing.route
+import io.ktor.websocket.webSocket
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -117,4 +154,38 @@ fun ktor3(root: Route, sink: (String) -> Unit) {
         val name = call.parameters["name"].orEmpty()
         sink(name)
     }
+}
+
+// P19 §4: the verb builders both generations spell — every modelled verb
+// row, one route each, so removing any row changes this fixture's report.
+fun ktor3Verbs(root: Route) {
+    root.put("/ktor3/put") { }
+    root.delete("/ktor3/delete") { }
+    root.patch("/ktor3/patch") { }
+    root.head("/ktor3/head") { }
+    root.options("/ktor3/options") { }
+    root.route("/ktor3/nested") {
+        get("/inner") { }
+    }
+    root.webSocket("/ktor3/ws") { }
+}
+
+fun ktor1Verbs(root: io.ktor.routing.Route1, sink: (String) -> Unit) {
+    root.authenticate("basic") {
+        get("/ktor1/authed") { }
+    }
+    root.get("/ktor1/get") { }
+    root.post("/ktor1/post") { }
+    root.put("/ktor1/put") { }
+    root.delete("/ktor1/delete") { }
+    root.patch("/ktor1/patch") { }
+    root.head("/ktor1/head") { }
+    root.options("/ktor1/options") { }
+    root.route("/ktor1/nested") {
+        get("/inner") { }
+    }
+    root.accept("application/json") {
+        get("/ktor1/json-only") { }
+    }
+    root.webSocket("/ktor1/ws") { }
 }

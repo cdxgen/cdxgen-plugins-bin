@@ -12,7 +12,10 @@ class Router {
 }
 
 class Route {
-    fun produces(mimeType: String): Route = this
+    // The real Route is a Java class: `produces(String)` reads as a
+    // PLATFORM type to Kotlin callers, who may pass null (warning, no
+    // error). The stub models the caller-side contract with String?.
+    fun produces(mimeType: String?): Route = this
     fun consumes(mimeType: String): Route = this
     fun handler(handler: Handler<RoutingContext>): Route = this
 }

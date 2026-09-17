@@ -117,6 +117,11 @@ object OutboundDetector {
         val detail = folded?.detail
         return when {
             folded?.status == KirValueFolder.ValueStatus.ENV -> "\${" + (detail ?: register) + "}"
+            // The code passed the null LITERAL: that is the honest raw
+            // rendering — the register's machine name is not evidence of
+            // anything. The row keeps endpoint = null (absence), never an
+            // endpoint called "null" (P19 §1).
+            folded?.status == KirValueFolder.ValueStatus.NULL -> "null"
             folded?.status == KirValueFolder.ValueStatus.UNRESOLVED && detail != null -> "\${" + detail + "}"
             else -> folded?.value ?: register
         }
@@ -127,6 +132,9 @@ object OutboundDetector {
         KirValueFolder.ValueStatus.FOLDED_CONST, KirValueFolder.ValueStatus.FOLDED_TEMPLATE -> "folded"
         KirValueFolder.ValueStatus.CONFIG -> "config"
         KirValueFolder.ValueStatus.ENV -> "env"
-        KirValueFolder.ValueStatus.UNRESOLVED -> "unresolved"
+        // A provable null is not an unresolved value, but for an outbound
+        // row there is no endpoint either way and `unresolved` is the
+        // resolution the raw rendering below qualifies with `null`.
+        KirValueFolder.ValueStatus.NULL, KirValueFolder.ValueStatus.UNRESOLVED -> "unresolved"
     }
 }

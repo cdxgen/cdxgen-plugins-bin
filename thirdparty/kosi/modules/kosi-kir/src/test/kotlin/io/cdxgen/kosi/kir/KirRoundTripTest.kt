@@ -59,9 +59,8 @@ class KirRoundTripTest {
                                     KirNew("t6", "java.util.ArrayList", listOf()),
                                     KirStringConcat("t7", listOf("t0", "t1")),
                                     KirElvis("t8", "t3", "t2"),
-                                    KirSafeCall("t9", "t3", AccessPath.field("t3", "value")),
-                                    KirCast("t10", "t9", "kotlin.String", checked = true),
-                                    KirTypeCheck("t11", "t9", "kotlin.String"),
+                                    KirCast("t10", "t3", "kotlin.String", checked = true),
+                                    KirTypeCheck("t11", "t3", "kotlin.String"),
                                     KirLambda("t12", "fixtures.kir/Repo#load$1", listOf("t1")),
                                     KirCall(
                                         "t13",
