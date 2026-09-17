@@ -362,7 +362,11 @@ object EndpointDetector {
         // register's own name as a URL. Neither is a path — P19 §1.
         if (folded?.status == KirValueFolder.ValueStatus.NULL) {
             val path = joinPaths(prefix, "").ifEmpty { "/" }
-            publish(add, framework, methods, path, handlerOfRegs(fn, callArgs, input) ?: "", fn, "dsl")
+            // With the framework in hand: a role-tail builder's handler is
+            // the argument BEFORE the roles, and resolving the LAST one
+            // publishes the ROLE register as the handler (P15's defect,
+            // which this arm reintroduced by dropping the argument).
+            publish(add, framework, methods, path, handlerOfRegs(fn, callArgs, input, framework) ?: "", fn, "dsl")
             return
         }
         val foldedPath = folded?.value

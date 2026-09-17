@@ -20,8 +20,10 @@ import kotlin.test.assertTrue
  * pack carries, remove it, re-run endpoint detection over every bundled
  * fixture, and classify:
  *
- *  - LIVE — some fixture's endpoints/services/URLs changed. The entry
- *    earns its place.
+ *  - LIVE — some fixture's detection RESULT changed: endpoints, services,
+ *    URLs, source handlers or the config counts, compared whole so the
+ *    verdict cannot be an artefact of which fields the gate looked at.
+ *    The entry earns its place.
  *  - ALIAS-COVERED — removing the entry alone changes nothing, but
  *    removing its whole NAME-CLASS (same channel, same pattern last
  *    segment) does: a generation spelling beside its twin
@@ -113,8 +115,36 @@ class EndpointsPackLivenessTest {
             "handlerDsl" -> drop({ it.handlerDsl }, { x, l -> x.copy(handlerDsl = l) })
             "mountFunctions" -> drop({ it.mountFunctions }, { x, l -> x.copy(mountFunctions = l) })
             "implicitRoutes" -> drop({ it.implicitRoutes }, { x, l -> x.copy(implicitRoutes = l) })
-            else -> f
+            // Never a silent no-op: a channel this arm does not know would
+            // remove NOTHING, and every one of its entries would then be
+            // reported inert — the sweep would quietly stop covering a
+            // whole channel the moment the pack grew one
+            // ([everyPackChannelIsSwept] fails first, in the same build).
+            else -> error("liveness sweep does not know channel '$channel' — add it to alter() and channelRemovables()")
         }
+    }
+
+    /**
+     * The sweep covers every list-shaped channel [FrameworkModel] has.
+     * Without this, a channel added to the model and forgotten here is
+     * invisible twice over: [channelRemovables] never enumerates its
+     * entries, so they are neither live nor inert — they are unswept, and
+     * the gate's own count says nothing about them. Reflection over the
+     * data class's getters is what makes "every channel" mean the model's
+     * channels rather than this file's memory of them.
+     */
+    @Test
+    fun everyPackChannelIsSwept() {
+        val empty = FrameworkModel(id = "probe", kind = "dsl")
+        val channels = FrameworkModel::class.java.methods
+            .filter { it.parameterCount == 0 && List::class.java.isAssignableFrom(it.returnType) && it.name.startsWith("get") }
+            .map { it.name.removePrefix("get").replaceFirstChar { c -> c.lowercaseChar() } }
+            .toSortedSet()
+        assertTrue(channels.isNotEmpty(), "no list-shaped channels found on FrameworkModel")
+        // alter() errors on an unknown channel; a known one drops nothing
+        // from an empty model and returns it unchanged.
+        channels.forEach { channel -> alter(empty, empty.id, channel, Any()) }
+        println("pack-liveness: ${channels.size} pack channels swept — ${channels.joinToString(",")}")
     }
 
     private fun channelRemovables(fw: FrameworkModel): List<Removable> = buildList {
@@ -190,7 +220,9 @@ class EndpointsPackLivenessTest {
             )
             val cap = held ?: continue
             val baseline = detect(root, cap, builtin)
-            if (baseline.apiEndpoints.isEmpty() && baseline.services.isEmpty() && baseline.urls.isEmpty()) {
+            if (baseline.apiEndpoints.isEmpty() && baseline.services.isEmpty() &&
+                baseline.urls.isEmpty() && baseline.sourceHandlers.isEmpty()
+            ) {
                 withoutEvidence++
                 continue
             }
@@ -201,13 +233,14 @@ class EndpointsPackLivenessTest {
         fun changesSomeFixture(minus: EndpointsPack): Set<String> {
             val hitters = sortedSetOf<String>()
             for (c in captured) {
-                val result = detect(c.root, c.capture, minus)
-                if (result.apiEndpoints != c.baseline.apiEndpoints ||
-                    result.services != c.baseline.services ||
-                    result.urls != c.baseline.urls
-                ) {
-                    hitters.add(c.root.fileName.toString())
-                }
+                // The WHOLE result, not three of its six fields: an entry
+                // that only seeds handler inputs is live on
+                // `sourceHandlers`, and comparing the URL-shaped arrays
+                // alone reported it INERT — which is how forty context
+                // readers and parameter annotations came to carry a
+                // recorded reason instead of a verdict (P19 review). A
+                // gate that cannot see a surface must not pronounce on it.
+                if (detect(c.root, c.capture, minus) != c.baseline) hitters.add(c.root.fileName.toString())
             }
             return hitters
         }
@@ -262,14 +295,14 @@ class EndpointsPackLivenessTest {
     private fun inertAllowance(): Map<String, String> = mapOf(
         "grpc.supertypeMarkers[GrpcKt]" to "jointly load-bearing with its Grpc twin: either substring carries the marker conjunct, and the grpcbad negative pins that SOMETHING must (a homonym ImplBase must be refused)",
         "grpc.supertypeMarkers[Grpc]" to "jointly load-bearing with its GrpcKt twin: either substring carries the marker conjunct, and the grpcbad negative pins that SOMETHING must (a homonym ImplBase must be refused)",
-        "azure-functions.parameterAnnotations[com.microsoft.azure.functions.annotation.HttpTrigger]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
-        "azure-functions.parameterAnnotations[com.microsoft.azure.functions.annotation.QueueTrigger]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
+        "azure-functions.parameterAnnotations[com.microsoft.azure.functions.annotation.HttpTrigger]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
+        "azure-functions.parameterAnnotations[com.microsoft.azure.functions.annotation.QueueTrigger]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
         "configReaders[com.typesafe.config.Config.getString]" to "config-table reader beside the exercised java.util.Properties row; one config-keyed route would make it live",
         "configReaders[io.ktor.server.config.ApplicationConfig.property]" to "config-table reader beside the exercised java.util.Properties row; one config-keyed route would make it live",
         "configReaders[java.lang.System.getProperty]" to "config-table reader beside the exercised java.util.Properties row; one config-keyed route would make it live",
         "configReaders[org.springframework.core.env.Environment.getProperty]" to "config-table reader beside the exercised java.util.Properties row; one config-keyed route would make it live",
         "graphql.classMarkers[org.springframework.stereotype.Controller]" to "plain-@Controller marker copy: this framework's endpoints come through its own mapping annotations; graphql's copy is the exercised one (cloud-and-messaging)",
-        "graphql.parameterAnnotations[org.springframework.graphql.data.method.annotation.Argument]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
+        "graphql.parameterAnnotations[org.springframework.graphql.data.method.annotation.Argument]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
         "http4k.contextReaders[org.http4k.core.Request.bodyString]" to "context reader beside its exercised sibling; the media fixtures' handlers read them through DELEGATED functions, where transportParameters cannot see the call",
         "http4k.contextReaders[org.http4k.core.Request.cookie]" to "context reader beside its exercised sibling; the media fixtures' handlers read them through DELEGATED functions, where transportParameters cannot see the call",
         "http4k.contextReaders[org.http4k.core.Request.header]" to "context reader beside its exercised sibling; the media fixtures' handlers read them through DELEGATED functions, where transportParameters cannot see the call",
@@ -379,9 +412,9 @@ class EndpointsPackLivenessTest {
         "sparkjava.dslFunctions[spark.Spark.post]" to "verb/nesting builder beside its exercised sibling; one more route in the framework's fixture would make it live",
         "sparkjava.dslFunctions[spark.Spark.put]" to "verb/nesting builder beside its exercised sibling; one more route in the framework's fixture would make it live",
         "spring-actuator.dependencyMarkers[spring-boot-actuator]" to "alternative coordinate spelling beside the exercised starter-actuator marker (implicit-routes)",
-        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.DestinationVariable]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
-        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.Header]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
-        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.Payload]" to "body/path-kind parameter annotation: seeds handler input rather than the URL arrays this sweep compares",
+        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.DestinationVariable]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
+        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.Header]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
+        "spring-messaging.parameterAnnotations[org.springframework.messaging.handler.annotation.Payload]" to "kind=body parameter annotation: annotatedParameters() reads only the path/query kinds and sourceHandlers carries no per-parameter category, so neither `kind` nor `category` has a consumer here \u2014 the entry is a declaration waiting for one (P19 review), not a capability",
         "spring-mvc.authenticationAnnotations[jakarta.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-mvc.authenticationAnnotations[javax.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-mvc.authenticationAnnotations[org.springframework.security.access.annotation.Secured]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",

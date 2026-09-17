@@ -161,8 +161,10 @@ Two tests gate the endpoints pack itself, not the engine:
 - `EndpointsPackLivenessTest` (kosi-bench) is the R63 gate the pack never
   had: it removes every pack entry in turn (identity-based, so whole
   name-classes compose) over one captured front-end analysis per bundled
-  fixture and classifies each entry LIVE (some fixture's
-  endpoints/services/urls changed), ALIAS-COVERED (a same-name sibling of
+  fixture and classifies each entry LIVE (some fixture's detection result
+  changed — the whole `Endpoints.Result`, source handlers and config
+  counts included, so a verdict is never an artefact of which fields the
+  gate compared), ALIAS-COVERED (a same-name sibling of
   another generation carries the channel) or INERT. An inert entry fails
   unless `inertAllowance()` in the test records a one-line reason for it —
   the reviewed-in-diff exit, not a CI suppressor. The sweep takes ~15 s
