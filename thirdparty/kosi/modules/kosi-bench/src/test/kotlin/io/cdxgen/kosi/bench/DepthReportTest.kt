@@ -57,7 +57,16 @@ class DepthReportTest {
 
     private val bundledTiers = setOf("fixtures", "frameworks", "crypto", "async", "vuln")
 
-    private class ValueRow(val asked: Int, val folded: Int, val crossBlock: Int, val depthCap: Int, val parameter: Int, val producer: Int)
+    private class ValueRow(
+        val asked: Int,
+        val folded: Int,
+        val crossBlock: Int,
+        val crossBlockRefused: Int,
+        val crossBlockResolved: Int,
+        val depthCap: Int,
+        val parameter: Int,
+        val producer: Int,
+    )
 
     private class FixtureRow(
         val slug: String,
@@ -171,8 +180,60 @@ class DepthReportTest {
         println("depth-report: ${rows.size} fixtures measured, golden matched")
     }
 
-    private fun io.cdxgen.kosi.kir.KirValueFolder.FoldStats.toValueRow() =
-        ValueRow(asked, folded, crossBlock, depthCap, parameter, producer)
+    /**
+     * P21 §4: the cheap structural gate the corpusChanged replay earned.
+     * corpusChanged and corpusFull both answer "did a behaviour move" and
+     * NEITHER answers "is this code reachable from any input we have" —
+     * R131 ran green through every tier because no corpus input reached the
+     * new code. The gate that answers THAT is a fixture, so every named
+     * way the fold can fail must be non-zero in the committed report: a new
+     * [FoldFailure] constant, or a widening that reclassifies an existing
+     * one, cannot ship without a bundled fixture that drives it — the same
+     * two-way ratchet the known-fail markers apply to expectations, applied
+     * to the failure vocabulary itself.
+     */
+    @Test
+    fun everyFoldFailureBucketIsNonZeroInTheCommittedReport() {
+        val report = repoRoot.resolve("modules/kosi-bench").resolve(reportFile)
+        assertTrue(Files.exists(report), "depth report golden missing: $reportFile")
+        val totals = io.cdxgen.kosi.schema.JsonReader(Files.readString(report))
+            .read().asObject()
+            .obj("totals")
+            ?.obj("valueResolution.crossBlock")
+            ?: error("committed depth report has no totals.valueResolution.crossBlock object")
+        for (failure in io.cdxgen.kosi.kir.KirValueFolder.FoldFailure.entries) {
+            // CROSS_BLOCK -> "crossBlock", DEPTH_CAP -> "depthCap": the
+            // report's keys are the enum names in lower camel case.
+            val key = failure.name.split('_')
+                .mapIndexed { i, part ->
+                    if (i == 0) part.lowercase() else part.lowercase().replaceFirstChar { it.uppercase() }
+                }
+                .joinToString("")
+            val counted = totals.long(key)
+            assertTrue(
+                counted != null,
+                "FoldFailure.$failure is named by the folder but the depth report publishes no '$key' bucket — " +
+                    "add the counter to ValueRow before shipping the constant",
+            )
+            assertTrue(
+                counted!! > 0,
+                "FoldFailure.$failure has never fired: its '$key' bucket is zero in the committed depth report. " +
+                    "A capability no fixture exercises does not exist (R63) — add the fixture that drives it " +
+                    "through Analyzer.analyze, or delete the constant (the P21 phase rule, written against R131)",
+            )
+        }
+    }
+
+    private fun io.cdxgen.kosi.kir.KirValueFolder.FoldStats.toValueRow() = ValueRow(
+        asked,
+        folded,
+        crossBlock,
+        crossBlockRefused,
+        crossBlockResolved,
+        depthCap,
+        parameter,
+        producer,
+    )
 
     private fun sum(rows: List<FixtureRow>, pick: (FixtureRow) -> Int): Int = rows.sumOf(pick)
 
@@ -253,6 +314,8 @@ class DepthReportTest {
     private fun summedValue(rows: List<FixtureRow>, pick: (FixtureRow) -> ValueRow): Map<String, Int> = sortedMapOf(
         "asked" to sum(rows) { pick(it).asked },
         "crossBlock" to sum(rows) { pick(it).crossBlock },
+        "crossBlockRefused" to sum(rows) { pick(it).crossBlockRefused },
+        "crossBlockResolved" to sum(rows) { pick(it).crossBlockResolved },
         "depthCap" to sum(rows) { pick(it).depthCap },
         "folded" to sum(rows) { pick(it).folded },
         "parameter" to sum(rows) { pick(it).parameter },
@@ -262,6 +325,8 @@ class DepthReportTest {
     private fun ValueRow.asMap(): Map<String, Int> = sortedMapOf(
         "asked" to asked,
         "crossBlock" to crossBlock,
+        "crossBlockRefused" to crossBlockRefused,
+        "crossBlockResolved" to crossBlockResolved,
         "depthCap" to depthCap,
         "folded" to folded,
         "parameter" to parameter,

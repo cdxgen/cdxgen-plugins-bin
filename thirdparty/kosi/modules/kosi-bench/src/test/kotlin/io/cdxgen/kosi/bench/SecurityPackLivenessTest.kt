@@ -293,15 +293,16 @@ class SecurityPackLivenessTest {
 
         // 1. Every sanitizer: R129's sweep found NONE load-bearing on the
         //    bundled tier until taint-sanitizer grew `sanitizedResult`;
-        //    MessageDigest.digest and URLEncoder.encode are now LIVE, and
-        //    each remaining sanitizer matches an API real applications
-        //    call. Deleted, the pack would stop sanitising on real repos
-        //    with no bundled row the wiser.
+        //    P21 §2 gave the remaining ten the same shape (sanitizer-gallery:
+        //    the sanitized result reaches the sink directly, entry removed =
+        //    want-not violates), so ALL TWELVE are LIVE and every reason
+        //    recorded here for them is dead text — kept so the loop that
+        //    wrote the reasons stays visible next to what closed them.
         for (s in pack.sanitizers) {
             record(
                 "sanitizers[${s.pattern}]",
-                "sanitizer for a real-world API no bundled fixture calls (${s.clears.joinToString(",")} cleared); " +
-                    "kept: real repos rely on it, and the sweep's job is to say so, not to delete it (P20 §3)",
+                "DEAD TEXT since P21 §2: the entry turned LIVE via fixtures/sanitizer-gallery " +
+                    "(this record is retained only as the audit trail of the R129/P21 closure)",
             )
         }
 
