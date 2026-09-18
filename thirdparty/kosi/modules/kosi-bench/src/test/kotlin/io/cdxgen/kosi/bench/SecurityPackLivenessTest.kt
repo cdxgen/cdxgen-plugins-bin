@@ -291,20 +291,15 @@ class SecurityPackLivenessTest {
             reasons[id] = reason
         }
 
-        // 1. Every sanitizer: R129's sweep found NONE load-bearing on the
-        //    bundled tier until taint-sanitizer grew `sanitizedResult`;
-        //    P21 §2 gave the remaining ten the same shape (sanitizer-gallery:
-        //    the sanitized result reaches the sink directly, entry removed =
-        //    want-not violates), so ALL TWELVE are LIVE and every reason
-        //    recorded here for them is dead text — kept so the loop that
-        //    wrote the reasons stays visible next to what closed them.
-        for (s in pack.sanitizers) {
-            record(
-                "sanitizers[${s.pattern}]",
-                "DEAD TEXT since P21 §2: the entry turned LIVE via fixtures/sanitizer-gallery " +
-                    "(this record is retained only as the audit trail of the R129/P21 closure)",
-            )
-        }
+        // 1. The sanitizers have NO allowance any more. R129's sweep found
+        //    none load-bearing; P21 §2 gave all twelve the R129 shape in
+        //    fixtures/sanitizer-gallery, and the committed depth report
+        //    records every one as `fired: true`. An allowance kept "as an
+        //    audit trail" is not inert text — it is a standing excuse, and
+        //    the next sanitizer to go inert would be covered by it in
+        //    silence. When a gate's bar moves up, the allowance that held
+        //    it down comes out (rule 9, P21 review). The bar itself is
+        //    asserted in DepthReportTest.everySanitizerFiresInTheCommittedReport.
 
         // 2. Android sources and sinks: the pinned vuln repos exercise this
         //    family (androgoat's floor rides it); the bundled tier is

@@ -10,6 +10,7 @@ import io.cdxgen.kosi.schema.JsonWriter
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -222,6 +223,45 @@ class DepthReportTest {
                     "through Analyzer.analyze, or delete the constant (the P21 phase rule, written against R131)",
             )
         }
+    }
+
+    /**
+     * P21 §2's bar, moved into the PASS line (rule 9). The phase took the
+     * pack's fired-sanitizer count from 2 of 12 to 12 of 12 and recorded it
+     * in the committed report — but a count that only lives in a golden
+     * moves whenever the golden is regenerated, and P21 also removed the
+     * liveness sweep's blanket sanitizer allowance that had covered the
+     * other ten. So the count is asserted here instead: every sanitizer the
+     * pack ships fires in at least one measured fixture, or it is not a
+     * sanitizer this project can claim (R63).
+     */
+    @Test
+    fun everySanitizerFiresInTheCommittedReport() {
+        val report = repoRoot.resolve("modules/kosi-bench").resolve(reportFile)
+        assertTrue(Files.exists(report), "depth report golden missing: $reportFile")
+        val entries = io.cdxgen.kosi.schema.JsonReader(Files.readString(report))
+            .read().asObject()
+            .arr("sanitizers")
+            ?.objects()
+            ?: error("committed depth report has no sanitizers array")
+        val packPatterns = ModelPacks.loadBuiltin().sanitizers.map { it.pattern }.toSortedSet()
+        val recorded = entries.mapNotNull { it.str("pattern") }.toSortedSet()
+        assertEquals(
+            packPatterns,
+            recorded,
+            "the committed report must name every pack sanitizer — regenerate it (KOSI_UPDATE_DEPTH_REPORT=1)",
+        )
+        val inert = entries.asSequence()
+            .filter { it.bool("fired") != true }
+            .mapNotNull { it.str("pattern") }
+            .toList()
+        assertTrue(
+            inert.isEmpty(),
+            "sanitizers that fire in no measured fixture: $inert — a sanitizer nothing exercises is a silent " +
+                "false-negative guarantee. Give it the R129 shape in fixtures/sanitizer-gallery (the sanitized " +
+                "result reaches the sink directly, so removing the entry violates a want-not), or delete it. " +
+                "P21 §2 took this count from 2 of 12 to 12 of 12; it only goes up.",
+        )
     }
 
     private fun io.cdxgen.kosi.kir.KirValueFolder.FoldStats.toValueRow() = ValueRow(

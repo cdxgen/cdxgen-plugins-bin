@@ -147,16 +147,32 @@ class KirValueFolder(
      */
     private val workspaceReturnSites = java.util.IdentityHashMap<KirFunction, List<Pair<KirBlock, Pair<Int, String?>>>>()
 
-    private val definedRegisters: Map<String, Set<String>> = module.functions.associate { fn ->
-        fn.canonicalName to buildSet {
-            fn.params.forEach { add(it.register) }
-            for (block in fn.body?.blocks.orEmpty()) {
-                for (ins in block.instructions) {
-                    addAll(ins.defs)
-                }
+    /**
+     * Registers a function defines, keyed by IDENTITY. A canonical name is
+     * the package-and-member path with no descriptor, so overloads share
+     * one — and `associate` kept the LAST, which is to say a function could
+     * be asked about its registers and answered about its namesake's. Same
+     * view, same key, everywhere: [cfgs] and [workspaceReturnSites] are
+     * keyed the same way, and the P21 review's R133 is what happens when
+     * one of the three is not (the review's rule: two maps describing the
+     * same function must agree on what a function IS).
+     */
+    private val definedRegisters: Map<KirFunction, Set<String>> =
+        java.util.IdentityHashMap<KirFunction, Set<String>>().apply {
+            for (fn in module.functions) {
+                put(
+                    fn,
+                    buildSet {
+                        fn.params.forEach { add(it.register) }
+                        for (block in fn.body?.blocks.orEmpty()) {
+                            for (ins in block.instructions) {
+                                addAll(ins.defs)
+                            }
+                        }
+                    },
+                )
             }
         }
-    }
 
     /**
      * P20 §2: per-function CFG facts for the dominator walk, built lazily
@@ -178,12 +194,21 @@ class KirValueFolder(
         val reaches: Map<String, Set<String>>,
     )
 
-    private val cfgs = HashMap<String, Cfg?>()
+    /**
+     * Keyed by IDENTITY, like [definedRegisters] and [workspaceReturnSites]:
+     * overloads share a canonical name, and a name-keyed cache answers one
+     * overload's dominator question with its namesake's control flow. That
+     * is not a missed fold but a WRONG one — the review's R133 probe folded
+     * a value defined on one arm of a branch into a confident constant,
+     * because the cached CFG said the defining block dominated the use when
+     * in that body it did not.
+     */
+    private val cfgs = java.util.IdentityHashMap<KirFunction, Cfg?>()
 
     private fun cfgOf(fn: KirFunction): Cfg? {
-        cfgs[fn.canonicalName]?.let { return it }
-        val blocks = fn.body?.blocks ?: return null.also { cfgs[fn.canonicalName] = null }
-        if (blocks.isEmpty()) return null.also { cfgs[fn.canonicalName] = null }
+        if (cfgs.containsKey(fn)) return cfgs[fn]
+        val blocks = fn.body?.blocks ?: return null.also { cfgs[fn] = null }
+        if (blocks.isEmpty()) return null.also { cfgs[fn] = null }
         val indexOf = blocks.withIndex().associate { (i, b) -> b.id to i }
         val succs = HashMap<String, MutableList<String>>()
         val preds = HashMap<String, MutableList<String>>()
@@ -280,7 +305,7 @@ class KirValueFolder(
             defsByRegister = defsByRegister,
             reaches = reaches,
         )
-        cfgs[fn.canonicalName] = cfg
+        cfgs[fn] = cfg
         return cfg
     }
 
@@ -400,7 +425,7 @@ class KirValueFolder(
         var status = ValueStatus.FOLDED_TEMPLATE
         var detail: String? = null
         for (part in parts) {
-            val piece = if (part in (definedRegisters[fn.canonicalName] ?: emptySet())) {
+            val piece = if (part in (definedRegisters[fn] ?: emptySet())) {
                 resolveAbove(fn, block, index, part, depth)
             } else {
                 FoldedValue(part, ValueStatus.FOLDED_TEMPLATE)

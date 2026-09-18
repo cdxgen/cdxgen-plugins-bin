@@ -291,4 +291,60 @@ class KirValueFolderWorkspaceCallTest {
         assertEquals(KirValueFolder.ValueStatus.NULL, folded.status)
         assertEquals(null, folded.failure, "found-null is a fact, not a failure")
     }
+
+    /**
+     * R133 (P21 review): overloads share a canonical name, so a cache keyed
+     * by that name answers one overload's question with its namesake's
+     * facts. P21 §1 saw this for the return-site cache and keyed it by
+     * identity; the CFG cache and the defined-register table, which the
+     * same walk reads, stayed name-keyed.
+     *
+     * The failure is not a missed fold but a WRONG one. Overload A defines
+     * its value in a block that dominates its return; overload B defines
+     * the SAME register name, in the SAME block id, on ONE ARM of a branch,
+     * where it dominates nothing. Folded alone, B refuses — the conservative
+     * join doing its job. Folded in a module that also holds A, B's walk
+     * read A's dominator facts and published `B-conditional`: a confident
+     * constant for a value that exists on one path. Two maps describing the
+     * same function must agree on what a function IS.
+     */
+    @Test
+    fun overloadsDoNotShareOneAnothersControlFlow() {
+        val a = fn(
+            "probe.load",
+            entryBlock("b0", KirBranch("c", "b1", "b1")),
+            block("b1", KirLoad("t0", KirConstant.Str("\"A-value\"")), KirBranch("c", "b3", "b3")),
+            block("b3", KirReturn("t0")),
+            descriptor = "()V",
+        )
+        val b = fn(
+            "probe.load",
+            entryBlock("b0", KirBranch("c", "b1", "b2")),
+            block("b1", KirLoad("t0", KirConstant.Str("\"B-conditional\"")), KirBranch("c", "b3", "b3")),
+            block("b2", KirBranch("c", "b3", "b3")),
+            block("b3", KirReturn("t0")),
+            descriptor = "(I)V",
+        )
+        val callerA = fn("probe.useA", entryBlock("b0", call("t1", "probe.load", descriptor = "()V"), call("t2", "sink", "t1")))
+        val callerB = fn("probe.useB", entryBlock("b0", call("t1", "probe.load", descriptor = "(I)V"), call("t2", "sink", "t1")))
+
+        val shared = folder(callerA, callerB, a, b)
+        assertEquals(
+            "A-value",
+            shared.valueAt(callerA, callerA.body!!.blocks.first(), 1, "t1")!!.value,
+            "the dominating definition still folds",
+        )
+        val viaShared = shared.valueAt(callerB, callerB.body!!.blocks.first(), 1, "t1")!!
+        assertFalse(
+            viaShared.resolved,
+            "a value defined on one arm of a branch is path-dependent: refusing is the whole design (R133)",
+        )
+
+        // The same question asked of a module holding B alone — the answer
+        // the shared module must give too.
+        val alone = folder(callerB, b).valueAt(callerB, callerB.body.blocks.first(), 1, "t1")!!
+        assertFalse(alone.resolved)
+        assertEquals(alone.failure, viaShared.failure, "a namesake in the module must not change the verdict")
+    }
+
 }
