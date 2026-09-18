@@ -15,6 +15,8 @@ import java.nio.file.Path
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -703,5 +705,118 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
         assertEquals(2, returns.size, "no unreachable implicit-return block is emitted, got: $returns")
         val tryReturns = result.instructionsOf("tryBothReturn").filterIsInstance<io.cdxgen.kosi.kir.KirReturn>()
         assertTrue(tryReturns.isNotEmpty(), "the try expression's return is still emitted")
+    }
+
+    @Test
+    fun catchParametersAreBoundToTheThrownValueAndReadAsLocals() {
+        // P16 §3: the handler's own parameter existed nowhere in the KIR — a
+        // read of `e` lowered as a FIELD READ on `this`, and no value the
+        // guarded body threw could reach it. Restoring that defect fails
+        // this test three ways: the parameter reads as `fieldget vthis`,
+        // no <thrown> binding exists, and a body ending in `throw` has no
+        // exceptional edge to the dispatch chain.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/CatchParam.kt" to """
+                    package t
+
+                    fun visibleThrow(input: String): String {
+                        try {
+                            throw IllegalStateException("bad ${'$'}input")
+                        } catch (e: IllegalStateException) {
+                            return e.message ?: "none"
+                        }
+                    }
+
+                    fun unguardedThrow(input: String): String {
+                        throw IllegalStateException(input)
+                    }
+
+                    fun implicitThrow(input: String): String {
+                        try {
+                            return input.toInt().toString()
+                        } catch (e: NumberFormatException) {
+                            return e.message ?: "none"
+                        }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        assertEquals(emptyMap(), result.failures, "every construct here lowers")
+
+        // The parameter is a LOCAL: `e.message` reads the field off `ve`,
+        // never a member of `this`.
+        for (namePart in listOf("visibleThrow", "implicitThrow")) {
+            val fieldGets = result.instructionsOf(namePart).filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>()
+            assertTrue(
+                fieldGets.none { it.receiver == "vthis" && it.path.elements.any { el -> (el as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name == "e" } },
+                "the catch parameter is not a field on this: $fieldGets",
+            )
+            assertTrue(
+                fieldGets.any { it.receiver == "ve" },
+                "the catch parameter's field read runs on its own register",
+            )
+        }
+
+        // The VISIBLE throw binds the thrown register AND its construction
+        // arguments — the fresh object's own register is clean by the
+        // transfer's rule, so a binding over the object alone would drop the
+        // flow the wrap-and-rethrow idiom is about.
+        val visible = result.instructionsOf("visibleThrow")
+        val thrown = visible.filterIsInstance<io.cdxgen.kosi.kir.KirDynamicCall>()
+            .single { it.name == KirLowering.THROWN_EXCEPTION }
+        val store = visible.filterIsInstance<io.cdxgen.kosi.kir.KirStore>().single { it.target == "ve" }
+        assertEquals(thrown.result, store.value, "the parameter store reads the thrown binding")
+        assertTrue(
+            thrown.args.any { it != thrown.receiver },
+            "the binding sees the construction arguments, not only the object register: $thrown",
+        )
+
+        // The body's own `throw` never dead-ends inside a guarded body: the
+        // throw becomes the exceptional edge, so the block holding the
+        // binding ends in a may-branch to the dispatch chain (no KirThrow is
+        // emitted there — a KirThrow terminates with no successor and would
+        // strand the binding). Throws OUTSIDE any guarded body keep their
+        // KirThrow.
+        val module = io.cdxgen.kosi.front.KirDumper.dumpWithWarnings(
+            root,
+            io.cdxgen.kosi.schema.AnalyzeOptions(backend = io.cdxgen.kosi.schema.Backend.RESOLVED),
+        ).first
+        val visibleFn = io.cdxgen.kosi.kir.KirReader.read(module).functions.single { "visibleThrow" in it.canonicalName }
+        val bindingBlock = visibleFn.body?.blocks?.single { b ->
+            b.instructions.any { it is io.cdxgen.kosi.kir.KirDynamicCall && it.name == KirLowering.THROWN_EXCEPTION }
+        }
+        assertNotNull(bindingBlock, "the binding block exists")
+        val bindingBranch = bindingBlock!!.instructions.lastOrNull() as? io.cdxgen.kosi.kir.KirBranch
+        assertNotNull(bindingBranch, "the throw site branches — the exceptional edge: ${bindingBlock.instructions}")
+        assertEquals(
+            bindingBranch.thenBlock,
+            bindingBranch.elseBlock,
+            "the exceptional edge is a may-edge (both arms to the dispatch chain)",
+        )
+        assertTrue(
+            visibleFn.body?.blocks?.any { b -> b.instructions.any { it is io.cdxgen.kosi.kir.KirThrow } } == false,
+            "inside a guarded body the throw lowered to its edge, not to a dead-end KirThrow",
+        )
+        // ... and a throw with no enclosing try still lowers to KirThrow:
+        // the edge replaces the terminator only where a handler can receive
+        // it.
+        assertTrue(
+            result.instructionsOf("unguardedThrow").any { it is io.cdxgen.kosi.kir.KirThrow },
+            "an unguarded throw keeps its KirThrow terminator",
+        )
+
+        // Where NO throw is visible, the parameter is seeded from the body's
+        // live registers at the dispatch edge (tainted-if-the-body-was).
+        val implicitFn = result.instructionsOf("implicitThrow")
+        val seed = implicitFn.filterIsInstance<io.cdxgen.kosi.kir.KirDynamicCall>()
+            .single { it.name == KirLowering.THROWN_EXCEPTION }
+        assertNull(seed.receiver, "the unknown exception has no thrown register")
+        assertTrue(seed.args.isNotEmpty(), "the seed reads the body's live registers")
+        assertTrue(
+            implicitFn.filterIsInstance<io.cdxgen.kosi.kir.KirStore>().any { it.target == "ve" && it.value == seed.result },
+            "the implicit parameter is bound to the seed",
+        )
     }
 }

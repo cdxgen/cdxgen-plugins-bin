@@ -46,6 +46,24 @@ data class CorpusEntry(
      * deps-class-limit diagnostic still names what was cut.
      */
     val depsMaxClasses: Int? = null,
+    /**
+     * The RESOLUTION-ERROR classes this entry's sources legitimately carry
+     * (P18 §3): the frontend's `resolution-errors` diagnostic names the
+     * ERROR-severity factories the analysis saw, and a class that is NOT
+     * here fails the row — a fixture whose stub stopped typechecking (R110:
+     * a missing import, an unimplemented member) otherwise passed every
+     * want over code the compiler rejects. The list is a RATCHET, not a
+     * licence: adding a class is a reviewed change, and the count rides
+     * the diagnostic for drift both ways. NULL = ungated (repo tiers: real
+     * code under partial classpaths legitimately resolves imperfectly —
+     * corpusFull measured ABSTRACT_MEMBER_NOT_IMPLEMENTED and a dozen
+     * inference classes on the pinned repos, none of them a fixture
+     * regression); an EMPTY list is a POSITIVE declaration that the entry
+     * typechecks clean, and the two must not collapse into each other
+     * (the first implementation parsed absent as empty and failed every
+     * repo row — caught by this phase's own corpusFull, not by review).
+     */
+    val toleratedResolutionErrors: List<String>? = null,
 ) {
     fun validate() {
         if (path == null && repo == null) {
@@ -70,16 +88,60 @@ data class CorpusManifest(
      * itself the full run (R64). Silently dropping an unknown tier turns a
      * misspelling into missing coverage that still exits zero.
      */
+    /**
+     * P23 §0: the BUNDLED entries — the ones whose sources live in this
+     * repository under `fixtures/`, so their reports are reproducible from a
+     * checkout alone with no external clone. This is the golden gate's
+     * population, derived rather than listed.
+     *
+     * It used to be the tier list `{"fixtures", "async"}`, written two lines
+     * under a comment claiming "every bundled fixture tier is
+     * golden-ratcheted ... a tier the goldens never see is a tier whose
+     * drift they prove nothing about" — which was false for five tiers and
+     * seventeen bundled fixtures the moment `frameworks` was added (the P23
+     * review's R142). Every crypto fixture, every framework fixture (ktor,
+     * spring, micronaut, quarkus, http4k, grpc) and the bundled vulnerable
+     * service were outside the pin. A tier list has to be remembered; a
+     * predicate over `path` cannot be forgotten, and a new bundled tier is
+     * golden-ratcheted the day it is added.
+     *
+     * [excludedTiers] is the one place an exception is stated out loud.
+     */
+    fun bundled(only: String? = null, excludedTiers: Set<String> = GOLDEN_EXCLUDED_TIERS): List<CorpusEntry> {
+        val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        return entries.filter { entry ->
+            entry.path?.startsWith("fixtures/") == true &&
+                entry.tier !in excludedTiers &&
+                (onlySlugs == null || entry.slug in onlySlugs)
+        }
+    }
+
     fun select(tiers: Set<String>, only: String? = null): List<CorpusEntry> {
         val known = entries.map { it.tier }.toSet()
         val unknown = (tiers - known).sorted()
         require(unknown.isEmpty()) {
             "unknown corpus tier(s) ${unknown.joinToString(", ")}; corpus.toml has ${known.sorted().joinToString(", ")}"
         }
-        return entries.filter { it.tier in tiers && (only == null || it.slug == only) }
+        // P20 §5: `only` is a comma-separated slug list — the corpusChanged
+        // middle tier selects many repo rows in one invocation.
+        val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        return entries.filter { it.tier in tiers && (onlySlugs == null || it.slug in onlySlugs) }
     }
 
     companion object {
+        /**
+         * P23 §0: the bundled tiers the golden gate deliberately does NOT
+         * pin, each for a reason that is stated rather than implied.
+         *
+         *  - `eap` targets a Kotlin EAP language version, so its report
+         *    depends on the compiler the checkout happens to have; pinning
+         *    a digest would ratchet the toolchain, not kosi.
+         *
+         * Anything else under `fixtures/` is pinned. Emptying this set is
+         * always the safe direction; adding to it needs a sentence above.
+         */
+        val GOLDEN_EXCLUDED_TIERS = setOf("eap")
+
         fun parse(text: String): CorpusManifest {
             val tables = mutableListOf<LinkedHashMap<String, Any?>>()
             var current: LinkedHashMap<String, Any?>? = null
@@ -141,6 +203,10 @@ data class CorpusManifest(
                 classpathFile = str("classpath_file"),
                 minFindings = int("min_findings"),
                 depsMaxClasses = int("deps_max_classes"),
+                // NOT the `list()` helper: that coerces an absent key to
+                // emptyList, collapsing "ungated" into "declared clean" —
+                // R116's fix only holds if absence parses as null.
+                toleratedResolutionErrors = table["tolerated_resolution_errors"] as? List<String>,
             )
         }
     }

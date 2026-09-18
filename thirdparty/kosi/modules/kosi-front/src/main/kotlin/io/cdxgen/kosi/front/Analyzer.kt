@@ -23,6 +23,7 @@ import io.cdxgen.kosi.schema.RuntimeInfo
 import io.cdxgen.kosi.schema.Severity
 import io.cdxgen.kosi.schema.Stats
 import io.cdxgen.kosi.schema.ToolInfo
+import io.cdxgen.kosi.schema.degradations
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.Path
@@ -70,9 +71,57 @@ object Analyzer {
         return parts.joinToString(" <- ")
     }
 
-    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport = when (options.backend) {
+    /**
+     * The endpoint-detection inputs, captured mid-pipeline (P19 §4): the
+     * lowered module, the source texts, the resolved declaration-annotation
+     * values and the resolved dependency coordinates. The pack-entry
+     * liveness gate re-runs [io.cdxgen.kosi.endpoints.Endpoints.analyze]
+     * over one capture per fixture with each pack entry removed, so the
+     * question "does any fixture's report change if this entry goes" is
+     * answered mechanically instead of by anecdote.
+     */
+    data class EndpointCapture(
+        val module: io.cdxgen.kosi.kir.KirModule,
+        val sourceTexts: Map<String, String>,
+        val annotationValues: Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>,
+        val dependencyCoordinates: Set<String>,
+        /**
+         * P20 §0: the endpoint pass's OWN result — including the value
+         * folder's fold statistics, the config-resolution counts and the
+         * source-handler map — captured so the depth report and the
+         * liveness gates can measure the consumers without re-running the
+         * front end. Null for runs that disable endpoint detection.
+         */
+        val endpoints: io.cdxgen.kosi.endpoints.Endpoints.Result? = null,
+        /** P20 §0: the value folder's fold counters for this run's consumers. */
+        val foldStats: io.cdxgen.kosi.kir.KirValueFolder.FoldStats = io.cdxgen.kosi.kir.KirValueFolder.FoldStats(),
+        /**
+         * P20 §0: the taint engine's depth scoreboard for this run —
+         * sources seeded, sink hits dropped unprovable, cap-affected hits,
+         * summary-missing call sites, sanitizers that actually fired. Null
+         * when the run asked for no dataflow.
+         */
+        val flowDepth: io.cdxgen.kosi.flow.TaintEngine.DepthStats? = null,
+        /**
+         * P22 §0: the flow module's verdicts on "can taint reach this
+         * function's return value" — the second answer to the question the
+         * const folder answers with its workspace walk. The depth report's
+         * agreement gate compares the two; null when no dataflow ran.
+         */
+        val flowReturnOpinions: io.cdxgen.kosi.flow.TaintEngine.ReturnOpinions? = null,
+    )
+
+    fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport =
+        analyze(root, options, commit, endpointCapture = null)
+
+    fun analyze(
+        root: Path,
+        options: AnalyzeOptions,
+        commit: String,
+        endpointCapture: ((EndpointCapture) -> Unit)?,
+    ): KosiReport = when (options.backend) {
         Backend.SYNTAX -> analyzeSyntax(root, options, commit)
-        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit)
+        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit, endpointCapture)
     }
 
     // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
@@ -250,14 +299,14 @@ object Analyzer {
 
     // ---- resolved tier (P1) -------------------------------------------------
 
-    private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
+    private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String, endpointCapture: ((EndpointCapture) -> Unit)? = null): KosiReport {
         // P10: the budgets (time, RSS) live across the whole resolved run and
         // degrade it — never panic, never discard computed evidence. Off by
         // default; when both budgets are unset no sampler thread exists and
         // shouldStop() is a constant null.
         val budgets = Budgets.of(options)
         try {
-            return analyzeResolvedInner(root, options, commit, budgets)
+            return analyzeResolvedInner(root, options, commit, budgets, endpointCapture)
         } finally {
             budgets.close()
         }
@@ -268,6 +317,7 @@ object Analyzer {
         options: AnalyzeOptions,
         commit: String,
         budgets: Budgets,
+        endpointCapture: ((EndpointCapture) -> Unit)? = null,
     ): KosiReport {
         val discovery = ProjectDiscovery.discover(root)
         val (versionedModules, versionDiagnostics, overrideDiagnostics) =
@@ -284,15 +334,25 @@ object Analyzer {
         // A named classpath file that does not exist is an error, not a
         // silently empty classpath: the P0 review's `--compare` defect was
         // exactly this shape — a flag the run echoed but never applied.
-        options.classpathFile?.let { file ->
-            if (!Files.isRegularFile(Path.of(file))) {
-                throw AnalysisException("--classpath-file $file does not exist or is not a regular file")
+        // A RELATIVE --classpath-file resolves against the analysed directory,
+        // not the process's working directory. The recorded option is part of
+        // the report, and an absolute path records the checkout's LOCATION —
+        // which is not an analysis input, and which made the golden gate's
+        // `options` digest differ between two machines analysing the same tree
+        // (P17 review). Absolute paths are unchanged: resolve() returns them
+        // as given.
+        val classpathFile = options.classpathFile?.let { root.resolve(it) }
+        classpathFile?.let { file ->
+            if (!Files.isRegularFile(file)) {
+                throw AnalysisException(
+                    "--classpath-file ${options.classpathFile} does not exist or is not a regular file",
+                )
             }
         }
         val resolution = ClasspathResolver.resolve(
             root = root,
             explicitJars = options.classpath.map { Path.of(it) },
-            explicitFile = options.classpathFile?.let { Path.of(it) },
+            explicitFile = classpathFile,
             moduleDirs = moduleDirs,
         )
         val classpathDiagnostics = buildList {
@@ -529,34 +589,62 @@ object Analyzer {
                     ""
                 })
             }
+            val declarationAnnotationValues = declarationAnnotations(
+                drafts,
+                kirModule,
+                // Resolution's own short-name -> FQN map. Scanning KIR
+                // FUNCTION annotations cannot reach a class with no
+                // functions, and framework matching is on the FQN.
+                facts.fold(mutableMapOf<String, MutableSet<String>>()) { acc, f ->
+                    for ((short, fqns) in f.annotationFqnsByShortName) {
+                        acc.getOrPut(short) { mutableSetOf() }.addAll(fqns)
+                    }
+                    acc
+                },
+            )
+            val resolvedDependencyCoordinates = buildSet {
+                for (jar in resolution.jars) {
+                    // The real coordinate, interpolated: this arm read
+                    // `"${'$'}{it.group}:${'$'}{it.artifact}"` since P13,
+                    // which renders the LITERAL `${it.group}:...` — a
+                    // dead arm nobody noticed because the FILE-NAME arm
+                    // below matched every Gradle-cache jar anyway
+                    // (R111b). A bound pin with a custom jar name has no
+                    // filename to fall back on; implicit-routes-
+                    // unresolved pins exactly that shape.
+                    jar.coordinate?.let { add(it.group + ":" + it.artifact) }
+                    add(jar.jar.fileName.toString())
+                }
+            }
+            // P19 §4: the pack-entry liveness gate re-runs endpoint
+            // DETECTION once per removed pack entry over exactly these
+            // captured products, so the front-end analysis runs once per
+            // fixture regardless of how many entries the pack carries.
+            // P20 §0: the capture carries the endpoint pass's own Result
+            // (fold statistics included), computed in the same run.
+            val capture = EndpointCapture(
+                module = kirModule,
+                sourceTexts = sourceTexts,
+                annotationValues = declarationAnnotationValues,
+                dependencyCoordinates = resolvedDependencyCoordinates,
+            )
             val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
                 module = kirModule,
                 root = root,
                 sourceTexts = sourceTexts,
-                annotationValues = declarationAnnotations(
-                    drafts,
-                    kirModule,
-                    // Resolution's own short-name -> FQN map. Scanning KIR
-                    // FUNCTION annotations cannot reach a class with no
-                    // functions, and framework matching is on the FQN.
-                    facts.fold(mutableMapOf<String, MutableSet<String>>()) { acc, f ->
-                        for ((short, fqns) in f.annotationFqnsByShortName) {
-                            acc.getOrPut(short) { mutableSetOf() }.addAll(fqns)
-                        }
-                        acc
-                    },
-                ),
+                annotationValues = declarationAnnotationValues,
                 attribution = io.cdxgen.kosi.endpoints.Endpoints.Attribution(fileRelPathByAbsolute, purlByModulePath),
                 includeManifests = true,
                 // The resolved classpath, as coordinates: some routes exist
                 // because a dependency is present and for no other reason.
-                dependencyCoordinates = buildSet {
-                    for (jar in resolution.jars) {
-                        jar.coordinate?.let { add("${'$'}{it.group}:${'$'}{it.artifact}") }
-                        add(jar.jar.fileName.toString())
-                    }
-                    addAll(resolution.missing)
-                },
+                // PRESENT means the resolver located the artifact — the
+                // missing[] list is deliberately NOT fed here: a marker
+                // coordinate that failed to resolve is an ABSENT dependency,
+                // and treating it as present published the implicit trees on
+                // machines whose cache was cold (R111), the exact
+                // wrong-reason pass implicit-routes-unresolved pins.
+                dependencyCoordinates = resolvedDependencyCoordinates,
+                foldStats = capture.foldStats,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(
@@ -611,16 +699,20 @@ object Analyzer {
                         maxSlices = options.dataflowMaxSlices,
                         maxTraceNodes = options.dataflowMaxTraceNodes,
                         maxFunctionInstructions = options.dataflowMaxFunctionInstructions,
+                        maxSummarySinkEffects = options.dataflowMaxSummarySinkEffects,
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
                         // The framework's own statement about which handler
-                        // parameters carry attacker input (P12).
-                        endpointParameterCategories = if (options.endpointSources) {
+                        // parameters carry attacker input, WHAT KIND of
+                        // input each annotation names, and the category it
+                        // carries (P20 §1: the source is a parameter, not
+                        // a function).
+                        endpointParameterAnnotations = if (options.endpointSources) {
                             io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
                                 .flatMap { it.parameterAnnotations }
-                                .associate { it.pattern to it.category }
+                                .associate { it.pattern to it }
                         } else {
                             emptyMap()
                         },
@@ -649,22 +741,49 @@ object Analyzer {
             } else {
                 null
             }
+            endpointCapture?.invoke(
+                capture.copy(
+                    endpoints = endpoints,
+                    flowDepth = flowResult?.depth,
+                    flowReturnOpinions = flowResult?.returnOpinions,
+                ),
+            )
             val dataFlow = if (flowResult != null) {
-                val evidence = flowResult.evidence
+                // P23 §0, R139: `--dataflow crypto` is a FILTER, and until
+                // this phase it filtered nothing — `security`, `crypto`,
+                // `all` and `security-deps` published byte-identical slice
+                // sets, so a run that asked for crypto flows was handed
+                // log-injection findings under `"mode": "crypto"`. The
+                // predicate is the one the bench has counted
+                // `cryptoFlowSlices` with since P6, now shared rather than
+                // duplicated. The other modes keep their meanings exactly:
+                // `security` is every pack flow, `all` is its declared alias
+                // (the pack has nothing `security` leaves out), `reachable`
+                // is the intersection below, `security-deps` is `security`
+                // plus the dependency tier.
+                val evidence = if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.CRYPTO) {
+                    flowResult.evidence.restrictTo(
+                        flowResult.evidence.slices.filter { io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(it) },
+                    )
+                } else {
+                    flowResult.evidence
+                }
                 if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {
                     val reachedFunctions = graphResult.callGraph.reachability
                         .filter { it.reached }
                         .mapNotNull { entry -> graphResult.callGraph.nodes.firstOrNull { it.id == entry.nodeId }?.canonicalName }
                         .toSet()
                     val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
-                    evidence.copy(
-                        slices = kept.map { it.copy(reachableFromRoots = true) },
-                        stats = evidence.stats.copy(
-                            sliceCount = kept.size,
-                            uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
-                            reachableSlices = kept.size,
-                        ),
-                    )
+                    // P22 §2: the intersection IS the reachability fact — the
+                    // per-slice flag that used to be stamped true here said
+                    // only "this run was the reachable one", which
+                    // `dataFlow.mode` already says. P23 §0: it narrows the
+                    // whole document (nodes, edges and every derived counter)
+                    // through the one function that does that, instead of
+                    // recomputing four counters and leaving five plus the
+                    // node and edge arrays describing dropped traces.
+                    val narrowed = evidence.restrictTo(kept)
+                    narrowed.copy(stats = narrowed.stats.copy(reachableSlices = kept.size))
                 } else {
                     evidence
                 }
@@ -876,7 +995,18 @@ object Analyzer {
                     sliceCount = dataFlow?.slices?.size ?: 0,
                     crossDependencySliceCount = dataFlow?.stats?.crossDependencySlices ?: 0,
                     crossModuleSliceCount = dataFlow?.stats?.crossModuleSlices ?: 0,
-                    reachableSliceCount = dataFlow?.slices?.count { it.reachableFromRoots } ?: 0,
+                    // READ, never re-derived: the intersection above is the
+                    // only place that can answer this, and it has already
+                    // written its answer into `dataFlow.stats`. The P22
+                    // review's R137 is what the second derivation cost —
+                    // this line asked the MODE ("was reachability wanted?")
+                    // where the intersection asks whether a graph existed,
+                    // so `--dataflow reachable --callgraph none` published
+                    // every slice as reachable with nothing computed. The
+                    // phase's own rule: when two pieces of code answer the
+                    // same question, the answers are a gate — so there is
+                    // now one piece of code.
+                    reachableSliceCount = dataFlow?.stats?.reachableSlices ?: 0,
                     sccsProcessed = flowResult?.sccsProcessed ?: 0,
                     sccIterationCapHits = flowResult?.sccIterationCapHits ?: 0,
                     suspendCrossingSliceCount = dataFlow?.stats?.suspendCrossingSlices ?: 0,
@@ -1208,6 +1338,25 @@ object Analyzer {
 
         val diagnosticsOut = buildList {
             addAll(diagnostics)
+            // P23 §0: every accepted option pairing that cannot deliver what
+            // it names, from the ONE predicate the CLI's refusals also read.
+            // Stamped here, in `assemble`, because both tiers end up here and
+            // a degradation that depended on which tier stamped it would be
+            // the R137 shape again. The Analyzer is a library — the bench,
+            // the corpus and evinse call it directly and never see a usage
+            // message — so it names all of them, including the ones the CLI
+            // refuses outright.
+            for (degradation in options.degradations()) {
+                add(
+                    Diagnostic(
+                        code = degradation.code,
+                        severity = if (degradation.usageError) Severity.WARNING else Severity.INFO,
+                        message = degradation.message,
+                        position = Position(".", 1, 1),
+                        count = 1,
+                    ),
+                )
+            }
             if (buildSystem == "none") {
                 add(
                     Diagnostic(

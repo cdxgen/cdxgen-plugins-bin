@@ -50,7 +50,7 @@ class SarifTest {
             nodeIds = listOf("n1", "n2", "n3"), edgeIds = listOf("e1", "e2"),
             pathLength = 2, elided = null, sanitizerNodeIds = emptyList(),
             sinkArgumentIndex = 1, accessPath = null, crossesModule = false,
-            crossesDependency = false, reachableFromRoots = false, rootWitness = null,
+            crossesDependency = false, pathKind = "complete",
             ruleId = "kosi-sqli", ruleName = "SQL injection",
             description = "Tainted data reaches a SQL query",
             severity = "critical", confidence = "high", riskScore = "0.90",

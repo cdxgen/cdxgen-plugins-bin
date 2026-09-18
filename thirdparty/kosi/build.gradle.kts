@@ -167,6 +167,28 @@ kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required fo
     )
 }
 
+// P20 §5: the corpusChanged middle tier's repo-row runner. scripts/
+// corpus-changed.sh selects the repo slugs whose declared capabilities the
+// change can move, then invokes this with -Pkosi.only=slug1,slug2. A cold
+// cache on one repo is a skipped row (--skip-missing-repos), never a dead
+// matrix; the floors ride it every time because the script always selects
+// them.
+kosiTask("kosiRepoRows", "Repo-tier rows selected by scripts/corpus-changed.sh (-Pkosi.only=slug,slug).") {
+    doFirst {
+        val only = (project.findProperty("kosi.only") as String?)
+            ?: throw GradleException("kosiRepoRows needs -Pkosi.only=slug1,slug2 (see scripts/corpus-changed.sh)")
+        val tiers = (project.findProperty("kosi.repo-tiers") as String?)
+            ?: "vuln-repo,small,medium,android,kmp,hybrid"
+        args = listOf(
+            "bench",
+            "--tier", tiers,
+            "--repo-root", rootDir.absolutePath,
+            "--only", only,
+            "--skip-missing-repos",
+        )
+    }
+}
+
 kosiTask("kosiEap", "EAP tier: fixtures using the next version's syntax (only meaningful with -PkotlinVersion=<rc>).") {
     args = listOf("bench", "--tier", "eap", "--repo-root", rootDir.absolutePath)
 }

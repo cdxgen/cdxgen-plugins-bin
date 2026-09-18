@@ -557,6 +557,9 @@ object ConstTable {
         """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
     )
 
+    // P22 §1: keyed by the `const val` NAME — deliberately name-unique: a
+    // name holding two values anywhere is ambiguous and is REFUSED below,
+    // never guessed.
     fun fromSources(sourceTexts: Map<String, String>): Map<String, String> {
         val byName = HashMap<String, MutableSet<String>>()
         for (text in sourceTexts.values) {

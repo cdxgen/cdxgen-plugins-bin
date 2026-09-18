@@ -52,15 +52,44 @@ object Endpoints {
          * handler anywhere in the application's source.
          */
         dependencyCoordinates: Set<String> = emptySet(),
+        /**
+         * The pack to detect with. Production always loads the builtin; the
+         * P19 liveness gate re-runs THIS analysis once per removed pack
+         * entry over the SAME captured inputs, so an entry no fixture's
+         * report depends on is a mechanical fact, not an anecdote.
+         */
+        pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
+        /**
+         * P20 §0: when non-null, every value the consumers ask the folder
+         * for is counted here with its failure reason — the depth report's
+         * value-resolution table. Production passes null and pays nothing.
+         */
+        foldStats: KirValueFolder.FoldStats? = null,
+        /**
+         * P20 §2: `false` restores the pre-P20 block-local scan — the depth
+         * report's baseline column measures both ways over one capture.
+         */
+        crossBlock: Boolean = true,
     ): Result {
-        val pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin()
         val configTable = ConfigResolver.load(root)
-        val configValues = configTable.keys().mapNotNull { key -> configTable[key]?.let { key to it.value!! } }.toMap()
+        // `value` is null for a key the config files DISAGREE about (P23 §1,
+        // R140): known key, unprovable value, so it is absent from the fold
+        // table and the site publishes `unresolved` with the key named. The
+        // `!!` that stood here was safe only while nothing could ever be
+        // ambiguous — the same read one layer up (`configValuesForCrypto`)
+        // has always used `mapNotNull` on the value, and two readers of one
+        // nullable field disagreeing about whether it can be null is the
+        // shape P22's rule is about.
+        val configValues = configTable.keys()
+            .mapNotNull { key -> configTable[key]?.value?.let { key to it } }
+            .toMap()
         val folder = KirValueFolder(
             module = module,
             constValues = ConstTable.fromSources(sourceTexts),
             configReaders = pack.configReaders.map { it.pattern to it.argument },
             configTable = configValues,
+            statsSink = foldStats,
+            crossBlock = crossBlock,
         )
         val lambdaLinks = buildLambdaLinks(module)
 
@@ -717,6 +746,10 @@ object ConstTable {
         """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
     )
 
+    // P22 §1: keyed by the `const val` NAME — deliberately name-unique: a
+    // name mapping to two values anywhere is ambiguous and is REFUSED below
+    // (filterValues size == 1), never guessed, so the non-unique key is the
+    // mechanism, not a defect.
     fun fromSources(sourceTexts: Map<String, String>): Map<String, String> {
         val byName = HashMap<String, MutableSet<String>>()
         for (text in sourceTexts.values) {

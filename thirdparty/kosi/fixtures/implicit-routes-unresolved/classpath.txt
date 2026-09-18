@@ -1,0 +1,11 @@
+# Two marker pins, one present and one absent, pinning both halves of the
+# dependency-marker contract (R111):
+#  - PRESENT, bound to a committed jar whose FILE NAME does not contain the
+#    marker — only the coordinate arm can match it (the filename arm carried
+#    every real resolution since P13 because Gradle names cache files after
+#    the artifact, which is how a dead coordinate arm stayed invisible).
+#  - ABSENT: the same artifact at a version no cache holds. A marker that
+#    failed to resolve is not a present dependency; feeding the resolver's
+#    missing[] into the marker set published the trees anyway.
+org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0=libs/springdoc-marker.jar
+org.springframework.boot:spring-boot-starter-actuator:9.9.9

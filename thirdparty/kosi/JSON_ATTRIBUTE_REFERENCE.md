@@ -85,6 +85,20 @@ Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
 defaults to the running JVM. Unknown flags are a usage error, never a silent
 degrade.
 
+**Which option values travel (P18).** The report records every effective
+option verbatim — reproduction needs the real jar paths and JDK home. The
+DIGEST goldens are the consumer that cannot: `classpath` entries and
+`jdkHome` are absolute by construction when set, and an explicitly absolute
+`classpathFile` names one machine just as much. At the digest boundary
+(`Digests.compute`) each ABSOLUTE path value among those three members
+enters as the fixed marker `<absolute-path>`, so two environments running
+the same slot set with their own absolute pins digest equal, while setting
+such an option still differs from leaving it unset and a relative value
+(a committed pin like `classpath.txt`) stays digested as given. The golden
+gate's in-run portability comparison digests `options` RAW on purpose: a
+report whose own bytes name their location is not portable, whatever the
+digest would tolerate.
+
 ## modules — ModuleRef
 
 | Attribute | Type | Purpose |
@@ -186,7 +200,7 @@ rather than a negative expectation that passes vacuously.
 | `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists |
 | `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
 | `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
-| `resolution-errors` | warning | frontend resolution reported diagnostics in a file; `message` summarises per-checker counts, `count` is the total |
+| `resolution-errors` | warning | frontend resolution reported ERROR-severity diagnostics in a file; `message` summarises per-checker counts, `count` is the total. P18: only ERROR-severity factories count (warning-severity ones like DEPRECATION used to be included, drowning the signal), and the bundled corpus entries ratchet their fixtures' error classes via corpus.toml `tolerated_resolution_errors` — an undeclared class fails the row (R110: a stub that stopped typechecking passed every want) |
 | `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
 | `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
@@ -374,9 +388,10 @@ channel's ELEMENT state). A suspend boundary is transparent to the analysis —
 suspension does not launder taint — and `stats.suspendCrossingSlices` counts
 the slices whose trace crosses one. `--dataflow reachable` additionally
 intersects the slices with the call graph's reachability from the declared
-roots and sets `reachableFromRoots` on the survivors; `--dataflow crypto`
-and `--dataflow all` run the same pack today; `security-deps` behaves as
-`security` until P9.
+roots and keeps only the survivors (their `pathKind` is unchanged — the
+intersection IS the reachability fact; `stats.reachableSlices` equals
+`sliceCount` there); `--dataflow crypto` and `--dataflow all` run the same
+pack today; `security-deps` behaves as `security` until P9.
 
 Everything that decides a category is DATA: the shipped model pack
 (`kosi-models/resources/models/security-pack-v0.json`, merged with user packs
@@ -396,17 +411,19 @@ first parameter is index 0.
 | `sourceName`, `sinkName` | string | callee FQNs matched from the pack |
 | `sourceFunction`, `sinkFunction` | string | the function each END lives in — two different functions (and modules) for an interprocedural slice |
 | `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
+| `sourceParameter` | string? | P20 §1: for a slice that entered through an endpoint HANDLER's parameter, the value-parameter it entered through — `#0` is the first non-receiver parameter. `null` for every other birth. Before this field an endpoint-rooted slice could say "this handler is reachable from untrusted input" but never WHICH input |
+| `sourceTransport` | string? | P20 §1: the transport that parameter's annotation names — `path`, `query`, `header`, `cookie`, `form`, `body` (the endpoints pack's `parameterAnnotations[].kind`). `null` when the handler (or framework) names no annotation for it |
 | `taintKinds` | string[] | the categories travelling on the trace |
 | `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
 | `pathLength` | int | `edgeIds.size` |
-| `elided` | boolean? | true when the trace cap (`--dataflow-max-trace-nodes`) cut the MIDDLE of the walk; the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `elided` | boolean? | true when the walk was cut — the trace cap (`--dataflow-max-trace-nodes`), a summary whose composed path was stabilized (`pathKind` is then `partial`); the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `pathKind` | string | P22 §2: what the slice's trace IS — `complete` (a full source→sink walk), `partial` (the walk was elided; endpoints guaranteed, the middle cut), `symbol-only` (no provable path; the finding stands on the symbol match alone — measured population zero on the whole corpus today, reserved so the vocabulary is closed). Replaces `reachableFromRoots` (false in every shipped slot, true by construction in the one mode that published it — the mode, not the slice, carried the information) and `rootWitness` (null everywhere). The depth report's reachability table reads this field |
 | `kind` (nodes) | string | `source`, `sink`, or the propagation role — now including `suspend` (a coroutine boundary the trace crosses) |
 | `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
 | `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
 | `accessPath` | string | the tainted register (and path suffix) at the sink, `base::field` form |
 | `crossesModule`, `crossesDependency` | boolean | computed from the slice ENDS: the source and sink functions' module paths and purls (P5) — true exactly when those differ |
 | `origins[]` | string[] | sorted distinct summary origins the trace crossed at interprocedural boundaries: `computed`, `pack`, `default`, `recursive-approx` (P5). `pack` on a source birth is provenance, not a boundary; the default-origin gate counts BOUNDARY origins (`default`/`computed`/`recursive-approx`) only |
-| `reachableFromRoots` | boolean | `--dataflow reachable` only |
 | `ruleId`, `ruleName`, `description`, `severity`, `confidence`, `riskScore` | | `severity` comes from the matched SINK PACK ENTRY (severity as data), `confidence` is `high` for pack-matched (resolved) sites, `riskScore` derives from severity |
 | `flowKey` | string | SHA-256 over the flow's endpoints and trace — stable across runs for suppression |
 
@@ -521,7 +538,7 @@ endpoint.
 | --- | --- | --- |
 | `id` | string | `ep-NNNNNN`, assigned after sorting |
 | `framework` | string | pack vocabulary, above |
-| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method) |
+| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method). **Naming quirk, deliberate (P17):** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`; fixed as cdxgen R101), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
 | `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
 | `pathParameters` | string[] | `{id}` template parameters |
 | `handlerSymbol` / `handlerCanonicalName` | string | the KIR canonical name of the handler; EMPTY when the handler could not be resolved (an Android component with no lifecycle method in the workspace) — the resolved-handler gate counts empty as unresolved |

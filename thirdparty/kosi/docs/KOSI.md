@@ -46,7 +46,11 @@ Output is minified and byte-identical across runs on the same input;
 `--pretty` only re-indents. Nothing in the report depends on filesystem
 ordering, hash iteration order or wall-clock time — that is a gated property,
 not an aspiration, and reports from two machines on the same input compare
-equal byte for byte.
+equal byte for byte. That last property has teeth in the tool itself:
+`kosi golden` analyses every fixture from two different absolute locations
+in one run and fails on any section that differs, and
+`scripts/two-environment-proof.sh` (see docs/BUILD.md) compares two
+checkouts at the same commit under different Gradle cache states.
 
 ### Classpath
 
@@ -60,6 +64,13 @@ tell you how well it did:
   downstream of it (reachability, interprocedural taint) is partial with it.
 - `diagnostics[]` with `classpath-partial`, `classpath-file`,
   `deps-class-not-found` — the specific things that were missing.
+
+`--classpath-file` pins the classpath explicitly. A relative path resolves
+against `--dir`, not the working directory, and that relative form is what the
+report records: where a tree is checked out is not an input to the analysis, so
+it never reaches the output. Each line is a jar path, or a
+`group:artifact:version=jar` binding when what matters is that a coordinate is
+present rather than what it contains.
 
 For repeatable measurement on a corpus, `scripts/warm-corpus-classpath.sh`
 fetches and pins the classpath first; a report taken against a cold cache and
@@ -125,11 +136,13 @@ read a result:
   publishes no summary at all, and its callers fall back to the labelled
   unknown-call default; the trips are counted as `summary-effect-budget` in
   `stats.truncations`. Dropping the whole summary is deliberate — half a
-  summary is a wrong summary.
+  summary is a wrong summary. `--max-summary-sink-effects` sets the budget,
+  so what it costs on your code is measurable rather than assumed.
 - **Access-path depth.** Taint is tracked on access paths of bounded depth;
   deeper paths collapse to a `*` element and are tracked as the collapsed
   path, which is sound but coarser. A path deeper than a fact key can spell
-  is dropped from composition rather than approximated.
+  is dropped from composition rather than approximated, and every such drop
+  is counted as `composed-path-depth` in `stats.truncations`.
 - **Unknown calls.** `--unknown-call` decides what happens at a call kosi
   cannot resolve. Whatever it decides, the slices it produces say so in
   `origins[]`, and the corpus gate holds the default-only share of findings

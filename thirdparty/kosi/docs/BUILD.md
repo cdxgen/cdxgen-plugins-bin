@@ -136,6 +136,222 @@ When comparing a native report against a JVM one, normalise `tool.commit`:
 the image bakes in the commit it was built from, the JVM run reads the one
 its jar was built from, and the two differ whenever either is stale.
 
+### The committed symbol-evidence extract and the pack liveness gate (P19)
+
+Two tests gate the endpoints pack itself, not the engine:
+
+- `EndpointsPackSymbolEvidenceTest` (kosi-bytecode) checks every modelled
+  symbol against COMMITTED evidence —
+  `modules/kosi-bytecode/src/test/resources/symbol-evidence/endpoints-pack-symbols.json`,
+  ~32 KB of class kinds, member tables and facade statics derived from the
+  pinned artifacts (http4k sources at the pinned SHA, vertx-web 5.1.7,
+  ktor 3.5.2, spring 5.3.18, micronaut 4.10.23, the jakarta/aws/azure
+  jars), never the jars. The pack-vs-extract check runs on EVERY machine
+  (R109/R112/R113/R114's shape fails anywhere); where the pinned evidence
+  is held, the extract is re-derived and must equal the committed bytes.
+  Regenerate after a deliberate pack or evidence-pin change:
+
+      KOSI_UPDATE_SYMBOL_EVIDENCE=1 ./gradlew :kosi-bytecode:test \
+          --tests 'io.cdxgen.kosi.bytecode.EndpointsPackSymbolEvidenceTest'
+
+  The verdict table counts per framework — checked vs committed, gaps
+  recorded with reasons; a framework nobody can check says so, never
+  KIND-CHECKED.
+
+- `EndpointsPackLivenessTest` (kosi-bench) is the R63 gate the pack never
+  had: it removes every pack entry in turn (identity-based, so whole
+  name-classes compose) over one captured front-end analysis per bundled
+  fixture and classifies each entry LIVE (some fixture's detection result
+  changed — the whole `Endpoints.Result`, source handlers and config
+  counts included, so a verdict is never an artefact of which fields the
+  gate compared), ALIAS-COVERED (a same-name sibling of
+  another generation carries the channel) or INERT. An inert entry fails
+  unless `inertAllowance()` in the test records a one-line reason for it —
+  the reviewed-in-diff exit, not a CI suppressor. The sweep takes ~15 s
+  (the front end runs once per fixture; only detection re-runs per entry).
+
+### The gate-cost policy: corpusChanged, and corpusFull ONCE (P20 §5)
+
+`corpusFull` is the most expensive thing anyone runs here (~50 minutes, a
+warmed cache, one machine), and by P20 it had become the routine answer to
+every question. The policy is now, on evidence:
+
+- **`corpusChanged` (`scripts/corpus-changed.sh [base-ref]`) is the
+  development loop's tier.** The bundled tiers always (they are
+  corpusQuick), the vuln-repo floors always, plus any repo row whose
+  declared `capabilities` intersect a capability token the change mentions
+  — the token vocabulary is read FROM `corpus.toml`, so the mapping is
+  data-driven. `--only` takes a comma-separated slug list;
+  `./gradlew kosiRepoRows -Pkosi.only=...` runs the selected rows.
+- **`corpusFull` runs ONCE per phase**, at the end, on the corpus machine,
+  and its result is what the phase report quotes. Not per commit, not per
+  question.
+- **CI stays the fast deterministic subset** it is today (`kosi-test.yml`:
+  unit tests, corpusQuick, goldens). Bigger tiers stay local — that is the
+  standing instruction and it does not change.
+- **What corpusChanged deliberately does NOT see**, and the gates that do:
+  cross-environment and cache effects (`scripts/two-environment-proof.sh`),
+  bundled-fixture digest drift (`./gradlew golden`), pack-symbol rotness
+  and inert entries (the two liveness sweeps), and repo-tier movement on
+  repos the change's capability tokens do not name (corpusFull, once).
+
+The evidence for the tier boundary (P20 §5, measured over goldens/ and the
+tracker's history): every one of the 17 commits that ever touched goldens
+is a phase squash, and the bundled fixtures' gates caught every movement —
+the bundled tier is the population whose digest history is dense. The REPO
+tier has no goldens at all; its recorded numbers (the floors, the
+per-repo ratios) have moved four times in twenty phases (P14's floors, P14
+kampkit, P16 nowinandroid, P12's pack growth), each time through a warm,
+a resolver, or a pack change — which is exactly the population the
+capability matching selects.
+
+### What no corpus tier answers: is this code reachable from any input we have (P21)
+
+`corpusChanged` and `corpusFull` both answer one question: **did a
+behaviour move.** Neither answers the question R131 turned up: **is this
+code reachable from any input we have.** R131's cross-block fold — 460
+lines of dominator walk with a green unit test — ran GREEN through every
+corpus tier at any cost, because the corpus held no input that reached the
+code: no bundled fixture had ever asked the folder for a local's value, so
+there was nothing for any bench row to move on. No tier, at any price,
+fixes that; a warm cache does not invent inputs.
+
+The gate that answers it is a FIXTURE, and the phase rule is the policy:
+**every capability ships with its fixture that reaches it through
+`Analyzer.analyze`, in the same change** — and every failure reason the
+folder can name stays non-zero in the committed depth report
+(`DepthReportTest.everyFoldFailureBucketIsNonZeroInTheCommittedReport`), so
+a new reason must arrive with an input that reaches it or not ship.
+
+The replay, measured (P21 §4) by restoring each defect one at a time:
+
+| defect | corpusChanged | what actually catches it |
+|---|---|---|
+| R129 — no fixture makes a sanitizer load-bearing | GREEN: an absence moves no bench row (measured: the bundled bench is green with `sanitizer-gallery` deleted) | the depth-report golden + the security-pack liveness sweep, both in `./gradlew test`, which runs in every loop |
+| R130 — the name matcher reads golden file names | FLOODS: the tier's vocabulary fills with fixture slugs mirrored by golden names (measured on this phase's own diff: 0 → 6 tokens; on P20's 164 regenerated goldens it selected every repo row and ran 45 minutes) | nothing automated can see a tier degenerate into corpusFull; the fix is the filter and the review of it |
+| R131 — the fold cannot see a local's value | GREEN at `cd71886`, where the defect shipped (measured: corpusQuick 0 fail, androgoat floor green, with the store arm absent and no fixture reaching the code). RED at P21 with the same defect restored — `cross-block-values/resolved` fails 2 wants. The difference is the FIXTURE, not the tier | the fixture (R63), which is the phase rule |
+| R132 — the content matcher diffs the whole tree | same flood as R130 through the other door (measured: 0 → 9 tokens) | same |
+
+A corollary the replay surfaced: `depth-cap-chain` pins the VALUE outcome
+(the chain stays unresolved) but not the failure REASON — the restored R131
+also produces an unresolved value there, by a different route. Reasons live
+in the depth-report golden, values in the corpus; the two gates hold
+different halves, and neither substitutes for the other.
+
+### The reachability table past the bundled tier (P21 §3, schema closed P22 §2)
+
+The depth report's third table (complete / partial / symbol-only) is a
+bundled-corpus golden; on the corpus machine it has been run over the three
+pinned vuln repos at the bench's own slot options, and the numbers are:
+androgoat 16 findings (16 complete, 0 partial, 0 symbol-only, ratio
+0.9546), insecureshop 7 (7/0/0, ratio 0.9147), tsp 2 (2/0/0, ratio 1.0) —
+identical at the `resolved` and `exported` slots, so on these apps every
+published finding rides a COMPLETE entrypoint→sink path and the fraction
+that means only "exists" (the exported roots' honest meaning, P20 §4) is
+zero. P22 §2 closed the schema gap that paragraph used to warn about: the
+distinction is now a FIELD on every slice (`pathKind`: complete | partial |
+symbol-only, pinned by `SlicePathKindVocabularyTest`), the constant-false
+`reachableFromRoots` flag and the always-null `rootWitness` are deleted
+(a field that never varies is not a fact, it is a schema lie — R117's
+rule), and the elided-trace fixture drives PARTIAL so no vocabulary value
+is undriven. The historical zero on the repos rests on a defect P22 found
+and fixed (R135): the summaries published their sink effects with the
+composed site paths stripped, so a composed trace could never outgrow the
+trace cap and PARTIAL was unrepresentable anywhere — the repo numbers
+above are unchanged by the fix (the same findings, now with real traces),
+which is what makes them a measurement instead of an artefact.
+
+### The option matrix (P23 §0)
+
+The corpus picks FIXTURES and SLOTS. Until P23 nothing picked option
+COMBINATIONS, and that is where R137 lived: `--dataflow reachable` paired
+with `--callgraph none` published a `reachableSlices` count claiming every
+slice reachable, on a run that had built no graph to intersect with. It
+survived 522 golden pairs, a 600-row `corpusQuick`, a full corpus and a
+two-environment proof, because not one of them runs `reachable` mode at
+all.
+
+`OptionMatrixTest` walks the accepted product of the option enums over one
+small project and asserts each cell's contract. It costs seconds and no
+corpus tier, which is the point: the cheapest gate in the repo covers the
+axis the expensive ones do not. Two properties make it a gate rather than a
+sample — it is EXHAUSTIVE over the enums (a new `DataflowMode` or
+`CallGraphMode` with no declared contract fails it), and the diagnostics it
+expects come from `AnalyzeOptions.degradations()`, the same predicate the
+CLI refuses from, so a report and a refusal cannot describe different sets.
+
+| pairing | before P23 | now |
+| --- | --- | --- |
+| `--backend syntax` + any `--dataflow` (THE DEFAULT) | no `dataFlow`, no diagnostic naming it; the only hint spoke about `resolvedCallRatio` | `dataflow-not-run` names it, run proceeds |
+| `--backend syntax` + any `--callgraph` | no `callGraph`, silently | `callgraph-not-run` names it, run proceeds |
+| `--dataflow reachable` + `--callgraph none` | accepted; published every slice as reachable (R137) | CLI REFUSES; the library names `reachable-without-callgraph` and reports 0 |
+| `--deps` + `--dataflow none` | the tier was lowered and summarised, then discarded | `deps-without-dataflow` names it |
+| `--dataflow crypto` | published every security slice, unfiltered (R139) | publishes only crypto flows, by the predicate the bench already counted them with |
+| `--dataflow all` | a synonym of `security` that nothing said was one | asserted to be a declared alias, in one line |
+
+The `all` SLOT is gone with it. It ran the syntax backend, which runs no
+dataflow, so `--dataflow all` could change nothing but the echo of the flag:
+across all 87 fixtures the `all` and `security` goldens differed in exactly
+one section, `options`, and no fixture carried a single `mode=all`
+annotation. 87 golden pairs — a sixth of every corpus run, every golden
+check and both legs of the two-environment proof — pinning the fact that the
+CLI echoes its own flag (R53).
+
+### Merges: a set, a witness, or a fact (P23 §1)
+
+R138 was a type error wearing a data structure's clothes: eight fields of a
+`FunctionSummary` are sets of effects and one is a witness path, and the
+deps-tier JOIN unioned all nine. Every merge in the analysis is now
+classified, and the classification is the discipline:
+
+| merge | kind | rule |
+| --- | --- | --- |
+| `FlowState.addFacts` / `mergeFrom` | SET | union; a fact either side has, the join has |
+| `Transfer.joinInto` (phi, concat, elvis) | SET + per-fact WITNESS | facts union; the blame register is CHOSEN (first operand carrying it), never merged (R54/R62) |
+| `FunctionSummary.join` (deps tier, by name) | SET ×8 | may-union across the overloads of one name |
+| `FunctionSummary.join`, `sourceReturns` | WITNESS | shortest path, lexicographic tie-break — the joined path IS one of its inputs (R138) |
+| `SummaryAnalysis.toSummary` escape dedup | WITNESS | one shortest-path witness per canonical (R135) |
+| `KirValueFolder` phi / dominator join | FACT | arms that disagree REFUSE; no arm is preferred |
+| `KirValueFolder` workspace return sites | FACT | every return site of every candidate must agree, or refuse |
+| `ConstTable.fromSources` (`const val` names) | FACT | a name holding two values is refused, never guessed |
+| `ConfigResolver.load` (config keys) | FACT | **was a PICK** — first file in sorted-path order won and was published as `resolution=config`. Now refuses: known key, null value (R140) |
+| `BytecodeLowerer.classIndex` | PICK, declared | a shaded class keeps the last jar, mirroring the resolver's own one-artifact-per-coordinate pick |
+
+### The two-environment proof (P18)
+
+`scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted
+form of the check that found R108: the same commit checked out TWICE (two
+git worktrees, different absolute paths), the same kosi jar, and two Gradle
+cache states — leg A with the machine's caches as the runner left them,
+leg B with `HOME` and `-Duser.home` pointed at an empty directory, so the
+offline resolver reads `user.home/.gradle` and `user.home/.m2` and finds
+nothing. Each leg runs `kosi golden --update-goldens` into its own
+directory; the script diffs the two legs' digest files (naming the sections
+that differ, per file) and each leg against the CHECKED-IN goldens at that
+commit. Any difference exits 1.
+
+Run it per phase and before a release; it takes a few minutes (one fat-jar
+build plus two golden passes). Requirements: a clean working tree (the
+proof compares a commit, not a dirty tree), git, a JDK, and either a warm
+Gradle build cache or network for the one jar build — the analysis itself
+never touches the network. On a machine whose Gradle modules-2 cache is
+already empty the cache axis degenerates (the script prints a note) but the
+checkout-location axis still runs; the corpus machine gives the full
+warm-vs-scrubbed contrast.
+
+Its teeth, measured 2026-09-16: against `feat/kosi-part2` (`2a6d232`) the
+proof PASSES — 450 digest files identical across both legs and matching the
+checked-in goldens, i.e. zero environment dependence found; against P16
+(`d317c78`), where the async fixtures were still unpinned, it FAILS exactly
+the way the P17 review's second machine did — the six coroutines fixtures
+differ between the legs (`callGraph, diagnostics, stats` sections: the warm
+cache attaches jars the scrubbed leg cannot), and `async-android-scopes`
+additionally disagrees with its own checked-in goldens (`callGraph,
+diagnostics, imports, stats`), which is R104 verbatim. The golden gate's
+in-run portability check (§ above) covers the checkout-location axis on
+every `kosi golden` run; this script adds the cache axis and the
+against-the-pin comparison.
+
 ## 2. Handled pitfalls (05-BUILD-DIST.md §1 table, with outcomes)
 
 | Pitfall | Handling | Status |

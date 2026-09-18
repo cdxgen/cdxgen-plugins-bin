@@ -18,3 +18,9 @@ class Route
 
 fun Route.get(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
 fun Route.post(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.put(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.delete(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.patch(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.head(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.options(path: String, body: suspend RoutingContext.() -> Unit): Unit = Unit
+fun Route.route(path: String, body: Route.() -> Unit): Unit = Unit

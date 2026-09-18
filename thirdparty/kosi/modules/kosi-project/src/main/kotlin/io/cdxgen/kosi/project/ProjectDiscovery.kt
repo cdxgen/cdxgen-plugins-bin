@@ -98,8 +98,16 @@ object SourceCollector {
                 }
                 if (!Files.isDirectory(rootDir)) continue
                 Files.walk(rootDir).use { stream ->
+                    // SORTED: Files.walk yields directory-entry order, which
+                    // the filesystem defines — the same tree at two locations
+                    // (or materialised twice, by git and by cp) can iterate
+                    // differently, and the collected order assigns the dfn
+                    // ids. Discovery order is part of "two machines compare
+                    // equal byte for byte", so it must be a function of the
+                    // TREE, not of the filesystem it sits on.
                     stream.filter { Files.isRegularFile(it) }
                         .filter { p -> !isInExcludedDir(root, p) }
+                        .sorted()
                         .forEach { p ->
                             val name = p.fileName.toString()
                             val language = when {

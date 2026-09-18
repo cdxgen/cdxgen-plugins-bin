@@ -25,8 +25,20 @@ object ConfigResolver {
 
     /**
      * The config table: key -> value with its origin file kind. Deterministic
-     * order (sorted map); duplicate keys keep the FIRST reader's value with
-     * readers ordered properties -> yaml -> buildconfig per file set.
+     * order (sorted map).
+     *
+     * A key defined ONCE, or defined several times with the SAME value, has
+     * that value. A key two files give DIFFERENT values is AMBIGUOUS and its
+     * [ConfigValue.value] is null: the key is known, the value is not. That
+     * is the discipline the `const val` tables already use — "a name holding
+     * two values anywhere is ambiguous and is REFUSED, never guessed" — and
+     * until P23 §1 this table did the opposite, keeping the FIRST reader's
+     * value in sorted-path order and publishing it as a resolved fact (the
+     * P23 review's R140). A multi-module repo where two modules'
+     * `application.properties` both set `spring.datasource.url` published one
+     * module's host, as a confident `resolution=config` service, chosen by
+     * filename order. Two tables answered "what constant does this name
+     * hold"; one refused ambiguity and one guessed (P22's rule).
      */
     class ConfigTable internal constructor(private val values: Map<String, ConfigValue>) {
 
@@ -45,8 +57,21 @@ object ConfigResolver {
         if (!Files.isDirectory(root)) return ConfigTable.EMPTY
         val values = LinkedHashMap<String, ConfigValue>()
         // Deterministic discovery: sorted relative paths, properties before
-        // yaml (spring's own precedence is the reverse; we report rather
-        // than decide, so the FIRST value wins and the file kind names it).
+        // yaml. We report rather than decide — which is why a key two files
+        // DISAGREE about resolves to nothing (see [ConfigTable]) instead of
+        // to whichever file sorted first.
+        fun offer(key: String, value: String, source: Source) {
+            val existing = values[key]
+            when {
+                existing == null -> values[key] = ConfigValue(key, value, source)
+                // Already ambiguous, or the same value again: nothing to
+                // decide either way.
+                existing.value == null || existing.value == value -> Unit
+                // Two files, two values, no ground to prefer one: the key is
+                // known and its value is not (R140).
+                else -> values[key] = ConfigValue(key, null, existing.source)
+            }
+        }
         val files = Files.walk(root).use { stream ->
             stream.filter { Files.isRegularFile(it) }
                 .filter { p ->
@@ -63,16 +88,16 @@ object ConfigResolver {
             val name = file.fileName.toString()
             when {
                 name == "BuildConfig.java" || name == "BuildConfig.kt" ->
-                    readBuildConfig(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.BUILDCONFIG)) }
+                    readBuildConfig(file).forEach { (k, v) -> offer(k, v, Source.BUILDCONFIG) }
 
                 name.endsWith(".properties") ->
-                    readProperties(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.PROPERTIES)) }
+                    readProperties(file).forEach { (k, v) -> offer(k, v, Source.PROPERTIES) }
 
                 name == "application.conf" ->
-                    readHocon(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.HOCON)) }
+                    readHocon(file).forEach { (k, v) -> offer(k, v, Source.HOCON) }
 
                 else ->
-                    readYaml(file).forEach { (k, v) -> values.putIfAbsent(k, ConfigValue(k, v, Source.YAML)) }
+                    readYaml(file).forEach { (k, v) -> offer(k, v, Source.YAML) }
             }
         }
         return ConfigTable(values)

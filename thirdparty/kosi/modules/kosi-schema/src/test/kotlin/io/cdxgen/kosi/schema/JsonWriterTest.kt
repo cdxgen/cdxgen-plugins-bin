@@ -3,6 +3,7 @@ package io.cdxgen.kosi.schema
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 // Negative-first: the determinism contract is the product here. These tests
 // assert the failure modes golem/rusi hit (unsorted keys, duplicate keys,
@@ -52,46 +53,115 @@ class JsonWriterTest {
 
     @Test
     fun doublesAreDeterministic() {
-        val w = JsonWriter()
-        w.beginObject()
-        w.dbl("zero", 0.0)
-        w.dbl("ratio", 0.5)
-        w.dbl("precise", 123.456789012)
-        w.endObject()
-        assertEquals("""{"precise":123.456789,"ratio":0.5,"zero":0}""", w.render())
+        // The property is the determinism CONTRACT, not three lucky
+        // renderings: 6dp HALF_UP, trailing zeros stripped, plain dot
+        // decimal, and the render PARSES BACK to the value it names. A
+        // formatting change that keeps the three originals (locale comma,
+        // scientific notation, 7th-digit carry) fails the spread.
+        val cases = linkedMapOf(
+            0.0 to "0",
+            0.5 to "0.5",
+            123.456789012 to "123.456789",
+            0.000001 to "0.000001",
+            1.0E-7 to "0",
+            -2.75 to "-2.75",
+            0.0025 to "0.0025",
+            1234567.5 to "1234567.5",
+        )
+        for ((value, expected) in cases) {
+            assertEquals(expected, JsonWriter.formatDouble(value), "render of $value")
+            val rendered = JsonWriter.formatDouble(value)
+            assertEquals(rendered.toDouble(), JsonReader.parse("""{"v":$rendered}""").asObject().dbl("v"), "parse of render($value)")
+        }
     }
 
     @Test
     fun nestedStructureAndPretty() {
-        val w = JsonWriter()
-        w.beginObject()
-        w.beginArray("items")
-        w.beginObject()
-        w.str("n", "a")
-        w.endObject()
-        w.beginObject()
-        w.str("n", "b")
-        w.endObject()
-        w.endArray()
-        w.nul("missing")
-        w.bool("ok", true)
-        w.endObject()
-        val minified = w.render()
-        assertEquals("""{"items":[{"n":"a"},{"n":"b"}],"missing":null,"ok":true}""", minified)
-        val pretty = JsonWriter(pretty = true)
-        pretty.beginObject()
-        pretty.beginArray("items")
-        pretty.beginObject()
-        pretty.str("n", "a")
-        pretty.endObject()
-        pretty.endArray()
-        pretty.nul("missing")
-        pretty.bool("ok", true)
-        pretty.endObject()
-        assertEquals(
-            "{\n  \"items\": [\n    {\n      \"n\": \"a\"\n    }\n  ],\n  \"missing\": null,\n  \"ok\": true\n}",
-            pretty.render(),
-        )
+        // The pretty half used to assert one hand-written expected string —
+        // an example that happened to parse, which is exactly the class the
+        // P16 review found in this file (R103: the pretty test contained no
+        // empty container, so a prettifier that emitted invalid JSON passed
+        // it). The properties `--pretty` actually promises: it ONLY
+        // re-indents — the pretty render parses to the same value as the
+        // minified one, and differs from it by whitespace OUTSIDE strings
+        // alone. The string values deliberately contain characters the
+        // prettifier's state machine must NOT treat as structure ({, }, ,,
+        // : and escapes).
+        fun write(w: JsonWriter): JsonWriter {
+            w.beginObject()
+            w.beginArray("items")
+            w.beginObject()
+            w.str("n", "a")
+            w.str("tricky", "brace{close},colon:comma\\quote\"tab\t")
+            w.endObject()
+            w.beginObject()
+            w.str("n", "b")
+            w.endObject()
+            w.endArray()
+            w.nul("missing")
+            w.bool("ok", true)
+            w.endObject()
+            return w
+        }
+        val minified = write(JsonWriter()).render()
+        assertEquals("""{"items":[{"n":"a","tricky":"brace{close},colon:comma\\quote\"tab\t"},{"n":"b"}],"missing":null,"ok":true}""", minified)
+        val pretty = write(JsonWriter(pretty = true)).render()
+        assertEquals(JsonReader.parse(minified), JsonReader.parse(pretty), "pretty must parse to the same value")
+        assertEquals(minified, whitespaceOutsideStrings(pretty), "pretty differs from minified by whitespace alone")
+    }
+
+    /** Every whitespace character that is not inside a JSON string, dropped. */
+    private fun whitespaceOutsideStrings(s: String): String {
+        val out = StringBuilder(s.length)
+        var inString = false
+        var escaped = false
+        for (c in s) {
+            when {
+                inString -> {
+                    out.append(c)
+                    if (escaped) escaped = false
+                    else if (c == '\\') escaped = true
+                    else if (c == '"') inString = false
+                }
+                c == '"' -> {
+                    inString = true
+                    out.append(c)
+                }
+                !c.isWhitespace() -> out.append(c)
+            }
+        }
+        return out.toString()
+    }
+
+    @Test
+    fun prettyRendersEmptyContainersAsValidJson() {
+        // P16 review: the prettifier emitted the inline `[]`/`{}` and then
+        // re-read the input's own closing bracket as a close, so every
+        // document containing an empty container — every kosi report —
+        // came out of `--pretty` with a stray bracket and did not parse.
+        // The docs promise `--pretty` ONLY re-indents, so the invariant the
+        // test pins is round-trip equality with the minified render.
+        fun write(w: JsonWriter): JsonWriter {
+            w.beginObject()
+            w.beginArray("empty")
+            w.endArray()
+            w.beginObject("emptyObject")
+            w.endObject()
+            w.beginArray("items")
+            w.beginObject()
+            w.beginArray("inner")
+            w.endArray()
+            w.str("n", "a")
+            w.endObject()
+            w.endArray()
+            w.bool("ok", true)
+            w.endObject()
+            return w
+        }
+        val minified = write(JsonWriter()).render()
+        val pretty = write(JsonWriter(pretty = true)).render()
+        assertEquals(JsonReader.parse(minified), JsonReader.parse(pretty))
+        assertTrue("[]" in pretty && "{}" in pretty, "empty containers stay inline: $pretty")
     }
 }
 
@@ -114,6 +184,12 @@ class JsonReaderTest {
 
     @Test
     fun roundTripThroughWriter() {
+        // The reader must give back exactly what was written for EVERY value
+        // class the writer can emit — the escape machinery (quotes,
+        // backslash, control characters as \uXXXX) is exercised here, not
+        // just the plain scalars the original example carried: a reader (or
+        // writer) that mishandled any escape would otherwise pass.
+        val tricky = "quote\" back\\ nl\n cr\r tab\t bs\u0008 ff\u000C ctrl\u0001 uni héllo→"
         val w = JsonWriter()
         w.beginObject()
         w.str("name", "kosi")
@@ -121,6 +197,7 @@ class JsonReaderTest {
         w.dbl("ratio", 0.25)
         w.bool("ok", true)
         w.nul("none")
+        w.str("tricky", tricky)
         w.beginArray("list")
         w.str("x")
         w.str("y")
@@ -134,5 +211,6 @@ class JsonReaderTest {
         assertEquals(true, obj.bool("ok"))
         assertEquals(JsonNullValue, obj["none"])
         assertEquals(listOf("x", "y"), obj.arr("list")!!.strings())
+        assertEquals(tricky, obj.str("tricky"), "every escaped character must survive the round trip")
     }
 }

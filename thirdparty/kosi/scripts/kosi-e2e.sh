@@ -70,10 +70,15 @@ cross = [s for s in slices if s.get("crossesDependency")]
 check(any("bytecode" in (s.get("origins") or []) for s in cross),
       "no cross-dependency slice carries a bytecode origin")
 
-# reachability evidence: the reachable pass flags slices from the roots
+# pathKind evidence (P22): every slice names what its trace IS, from the
+# closed vocabulary (complete | partial | symbol-only). The reachable
+# pass's slices rode a real entrypoint-to-sink walk under the
+# intersection, so at least one is COMPLETE there.
 rslices = (reachable_report.get("dataFlow") or {}).get("slices", [])
-check(any(s.get("reachableFromRoots") for s in rslices),
-      "no slice is reachableFromRoots in the reachable pass")
+check(rslices and all(s.get("pathKind") in ("complete", "partial", "symbol-only") for s in rslices),
+      "the reachable pass published a slice outside the pathKind vocabulary")
+check(any(s.get("pathKind") == "complete" for s in rslices),
+      "no slice in the reachable pass is pathKind=complete")
 
 # crypto-flow evidence: a material-to-crypto-asset slice and the material
 crypto = all_report.get("crypto") or {}
@@ -85,6 +90,14 @@ check(len(crypto.get("materials", [])) >= 1, "no crypto material on the sample")
 services = all_report.get("services", [])
 check(any(s.get("protocol") == "jdbc" and s.get("resolution") == "literal"
           for s in services), "the outbound JDBC service row is missing")
+
+# inbound route evidence (P17: the sample now declares one — a Ktor GET
+# /users — so the join's input is gated here too, not only its output)
+endpoints = all_report.get("apiEndpoints", [])
+check(any(e.get("framework") == "ktor" and e.get("pathTemplate") == "/users"
+          and "GET" in (e.get("httpMethod") or [])
+          for e in endpoints),
+      "the sample's /users GET route is missing from apiEndpoints[]")
 
 if problems:
     for problem in problems:
@@ -104,8 +117,10 @@ if [ -z "$cdxgen_dir" ] || [ ! -f "$cdxgen_dir/bin/evinse.js" ]; then
   fi
   echo "kosi-e2e: SKIP — $message"
   echo "kosi-e2e: the cdxgen integration is UNVERIFIED by this run. The arm lives"
-  echo "  on the cdxgen branch feat/kosi-evinse-tmp, which is not pushed — so this"
-  echo "  half runs on one machine only and CI cannot gate it yet."
+  echo "  on the cdxgen branch feat/kosi-evinse-tmp (pushed since P17 §4),"
+  echo "  unmerged into cdxgen main — so this half runs only where a checkout"
+  echo "  of that branch is present, and CI gates it only via a caller that"
+  echo "  passes KOSI_E2E_REQUIRE_CDGEN=1 with CDXGEN_DIR set."
   exit 0
 fi
 
@@ -157,10 +172,10 @@ all_components = [evinse.get("metadata", {}).get("component")] + evinse.get("com
 for kind in ("occurrences", "callstack"):
     check(kind in kinds, f"no {kind} evidence in the evinse BOM")
 check(kosi_artifacts.get("props", 0) > 0, "no cdx:kosi properties in the evinse BOM (data-flow/reachability)")
-check(any(p["name"] == "cdx:kosi:reachableFromRoots"
+check(any(p["name"] == "cdx:kosi:pathKind"
           for c in all_components
           for p in c.get("properties") or [] if c),
-      "no reachability evidence (cdx:kosi:reachableFromRoots)")
+      "no pathKind evidence (cdx:kosi:pathKind)")
 check(any(p["name"] == "cdx:kosi:cryptoFlow"
           for c in all_components
           for p in c.get("properties") or [] if c),
@@ -168,6 +183,23 @@ check(any(p["name"] == "cdx:kosi:cryptoFlow"
 check(any(c.get("type") == "cryptographic-asset" for c in evinse.get("components", [])),
       "no cryptographic-asset component in the evinse BOM")
 check(len(evinse.get("services", [])) >= 1, "no services[] row in the evinse BOM")
+# P16 §4: INBOUND route rows must carry their HTTP verb. Until P17 the
+# sample declared no routes, so this was `all()` over an empty list —
+# honest about it, but by R53 it proved nothing. The sample now carries a
+# Ktor GET /users route, so the assertions are LIVE: a route row without a
+# real verb is always a defect, and the row must arrive under the name
+# cdxgen's own OpenAPI detector would give the same route
+# (service-<path>-<verb>) — the convergence the join exists for, gated
+# rather than described.
+route_rows = [s for s in evinse.get("services", [])
+              if any(p["name"] == "cdx:kosi:endpoint:framework"
+                     for p in s.get("properties") or [])]
+check(len(route_rows) >= 1, "no inbound route row in the evinse BOM (the sample declares a route)")
+check(all(any(p["name"] == "cdx:service:httpMethod" and p["value"] != "ALL"
+              for p in s.get("properties") or []) for s in route_rows),
+      "an inbound route lost its HTTP verb (httpMethod fell to ALL)")
+check(any(s.get("name") == "service-users-get" for s in route_rows),
+      "the /users GET route is not named service-users-get — an OpenAPI spec over the same route would duplicate it")
 
 disabled_kinds = bom_kosi_artifacts(disabled)
 check(disabled.get("bomFormat") == "CycloneDX" and disabled.get("components"),

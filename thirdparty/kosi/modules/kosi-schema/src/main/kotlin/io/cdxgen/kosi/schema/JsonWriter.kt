@@ -198,8 +198,15 @@ class JsonWriter(private val pretty: Boolean = false) {
                         val close = if (c == '{') '}' else ']'
                         out.append(c)
                         if (nextMeaningful(minified, i) == close) {
+                            // An empty container is written inline. The input's
+                            // own closing bracket must be CONSUMED here: leaving
+                            // `i` on it (P16 review: `i++` then `continue`, with
+                            // the loop's own `i++` skipped) re-entered the close
+                            // arm and emitted a second bracket, so every report
+                            // with an empty array — that is, every report —
+                            // came out of `--pretty` as invalid JSON.
                             out.append(close)
-                            i++
+                            i = minified.indexOf(close, i + 1) + 1
                             continue
                         }
                         indent++

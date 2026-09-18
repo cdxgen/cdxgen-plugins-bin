@@ -14,6 +14,13 @@ dependencies {
     implementation(libs.compiler.common.ide) { isTransitive = false }
     implementation(libs.aa.asm)
     implementation(libs.kotlin.stdlib)
+    // Test-only: P18's symbol-kind validation reads the endpoints pack from
+    // kosi-models and checks its modelled symbols against the framework
+    // sources/jars the corpus machine holds (ASM is here for the jar half).
+    testImplementation(project(":kosi-models"))
+    // P19 §3: the committed symbol-evidence extract is JSON, read with the
+    // same hand-rolled reader the reports use.
+    testImplementation(project(":kosi-schema"))
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit5)
     testRuntimeOnly(libs.junit.platform.launcher)

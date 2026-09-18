@@ -13,6 +13,7 @@ import io.cdxgen.kosi.models.TRANSPORT_QUERY
 import io.cdxgen.kosi.kir.KirLambda
 import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirModule
+import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirValueFolder
 import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.models.FrameworkModel
@@ -316,7 +317,9 @@ object EndpointDetector {
             is KirDynamicCall -> ins.args
             else -> emptyList()
         }
-        val prefix = prefixChain(fn.canonicalName, input)
+        // The full prefix is the lambda-link chain (outermost) composed with
+        // the MOUNT prefix a mounted router publishes under (P19 §4).
+        val prefix = joinPaths(prefixChain(fn.canonicalName, input), mountedPrefix(fn, (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver, framework, input))
 
         // A TYPED route names its path on a class, not at the call site:
         // `get<Article> { }` with `@Resource("/articles/{id}")` on
@@ -349,6 +352,23 @@ object EndpointDetector {
             }
         }
         val folded = input.folder.valueAt(fn, block, index, pathReg)
+        // A PROVABLE null path argument is not an unresolvable one: ktor 2's
+        // own builder spells it (`get(path: String? = null, body)`,
+        // RoutingRoot.kt — the no-argument overload of the same generation),
+        // and a null path selects the route at its ENCLOSING level, exactly
+        // as the lambda-only route above. Before the typed constants (R117)
+        // this compiled to the string "null" and published a route at
+        // "/null"; after it, the register fallback would have published the
+        // register's own name as a URL. Neither is a path — P19 §1.
+        if (folded?.status == KirValueFolder.ValueStatus.NULL) {
+            val path = joinPaths(prefix, "").ifEmpty { "/" }
+            // With the framework in hand: a role-tail builder's handler is
+            // the argument BEFORE the roles, and resolving the LAST one
+            // publishes the ROLE register as the handler (P15's defect,
+            // which this arm reintroduced by dropping the argument).
+            publish(add, framework, methods, path, handlerOfRegs(fn, callArgs, input, framework) ?: "", fn, "dsl")
+            return
+        }
         val foldedPath = folded?.value
         val boundMethod: String? = when (ins) {
             is KirCall -> boundMethodName(fn, block, index, ins)
@@ -380,7 +400,7 @@ object EndpointDetector {
             "dsl",
             consumes = chained.consumes,
             produces = chained.produces,
-            authentication = roles,
+            authentication = roles + chained.authentication,
         )
     }
 
@@ -391,12 +411,17 @@ object EndpointDetector {
      * handler. The walk follows the receiver chain one call at a time — a
      * `.produces` result is the input of the NEXT chained call — and stops
      * at the first call that consumes the chain without producing a route
-     * (the handler attach).
+     * (the handler attach). P17: an attach whose argument is an
+     * authentication handler FACTORY result (Vert.x's
+     * `handler(BasicAuthHandler.create(auth))`) is an authentication
+     * declaration, not the real handler — it is recorded and the chain
+     * CONTINUES, because `Route.handler` returns the route.
      */
     private class ChainedRouteFacts(
         val handler: String?,
         val consumes: List<String>,
         val produces: List<String>,
+        val authentication: List<String>,
     )
 
     private fun chainedRouteFacts(
@@ -407,12 +432,13 @@ object EndpointDetector {
         framework: FrameworkModel?,
         input: Input,
     ): ChainedRouteFacts {
-        if (framework == null || (framework.mediaDsl.isEmpty() && framework.handlerDsl.isEmpty())) {
-            return ChainedRouteFacts(null, emptyList(), emptyList())
+        if (framework == null || (framework.mediaDsl.isEmpty() && framework.handlerDsl.isEmpty() && framework.authHandlerFactories.isEmpty())) {
+            return ChainedRouteFacts(null, emptyList(), emptyList(), emptyList())
         }
-        val result = (ins as? KirCall)?.result ?: return ChainedRouteFacts(null, emptyList(), emptyList())
+        val result = (ins as? KirCall)?.result ?: return ChainedRouteFacts(null, emptyList(), emptyList(), emptyList())
         var consumes = mutableListOf<String>()
         var produces = mutableListOf<String>()
+        var authentication = mutableListOf<String>()
         var handler: String? = null
         var current = result
         var hops = 0
@@ -434,12 +460,54 @@ object EndpointDetector {
                 continue
             }
             if (framework.handlerDsl.any { matches(next.callee.fqn, it) }) {
+                val authScheme = authHandlerSchemeOf(fn, block, nextAt, next, framework)
+                if (authScheme != null) {
+                    authentication.add("auth-handler($authScheme)")
+                    current = next.result ?: break
+                    continue
+                }
                 handler = chainedHandlerOf(fn, block, nextAt, next, input)
                 break
             }
             break
         }
-        return ChainedRouteFacts(handler, consumes, produces)
+        return ChainedRouteFacts(handler, consumes, produces, authentication)
+    }
+
+    /**
+     * The scheme a chained handler attach DECLARED, when the attached value
+     * is the result of one of the framework's authentication-handler
+     * factories (Vert.x's `BasicAuthHandler.create(auth)`): the call that
+     * produced the argument names the scheme, and — unlike the P15 comment
+     * believed — the KIR attributes it to exactly one route, because the
+     * factory result is attached through this route's own chain.
+     */
+    private fun authHandlerSchemeOf(
+        fn: KirFunction,
+        block: KirBlock,
+        at: Int,
+        call: KirCall,
+        framework: FrameworkModel,
+    ): String? {
+        if (framework.authHandlerFactories.isEmpty()) return null
+        val attached = call.args.firstOrNull() ?: return null
+        for (i in at - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is KirCall && candidate.result == attached) {
+                // A Kotlin companion factory renders an extra `Companion`
+                // segment (`BasicAuthHandler.Companion.create`) where the
+                // Java interface static the pack pattern was sourced from
+                // does not; the segment is a resolution artifact, not part
+                // of the API's shape, so it is transparent here.
+                val fqn = candidate.callee.fqn.split('.').filterNot { it == "Companion" }.joinToString(".")
+                val pattern = framework.authHandlerFactories.firstOrNull { matches(fqn, it) }
+                    ?: return null
+                // `io.vertx.ext.web.handler.BasicAuthHandler.create` ->
+                // `BasicAuthHandler`: the owner of the matched factory.
+                return pattern.split('.').dropLast(1).lastOrNull()
+            }
+        }
+        return null
     }
 
     /**
@@ -538,7 +606,19 @@ object EndpointDetector {
         return null
     }
 
-    /** http4k: `"/path" bind GET to { ... }` — receiver is the path, the `to` side the handler. */
+    /**
+     * http4k: `"/path" bind GET to { ... }` — receiver is the path, the `to`
+     * side the handler. P17: the CONTRACT spelling
+     * `"/path" meta { security = .. } bindContract GET to { .. }` puts a
+     * META call between the path and the bind; the bind's receiver is then
+     * the meta call's result, the path is the META call's receiver, and the
+     * meta lambda's own `security` assignment is the route's requirement.
+     * The CONTRACT BLOCK's `security` (the lambda of the `contract { .. }`
+     * call this route is declared inside) applies when the route's meta
+     * declares none — the precedence the framework itself applies
+     * (`it.meta.security?.filter ?: security?.filter ?: Filter.NoOp`,
+     * ContractRouteMatcher.kt:121 at 6.59.0.0).
+     */
     private fun detectBindCall(
         fn: KirFunction,
         block: KirBlock,
@@ -549,8 +629,29 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         val receiver = ins.receiver ?: return
-        val folded = input.folder.valueAt(fn, block, index, receiver)
-        val path = folded?.value ?: rawOf(fn, block, index, receiver)
+        var authentication: List<String> = emptyList()
+        val path: String
+        val metaCall = producerOf(block, index, receiver)
+        // An INFIX call lowers as `kotlin.<name>` (the callee resolves, but
+        // the named-operator lowering keeps only the operation reference), so
+        // the meta infix is matched on its last segment — the same convention
+        // [matchesCallName] uses for the bind itself.
+        if (metaCall != null && framework.routeMetaDsl.any { metaCall.callee.fqn.substringAfterLast('.') == it.substringAfterLast('.') }) {
+            val metaReceiver = metaCall.receiver
+            path = metaReceiver?.let { input.folder.valueAt(fn, block, index, it)?.value ?: rawOf(fn, block, index, it) }
+                ?: rawOf(fn, block, index, receiver)
+            val metaSecurity = metaCall.args.firstOrNull()
+                ?.let { LambdaResolver.resolve(fn, it, input) }
+                ?.let { lambda -> securityAssignmentOf(lambda, input, framework) }
+            if (metaSecurity != null) authentication = listOf("meta-security($metaSecurity)")
+        } else {
+            val folded = input.folder.valueAt(fn, block, index, receiver)
+            path = folded?.value ?: rawOf(fn, block, index, receiver)
+        }
+        if (authentication.isEmpty()) {
+            val blockSecurity = contractBlockSecurity(fn, framework, input)
+            if (blockSecurity != null) authentication = listOf("contract-security($blockSecurity)")
+        }
         // The handler lives on the `to` call whose receiver is this bind's
         // result, and the method constant is the bind's argument.
         val handler = bindHandler(fn, ins.result, input)
@@ -562,7 +663,94 @@ object EndpointDetector {
                     ?.let { e -> (e as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name }
             }
         }
-        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl")
+        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl", authentication = authentication)
+    }
+
+    /** True when [register] is last written before [index] by a null literal. */
+    private fun loadsNull(block: KirBlock, index: Int, register: String): Boolean {
+        for (i in index - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is io.cdxgen.kosi.kir.KirLoad && candidate.result == register) {
+                return candidate.constant is io.cdxgen.kosi.kir.KirConstant.Null
+            }
+            if (candidate is KirCall && candidate.result == register) return false
+        }
+        return false
+    }
+
+    /** The last call before [index] in [block] whose result is [register]. */
+    private fun producerOf(block: KirBlock, index: Int, register: String): KirCall? {
+        for (i in index - 1 downTo 0) {
+            val candidate = block.instructions.getOrNull(i) ?: continue
+            if (candidate is KirCall && candidate.result == register) return candidate
+        }
+        return null
+    }
+
+    /**
+     * The SECURITY SCHEME a declaration-site lambda assigns, when it assigns
+     * a modelled security constructor to the DSL's `security` property —
+     * `security = BasicAuthSecurity("realm", creds)` lowers as a field set
+     * whose value register is the constructor call's result. Both real
+     * http4k sites assign a property literally named `security`
+     * (`ContractBuilder.security`, `RouteMetaDsl.security`), so the field
+     * name is the model's, matched here rather than guessed from the KIR.
+     *
+     * R109's residual, closed (P18): an assignment whose producer matches
+     * NO modelled constructor used to return null here, and the caller fell
+     * back to the CONTRACT BLOCK's scheme — naming the wrong requirement
+     * with confidence, because the framework's own elvis
+     * (`meta.security ?: security`) ignores the block whenever meta declares
+     * ANY security. A lambda that assigns `security` at all therefore never
+     * yields null: the unmodelled producer's own name is reported (the code
+     * declares it; the pack merely does not model it), "unknown" when the
+     * producer is not even a call.
+     *
+     * With ONE exception, which is the elvis read literally: `security =
+     * null` assigns nothing. `meta.security?.filter ?: security?.filter`
+     * takes the block's arm for a null meta value exactly as it does for an
+     * absent one, so an explicit null is not an unknown requirement — it is
+     * the absence of a per-route requirement, and the block still applies.
+     * Reporting "unknown" there would be R109's own mistake in its other
+     * direction: confident about a site the framework is not confused by.
+     */
+    private fun securityAssignmentOf(
+        lambdaCanonical: String,
+        input: Input,
+        framework: FrameworkModel,
+    ): String? {
+        if (framework.securityConstructors.isEmpty()) return null
+        val lambda = input.module.functions.firstOrNull { it.canonicalName == lambdaCanonical } ?: return null
+        for (block in lambda.body?.blocks.orEmpty()) {
+            for ((at, ins) in block.instructions.withIndex()) {
+                if (ins !is io.cdxgen.kosi.kir.KirFieldSet) continue
+                val field = ins.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field ?: continue
+                if (field.name != "security") continue
+                if (loadsNull(block, at, ins.value)) continue
+                val ctor = producerOf(block, at, ins.value) ?: return "unknown"
+                val modelled = framework.securityConstructors.firstOrNull { matches(ctor.callee.fqn, it) }
+                return modelled?.substringAfterLast('.') ?: ctor.callee.fqn.substringAfterLast('.')
+            }
+        }
+        return null
+    }
+
+    /**
+     * The security the CONTRACT BLOCK declares, when [fn] IS the lambda of
+     * one of the framework's contract-builder calls: the block's own
+     * `security = <scheme>(..)` assignment, read from the same function the
+     * routes are declared in.
+     */
+    private fun contractBlockSecurity(
+        fn: KirFunction,
+        framework: FrameworkModel,
+        input: Input,
+    ): String? {
+        if (framework.contractDsl.isEmpty()) return null
+        val link = input.lambdaLinks[fn.canonicalName] ?: return null
+        val call = link.creationCall as? KirCall ?: return null
+        if (framework.contractDsl.none { matches(call.callee.fqn, it) }) return null
+        return securityAssignmentOf(fn.canonicalName, input, framework)
     }
 
     private fun bindHandler(fn: KirFunction, bindResult: String?, input: Input): String? {
@@ -637,6 +825,56 @@ object EndpointDetector {
             }
         }
         return register
+    }
+
+    /**
+     * The prefix a MOUNTED router publishes under (P19 §4): Vert.x 5's
+     * mount idiom — a wildcard route on the parent router whose subRouter
+     * call takes the mounted router as its argument — puts every route
+     * declared on the mounted router under the wildcard route's path. The
+     * walk is keyed on the MOUNTED ROUTER'S REGISTER (the mount call's
+     * first argument) through one store alias (`val api = Router.router(v)`),
+     * which is the shape the routes are declared against; the lambda-link
+     * chain cannot see it because a sub-router is a VALUE, not a lambda.
+     * The mount route's trailing wildcard marker is the framework's own
+     * "and everything below" spelling and contributes no segment.
+     * Same-function mounts only: a sub-router built in another function
+     * crosses a boundary this walk does not follow — a named gap, recorded
+     * in the pack comment, not a wrong prefix.
+     */
+    private fun mountedPrefix(
+        fn: KirFunction,
+        routeReceiver: String?,
+        framework: FrameworkModel?,
+        input: Input,
+    ): String {
+        if (framework == null || framework.mountFunctions.isEmpty() || routeReceiver == null) return ""
+        val storeSources = HashMap<String, String>()
+        for (block in fn.body?.blocks.orEmpty()) {
+            for (ins in block.instructions) {
+                if (ins is KirStore) storeSources[ins.target] = ins.value
+            }
+        }
+        for (block in fn.body?.blocks.orEmpty()) {
+            for ((at, ins) in block.instructions.withIndex()) {
+                if (ins !is KirCall) continue
+                val fqn = ins.callee.fqn.split('.').filterNot { it == "Companion" }.joinToString(".")
+                if (framework.mountFunctions.none { matches(fqn, it) }) continue
+                val mounted = ins.args.firstOrNull() ?: continue
+                val receiverIsMounted = routeReceiver == mounted || storeSources[routeReceiver] == mounted
+                if (!receiverIsMounted) continue
+                // The mount call's own receiver is the ROUTE the mount hangs
+                // off; its producer is the `router.route("/api/*")` call and
+                // its first argument is the prefix.
+                val routeObject = ins.receiver ?: continue
+                val producer = producerOf(block, at, routeObject) ?: continue
+                if (producer.callee.fqn.substringAfterLast('.') != "route") continue
+                val prefixReg = producer.args.firstOrNull() ?: continue
+                val folded = input.folder.valueAt(fn, block, at, prefixReg)?.value ?: continue
+                return folded.trimEnd('*').trimEnd('/')
+            }
+        }
+        return ""
     }
 
     /**

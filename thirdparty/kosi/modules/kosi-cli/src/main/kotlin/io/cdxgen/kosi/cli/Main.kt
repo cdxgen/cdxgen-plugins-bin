@@ -19,6 +19,7 @@ import io.cdxgen.kosi.schema.Diagnostic
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.RootScope
 import io.cdxgen.kosi.schema.Severity
+import io.cdxgen.kosi.schema.degradations
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -87,7 +88,7 @@ object Main {
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
         "classpath", "classpath-file", "jdk-home", "reachable-symbols", "sarif-out",
-        "max-analysis-seconds", "max-rss-mb", "deps-max-classes",
+        "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
         "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
@@ -113,6 +114,17 @@ object Main {
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
         val options = optionsFrom(parsed)
+        // P23 §0: a pairing whose OUTPUT would mislead is refused before the
+        // run, in the same spirit as `--reachable-symbols` and `--format
+        // graphml` below — but derived from `AnalyzeOptions.degradations()`,
+        // the one predicate the report's diagnostics also come from, so a
+        // refusal and a diagnostic can never describe different sets. The
+        // pairings that merely produce LESS (the syntax tier's absent
+        // dataflow, which is the DEFAULT invocation) are named on the report
+        // and run.
+        options.degradations().firstOrNull { it.usageError }?.let {
+            throw UsageException(it.message)
+        }
         val out = parsed.value("out")
         val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit)
         val reachableSymbols = parsed.value("reachable-symbols")
@@ -233,6 +245,8 @@ object Main {
             endpointSources = parsed.bool("endpoint-sources", defaults.endpointSources),
             deps = parsed.bool("deps", defaults.deps),
             depsMaxClasses = parsed.value("deps-max-classes")?.toIntOrNull() ?: defaults.depsMaxClasses,
+            dataflowMaxSummarySinkEffects = parsed.value("max-summary-sink-effects")?.toIntOrNull()
+                ?: defaults.dataflowMaxSummarySinkEffects,
             maxAnalysisSeconds = parsed.value("max-analysis-seconds")?.toIntOrNull() ?: defaults.maxAnalysisSeconds,
             maxRssMb = parsed.value("max-rss-mb")?.toIntOrNull() ?: defaults.maxRssMb,
             unknownCall = parsed.value("unknown-call", defaults.unknownCall).let {
@@ -452,44 +466,181 @@ object Main {
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
         val goldensDir = Path.of(parsed.value("goldens", "goldens"))
         val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
-        // Every bundled fixture tier is golden-ratcheted: the async tier's
-        // reports are as deterministic as the fixture tier's, and a tier the
-        // goldens never see is a tier whose drift they prove nothing about.
-        val entries = manifest.select(setOf("fixtures", "async"), parsed.value("only"))
+        // Every BUNDLED fixture is golden-ratcheted — derived from the
+        // manifest's paths, not from a tier list somebody has to remember to
+        // extend. This comment made that claim from P0 while the line under
+        // it named two tiers of the eleven; `frameworks` and `crypto` were
+        // added later and silently fell outside the pin, which left every
+        // ktor/spring/micronaut/quarkus/http4k/grpc fixture, every crypto
+        // fixture and the bundled vulnerable service unpinned (R142). The
+        // exclusions are stated in `GOLDEN_EXCLUDED_TIERS`.
+        val entries = manifest.bundled(parsed.value("only"))
         val problems = mutableListOf<String>()
         var checked = 0
-        for (entry in entries) {
-            val dir = repoRoot.resolve(entry.path!!)
-            for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
-                checked++
-                val report = Analyzer.analyze(dir, slot.options(), commit)
-                val digest = Digests.FixtureDigest(
-                    slug = entry.slug,
-                    slot = slot.label,
-                    sections = Digests.compute(report.toJson(pretty = false)),
-                )
-                val goldenFile = goldensDir.resolve("${entry.slug}-${slot.label}.json")
-                val existing = Digests.load(goldenFile)
-                if (existing == null || parsed.bool("update-goldens")) {
-                    if (existing == null && !parsed.bool("update-goldens")) {
-                        problems.add("${entry.slug}/${slot.label}: no golden (run kosi golden --update-goldens)")
-                        continue
+        var portabilityChecked = 0
+        // P18: the gate proves its own portability instead of trusting a
+        // reviewer to try it. Every fixture is analysed from TWO absolute
+        // locations in this run — the checkout and a relocated copy under
+        // the system temp dir — and any section digest that differs fails
+        // the gate. This is the in-gate form of the report contract's
+        // "two machines compare equal byte for byte": R104 and R108 were
+        // both one-environment proofs of cross-environment properties, and
+        // the relocated run would have caught R108 on the commit that
+        // introduced it. The digests compared here are RAW — the golden
+        // pin tolerates option values that name one machine, but a report
+        // whose own bytes name their location is not portable whatever the
+        // digest would tolerate.
+        val portableRoot = Files.createTempDirectory("kosi-golden-portable")
+        try {
+            for (entry in entries) {
+                val dir = repoRoot.resolve(entry.path!!)
+                val relocatedDir = portableRoot.resolve(entry.path!!)
+                copyTree(dir, relocatedDir)
+                if (dir == relocatedDir) {
+                    problems.add("${entry.slug}: portability relocation is the same directory as the checkout")
+                    continue
+                }
+                // A pin's jar can live OUTSIDE the entry directory (the async
+                // fixtures reach ../shared-libs): it is still an input the
+                // analysis reads, so the relocation has to carry it or the
+                // relocated run measures a DIFFERENT analysis. Only RELATIVE
+                // targets inside the checkout can travel; an absolute pin or
+                // one escaping the checkout names one machine and is a
+                // portability defect in its own right.
+                entry.classpathFile?.let { declared ->
+                    for (target in classpathPinTargets(dir.resolve(declared))) {
+                        // Targets INSIDE the entry directory are already in
+                        // the copy; only the ones reaching out of it need
+                        // mirroring.
+                        if (!target.startsWith(dir.toAbsolutePath().normalize())) {
+                            val rel = repoRoot.relativize(target)
+                            if (rel.startsWith("..")) {
+                                problems.add("${entry.slug}: classpath pin target does not travel with the checkout: $target")
+                            } else {
+                                copyTree(target, portableRoot.resolve(rel))
+                            }
+                        }
                     }
-                    Digests.save(digest, goldenFile)
-                } else {
-                    val diff = Digests.diff(digest, existing)
-                    if (diff.isNotEmpty()) {
-                        diff.forEach { problems.add("${entry.slug}/${slot.label}: $it") }
+                }
+                // The classpath_file a corpus entry declares is part of the
+                // INPUT the report contract pins: the bench runner already
+                // applies it (BenchRunner.runSlot), but this gate analysed the
+                // bare slot options until P17 — every classpath_file fixture
+                // was golden-checked against the machine-cache scan instead of
+                // its pinned classpath, so its digests were machine-dependent
+                // exactly where the pin existed to make them not (R105). A
+                // declared file that is missing fails the entry outright: a
+                // pin nobody can read is a broken pin.
+                val declaredClasspath = entry.classpathFile?.let { dir.resolve(it) }
+                if (declaredClasspath != null && !Files.isRegularFile(declaredClasspath)) {
+                    problems.add("${entry.slug}: declares classpath_file '${entry.classpathFile}' which is not on disk")
+                    continue
+                }
+                for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
+                    checked++
+                    portabilityChecked++
+                    // The ENTRY-RELATIVE value is what the report records: an
+                    // absolute path would put this checkout's location into the
+                    // `options` digest, so the gate would only ever pass in the
+                    // directory the goldens were generated in (P17 review).
+                    // Both runs get the SAME relative options, and that is
+                    // the point: each resolves the pin against its own root,
+                    // so neither reads the other's jars. An absolute pin here
+                    // would hand the relocated run the checkout's files and
+                    // measure nothing.
+                    val slotOptions = entry.classpathFile
+                        ?.let { slot.options().copy(classpathFile = it) }
+                        ?: slot.options()
+                    val report = Analyzer.analyze(dir, slotOptions, commit)
+                    val relocatedReport = Analyzer.analyze(relocatedDir, slotOptions, commit)
+                    Digests.sectionDifferences(
+                        io.cdxgen.kosi.bench.Digests.FixtureDigest(
+                            slug = entry.slug,
+                            slot = slot.label,
+                            sections = Digests.compute(report.toJson(pretty = false), normalizeEnvironmentNaming = false),
+                        ),
+                        io.cdxgen.kosi.bench.Digests.FixtureDigest(
+                            slug = entry.slug,
+                            slot = slot.label,
+                            sections = Digests.compute(relocatedReport.toJson(pretty = false), normalizeEnvironmentNaming = false),
+                        ),
+                        "at $dir",
+                        "at $relocatedDir",
+                    ).forEach { problems.add("${entry.slug}/${slot.label}: NOT PORTABLE: $it") }
+                    val digest = Digests.FixtureDigest(
+                        slug = entry.slug,
+                        slot = slot.label,
+                        sections = Digests.compute(report.toJson(pretty = false)),
+                    )
+                    val goldenFile = goldensDir.resolve("${entry.slug}-${slot.label}.json")
+                    val existing = Digests.load(goldenFile)
+                    if (existing == null || parsed.bool("update-goldens")) {
+                        if (existing == null && !parsed.bool("update-goldens")) {
+                            problems.add("${entry.slug}/${slot.label}: no golden (run kosi golden --update-goldens)")
+                            continue
+                        }
+                        Digests.save(digest, goldenFile)
+                    } else {
+                        val diff = Digests.diff(digest, existing)
+                        if (diff.isNotEmpty()) {
+                            diff.forEach { problems.add("${entry.slug}/${slot.label}: $it") }
+                        }
                     }
                 }
             }
+        } finally {
+            portableRoot.toFile().deleteRecursively()
         }
-        System.err.println("kosi golden: checked $checked fixture/slot pair(s), ${problems.size} problem(s)")
+        System.err.println(
+            "kosi golden: checked $checked fixture/slot pair(s), $portabilityChecked from two locations, ${problems.size} problem(s)",
+        )
         if (problems.isNotEmpty()) {
             problems.forEach { System.err.println("  - $it") }
             return ExitCodes.EXPECTATIONS_FAILED
         }
         return ExitCodes.OK
+    }
+
+    /** Recursive copy of a fixture tree, for the golden gate's relocated run. */
+    private fun copyTree(from: Path, to: Path) {
+        Files.walk(from).use { stream ->
+            for (source in stream.sorted()) {
+                val target = to.resolve(from.relativize(source).toString())
+                if (Files.isDirectory(source)) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    // REPLACE_EXISTING: several fixtures pin the same shared
+                    // jar, so a target can be mirrored more than once.
+                    Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+        }
+    }
+
+    /**
+     * The jar files a classpath pin names, resolved the way the resolver
+     * resolves them (relative entries against the file's own directory;
+     * `g:a:v=path` bound entries the same). Bare `g:a:v` coordinates are
+     * absent on purpose: they name the machine-local Gradle cache, which is
+     * the environment axis the two-environment proof varies, not a committed
+     * input the relocation must carry.
+     */
+    private fun classpathPinTargets(pinFile: Path): List<Path> {
+        if (!Files.isRegularFile(pinFile)) return emptyList()
+        val parent = pinFile.toAbsolutePath().normalize().parent ?: return emptyList()
+        return pinFile.toFile().readLines().mapNotNull { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@mapNotNull null
+            val raw = when {
+                trimmed.endsWith(".jar") && trimmed.contains('=') && trimmed.substringBefore('=').split(':').size >= 3 ->
+                    trimmed.substringAfter('=')
+                trimmed.endsWith(".jar") -> trimmed
+                else -> return@mapNotNull null
+            }.trim().trim('"', '\'')
+            val path = Path.of(raw)
+            (if (path.isAbsolute) path else parent.resolve(path)).toAbsolutePath().normalize()
+        }
     }
 
     // ---- version --------------------------------------------------------------
@@ -577,6 +728,10 @@ object Main {
                                               and cross-dependency slices are added (P9); --dataflow
                                               security-deps implies this
               --deps-max-classes <n>          cap on dependency classes lowered per run (default 500)
+              --max-summary-sink-effects <n>  summary escape-set budget; past it a summary is dropped
+                                              whole and callers fall to the labelled default (P15;
+                                              default 8192; the trips are counted in stats.truncations
+                                              as summary-effect-budget)
               --max-analysis-seconds <n>      wall-clock budget; tripping emits a named diagnostic and the
                                               partial report still ships (P10; 0 trips at the first boundary)
               --max-rss-mb <n>                peak-RSS budget; same degradation contract (P10)

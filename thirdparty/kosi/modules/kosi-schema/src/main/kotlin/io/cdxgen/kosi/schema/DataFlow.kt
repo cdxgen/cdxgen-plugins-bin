@@ -43,6 +43,46 @@ data class FlowEdge(
     }
 }
 
+/**
+ * P22 §2: the closed vocabulary of [FlowSlice.pathKind] — what a slice's
+ * trace IS. Pinned by `SlicePathKindVocabularyTest` the way
+ * `RootsVocabularyTest` pins the roots vocabulary: a fourth value does not
+ * ship, and every published slice carries exactly one.
+ */
+object PathKind {
+    /** A full source→sink walk, not cut. */
+    const val COMPLETE = "complete"
+
+    /** The walk was elided (trace cap, missing middle); endpoints guaranteed. */
+    const val PARTIAL = "partial"
+
+    /** No provable path — the finding stands on the symbol match alone. */
+    const val SYMBOL_ONLY = "symbol-only"
+
+    val ALL = sortedSetOf(COMPLETE, PARTIAL, SYMBOL_ONLY)
+}
+
+/**
+ * P23 §0: what makes a slice a CRYPTO flow — key or secret material (the
+ * `hardcoded-secret` literal sources) reaching a crypto API (`crypto-asset`)
+ * or a TLS misconfiguration (`insecure-tls`).
+ *
+ * It lives in the schema module, beside [FlowSlice], because two pieces of
+ * code answer this question and they must answer it the same way (P22's
+ * rule). The bench has counted `cryptoFlowSlices` with this predicate since
+ * P6; `--dataflow crypto` never consulted it and published every slice the
+ * `security` mode does, so the mode named a filter that did not exist — and
+ * a consumer who asked for crypto flows was handed log-injection findings
+ * labelled `"mode": "crypto"` (the P23 §0 matrix's first finding, R139).
+ */
+object CryptoFlow {
+    const val SOURCE_CATEGORY = "hardcoded-secret"
+    val SINK_CATEGORIES = sortedSetOf("crypto-asset", "insecure-tls")
+
+    fun isCryptoFlow(slice: FlowSlice): Boolean =
+        slice.sourceCategory == SOURCE_CATEGORY && slice.sinkCategory in SINK_CATEGORIES
+}
+
 data class FlowSlice(
     val id: String,
     val sourceId: String,
@@ -68,8 +108,25 @@ data class FlowSlice(
     val accessPath: String?,
     val crossesModule: Boolean,
     val crossesDependency: Boolean,
-    val reachableFromRoots: Boolean,
-    val rootWitness: List<String>?,
+    /**
+     * P22 §2: what the slice's trace IS, published rather than left for the
+     * consumer to re-derive from `nodeIds` (P21 §3's schema gap):
+     *
+     *  - `complete`    — a full source→sink walk, not cut;
+     *  - `partial`     — the walk was elided (trace cap, missing middle);
+     *                    the endpoints are guaranteed, the middle is not;
+     *  - `symbol-only` — no provable path; the finding stands on the
+     *                    symbol match alone.
+     *
+     * It replaces two fields that were facts nowhere: `reachableFromRoots`
+     * was false on every slice in every shipped slot and true by
+     * construction in the one mode that published it (the mode, not the
+     * slice, carried the information — `dataFlow.mode` still does), and
+     * `rootWitness` was null everywhere (R117's rule: a field that never
+     * varies is not a fact, it is a schema lie a consumer will eventually
+     * believe).
+     */
+    val pathKind: String,
     val ruleId: String,
     val ruleName: String,
     val description: String,
@@ -86,6 +143,17 @@ data class FlowSlice(
      * did.
      */
     val origins: List<String> = emptyList(),
+    /**
+     * P20 §1: for a slice that entered through an ENDPOINT HANDLER's
+     * parameter, the value-parameter it entered through (`#0` = the first
+     * non-receiver parameter) and the transport the parameter's annotation
+     * names (path/query/header/cookie/form/body). Null for every other
+     * birth — before P20 an endpoint-rooted slice could say "this handler
+     * is reachable from untrusted input" but never WHICH parameter, which
+     * is the difference between "guard this input" and "audit the handler".
+     */
+    val sourceParameter: String? = null,
+    val sourceTransport: String? = null,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -107,10 +175,7 @@ data class FlowSlice(
         for (n in nodeIds) w.str(n)
         w.endArray()
         w.num("pathLength", pathLength)
-        w.bool("reachableFromRoots", reachableFromRoots)
-        w.beginArray("rootWitness")
-        for (r in (rootWitness ?: emptyList())) w.str(r)
-        w.endArray()
+        w.str("pathKind", pathKind)
         w.str("riskScore", riskScore)
         w.str("ruleId", ruleId)
         w.str("ruleName", ruleName)
@@ -128,7 +193,9 @@ data class FlowSlice(
         w.str("sourceId", sourceId)
         w.str("sourceModulePath", sourceModulePath)
         w.str("sourceName", sourceName)
+        if (sourceParameter != null) w.str("sourceParameter", sourceParameter) else w.nul("sourceParameter")
         w.str("sourcePurl", sourcePurl)
+        if (sourceTransport != null) w.str("sourceTransport", sourceTransport) else w.nul("sourceTransport")
         w.str("severity", severity)
         w.str("targetPurl", targetPurl)
         w.beginArray("taintKinds")
@@ -208,6 +275,78 @@ data class DataFlowEvidence(
     val stats: DataFlowStats,
     val diagnostics: List<Diagnostic>,
 ) {
+    /**
+     * P23 §0: this evidence narrowed to [kept], as a WHOLE — the slices, the
+     * nodes and edges those slices still reference, and every counter derived
+     * from them.
+     *
+     * There is one of these because a filter that drops slices and leaves the
+     * rest of the document behind publishes a contradiction: `nodes[]` and
+     * `edges[]` describing traces that are not in `slices[]`, and counters
+     * (`connectivity`, `suspendCrossingSlices`, `summaryCrossingSlices`,
+     * `defaultOriginSlices`, `integrityViolations`) still measuring the
+     * unfiltered population. The reachable-mode intersection recomputed four
+     * of those counters and left the other five plus the node and edge
+     * arrays; the P23 crypto filter, written from it, reproduced the same
+     * gap. Two places narrowing one document is exactly the shape this phase
+     * is about, so there is now one place.
+     *
+     * `summaries[]` is deliberately NOT narrowed: a summary is a fact about a
+     * FUNCTION, computed whether or not any surviving slice runs through it,
+     * and `summariesComputed`/`summariesByOrigin` count what the run
+     * computed. Narrowing those would report less analysis than was done.
+     */
+    fun restrictTo(kept: List<FlowSlice>): DataFlowEvidence {
+        if (kept.size == slices.size) return this
+        val keptNodeIds = kept.flatMapTo(HashSet()) { it.nodeIds }
+        val keptEdgeIds = kept.flatMapTo(HashSet()) { it.edgeIds }
+        val nodesOut = nodes.filter { it.id in keptNodeIds }
+        val edgesOut = edges.filter { it.id in keptEdgeIds }
+        val edgesById = edgesOut.associateBy { it.id }
+        val nodesById = nodesOut.associateBy { it.id }
+        // The same rule the engine uses: a `pack` origin on a source birth is
+        // PROVENANCE, not a summary boundary.
+        val boundaryOrigins = { origins: List<String> -> origins.filter { it != "pack" } }
+        return copy(
+            nodes = nodesOut,
+            edges = edgesOut,
+            slices = kept,
+            stats = stats.copy(
+                sliceCount = kept.size,
+                uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
+                crossDependencySlices = kept.count { it.crossesDependency },
+                crossModuleSlices = kept.count { it.crossesModule },
+                connectivity = if (kept.isEmpty()) {
+                    1.0
+                } else {
+                    kept.count { slice -> sliceIsConnected(slice, edgesById) }.toDouble() / kept.size
+                },
+                integrityViolations = kept.count { slice ->
+                    slice.nodeIds.any { it !in nodesById } || !sliceIsConnected(slice, edgesById)
+                },
+                defaultOriginSlices = kept.count { slice ->
+                    val boundary = boundaryOrigins(slice.origins)
+                    boundary.isNotEmpty() && boundary.all { it == "default" }
+                },
+                summaryCrossingSlices = kept.count { boundaryOrigins(it.origins).isNotEmpty() },
+                suspendCrossingSlices = kept.count { slice ->
+                    slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
+                },
+            ),
+        )
+    }
+
+    /** Every consecutive node pair of the trace is joined by a published edge. */
+    private fun sliceIsConnected(slice: FlowSlice, edgesById: Map<String, FlowEdge>): Boolean {
+        if (slice.nodeIds.size < 2) return slice.edgeIds.isEmpty()
+        if (slice.edgeIds.size != slice.nodeIds.size - 1) return false
+        for ((i, edgeId) in slice.edgeIds.withIndex()) {
+            val edge = edgesById[edgeId] ?: return false
+            if (edge.sourceId != slice.nodeIds[i] || edge.targetId != slice.nodeIds[i + 1]) return false
+        }
+        return true
+    }
+
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.str("mode", mode)
@@ -264,6 +403,16 @@ data class DataFlowStats(
     val uniqueFlows: Int,
     val crossDependencySlices: Int,
     val crossModuleSlices: Int = 0,
+    /**
+     * How many published slices are proven root-reachable — non-zero ONLY
+     * when the run both asked for `--dataflow reachable` AND produced a call
+     * graph to intersect with. Asking without a graph (`--callgraph none`)
+     * computes nothing, and the field then reads 0 meaning "not measured",
+     * never "every slice" (the P22 review's R137). The taint engine always
+     * writes 0 here; the Analyzer's intersection is the only writer of a
+     * non-zero value, and `summary.reachableSliceCount` reads this field
+     * rather than deriving a second answer.
+     */
     val reachableSlices: Int,
     val connectivity: Double,
     val integrityViolations: Int,

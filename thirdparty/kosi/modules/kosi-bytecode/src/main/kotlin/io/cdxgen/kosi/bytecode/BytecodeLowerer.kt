@@ -113,7 +113,11 @@ object BytecodeLowerer {
     fun lower(jars: List<JarSpec>, wantedCallables: Set<String>, maxClasses: Int): Result {
         val unlowered = sortedMapOf<String, Int>()
         val orderedJars = jars.sortedWith(compareBy({ it.purl }, { it.jar.toString() }))
-        val classIndex = HashMap<String, JarSpec>() // internal name -> jar
+        // P22 §1: internal class name -> jar. The key is a CLASS internal
+        // name (unique per class file); a shaded duplicate across jars keeps
+        // the LAST jar — the resolver already picked one artifact per
+        // coordinate, so the index mirrors that pick rather than guessing.
+        val classIndex = HashMap<String, JarSpec>()
         for (spec in orderedJars) {
             try {
                 JarFile(spec.jar.toFile()).use { file ->

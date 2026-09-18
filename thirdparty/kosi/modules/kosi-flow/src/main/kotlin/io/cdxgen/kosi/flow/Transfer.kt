@@ -20,7 +20,6 @@ import io.cdxgen.kosi.kir.KirLoad
 import io.cdxgen.kosi.kir.KirNew
 import io.cdxgen.kosi.kir.KirPhi
 import io.cdxgen.kosi.kir.KirReturn
-import io.cdxgen.kosi.kir.KirSafeCall
 import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirStringConcat
 import io.cdxgen.kosi.kir.KirSuspendPoint
@@ -152,8 +151,12 @@ internal interface TransferHost<F, C> {
     /** Called when a pack source actually created a fact (counting, provenance). */
     fun onSourceApplied(fqn: String, site: Int, fact: F, resultKey: TaintKey, collect: C?)
 
-    /** Called when a pack sanitizer cleared categories (the summary's `sanitizes` record). */
-    fun onSanitizerCleared(cleared: List<String>, collect: C?)
+    /**
+     * Called when pack sanitizer [fqn] cleared categories — something was
+     * actually cleared, which is the event the depth report counts (a
+     * sanitizer that never fires is R63 for the security pack, P20 §0).
+     */
+    fun onSanitizerCleared(fqn: String, cleared: List<String>, collect: C?)
 
     /** Called when a pack passthrough actually moved taint (counting, provenance). */
     fun onPackPassthroughApplied(fqn: String, collect: C?)
@@ -441,11 +444,6 @@ internal class FlowTransfer<F, C>(
                     deriveFieldRead(ins.receiver, pathSuffix(ins.path), ins.result, state, site.id)
                 }
 
-                is KirSafeCall -> {
-                    moveAll(TaintKey(ins.receiver, pathSuffix(ins.path)), reg(ins.result), site.id, "field", replace = true)
-                    deriveFieldRead(ins.receiver, pathSuffix(ins.path), ins.result, state, site.id)
-                }
-
                 is KirFieldSet -> {
                     // A field write is a STRONG update in both engines: the
                     // written value replaces the key's prior facts at the
@@ -585,14 +583,23 @@ internal class FlowTransfer<F, C>(
 
         // SANITIZER: the named categories are cleared on the RESULT only — a
         // sanitizer must not hide the taint that stays behind in memory.
+        // P20 §0: a sanitizer "fires" when it actually stopped taint — a
+        // clear on the result, OR facts sitting on its arguments whose
+        // propagation the entry suppresses (the pack entry's presence is
+        // what keeps the unknown-call default from moving them). Either
+        // way the removal of the entry would change a result, which is the
+        // liveness the depth report and the security-pack sweep measure.
         val sanitizer = pack.sanitizers.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
         if (sanitizer != null && result != null) {
             matched = true
             val resultKey = TaintKey(result, "")
             val before = state.factsOf(resultKey)
             val remaining = before.filter { host.ops.categoryOf(it) !in sanitizer.clears }
-            if (remaining.size != before.size) {
-                host.onSanitizerCleared(sanitizer.clears, collect)
+            val argumentFacts = (listOfNotNull(receiver) + ins.args).any { reg ->
+                state.factsOf(TaintKey(reg, "")).isNotEmpty()
+            }
+            if (remaining.size != before.size || argumentFacts) {
+                host.onSanitizerCleared(fqn, sanitizer.clears, collect)
             }
             state.setFacts(resultKey, java.util.TreeSet(remaining))
         }

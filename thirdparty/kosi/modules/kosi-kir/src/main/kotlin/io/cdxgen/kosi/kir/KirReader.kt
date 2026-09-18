@@ -262,7 +262,10 @@ object KirReader {
             KirLambda(reg, fn, captures)
         }
         "elvis" -> KirElvis(reg, rest.substringBefore(" fallback="), rest.substringAfter(" fallback="))
-        "safecall" -> KirSafeCall(reg, rest.substringBefore(' '), readPath(rest.substringAfter(' ')))
+        // `safecall` is gone with KirSafeCall (P19): no tier ever emitted
+        // one, so no existing dump carries the opcode and there is nothing
+        // to read back. An old dump that did would fail as an unknown
+        // opcode rather than silently drop an instruction.
         "cast" -> {
             val value = rest.substringBefore(" as ")
             val afterAs = rest.substringAfter(" as ")

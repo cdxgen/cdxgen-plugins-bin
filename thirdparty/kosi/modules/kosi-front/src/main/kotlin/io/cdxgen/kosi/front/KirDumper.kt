@@ -38,7 +38,8 @@ object KirDumper {
         val resolution = ClasspathResolver.resolve(
             root = root,
             explicitJars = options.classpath.map { Path.of(it) },
-            explicitFile = options.classpathFile?.let { Path.of(it) },
+            // Relative resolves against the analysed dir, as in Analyzer.
+            explicitFile = options.classpathFile?.let { root.resolve(it) },
             moduleDirs = moduleDirs,
         )
         val jdkResolution = JdkModules.resolve(options.jdkHome?.let { Path.of(it) })
