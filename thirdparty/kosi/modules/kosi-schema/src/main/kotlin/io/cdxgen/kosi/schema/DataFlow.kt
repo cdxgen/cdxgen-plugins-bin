@@ -310,6 +310,16 @@ data class DataFlowStats(
     val uniqueFlows: Int,
     val crossDependencySlices: Int,
     val crossModuleSlices: Int = 0,
+    /**
+     * How many published slices are proven root-reachable — non-zero ONLY
+     * when the run both asked for `--dataflow reachable` AND produced a call
+     * graph to intersect with. Asking without a graph (`--callgraph none`)
+     * computes nothing, and the field then reads 0 meaning "not measured",
+     * never "every slice" (the P22 review's R137). The taint engine always
+     * writes 0 here; the Analyzer's intersection is the only writer of a
+     * non-zero value, and `summary.reachableSliceCount` reads this field
+     * rather than deriving a second answer.
+     */
     val reachableSlices: Int,
     val connectivity: Double,
     val integrityViolations: Int,

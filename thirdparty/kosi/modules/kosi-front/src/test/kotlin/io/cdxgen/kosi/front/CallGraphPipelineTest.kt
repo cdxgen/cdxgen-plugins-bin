@@ -185,4 +185,88 @@ class CallGraphPipelineTest {
             "a sealed hierarchy must not carry the open-hierarchy label",
         )
     }
+
+    /**
+     * The P22 review's R137. `--dataflow reachable` names what was ASKED
+     * for; the intersection that makes a slice reachable needs a call
+     * GRAPH, and `--callgraph none` publishes none — so in that pairing
+     * reachability is not computed at all and the only honest count is 0.
+     * P22 §2 replaced a `reachableFromRoots` flag that was false everywhere
+     * with a count keyed off the mode, which read "every slice reachable"
+     * for a run that had measured nothing: R117's rule broken inside the
+     * change that was applying it, and the unmeasured answer was the
+     * OPPOSITE of the measured one on the very first project tried.
+     *
+     * Restoring the defect (keying either count off the mode instead of the
+     * intersection) turns the second half of this test red while the first
+     * half — the real, graph-backed count — stays green, which is the pair
+     * that makes it a gate rather than a constant.
+     */
+    @Test
+    fun aReachableCountWithoutACallGraphCountsNothing() {
+        val root = project(
+            mapOf(
+                "src/main/kotlin/Relay.kt" to """
+                    package t
+
+                    private fun unreached() {
+                        val raw = readLine()!!
+                        ProcessBuilder(raw).start()
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val withGraph = Analyzer.analyze(
+            root,
+            AnalyzeOptions(
+                backend = Backend.RESOLVED,
+                dataflow = io.cdxgen.kosi.schema.DataflowMode.REACHABLE,
+                roots = listOf(RootScope.EXPORTED.id),
+            ),
+            commit = "test",
+        )
+        assertNotNull(withGraph.callGraph, "the graph-backed leg must actually have a graph")
+        val graphFlow = assertNotNull(withGraph.dataFlow)
+        // The intersection is the authority, and the summary reads it rather
+        // than deriving a second answer: one question, one piece of code.
+        assertEquals(
+            graphFlow.slices.size,
+            graphFlow.stats.reachableSlices,
+            "reachable mode publishes only the slices that survived the intersection",
+        )
+        assertEquals(
+            graphFlow.stats.reachableSlices,
+            withGraph.stats.reachableSliceCount,
+            "the summary's count is the intersection's count, never re-derived from the mode",
+        )
+
+        val noGraph = Analyzer.analyze(
+            root,
+            AnalyzeOptions(
+                backend = Backend.RESOLVED,
+                dataflow = io.cdxgen.kosi.schema.DataflowMode.REACHABLE,
+                callgraph = io.cdxgen.kosi.schema.CallGraphMode.NONE,
+                roots = listOf(RootScope.EXPORTED.id),
+            ),
+            commit = "test",
+        )
+        assertNull(noGraph.callGraph, "--callgraph none publishes no graph")
+        val blindFlow = assertNotNull(noGraph.dataFlow)
+        assertTrue(
+            blindFlow.slices.isNotEmpty(),
+            "the fixture must publish slices, or the zero below proves nothing (R53)",
+        )
+        assertEquals(
+            0,
+            blindFlow.stats.reachableSlices,
+            "no call graph means reachability was never computed: the honest count is 0, not " +
+                "every slice. This read ${blindFlow.slices.size} before the R137 fix, for a project " +
+                "whose graph-backed answer is ${graphFlow.stats.reachableSlices}",
+        )
+        assertEquals(
+            0,
+            noGraph.stats.reachableSliceCount,
+            "and the summary must not re-derive what the engine refused to claim",
+        )
+    }
 }

@@ -978,14 +978,18 @@ object Analyzer {
                     sliceCount = dataFlow?.slices?.size ?: 0,
                     crossDependencySliceCount = dataFlow?.stats?.crossDependencySlices ?: 0,
                     crossModuleSliceCount = dataFlow?.stats?.crossModuleSlices ?: 0,
-                    // P22 §2: reachable-mode runs publish only reachable
-                    // slices (the intersection happened upstream), so the
-                    // count equals sliceCount there; every other mode never
-                    // computed reachability and says 0 — "not measured in
-                    // this mode", not "no reachable slices".
-                    reachableSliceCount = dataFlow?.let { df ->
-                        if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE) df.slices.size else 0
-                    } ?: 0,
+                    // READ, never re-derived: the intersection above is the
+                    // only place that can answer this, and it has already
+                    // written its answer into `dataFlow.stats`. The P22
+                    // review's R137 is what the second derivation cost —
+                    // this line asked the MODE ("was reachability wanted?")
+                    // where the intersection asks whether a graph existed,
+                    // so `--dataflow reachable --callgraph none` published
+                    // every slice as reachable with nothing computed. The
+                    // phase's own rule: when two pieces of code answer the
+                    // same question, the answers are a gate — so there is
+                    // now one piece of code.
+                    reachableSliceCount = dataFlow?.stats?.reachableSlices ?: 0,
                     sccsProcessed = flowResult?.sccsProcessed ?: 0,
                     sccIterationCapHits = flowResult?.sccIterationCapHits ?: 0,
                     suspendCrossingSliceCount = dataFlow?.stats?.suspendCrossingSlices ?: 0,

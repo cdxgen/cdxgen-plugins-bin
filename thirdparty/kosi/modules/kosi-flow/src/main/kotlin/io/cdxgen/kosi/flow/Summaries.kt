@@ -163,7 +163,20 @@ internal class FunctionSummary(
         sinkEffects = (sinkEffects + other.sinkEffects).sortedWith(
             compareBy({ it.paramIndex }, { it.paramPath }, { it.sinkSite }, { it.sinkCalleeFqn }, { it.sinkArgumentIndex }, { it.sinkAccessPath }),
         ),
-        sourceReturns = mergeWith(sourceReturns, other.sourceReturns) { a, b -> (a + b).distinct().sorted() },
+        // NOT a union: this value is a WITNESS PATH, not a set of effects.
+        // `recordSourceReturn` prepends it verbatim to the published slice's
+        // trace, so unioning two overloads' paths (the P22 review's R138 —
+        // `(a + b).distinct().sorted()`) fabricated a trace out of sites
+        // interleaved from two different bodies, ordered by site id: a walk
+        // no execution can take, published as evidence. Every other field
+        // here is a set and unions soundly; a witness can only be CHOSEN.
+        // The choice is the rule `toSummary` already uses when one body
+        // offers several witnesses for a category — the shortest, ties
+        // broken lexicographically — so the joined path is always a real
+        // path of a real overload.
+        sourceReturns = mergeWith(sourceReturns, other.sourceReturns) { a, b ->
+            listOf(a, b).minWithOrNull(compareBy({ it.size }, { it.joinToString(",") }))!!
+        },
         sanitizes = sanitizes + other.sanitizes,
         invokedParams = invokedParams + other.invokedParams,
         // The join answers name-keyed lookups, and the only name-keyed
@@ -175,12 +188,6 @@ internal class FunctionSummary(
     private fun <K, V> mergeSets(into: Map<K, Set<V>>, other: Map<K, Set<V>>): Map<K, Set<V>> {
         val out = HashMap(into)
         for ((k, v) in other) out[k] = out[k]?.let { it + v } ?: v
-        return out
-    }
-
-    private fun <K, V> mergeSets(into: Map<K, Set<V>>, other: Map<K, Set<V>>, merge: (Set<V>, Set<V>) -> Set<V>): Map<K, Set<V>> {
-        val out = HashMap(into)
-        for ((k, v) in other) out[k] = out[k]?.let { merge(it, v) } ?: v
         return out
     }
 

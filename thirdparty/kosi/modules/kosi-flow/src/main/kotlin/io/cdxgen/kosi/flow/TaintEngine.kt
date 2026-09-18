@@ -1133,11 +1133,6 @@ object TaintEngine {
             // answered one overload's question with a namesake's effects,
             // a missed flow one way and a confident wrong one the other
             // (P22 §1, R133's shape in the summary table).
-            // Keyed by FUNCTION, not name: a descriptor-narrowed call site
-            // must meet its own overload's summary — the name-keyed lookup
-            // answered one overload's question with a namesake's effects,
-            // a missed flow one way and a confident wrong one the other
-            // (P22 §1, R133's shape in the summary table).
             val applicable = targets.mapNotNull { target -> context.table[functionKey(target)]?.let { target to it } }.toMutableList()
             // P9 boundary: when no WORKSPACE target has a summary, the `--deps`
             // tier may have one. The per-summary application below is shared
@@ -2078,13 +2073,21 @@ object TaintEngine {
                 uniqueFlows = slicesOut.map { it.flowKey }.toSortedSet().size,
                 crossDependencySlices = slicesOut.count { it.crossesDependency },
                 crossModuleSlices = slicesOut.count { it.crossesModule },
-                // Meaningful ONLY in `reachable` mode (where the engine has
-                // intersected the slices with the call-graph reachability, so
-                // every published one is reachable and this equals
-                // sliceCount); everywhere else reachability was not computed
-                // and the honest count is 0 — "not measured here", which the
-                // schema reference says out loud (P22 §2).
-                reachableSlices = if (options.mode == "reachable") slicesOut.size else 0,
+                // ALWAYS 0 here, in every mode, and the mode is deliberately
+                // not consulted: this engine has no call graph, so it cannot
+                // know whether any slice is root-reachable. The intersection
+                // lives in the Analyzer, which overwrites this field with the
+                // kept count when it runs. P22 §2's first version keyed the
+                // count off `mode == "reachable"` and published
+                // `slicesOut.size` — but the mode says only what was ASKED
+                // for, and `--dataflow reachable --callgraph none` asks
+                // without a graph: the intersection never ran and the stat
+                // claimed every slice reachable. On taint-sanitizer that read
+                // 2 where the real intersection keeps 0 (the P22 review's
+                // R137) — R117's rule, broken inside the change that was
+                // applying it: a field that never varies is a schema lie, and
+                // one that varies WRONGLY is a worse one.
+                reachableSlices = 0,
                 connectivity = connectivity,
                 integrityViolations = integrity,
                 summariesComputed = summaries.count { it.origin == SummaryOrigin.COMPUTED || it.origin == SummaryOrigin.RECURSIVE_APPROX },

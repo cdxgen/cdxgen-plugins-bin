@@ -15,6 +15,7 @@ import io.cdxgen.kosi.kir.KirReturn
 import io.cdxgen.kosi.models.ModelPacks
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * P22 §1, the R133 shape at the SUMMARY layer: two real overloads share one
@@ -192,4 +193,45 @@ class SummaryOverloadTest {
         )
         assertEquals(false to false, opinions.opinion("fixtures.Msg.absent", null), "no workspace body: no opinion")
     }
+
+    /**
+     * The P22 review's R138. The deps tier answers a name-keyed lookup with
+     * the JOIN of every overload of that name, and the join is a may-union
+     * — sound for every field that is a SET of effects. `sourceReturns` is
+     * not one: its value is a witness PATH, which `recordSourceReturn`
+     * prepends verbatim to the published slice's trace. Unioning two paths
+     * (`(a + b).distinct().sorted()`, as the join shipped) fabricates a
+     * walk out of sites interleaved from two different bodies and orders it
+     * by site id — evidence for an execution that cannot happen.
+     *
+     * A witness can only be CHOSEN, by the rule the summariser already uses
+     * when one body offers several: shortest, lexicographic tie-break. So
+     * the joined path must be, exactly, one of the two inputs.
+     */
+    @Test
+    fun joiningTwoOverloadsChoosesAWitnessPathAndNeverInventsOne() {
+        val a = summaryWithSourceReturn(stringDescriptor, listOf(11, 12, 13))
+        val b = summaryWithSourceReturn(userDescriptor, listOf(20, 21))
+        for ((left, right) in listOf(a to b, b to a)) {
+            val joined = left.join(right).sourceReturns.getValue("untrusted-input")
+            assertTrue(
+                joined == listOf(11, 12, 13) || joined == listOf(20, 21),
+                "the joined witness must BE one of the two real paths, not a blend of both: $joined",
+            )
+            assertEquals(listOf(20, 21), joined, "and the choice is the shortest, deterministically")
+        }
+    }
+
+    private fun summaryWithSourceReturn(descriptor: String, path: List<Int>) = FunctionSummary(
+        function = overload(descriptor, KirReturn("%0")),
+        paramToReturn = emptySet(),
+        paramToParam = emptyMap(),
+        paramFieldWrites = emptyMap(),
+        receiverWrites = emptyMap(),
+        sinkEffects = emptyList(),
+        sourceReturns = mapOf("untrusted-input" to path),
+        sanitizes = emptySet(),
+        invokedParams = emptySet(),
+        origin = SummaryOrigin.BYTECODE,
+    )
 }
