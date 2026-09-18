@@ -36,6 +36,23 @@ object SummaryOrigin {
     const val DEFAULT = "default"
 }
 
+/**
+ * P22 §1: the identity of one function in every map the flow engine keeps.
+ * A canonical name is the package-and-member path with no descriptor, so
+ * Kotlin overloads share one — R133's fold lost a verdict to a namesake
+ * through exactly such a key, and this module's summary table answered one
+ * overload's question with another's by the same spelling (`associateBy`
+ * kept the LAST overload and never summarised the rest). The descriptor
+ * makes the pair unique for every declared function (the JVM forbids two
+ * methods of one class sharing name and descriptor); extracted lambdas have
+ * none, and the lowering names them uniquely per module (KirLowering's
+ * module-wide ordinal).
+ */
+internal fun functionKey(f: KirFunction): String = f.canonicalName + "\u0000" + (f.jvmDescriptor ?: "")
+
+/** The key of a function known by name only (a lambda's canonical). */
+internal fun functionKeyByName(canonicalName: String): String = canonicalName + "\u0000"
+
 /** One interprocedurally-visible escape: a parameter's taint reaches a sink. */
 internal data class SummarySinkEffect(
     /** Index into the summary's function's [KirFunction.params]. */
@@ -129,6 +146,57 @@ internal class FunctionSummary(
             sanitizes == other.sanitizes &&
             invokedParams == other.invokedParams
 
+    /**
+     * The may-analysis union with [other]: every effect either summary has,
+     * the joined summary has. Used where a consumer can only name the
+     * FUNCTION (the deps tier's FQN lookups), never one overload — the
+     * honest answer to "what can this name do" is the union, not whichever
+     * overload a map happened to keep last (P22 §1). Sorted/merged fields
+     * keep the join commutative and deterministic.
+     */
+    fun join(other: FunctionSummary): FunctionSummary = FunctionSummary(
+        function = function,
+        paramToReturn = paramToReturn + other.paramToReturn,
+        paramToParam = mergeSets(paramToParam, other.paramToParam),
+        paramFieldWrites = mergeWith(paramFieldWrites, other.paramFieldWrites) { a, b -> mergeSets(a, b) },
+        receiverWrites = mergeSets(receiverWrites, other.receiverWrites),
+        sinkEffects = (sinkEffects + other.sinkEffects).sortedWith(
+            compareBy({ it.paramIndex }, { it.paramPath }, { it.sinkSite }, { it.sinkCalleeFqn }, { it.sinkArgumentIndex }, { it.sinkAccessPath }),
+        ),
+        // NOT a union: this value is a WITNESS PATH, not a set of effects.
+        // `recordSourceReturn` prepends it verbatim to the published slice's
+        // trace, so unioning two overloads' paths (the P22 review's R138 —
+        // `(a + b).distinct().sorted()`) fabricated a trace out of sites
+        // interleaved from two different bodies, ordered by site id: a walk
+        // no execution can take, published as evidence. Every other field
+        // here is a set and unions soundly; a witness can only be CHOSEN.
+        // The choice is the rule `toSummary` already uses when one body
+        // offers several witnesses for a category — the shortest, ties
+        // broken lexicographically — so the joined path is always a real
+        // path of a real overload.
+        sourceReturns = mergeWith(sourceReturns, other.sourceReturns) { a, b ->
+            listOf(a, b).minWithOrNull(compareBy({ it.size }, { it.joinToString(",") }))!!
+        },
+        sanitizes = sanitizes + other.sanitizes,
+        invokedParams = invokedParams + other.invokedParams,
+        // The join answers name-keyed lookups, and the only name-keyed
+        // consumer is the deps tier, whose summaries uniformly carry
+        // `bytecode` — so the joined origin is this one's.
+        origin = origin,
+    )
+
+    private fun <K, V> mergeSets(into: Map<K, Set<V>>, other: Map<K, Set<V>>): Map<K, Set<V>> {
+        val out = HashMap(into)
+        for ((k, v) in other) out[k] = out[k]?.let { it + v } ?: v
+        return out
+    }
+
+    private fun <K, V> mergeWith(into: Map<K, V>, other: Map<K, V>, merge: (V, V) -> V): Map<K, V> {
+        val out = HashMap(into)
+        for ((k, v) in other) out[k] = out[k]?.let { merge(it, v) } ?: v
+        return out
+    }
+
     /** Projects onto the schema type (param ids `p<i>` over the params list). */
     fun toSchema(): io.cdxgen.kosi.schema.FlowSummary {
         val names = function.params.map { it.name }
@@ -183,7 +251,10 @@ internal class CallIndex(
      * copies, stores, phis and elvis joins to a per-function fixpoint — the
      * same site-local pre-pass the P3 graph runs. Registers with no known
      * type yield an empty set and their sites fall back to the RTA
-     * candidate set; unknown never narrows.
+     * candidate set; unknown never narrows. Keyed by [functionKey], not the
+     * canonical name: overloads share a name, and an `associate` here kept
+     * the LAST overload's type facts and answered the other's VTA question
+     * with them (the P22 §1 sweep's second instance of R133's shape).
      */
     private val registerTypesByFunction: Map<String, Map<String, Set<String>>> = compiled.associate { cf ->
         val body = cf.blocks
@@ -224,13 +295,13 @@ internal class CallIndex(
                 }
             }
         }
-        cf.function.canonicalName to types
+        functionKey(cf.function) to types
     }
 
     /** A package-qualified receiver type narrows to chain-form classes by suffix. */
-    private fun knownTypes(functionCanonical: String, receiver: String?): Set<String> {
+    private fun knownTypes(fn: KirFunction, receiver: String?): Set<String> {
         if (receiver == null) return emptySet()
-        val raw = registerTypesByFunction[functionCanonical]?.get(receiver).orEmpty()
+        val raw = registerTypesByFunction[functionKey(fn)]?.get(receiver).orEmpty()
         if (raw.isEmpty()) return emptySet()
         return raw.flatMap { type -> canonicalClasses(type) }.toSet()
     }
@@ -241,8 +312,8 @@ internal class CallIndex(
      * disagree with the override index, and the override index — the sound
      * superset — wins.
      */
-    fun narrowByReceiverType(functionCanonical: String, receiver: String?, candidates: List<KirFunction>): List<KirFunction> {
-        val known = knownTypes(functionCanonical, receiver)
+    fun narrowByReceiverType(fn: KirFunction, receiver: String?, candidates: List<KirFunction>): List<KirFunction> {
+        val known = knownTypes(fn, receiver)
         if (known.isEmpty()) return candidates
         val narrowed = candidates.filter { f ->
             val owner = f.enclosingClass ?: return@filter false
@@ -251,11 +322,23 @@ internal class CallIndex(
         return narrowed.ifEmpty { candidates }
     }
 
+    /**
+     * Overload candidates by canonical name — the value is the LIST of every
+     * overload with that name, so the non-unique key is the point: a call
+     * site names an FQN, and narrowing to one body is [targets]' job on
+     * descriptor/exactness evidence, never the index's (P22 §1 sweep: the
+     * key is correct exactly because nothing reads it as one function).
+     */
     private val byCanonical: Map<String, List<KirFunction>> = compiled
         .groupBy { it.function.canonicalName }
         .mapValues { (_, fs) -> fs.map { it.function }.sortedBy { it.jvmDescriptor ?: "" } }
 
-    /** Overridden symbol fqn -> workspace functions with bodies overriding it. */
+    /**
+     * Overridden symbol fqn -> workspace functions with bodies overriding it.
+     * The key names a SYMBOL, not one function, and the value is the list of
+     * every overrider — a dispatch candidate set, never one body (P22 §1
+     * sweep).
+     */
     private val overriders: Map<String, List<KirFunction>> = compiled
         .flatMap { cf -> cf.function.overrides.map { it to cf.function } }
         .groupBy({ it.first }, { it.second })
@@ -358,6 +441,7 @@ internal class Summarizer(
     private val deps: TaintEngine.DepsTier? = null,
 ) {
     class Result(
+        /** Keyed by [functionKey]: one summary per FUNCTION, never per name. */
         val table: Map<String, FunctionSummary>,
         val sccsProcessed: Int,
         val sccIterationCapHits: Int,
@@ -369,23 +453,31 @@ internal class Summarizer(
         val composedPathDrops: Int = 0,
     )
 
-    private val byCanonical: Map<String, CompiledFunction> =
-        compiledInOrder.associateBy { it.function.canonicalName }
+    /**
+     * All overloads by [functionKey]. Before P22 this was `associateBy`
+     * canonical name — it kept the LAST overload and the other overloads
+     * were never summarised at all, while the table's one name-keyed entry
+     * answered every overload's call sites with that namesake's effects:
+     * a missed flow in one direction (the constant overload's empty summary
+     * swallowed the tainted one's) and a confident wrong one in the other.
+     */
+    private val byKey: Map<String, List<CompiledFunction>> =
+        compiledInOrder.groupBy { functionKey(it.function) }
 
     fun compute(): Result {
         val edges = HashMap<String, MutableSet<String>>()
         for (cf in compiledInOrder) {
-            val out = edges.getOrPut(cf.function.canonicalName) { sortedSetOf() }
+            val out = edges.getOrPut(functionKey(cf.function)) { sortedSetOf() }
             for (block in cf.blocks) {
                 for (ins in block.instructions) {
                     if (ins !is KirCall) continue
                     for (target in callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)) {
-                        out.add(target.canonicalName)
+                        out.add(functionKey(target))
                     }
                 }
             }
         }
-        val order = compiledInOrder.map { it.function.canonicalName }.sorted()
+        val order = compiledInOrder.map { functionKey(it.function) }.sorted()
         val sccs = Tarjan.sccs(order, edges)
 
         val table = HashMap<String, FunctionSummary>()
@@ -411,38 +503,39 @@ internal class Summarizer(
                 }
                 changed = false
                 for (member in members) {
-                    val cf = byCanonical[member] ?: continue
-                    // The same body budget the main analysis enforces — a
-                    // function too big to analyse is too big to summarise.
-                    val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
-                    if (instructionCount > options.maxFunctionInstructions) {
-                        skipped.merge("summary-oversized-function", 1, Int::plus)
-                        table.remove(member)
-                        continue
-                    }
-                    val analysis = computeSummary(cf, table)
-                    composedPathDrops += analysis.composedPathDrops
-                    if (analysis.overBudget) {
-                        // The state or the escape set exploded past its
-                        // budget: publish NO summary rather than a partial
-                        // one — callers then fall to the labelled unknown
-                        // default instead of a silently truncated summary.
-                        skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
-                        table.remove(member)
-                        // P16 §2 measurement aid: name the functions the
-                        // degradation touches, on stderr, only under
-                        // KOSI_TRACE — a number without names invited nobody
-                        // to ask what the budget cost.
-                        if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
-                            System.err.println("TRACE: summary-effect-budget dropped $member")
+                    for (cf in byKey[member].orEmpty()) {
+                        // The same body budget the main analysis enforces — a
+                        // function too big to analyse is too big to summarise.
+                        val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
+                        if (instructionCount > options.maxFunctionInstructions) {
+                            skipped.merge("summary-oversized-function", 1, Int::plus)
+                            table.remove(member)
+                            continue
                         }
-                        continue
-                    }
-                    val next = analysis.summary
-                    val previous = table[member]
-                    if (previous == null || !next.sameAs(previous)) {
-                        table[member] = next
-                        changed = true
+                        val analysis = computeSummary(cf, table)
+                        composedPathDrops += analysis.composedPathDrops
+                        if (analysis.overBudget) {
+                            // The state or the escape set exploded past its
+                            // budget: publish NO summary rather than a partial
+                            // one — callers then fall to the labelled unknown
+                            // default instead of a silently truncated summary.
+                            skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
+                            table.remove(member)
+                            // P16 §2 measurement aid: name the functions the
+                            // degradation touches, on stderr, only under
+                            // KOSI_TRACE — a number without names invited nobody
+                            // to ask what the budget cost.
+                            if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
+                                System.err.println("TRACE: summary-effect-budget dropped $member")
+                            }
+                            continue
+                        }
+                        val next = analysis.summary
+                        val previous = table[member]
+                        if (previous == null || !next.sameAs(previous)) {
+                            table[member] = next
+                            changed = true
+                        }
                     }
                 }
             }
@@ -929,7 +1022,9 @@ internal class SummaryAnalysis(
     ): Boolean {
         val fqn = ins.callee.fqn
         val targets = callIndex.targets(fqn, ins.callee.descriptor, ins.callee.kind)
-        val applicable = targets.mapNotNull { target -> table[target.canonicalName] }
+        // Keyed by FUNCTION, not name: a descriptor-narrowed call site must
+        // meet its own overload's summary, never a namesake's (P22 §1).
+        val applicable = targets.mapNotNull { target -> table[functionKey(target)] }
         if (applicable.isEmpty()) {
             // No WORKSPACE summary applies here — the same condition the
             // taint host uses before it consults the tier, so a call site
@@ -1089,7 +1184,28 @@ internal class SummaryAnalysis(
         paramToParam = paramToParam.mapValues { it.value.toSet() },
         paramFieldWrites = paramFieldWrites.mapValues { (_, tos) -> tos.mapValues { it.value.toSet() } },
         receiverWrites = receiverWrites.mapValues { it.value.toSet() },
-        sinkEffects = sinkEffects.keys.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }, { it.sinkCategory })),
+        // P22 §0's elided-trace fixture caught this: the dedup map's KEYS
+        // are the path-STRIPPED canonicals, so publishing `.keys` discarded
+        // every composed site path at the publish boundary — an
+        // interprocedural slice's callee-internal trace was structurally
+        // empty, `stabilize` could never cut (paths restarted empty at
+        // every level), and a composed trace longer than the trace cap was
+        // unrepresentable: the measured `partial` population of zero was
+        // this defect, not shallowness. Publish the VALUES — one
+        // shortest-path witness per canonical — under a comparator that
+        // covers every field, so the order stays total and deterministic.
+        sinkEffects = sinkEffects.values.sortedWith(
+            compareBy(
+                { it.paramIndex },
+                { it.sinkSite },
+                { it.sinkCategory },
+                { it.paramPath },
+                { it.sinkArgumentIndex },
+                { it.sinkAccessPath },
+                { it.path.joinToString(",") },
+                { it.elided },
+            ),
+        ),
         // Several witnesses per category can exist; the summary keeps the
         // shortest (deterministic tie-break: lexicographic) — the most
         // direct source-to-return trace.

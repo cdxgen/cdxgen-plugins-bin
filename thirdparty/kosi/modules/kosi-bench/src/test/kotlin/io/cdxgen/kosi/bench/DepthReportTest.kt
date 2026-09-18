@@ -69,6 +69,18 @@ class DepthReportTest {
         val producer: Int,
     )
 
+    /** P22 §0: the two answers to "what does this call return", compared. */
+    private class CallReturnRow(
+        /** Workspace call sites whose return the folder folded. */
+        val folderFolded: Int,
+        /** The flow summary exists and claims no taint reaches the return. */
+        val agree: Int,
+        /** The flow summary claims taint reaches a return the folder proves constant. */
+        val disagree: Int,
+        /** No summary exists for the callee (skipped, budget, absent). */
+        val flowNoOpinion: Int,
+    )
+
     private class FixtureRow(
         val slug: String,
         val valueBlockLocal: ValueRow,
@@ -88,6 +100,9 @@ class DepthReportTest {
         val partialPath: Int,
         val noPath: Int,
         val integrityViolations: Int,
+        val callReturn: CallReturnRow,
+        /** P22 §3: the producer bucket by callee arm. */
+        val producerArms: Map<String, Int>,
     )
 
     @Test
@@ -124,19 +139,46 @@ class DepthReportTest {
 
             val dataFlow = report?.dataFlow
             val slices = dataFlow?.slices.orEmpty()
-            val nodesById = dataFlow?.nodes?.associateBy { it.id } ?: emptyMap()
+            // P22 §2: counted from the schema's own `pathKind` — the field is
+            // the published fact now, and deriving the report from anything
+            // else would let the two answers drift.
             var complete = 0
             var partial = 0
             var none = 0
             for (slice in slices) {
-                val headKind = nodesById[slice.nodeIds.firstOrNull()]?.kind
-                val tailKind = nodesById[slice.nodeIds.lastOrNull()]?.kind
-                when {
-                    slice.elided == true -> partial++
-                    slice.nodeIds.size >= 2 && headKind == "source" && tailKind == "sink" -> complete++
+                when (slice.pathKind) {
+                    io.cdxgen.kosi.schema.PathKind.COMPLETE -> complete++
+                    io.cdxgen.kosi.schema.PathKind.PARTIAL -> partial++
                     else -> none++
                 }
             }
+
+            // P22 §0: the two answers to "what does this call return". The
+            // folder's: every return site of the callee folds to one
+            // constant (a MUST analysis over constants). The flow module's:
+            // param taint or a source birth MAY reach the return value (a
+            // MAY analysis over taint). A folded constant carries no taint,
+            // so a summary that claims taint on a return the folder proves
+            // constant is a DISAGREEMENT — a finding, never a tolerated row.
+            val callReturn = run {
+                val opinions = capture.flowReturnOpinions
+                var agree = 0
+                var disagree = 0
+                var noOpinion = 0
+                for (key in capture.foldStats.workspaceFolds.distinct().sorted()) {
+                    val parts = key.split("\u0000")
+                    val fqn = parts[0]
+                    val descriptor = parts.getOrNull(1)?.ifEmpty { null }
+                    val (has, taint) = opinions?.opinion(fqn, descriptor) ?: (false to false)
+                    when {
+                        !has -> noOpinion++
+                        taint -> disagree++
+                        else -> agree++
+                    }
+                }
+                CallReturnRow(capture.foldStats.workspaceFolds.distinct().size, agree, disagree, noOpinion)
+            }
+
             val fired = depth.sanitizersApplied.toSet()
             rows.add(
                 FixtureRow(
@@ -158,6 +200,8 @@ class DepthReportTest {
                     partialPath = partial,
                     noPath = none,
                     integrityViolations = dataFlow?.stats?.integrityViolations ?: 0,
+                    callReturn = callReturn,
+                    producerArms = capture.foldStats.producerArms,
                 ),
             )
         }
@@ -264,6 +308,93 @@ class DepthReportTest {
         )
     }
 
+    /**
+     * P22 §0: the phase rule, written against R131/R133 — when two pieces of
+     * code answer the same question, the answers are a GATE, not a
+     * coincidence. The folder answers "what does this call return" with its
+     * workspace walk (a MUST analysis over constants: every return site of
+     * every candidate folds to one value); the flow module answers with its
+     * summaries (a MAY analysis over taint: param taint or a source birth
+     * can reach the return value). A folded constant carries no taint, so
+     * for every call site the folder folds, the callee's summary must claim
+     * NOTHING about the return. A disagreement is a finding: name the pair,
+     * fix the side that is wrong, or write down the two definitions and why
+     * every consumer is safe with both — never a tolerated row.
+     */
+    @Test
+    fun everyFoldedWorkspaceCallAgreesWithTheFlowSummary() {
+        val report = repoRoot.resolve("modules/kosi-bench").resolve(reportFile)
+        assertTrue(Files.exists(report), "depth report golden missing: $reportFile")
+        val totals = io.cdxgen.kosi.schema.JsonReader(Files.readString(report))
+            .read().asObject()
+            .obj("totals")
+            ?.obj("callReturn")
+            ?: error("committed depth report has no totals.callReturn object")
+        val disagree = totals.long("disagree") ?: error("totals.callReturn.disagree missing")
+        assertEquals(
+            0L,
+            disagree,
+            "the folder folds a call to a constant and the flow summary claims taint reaches that " +
+                "return — two answers to the same question disagreeing out loud. Name the callee, " +
+                "fix the wrong side, or write the two definitions down; the counts are per fixture " +
+                "in callReturn{}",
+        )
+    }
+
+    /**
+     * P22 §3: a bucket with a breakdown is a design input; a bucket with a
+     * total is a number. The producer bucket must be fully classified by
+     * callee arm — dependency call (out of scope by construction), the
+     * workspace refusal arms, or a shape the folder does not recognise —
+     * and the classification must ACCOUNT for the total, or the breakdown
+     * is decoration.
+     */
+    @Test
+    fun theProducerBucketPublishesItsBreakdown() {
+        val report = repoRoot.resolve("modules/kosi-bench").resolve(reportFile)
+        assertTrue(Files.exists(report), "depth report golden missing: $reportFile")
+        val root = io.cdxgen.kosi.schema.JsonReader(Files.readString(report)).read().asObject()
+        val totals = root.obj("totals") ?: error("no totals")
+        val producer = totals.obj("valueResolution.crossBlock")?.long("producer")
+            ?: error("no producer bucket")
+        val arms = totals.obj("producerArms") ?: error("no producerArms breakdown")
+        val classified = arms.members.keys.sumOf { arms.long(it) ?: 0L }
+        if (producer > 0) {
+            assertTrue(
+                classified == producer,
+                "producer=$producer but the arms account for $classified — the classification must " +
+                    "cover the bucket it explains",
+            )
+            assertTrue(
+                arms.members.keys.isNotEmpty(),
+                "the producer bucket is non-zero and unclassified",
+            )
+        }
+    }
+
+    /**
+     * P22 §2: the PARTIAL half of the pathKind vocabulary must be driven —
+     * the elided-trace fixture's composed trace outgrows the trace cap, so
+     * the committed report holds a finding whose witness is an elided walk.
+     * A vocabulary value nothing drives is R63 applied to a schema.
+     */
+    @Test
+    fun aPartialFindingExistsInTheCommittedReport() {
+        val report = repoRoot.resolve("modules/kosi-bench").resolve(reportFile)
+        assertTrue(Files.exists(report), "depth report golden missing: $reportFile")
+        val partial = io.cdxgen.kosi.schema.JsonReader(Files.readString(report))
+            .read().asObject()
+            .obj("totals")
+            ?.long("partialPath")
+            ?: error("no totals.partialPath")
+        assertTrue(
+            partial > 0,
+            "no published finding is PARTIAL (an elided trace) — the vocabulary has a value nothing " +
+                "drives. The elided-trace fixture exists to hold this honest; if it stopped eliding, " +
+                "the trace cap or the chain moved and the report must say so",
+        )
+    }
+
     private fun io.cdxgen.kosi.kir.KirValueFolder.FoldStats.toValueRow() = ValueRow(
         asked,
         folded,
@@ -302,6 +433,15 @@ class DepthReportTest {
         w.num("partialPath", sum(rows) { it.partialPath }.toLong())
         w.num("noPath", sum(rows) { it.noPath }.toLong())
         w.num("integrityViolations", sum(rows) { it.integrityViolations }.toLong())
+        w.beginObject("callReturn")
+        w.num("folderFolded", sum(rows) { it.callReturn.folderFolded }.toLong())
+        w.num("agree", sum(rows) { it.callReturn.agree }.toLong())
+        w.num("disagree", sum(rows) { it.callReturn.disagree }.toLong())
+        w.num("flowNoOpinion", sum(rows) { it.callReturn.flowNoOpinion }.toLong())
+        w.endObject()
+        w.beginObject("producerArms")
+        for ((arm, count) in summedProducerArms(rows)) w.num(arm, count.toLong())
+        w.endObject()
         w.endObject()
 
         // The sanitizer verdict is the security pack's R63 line: a pack
@@ -343,6 +483,15 @@ class DepthReportTest {
             w.num("partialPath", row.partialPath.toLong())
             w.num("noPath", row.noPath.toLong())
             w.num("integrityViolations", row.integrityViolations.toLong())
+            w.beginObject("callReturn")
+            w.num("folderFolded", row.callReturn.folderFolded.toLong())
+            w.num("agree", row.callReturn.agree.toLong())
+            w.num("disagree", row.callReturn.disagree.toLong())
+            w.num("flowNoOpinion", row.callReturn.flowNoOpinion.toLong())
+            w.endObject()
+            w.beginObject("producerArms")
+            for ((arm, count) in row.producerArms) w.num(arm, count.toLong())
+            w.endObject()
             w.endObject()
         }
         w.endObject()
@@ -361,6 +510,14 @@ class DepthReportTest {
         "parameter" to sum(rows) { pick(it).parameter },
         "producer" to sum(rows) { pick(it).producer },
     )
+
+    private fun summedProducerArms(rows: List<FixtureRow>): Map<String, Int> {
+        val out = sortedMapOf<String, Int>()
+        for (row in rows) {
+            for ((arm, count) in row.producerArms) out.merge(arm, count, Int::plus)
+        }
+        return out
+    }
 
     private fun ValueRow.asMap(): Map<String, Int> = sortedMapOf(
         "asked" to asked,

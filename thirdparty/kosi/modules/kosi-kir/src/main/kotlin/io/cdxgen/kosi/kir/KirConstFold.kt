@@ -112,6 +112,27 @@ class KirValueFolder(
         var crossBlockRefused: Int = 0
         /** Values resolved by walking the dominator chain (zero when disabled). */
         var crossBlockResolved: Int = 0
+        /**
+         * P22 §0: the workspace call sites whose return the folder FOLDED,
+         * as `fqn\0descriptor` keys, in fold order. The depth report asks
+         * the flow module's summaries about exactly these callees — the
+         * agreement gate. Bounded by the folded-site count; production
+         * consumers (crypto) pass no statsSink and pay nothing.
+         */
+        val workspaceFolds: MutableList<String> = mutableListOf()
+        /**
+         * P22 §3: the producer bucket BY CALLEE ARM. A bucket with a total
+         * is a number; a bucket with a breakdown is a design input —
+         * `dependency-call` (out of scope by construction), the workspace
+         * refusal arms, and the shapes the folder does not recognise.
+         * Recorded where the arm is decided; the counts ride the statsSink
+         * (null in production) exactly like every other counter.
+         */
+        val producerArms: java.util.TreeMap<String, Int> = java.util.TreeMap()
+
+        fun recordProducer(arm: String) {
+            producerArms.merge(arm, 1, Int::plus)
+        }
 
         fun snapshot(): Map<String, Int> = sortedMapOf(
             "asked" to asked,
@@ -383,7 +404,7 @@ class KirValueFolder(
                     if (constValue != null) {
                         FoldedValue(constValue, ValueStatus.FOLDED_CONST)
                     } else {
-                        FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+                        unresolved("field-read")
                     }
                 }
 
@@ -399,7 +420,7 @@ class KirValueFolder(
 
                 is KirCall -> callValue(fn, block, i, ins, depth)
 
-                else -> FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+                else -> unresolved("unrecognised-ins")
             }
         }
         // Not defined in this block above the use. A parameter is the
@@ -583,12 +604,12 @@ class KirValueFolder(
                 if (constValue != null) {
                     FoldedValue(constValue, ValueStatus.FOLDED_CONST)
                 } else {
-                    FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+                    unresolved("field-read")
                 }
             }
 
             is KirCall -> callValue(fn, block, index, ins, depth)
-            else -> FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+            else -> unresolved("unrecognised-ins")
         }
 
     private fun resolveAbove(fn: KirFunction, block: KirBlock, index: Int, register: String, depth: Int): FoldedValue? =
@@ -603,9 +624,9 @@ class KirValueFolder(
         }
         val argIndex = configReaderByFqn[ins.callee.fqn]
         if (argIndex != null) {
-            val keyReg = ins.args.getOrNull(argIndex) ?: return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
-            val key = fold(fn, block, index, keyReg, depth + 1) ?: return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
-            val keyValue = key.value ?: return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+            val keyReg = ins.args.getOrNull(argIndex) ?: return unresolved("config-unresolved")
+            val key = fold(fn, block, index, keyReg, depth + 1) ?: return unresolved("config-unresolved")
+            val keyValue = key.value ?: return unresolved("config-unresolved")
             val configValue = configValues[keyValue] ?: return FoldedValue(null, ValueStatus.UNRESOLVED, keyValue)
             return FoldedValue(configValue, ValueStatus.CONFIG, keyValue)
         }
@@ -616,7 +637,32 @@ class KirValueFolder(
         // guard here on purpose: a call reached at the budget's edge walks
         // one more hop and the nested fold's own entry check names
         // DEPTH_CAP — guarding here would misname it PRODUCER.
-        workspaceReturnValue(ins, depth)?.let { return it }
+        workspaceReturnValue(ins, depth)?.let {
+            // P22 §0: a FOLDED workspace return — resolved, or provably null
+            // (a NULL-status value is a fact the consumers branch on). The
+            // internal refusals also come back non-null (an UNRESOLVED
+            // FoldedValue carrying its producer arm), and they are not
+            // folds — recording one as such produced a phantom disagreement
+            // with the flow summary on the very first run of this gate.
+            if (it.resolved || it.status == ValueStatus.NULL) {
+                statsSink?.workspaceFolds?.add(ins.callee.fqn + "\u0000" + (ins.callee.descriptor ?: ""))
+            }
+            return it
+        }
+        // The refusal's ARM is the design input (P22 §3): a call into a
+        // constructor, into a dependency (no workspace body — out of scope
+        // by construction). A workspace body that refused recorded its
+        // precise arm inside [workspaceReturnValue] before this line.
+        if (ins.callee.kind == CallKind.CONSTRUCTOR) {
+            statsSink?.recordProducer("constructor")
+        } else if (workspaceByFqn[ins.callee.fqn].orEmpty().none { it.body != null }) {
+            statsSink?.recordProducer("dependency-call")
+        }
+        return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+    }
+
+    private fun unresolved(arm: String): FoldedValue {
+        statsSink?.recordProducer(arm)
         return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
     }
 
@@ -645,20 +691,27 @@ class KirValueFolder(
             // Recursion: a cycle has no single provenance. The guard entry
             // belongs to an outer frame — leave it there.
             if (!workspaceInFlight.add(candidate.canonicalName)) {
+                statsSink?.recordProducer("workspace-recursion")
                 return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
             }
             try {
                 for ((block, site) in returnSitesOf(candidate)) {
                     val (retIndex, returned) = site
                     // A Unit return (`return` with no value) is not a value.
-                    val reg = returned ?: return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+                    val reg = returned ?: return unresolved("workspace-unit-return")
                     val siteValue = fold(candidate, block, retIndex, reg, depth + 1)
                     if (siteValue == null || (!siteValue.resolved && siteValue.status != ValueStatus.NULL)) {
                         // The budget binds INSIDE the callee's body: keep its
                         // name — a silent stop is the one answer the depth
                         // report cannot use (P21 §1).
                         if (siteValue?.failure == FoldFailure.DEPTH_CAP) return siteValue
-                        return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
+                        // The callee returns its PARAMETER: the arm the next
+                        // widening question names (P22 §3).
+                        return if (siteValue?.failure == FoldFailure.PARAMETER) {
+                            unresolved("workspace-parameter-return")
+                        } else {
+                            unresolved("workspace-return-unprovable")
+                        }
                     }
                     // The site names a CALL, not the value itself: whatever
                     // the body returned publishes as FOLDED_CONST — the
@@ -676,12 +729,19 @@ class KirValueFolder(
                     } else if (value.value != normalized.value || value.status != normalized.status) {
                         // Return sites disagree: unresolved — not a guess,
                         // not the first arm.
+                        statsSink?.recordProducer("workspace-returns-disagree")
                         return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
                     }
                 }
             } finally {
                 workspaceInFlight.remove(candidate.canonicalName)
             }
+        }
+        if (value == null) {
+            // Every candidate's body falls off its end: no return site to
+            // read — recorded here, and the caller still answers PRODUCER.
+            statsSink?.recordProducer("workspace-no-return-site")
+            return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
         }
         return value
     }
@@ -700,7 +760,12 @@ class KirValueFolder(
         val narrowed = callee.descriptor?.let { d -> declared.filter { it.jvmDescriptor == d } }.orEmpty()
         val candidates = narrowed.ifEmpty { declared }
         if (callee.kind == CallKind.VIRTUAL) {
-            if (candidates.any { !isExactWorkspaceTarget(it) }) return null
+            if (candidates.any { !isExactWorkspaceTarget(it) }) {
+                // An override can hide in a jar: recorded as its own
+                // producer arm (P22 §3), refused.
+                statsSink?.recordProducer("workspace-virtual-open")
+                return null
+            }
         }
         return candidates
     }

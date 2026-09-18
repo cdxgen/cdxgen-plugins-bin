@@ -43,6 +43,25 @@ data class FlowEdge(
     }
 }
 
+/**
+ * P22 §2: the closed vocabulary of [FlowSlice.pathKind] — what a slice's
+ * trace IS. Pinned by `SlicePathKindVocabularyTest` the way
+ * `RootsVocabularyTest` pins the roots vocabulary: a fourth value does not
+ * ship, and every published slice carries exactly one.
+ */
+object PathKind {
+    /** A full source→sink walk, not cut. */
+    const val COMPLETE = "complete"
+
+    /** The walk was elided (trace cap, missing middle); endpoints guaranteed. */
+    const val PARTIAL = "partial"
+
+    /** No provable path — the finding stands on the symbol match alone. */
+    const val SYMBOL_ONLY = "symbol-only"
+
+    val ALL = sortedSetOf(COMPLETE, PARTIAL, SYMBOL_ONLY)
+}
+
 data class FlowSlice(
     val id: String,
     val sourceId: String,
@@ -68,8 +87,25 @@ data class FlowSlice(
     val accessPath: String?,
     val crossesModule: Boolean,
     val crossesDependency: Boolean,
-    val reachableFromRoots: Boolean,
-    val rootWitness: List<String>?,
+    /**
+     * P22 §2: what the slice's trace IS, published rather than left for the
+     * consumer to re-derive from `nodeIds` (P21 §3's schema gap):
+     *
+     *  - `complete`    — a full source→sink walk, not cut;
+     *  - `partial`     — the walk was elided (trace cap, missing middle);
+     *                    the endpoints are guaranteed, the middle is not;
+     *  - `symbol-only` — no provable path; the finding stands on the
+     *                    symbol match alone.
+     *
+     * It replaces two fields that were facts nowhere: `reachableFromRoots`
+     * was false on every slice in every shipped slot and true by
+     * construction in the one mode that published it (the mode, not the
+     * slice, carried the information — `dataFlow.mode` still does), and
+     * `rootWitness` was null everywhere (R117's rule: a field that never
+     * varies is not a fact, it is a schema lie a consumer will eventually
+     * believe).
+     */
+    val pathKind: String,
     val ruleId: String,
     val ruleName: String,
     val description: String,
@@ -118,10 +154,7 @@ data class FlowSlice(
         for (n in nodeIds) w.str(n)
         w.endArray()
         w.num("pathLength", pathLength)
-        w.bool("reachableFromRoots", reachableFromRoots)
-        w.beginArray("rootWitness")
-        for (r in (rootWitness ?: emptyList())) w.str(r)
-        w.endArray()
+        w.str("pathKind", pathKind)
         w.str("riskScore", riskScore)
         w.str("ruleId", ruleId)
         w.str("ruleName", ruleName)
@@ -277,6 +310,16 @@ data class DataFlowStats(
     val uniqueFlows: Int,
     val crossDependencySlices: Int,
     val crossModuleSlices: Int = 0,
+    /**
+     * How many published slices are proven root-reachable — non-zero ONLY
+     * when the run both asked for `--dataflow reachable` AND produced a call
+     * graph to intersect with. Asking without a graph (`--callgraph none`)
+     * computes nothing, and the field then reads 0 meaning "not measured",
+     * never "every slice" (the P22 review's R137). The taint engine always
+     * writes 0 here; the Analyzer's intersection is the only writer of a
+     * non-zero value, and `summary.reachableSliceCount` reads this field
+     * rather than deriving a second answer.
+     */
     val reachableSlices: Int,
     val connectivity: Double,
     val integrityViolations: Int,

@@ -37,6 +37,7 @@ import io.cdxgen.kosi.schema.FlowEdge
 import io.cdxgen.kosi.schema.FlowNode
 import io.cdxgen.kosi.schema.FlowSlice
 import io.cdxgen.kosi.schema.ModelPackRef
+import io.cdxgen.kosi.schema.PathKind
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.Severity
 import java.security.MessageDigest
@@ -300,7 +301,40 @@ object TaintEngine {
          * the depth gate reads them off the engine's Result.
          */
         val depth: DepthStats = DepthStats(0, 0, 0, 0, emptyList()),
+        /**
+         * P22 §0: what this run's workspace summaries say about RETURN
+         * VALUES — the second answer to "what does this call return" (the
+         * const folder's is the first). The depth report's agreement gate
+         * reads it; nothing in the report schema carries it.
+         */
+        val returnOpinions: ReturnOpinions = ReturnOpinions(emptyMap()),
     )
+
+    /**
+     * P22 §0: per workspace function, whether a summary exists and whether
+     * it claims taint can reach the RETURN value (`paramToReturn` or
+     * `sourceReturns` non-empty). Keyed by [functionKey]; [opinion] mirrors
+     * the folder's resolution — descriptor-narrowed where the site carries
+     * one, the union over the name's overloads where it does not (the same
+     * widening toward more candidates the folder applies).
+     */
+    class ReturnOpinions(private val byKey: Map<String, Boolean>) {
+        /** False when the run has no summary for the callee (no opinion). */
+        fun opinion(fqn: String, descriptor: String?): Pair<Boolean, Boolean> {
+            descriptor?.let { d ->
+                byKey["$fqn\u0000$d"]?.let { return true to it }
+            }
+            var found = false
+            var taint = false
+            for ((key, claimsTaint) in byKey) {
+                if (key.substringBefore('\u0000') == fqn) {
+                    found = true
+                    taint = taint || claimsTaint
+                }
+            }
+            return found to taint
+        }
+    }
 
     /**
      * P20 §0: how much taint depth a run actually had, measured rather
@@ -409,12 +443,13 @@ object TaintEngine {
      * The P9 `--deps` tier: the dependency module's compiled functions (site
      * ids continuing after the workspace's), its own call index, and the
      * summaries the SAME summariser computed over them with
-     * `origin=bytecode`. A workspace call site resolves into the tier by
+     * `origin=bytecode`. A workspace call into the tier resolves by
      * canonical name (through the demangler's aliases) plus descriptor.
      */
     internal class DepsTier(
         val compiled: List<CompiledFunction>,
         val callIndex: CallIndex,
+        /** Keyed by [functionKey], exactly as the summariser published it. */
         val table: Map<String, FunctionSummary>,
         val aliases: Map<String, List<String>>,
         val purls: Set<String>,
@@ -424,20 +459,34 @@ object TaintEngine {
         val summarised: Summarizer.Result,
     ) {
         /**
+         * The summaries joined by canonical NAME. There is deliberately no
+         * descriptor parameter on [summaries]: Kotlin `vararg`/`Unit`-bridge
+         * call descriptors never equal the raw JVM ones the class file
+         * carries, so a workspace call site can only ever name the tier by
+         * FQN — and a name-keyed reader must not be answered with ONE
+         * overload's effects. Until P22 the tier's `associateBy` kept the
+         * last overload and dropped the rest (R133's shape in the tier);
+         * the view is now the CONSERVATIVE JOIN across every overload of
+         * the name — a may-analysis union, so an effect any overload has is
+         * an effect the name carries. Sorted concatenation keeps the join
+         * deterministic.
+         */
+        private val byName: Map<String, FunctionSummary> = buildMap {
+            for ((key, summary) in table) {
+                val name = key.substringBefore('\u0000')
+                val existing = this[name]
+                this[name] = if (existing == null) summary else existing.join(summary)
+            }
+        }
+
+        /**
          * Resolves a workspace call into the tier's summary by canonical
-         * name (direct, then demangler aliases). There is deliberately no
-         * descriptor parameter: the summariser keys summaries by canonical
-         * name, so overloads of one name are already one summary — the same
-         * collapse the workspace CallIndex has always had — and Kotlin
-         * `vararg`/`Unit`-bridge call descriptors never equal the raw JVM
-         * ones the class file carries. A canonical whose overloads genuinely
-         * disagree is a named limitation (docs/KOSI.md), not a silently
-         * wrong pick.
+         * name (direct, then demangler aliases).
          */
         fun summaries(fqn: String): FunctionSummary? {
-            table[fqn]?.let { return it }
+            byName[fqn]?.let { return it }
             for (alias in aliases[fqn].orEmpty()) {
-                table[alias]?.let { return it }
+                byName[alias]?.let { return it }
             }
             return null
         }
@@ -545,9 +594,11 @@ object TaintEngine {
         }
         if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 
-        val lambdaDefs = compiled.associate { it.function.canonicalName to lambdaDefsOf(it) }
+        // Keyed by FUNCTION (P22 §1): two overloads of one name each carrying
+        // lambdas must not answer for each other's lambda bodies.
+        val lambdaDefs = compiled.associate { functionKey(it.function) to lambdaDefsOf(it) }
         val captures = compiled.associate { cf ->
-            cf.function.canonicalName to buildMap {
+            functionKey(cf.function) to buildMap {
                 for (block in cf.blocks) {
                     for (ins in block.instructions) {
                         if (ins is KirLambda) put(ins.function, ins.captures)
@@ -568,14 +619,17 @@ object TaintEngine {
         // P20 §0: the summary-missing set — compiled functions with no
         // summary in the final table. A body-less function never compiles
         // and owes nothing; a compiled one owes its summary to every caller.
+        // Names, not keys: call sites ask by FQN.
+        val summarisedNames = summaryResult.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
         for (cf in compiled) {
-            if (cf.function.canonicalName !in summaryResult.table) {
+            if (cf.function.canonicalName !in summarisedNames) {
                 context.missingSummaries.add(cf.function.canonicalName)
             }
         }
         if (depsTier != null) {
+            val depSummarisedNames = depsTier.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
             for (cf in depsCompiled) {
-                if (cf.function.canonicalName !in depsTier.table) {
+                if (cf.function.canonicalName !in depSummarisedNames) {
                     context.missingSummaries.add(cf.function.canonicalName)
                 }
             }
@@ -739,10 +793,13 @@ object TaintEngine {
             )
         }
 
+        // bytecodeAppliedFqns records CANONICAL NAMES (call sites ask by
+        // FQN); the tier's table is keyed by functionKey — compare on the
+        // name half (P22 §1).
         val bytecodeSummaries = depsTier
             ?.table
             ?.entries
-            ?.filter { it.key in context.bytecodeAppliedFqns }
+            ?.filter { it.key.substringBefore('\u0000') in context.bytecodeAppliedFqns }
             ?.map { it.value.toSchema() }
             .orEmpty()
         val allSummaries = buildList {
@@ -776,6 +833,12 @@ object TaintEngine {
                 sanitizersApplied = context.sanitizersApplied.toList(),
                 sourceSites = sourceSites,
                 sinkSites = sinkSites,
+            ),
+            // P22 §0: the workspace tier's verdicts on "can taint reach the
+            // return value", per function — the depth report's agreement
+            // gate compares the const folder's answers against these.
+            returnOpinions = ReturnOpinions(
+                summaryResult.table.mapValues { (_, s) -> s.paramToReturn.isNotEmpty() || s.sourceReturns.isNotEmpty() },
             ),
         )
     }
@@ -1063,9 +1126,14 @@ object TaintEngine {
                 // VTA narrows by the receiver's known construction types before
                 // the summary JOIN — the same positive-evidence-only refinement
                 // the P3 graph applies.
-                targets = context.callIndex.narrowByReceiverType(compiled.function.canonicalName, ins.receiver, targets)
+                targets = context.callIndex.narrowByReceiverType(compiled.function, ins.receiver, targets)
             }
-            val applicable = targets.mapNotNull { target -> context.table[target.canonicalName]?.let { target to it } }.toMutableList()
+            // Keyed by FUNCTION, not name: a descriptor-narrowed call site
+            // must meet its own overload's summary — the name-keyed lookup
+            // answered one overload's question with a namesake's effects,
+            // a missed flow one way and a confident wrong one the other
+            // (P22 §1, R133's shape in the summary table).
+            val applicable = targets.mapNotNull { target -> context.table[functionKey(target)]?.let { target to it } }.toMutableList()
             // P9 boundary: when no WORKSPACE target has a summary, the `--deps`
             // tier may have one. The per-summary application below is shared
             // verbatim — a dependency summary is applied exactly like a
@@ -1189,15 +1257,18 @@ object TaintEngine {
                 // whose capture parameters carry the closure's taint).
                 for (param in summary.invokedParams.sorted()) {
                     val argReg = mapParam(summary, param) ?: continue
-                    val lambdaCanonical = context.lambdaDefs[compiled.function.canonicalName]?.get(argReg)
+                    val lambdaCanonical = context.lambdaDefs[functionKey(compiled.function)]?.get(argReg)
                     if (lambdaCanonical == null) {
                         // A callable reference or local function: no extracted
                         // body, so no summary — counted, never silent.
                         collect?.let { context.recordLambdaUnresolved() }
                         continue
                     }
-                    val lambdaSummary = context.table[lambdaCanonical] ?: continue
-                    val lambdaCaptured = context.captures[compiled.function.canonicalName]?.get(lambdaCanonical).orEmpty()
+                    // Lambdas carry no descriptor; the lowering's module-wide
+                    // ordinal makes the name unique, so the name-only key is
+                    // the function's (P22 §1).
+                    val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)] ?: continue
+                    val lambdaCaptured = context.captures[functionKey(compiled.function)]?.get(lambdaCanonical).orEmpty()
                     val lambdaOrigin = lambdaSummary.origin
                     for (effect in lambdaSummary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
                         if (effect.paramIndex >= lambdaCaptured.size) continue // a value-parameter effect cannot be bound here
@@ -1642,7 +1713,14 @@ object TaintEngine {
         }
         if (sourceRefs.isEmpty()) return null
 
-        var elided = false
+        // The effect's own elision travels with the slice: the composed path
+        // was capped INSIDE the summary (stabilize keeps the sink end), so
+        // the published trace's middle is cut even when this caller-side
+        // walk is complete. Before P22 this flag was read nowhere — the
+        // second half of the composed-path defect (the first half was
+        // toSummary publishing path-stripped keys), and the reason an
+        // over-cap composed trace could never publish PARTIAL.
+        var elided = hit.effect.elided
         val traceSegments = mutableListOf<List<Int>>()
         val origins = sortedSetOf(hit.origin)
         var sourceNodeSite = -1
@@ -1890,10 +1968,22 @@ object TaintEngine {
         }
 
         val edgesById = edges.associateBy { it.id }
+        // P22 §2: every published slice names what its trace IS — complete,
+        // partial (elided), or symbol-only — computed by the same rule the
+        // depth report's reachability table reads (the two must not drift).
+        val kindById = nodes.associate { it.id to it.kind }
         val slicesOut = candidates.sortedWith(
             compareBy({ it.sourceSite }, { it.sinkSite }, { it.sourceCategory }, { it.sinkCategory }, { it.flowKey }),
         ).mapIndexed { index, candidate ->
             val nodeIds = candidate.nodes.map { nodeIdBySortKey.getValue(it.sortKey) }
+            val pathKind = when {
+                candidate.elided -> PathKind.PARTIAL
+                nodeIds.size >= 2 &&
+                    kindById[nodeIds.first()] == "source" &&
+                    kindById[nodeIds.last()] == "sink" -> PathKind.COMPLETE
+
+                else -> PathKind.SYMBOL_ONLY
+            }
             val edgeIds = (0 until nodeIds.size - 1).map { i ->
                 val kind = if (candidate.elided && i == 0) "elided" else "data"
                 edgeKeyToId.getValue(EdgeKey(nodeIds[i], nodeIds[i + 1], kind))
@@ -1928,8 +2018,7 @@ object TaintEngine {
                 // the intraprocedural engine had to publish (R55).
                 crossesModule = candidate.crossesModuleFlag,
                 crossesDependency = candidate.crossesDependencyFlag,
-                reachableFromRoots = false,
-                rootWitness = null,
+                pathKind = pathKind,
                 ruleId = "taint/${candidate.sourceCategory}-to-${candidate.sinkCategory}",
                 ruleName = "${candidate.sourceCategory} to ${candidate.sinkCategory}",
                 description = "Value from ${candidate.sourceCategory} (${candidate.sourceName}) reaches " +
@@ -1984,7 +2073,21 @@ object TaintEngine {
                 uniqueFlows = slicesOut.map { it.flowKey }.toSortedSet().size,
                 crossDependencySlices = slicesOut.count { it.crossesDependency },
                 crossModuleSlices = slicesOut.count { it.crossesModule },
-                reachableSlices = slicesOut.count { it.reachableFromRoots },
+                // ALWAYS 0 here, in every mode, and the mode is deliberately
+                // not consulted: this engine has no call graph, so it cannot
+                // know whether any slice is root-reachable. The intersection
+                // lives in the Analyzer, which overwrites this field with the
+                // kept count when it runs. P22 §2's first version keyed the
+                // count off `mode == "reachable"` and published
+                // `slicesOut.size` — but the mode says only what was ASKED
+                // for, and `--dataflow reachable --callgraph none` asks
+                // without a graph: the intersection never ran and the stat
+                // claimed every slice reachable. On taint-sanitizer that read
+                // 2 where the real intersection keeps 0 (the P22 review's
+                // R137) — R117's rule, broken inside the change that was
+                // applying it: a field that never varies is a schema lie, and
+                // one that varies WRONGLY is a worse one.
+                reachableSlices = 0,
                 connectivity = connectivity,
                 integrityViolations = integrity,
                 summariesComputed = summaries.count { it.origin == SummaryOrigin.COMPUTED || it.origin == SummaryOrigin.RECURSIVE_APPROX },

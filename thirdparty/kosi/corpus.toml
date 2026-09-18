@@ -842,6 +842,30 @@ path = "fixtures/depth-cap-chain"
 capabilities = ["outbound", "services", "depth-budget"]
 tolerated_resolution_errors = []
 
+# P22 §1: the corpus shape no bundled fixture held — two real Kotlin
+# overloads sharing one canonical name whose bodies differ in control flow.
+# R133 (a name-keyed fold cache answering one overload with its namesake's
+# blocks) survived every gate because of exactly this absence; the folder
+# half pins identity-keyed folding, the flow half pins identity-keyed
+# summaries (the pre-P22 name-keyed table MISSED the relay flow entirely).
+[[fixtures]]
+slug = "overload-shapes"
+tier = "fixtures"
+path = "fixtures/overload-shapes"
+capabilities = ["outbound", "services", "overloads", "workspace-call-fold"]
+tolerated_resolution_errors = []
+
+# P22 §2: the PARTIAL half of the pathKind vocabulary — a taint chain
+# through forty summary boundaries whose composed trace outgrows the trace
+# cap, so the published slice is elided (endpoints guaranteed, middle cut).
+# A value the corpus never drove is a value nothing holds honest.
+[[fixtures]]
+slug = "elided-trace"
+tier = "fixtures"
+path = "fixtures/elided-trace"
+capabilities = ["outbound", "trace-elision", "path-kind"]
+tolerated_resolution_errors = []
+
 # P21 §2: the ten sanitizers that had never fired, given the R129 shape —
 # the sanitized result reaches the sink directly, so entry present = flow
 # absent and entry removed = the want-not violates. Every non-JDK class is

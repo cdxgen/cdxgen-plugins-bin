@@ -101,6 +101,13 @@ object Analyzer {
          * when the run asked for no dataflow.
          */
         val flowDepth: io.cdxgen.kosi.flow.TaintEngine.DepthStats? = null,
+        /**
+         * P22 §0: the flow module's verdicts on "can taint reach this
+         * function's return value" — the second answer to the question the
+         * const folder answers with its workspace walk. The depth report's
+         * agreement gate compares the two; null when no dataflow ran.
+         */
+        val flowReturnOpinions: io.cdxgen.kosi.flow.TaintEngine.ReturnOpinions? = null,
     )
 
     fun analyze(root: Path, options: AnalyzeOptions, commit: String): KosiReport =
@@ -733,7 +740,13 @@ object Analyzer {
             } else {
                 null
             }
-            endpointCapture?.invoke(capture.copy(endpoints = endpoints, flowDepth = flowResult?.depth))
+            endpointCapture?.invoke(
+                capture.copy(
+                    endpoints = endpoints,
+                    flowDepth = flowResult?.depth,
+                    flowReturnOpinions = flowResult?.returnOpinions,
+                ),
+            )
             val dataFlow = if (flowResult != null) {
                 val evidence = flowResult.evidence
                 if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {
@@ -743,7 +756,11 @@ object Analyzer {
                         .toSet()
                     val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
                     evidence.copy(
-                        slices = kept.map { it.copy(reachableFromRoots = true) },
+                        // P22 §2: the intersection IS the reachability fact —
+                        // the per-slice flag that used to be stamped true
+                        // here said only "this run was the reachable one",
+                        // which `dataFlow.mode` already says.
+                        slices = kept,
                         stats = evidence.stats.copy(
                             sliceCount = kept.size,
                             uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
@@ -961,7 +978,18 @@ object Analyzer {
                     sliceCount = dataFlow?.slices?.size ?: 0,
                     crossDependencySliceCount = dataFlow?.stats?.crossDependencySlices ?: 0,
                     crossModuleSliceCount = dataFlow?.stats?.crossModuleSlices ?: 0,
-                    reachableSliceCount = dataFlow?.slices?.count { it.reachableFromRoots } ?: 0,
+                    // READ, never re-derived: the intersection above is the
+                    // only place that can answer this, and it has already
+                    // written its answer into `dataFlow.stats`. The P22
+                    // review's R137 is what the second derivation cost —
+                    // this line asked the MODE ("was reachability wanted?")
+                    // where the intersection asks whether a graph existed,
+                    // so `--dataflow reachable --callgraph none` published
+                    // every slice as reachable with nothing computed. The
+                    // phase's own rule: when two pieces of code answer the
+                    // same question, the answers are a gate — so there is
+                    // now one piece of code.
+                    reachableSliceCount = dataFlow?.stats?.reachableSlices ?: 0,
                     sccsProcessed = flowResult?.sccsProcessed ?: 0,
                     sccIterationCapHits = flowResult?.sccIterationCapHits ?: 0,
                     suspendCrossingSliceCount = dataFlow?.stats?.suspendCrossingSlices ?: 0,
