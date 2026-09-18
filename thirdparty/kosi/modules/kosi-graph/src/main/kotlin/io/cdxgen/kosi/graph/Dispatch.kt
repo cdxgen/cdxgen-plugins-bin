@@ -48,7 +48,12 @@ internal class DispatchIndex(functions: List<KirFunction>) {
         out
     }
 
-    /** Workspace class fqn -> the flags any of its members recorded. */
+    /**
+     * Workspace class fqn -> the flags any of its members recorded. The key
+     * is a CLASS FQN, unique in the workspace population (one declaration
+     * per class; overloads are a FUNCTION-name problem — P22 §1's sweep),
+     * so the string key is correct here.
+     */
     val classFlags: Map<String, Set<String>> =
         functions.filter { it.enclosingClass != null }
             .groupBy({ it.enclosingClass!! }) { it.ownerFlags }

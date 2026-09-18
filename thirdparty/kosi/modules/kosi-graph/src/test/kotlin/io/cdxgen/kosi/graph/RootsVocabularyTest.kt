@@ -21,9 +21,12 @@ import kotlin.test.assertTrue
  *     detected handlers) is the entrypoint set, and the graph's
  *     `handlers` scope deliberately does not approximate it.
  *  2. `exported` roots every public/protected callable: in the `exported`
- *     slot, `reachableFromRoots` is the fact that a function EXISTS in the
- *     workspace, never that anything calls it. Pinned by a public orphan —
- *     a root at distance zero with no caller anywhere.
+ *     slot, a slice's presence is the fact that a function EXISTS in the
+ *     workspace, never that anything calls it (`reachableFromRoots` was
+ *     deleted in P22 §2 — it was false in every shipped slot and true by
+ *     construction in the reachable mode; `pathKind` is the per-slice fact
+ *     now). Pinned by a public orphan — a root at distance zero with no
+ *     caller anywhere.
  *  3. `main` and `android` are the narrow scopes they claim: the top-level
  *     `main` only, and the Android component supertypes only.
  */

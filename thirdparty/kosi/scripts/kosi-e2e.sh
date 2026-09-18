@@ -70,10 +70,15 @@ cross = [s for s in slices if s.get("crossesDependency")]
 check(any("bytecode" in (s.get("origins") or []) for s in cross),
       "no cross-dependency slice carries a bytecode origin")
 
-# reachability evidence: the reachable pass flags slices from the roots
+# pathKind evidence (P22): every slice names what its trace IS, from the
+# closed vocabulary (complete | partial | symbol-only). The reachable
+# pass's slices rode a real entrypoint-to-sink walk under the
+# intersection, so at least one is COMPLETE there.
 rslices = (reachable_report.get("dataFlow") or {}).get("slices", [])
-check(any(s.get("reachableFromRoots") for s in rslices),
-      "no slice is reachableFromRoots in the reachable pass")
+check(rslices and all(s.get("pathKind") in ("complete", "partial", "symbol-only") for s in rslices),
+      "the reachable pass published a slice outside the pathKind vocabulary")
+check(any(s.get("pathKind") == "complete" for s in rslices),
+      "no slice in the reachable pass is pathKind=complete")
 
 # crypto-flow evidence: a material-to-crypto-asset slice and the material
 crypto = all_report.get("crypto") or {}
@@ -167,10 +172,10 @@ all_components = [evinse.get("metadata", {}).get("component")] + evinse.get("com
 for kind in ("occurrences", "callstack"):
     check(kind in kinds, f"no {kind} evidence in the evinse BOM")
 check(kosi_artifacts.get("props", 0) > 0, "no cdx:kosi properties in the evinse BOM (data-flow/reachability)")
-check(any(p["name"] == "cdx:kosi:reachableFromRoots"
+check(any(p["name"] == "cdx:kosi:pathKind"
           for c in all_components
           for p in c.get("properties") or [] if c),
-      "no reachability evidence (cdx:kosi:reachableFromRoots)")
+      "no pathKind evidence (cdx:kosi:pathKind)")
 check(any(p["name"] == "cdx:kosi:cryptoFlow"
           for c in all_components
           for p in c.get("properties") or [] if c),

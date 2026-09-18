@@ -16,9 +16,14 @@ object KirValidator {
 
     fun validate(module: KirModule): List<Finding> {
         val findings = mutableListOf<Finding>()
+        // Keyed by canonical name AND descriptor (P22 §1): overloads share
+        // the name — flagging them as duplicates refused `kir dump` on any
+        // module holding real Kotlin overloads, R87's rule at the wrong
+        // granularity. Two functions with the SAME name and descriptor are
+        // still a defect: one of them is not the function it claims to be.
         val seen = HashSet<String>()
         for (function in module.functions) {
-            if (!seen.add(function.canonicalName)) {
+            if (!seen.add(function.canonicalName + "\u0000" + (function.jvmDescriptor ?: ""))) {
                 findings.add(Finding(function.canonicalName, null, "duplicate function"))
             }
             val body = function.body ?: continue

@@ -388,9 +388,10 @@ channel's ELEMENT state). A suspend boundary is transparent to the analysis —
 suspension does not launder taint — and `stats.suspendCrossingSlices` counts
 the slices whose trace crosses one. `--dataflow reachable` additionally
 intersects the slices with the call graph's reachability from the declared
-roots and sets `reachableFromRoots` on the survivors; `--dataflow crypto`
-and `--dataflow all` run the same pack today; `security-deps` behaves as
-`security` until P9.
+roots and keeps only the survivors (their `pathKind` is unchanged — the
+intersection IS the reachability fact; `stats.reachableSlices` equals
+`sliceCount` there); `--dataflow crypto` and `--dataflow all` run the same
+pack today; `security-deps` behaves as `security` until P9.
 
 Everything that decides a category is DATA: the shipped model pack
 (`kosi-models/resources/models/security-pack-v0.json`, merged with user packs
@@ -415,14 +416,14 @@ first parameter is index 0.
 | `taintKinds` | string[] | the categories travelling on the trace |
 | `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
 | `pathLength` | int | `edgeIds.size` |
-| `elided` | boolean? | true when the trace cap (`--dataflow-max-trace-nodes`) cut the MIDDLE of the walk; the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `elided` | boolean? | true when the walk was cut — the trace cap (`--dataflow-max-trace-nodes`), a summary whose composed path was stabilized (`pathKind` is then `partial`); the endpoints survive and an `elided`-kind edge keeps the walk connected |
+| `pathKind` | string | P22 §2: what the slice's trace IS — `complete` (a full source→sink walk), `partial` (the walk was elided; endpoints guaranteed, the middle cut), `symbol-only` (no provable path; the finding stands on the symbol match alone — measured population zero on the whole corpus today, reserved so the vocabulary is closed). Replaces `reachableFromRoots` (false in every shipped slot, true by construction in the one mode that published it — the mode, not the slice, carried the information) and `rootWitness` (null everywhere). The depth report's reachability table reads this field |
 | `kind` (nodes) | string | `source`, `sink`, or the propagation role — now including `suspend` (a coroutine boundary the trace crosses) |
 | `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
 | `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
 | `accessPath` | string | the tainted register (and path suffix) at the sink, `base::field` form |
 | `crossesModule`, `crossesDependency` | boolean | computed from the slice ENDS: the source and sink functions' module paths and purls (P5) — true exactly when those differ |
 | `origins[]` | string[] | sorted distinct summary origins the trace crossed at interprocedural boundaries: `computed`, `pack`, `default`, `recursive-approx` (P5). `pack` on a source birth is provenance, not a boundary; the default-origin gate counts BOUNDARY origins (`default`/`computed`/`recursive-approx`) only |
-| `reachableFromRoots` | boolean | `--dataflow reachable` only |
 | `ruleId`, `ruleName`, `description`, `severity`, `confidence`, `riskScore` | | `severity` comes from the matched SINK PACK ENTRY (severity as data), `confidence` is `high` for pack-matched (resolved) sites, `riskScore` derives from severity |
 | `flowKey` | string | SHA-256 over the flow's endpoints and trace — stable across runs for suppression |
 

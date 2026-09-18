@@ -238,7 +238,7 @@ also produces an unresolved value there, by a different route. Reasons live
 in the depth-report golden, values in the corpus; the two gates hold
 different halves, and neither substitutes for the other.
 
-### The reachability table past the bundled tier (P21 §3)
+### The reachability table past the bundled tier (P21 §3, schema closed P22 §2)
 
 The depth report's third table (complete / partial / symbol-only) is a
 bundled-corpus golden; on the corpus machine it has been run over the three
@@ -248,13 +248,18 @@ androgoat 16 findings (16 complete, 0 partial, 0 symbol-only, ratio
 identical at the `resolved` and `exported` slots, so on these apps every
 published finding rides a COMPLETE entrypoint→sink path and the fraction
 that means only "exists" (the exported roots' honest meaning, P20 §4) is
-zero. A consumer reading the schema should know two things the numbers
-rest on: the per-slice `reachableFromRoots` flag is populated only in
-`--dataflow reachable` mode (every shipped slot publishes it false), and
-the complete/partial/symbol-only distinction is re-derivable from
-`nodeIds` but is not a field. If a repo tier ever publishes a partial or
-symbol-only finding, that gap becomes the next phase's schema work; today
-the measured population of the gap is zero.
+zero. P22 §2 closed the schema gap that paragraph used to warn about: the
+distinction is now a FIELD on every slice (`pathKind`: complete | partial |
+symbol-only, pinned by `SlicePathKindVocabularyTest`), the constant-false
+`reachableFromRoots` flag and the always-null `rootWitness` are deleted
+(a field that never varies is not a fact, it is a schema lie — R117's
+rule), and the elided-trace fixture drives PARTIAL so no vocabulary value
+is undriven. The historical zero on the repos rests on a defect P22 found
+and fixed (R135): the summaries published their sink effects with the
+composed site paths stripped, so a composed trace could never outgrow the
+trace cap and PARTIAL was unrepresentable anywhere — the repo numbers
+above are unchanged by the fix (the same findings, now with real traces),
+which is what makes them a measurement instead of an artefact.
 
 ### The two-environment proof (P18)
 
