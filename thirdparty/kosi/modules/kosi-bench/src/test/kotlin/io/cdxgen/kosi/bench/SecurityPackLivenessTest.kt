@@ -291,19 +291,15 @@ class SecurityPackLivenessTest {
             reasons[id] = reason
         }
 
-        // 1. Every sanitizer: R129's sweep found NONE load-bearing on the
-        //    bundled tier until taint-sanitizer grew `sanitizedResult`;
-        //    MessageDigest.digest and URLEncoder.encode are now LIVE, and
-        //    each remaining sanitizer matches an API real applications
-        //    call. Deleted, the pack would stop sanitising on real repos
-        //    with no bundled row the wiser.
-        for (s in pack.sanitizers) {
-            record(
-                "sanitizers[${s.pattern}]",
-                "sanitizer for a real-world API no bundled fixture calls (${s.clears.joinToString(",")} cleared); " +
-                    "kept: real repos rely on it, and the sweep's job is to say so, not to delete it (P20 §3)",
-            )
-        }
+        // 1. The sanitizers have NO allowance any more. R129's sweep found
+        //    none load-bearing; P21 §2 gave all twelve the R129 shape in
+        //    fixtures/sanitizer-gallery, and the committed depth report
+        //    records every one as `fired: true`. An allowance kept "as an
+        //    audit trail" is not inert text — it is a standing excuse, and
+        //    the next sanitizer to go inert would be covered by it in
+        //    silence. When a gate's bar moves up, the allowance that held
+        //    it down comes out (rule 9, P21 review). The bar itself is
+        //    asserted in DepthReportTest.everySanitizerFiresInTheCommittedReport.
 
         // 2. Android sources and sinks: the pinned vuln repos exercise this
         //    family (androgoat's floor rides it); the bundled tier is

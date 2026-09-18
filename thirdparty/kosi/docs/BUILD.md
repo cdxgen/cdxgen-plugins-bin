@@ -205,6 +205,57 @@ kampkit, P16 nowinandroid, P12's pack growth), each time through a warm,
 a resolver, or a pack change — which is exactly the population the
 capability matching selects.
 
+### What no corpus tier answers: is this code reachable from any input we have (P21)
+
+`corpusChanged` and `corpusFull` both answer one question: **did a
+behaviour move.** Neither answers the question R131 turned up: **is this
+code reachable from any input we have.** R131's cross-block fold — 460
+lines of dominator walk with a green unit test — ran GREEN through every
+corpus tier at any cost, because the corpus held no input that reached the
+code: no bundled fixture had ever asked the folder for a local's value, so
+there was nothing for any bench row to move on. No tier, at any price,
+fixes that; a warm cache does not invent inputs.
+
+The gate that answers it is a FIXTURE, and the phase rule is the policy:
+**every capability ships with its fixture that reaches it through
+`Analyzer.analyze`, in the same change** — and every failure reason the
+folder can name stays non-zero in the committed depth report
+(`DepthReportTest.everyFoldFailureBucketIsNonZeroInTheCommittedReport`), so
+a new reason must arrive with an input that reaches it or not ship.
+
+The replay, measured (P21 §4) by restoring each defect one at a time:
+
+| defect | corpusChanged | what actually catches it |
+|---|---|---|
+| R129 — no fixture makes a sanitizer load-bearing | GREEN: an absence moves no bench row (measured: the bundled bench is green with `sanitizer-gallery` deleted) | the depth-report golden + the security-pack liveness sweep, both in `./gradlew test`, which runs in every loop |
+| R130 — the name matcher reads golden file names | FLOODS: the tier's vocabulary fills with fixture slugs mirrored by golden names (measured on this phase's own diff: 0 → 6 tokens; on P20's 164 regenerated goldens it selected every repo row and ran 45 minutes) | nothing automated can see a tier degenerate into corpusFull; the fix is the filter and the review of it |
+| R131 — the fold cannot see a local's value | GREEN at `cd71886`, where the defect shipped (measured: corpusQuick 0 fail, androgoat floor green, with the store arm absent and no fixture reaching the code). RED at P21 with the same defect restored — `cross-block-values/resolved` fails 2 wants. The difference is the FIXTURE, not the tier | the fixture (R63), which is the phase rule |
+| R132 — the content matcher diffs the whole tree | same flood as R130 through the other door (measured: 0 → 9 tokens) | same |
+
+A corollary the replay surfaced: `depth-cap-chain` pins the VALUE outcome
+(the chain stays unresolved) but not the failure REASON — the restored R131
+also produces an unresolved value there, by a different route. Reasons live
+in the depth-report golden, values in the corpus; the two gates hold
+different halves, and neither substitutes for the other.
+
+### The reachability table past the bundled tier (P21 §3)
+
+The depth report's third table (complete / partial / symbol-only) is a
+bundled-corpus golden; on the corpus machine it has been run over the three
+pinned vuln repos at the bench's own slot options, and the numbers are:
+androgoat 16 findings (16 complete, 0 partial, 0 symbol-only, ratio
+0.9546), insecureshop 7 (7/0/0, ratio 0.9147), tsp 2 (2/0/0, ratio 1.0) —
+identical at the `resolved` and `exported` slots, so on these apps every
+published finding rides a COMPLETE entrypoint→sink path and the fraction
+that means only "exists" (the exported roots' honest meaning, P20 §4) is
+zero. A consumer reading the schema should know two things the numbers
+rest on: the per-slice `reachableFromRoots` flag is populated only in
+`--dataflow reachable` mode (every shipped slot publishes it false), and
+the complete/partial/symbol-only distinction is re-derivable from
+`nodeIds` but is not a field. If a repo tier ever publishes a partial or
+symbol-only finding, that gap becomes the next phase's schema work; today
+the measured population of the gap is zero.
+
 ### The two-environment proof (P18)
 
 `scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted

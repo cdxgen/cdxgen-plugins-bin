@@ -810,6 +810,50 @@ path = "fixtures/cross-block-values"
 capabilities = ["outbound", "services", "urls", "cross-block-fold"]
 tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
+# P21 §1: the producer bucket — values defined by a call — folded through
+# workspace callees with provable-constant returns (every return site the
+# same constant; disagreeing returns, open virtual targets and recursion
+# refuse). The fixture's outbound URLs and its route prefix all come from
+# workspace accessors; the defect restored publishes the register's machine
+# name where the host belongs (R131's outside view).
+[[fixtures]]
+slug = "workspace-call-constants"
+tier = "fixtures"
+path = "fixtures/workspace-call-constants"
+capabilities = ["outbound", "services", "urls", "workspace-call-fold", "ktor", "endpoints"]
+tolerated_resolution_errors = []
+
+# P21 §0: the two failure buckets that had never been non-zero, each with
+# the fixture that drives it — a value whose provenance is a handler
+# PARAMETER (the fold's honest boundary), and a chain deeper than the
+# fold's MAX_DEPTH budget. The buckets are load-bearing from here: a change
+# that reclassifies a failure moves a published number.
+[[fixtures]]
+slug = "parameter-provenance"
+tier = "fixtures"
+path = "fixtures/parameter-provenance"
+capabilities = ["outbound", "services", "parameter-fold"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "depth-cap-chain"
+tier = "fixtures"
+path = "fixtures/depth-cap-chain"
+capabilities = ["outbound", "services", "depth-budget"]
+tolerated_resolution_errors = []
+
+# P21 §2: the ten sanitizers that had never fired, given the R129 shape —
+# the sanitized result reaches the sink directly, so entry present = flow
+# absent and entry removed = the want-not violates. Every non-JDK class is
+# a real API stubbed with its real signature; the four positive controls
+# pin each sink category's source-to-sink wiring.
+[[fixtures]]
+slug = "sanitizer-gallery"
+tier = "fixtures"
+path = "fixtures/sanitizer-gallery"
+capabilities = ["taint", "sanitizer", "xss", "path-traversal", "ssrf", "sql-quote", "uuid"]
+tolerated_resolution_errors = []
+
 # P19 §4: the frameworks the pack modelled but no fixture exercised (the
 # liveness sweep's whole-population finding): AWS Lambda's supertype
 # handlers, Azure Functions' annotations, spring-graphql's controller and
