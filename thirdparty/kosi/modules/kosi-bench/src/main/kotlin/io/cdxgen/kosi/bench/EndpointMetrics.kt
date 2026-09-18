@@ -65,14 +65,12 @@ object CryptoMetrics {
     }
 
     /**
-     * A crypto-flow slice: key/secret material (the `hardcoded-secret`
-     * literal sources) reaching a crypto API (`crypto-asset`) or a TLS
-     * misconfiguration (`insecure-tls`). Counted from the slices, never
-     * invented.
+     * A crypto-flow slice. The predicate itself lives in the schema module
+     * (`CryptoFlow`) because the taint engine's `--dataflow crypto` filter
+     * reads the same one: this bench counter and that filter answer one
+     * question, so they are one piece of code (P22's rule, P23 §0's R139).
      */
-    fun isCryptoFlow(slice: FlowSlice): Boolean =
-        slice.sourceCategory == "hardcoded-secret" &&
-            (slice.sinkCategory == "crypto-asset" || slice.sinkCategory == "insecure-tls")
+    fun isCryptoFlow(slice: FlowSlice): Boolean = io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(slice)
 
     /**
      * Per-form Cipher mode/padding extraction, from the report's assets:

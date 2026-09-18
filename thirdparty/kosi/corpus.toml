@@ -417,6 +417,20 @@ capabilities = ["spring-webflux", "endpoints", "lookalike-negative"]
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "producer-arms"
+tier = "frameworks"
+path = "fixtures/producer-arms"
+capabilities = ["outbound", "const-fold"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "config-ambiguous-key"
+tier = "frameworks"
+path = "fixtures/config-ambiguous-key"
+capabilities = ["config-resolution", "outbound"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
 slug = "ktor-app"
 tier = "frameworks"
 path = "fixtures/ktor-app"

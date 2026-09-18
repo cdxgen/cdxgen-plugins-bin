@@ -37,7 +37,19 @@ class DefaultsSyncTest {
     fun bothShippingModesAreInTheMatrix() {
         val labels = Matrix.defaultMatrix().map { it.label }.toSet()
         assertTrue("security" in labels, "the shipping default mode must be exercised")
-        assertTrue("all" in labels, "the all mode must be exercised for every case")
+        // P23 §0: the `all` slot is GONE, and this line used to demand it.
+        // It ran the syntax backend, which lowers no IR and runs no dataflow,
+        // so `--dataflow all` changed nothing but the echo of the flag: the
+        // `all` and `security` goldens were identical in every analysis
+        // section across all 87 fixtures. `DataflowMode.ALL` is asserted to
+        // be a declared alias of `security` by `OptionMatrixTest`, on the
+        // resolved backend where the two COULD differ — which is what
+        // "exercised" has to mean (R53).
+        assertTrue(
+            "all" !in labels,
+            "the all slot proves nothing the security slot does not: if it is back, say what it " +
+                "measures that security cannot",
+        )
         assertTrue("resolved" in labels, "the resolved backend must be exercised for every case (P1)")
     }
 

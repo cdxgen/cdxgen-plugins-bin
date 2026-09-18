@@ -62,6 +62,27 @@ object PathKind {
     val ALL = sortedSetOf(COMPLETE, PARTIAL, SYMBOL_ONLY)
 }
 
+/**
+ * P23 §0: what makes a slice a CRYPTO flow — key or secret material (the
+ * `hardcoded-secret` literal sources) reaching a crypto API (`crypto-asset`)
+ * or a TLS misconfiguration (`insecure-tls`).
+ *
+ * It lives in the schema module, beside [FlowSlice], because two pieces of
+ * code answer this question and they must answer it the same way (P22's
+ * rule). The bench has counted `cryptoFlowSlices` with this predicate since
+ * P6; `--dataflow crypto` never consulted it and published every slice the
+ * `security` mode does, so the mode named a filter that did not exist — and
+ * a consumer who asked for crypto flows was handed log-injection findings
+ * labelled `"mode": "crypto"` (the P23 §0 matrix's first finding, R139).
+ */
+object CryptoFlow {
+    const val SOURCE_CATEGORY = "hardcoded-secret"
+    val SINK_CATEGORIES = sortedSetOf("crypto-asset", "insecure-tls")
+
+    fun isCryptoFlow(slice: FlowSlice): Boolean =
+        slice.sourceCategory == SOURCE_CATEGORY && slice.sinkCategory in SINK_CATEGORIES
+}
+
 data class FlowSlice(
     val id: String,
     val sourceId: String,

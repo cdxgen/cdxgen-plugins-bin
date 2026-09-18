@@ -88,6 +88,34 @@ data class CorpusManifest(
      * itself the full run (R64). Silently dropping an unknown tier turns a
      * misspelling into missing coverage that still exits zero.
      */
+    /**
+     * P23 §0: the BUNDLED entries — the ones whose sources live in this
+     * repository under `fixtures/`, so their reports are reproducible from a
+     * checkout alone with no external clone. This is the golden gate's
+     * population, derived rather than listed.
+     *
+     * It used to be the tier list `{"fixtures", "async"}`, written two lines
+     * under a comment claiming "every bundled fixture tier is
+     * golden-ratcheted ... a tier the goldens never see is a tier whose
+     * drift they prove nothing about" — which was false for five tiers and
+     * seventeen bundled fixtures the moment `frameworks` was added (the P23
+     * review's R142). Every crypto fixture, every framework fixture (ktor,
+     * spring, micronaut, quarkus, http4k, grpc) and the bundled vulnerable
+     * service were outside the pin. A tier list has to be remembered; a
+     * predicate over `path` cannot be forgotten, and a new bundled tier is
+     * golden-ratcheted the day it is added.
+     *
+     * [excludedTiers] is the one place an exception is stated out loud.
+     */
+    fun bundled(only: String? = null, excludedTiers: Set<String> = GOLDEN_EXCLUDED_TIERS): List<CorpusEntry> {
+        val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        return entries.filter { entry ->
+            entry.path?.startsWith("fixtures/") == true &&
+                entry.tier !in excludedTiers &&
+                (onlySlugs == null || entry.slug in onlySlugs)
+        }
+    }
+
     fun select(tiers: Set<String>, only: String? = null): List<CorpusEntry> {
         val known = entries.map { it.tier }.toSet()
         val unknown = (tiers - known).sorted()
@@ -101,6 +129,19 @@ data class CorpusManifest(
     }
 
     companion object {
+        /**
+         * P23 §0: the bundled tiers the golden gate deliberately does NOT
+         * pin, each for a reason that is stated rather than implied.
+         *
+         *  - `eap` targets a Kotlin EAP language version, so its report
+         *    depends on the compiler the checkout happens to have; pinning
+         *    a digest would ratchet the toolchain, not kosi.
+         *
+         * Anything else under `fixtures/` is pinned. Emptying this set is
+         * always the safe direction; adding to it needs a sentence above.
+         */
+        val GOLDEN_EXCLUDED_TIERS = setOf("eap")
+
         fun parse(text: String): CorpusManifest {
             val tables = mutableListOf<LinkedHashMap<String, Any?>>()
             var current: LinkedHashMap<String, Any?>? = null

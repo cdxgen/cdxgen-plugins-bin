@@ -230,3 +230,98 @@ data class AnalyzeOptions(
         w.endObject()
     }
 }
+
+/**
+ * P23 §0: one accepted-but-degenerate option pairing — a run that names
+ * something it cannot deliver.
+ *
+ * The whole point is that there is ONE definition. The CLI refuses the
+ * [usageError] subset before a run starts; the Analyzer stamps every one of
+ * them on the report, because the Analyzer is also a library (the bench, the
+ * corpus and evinse call it directly and never see a usage message). Before
+ * P23 neither existed: `--dataflow reachable --callgraph none` was accepted,
+ * computed no reachability, and published a count claiming every slice was
+ * reachable (the P22 review's R137), and the default pairing — the syntax
+ * backend with `--dataflow security` — silently produced no `dataFlow` at
+ * all, with the only hint a diagnostic that talks about `resolvedCallRatio`.
+ */
+data class OptionDegradation(
+    /** A registered diagnostic code (`DiagnosticCodes`). */
+    val code: String,
+    /** Names what was asked for, what is produced instead, and why. */
+    val message: String,
+    /**
+     * True when the CLI refuses this pairing outright rather than running
+     * it. Reserved for pairings whose OUTPUT would mislead — the precedent
+     * is `--reachable-symbols` and `--format graphml`, both of which refuse
+     * a run with no call graph. A pairing that merely produces LESS (the
+     * syntax backend's missing dataflow, which is the default invocation)
+     * is named, never refused.
+     */
+    val usageError: Boolean,
+)
+
+/**
+ * P23 §0: every accepted pairing in [AnalyzeOptions] that cannot deliver
+ * what it names, in a stable order. Empty for a coherent run.
+ *
+ * `OptionMatrixTest` walks the accepted product of the option enums and
+ * asserts each cell against its declared contract, so a pairing cannot be
+ * both accepted and unexamined — the state R137 came out of.
+ */
+fun AnalyzeOptions.degradations(): List<OptionDegradation> {
+    val out = mutableListOf<OptionDegradation>()
+    val wantsFlow = dataflow != DataflowMode.NONE
+    val wantsGraph = callgraph != CallGraphMode.NONE
+    // The syntax tier parses without a classpath: no KIR is lowered, so
+    // neither engine can run whatever the flags asked for.
+    if (backend == Backend.SYNTAX && wantsFlow) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.DATAFLOW_NOT_RUN,
+                "--dataflow ${dataflow.id} needs the resolved backend: the syntax tier lowers no IR, " +
+                    "so no dataFlow is published and sliceCount is 0 because nothing ran, not because " +
+                    "nothing was found",
+                usageError = false,
+            ),
+        )
+    }
+    if (backend == Backend.SYNTAX && wantsGraph) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.CALLGRAPH_NOT_RUN,
+                "--callgraph ${callgraph.id} needs the resolved backend: the syntax tier resolves no " +
+                    "calls, so no callGraph is published",
+                usageError = false,
+            ),
+        )
+    }
+    // R137's pairing. Reachability is an INTERSECTION with the call graph;
+    // with no graph there is nothing to intersect, and a consumer reading
+    // `reachable` in `dataFlow.mode` would take the published slices for
+    // reachable ones.
+    if (dataflow == DataflowMode.REACHABLE && !wantsGraph) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.REACHABLE_WITHOUT_CALLGRAPH,
+                "--dataflow reachable intersects the slices with the call graph's reachability and " +
+                    "--callgraph none builds no graph: no reachability is computed, every published " +
+                    "slice is unfiltered, and stats.reachableSliceCount is 0 meaning NOT MEASURED",
+                usageError = true,
+            ),
+        )
+    }
+    // The dependency tier costs a jar walk, a lowering and a summarisation,
+    // and only the taint engine consumes it.
+    if (deps && !wantsFlow) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.DEPS_WITHOUT_DATAFLOW,
+                "--deps lowers and summarises dependency classes for the taint engine and " +
+                    "--dataflow none runs no taint engine: the tier is built and discarded",
+                usageError = false,
+            ),
+        )
+    }
+    return out
+}

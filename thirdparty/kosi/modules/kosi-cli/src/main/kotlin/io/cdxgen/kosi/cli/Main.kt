@@ -19,6 +19,7 @@ import io.cdxgen.kosi.schema.Diagnostic
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.RootScope
 import io.cdxgen.kosi.schema.Severity
+import io.cdxgen.kosi.schema.degradations
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -113,6 +114,17 @@ object Main {
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
         val options = optionsFrom(parsed)
+        // P23 §0: a pairing whose OUTPUT would mislead is refused before the
+        // run, in the same spirit as `--reachable-symbols` and `--format
+        // graphml` below — but derived from `AnalyzeOptions.degradations()`,
+        // the one predicate the report's diagnostics also come from, so a
+        // refusal and a diagnostic can never describe different sets. The
+        // pairings that merely produce LESS (the syntax tier's absent
+        // dataflow, which is the DEFAULT invocation) are named on the report
+        // and run.
+        options.degradations().firstOrNull { it.usageError }?.let {
+            throw UsageException(it.message)
+        }
         val out = parsed.value("out")
         val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit)
         val reachableSymbols = parsed.value("reachable-symbols")
@@ -454,10 +466,15 @@ object Main {
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
         val goldensDir = Path.of(parsed.value("goldens", "goldens"))
         val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
-        // Every bundled fixture tier is golden-ratcheted: the async tier's
-        // reports are as deterministic as the fixture tier's, and a tier the
-        // goldens never see is a tier whose drift they prove nothing about.
-        val entries = manifest.select(setOf("fixtures", "async"), parsed.value("only"))
+        // Every BUNDLED fixture is golden-ratcheted — derived from the
+        // manifest's paths, not from a tier list somebody has to remember to
+        // extend. This comment made that claim from P0 while the line under
+        // it named two tiers of the eleven; `frameworks` and `crypto` were
+        // added later and silently fell outside the pin, which left every
+        // ktor/spring/micronaut/quarkus/http4k/grpc fixture, every crypto
+        // fixture and the bundled vulnerable service unpinned (R142). The
+        // exclusions are stated in `GOLDEN_EXCLUDED_TIERS`.
+        val entries = manifest.bundled(parsed.value("only"))
         val problems = mutableListOf<String>()
         var checked = 0
         var portabilityChecked = 0

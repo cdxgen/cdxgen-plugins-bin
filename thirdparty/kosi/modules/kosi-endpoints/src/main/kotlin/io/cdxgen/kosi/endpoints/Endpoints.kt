@@ -72,7 +72,17 @@ object Endpoints {
         crossBlock: Boolean = true,
     ): Result {
         val configTable = ConfigResolver.load(root)
-        val configValues = configTable.keys().mapNotNull { key -> configTable[key]?.let { key to it.value!! } }.toMap()
+        // `value` is null for a key the config files DISAGREE about (P23 §1,
+        // R140): known key, unprovable value, so it is absent from the fold
+        // table and the site publishes `unresolved` with the key named. The
+        // `!!` that stood here was safe only while nothing could ever be
+        // ambiguous — the same read one layer up (`configValuesForCrypto`)
+        // has always used `mapNotNull` on the value, and two readers of one
+        // nullable field disagreeing about whether it can be null is the
+        // shape P22's rule is about.
+        val configValues = configTable.keys()
+            .mapNotNull { key -> configTable[key]?.value?.let { key to it } }
+            .toMap()
         val folder = KirValueFolder(
             module = module,
             constValues = ConstTable.fromSources(sourceTexts),
