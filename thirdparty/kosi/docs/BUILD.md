@@ -261,6 +261,62 @@ trace cap and PARTIAL was unrepresentable anywhere — the repo numbers
 above are unchanged by the fix (the same findings, now with real traces),
 which is what makes them a measurement instead of an artefact.
 
+### The option matrix (P23 §0)
+
+The corpus picks FIXTURES and SLOTS. Until P23 nothing picked option
+COMBINATIONS, and that is where R137 lived: `--dataflow reachable` paired
+with `--callgraph none` published a `reachableSlices` count claiming every
+slice reachable, on a run that had built no graph to intersect with. It
+survived 522 golden pairs, a 600-row `corpusQuick`, a full corpus and a
+two-environment proof, because not one of them runs `reachable` mode at
+all.
+
+`OptionMatrixTest` walks the accepted product of the option enums over one
+small project and asserts each cell's contract. It costs seconds and no
+corpus tier, which is the point: the cheapest gate in the repo covers the
+axis the expensive ones do not. Two properties make it a gate rather than a
+sample — it is EXHAUSTIVE over the enums (a new `DataflowMode` or
+`CallGraphMode` with no declared contract fails it), and the diagnostics it
+expects come from `AnalyzeOptions.degradations()`, the same predicate the
+CLI refuses from, so a report and a refusal cannot describe different sets.
+
+| pairing | before P23 | now |
+| --- | --- | --- |
+| `--backend syntax` + any `--dataflow` (THE DEFAULT) | no `dataFlow`, no diagnostic naming it; the only hint spoke about `resolvedCallRatio` | `dataflow-not-run` names it, run proceeds |
+| `--backend syntax` + any `--callgraph` | no `callGraph`, silently | `callgraph-not-run` names it, run proceeds |
+| `--dataflow reachable` + `--callgraph none` | accepted; published every slice as reachable (R137) | CLI REFUSES; the library names `reachable-without-callgraph` and reports 0 |
+| `--deps` + `--dataflow none` | the tier was lowered and summarised, then discarded | `deps-without-dataflow` names it |
+| `--dataflow crypto` | published every security slice, unfiltered (R139) | publishes only crypto flows, by the predicate the bench already counted them with |
+| `--dataflow all` | a synonym of `security` that nothing said was one | asserted to be a declared alias, in one line |
+
+The `all` SLOT is gone with it. It ran the syntax backend, which runs no
+dataflow, so `--dataflow all` could change nothing but the echo of the flag:
+across all 87 fixtures the `all` and `security` goldens differed in exactly
+one section, `options`, and no fixture carried a single `mode=all`
+annotation. 87 golden pairs — a sixth of every corpus run, every golden
+check and both legs of the two-environment proof — pinning the fact that the
+CLI echoes its own flag (R53).
+
+### Merges: a set, a witness, or a fact (P23 §1)
+
+R138 was a type error wearing a data structure's clothes: eight fields of a
+`FunctionSummary` are sets of effects and one is a witness path, and the
+deps-tier JOIN unioned all nine. Every merge in the analysis is now
+classified, and the classification is the discipline:
+
+| merge | kind | rule |
+| --- | --- | --- |
+| `FlowState.addFacts` / `mergeFrom` | SET | union; a fact either side has, the join has |
+| `Transfer.joinInto` (phi, concat, elvis) | SET + per-fact WITNESS | facts union; the blame register is CHOSEN (first operand carrying it), never merged (R54/R62) |
+| `FunctionSummary.join` (deps tier, by name) | SET ×8 | may-union across the overloads of one name |
+| `FunctionSummary.join`, `sourceReturns` | WITNESS | shortest path, lexicographic tie-break — the joined path IS one of its inputs (R138) |
+| `SummaryAnalysis.toSummary` escape dedup | WITNESS | one shortest-path witness per canonical (R135) |
+| `KirValueFolder` phi / dominator join | FACT | arms that disagree REFUSE; no arm is preferred |
+| `KirValueFolder` workspace return sites | FACT | every return site of every candidate must agree, or refuse |
+| `ConstTable.fromSources` (`const val` names) | FACT | a name holding two values is refused, never guessed |
+| `ConfigResolver.load` (config keys) | FACT | **was a PICK** — first file in sorted-path order won and was published as `resolution=config`. Now refuses: known key, null value (R140) |
+| `BytecodeLowerer.classIndex` | PICK, declared | a shaded class keeps the last jar, mirroring the resolver's own one-artifact-per-coordinate pick |
+
 ### The two-environment proof (P18)
 
 `scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted

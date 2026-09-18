@@ -23,6 +23,7 @@ import io.cdxgen.kosi.schema.RuntimeInfo
 import io.cdxgen.kosi.schema.Severity
 import io.cdxgen.kosi.schema.Stats
 import io.cdxgen.kosi.schema.ToolInfo
+import io.cdxgen.kosi.schema.degradations
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.Path
@@ -748,25 +749,41 @@ object Analyzer {
                 ),
             )
             val dataFlow = if (flowResult != null) {
-                val evidence = flowResult.evidence
+                // P23 §0, R139: `--dataflow crypto` is a FILTER, and until
+                // this phase it filtered nothing — `security`, `crypto`,
+                // `all` and `security-deps` published byte-identical slice
+                // sets, so a run that asked for crypto flows was handed
+                // log-injection findings under `"mode": "crypto"`. The
+                // predicate is the one the bench has counted
+                // `cryptoFlowSlices` with since P6, now shared rather than
+                // duplicated. The other modes keep their meanings exactly:
+                // `security` is every pack flow, `all` is its declared alias
+                // (the pack has nothing `security` leaves out), `reachable`
+                // is the intersection below, `security-deps` is `security`
+                // plus the dependency tier.
+                val evidence = if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.CRYPTO) {
+                    flowResult.evidence.restrictTo(
+                        flowResult.evidence.slices.filter { io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(it) },
+                    )
+                } else {
+                    flowResult.evidence
+                }
                 if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {
                     val reachedFunctions = graphResult.callGraph.reachability
                         .filter { it.reached }
                         .mapNotNull { entry -> graphResult.callGraph.nodes.firstOrNull { it.id == entry.nodeId }?.canonicalName }
                         .toSet()
                     val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
-                    evidence.copy(
-                        // P22 §2: the intersection IS the reachability fact —
-                        // the per-slice flag that used to be stamped true
-                        // here said only "this run was the reachable one",
-                        // which `dataFlow.mode` already says.
-                        slices = kept,
-                        stats = evidence.stats.copy(
-                            sliceCount = kept.size,
-                            uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
-                            reachableSlices = kept.size,
-                        ),
-                    )
+                    // P22 §2: the intersection IS the reachability fact — the
+                    // per-slice flag that used to be stamped true here said
+                    // only "this run was the reachable one", which
+                    // `dataFlow.mode` already says. P23 §0: it narrows the
+                    // whole document (nodes, edges and every derived counter)
+                    // through the one function that does that, instead of
+                    // recomputing four counters and leaving five plus the
+                    // node and edge arrays describing dropped traces.
+                    val narrowed = evidence.restrictTo(kept)
+                    narrowed.copy(stats = narrowed.stats.copy(reachableSlices = kept.size))
                 } else {
                     evidence
                 }
@@ -1321,6 +1338,25 @@ object Analyzer {
 
         val diagnosticsOut = buildList {
             addAll(diagnostics)
+            // P23 §0: every accepted option pairing that cannot deliver what
+            // it names, from the ONE predicate the CLI's refusals also read.
+            // Stamped here, in `assemble`, because both tiers end up here and
+            // a degradation that depended on which tier stamped it would be
+            // the R137 shape again. The Analyzer is a library — the bench,
+            // the corpus and evinse call it directly and never see a usage
+            // message — so it names all of them, including the ones the CLI
+            // refuses outright.
+            for (degradation in options.degradations()) {
+                add(
+                    Diagnostic(
+                        code = degradation.code,
+                        severity = if (degradation.usageError) Severity.WARNING else Severity.INFO,
+                        message = degradation.message,
+                        position = Position(".", 1, 1),
+                        count = 1,
+                    ),
+                )
+            }
             if (buildSystem == "none") {
                 add(
                     Diagnostic(

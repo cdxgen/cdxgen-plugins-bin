@@ -370,6 +370,43 @@ class DepthReportTest {
                 "the producer bucket is non-zero and unclassified",
             )
         }
+
+        // P23 §3, rule 9: the bar moved, so the measurement moves into the
+        // PASS line. P22 §3 published the breakdown and the corpus drove
+        // five of the folder's twelve arms; the other seven were names in
+        // the code with nothing behind them — R63 applied to a vocabulary.
+        // Two of the seven (`workspace-unit-return`, `workspace-no-return-
+        // site`) turned out to be distinctions no Kotlin a fixture can write
+        // reaches, and were FOLDED INTO `workspace-return-unprovable` rather
+        // than kept as undriven names; `producer-arms` drives the rest. From
+        // here an arm added without a fixture fails HERE, at the cost of one
+        // line, instead of sitting at zero where nobody reads it.
+        val expectedArms = sortedSetOf(
+            "config-unresolved",
+            "constructor",
+            "dependency-call",
+            "field-read",
+            "unrecognised-ins",
+            "workspace-parameter-return",
+            "workspace-recursion",
+            "workspace-return-unprovable",
+            "workspace-returns-disagree",
+            "workspace-virtual-open",
+        )
+        assertEquals(
+            expectedArms,
+            arms.members.keys.toSortedSet(),
+            "every arm the folder can record must be DRIVEN by a bundled fixture and every arm " +
+                "driven must be declared. A new arm with no fixture belongs in `producer-arms`; " +
+                "an arm no Kotlin can reach belongs folded into the arm that subsumes it, not " +
+                "sitting at zero (P23 §3)",
+        )
+        for (arm in expectedArms) {
+            assertTrue(
+                (arms.long(arm) ?: 0L) > 0L,
+                "producer arm '$arm' is declared and measured at zero — drive it or fold it away",
+            )
+        }
     }
 
     /**

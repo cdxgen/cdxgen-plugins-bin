@@ -130,7 +130,33 @@ class KirValueFolder(
          */
         val producerArms: java.util.TreeMap<String, Int> = java.util.TreeMap()
 
+        /**
+         * P23 §3: whether the ask in flight has already been classified.
+         * The arms are recorded where the refusal is decided — at every
+         * depth of the walk — and `producer` counts one per top-level ask,
+         * so without this latch a nested refusal and its caller's re-refusal
+         * both counted and the breakdown over-ran the bucket it explains
+         * (R141). Null between asks; the innermost arm wins, because it is
+         * the one that names the shape.
+         */
+        private var armRecorded: Boolean = false
+        private var armLatched: Boolean = false
+
+        fun armLatchOpen() {
+            armLatched = true
+            armRecorded = false
+        }
+
+        fun armLatchClose() {
+            armLatched = false
+            armRecorded = false
+        }
+
         fun recordProducer(arm: String) {
+            if (armLatched) {
+                if (armRecorded) return
+                armRecorded = true
+            }
             producerArms.merge(arm, 1, Int::plus)
         }
 
@@ -349,7 +375,21 @@ class KirValueFolder(
      * and the callers that care branch on the status.
      */
     fun valueAt(fn: KirFunction, block: KirBlock, index: Int, register: String): FoldedValue? {
+        // P23 §3: one ask, one arm. The arms are recorded wherever the
+        // refusal is DECIDED, which is at every depth of the walk, while
+        // `producer` counts only this top-level ask — so a nested refusal
+        // that the outer frame then re-refuses recorded two arms for one
+        // failure. `recursive(n)`'s inner call names `workspace-recursion`
+        // and its caller then names `workspace-return-unprovable` for the
+        // same ask. P22 §3's gate asserted arms == producer and passed only
+        // because no bundled fixture had a nested refusal; driving the
+        // arms (R141) made the over-count visible at once, which is the
+        // gate doing its job a phase late. The INNERMOST arm wins: it is
+        // the one that names the actual shape, where the outer frame can
+        // only say "the callee did not fold".
+        statsSink?.armLatchOpen()
         val out = fold(fn, block, index, register, depth = 0)
+        statsSink?.armLatchClose()
         statsSink?.let { stats ->
             stats.asked++
             when {
@@ -683,6 +723,39 @@ class KirValueFolder(
      * recursive cycle refuses; the depth budget binds through the walk the
      * same as through any other hop and names [FoldFailure.DEPTH_CAP] when
      * it does.
+     *
+     * ---
+     *
+     * P23 §2 — WHY THIS WALK IS NOT THE FLOW MODULE'S SUMMARIES, decided and
+     * written here because this is the only place both can be read at once.
+     *
+     * P22 §0 built the gate that compares this walk's answer to "what does
+     * this call return" against `kosi-flow`'s summaries, and published three
+     * counters. The committed result was 5 folded, 5 agree, 0 disagree and
+     * **0 no-opinion**, and the plan read the no-opinion counter as the
+     * design input: the population one side could INHERIT from the other. An
+     * empty no-opinion column was therefore taken to mean "the flow module
+     * already knows about every callee this walk folds — so why two walks?"
+     *
+     * That reading does not survive contact with what the two analyses
+     * compute. This walk is a MUST analysis over VALUES: it must come back
+     * with the string `"https://api.example.com"` or refuse, because its
+     * consumers publish the value as a service name, a route path, a cipher
+     * transform. A summary is a MAY analysis over LABELS: it says whether
+     * taint can reach the return, and it carries no value at all — there is
+     * nothing in a `FunctionSummary` from which a returned constant could be
+     * recovered, for any callee, ever. The zero in the no-opinion column
+     * says the flow module has an opinion about TAINT on every callee this
+     * walk folds. It does not say, and cannot say, that it has the VALUE.
+     *
+     * So the two walks stay, and they are not duplication: two analyses of
+     * different kinds that happen to traverse the same call. What the P22
+     * gate proves is a CONSISTENCY property, not an inheritance opportunity
+     * — a callee this walk proves constant carries no taint to its return,
+     * so a summary claiming otherwise means one of the two is wrong. Worth
+     * gating permanently; worth nothing as a refactor. That is the decision
+     * P23 §2 asked for, with the number that prompted the question explained
+     * rather than acted on.
      */
     private fun workspaceReturnValue(ins: KirCall, depth: Int): FoldedValue? {
         val candidates = workspaceCandidates(ins.callee) ?: return null
@@ -697,8 +770,13 @@ class KirValueFolder(
             try {
                 for ((block, site) in returnSitesOf(candidate)) {
                     val (retIndex, returned) = site
-                    // A Unit return (`return` with no value) is not a value.
-                    val reg = returned ?: return unresolved("workspace-unit-return")
+                    // A Unit return (`return` with no value) is not a
+                    // value. P23 §3 folded this into the general arm: as its
+                    // own name it was a distinction the measurement never
+                    // made — no Kotlin a fixture can write reaches a Unit
+                    // return site through a VALUE ask, and an arm nothing
+                    // drives is a vocabulary entry R63 is about.
+                    val reg = returned ?: return unresolved("workspace-return-unprovable")
                     val siteValue = fold(candidate, block, retIndex, reg, depth + 1)
                     if (siteValue == null || (!siteValue.resolved && siteValue.status != ValueStatus.NULL)) {
                         // The budget binds INSIDE the callee's body: keep its
@@ -738,9 +816,14 @@ class KirValueFolder(
             }
         }
         if (value == null) {
-            // Every candidate's body falls off its end: no return site to
-            // read — recorded here, and the caller still answers PRODUCER.
-            statsSink?.recordProducer("workspace-no-return-site")
+            // No candidate offered a readable return site. P23 §3 folded
+            // this into the general arm too: every Kotlin body the lowering
+            // produces carries a return site — a `throw` gets one whose
+            // value is the exception, and so does a `while (true)` — both of
+            // which were tried against this arm and landed on
+            // return-unprovable instead. Keeping a name for a case no
+            // fixture can reach is the state §3 exists to end.
+            statsSink?.recordProducer("workspace-return-unprovable")
             return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PRODUCER)
         }
         return value

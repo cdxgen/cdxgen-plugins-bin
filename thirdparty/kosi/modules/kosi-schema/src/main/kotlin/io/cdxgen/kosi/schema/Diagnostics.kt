@@ -151,6 +151,24 @@ object DiagnosticCodes {
     /** P9: `--backend compile` runs the resolved tier; this names the gap. */
     const val COMPILE_BACKEND_GAP = "compile-backend-gap"
 
+    /**
+     * P23 §0: the four codes below name an accepted OPTION PAIRING that
+     * cannot deliver what it names. They are produced from one predicate
+     * (`AnalyzeOptions.degradations()`), so the CLI's refusals and the
+     * report's diagnostics cannot drift apart, and `OptionMatrixTest` walks
+     * the accepted product of the option enums to keep every cell examined.
+     */
+    const val DATAFLOW_NOT_RUN = "dataflow-not-run"
+
+    /** P23 §0: a call graph was asked for on a tier that resolves no calls. */
+    const val CALLGRAPH_NOT_RUN = "callgraph-not-run"
+
+    /** P23 §0: R137's pairing — reachability asked for with no graph to intersect. */
+    const val REACHABLE_WITHOUT_CALLGRAPH = "reachable-without-callgraph"
+
+    /** P23 §0: the dependency tier built for a run with no taint engine to use it. */
+    const val DEPS_WITHOUT_DATAFLOW = "deps-without-dataflow"
+
     val ALL: Set<String> = setOf(
         PARSE_ERROR,
         SYNTAX_BACKEND_NO_RESOLUTION,
@@ -182,6 +200,10 @@ object DiagnosticCodes {
         RSS_BUDGET,
         CALLGRAPH_FAILED,
         COMPILE_BACKEND_GAP,
+        DATAFLOW_NOT_RUN,
+        CALLGRAPH_NOT_RUN,
+        REACHABLE_WITHOUT_CALLGRAPH,
+        DEPS_WITHOUT_DATAFLOW,
     )
 }
 

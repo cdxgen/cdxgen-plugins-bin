@@ -34,7 +34,6 @@ data class MatrixSlot(
 
     companion object {
         const val SECURITY_LABEL = "security"
-        const val ALL_LABEL = "all"
         const val RESOLVED_LABEL = "resolved"
         const val EXPORTED_LABEL = "exported"
         const val ENDPOINT_LABEL = "endpoint"
@@ -61,11 +60,22 @@ object Matrix {
             dataflow = DataflowMode.SECURITY,
             backend = Backend.SYNTAX,
         ),
-        MatrixSlot(
-            label = MatrixSlot.ALL_LABEL,
-            dataflow = DataflowMode.ALL,
-            backend = Backend.SYNTAX,
-        ),
+        // P23 §0 DELETED the `all` slot. It ran the SYNTAX backend, which
+        // lowers no IR and therefore runs no dataflow at all, so the only
+        // thing `--dataflow all` could change about its report was the echo
+        // of the flag itself: measured across all 87 fixtures, the `all` and
+        // `security` goldens differed in exactly one section — `options` —
+        // and were byte-identical in `dataFlow`, `stats`, `crypto`,
+        // `callGraph`, `services`, `apiEndpoints` and every other section
+        // carrying analysis output. No fixture carried a single `mode=all`
+        // annotation either, so the slot evaluated nothing. 87 golden pairs,
+        // a sixth of every corpus run, every golden check and BOTH legs of
+        // the two-environment proof, pinning the fact that the CLI echoes
+        // its own flag (R53: a slot nobody's analysis differs on proves
+        // nothing). `DataflowMode.ALL` is covered where the claim actually
+        // lives: `OptionMatrixTest` asserts it is a declared alias of
+        // `security`, in one line, on the RESOLVED backend where the modes
+        // could differ if they ever did.
         MatrixSlot(
             label = MatrixSlot.RESOLVED_LABEL,
             dataflow = DataflowMode.SECURITY,

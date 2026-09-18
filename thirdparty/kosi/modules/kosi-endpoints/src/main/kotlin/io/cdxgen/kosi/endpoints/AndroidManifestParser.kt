@@ -48,7 +48,22 @@ object AndroidManifestParser {
             } catch (_: Exception) {
                 return@mapNotNull null
             }
-            parseText(text, path.toString())
+            // RELATIVE to the analysis root, with POSIX separators, like
+            // every other path the report carries. It was `path.toString()`
+            // — absolute — so an Android project's manifest endpoints
+            // published the checkout's own location in `position.filename`,
+            // and the same sources analysed from two directories produced
+            // different reports. The report contract's "two machines compare
+            // equal byte for byte" was broken for every project with a
+            // manifest, and nothing saw it because the `frameworks` tier sat
+            // outside the golden pin (P23 §0's R142); extending the pin
+            // surfaced this on its first run (R143).
+            val relative = runCatching { root.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize()) }
+                .getOrNull()
+                ?.toString()
+                ?.replace('\\', '/')
+                ?: path.fileName.toString()
+            parseText(text, relative)
         }
     }
 

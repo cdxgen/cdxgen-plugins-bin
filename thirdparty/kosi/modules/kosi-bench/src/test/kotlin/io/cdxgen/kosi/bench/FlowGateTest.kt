@@ -213,7 +213,6 @@ class FlowGateTest {
         val current = throughBaseline(
             result(
                 row("a", slot = MatrixSlot.SECURITY_LABEL, functionsAnalysed = 1),
-                row("a", slot = MatrixSlot.ALL_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.RESOLVED_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.EXPORTED_LABEL, functionsAnalysed = 1),
                 row("a", slot = MatrixSlot.ENDPOINT_LABEL, functionsAnalysed = 1),
