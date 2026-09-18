@@ -275,6 +275,78 @@ data class DataFlowEvidence(
     val stats: DataFlowStats,
     val diagnostics: List<Diagnostic>,
 ) {
+    /**
+     * P23 §0: this evidence narrowed to [kept], as a WHOLE — the slices, the
+     * nodes and edges those slices still reference, and every counter derived
+     * from them.
+     *
+     * There is one of these because a filter that drops slices and leaves the
+     * rest of the document behind publishes a contradiction: `nodes[]` and
+     * `edges[]` describing traces that are not in `slices[]`, and counters
+     * (`connectivity`, `suspendCrossingSlices`, `summaryCrossingSlices`,
+     * `defaultOriginSlices`, `integrityViolations`) still measuring the
+     * unfiltered population. The reachable-mode intersection recomputed four
+     * of those counters and left the other five plus the node and edge
+     * arrays; the P23 crypto filter, written from it, reproduced the same
+     * gap. Two places narrowing one document is exactly the shape this phase
+     * is about, so there is now one place.
+     *
+     * `summaries[]` is deliberately NOT narrowed: a summary is a fact about a
+     * FUNCTION, computed whether or not any surviving slice runs through it,
+     * and `summariesComputed`/`summariesByOrigin` count what the run
+     * computed. Narrowing those would report less analysis than was done.
+     */
+    fun restrictTo(kept: List<FlowSlice>): DataFlowEvidence {
+        if (kept.size == slices.size) return this
+        val keptNodeIds = kept.flatMapTo(HashSet()) { it.nodeIds }
+        val keptEdgeIds = kept.flatMapTo(HashSet()) { it.edgeIds }
+        val nodesOut = nodes.filter { it.id in keptNodeIds }
+        val edgesOut = edges.filter { it.id in keptEdgeIds }
+        val edgesById = edgesOut.associateBy { it.id }
+        val nodesById = nodesOut.associateBy { it.id }
+        // The same rule the engine uses: a `pack` origin on a source birth is
+        // PROVENANCE, not a summary boundary.
+        val boundaryOrigins = { origins: List<String> -> origins.filter { it != "pack" } }
+        return copy(
+            nodes = nodesOut,
+            edges = edgesOut,
+            slices = kept,
+            stats = stats.copy(
+                sliceCount = kept.size,
+                uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
+                crossDependencySlices = kept.count { it.crossesDependency },
+                crossModuleSlices = kept.count { it.crossesModule },
+                connectivity = if (kept.isEmpty()) {
+                    1.0
+                } else {
+                    kept.count { slice -> sliceIsConnected(slice, edgesById) }.toDouble() / kept.size
+                },
+                integrityViolations = kept.count { slice ->
+                    slice.nodeIds.any { it !in nodesById } || !sliceIsConnected(slice, edgesById)
+                },
+                defaultOriginSlices = kept.count { slice ->
+                    val boundary = boundaryOrigins(slice.origins)
+                    boundary.isNotEmpty() && boundary.all { it == "default" }
+                },
+                summaryCrossingSlices = kept.count { boundaryOrigins(it.origins).isNotEmpty() },
+                suspendCrossingSlices = kept.count { slice ->
+                    slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
+                },
+            ),
+        )
+    }
+
+    /** Every consecutive node pair of the trace is joined by a published edge. */
+    private fun sliceIsConnected(slice: FlowSlice, edgesById: Map<String, FlowEdge>): Boolean {
+        if (slice.nodeIds.size < 2) return slice.edgeIds.isEmpty()
+        if (slice.edgeIds.size != slice.nodeIds.size - 1) return false
+        for ((i, edgeId) in slice.edgeIds.withIndex()) {
+            val edge = edgesById[edgeId] ?: return false
+            if (edge.sourceId != slice.nodeIds[i] || edge.targetId != slice.nodeIds[i + 1]) return false
+        }
+        return true
+    }
+
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.str("mode", mode)

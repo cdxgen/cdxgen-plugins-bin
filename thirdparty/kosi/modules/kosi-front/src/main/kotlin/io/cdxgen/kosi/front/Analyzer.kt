@@ -761,39 +761,29 @@ object Analyzer {
                 // (the pack has nothing `security` leaves out), `reachable`
                 // is the intersection below, `security-deps` is `security`
                 // plus the dependency tier.
-                val filtered = if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.CRYPTO) {
-                    val kept = flowResult.evidence.slices.filter { io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(it) }
-                    flowResult.evidence.copy(
-                        slices = kept,
-                        stats = flowResult.evidence.stats.copy(
-                            sliceCount = kept.size,
-                            uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
-                            crossDependencySlices = kept.count { it.crossesDependency },
-                            crossModuleSlices = kept.count { it.crossesModule },
-                        ),
+                val evidence = if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.CRYPTO) {
+                    flowResult.evidence.restrictTo(
+                        flowResult.evidence.slices.filter { io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(it) },
                     )
                 } else {
                     flowResult.evidence
                 }
-                val evidence = filtered
                 if (options.dataflow == io.cdxgen.kosi.schema.DataflowMode.REACHABLE && graphResult != null) {
                     val reachedFunctions = graphResult.callGraph.reachability
                         .filter { it.reached }
                         .mapNotNull { entry -> graphResult.callGraph.nodes.firstOrNull { it.id == entry.nodeId }?.canonicalName }
                         .toSet()
                     val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
-                    evidence.copy(
-                        // P22 §2: the intersection IS the reachability fact —
-                        // the per-slice flag that used to be stamped true
-                        // here said only "this run was the reachable one",
-                        // which `dataFlow.mode` already says.
-                        slices = kept,
-                        stats = evidence.stats.copy(
-                            sliceCount = kept.size,
-                            uniqueFlows = kept.map { it.flowKey }.toSortedSet().size,
-                            reachableSlices = kept.size,
-                        ),
-                    )
+                    // P22 §2: the intersection IS the reachability fact — the
+                    // per-slice flag that used to be stamped true here said
+                    // only "this run was the reachable one", which
+                    // `dataFlow.mode` already says. P23 §0: it narrows the
+                    // whole document (nodes, edges and every derived counter)
+                    // through the one function that does that, instead of
+                    // recomputing four counters and leaving five plus the
+                    // node and edge arrays describing dropped traces.
+                    val narrowed = evidence.restrictTo(kept)
+                    narrowed.copy(stats = narrowed.stats.copy(reachableSlices = kept.size))
                 } else {
                     evidence
                 }

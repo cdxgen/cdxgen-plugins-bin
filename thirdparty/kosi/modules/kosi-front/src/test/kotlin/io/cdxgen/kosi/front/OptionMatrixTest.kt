@@ -207,6 +207,46 @@ class OptionMatrixTest {
             security.any { CryptoFlow.isCryptoFlow(it) } && security.any { !CryptoFlow.isCryptoFlow(it) },
             "security publishes both kinds, which is what makes the subset above a real subset",
         )
+
+        // A mode that NARROWS the evidence must narrow the whole document.
+        // Dropping slices and leaving `nodes[]`, `edges[]` and the derived
+        // counters behind publishes a contradiction — traces that are not in
+        // `slices[]`, and counters still measuring the population before the
+        // filter. Asserted here for the two modes that narrow (`crypto`
+        // filters, `reachable` intersects), because they are the only two,
+        // and `DataFlowEvidence.restrictTo` is the one place that does it.
+        for (mode in listOf(DataflowMode.CRYPTO, DataflowMode.REACHABLE)) {
+            val flow = reports
+                .getValue("backend=resolved dataflow=${mode.id} callgraph=auto deps=false")
+                .dataFlow!!
+            val sliceNodeIds = flow.slices.flatMap { it.nodeIds }.toSet()
+            val sliceEdgeIds = flow.slices.flatMap { it.edgeIds }.toSet()
+            assertEquals(
+                emptyList(),
+                flow.nodes.map { it.id }.filterNot { it in sliceNodeIds },
+                "${mode.id}: every published node belongs to a published slice",
+            )
+            assertEquals(
+                emptyList(),
+                flow.edges.map { it.id }.filterNot { it in sliceEdgeIds },
+                "${mode.id}: every published edge belongs to a published slice",
+            )
+            assertEquals(
+                flow.slices.size,
+                flow.stats.sliceCount,
+                "${mode.id}: the counters measure the slices that survived, not the ones that did not",
+            )
+            assertEquals(
+                flow.slices.count { it.crossesDependency },
+                flow.stats.crossDependencySlices,
+                "${mode.id}: derived counters are recomputed after the narrowing",
+            )
+            assertEquals(
+                0,
+                flow.stats.integrityViolations,
+                "${mode.id}: a narrowed document is still internally consistent",
+            )
+        }
     }
 
     /**
