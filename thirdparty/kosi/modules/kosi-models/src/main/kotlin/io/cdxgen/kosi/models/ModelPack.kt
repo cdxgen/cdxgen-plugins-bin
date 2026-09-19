@@ -120,6 +120,17 @@ data class LiteralSourcePattern(
     val category: String,
 )
 
+/**
+ * P26 §1.3: a call whose PRODUCED OBJECT carries the input's taint on its
+ * FIELDS — Jackson `readValue`, kotlinx `decodeFromString`, Gson `fromJson`.
+ * The input->result move is the passthrough table's job (format-adapter
+ * rows); this entry adds what a passthrough cannot say: every FIELD READ of
+ * the result derives the same category, which is how a request body reaches
+ * a sink through a DTO. The deserialization-as-a-risk SINK stays beside it —
+ * deserializing untrusted bytes is a finding even when nothing reads a field.
+ */
+data class DeserializerPattern(val pattern: String)
+
 data class ModelPack(
     val name: String,
     val sources: List<SourcePattern>,
@@ -128,6 +139,7 @@ data class ModelPack(
     val sanitizers: List<SanitizerPattern>,
     val effects: List<EffectPattern>,
     val literalSources: List<LiteralSourcePattern> = emptyList(),
+    val deserializers: List<DeserializerPattern> = emptyList(),
 ) {
     /** Every distinct category this pack can produce (sources and sinks). */
     val categories: Set<String>

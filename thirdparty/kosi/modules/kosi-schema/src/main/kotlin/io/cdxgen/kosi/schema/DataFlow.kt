@@ -330,6 +330,16 @@ data class FlowSummary(
      * `p<j>(arg<k>)<-source:<category>` (a source born in me).
      */
     val invokes: List<String> = emptyList(),
+    /**
+     * P26 §0: source-born taint reaching the RETURN's FIELD, as
+     * `<suffix>:<category>` strings — `fun make() = Wrapped(readLine() ?:
+     * "")` returns an object whose field carries a source born inside it.
+     * The channel P24's constructor synthesis made load-bearing (it moved
+     * source facts off the bare return key into constructed objects'
+     * fields) and no vocabulary carried (R161: http4k's delegation
+     * factories went silent).
+     */
+    val sourceReturnFields: List<String> = emptyList(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -373,6 +383,9 @@ data class FlowSummary(
         w.endArray()
         w.beginArray("sourceFieldWrites")
         for (v in sourceFieldWrites.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("sourceReturnFields")
+        for (v in sourceReturnFields.sorted()) w.str(v)
         w.endArray()
         w.beginArray("paramToReturnFields")
         for (v in paramToReturnFields.sorted()) w.str(v)

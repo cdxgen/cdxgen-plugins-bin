@@ -188,6 +188,23 @@ internal interface TransferHost<F, C> {
     /** Called when a pack passthrough actually moved taint (counting, provenance). */
     fun onPackPassthroughApplied(fqn: String, collect: C?)
 
+    /**
+     * P26 §1.3: a pack DESERIALIZER produced [result] — the value's FIELDS
+     * carry whatever taint reached the result, and the engine whose facts
+     * can say so marks them (the reporting engine's fieldBearing variants;
+     * the summary engine's facts already derive along paths). The [chain]
+     * is handed over because the marking REPLACES fact identities, and a
+     * replaced fact without a chain entry dead-ends the backward walk.
+     * Default no-op.
+     */
+    fun onDeserializerResult(
+        result: String?,
+        site: Int,
+        state: FlowState<F>,
+        chain: HashMap<ChainKey<F>, Move>,
+        collect: C?,
+    ) {}
+
     /** A pack sink matched: the sink read its arguments (the reporting engine counts the site). */
     fun onSinkMatched(collect: C?)
 
@@ -704,6 +721,15 @@ internal class FlowTransfer<F, C>(
                 moved = moveChain(state, chain, fromKey, TaintKey(to, ""), site, "call", host.packMoveOrigin()) || moved
             }
             if (moved) host.onPackPassthroughApplied(fqn, collect)
+        }
+
+        // DESERIALIZER (P26 §1.3): the call produced an OBJECT whose FIELDS
+        // carry the input's taint — the passthrough above moved the input to
+        // the result; this arm says the result's FIELD READS derive it. The
+        // host decides what "field-bearing" means for its fact type.
+        if (result != null && pack.deserializers.any { PatternMatcher.matches(it.pattern, fqn) }) {
+            matched = true
+            host.onDeserializerResult(result, site, state, chain, collect)
         }
 
         // EFFECT: a call that WRITES memory — argument taint flows into the

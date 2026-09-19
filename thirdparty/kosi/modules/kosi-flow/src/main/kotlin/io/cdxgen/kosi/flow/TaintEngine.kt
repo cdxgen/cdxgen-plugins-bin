@@ -113,15 +113,34 @@ internal data class Site(val id: Int, val blockId: String, val indexInBlock: Int
  * parameters of one handler are two facts — "which input is untrusted" is
  * a per-parameter fact, not a per-function one. `-1` is every other birth.
  */
-internal data class TaintFact(val site: Int, val category: String, val param: Int = -1) : Comparable<TaintFact> {
+internal data class TaintFact(val site: Int, val category: String, val param: Int = -1, val fieldBearing: Boolean = false) : Comparable<TaintFact> {
+    /**
+     * P26 §1.3: this fact sits on a value whose CONTENT came out of a pack
+     * DESERIALIZER (Jackson `readValue`, kotlinx `decodeFromString`, Gson
+     * `fromJson`) — the produced object carries the input's taint on its
+     * FIELDS, so a field read of it derives the same category. Ordinary
+     * facts (a tainted reference to some object) derive nothing on a field
+     * read: the object's fields are other values.
+     */
+    val isFieldBearing: Boolean get() = fieldBearing
+
+    /** The field-bearing variant of this fact. */
+    fun asFieldBearing(): TaintFact =
+        if (fieldBearing) this else TaintFact(site, category, param, fieldBearing = true)
+
     override fun compareTo(other: TaintFact): Int =
-        compareValuesBy(this, other, { it.site }, { it.category }, { it.param })
+        compareValuesBy(this, other, { it.site }, { it.category }, { it.param }, { it.fieldBearing })
 }
 
-/** Reporting facts carry paths on STATE KEYS, so a field read derives nothing. */
+/**
+ * Reporting facts carry paths on STATE KEYS, so a field read derives nothing
+ * — except a [TaintFact.fieldBearing] fact, whose value's FIELDS carry the
+ * taint a pack deserializer moved there.
+ */
 private object TaintFactOps : FactOps<TaintFact> {
     override fun categoryOf(fact: TaintFact): String = fact.category
-    override fun deriveOnFieldRead(fact: TaintFact, suffix: String): TaintFact? = null
+    override fun deriveOnFieldRead(fact: TaintFact, suffix: String): TaintFact? =
+        if (fact.fieldBearing) fact.asFieldBearing() else null
 }
 
 /**
@@ -1132,6 +1151,36 @@ object TaintEngine {
             if (collect != null) context.recordPackPassthrough(fqn)
         }
 
+        /**
+         * P26 §1.3: mark the deserializer's result facts FIELD-BEARING —
+         * every field read of the produced object derives them. The variant
+         * facts take over the key, and each inherits the chain entry of the
+         * fact it replaced (a replaced identity without an entry dead-ends
+         * the backward walk at exactly this call).
+         */
+        override fun onDeserializerResult(
+            result: String?,
+            site: Int,
+            state: FlowState<TaintFact>,
+            chain: HashMap<ChainKey<TaintFact>, Move>,
+            collect: TransferEvents?,
+        ) {
+            if (result == null) return
+            val key = TaintKey(result, "")
+            val facts = state.factsOf(key).toList()
+            if (facts.isEmpty()) return
+            val bearing = java.util.TreeSet(facts.map { it.asFieldBearing() })
+            state.setFacts(key, bearing)
+            for (original in facts) {
+                val variant = original.asFieldBearing()
+                val chainKey = ChainKey(variant, key)
+                if (chain[chainKey] == null) {
+                    chain[chainKey] = chain[ChainKey(original, key)]
+                        ?: Move(site, null, "deserializer", packMoveOrigin())
+                }
+            }
+        }
+
         override fun onSinkMatched(collect: TransferEvents?) {
             collect?.let { it.sinkSites += 1 }
         }
@@ -1487,6 +1536,21 @@ object TaintEngine {
                     state.addFacts(resultKey, listOf(fact))
                     moved = true
                     chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
+                }
+                // P26 §0 (R161): the source-return FIELD channel — same
+                // birth, but the callee stored it into the returned object's
+                // FIELD, so the caller's result carries it at that access
+                // path. The field read finds it; the ALIAS class fans it
+                // across the caller's names of the object.
+                for ((category, suffixes) in summary.sourceReturnFields) {
+                    for (suffix in suffixes.sorted()) {
+                        val fact = TaintFact(site, category)
+                        context.recordSourceReturn(fact, summary.sourceReturnFieldPaths["$category\u0000$suffix"].orEmpty())
+                        val key = TaintKey(result, suffix)
+                        state.addFacts(key, listOf(fact))
+                        moved = true
+                        chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
+                    }
                 }
                 // P24 §2: the field channel — the callee stored param i's
                 // VALUE into the returned object's field, so the argument's

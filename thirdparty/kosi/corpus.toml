@@ -1126,6 +1126,29 @@ path = "fixtures/di-module-bindings"
 capabilities = ["dispatch", "di", "bindings", "koin", "dagger", "spring"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
+# P26 §0 (R161): the source that comes back inside an object. A source born
+# in a factory callee, stored into the constructed object's FIELD — the shape
+# P24's constructor synthesis made load-bearing and no summary channel
+# carried (http4k's delegation factories went silent between the P23 and P24
+# builds; 22 findings, no gate watching).
+[[fixtures]]
+slug = "source-return-fields"
+tier = "fixtures"
+path = "fixtures/source-return-fields"
+capabilities = ["taint", "summaries", "source-returns", "object-identity", "constructor-synthesis"]
+tolerated_resolution_errors = []
+
+# P26 §1.3: deserialization as a boundary — the produced OBJECT carries the
+# source's taint on its FIELDS (Jackson readValue, kotlinx
+# decodeFromString, Gson fromJson), the hop that makes a request body reach
+# a sink through a DTO. The cross-boundary wildcard channel is R163.
+[[fixtures]]
+slug = "deserialization-fields"
+tier = "fixtures"
+path = "fixtures/deserialization-fields"
+capabilities = ["taint", "deserialization", "dto-fields", "jackson", "kotlinx-serialization", "gson"]
+tolerated_resolution_errors = []
+
 # P25 §1: the same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
 # context-INSENSITIVE engine gets it right is the phase's §1 answer.

@@ -188,6 +188,19 @@ internal class FunctionSummary(
     val sourceFieldWrites: Map<String, List<SourceFieldWrite>> = emptyMap(),
     /** P24 §2d: what the body passes when it invokes function-valued parameters. */
     val invokedBinds: List<InvokeBind> = emptyList(),
+    /**
+     * P26 §0: source-born taint stored into a FIELD of the returned object —
+     * `fun make() = Wrapped(readLine() ?: "")`. The RETURN mirror of
+     * [sourceFieldWrites]'s write half: P24's constructor synthesis writes
+     * source facts into constructed objects' fields (where they belong), but
+     * the return channel probed only the bare key, so a summary whose source
+     * reaches the caller exclusively through a field said "returns nothing
+     * tainted" and every caller went clean — http4k's delegation getters,
+     * measured as 22 dropped findings no gate watched (R161).
+     */
+    val sourceReturnFields: Map<String, Set<String>> = emptyMap(),
+    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    val sourceReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
 ) {
     fun sameAs(other: FunctionSummary): Boolean =
         paramToReturn == other.paramToReturn &&
@@ -212,7 +225,9 @@ internal class FunctionSummary(
             sourceFieldWrites.mapValues { (_, w) -> w.mapTo(sortedSetOf()) { "${it.paramIndex}\u0000${it.suffix}" } } ==
                 other.sourceFieldWrites.mapValues { (_, w) -> w.mapTo(sortedSetOf()) { "${it.paramIndex}\u0000${it.suffix}" } } &&
             invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() ==
-                other.invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet()
+                other.invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() &&
+            sourceReturnFields == other.sourceReturnFields &&
+            sourceReturnFieldPaths.keys == other.sourceReturnFieldPaths.keys
 
     /**
      * The may-analysis union with [other]: every effect either summary has,
@@ -266,6 +281,7 @@ internal class FunctionSummary(
                 .map { (_, binds) -> binds.minWithOrNull(compareBy({ it.path.size }, { it.path.joinToString(",") }))!! }
                 .sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }))
         },
+        sourceReturnFields = mergeSets(sourceReturnFields, other.sourceReturnFields),
         // The join answers name-keyed lookups, and the only name-keyed
         // consumer is the deps tier, whose summaries uniformly carry
         // `bytecode` — so the joined origin is this one's.
@@ -335,6 +351,9 @@ internal class FunctionSummary(
             sourceFieldWrites = sourceFieldWrites.entries
                 .sortedWith(compareBy({ it.key }, { it.value.firstOrNull()?.paramIndex ?: 0 }, { it.value.firstOrNull()?.suffix ?: "" }))
                 .flatMap { (category, writes) -> writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix })).map { "${pid(it.paramIndex)}.${it.suffix}:${category}" } },
+            sourceReturnFields = sourceReturnFields.entries
+                .sortedWith(compareBy({ it.key }, { it.value.minOrNull() ?: "" }))
+                .flatMap { (category, suffixes) -> suffixes.sorted().map { sfx -> "$sfx:$category" } },
             invokes = invokedBinds.sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 })).map { bind ->
                 val from = bind.fromParam?.let { pid(it) } ?: "source:${bind.category}"
                 "${pid(bind.invokedParam)}(arg${bind.argIndex})<-$from"
@@ -756,6 +775,7 @@ internal class Summarizer(
         function, paramToReturn, paramToParam, paramFieldWrites, receiverWrites, sinkEffects,
         sourceReturns, sanitizes, invokedParams, origin,
         paramToReturnPaths, paramToReturnFields, paramToReturnFieldPaths, sourceFieldWrites, invokedBinds,
+        sourceReturnFields,
     )
 
     /**
@@ -939,6 +959,12 @@ internal class SummaryAnalysis(
 
     /** P24 §2c: source-born field writes into parameters' objects. */
     private val sourceFieldWrites = HashMap<String, MutableList<SourceFieldWrite>>()
+
+    /** P26 §0 (R161): source-born taint reaching the RETURN's fields. */
+    private val sourceReturnFields = HashMap<String, MutableSet<String>>()
+
+    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    private val sourceReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
 
     /** P24 §2d: what the body passes when it invokes function-valued parameters. */
     private val invokedBinds = LinkedHashMap<String, InvokeBind>()
@@ -1223,6 +1249,17 @@ internal class SummaryAnalysis(
                         paramToReturnFields.getOrPut(fact.param!!) { sortedSetOf() }.add(key.path)
                         val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
                         paramToReturnFieldPaths.getOrPut("${fact.param}\u0000${key.path}") { mutableListOf() }.add(walk)
+                    }
+                    // P26 §0 (R161): a SOURCE born in this body, stored into a
+                    // field of the returned object. The param half of this
+                    // scan existed; the source half did not, and P24's
+                    // constructor synthesis moved exactly these facts off the
+                    // bare key — silently emptying the summary's return
+                    // channel for every factory-shaped callee.
+                    if (fact.site != null) {
+                        sourceReturnFields.getOrPut(fact.category) { sortedSetOf() }.add(key.path)
+                        val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
+                        sourceReturnFieldPaths.getOrPut("${fact.category}\u0000${key.path}") { mutableListOf() }.add(walk)
                     }
                 }
             }
@@ -1525,6 +1562,20 @@ internal class SummaryAnalysis(
                 state.addFacts(resultKey, listOf(fact))
                 chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
             }
+            // P26 §0 (R161): the source-return FIELD channel — the source was
+            // born in the callee and stored into the returned object's field,
+            // so the caller's result carries it at that access path (a field
+            // read of it finds the fact; a getter call through a delegation
+            // still needs the delegation getter lowered — P27's list).
+            for ((category, suffixes) in summary.sourceReturnFields) {
+                for (suffix in suffixes.sorted()) {
+                    val fact = SummaryFact(null, site, category)
+                    upstream[fact] = listOf(site)
+                    val key = TaintKey(result, suffix)
+                    state.addFacts(key, listOf(fact))
+                    chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
+                }
+            }
             // P24 §2: the field channel — the callee stored param i's
             // VALUE into the returned object's field (`Session(token =
             // raw)`), so the argument's BASE taint reaches the result's
@@ -1735,6 +1786,10 @@ internal class SummaryAnalysis(
         invokedBinds = invokedBinds.values.sortedWith(
             compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }),
         ),
+        sourceReturnFields = sourceReturnFields.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        sourceReturnFieldPaths = sourceReturnFieldPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
         origin = if (capHit && originLabel == SummaryOrigin.COMPUTED) SummaryOrigin.RECURSIVE_APPROX else originLabel,
     )
 }

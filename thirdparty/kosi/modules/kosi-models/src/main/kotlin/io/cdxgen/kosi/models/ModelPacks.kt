@@ -66,6 +66,11 @@ object ModelPacks {
                 category = require(entry.str("category"), "literalSources[].category", name),
             )
         } ?: emptyList()
+        val deserializers = root.arr("deserializers")?.objects()?.map { entry ->
+            DeserializerPattern(
+                pattern = require(entry.str("pattern"), "deserializers[].pattern", name),
+            )
+        } ?: emptyList()
         return ModelPack(
             name = name,
             sources = sources,
@@ -74,6 +79,7 @@ object ModelPacks {
             sanitizers = sanitizers,
             effects = effects,
             literalSources = literalSources,
+            deserializers = deserializers,
         )
     }
 
@@ -89,6 +95,7 @@ object ModelPacks {
                 sanitizers = dedupe(merged.sanitizers, pack.sanitizers) { it.pattern },
                 effects = dedupe(merged.effects, pack.effects) { it.pattern },
                 literalSources = dedupe(merged.literalSources, pack.literalSources) { it.namePattern },
+                deserializers = dedupe(merged.deserializers, pack.deserializers) { it.pattern },
             )
         }
         return merged
