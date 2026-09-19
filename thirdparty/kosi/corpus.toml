@@ -1092,3 +1092,34 @@ tier = "deep"
 path = "fixtures/deep-dispatch-ladder"
 capabilities = ["deep", "dispatch", "higher-order", "sam"]
 tolerated_resolution_errors = []
+
+# P25 §0: one capability, every spelling. One flow written 25 ways, with a
+# want per spelling that works and a known-fail per spelling that does not —
+# so a channel that holds for `{ s -> }` and dies for `{ it }` (R152, the
+# defect this fixture generalises) cannot ship again.
+[[fixtures]]
+slug = "spelling-gallery"
+tier = "fixtures"
+path = "fixtures/spelling-gallery"
+capabilities = ["higher-order", "dispatch", "sam", "references", "receivers"]
+tolerated_resolution_errors = []
+
+# P25 §2: DI as dispatch evidence. The container constructs the bound
+# implementation, so the interface call has ONE target and the edge says
+# `di-binding`; the two unbound siblings must stay clean.
+[[fixtures]]
+slug = "di-bound-dispatch"
+tier = "frameworks"
+path = "fixtures/di-bound-dispatch"
+capabilities = ["dispatch", "di", "spring-mvc"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P25 §1: the same helper called three ways — tainted, constant, sanitized.
+# Exactly one finding is correct, and the measurement of whether a
+# context-INSENSITIVE engine gets it right is the phase's §1 answer.
+[[fixtures]]
+slug = "context-shared-helper"
+tier = "fixtures"
+path = "fixtures/context-shared-helper"
+capabilities = ["summaries", "sanitizers", "context"]
+tolerated_resolution_errors = []

@@ -124,6 +124,30 @@ depth histogram, a dispatch-width histogram and `truncations{}`, which
 names any cap that bound the run. A slice whose frame list was cut says so
 in `framesCutBy`; nothing infers depth from a silence.
 
+Since P25 the engine also reads **dependency injection as dispatch
+evidence**. A Spring, Micronaut, Dagger/Hilt or CDI application never
+constructs the implementation behind an interface — the container does, from
+an annotation — so an analysis that reasons only from `new` was blind to
+exactly the classes that run: the taint died at the service boundary and the
+report said nothing. A stereotype (`@Component`, `@Service`, `@Repository`,
+`@Controller`, `@RestController`, `@Configuration`, `@Singleton`,
+`@Inject`, `@ApplicationScoped`, `@Bean`, Hilt's entry points) is now a
+construction site the framework performs, matched on RESOLVED annotation
+FQNs. Where an interface has several implementations and the container binds
+one, the call narrows to it and the hop says `dispatchNarrowedBy:
+di-binding` — narrowing that rests on an annotation, named apart from
+narrowing that rests on a `new`.
+
+Function VALUES are followed in every spelling the language offers: a
+lambda (trailing, named-argument, implicit `it`, multi-parameter), a
+callable reference (`::top`, `obj::method`, a local `fun`), an anonymous
+`fun`, and a function held in a local. `fixtures/spelling-gallery` writes
+one flow twenty-five ways and carries a want per spelling that works and a
+numbered known-fail per spelling that does not — destructured lambda
+parameters, constructor references, function values in a field or a
+collection, SAM conversions, anonymous object expressions and extension
+lambdas are the six that do not, each with a tracker defect.
+
 **Endpoints, services, URLs.** Inbound routes per framework (Spring MVC and
 WebFlux, Ktor, Micronaut, Quarkus/JAX-RS, http4k, gRPC, Android manifest
 components) land in `apiEndpoints[]` with path template, methods, declared

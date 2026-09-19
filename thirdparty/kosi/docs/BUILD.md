@@ -528,3 +528,26 @@ fails (measured). Darwin needs no flag — its `libawt.dylib` has no
 `docker run --platform linux/arm64 ubuntu:24.04` + the pinned
 linux-aarch64 GraalVM + `zlib1g-dev`, then the `native-image` command from
 the Makefile's linux rule against the checked-in fat jar and metadata.
+
+### One capability, every spelling (P25 §0)
+
+R152 — the function-value channel that worked for `{ s -> ... }` and died
+for `{ ... it ... }` — is not a bug about lambdas. It is what happens when a
+capability is proven in the spelling its author happened to type. Kotlin
+gives most constructs three to six spellings, and the engine reaches them
+through different lowering paths, so "it works" is a claim about a spelling
+until a fixture says otherwise.
+
+`fixtures/spelling-gallery` is the answer: ONE flow — `readLine()` to
+`Runtime.exec` — written twenty-five ways, with a want per spelling that
+works and a `known-fail=<defect>` per spelling that does not. There is no
+third state. A spelling that is neither wanted nor known-failed is a
+spelling nobody decided about, and the sweep that produced the gallery found
+five dead channels in one afternoon (every callable-reference form, the
+anonymous `fun`, the local `fun` reference) plus six open defects
+(R154-R158, R147).
+
+The rule for future phases: **a phase that adds a capability adds its
+spellings to the gallery.** The cost is one fixture and one slot; the
+alternative is finding out from a user's repository which spelling you
+happened not to type.

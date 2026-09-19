@@ -376,6 +376,15 @@ object TaintEngine {
      * sites — one trace can walk into a jar and back — and [deps] exposes
      * the tier's summaries for boundary application.
      */
+    /**
+     * P25 §0: a declared function used as a value. [summaryKey] is its key
+     * in the summary table; [receiverOffset] is 1 when the function's first
+     * parameter is its receiver (a bound reference `obj::method` binds it,
+     * so the invocation's argument 0 is the callee's parameter 1) and 0
+     * otherwise.
+     */
+    internal data class FunctionValueTarget(val summaryKey: String, val receiverOffset: Int)
+
     internal class EngineContext(
         val pack: ModelPack,
         val siteIndex: Map<Int, Pair<CompiledFunction, Site>>,
@@ -385,6 +394,21 @@ object TaintEngine {
         val captures: Map<String, Map<String, List<String>>>,
         val options: Options,
         val deps: DepsTier? = null,
+        /**
+         * P25 §0: function values that name a DECLARED function — every
+         * `::reference`, bound reference and anonymous `fun`, which the
+         * lowering now resolves to the target's canonical name. A lambda's
+         * table key is name-with-no-descriptor; a declared function's key
+         * carries its descriptor, so the lambda lookup alone could never
+         * find one and every reference spelling died at the invocation.
+         *
+         * A canonical name shared by several declared overloads is NOT
+         * resolved: the reference names one of them and nothing in the KIR
+         * says which, and answering with an arbitrary overload is the
+         * mistake P22 §1 fixed for the summary table. Those are counted as
+         * unresolved lambdas, which is what they are.
+         */
+        val functionValues: Map<String, FunctionValueTarget> = emptyMap(),
     ) {
         private val lock = Any()
         var joinOverruns: Int = 0
@@ -656,6 +680,19 @@ object TaintEngine {
             truncations.merge("access-path-collapse", accessPathCollapses, Int::plus)
         }
 
+        // P25 §0: declared functions reachable as VALUES, by canonical name,
+        // and only where the name is unambiguous (see FunctionValueTarget).
+        val functionValues = buildMap {
+            val byCanonical = compiled.groupBy { it.function.canonicalName }
+            for ((canonical, functions) in byCanonical) {
+                val withBody = functions.filter { it.function.body != null }
+                val only = withBody.singleOrNull() ?: continue
+                val key = functionKey(only.function)
+                if (key !in summaryResult.table) continue
+                put(canonical, FunctionValueTarget(key, if (only.function.params.firstOrNull()?.receiver == true) 1 else 0))
+            }
+        }
+
         val context = EngineContext(
             pack = pack,
             siteIndex = siteIndex,
@@ -665,6 +702,7 @@ object TaintEngine {
             captures = captures,
             options = options,
             deps = depsTier,
+            functionValues = functionValues,
         )
         // P20 §0: the summary-missing set — compiled functions with no
         // summary in the final table. A body-less function never compiles
@@ -1291,6 +1329,7 @@ object TaintEngine {
                 targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto") ->
                     if (targets.size > applicable.size + 0 && applicable.size == 1) "vta" else null
 
+                targets.size == 1 && context.callIndex.narrowedByDiBinding(ins.callee.fqn) -> "di-binding"
                 targets.size == 1 -> "single-impl"
                 else -> null
             }
@@ -1342,8 +1381,19 @@ object TaintEngine {
             if (targets.isEmpty()) return false
             var applied = false
             for (canonical in targets) {
-                val lambdaSummary = context.table[functionKeyByName(canonical)] ?: continue
-                val captured = context.captures[functionKey(compiled.function)]?.get(canonical).orEmpty()
+                // A lambda's key is name-only; a DECLARED function used as a
+                // value (`::sink`, an anonymous `fun`, a bound reference)
+                // carries a descriptor and is found through the canonical
+                // index. Its receiver, where it has one, is already bound,
+                // so its parameters shift exactly as a lambda's captures do.
+                val declared = context.functionValues[canonical]
+                val byName = context.table[functionKeyByName(canonical)]
+                val lambdaSummary = byName ?: declared?.let { context.table[it.summaryKey] } ?: continue
+                val captured = if (byName == null && declared != null) {
+                    List(declared.receiverOffset) { "" }
+                } else {
+                    context.captures[functionKey(compiled.function)]?.get(canonical).orEmpty()
+                }
                 val hit = applyOneWithBinding(lambdaSummary, { index ->
                     if (index < captured.size) captured[index] else ins.args.getOrNull(index - captured.size)
                 }, ins.result, site, state, chain, collect)
@@ -1513,18 +1563,44 @@ object TaintEngine {
             // whose capture parameters carry the closure's taint).
             for (param in summary.invokedParams.sorted()) {
                 val argReg = binding(param) ?: continue
-                val lambdaCanonical = context.lambdaDefs[functionKey(compiled.function)]?.get(argReg)
-                if (lambdaCanonical == null) {
-                    // A callable reference or local function: no extracted
-                    // body, so no summary — counted, never silent.
+                // The syntactic def map first (a lambda written at the call),
+                // then P24's alias analysis, which knows the function values
+                // an object's field or a collection element may hold — the
+                // spellings §0's sweep found dead: a function stored in a
+                // field, put in a list, or assigned through another object.
+                // Several candidates are a MAY set and each is applied, the
+                // same treatment a virtual call's targets get.
+                val syntactic = context.lambdaDefs[functionKey(compiled.function)]?.get(argReg)
+                val candidates = if (syntactic != null) listOf(syntactic) else lambdaTargets(argReg)
+                if (candidates.isEmpty()) {
+                    // No extracted body and no tracked function value: no
+                    // summary — counted, never silent.
                     collect?.let { context.recordLambdaUnresolved() }
                     continue
                 }
+                for (lambdaCanonical in candidates) {
                 // Lambdas carry no descriptor; the lowering's module-wide
                 // ordinal makes the name unique, so the name-only key is
-                // the function's (P22 §1).
-                val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)] ?: continue
-                val lambdaCaptured = context.captures[functionKey(compiled.function)]?.get(lambdaCanonical).orEmpty()
+                // the function's (P22 §1). A function value that names a
+                // DECLARED function — every `::reference` and anonymous
+                // `fun` since P25 §0 — has a descriptor and is found
+                // through the canonical index instead.
+                val declaredTarget = context.functionValues[lambdaCanonical]
+                val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)]
+                    ?: declaredTarget?.let { context.table[it.summaryKey] }
+                    ?: run {
+                        collect?.let { context.recordLambdaUnresolved() }
+                        continue
+                    }
+                // A declared target's own parameters play the part the
+                // lambda's captures play: a bound reference has its receiver
+                // already bound, so the invocation's argument 0 addresses
+                // the callee's parameter 1.
+                val lambdaCaptured = if (declaredTarget != null && context.table[functionKeyByName(lambdaCanonical)] == null) {
+                    List(declaredTarget.receiverOffset) { "" }
+                } else {
+                    context.captures[functionKey(compiled.function)]?.get(lambdaCanonical).orEmpty()
+                }
                 val lambdaOrigin = lambdaSummary.origin
                 for (effect in lambdaSummary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
                     if (effect.paramIndex < lambdaCaptured.size) {
@@ -1578,6 +1654,7 @@ object TaintEngine {
                             )
                         }
                     }
+                }
                 }
             }
             return moved

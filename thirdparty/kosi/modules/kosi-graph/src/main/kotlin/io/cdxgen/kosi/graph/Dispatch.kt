@@ -62,6 +62,28 @@ internal class DispatchIndex(functions: List<KirFunction>) {
     val classes: Set<String> get() = supertypeClosure.keys
 
     /**
+     * P25 §2: workspace classes a DEPENDENCY-INJECTION CONTAINER constructs.
+     *
+     * In a Spring, Micronaut, Dagger/Hilt or Jakarta application the
+     * implementation behind an interface is never constructed by user code —
+     * the container does it from an annotation — so RTA, which keeps only
+     * candidates whose owner is instantiated, dropped exactly the classes
+     * that actually run. The taint died at the interface call and the report
+     * said nothing, which is a false negative with no diagnostic. A
+     * stereotype IS a construction site; it is just one the framework
+     * performs.
+     *
+     * The same fact narrows: where an interface has several implementations
+     * and only one carries a stereotype, the container's binding is the
+     * dispatch evidence, and the site is labelled `di-binding` rather than
+     * `interface-cha`.
+     *
+     * Matched on RESOLVED annotation FQNs by suffix segment (the rule
+     * `Roots` already follows), never on short names.
+     */
+    val diManagedClasses: Set<String> = io.cdxgen.kosi.kir.DiStereotypes.managedClasses(functions)
+
+    /**
      * Workspace classes indexed by their last simple name, so a type FQN that
      * arrives package-qualified (constructor callees, receiver types from
      * resolution) can be canonicalized to the chain form the KIR uses for
