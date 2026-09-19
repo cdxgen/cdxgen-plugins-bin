@@ -109,6 +109,8 @@ object AnnotationParser {
             var resolution: String? = null
             var sourceParam: String? = null
             var sourceTransport: String? = null
+            var frames: Int? = null
+            var via = mutableListOf<String>()
             val knownFailByBackend = linkedMapOf<String, Int>()
 
             for (token in tokens.drop(1)) {
@@ -162,6 +164,20 @@ object AnnotationParser {
                     "resolution" -> resolution = rawValue
                     "sourceparam" -> sourceParam = rawValue
                     "sourcetransport" -> sourceTransport = rawValue
+                    "frames" -> frames = rawValue.toIntOrNull() ?: run {
+                        results.add(Failure("frames must be an integer", lineText, fileName, index + 1))
+                        return@forEachIndexed
+                    }
+                    "via" -> {
+                        // Comma-separated `fn:<name>` segments in one token;
+                        // the annotation grammar is whitespace-delimited, so
+                        // the chain arrives as one value.
+                        via = rawValue.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+                        if (via.isEmpty()) {
+                            results.add(Failure("via must name at least one fn: segment", lineText, fileName, index + 1))
+                            return@forEachIndexed
+                        }
+                    }
                     "maxdepth" -> maxDepth = rawValue.toIntOrNull() ?: run {
                         results.add(Failure("maxdepth must be an integer", lineText, fileName, index + 1))
                         return@forEachIndexed
@@ -240,6 +256,8 @@ object AnnotationParser {
                 resolution = resolution,
                 sourceParam = sourceParam,
                 sourceTransport = sourceTransport,
+                frames = frames,
+                via = via,
                 file = fileName,
                 line = index + 1,
             )

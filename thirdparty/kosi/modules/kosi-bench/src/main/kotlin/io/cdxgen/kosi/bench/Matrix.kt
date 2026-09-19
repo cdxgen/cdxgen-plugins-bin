@@ -44,6 +44,25 @@ data class MatrixSlot(
 object Matrix {
 
     /**
+     * P24 / 10-DEEP-EVIDENCE.md §3: the deep tier runs the DEFAULT slot
+     * only (`resolved` + security + auto), plus `--deps` on the fixtures
+     * whose flows leave the workspace. "One slot, not six" is the tier's
+     * cost discipline: a deep fixture is small and hard, and the matrix
+     * product would multiply its price without multiplying its proof. The
+     * golden gate reads the same predicate, so a deep fixture costs ONE
+     * golden pair, not five.
+     */
+    val DEEP_TIERS = setOf("deep")
+
+    /** The slots a corpus entry's tier runs. */
+    fun slotsFor(tier: String): List<MatrixSlot> =
+        if (tier in DEEP_TIERS) {
+            defaultMatrix().filter { it.label == MatrixSlot.RESOLVED_LABEL }
+        } else {
+            defaultMatrix()
+        }
+
+    /**
      * Since P1 the matrix runs every case three ways: the two syntax slots
      * (dataflow modes, as in P0) and the resolved backend, so the resolved
      * tier's expectations are ratcheted per fixture exactly like the syntax

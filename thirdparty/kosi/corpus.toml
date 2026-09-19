@@ -1058,3 +1058,37 @@ repo = "https://github.com/grpc/grpc-kotlin"
 sha = "fffe0320d3c6af86e466f96bb3ec424f1c36a063"
 classpath_file = "classpath.txt"
 capabilities = ["grpc", "rpc", "endpoints"]
+
+# ---- P24: the deep tier (10-DEEP-EVIDENCE.md). Layered applications, small
+# in lines and deep in frames, each with a negative half. One slot per
+# fixture (the default `resolved` one - Matrix.slotsFor), added WITH its
+# known-fails: the inventory is the measurement.
+
+[[fixtures]]
+slug = "deep-layered-service"
+tier = "deep"
+path = "fixtures/deep-layered-service"
+capabilities = ["deep", "layered", "dispatch-width", "sanitizer"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "deep-aliased-state"
+tier = "deep"
+path = "fixtures/deep-aliased-state"
+capabilities = ["deep", "aliasing", "object-identity", "data-class-copy"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "deep-async-pipeline"
+tier = "deep"
+path = "fixtures/deep-async-pipeline"
+classpath_file = "classpath.txt"
+capabilities = ["deep", "coroutines", "flow", "channel", "suspend"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "deep-dispatch-ladder"
+tier = "deep"
+path = "fixtures/deep-dispatch-ladder"
+capabilities = ["deep", "dispatch", "higher-order", "sam"]
+tolerated_resolution_errors = []

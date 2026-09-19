@@ -536,7 +536,9 @@ object Main {
                     problems.add("${entry.slug}: declares classpath_file '${entry.classpathFile}' which is not on disk")
                     continue
                 }
-                for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
+                // P24: a deep-tier fixture is golden-pinned in the default
+                // slot only - one pair per fixture, the tier's cost rule.
+                for (slot in io.cdxgen.kosi.bench.Matrix.slotsFor(entry.tier)) {
                     checked++
                     portabilityChecked++
                     // The ENTRY-RELATIVE value is what the report records: an

@@ -255,6 +255,8 @@ class KirLoweringTest {
                     data class Point(val x: Int, val y: Int)
 
                     class Plain(val x: Int)
+
+                    class Bare
                 """.trimIndent(),
             ),
         )
@@ -264,9 +266,17 @@ class KirLoweringTest {
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.copy") }, "copy is synthesized")
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.component1") }, "component1 is synthesized")
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.component2") }, "component2 is synthesized")
+        // P24 §2b: a class with a STORED primary-constructor parameter gets
+        // the `<init>` that writes the object's fields (the constructor is a
+        // function); a class with no stored parameters gets nothing, and no
+        // OTHER synthetic member exists for either.
+        val ctors = result.functions.filter { it.syntheticCause == "primary-constructor" }
+        assertTrue(ctors.any { it.canonicalName.endsWith("Plain.<init>") }, "Plain's primary constructor is synthesized")
+        assertTrue(ctors.any { it.canonicalName.endsWith("Point.<init>") }, "Point's primary constructor is synthesized")
+        assertTrue(ctors.none { it.canonicalName.endsWith("Bare.<init>") }, "Bare has no stored parameters to write")
         assertTrue(
-            result.functions.none { it.canonicalName.contains("Plain.") && it.syntheticCause != null },
-            "a plain class gets no synthetic members",
+            result.functions.none { it.canonicalName.contains("Bare.") && it.syntheticCause != null },
+            "a class with no stored primary parameters gets no synthetic members",
         )
     }
 

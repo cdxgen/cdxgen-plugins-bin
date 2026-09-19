@@ -482,10 +482,86 @@ object KirLowering {
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
                 }
+                // P24 §2b: every class with a primary constructor gets its
+                // `<init>` lowered as the function it is — one that writes
+                // the object's fields. Until now a primary constructor
+                // existed in the KIR only as a CALL SITE (`kind=constructor`)
+                // with no body anywhere, so `Job(tainted)` could never taint
+                // `job.command`: the flow engine had no function to
+                // summarise. Secondary constructors were already lowered;
+                // this is the primary's turn.
+                for (klass in classesWithPrimaryConstructor(file)) {
+                    synthesizePrimaryConstructor(klass)?.let { functions.add(it) }
+                }
             }
             functions.addAll(lambdaContext.functions)
         }
         return Result(functions, failures, functionCount, symbolFactFailures)
+    }
+
+    /** Classes declaring a primary constructor with at least one stored (`val`/`var`) parameter. */
+    private fun classesWithPrimaryConstructor(file: org.jetbrains.kotlin.psi.KtFile): List<org.jetbrains.kotlin.psi.KtClass> {
+        val out = mutableListOf<org.jetbrains.kotlin.psi.KtClass>()
+        file.accept(object : KtTreeVisitorVoid() {
+            override fun visitClass(klass: org.jetbrains.kotlin.psi.KtClass) {
+                val primary = klass.primaryConstructor
+                if (primary != null && primary.valueParameters.any { it.hasValOrVar() }) out.add(klass)
+                super.visitClass(klass)
+            }
+        })
+        return out
+    }
+
+    /**
+     * The primary constructor's body: `fieldSet this.<name> = <param>` for
+     * each stored parameter, in declaration order — the object-identity
+     * content of a construction. The receiver parameter mirrors a member
+     * function's `%0`/`this`, so the summary's `paramFieldWrites` reach the
+     * caller's NEW OBJECT through the same channel every member uses.
+     */
+    private fun synthesizePrimaryConstructor(klass: org.jetbrains.kotlin.psi.KtClass): KirFunction? {
+        val primary = klass.primaryConstructor ?: return null
+        val stored = primary.valueParameters.filter { it.hasValOrVar() }
+        if (stored.isEmpty()) return null
+        val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(klass)
+        val className = klass.name ?: "<anonymous>"
+        val base = listOf(pkg, chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val file = klass.containingFile?.virtualFile?.path ?: "<memory>"
+        val params = mutableListOf(io.cdxgen.kosi.kir.KirParam("%0", "this", null, receiver = true))
+        val writes = mutableListOf<io.cdxgen.kosi.kir.KirIns>()
+        stored.forEachIndexed { position, parameter ->
+            val name = parameter.name ?: return@forEachIndexed
+            params.add(io.cdxgen.kosi.kir.KirParam("%${position + 1}", name, parameter.typeReference?.text, receiver = false))
+            writes.add(
+                io.cdxgen.kosi.kir.KirFieldSet(
+                    "%0",
+                    io.cdxgen.kosi.kir.AccessPath.field("%0", name),
+                    "%${position + 1}",
+                ),
+            )
+        }
+        writes.add(io.cdxgen.kosi.kir.KirReturn(null))
+        return KirFunction(
+            canonicalName = "$base.<init>",
+            jvmDescriptor = null,
+            purl = "",
+            file = file,
+            line = klass.line(),
+            column = klass.column(),
+            params = params,
+            returnType = null,
+            modifiers = emptySet(),
+            visibility = "public",
+            enclosingClass = listOf(chain, className).filter { it.isNotEmpty() }.joinToString("."),
+            overrides = emptyList(),
+            overriddenBy = emptyList(),
+            annotations = emptyList(),
+            syntheticCause = "primary-constructor",
+            body = io.cdxgen.kosi.kir.KirBody(
+                listOf(io.cdxgen.kosi.kir.KirBlock("b0", entry = true, instructions = writes)),
+            ),
+        )
     }
 
     private fun modalityModifier(symbol: KaCallableSymbol?): String? = when (symbol?.modality) {
