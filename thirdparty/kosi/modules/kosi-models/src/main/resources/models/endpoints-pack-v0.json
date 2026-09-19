@@ -1585,6 +1585,14 @@
         "io.vertx.ext.web.Route.subRouter"
       ],
       "_p19_comment": "P19: the sub-router mount moved here from dslFunctions (it was swapped there from Router.mountSubRouter in P18). Vert.x 5's own spelling (Route.subRouter(Router), javap on io/vertx/ext/web/Route.class in io.vertx:vertx-web:5.1.7): the ROUTE the mount is called on carries the path prefix, and every route declared on the MOUNTED router (the call's first argument) publishes under it, with the mount route's trailing `*` stripped. The entry is exercised by fixtures/vertx-subrouter; the prefix walk keys on the mounted router's register, not on lambda links. Same-function mounts only \u2014 a sub-router built in another function is a named gap."
+    },
+    {
+      "id": "android-provider",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "android.content.ContentProvider"
+      ],
+      "handlerInput": "all"
     }
   ],
   "name": "endpoints-pack-v0",
@@ -1709,6 +1717,33 @@
       "pattern": "retrofit2.Retrofit.Builder.baseUrl",
       "protocol": "https",
       "urlArgument": 0
+    }
+  ],
+  "outboundInterfaces": [
+    {
+      "framework": "retrofit2",
+      "methodAnnotations": [
+        "retrofit2.http.GET",
+        "retrofit2.http.POST",
+        "retrofit2.http.PUT",
+        "retrofit2.http.DELETE",
+        "retrofit2.http.PATCH",
+        "retrofit2.http.HEAD",
+        "retrofit2.http.OPTIONS",
+        "retrofit2.http.HTTP",
+        "retrofit2.http.Multipart",
+        "retrofit2.http.FormUrlEncoded"
+      ],
+      "protocol": "https",
+      "clientLibrary": "retrofit2"
+    },
+    {
+      "framework": "feign",
+      "methodAnnotations": [
+        "feign.RequestLine"
+      ],
+      "protocol": "https",
+      "clientLibrary": "feign"
     }
   ],
   "_p19_outbound_comment": "P19 liveness sweep: nine outbound rows carried urlArgument -1 and OutboundDetector SKIPS models with no URL argument (`if (model.urlArgument < 0) continue`) \u2014 unread vocabulary, deleted: co.elastic.clients.transport.rest_client.RestClientTransport, com.google.cloud.storage.StorageOptions.getDefaultInstance, com.openai.client.okhttp.OpenAIOkHttpClient.builder, dev.langchain4j.model.openai.OpenAiChatModel.builder, io.ktor.client.HttpClient, io.ktor.client.request.request, java.net.http.HttpClient.newHttpClient, org.apache.kafka.clients.producer.KafkaProducer, software.amazon.awssdk.services.s3.S3Client.builder. The remaining rows are exercised by fixtures/outbound-clients."

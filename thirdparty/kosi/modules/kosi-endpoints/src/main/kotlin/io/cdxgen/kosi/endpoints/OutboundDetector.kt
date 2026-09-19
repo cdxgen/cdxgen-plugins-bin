@@ -36,16 +36,58 @@ object OutboundDetector {
         module: KirModule,
         folder: KirValueFolder,
         pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
+        /** P26 §1.2: declaration annotations WITH VALUES, for the interface row's path. */
+        annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>> = emptyMap(),
     ): List<Outbound> {
         val out = mutableListOf<Outbound>()
         val functions = module.functions.sortedWith(
             compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" }, { it.file }, { it.line }),
         )
+        // P26 §1.2: declarations by canonical name, bodyless included — the
+        // annotated interface method has no body, and the CALL to it is the
+        // outbound event the library performs by proxy.
+        val declarationsByName = module.functions.groupBy { it.canonicalName }
         for (fn in functions) {
             val body = fn.body ?: continue
             for (block in body.blocks) {
                 for ((index, ins) in block.instructions.withIndex()) {
                     if (ins !is KirCall) continue
+                    // The annotated-interface arm first: the callee's
+                    // DECLARATION carries the framework's method annotation,
+                    // and the annotation's value is the remote path.
+                    val interfaceRow = pack.outboundInterfaces.firstOrNull { row ->
+                        val declaration = declarationsByName[ins.callee.fqn]?.firstOrNull()
+                            ?: return@firstOrNull false
+                        declaration.body == null &&
+                            declaration.annotations.any { annotation ->
+                                row.methodAnnotations.any { annotation == it || annotation.endsWith(".$it") }
+                            }
+                    }
+                    if (interfaceRow != null) {
+                        val declaration = declarationsByName.getValue(ins.callee.fqn).first()
+                        val annotationValue = annotationValues[declaration.canonicalName]
+                            ?.firstOrNull { decl ->
+                                interfaceRow.methodAnnotations.any { decl.fqn == it || decl.fqn.endsWith(".$it") }
+                            }
+                        val path = annotationValue?.namedValues?.get("value")?.firstOrNull()
+                            ?: annotationValue?.value
+                        out.add(
+                            Outbound(
+                                protocol = interfaceRow.protocol,
+                                clientLibrary = interfaceRow.clientLibrary,
+                                endpoint = path,
+                                raw = path ?: ins.callee.fqn,
+                                resolution = if (path != null) "literal" else "unresolved",
+                                enclosingSymbol = fn.canonicalName,
+                                position = Position(
+                                    fn.file,
+                                    if (ins.line > 0) ins.line else fn.line,
+                                    fn.line,
+                                ),
+                            ),
+                        )
+                        continue
+                    }
                     val model = pack.outbound.firstOrNull { o ->
                         EndpointDetector.matches(ins.callee.fqn, o.pattern)
                     } ?: continue

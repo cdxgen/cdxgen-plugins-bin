@@ -136,7 +136,33 @@ construction site the framework performs, matched on RESOLVED annotation
 FQNs. Where an interface has several implementations and the container binds
 one, the call narrows to it and the hop says `dispatchNarrowedBy:
 di-binding` — narrowing that rests on an annotation, named apart from
-narrowing that rests on a `new`.
+narrowing that rests on a `new`. Since P26 the BINDING METHODS are read too:
+`@Binds` (the parameter IS the implementation — no construction anywhere),
+`@Provides`/`@Bean` by parameter or by construction, and Koin's provider
+lambdas (`single<Api> { ApiImpl() }`, `factory`, `viewModel`, both the 3.x
+and 2.x package spellings). A container that manages TWO implementations of
+one interface publishes BOTH — a dispatch width of 2, labelled `di-binding`,
+which is the honest answer — and a container that binds the non-sinking
+implementation publishes no finding at all.
+
+Since P26 the engine also models **what the framework does with the value**,
+not only where it enters. Persistence interfaces are sinks: a Spring Data
+repository method (a derived query name or `@Query`) and a Room
+`@Dao`/`@Query` method are matched on what the DECLARATION carries — the
+repository base it extends or the annotations on it — because the interface
+is user code and no callee pattern can name it; Exposed's `Transaction.exec`
+is a plain sink. Deserializers (Jackson `readValue`, kotlinx
+`decodeFromString`, Gson `fromJson`) produce FIELD-BEARING results: the
+produced object carries the input's taint on its fields, which is how a
+request body reaches a sink through a DTO. Retrofit and Feign INTERFACES are
+outbound services: the annotated method is the call, and the method's
+annotation value is the path, published in `services[]`/`urls[]`. Android's
+cross-component channel is modelled end to end — `getIntent()` is a source,
+`putExtra`/`putString` are write effects, and a `ContentProvider`'s
+`query`/`insert`/`update`/`delete` arguments are seeded inputs (any app on
+the device can call a provider). Property initializers are lowered as the
+executable code they are, so a Koin module at top level — the framework's
+own idiom — is visible to the whole engine.
 
 Function VALUES are followed in every spelling the language offers: a
 lambda (trailing, named-argument, implicit `it`, multi-parameter), a

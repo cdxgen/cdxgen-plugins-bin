@@ -113,15 +113,34 @@ internal data class Site(val id: Int, val blockId: String, val indexInBlock: Int
  * parameters of one handler are two facts — "which input is untrusted" is
  * a per-parameter fact, not a per-function one. `-1` is every other birth.
  */
-internal data class TaintFact(val site: Int, val category: String, val param: Int = -1) : Comparable<TaintFact> {
+internal data class TaintFact(val site: Int, val category: String, val param: Int = -1, val fieldBearing: Boolean = false) : Comparable<TaintFact> {
+    /**
+     * P26 §1.3: this fact sits on a value whose CONTENT came out of a pack
+     * DESERIALIZER (Jackson `readValue`, kotlinx `decodeFromString`, Gson
+     * `fromJson`) — the produced object carries the input's taint on its
+     * FIELDS, so a field read of it derives the same category. Ordinary
+     * facts (a tainted reference to some object) derive nothing on a field
+     * read: the object's fields are other values.
+     */
+    val isFieldBearing: Boolean get() = fieldBearing
+
+    /** The field-bearing variant of this fact. */
+    fun asFieldBearing(): TaintFact =
+        if (fieldBearing) this else TaintFact(site, category, param, fieldBearing = true)
+
     override fun compareTo(other: TaintFact): Int =
-        compareValuesBy(this, other, { it.site }, { it.category }, { it.param })
+        compareValuesBy(this, other, { it.site }, { it.category }, { it.param }, { it.fieldBearing })
 }
 
-/** Reporting facts carry paths on STATE KEYS, so a field read derives nothing. */
+/**
+ * Reporting facts carry paths on STATE KEYS, so a field read derives nothing
+ * — except a [TaintFact.fieldBearing] fact, whose value's FIELDS carry the
+ * taint a pack deserializer moved there.
+ */
 private object TaintFactOps : FactOps<TaintFact> {
     override fun categoryOf(fact: TaintFact): String = fact.category
-    override fun deriveOnFieldRead(fact: TaintFact, suffix: String): TaintFact? = null
+    override fun deriveOnFieldRead(fact: TaintFact, suffix: String): TaintFact? =
+        if (fact.fieldBearing) fact.asFieldBearing() else null
 }
 
 /**
@@ -576,7 +595,10 @@ object TaintEngine {
         }
 
         // ---- P5: resolve callees, condense SCCs, compute summaries -----------
-        val callIndex = CallIndex(compiled, options.dispatchMode)
+        // allFunctions: the DI facts are SIGNATURE facts, and a binding
+        // method (`@Binds`) is abstract — bodyless, invisible to the compiled
+        // list (P26 §2).
+        val callIndex = CallIndex(compiled, options.dispatchMode, module.functions)
 
         // ---- P9: the `--deps` tier, summarised BEFORE the workspace's -------
         // (dependencies never call back into the workspace, so their
@@ -1129,9 +1151,49 @@ object TaintEngine {
             if (collect != null) context.recordPackPassthrough(fqn)
         }
 
+        /**
+         * P26 §1.3: mark the deserializer's result facts FIELD-BEARING —
+         * every field read of the produced object derives them. The variant
+         * facts take over the key, and each inherits the chain entry of the
+         * fact it replaced (a replaced identity without an entry dead-ends
+         * the backward walk at exactly this call).
+         */
+        override fun onDeserializerResult(
+            result: String?,
+            site: Int,
+            state: FlowState<TaintFact>,
+            chain: HashMap<ChainKey<TaintFact>, Move>,
+            collect: TransferEvents?,
+        ) {
+            if (result == null) return
+            val key = TaintKey(result, "")
+            val facts = state.factsOf(key).toList()
+            if (facts.isEmpty()) return
+            val bearing = java.util.TreeSet(facts.map { it.asFieldBearing() })
+            state.setFacts(key, bearing)
+            for (original in facts) {
+                val variant = original.asFieldBearing()
+                val chainKey = ChainKey(variant, key)
+                if (chain[chainKey] == null) {
+                    chain[chainKey] = chain[ChainKey(original, key)]
+                        ?: Move(site, null, "deserializer", packMoveOrigin())
+                }
+            }
+        }
+
         override fun onSinkMatched(collect: TransferEvents?) {
             collect?.let { it.sinkSites += 1 }
         }
+
+        /**
+         * P26 §1.1: the callee names a bodyless INTERFACE method whose
+         * declaration matches a pack interfaceSinks row — a Spring Data
+         * repository method (derived query or @Query) or a Room DAO query.
+         * Every argument is relevant: the method's parameters ARE the
+         * query's bind values.
+         */
+        override fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? =
+            InterfaceSinks.sinkPatternFor(context.callIndex, pack, ins)
 
         override fun onResolvedCall(ins: KirCall, site: Int, collect: TransferEvents?) {}
 
@@ -1325,11 +1387,16 @@ object TaintEngine {
             if (width > options.dispatchJoinBudget) context.recordJoinOverrun()
             // P24 §3: the per-hop dispatch evidence the frames read — what
             // was CONSIDERED, what was APPLIED, and what narrowed it.
+            // P26 §2: a binding that leaves TWO managed implementations is
+            // still the binding's decision — `di-binding` names the evidence
+            // (the container's wiring), not the count, and it outranks the
+            // blander width-based labels at every width.
             val narrowedBy = when {
+                context.callIndex.narrowedByDiBinding(ins.callee.fqn) -> "di-binding"
+
                 targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto") ->
                     if (targets.size > applicable.size + 0 && applicable.size == 1) "vta" else null
 
-                targets.size == 1 && context.callIndex.narrowedByDiBinding(ins.callee.fqn) -> "di-binding"
                 targets.size == 1 -> "single-impl"
                 else -> null
             }
@@ -1479,6 +1546,21 @@ object TaintEngine {
                     state.addFacts(resultKey, listOf(fact))
                     moved = true
                     chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
+                }
+                // P26 §0 (R161): the source-return FIELD channel — same
+                // birth, but the callee stored it into the returned object's
+                // FIELD, so the caller's result carries it at that access
+                // path. The field read finds it; the ALIAS class fans it
+                // across the caller's names of the object.
+                for ((category, suffixes) in summary.sourceReturnFields) {
+                    for (suffix in suffixes.sorted()) {
+                        val fact = TaintFact(site, category)
+                        context.recordSourceReturn(fact, summary.sourceReturnFieldPaths["$category\u0000$suffix"].orEmpty())
+                        val key = TaintKey(result, suffix)
+                        state.addFacts(key, listOf(fact))
+                        moved = true
+                        chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
+                    }
                 }
                 // P24 §2: the field channel — the callee stored param i's
                 // VALUE into the returned object's field, so the argument's
@@ -1870,7 +1952,11 @@ object TaintEngine {
         if (!entryFact && !literalBirth && sourcePattern == null && !upstreamBirth) return null
         if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
-        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
+        // P26 §1.1: a hit whose callee has no pack row may be an
+        // interface-declared sink (the host's interfaceSink arm produced it).
+        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
+            ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
+            ?: return null
 
         // The upstream path of a source-return birth: taint that came back
         // from a callee's internal source starts its trace THERE, not at the
@@ -2110,7 +2196,11 @@ object TaintEngine {
         val effect = hit.effect
         val sinkRef = siteIndex[effect.sinkSite] ?: return null
         val sinkIns = sinkRef.second.ins as? KirCall ?: return null
-        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
+        // P26 §1.1: a hit whose callee has no pack row may be an
+        // interface-declared sink (the host's interfaceSink arm produced it).
+        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
+            ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
+            ?: return null
         // The fact must have been born at a REAL source — a pack source call,
         // a call whose callee RETURNED source taint (the source-return birth:
         // the real source lives at the head of the recorded upstream path,

@@ -1114,6 +1114,74 @@ path = "fixtures/di-bound-dispatch"
 capabilities = ["dispatch", "di", "spring-mvc"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
+# P26 §2: finish the container — the BINDING METHODS. @Binds (the parameter
+# is the implementation, no construction anywhere), @Bean/@Provides by
+# parameter and by construction, Koin's provider lambdas in both package
+# spellings, two bindings of one interface (both targets, width 2,
+# `di-binding`), and the unbound siblings that must stay clean.
+[[fixtures]]
+slug = "di-module-bindings"
+tier = "frameworks"
+path = "fixtures/di-module-bindings"
+capabilities = ["dispatch", "di", "bindings", "koin", "dagger", "spring"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P26 §0 (R161): the source that comes back inside an object. A source born
+# in a factory callee, stored into the constructed object's FIELD — the shape
+# P24's constructor synthesis made load-bearing and no summary channel
+# carried (http4k's delegation factories went silent between the P23 and P24
+# builds; 22 findings, no gate watching).
+[[fixtures]]
+slug = "source-return-fields"
+tier = "fixtures"
+path = "fixtures/source-return-fields"
+capabilities = ["taint", "summaries", "source-returns", "object-identity", "constructor-synthesis"]
+tolerated_resolution_errors = []
+
+# P26 §1.3: deserialization as a boundary — the produced OBJECT carries the
+# source's taint on its FIELDS (Jackson readValue, kotlinx
+# decodeFromString, Gson fromJson), the hop that makes a request body reach
+# a sink through a DTO. The cross-boundary wildcard channel is R163.
+[[fixtures]]
+slug = "deserialization-fields"
+tier = "fixtures"
+path = "fixtures/deserialization-fields"
+capabilities = ["taint", "deserialization", "dto-fields", "jackson", "kotlinx-serialization", "gson"]
+tolerated_resolution_errors = []
+
+# P26 §1.1: persistence as sinks — Spring Data repository interfaces
+# (derived query names and @Query), Room DAOs (@Dao/@Query), Exposed's
+# Transaction.exec. The interface is USER code: the sink matches what the
+# DECLARATION carries, not an FQN pattern.
+[[fixtures]]
+slug = "persistence-sinks"
+tier = "fixtures"
+path = "fixtures/persistence-sinks"
+capabilities = ["taint", "sql-query", "spring-data", "room", "exposed", "interface-sinks"]
+tolerated_resolution_errors = []
+
+# P26 §1.2: outbound as services — the annotated interface method IS the
+# call (Retrofit @GET family, Feign @RequestLine); the base URL rides the
+# existing builder row, resolved through the config resolver.
+[[fixtures]]
+slug = "outbound-interfaces"
+tier = "fixtures"
+path = "fixtures/outbound-interfaces"
+capabilities = ["outbound", "services", "urls", "retrofit2", "feign", "interface-outbound"]
+tolerated_resolution_errors = []
+
+# P26 §1.4: Android's cross-component channel — Intent/Bundle extras out of
+# one component and into another (the write half is a pack effect, the read
+# half the existing source), and a ContentProvider's query() arguments as
+# inputs any app on the device can supply (the provider framework entry
+# seeds them like every other handler).
+[[fixtures]]
+slug = "intent-extras-channel"
+tier = "fixtures"
+path = "fixtures/intent-extras-channel"
+capabilities = ["android", "intent", "extras", "content-provider", "endpoint-sources"]
+tolerated_resolution_errors = []
+
 # P25 §1: the same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
 # context-INSENSITIVE engine gets it right is the phase's §1 answer.

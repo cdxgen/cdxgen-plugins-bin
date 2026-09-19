@@ -312,6 +312,20 @@ data class ParameterAnnotation(
     val kind: String,
 )
 
+/**
+ * P26 §1.2: an OUTBOUND INTERFACE — Retrofit and Feign declare remote calls
+ * as annotated methods on an interface the library implements at runtime.
+ * There is no body to walk and no call-site URL argument: the ANNOTATED
+ * METHOD IS THE CALL, and the path is the annotation's value (resolved to
+ * the declaration's annotation VALUES where the pipeline carries them).
+ */
+data class OutboundInterfaceModel(
+    val framework: String,
+    val methodAnnotations: List<String>,
+    val protocol: String,
+    val clientLibrary: String,
+)
+
 /** One outbound client call shape: callee pattern plus where the URL argument sits. */
 data class OutboundModel(
     val pattern: String,
@@ -332,6 +346,8 @@ data class EndpointsPack(
     val name: String,
     val frameworks: List<FrameworkModel>,
     val outbound: List<OutboundModel>,
+    /** P26 §1.2: annotated-interface outbound declarations (Retrofit, Feign). */
+    val outboundInterfaces: List<OutboundInterfaceModel> = emptyList(),
     val configReaders: List<ConfigReaderModel>,
 ) {
     /** The closed framework vocabulary annotation validation reads. */
@@ -456,6 +472,14 @@ object EndpointModels {
             name = root.str("name") ?: "endpoints-pack",
             frameworks = frameworks,
             outbound = outbound,
+            outboundInterfaces = root.arr("outboundInterfaces")?.objects()?.map { o ->
+                OutboundInterfaceModel(
+                    framework = require(o.str("framework"), "outboundInterfaces[].framework"),
+                    methodAnnotations = o.arr("methodAnnotations")?.strings() ?: emptyList(),
+                    protocol = require(o.str("protocol"), "outboundInterfaces[].protocol"),
+                    clientLibrary = require(o.str("clientLibrary"), "outboundInterfaces[].clientLibrary"),
+                )
+            } ?: emptyList(),
             configReaders = configReaders,
         )
     }
