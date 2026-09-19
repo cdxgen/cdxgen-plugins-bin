@@ -457,6 +457,10 @@ internal class CallIndex(
         .groupBy({ it.first }, { it.second })
         .mapValues { (_, fs) -> fs.sortedWith(compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" })) }
 
+    /** P25 §2: workspace classes a DI container constructs. */
+    val diManagedClasses: Set<String> =
+        io.cdxgen.kosi.kir.DiStereotypes.managedClasses(compiled.map { it.function })
+
     /** Workspace classes the engine saw constructed: KirNew sites + constructor calls + singletons. */
     private val instantiatedClasses: Set<String> = buildSet {
         for (cf in compiled) {
@@ -478,7 +482,15 @@ internal class CallIndex(
             val owner = cf.function.enclosingClass
             if (owner != null && flags.any { it == "object" || it == "companion" || it == "enum" }) add(owner)
         }
+        // P25 §2: a DI stereotype is a construction site the CONTAINER
+        // performs. Without it an injected implementation is a class the run
+        // never saw constructed, so RTA dropped it and the taint died at the
+        // service boundary — the shape every Spring, Micronaut, Hilt and CDI
+        // application has. The same predicate the call graph's dispatch index
+        // reads (P22: one question, one answer).
+        addAll(diManagedClasses)
     }
+
 
     /** A package-qualified type FQN matches the KIR's chain-form classes by suffix. */
     private fun canonicalClasses(typeFqn: String): List<String> =
@@ -520,10 +532,28 @@ internal class CallIndex(
             // Keep only targets whose owner the run saw instantiated; a class
             // with no constructor site and no singleton flag never executes.
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in instantiatedClasses }
-            if (ready.isNotEmpty()) return ready
+            if (ready.isNotEmpty()) {
+                // P25 §2: remember WHEN the container's binding is what
+                // decided the site — survivors all container-managed, and
+                // something dropped. The narrowing reason belongs in the
+                // trace (a narrowing that rests on an annotation is
+                // different evidence from one that rests on a `new`), and
+                // only this function knows it.
+                if (ready.size < candidates.size &&
+                    ready.all { it.enclosingClass != null && it.enclosingClass in diManagedClasses }
+                ) {
+                    diDecidedSites.add(calleeFqn)
+                }
+                return ready
+            }
         }
         return candidates
     }
+
+    /** Callee FQNs whose target set the DI bindings decided (P25 §2). */
+    private val diDecidedSites = java.util.Collections.synchronizedSet(sortedSetOf<String>())
+
+    fun narrowedByDiBinding(calleeFqn: String): Boolean = calleeFqn in diDecidedSites
 }
 
 /**

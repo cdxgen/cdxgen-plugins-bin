@@ -323,6 +323,14 @@ private class Dispatch(
             if (flags.any { it == "object" || it == "companion" || it == "enum" }) rtaInstantiated.add(klass)
         }
         rtaInstantiated.addAll(rootSeeds)
+        // P25 §2: a DI stereotype is a construction site the FRAMEWORK
+        // performs. Without this, the implementation behind an injected
+        // interface — which user code never constructs, that being the whole
+        // point of a container — is a class RTA is "still waiting on", so
+        // the interface call resolves to nothing and the taint dies with no
+        // diagnostic. Every Spring, Micronaut, Hilt and CDI service has this
+        // shape at its service boundary.
+        rtaInstantiated.addAll(index.diManagedClasses)
     }
 
     private fun reset() {
@@ -551,6 +559,11 @@ private class Dispatch(
         val callType = when {
             index.isSealedSite(declared) && gated.targets.size == 1 -> "sealed-exact"
             index.isSealedSite(declared) -> "sealed-bounded"
+            // P25 §2: the container's binding decided this site (gateRtaVta
+            // says so); it outranks the interface label because it names the
+            // EVIDENCE, and `interface-cha` would claim the site was never
+            // narrowed at all.
+            gated.callType == "di-binding" -> "di-binding"
             index.isInterfaceSite(declared) -> "interface-cha"
             else -> "receiver-typed"
         }
@@ -565,10 +578,19 @@ private class Dispatch(
     private fun gateRtaVta(site: Site, candidates: List<KirFunction>): Quad {
         var effective = candidates
         var waitingOn: Set<String> = emptySet()
+        var diDecided = false
         if (usesRta) {
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in rtaInstantiated }
             waitingOn = candidates.mapNotNull { it.enclosingClass }.filter { it !in rtaInstantiated }.toSortedSet()
             if (ready.isEmpty()) return Quad(emptyList(), callType = "", waitingOn = waitingOn)
+            // P25 §2: the container's binding is what decided this site when
+            // the survivors are DI-managed, something was dropped, and no
+            // survivor was constructed by user code. Labelled so a reader
+            // can tell a narrowing that rests on an annotation from one that
+            // rests on a `new` — they are different evidence and a wrong
+            // binding is a different bug from a wrong type.
+            diDecided = ready.size < candidates.size &&
+                ready.all { it.enclosingClass != null && it.enclosingClass in index.diManagedClasses }
             effective = ready
         }
         if (algorithmUsed == "vta") {
@@ -586,7 +608,7 @@ private class Dispatch(
                 if (narrowed.isNotEmpty()) effective = narrowed
             }
         }
-        return Quad(effective.mapNotNull { nodes.keyOf(it) }, "", waitingOn)
+        return Quad(effective.mapNotNull { nodes.keyOf(it) }, if (diDecided) "di-binding" else "", waitingOn)
     }
 }
 

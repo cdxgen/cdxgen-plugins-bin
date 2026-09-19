@@ -473,7 +473,40 @@ object KirLowering {
                 NO_FACTS
             }
 
-            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty)
+            /**
+             * P25 §0: the canonical name a callable reference NAMES.
+             *
+             * `::sink`, `obj::method` and `Type::member` are function VALUES
+             * exactly as a lambda is, and P24 built the channel that carries
+             * taint through one — but the lowering wrote the reference's
+             * SOURCE TEXT (`::sink`) as the function value's name, and no
+             * table is keyed by source text, so every reference spelling
+             * died at the invocation while `{ s -> sink(s) }` went through.
+             * Resolved here, in the ambient analysis pass that already
+             * answers for call expressions, because the lowering itself may
+             * not call `KtReference.resolve()` (it re-enters `analyze` and
+             * deadlocks a native image — the rule at `isLocalReference`).
+             */
+            fun resolveReference(psi: org.jetbrains.kotlin.psi.KtCallableReferenceExpression): String? = try {
+                val call: org.jetbrains.kotlin.analysis.api.resolution.KaSingleCall<*, *> =
+                    psi.resolveCall() ?: return@resolveReference null
+                val symbol = call.signature.symbol as? KaCallableSymbol
+                when (symbol) {
+                    is KaConstructorSymbol ->
+                        symbol.containingClassId?.asSingleFqName()?.asString()?.let { "$it.<init>" }
+
+                    // A LOCAL function has no callableId — locals are not
+                    // addressable from outside — but the lowering hoists its
+                    // body to a package-qualified KIR function, so the
+                    // declaration is what names it.
+                    else -> symbol?.callableId?.asSingleFqName()?.asString()
+                        ?: (symbol?.psi as? KtNamedFunction)?.let { canonicalNameOfDeclaration(it) }
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference)
             for (file in files) {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
@@ -695,6 +728,8 @@ object KirLowering {
         val failures: MutableMap<String, Int>,
         val resolve: (KtCallExpression) -> CallInfo?,
         val resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
+        /** P25 §0: the canonical name a `::reference` names; null when it does not resolve. */
+        val resolveReference: (org.jetbrains.kotlin.psi.KtCallableReferenceExpression) -> String? = { null },
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -803,6 +838,20 @@ object KirLowering {
             }
         }
         return params
+    }
+
+    /**
+     * The canonical name a declaration's lowered function carries: package,
+     * enclosing class chain, then the name (`<anonymous>` for an anonymous
+     * `fun`, which is exactly what the collector names it). The same three
+     * parts `lowerFunction` joins — kept here so a USE of a function as a
+     * value can name it the way its DECLARATION is named (P25 §0).
+     */
+    private fun canonicalNameOfDeclaration(psi: KtNamedFunction): String {
+        val pkg = (psi.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(psi)
+        val name = psi.name ?: "<anonymous>"
+        return listOf(pkg, chain, name).filter { it.isNotEmpty() }.joinToString(".")
     }
 
     private fun containerChain(psi: com.intellij.psi.PsiElement): String =
@@ -1541,15 +1590,29 @@ object KirLowering {
                 reg
             }
             is org.jetbrains.kotlin.psi.KtCallableReferenceExpression -> {
+                // P25 §0: the RESOLVED target, not the source text. A
+                // reference is a function value whose target is known at
+                // its allocation site — which is exactly what P24's
+                // invoke-bind channel needs to carry taint through it — and
+                // naming it `::sink` made that channel unreachable for
+                // every reference spelling in the language. The text
+                // survives as the fallback so an unresolvable reference is
+                // still visible as a function value rather than vanishing.
                 val reg = t()
-                emit(KirLambda(reg, psi.text, emptyList()))
+                emit(KirLambda(reg, lambdaContext?.resolveReference?.invoke(psi) ?: psi.text, emptyList()))
                 reg
             }
             is KtNamedFunction -> {
-                // A local function: its body lowers as its own KIR function
-                // (collectFunctionLikes visits it); the use site names it.
+                // A local or anonymous function at value position: its body
+                // lowers as its own KIR function (collectFunctionLikes
+                // visits it), and the use site must name it the way that
+                // function is NAMED — package-qualified, container chain and
+                // all. The bare `sink` / `<local-fun>` written here before
+                // matched no function in any table, so an anonymous `fun`
+                // and a `::reference` were function values pointing at
+                // nothing (P25 §0's sweep).
                 val reg = t()
-                emit(KirLambda(reg, psi.name ?: "<local-fun>", emptyList()))
+                emit(KirLambda(reg, canonicalNameOfDeclaration(psi), emptyList()))
                 reg
             }
             is KtProperty -> {
@@ -2540,7 +2603,23 @@ object KirLowering {
                     is KtBlockExpression, is org.jetbrains.kotlin.psi.KtClassBody -> {
                         for (child in cursor.children) {
                             if (child is KtProperty && child.isLocal && child.name == name) {
-                                if (child.initializer is KtLambdaExpression) return true
+                                // Every expression that PRODUCES a function
+                                // value, not only the lambda spelling: a
+                                // `::reference` and an anonymous `fun` are
+                                // function values too, and treating them as
+                                // ordinary locals dropped the receiver from
+                                // their invocation — which is the one fact
+                                // higher-order analysis needs (P25 §0).
+                                when (child.initializer) {
+                                    is KtLambdaExpression,
+                                    is org.jetbrains.kotlin.psi.KtCallableReferenceExpression,
+                                    -> return true
+
+                                    is KtNamedFunction ->
+                                        return (child.initializer as KtNamedFunction).name == null
+
+                                    else -> {}
+                                }
                                 return child.typeReference?.text?.contains("->") == true
                             }
                         }
