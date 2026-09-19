@@ -137,6 +137,36 @@ internal data class TaintFact(val site: Int, val category: String, val param: In
  * — except a [TaintFact.fieldBearing] fact, whose value's FIELDS carry the
  * taint a pack deserializer moved there.
  */
+/**
+ * P27 §1: reads "register at access path" in the REPORTING engine, across an
+ * alias class and across BOTH ways a value's taint can be represented here.
+ *
+ *  - on the KEY, the ordinary case: a field write or a summary channel put
+ *    the fact at `(register, path)`;
+ *  - on the BARE key when the fact is FIELD-BEARING (P26 §1.3) — a
+ *    deserializer's result carries the input's taint on every field, and
+ *    there is no key per field because the fields were never written by
+ *    code the engine saw.
+ *
+ * Reading only the keyed form is why a `@RequestBody` DTO died at the first
+ * mapper: Jackson's result is field-bearing, the mapper asked for
+ * `customerName`, and the keyed probe found nothing.
+ */
+internal fun readReportingPath(
+    state: FlowState<TaintFact>,
+    bases: Collection<String>,
+    path: String,
+): List<TaintFact> {
+    val out = mutableListOf<TaintFact>()
+    for (base in bases.sorted()) {
+        out += state.factsOf(TaintKey(base, path))
+        if (path.isNotEmpty()) {
+            out += state.factsOf(TaintKey(base, "")).filter { it.isFieldBearing }
+        }
+    }
+    return out.distinct()
+}
+
 private object TaintFactOps : FactOps<TaintFact> {
     override fun categoryOf(fact: TaintFact): String = fact.category
     override fun deriveOnFieldRead(fact: TaintFact, suffix: String): TaintFact? =
@@ -1536,6 +1566,51 @@ object TaintEngine {
                         chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
                     }
                 }
+                // P27 §1 (R171): the argument's FIELD becomes a FIELD of the
+                // result — the mapper shape, where both sides carry a path.
+                for ((param, moves) in summary.paramPathToReturnPath) {
+                    val from = binding(param) ?: continue
+                    for (move in moves.sorted()) {
+                        val fromPath = move.substringBefore('\u0000')
+                        val toPath = move.substringAfter('\u0000')
+                        // ALIAS-AWARE on the read side: the argument's object
+                        // may be named by any register of its alias class
+                        // (the call temp the value was stored from, another
+                        // local holding the same object). Reading the raw
+                        // argument register found the mapper's own result
+                        // only when nothing had stored it first.
+                        val facts = readReportingPath(state, aliasClass(from), fromPath)
+                        if (facts.isNotEmpty()) {
+                            val toKey = TaintKey(result, toPath)
+                            state.addFacts(toKey, facts)
+                            moved = true
+                            for (fact in facts) {
+                                chain[ChainKey(fact, toKey)] =
+                                    Move(site, TaintKey(from, fromPath), "summary", origin)
+                            }
+                        }
+                    }
+                }
+                // P27 §1 (R171): the argument's FIELD becomes the result —
+                // the getter channel. `val body get() = raw` is this shape,
+                // and so is every generated delegation forwarder, which
+                // reads the delegate field and returns what it answers.
+                // Read the argument at the recorded SUFFIX; its bare key is
+                // empty when the object carries its taint in a field.
+                for ((param, suffixes) in summary.paramFieldToReturn) {
+                    val from = binding(param) ?: continue
+                    for (suffix in suffixes.sorted()) {
+                        val facts = readReportingPath(state, aliasClass(from), suffix)
+                        if (facts.isEmpty()) continue
+                        val fromKey = TaintKey(from, suffix)
+                        state.addFacts(resultKey, facts)
+                        moved = true
+                        val via = summary.paramFieldToReturnPaths["$param\u0000$suffix"].orEmpty()
+                        for (fact in facts) {
+                            chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
+                        }
+                    }
+                }
                 // sourceReturns: taint born at a source INSIDE the callee
                 // comes back through the return; the caller's birth site is
                 // this call, and the callee's path is prepended at slice
@@ -1613,11 +1688,35 @@ object TaintEngine {
             // caller named — the alias class of the bound argument.
             for ((from, tos) in summary.paramFieldWrites) {
                 val fromReg = binding(from) ?: continue
+                // P27 §1 (R171): the argument's own tainted SUB-PATHS travel
+                // with it. `W(R(raw))` stores the argument into `inner`, and
+                // the argument is an object whose taint sits at `.raw` — so
+                // the receiver carries it at `inner.raw`. Reading only the
+                // argument's bare key lost every wrapper-of-a-wrapper, which
+                // is the shape a decorator chain is made of.
+                val fromBases = aliasClass(fromReg)
+                val carriedPaths = state.map.keys
+                    .filter { it.base in fromBases && it.path.isNotEmpty() }
+                    .map { it.path }
+                    .distinct()
+                    .sorted()
                 for ((to, suffixes) in tos) {
                     val toReg = binding(to) ?: continue
                     for (suffix in suffixes.sorted()) {
                         for (base in aliasClass(toReg).sorted()) {
                             moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(base, suffix), site, "summary", origin) || moved
+                            for (carried in carriedPaths) {
+                                for (fromBase in fromBases.sorted()) {
+                                moved = moveChain(
+                                    state,
+                                    TaintKey(fromBase, carried),
+                                    TaintKey(base, capPath("$suffix.$carried")),
+                                    site,
+                                    "summary",
+                                    origin,
+                                ) || moved
+                                }
+                            }
                         }
                     }
                 }
@@ -1633,7 +1732,12 @@ object TaintEngine {
             for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
                 val fromReg = binding(effect.paramIndex) ?: continue
                 val argKey = TaintKey(fromReg, effect.paramPath)
-                val facts = state.factsOf(argKey)
+                // P27 §1: alias-aware, and aware of FIELD-BEARING facts — a
+                // DTO straight out of a deserializer carries its taint on
+                // the bare key with no per-field key, so the keyed probe
+                // alone lost every `@RequestBody` that reached a sink
+                // through a mapper.
+                val facts = readReportingPath(state, aliasClass(fromReg), effect.paramPath)
                 if (facts.isEmpty()) continue
                 moved = true
                 collect?.interHits?.add(InterSinkHit(site, argKey, java.util.TreeSet(facts), effect, origin))

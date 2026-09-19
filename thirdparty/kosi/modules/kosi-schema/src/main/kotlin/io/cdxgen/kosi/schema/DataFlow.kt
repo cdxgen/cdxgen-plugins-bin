@@ -340,6 +340,16 @@ data class FlowSummary(
      * factories went silent).
      */
     val sourceReturnFields: List<String> = emptyList(),
+    /**
+     * P27 §1: parameter i's FIELD reaching the RETURN value, as
+     * `p<i>.<suffix>` strings — the getter channel
+     * (`val body get() = raw`) and every `by`-delegation forwarder. The
+     * inverse of [paramToReturnFields], and the half that was missing: the
+     * summary said only that the parameter reached the return, and the
+     * caller then probed the argument's bare key, where an object carrying
+     * its taint in a field has nothing (R171).
+     */
+    val paramFieldToReturn: List<String> = emptyList(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -386,6 +396,9 @@ data class FlowSummary(
         w.endArray()
         w.beginArray("sourceReturnFields")
         for (v in sourceReturnFields.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("paramFieldToReturn")
+        for (v in paramFieldToReturn.sorted()) w.str(v)
         w.endArray()
         w.beginArray("paramToReturnFields")
         for (v in paramToReturnFields.sorted()) w.str(v)

@@ -1182,6 +1182,31 @@ path = "fixtures/intent-extras-channel"
 capabilities = ["android", "intent", "extras", "content-provider", "endpoint-sources"]
 tolerated_resolution_errors = []
 
+# P27: the corpus's first fixture that is an APPLICATION rather than a
+# feature. One request crosses a Spring MVC entry, a Jackson deserialization
+# boundary, a container-bound service seam with an unbound sibling, a
+# `by`-delegation decorator, a DTO->domain mapper, a getter, a collection,
+# and a Spring Data repository interface as the sink — eleven frames. Every
+# capability in that list had a fixture that exercised it ALONE; this one
+# makes them COMPOSE, which is where P27 found all four of its defects.
+[[fixtures]]
+slug = "layered-app"
+tier = "frameworks"
+path = "fixtures/layered-app"
+capabilities = ["taint", "spring-mvc", "spring-data", "di", "delegation", "deserialization", "object-identity", "sanitizers", "endpoint-sources"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P27 §1: the forwarders `by`-delegation generates — one override per
+# member, none of them with PSI. The other half of R161: P26 carried the
+# source back inside the returned object's FIELD, and http4k's consumers
+# still could not read it, because they read through exactly these.
+[[fixtures]]
+slug = "class-delegation"
+tier = "fixtures"
+path = "fixtures/class-delegation"
+capabilities = ["taint", "delegation", "dispatch", "object-identity", "synthesis"]
+tolerated_resolution_errors = []
+
 # P25 §1: the same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
 # context-INSENSITIVE engine gets it right is the phase's §1 answer.

@@ -563,11 +563,173 @@ object KirLowering {
                 for (klass in classesWithPrimaryConstructor(file)) {
                     synthesizePrimaryConstructor(klass)?.let { functions.add(it) }
                 }
+                // P27 §1: the forwarders `by`-delegation generates. They have
+                // no PSI, so nothing above this line can see them.
+                for (klass in classesWithDelegation(file)) {
+                    functions.addAll(synthesizeDelegationForwarders(klass, failures))
+                }
             }
             functions.addAll(lambdaContext.functions)
         }
         return Result(functions, failures, functionCount, symbolFactFailures)
     }
+
+    /**
+     * P27 §1: the forwarders Kotlin's CLASS DELEGATION generates.
+     *
+     * `class RequestWithContext(private val delegate: Request, ...) : Request
+     * by delegate` compiles to one override per member of `Request`, each
+     * body `delegate.member(...)`. Not one of them has PSI, and the lowering
+     * is PSI-driven, so the whole forwarding layer was absent from the KIR:
+     * `wrapped.body` resolved to an interface method with no implementation
+     * anywhere, the flow engine had nothing to summarise, and the value the
+     * delegate carried stopped at the wrapper.
+     *
+     * This is the other half of R161. P26 taught the summary to say "the
+     * source came back inside the returned object's FIELD"; the 22 http4k
+     * findings still did not return, because their consumers read that field
+     * through exactly these missing forwarders. The channel existed and the
+     * bridge did not.
+     *
+     * The synthesis is deliberately literal — a field read of the delegate
+     * and a virtual call on it — so that nothing here is a special case
+     * downstream: the summary machinery, the alias class, dispatch and the
+     * frames all see an ordinary member function whose body forwards, which
+     * is exactly what the JVM runs.
+     *
+     * Returns null members rather than guessing when the delegate is not a
+     * plain name (`: Request by wrap(other)` stores an unnamed
+     * `$$delegate_0` the object-identity model never wrote); those count as
+     * a `delegation-opaque` lowering failure so the gap is visible instead
+     * of silent.
+     */
+    private fun org.jetbrains.kotlin.analysis.api.KaSession.synthesizeDelegationForwarders(
+        klass: org.jetbrains.kotlin.psi.KtClassOrObject,
+        failures: MutableMap<String, Int>,
+    ): List<KirFunction> {
+        val entries = klass.superTypeListEntries
+            .filterIsInstance<org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry>()
+        if (entries.isEmpty()) return emptyList()
+
+        val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(klass)
+        // An object EXPRESSION delegating (`object : Payload by source {}`)
+        // has no name; `<anonymous>` is the convention the rest of the
+        // lowering already uses, and what identifies these forwarders to
+        // dispatch is their `overrides` edge, not their name.
+        val className = klass.name ?: "<anonymous>"
+        val base = listOf(pkg, chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val enclosing = listOf(chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val file = klass.containingFile?.virtualFile?.path ?: "<memory>"
+
+        // Members the class declares ITSELF always win: `override fun body()`
+        // beside `by delegate` is the idiom for "forward everything except
+        // this", and synthesizing over it would publish a forwarder the JVM
+        // never runs.
+        val declared = klass.declarations.mapNotNull { declaration ->
+            when (declaration) {
+                is KtNamedFunction -> declaration.name
+                is org.jetbrains.kotlin.psi.KtProperty -> declaration.name
+                else -> null
+            }
+        }.toSet()
+
+        val out = mutableListOf<KirFunction>()
+        val taken = sortedSetOf<String>()
+        for (entry in entries) {
+            val delegateName = (entry.delegateExpression as? KtNameReferenceExpression)
+                ?.getReferencedName()
+            if (delegateName == null) {
+                failures.merge("delegation-opaque", 1, Int::plus)
+                continue
+            }
+            val supertype = entry.typeReference?.type as? org.jetbrains.kotlin.analysis.api.types.KaClassType
+            val symbol = supertype?.symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+            if (symbol == null) {
+                failures.merge("delegation-unresolved-supertype", 1, Int::plus)
+                continue
+            }
+            val supertypeFqn = supertype.classId?.asSingleFqName()?.asString() ?: continue
+
+            for (member in symbol.memberScope.callables.sortedBy { it.callableId?.asSingleFqName()?.asString() ?: "" }) {
+                val name = member.callableId?.callableName?.asString() ?: continue
+                // kotlin.Any's members are on every type and forwarding them
+                // says nothing about data.
+                if (name in ANY_MEMBERS || name in declared || !taken.add(name)) continue
+                val valueParams = (member as? KaFunctionSymbol)?.valueParameters.orEmpty()
+                val params = mutableListOf(io.cdxgen.kosi.kir.KirParam("%0", "this", null, receiver = true))
+                valueParams.forEachIndexed { index, parameter ->
+                    params.add(
+                        io.cdxgen.kosi.kir.KirParam(
+                            "%${index + 1}",
+                            parameter.name.asString(),
+                            null,
+                            receiver = false,
+                            resolvedType = (parameter.returnType as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                                ?.classId?.asSingleFqName()?.asString(),
+                        ),
+                    )
+                }
+                val args = valueParams.indices.map { "%${it + 1}" }
+                val delegateReg = "%d0"
+                val resultReg = "%d1"
+                out.add(
+                    KirFunction(
+                        canonicalName = "$base.$name",
+                        jvmDescriptor = null,
+                        purl = "",
+                        file = file,
+                        line = klass.line(),
+                        column = klass.column(),
+                        params = params,
+                        returnType = (member.returnType as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                            ?.classId?.asSingleFqName()?.asString()
+                            ?.takeIf { it != "kotlin.Unit" },
+                        modifiers = setOf("override"),
+                        visibility = "public",
+                        enclosingClass = enclosing.ifEmpty { null },
+                        // The dispatch edge: a call on the INTERFACE resolves
+                        // here, which is the whole point of the synthesis.
+                        overrides = listOf("$supertypeFqn.$name"),
+                        overriddenBy = emptyList(),
+                        annotations = emptyList(),
+                        syntheticCause = "class-delegation",
+                        body = io.cdxgen.kosi.kir.KirBody(
+                            listOf(
+                                io.cdxgen.kosi.kir.KirBlock(
+                                    "b0",
+                                    entry = true,
+                                    instructions = listOf(
+                                        io.cdxgen.kosi.kir.KirFieldGet(
+                                            delegateReg,
+                                            "%0",
+                                            io.cdxgen.kosi.kir.AccessPath.field("%0", delegateName),
+                                        ),
+                                        io.cdxgen.kosi.kir.KirCall(
+                                            result = resultReg,
+                                            callee = io.cdxgen.kosi.kir.KirCallee(
+                                                "$supertypeFqn.$name",
+                                                null,
+                                                io.cdxgen.kosi.kir.CallKind.VIRTUAL,
+                                            ),
+                                            receiver = delegateReg,
+                                            args = args,
+                                            line = klass.line(),
+                                        ),
+                                        io.cdxgen.kosi.kir.KirReturn(resultReg),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    /** Members every type has; forwarding them carries no data fact. */
+    private val ANY_MEMBERS = setOf("equals", "hashCode", "toString")
 
     /** Classes declaring a primary constructor with at least one stored (`val`/`var`) parameter. */
     private fun classesWithPrimaryConstructor(file: org.jetbrains.kotlin.psi.KtFile): List<org.jetbrains.kotlin.psi.KtClass> {
@@ -711,6 +873,24 @@ object KirLowering {
             override fun visitSecondaryConstructor(constructor: KtSecondaryConstructor) {
                 out.add(constructor)
                 super.visitSecondaryConstructor(constructor)
+            }
+        })
+        return out
+    }
+
+    /** Classes with at least one `by`-delegated supertype (P27 §1). */
+    private fun classesWithDelegation(
+        file: org.jetbrains.kotlin.psi.KtFile,
+    ): List<org.jetbrains.kotlin.psi.KtClassOrObject> {
+        val out = mutableListOf<org.jetbrains.kotlin.psi.KtClassOrObject>()
+        file.accept(object : KtTreeVisitorVoid() {
+            override fun visitClassOrObject(classOrObject: org.jetbrains.kotlin.psi.KtClassOrObject) {
+                if (classOrObject.superTypeListEntries
+                        .any { it is org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry }
+                ) {
+                    out.add(classOrObject)
+                }
+                super.visitClassOrObject(classOrObject)
             }
         })
         return out

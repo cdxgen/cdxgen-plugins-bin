@@ -201,6 +201,45 @@ internal class FunctionSummary(
     val sourceReturnFields: Map<String, Set<String>> = emptyMap(),
     /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
     val sourceReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
+    /**
+     * P27 §1: parameter i's FIELD reaches the return VALUE —
+     * `override val body: String get() = raw`, the getter every Kotlin class
+     * with a private backing property has.
+     *
+     * This is the INVERSE of [paramToReturnFields], and it was the missing
+     * one. That channel says "the argument's value lands on a FIELD of the
+     * result"; this one says "a FIELD of the argument becomes the result".
+     * Every accessor on a workspace class is this shape, and without it the
+     * summary recorded only `paramToReturn = {0}` — true, but path-less —
+     * while the caller-side application read the argument's BARE key, where
+     * an object carrying its taint in a field has nothing. Both ends were
+     * broken, so the channel could not be repaired from either alone.
+     *
+     * The measured consequence is R161's remainder: P26 got the source back
+     * inside the returned object's field and http4k's 22 findings still did
+     * not return, because their consumers read that field through a getter
+     * — and a getter is exactly this shape.
+     */
+    val paramFieldToReturn: Map<Int, Set<String>> = emptyMap(),
+    /** P27 §1: witness path per field-to-return channel, keyed `param suffix`. */
+    val paramFieldToReturnPaths: Map<String, List<Int>> = emptyMap(),
+    /**
+     * P27 §1: parameter i's FIELD reaches a FIELD of the return —
+     * `fun toCommand(r: Req) = Cmd(r.customerName, r.note)`, the mapper
+     * every layered application has between its DTO and its domain type.
+     *
+     * With [paramToReturn], [paramToReturnFields] and [paramFieldToReturn],
+     * this completes the matrix: the parameter channels record (path in,
+     * path out), and until this entry existed each channel carried ONE
+     * side's path and silently dropped the other's. A mapper was therefore
+     * summarised as "the whole argument reaches the result's `name` field"
+     * — both wrong (only one field does) and useless (the caller then
+     * probed the argument's bare key, where a DTO built by a constructor
+     * has nothing).
+     *
+     * Encoded `from\u0000to`, both sides non-empty.
+     */
+    val paramPathToReturnPath: Map<Int, Set<String>> = emptyMap(),
 ) {
     fun sameAs(other: FunctionSummary): Boolean =
         paramToReturn == other.paramToReturn &&
@@ -227,7 +266,9 @@ internal class FunctionSummary(
             invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() ==
                 other.invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() &&
             sourceReturnFields == other.sourceReturnFields &&
-            sourceReturnFieldPaths.keys == other.sourceReturnFieldPaths.keys
+            sourceReturnFieldPaths.keys == other.sourceReturnFieldPaths.keys &&
+            paramFieldToReturn == other.paramFieldToReturn &&
+            paramPathToReturnPath == other.paramPathToReturnPath
 
     /**
      * The may-analysis union with [other]: every effect either summary has,
@@ -282,6 +323,8 @@ internal class FunctionSummary(
                 .sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }))
         },
         sourceReturnFields = mergeSets(sourceReturnFields, other.sourceReturnFields),
+        paramFieldToReturn = mergeSets(paramFieldToReturn, other.paramFieldToReturn),
+        paramPathToReturnPath = mergeSets(paramPathToReturnPath, other.paramPathToReturnPath),
         // The join answers name-keyed lookups, and the only name-keyed
         // consumer is the deps tier, whose summaries uniformly carry
         // `bytecode` — so the joined origin is this one's.
@@ -351,6 +394,9 @@ internal class FunctionSummary(
             sourceFieldWrites = sourceFieldWrites.entries
                 .sortedWith(compareBy({ it.key }, { it.value.firstOrNull()?.paramIndex ?: 0 }, { it.value.firstOrNull()?.suffix ?: "" }))
                 .flatMap { (category, writes) -> writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix })).map { "${pid(it.paramIndex)}.${it.suffix}:${category}" } },
+            paramFieldToReturn = paramFieldToReturn.entries
+                .sortedWith(compareBy({ it.key }, { it.value.minOrNull() ?: "" }))
+                .flatMap { (param, suffixes) -> suffixes.sorted().map { sfx -> "${pid(param)}.$sfx" } },
             sourceReturnFields = sourceReturnFields.entries
                 .sortedWith(compareBy({ it.key }, { it.value.minOrNull() ?: "" }))
                 .flatMap { (category, suffixes) -> suffixes.sorted().map { sfx -> "$sfx:$category" } },
@@ -844,7 +890,7 @@ internal class Summarizer(
         function, paramToReturn, paramToParam, paramFieldWrites, receiverWrites, sinkEffects,
         sourceReturns, sanitizes, invokedParams, origin,
         paramToReturnPaths, paramToReturnFields, paramToReturnFieldPaths, sourceFieldWrites, invokedBinds,
-        sourceReturnFields,
+        sourceReturnFields, emptyMap(), paramFieldToReturn, emptyMap(), paramPathToReturnPath,
     )
 
     /**
@@ -933,12 +979,65 @@ internal object SummaryFactOps : FactOps<SummaryFact> {
         fact.param?.let { fact.withPath(joinPath(fact.path, suffix)) }
 }
 
+/**
+ * Joins two access-path suffixes, COLLAPSING to `*` past
+ * [AccessPath.DEFAULT_DEPTH] elements — the same cap
+ * [io.cdxgen.kosi.kir.AccessPath.of] applies to every path built from KIR.
+ *
+ * P27 §1: this was the one path builder in the engine with no cap, and it
+ * was harmless only because nothing RECORDED the result. The moment
+ * `paramFieldToReturn` published it, a decorator that forwards to its own
+ * interface (`class W(val inner: I) : I` — http4k's shape, and every
+ * `by`-delegation wrapper) made the SCC fixpoint chase
+ * `inner`, `inner.inner`, `inner.inner.inner`, … forever: the summary never
+ * converged, the iteration budget tripped, and the members shipped EMPTY
+ * under `origin=recursive-approx`. A wrapper around an interface summarised
+ * as "does nothing" is worse than an approximation — it is a silent zero.
+ */
+/**
+ * P27 §1: reads "register at access path" in the SUMMARY engine, which
+ * carries a value's path in two different places and needs both.
+ *
+ *  - on the FACT, when the value came from a parameter — an entry fact is
+ *    bare and a `fieldget` of `p` derives a fact whose path is `p`;
+ *  - on the KEY, when a callee's summary DEPOSITED it there (P24's
+ *    `paramToReturnFields`, and P27's path-to-path channel below).
+ *
+ * A caller that consulted only one representation saw half the state. That
+ * is why the layered fixture's flow died between its mapper and its getter
+ * while both worked alone: the mapper writes the key, the getter reads the
+ * fact.
+ */
+internal fun readAtPath(
+    state: FlowState<SummaryFact>,
+    register: String,
+    path: String,
+    aliases: Set<String> = setOf(register),
+): Pair<TaintKey, List<SummaryFact>> {
+    val out = mutableListOf<SummaryFact>()
+    for (base in aliases.sorted()) {
+        out += state.factsOf(TaintKey(base, path))
+        out += state.factsOf(TaintKey(base, ""))
+            .mapNotNull { SummaryFactOps.deriveOnFieldRead(it, path) }
+    }
+    return TaintKey(register, path) to out.distinct()
+}
+
 internal fun joinPath(prefix: String, suffix: String): String =
     when {
         prefix.isEmpty() -> suffix
         suffix.isEmpty() -> prefix
-        else -> "$prefix.$suffix"
+        else -> capPath("$prefix.$suffix")
     }
+
+/** Collapses an access path to `*` beyond the KIR's default depth. */
+internal fun capPath(path: String): String {
+    if (path.isEmpty()) return path
+    val elements = path.split('.')
+    if (elements.size <= io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) return path
+    if (elements.last() == "*" && elements.size == io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH + 1) return path
+    return (elements.take(io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) + "*").joinToString(".")
+}
 
 /**
  * The summary-mode analysis of one function. It is the ONE shared transfer
@@ -1034,6 +1133,15 @@ internal class SummaryAnalysis(
 
     /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
     private val sourceReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
+
+    /** P27 §1 (R171): parameter i's FIELD reaching the return value. */
+    private val paramFieldToReturn = HashMap<Int, MutableSet<String>>()
+
+    /** P27 §1: witness path per field-to-return channel, keyed `param\u0000suffix`. */
+    private val paramFieldToReturnPaths = HashMap<String, MutableList<List<Int>>>()
+
+    /** P27 §1 (R171): parameter i's FIELD reaching a FIELD of the return. */
+    private val paramPathToReturnPath = HashMap<Int, MutableSet<String>>()
 
     /** P24 §2d: what the body passes when it invokes function-valued parameters. */
     private val invokedBinds = LinkedHashMap<String, InvokeBind>()
@@ -1319,9 +1427,20 @@ internal class SummaryAnalysis(
                 if (key.base !in returnBases || key.path.isEmpty()) continue
                 for (fact in facts) {
                     if (fact.param != null) {
-                        paramToReturnFields.getOrPut(fact.param!!) { sortedSetOf() }.add(key.path)
-                        val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
-                        paramToReturnFieldPaths.getOrPut("${fact.param}\u0000${key.path}") { mutableListOf() }.add(walk)
+                        if (fact.path.isEmpty()) {
+                            paramToReturnFields.getOrPut(fact.param!!) { sortedSetOf() }.add(key.path)
+                            val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
+                            paramToReturnFieldPaths.getOrPut("${fact.param}\u0000${key.path}") { mutableListOf() }.add(walk)
+                        } else {
+                            // P27 §1 (R171): BOTH sides carry a path — the
+                            // mapper shape (`Cmd(r.customerName, r.note)`).
+                            // Recording it in the bare-param channel claimed
+                            // the WHOLE argument reached the field, and the
+                            // caller's bare-key probe then found nothing
+                            // anyway: wrong and inert at the same time.
+                            paramPathToReturnPath.getOrPut(fact.param!!) { sortedSetOf() }
+                                .add("${fact.path}\u0000${key.path}")
+                        }
                     }
                     // P26 §0 (R161): a SOURCE born in this body, stored into a
                     // field of the returned object. The param half of this
@@ -1341,6 +1460,20 @@ internal class SummaryAnalysis(
                 val up = upstream[fact].orEmpty()
                 val path = up + walkBack(fact, valueKey)
                 when {
+                    // P27 §1 (R171): the fact reached the return through a
+                    // FIELD READ of the parameter (`get() = raw` derives
+                    // (param 0, "raw") and returns it). Recording it as a
+                    // bare paramToReturn threw the path away, and the
+                    // caller then probed the argument's bare key — where an
+                    // object carrying taint in a field has nothing. The
+                    // split is also a PRECISION gain: a getter no longer
+                    // claims the whole parameter reaches the return.
+                    fact.param != null && fact.path.isNotEmpty() -> {
+                        paramFieldToReturn.getOrPut(fact.param!!) { sortedSetOf() }.add(fact.path)
+                        paramFieldToReturnPaths.getOrPut("${fact.param}\u0000${fact.path}") { mutableListOf() }
+                            .add(path + listOf(site))
+                    }
+
                     fact.param != null -> {
                         paramToReturn.add(fact.param!!)
                         // P24 §3: the witness path, ending at the RETURN
@@ -1629,6 +1762,38 @@ internal class SummaryAnalysis(
                     chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
                 }
             }
+            // P27 §1 (R171): the argument's FIELD becomes the result — the
+            // getter channel. Read the argument at the recorded suffix, not
+            // at its bare key.
+            // P27 §1 (R171): the mapper channel — a FIELD of the argument
+            // becomes a FIELD of the result. Paths live on the FACT here,
+            // so the read derives and the write lands on the result's key.
+            for ((param, moves) in summary.paramPathToReturnPath) {
+                val from = binding(param) ?: continue
+                for (move in moves.sorted()) {
+                    val fromPath = move.substringBefore('\u0000')
+                    val toPath = move.substringAfter('\u0000')
+                    val (fromKey, derived) = readAtPath(state, from, fromPath, aliases.aliasClass(from))
+                    if (derived.isEmpty()) continue
+                    val toKey = TaintKey(result, toPath)
+                    state.addFacts(toKey, derived)
+                    for (fact in derived) {
+                        chain[ChainKey(fact, toKey)] = Move(site, fromKey, "summary", origin)
+                    }
+                }
+            }
+            for ((param, suffixes) in summary.paramFieldToReturn) {
+                val from = binding(param) ?: continue
+                for (suffix in suffixes.sorted()) {
+                    val (fromKey, derived) = readAtPath(state, from, suffix, aliases.aliasClass(from))
+                    if (derived.isEmpty()) continue
+                    state.addFacts(resultKey, derived)
+                    val via = summary.paramFieldToReturnPaths["$param\u0000$suffix"].orEmpty()
+                    for (fact in derived) {
+                        chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
+                    }
+                }
+            }
             for ((category, path) in summary.sourceReturns) {
                 val fact = SummaryFact(null, site, category)
                 upstream[fact] = listOf(site) + path
@@ -1812,6 +1977,11 @@ internal class SummaryAnalysis(
     fun toSummary(): FunctionSummary = FunctionSummary(
         function = cf.function,
         paramToReturn = paramToReturn.toSet(),
+        paramFieldToReturn = paramFieldToReturn.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        paramPathToReturnPath = paramPathToReturnPath.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        paramFieldToReturnPaths = paramFieldToReturnPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
         paramToParam = paramToParam.mapValues { it.value.toSet() },
         paramFieldWrites = paramFieldWrites.mapValues { (_, tos) -> tos.mapValues { it.value.toSet() } },
         receiverWrites = receiverWrites.mapValues { it.value.toSet() },

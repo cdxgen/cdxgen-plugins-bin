@@ -551,3 +551,62 @@ The rule for future phases: **a phase that adds a capability adds its
 spellings to the gallery.** The cost is one fixture and one slot; the
 alternative is finding out from a user's repository which spelling you
 happened not to type.
+
+## The channels must be closed under composition (P27)
+
+A summary channel records "what this function does to a parameter". There
+are four cells, and for a long time only two existed:
+
+| in | out | channel | shape |
+| --- | --- | --- | --- |
+| `p` | return | `paramToReturn` | `fun id(x) = x` |
+| `p` | `return.S` | `paramToReturnFields` | `fun wrap(x) = Box(x)` |
+| `p.P` | return | `paramFieldToReturn` (P27) | `val body get() = raw` |
+| `p.P` | `return.S` | `paramPathToReturnPath` (P27) | `fun map(r) = Cmd(r.name)` |
+
+The missing two are not exotic: the third is every ACCESSOR on every Kotlin
+class, and the fourth is every DTO-to-domain MAPPER. Both were being
+recorded in the bare-param channel, which is wrong and inert at once — wrong
+because it claims the whole argument reaches the result, inert because the
+caller then probes the argument's bare key, where an object carrying its
+taint in a field has nothing.
+
+The rule this leaves: **a channel that records one side's access path must
+record the other's.** When adding one, write down its cell in this table
+first; if the cell is already taken, the channel is a duplicate, and if the
+mirror cell is empty, ask why.
+
+### And two representations of one fact
+
+The engines disagree, on purpose, about where a value's access path lives:
+the summary engine puts it on the FACT (an entry fact is bare; a `fieldget`
+derives a deeper fact), the reporting engine on the KEY. A third form exists
+only in the reporting engine — a FIELD-BEARING fact (P26 §1.3), which has no
+per-field key at all because no code the engine saw wrote those fields.
+
+Any new read of "register at access path" must handle every form that engine
+has, and must be ALIAS-aware. `readAtPath` (summary) and
+`readReportingPath` (reporting) are the two places that know this; use them
+rather than calling `factsOf` with a composed key.
+
+### A cap that binds is a defect
+
+`joinPath` was the one path builder with no depth cap. It was harmless only
+while nothing recorded its output. The moment P27 published it, a decorator
+forwarding to its own interface chased `inner.inner.inner…` forever and
+shipped EMPTY summaries under `origin=recursive-approx`. Capping it at
+`AccessPath.DEFAULT_DEPTH` took `kosi-vulnerable-service/deps` from **2 516
+`composed-path-depth` truncations to zero, with the same nine slices**.
+
+## A fixture that is an application (P27)
+
+Before P27 the largest fixture was 432 lines and the deepest was 92, and
+every one of them exercised ONE capability. `fixtures/layered-app` is the
+first that is an application: one request crosses a Spring MVC entry, a
+Jackson boundary, a bound service seam with an unbound sibling, a
+`by`-delegation decorator, a mapper, a getter, a collection and a Spring
+Data repository interface — eleven frames.
+
+All four P27 defects were found by it and by nothing else. Each appeared
+only when two layers stacked, and each single-feature fixture went on
+passing throughout. **A capability proven alone is not proven composed.**
