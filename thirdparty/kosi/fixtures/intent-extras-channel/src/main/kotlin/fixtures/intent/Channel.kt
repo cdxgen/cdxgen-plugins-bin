@@ -10,7 +10,7 @@
 // like every other handler.
 //
 // kosi:want flow source=android-intent sink=sql-query fn=~receiverReadsExtra known-fail=syntax:1
-// kosi:want flow source=untrusted-input sink=sql-query fn=~providerQuery known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=sql-query fn=~providerQuery mode=endpoint known-fail=syntax:1
 // kosi:want-not flow source=android-intent sink=sql-query fn=~receiverReadsLiteral
 // kosi:want-not diagnostic code=parse-error
 package fixtures.intent

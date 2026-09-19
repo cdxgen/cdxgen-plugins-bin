@@ -23,6 +23,7 @@ package fixtures.persist
 import androidx.room.Dao
 import androidx.room.Query
 import org.springframework.data.repository.JpaRepository
+import org.springframework.data.repository.Repository
 import org.springframework.data.repository.query.Query as SpringQuery
 
 data class User(val name: String, val lastName: String)
@@ -41,6 +42,11 @@ interface UserRepo : JpaRepository<User, Long> {
 interface UserDao {
     @Query("SELECT * FROM users WHERE name = :name")
     fun byName(name: String): List<User>
+}
+
+// The ROOT base spelled directly: `Repository` with a derived method.
+interface CountRepo : Repository<User, Long> {
+    fun countByLastName(lastName: String): Long
 }
 
 // The NEGATIVE interface: same method-name shape, no repository base, no
@@ -71,6 +77,12 @@ fun plainInterfaceFlow(greeter: Greeter) {
 
 fun cleanArgsNoFlow(repo: UserRepo) {
     repo.findByLastName("constant")
+}
+
+// kosi:want flow source=untrusted-input sink=sql-query fn=~rootBaseFlow known-fail=syntax:1
+fun rootBaseFlow(repo: CountRepo) {
+    val raw = readLine() ?: ""
+    repo.countByLastName(raw)
 }
 
 fun exposedFlow(tx: org.jetbrains.exposed.sql.Transaction) {

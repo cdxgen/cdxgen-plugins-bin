@@ -3,8 +3,7 @@
 // kosi:want flow source=untrusted-input sink=sql-query fn=~RealHealthApi.ping known-fail=syntax:1
 package fixtures.di
 
-import org.koin.dsl.module
-import org.koin.dsl.single
+import org.koin.dsl.*
 import org.springframework.stereotype.Service
 
 interface HealthApi {
@@ -22,6 +21,7 @@ class RealHealthApi : HealthApi {
 val healthModule = module {
     single<HealthApi> { RealHealthApi() }
 }
+
 
 // Unprovided sibling with a sink, for the same reason as FakeUserApi: the
 // 2.x spelling's narrowing is only observable against a second candidate.

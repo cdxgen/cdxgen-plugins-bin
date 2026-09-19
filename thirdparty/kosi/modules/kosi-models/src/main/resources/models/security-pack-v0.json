@@ -2,16 +2,7 @@
   "description": "The taint model pack. Sources, sinks, passthroughs, sanitizers and effects are DATA: the engine matches callee symbols against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a rule. Argument-index convention: 0 is the RECEIVER when the callee has one, otherwise the first argument; n is the n-th element of that (receiver,) arguments sequence; -1 is the call's result. Constructor callees render as the class FQN (no <init> suffix). P4 is the first phase that executes this pack, which is why several P0 seed entries carry corrected indexes. P26 \u00a71.3: deserializers name the calls whose PRODUCED OBJECT carries the input's taint on its FIELDS (Jackson readValue/readTree, kotlinx decodeFromString, Gson fromJson) - the boundary that makes a request body reach a sink through a DTO.",
   "deserializers": [
     {
-      "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readTree"
-    },
-    {
       "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue"
-    },
-    {
-      "pattern": "com.fasterxml.jackson.dataformat.xml.XmlMapper.readValue"
-    },
-    {
-      "pattern": "com.fasterxml.jackson.dataformat.yaml.YAMLMapper.readValue"
     },
     {
       "pattern": "com.google.gson.Gson.fromJson"
@@ -27,11 +18,7 @@
       "supertypes": [
         "org.springframework.data.repository.Repository",
         "org.springframework.data.repository.CrudRepository",
-        "org.springframework.data.repository.ListCrudRepository",
-        "org.springframework.data.repository.JpaRepository",
-        "org.springframework.data.repository.PagingAndSortingRepository",
-        "org.springframework.data.repository.ReactiveCrudRepository",
-        "org.springframework.data.kotlin.coroutine.CoroutineCrudRepository"
+        "org.springframework.data.repository.JpaRepository"
       ]
     },
     {
