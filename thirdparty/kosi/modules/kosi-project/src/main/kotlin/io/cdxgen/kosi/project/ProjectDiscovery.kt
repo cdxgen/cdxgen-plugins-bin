@@ -142,14 +142,27 @@ object SourceCollector {
         // Distinct-by-path alone kept whichever module enumerated first, so
         // every multi-module file silently attributed to "." and per-module
         // consumers (cross-module slice flags among them) read one blob.
+        //
+        // P24 §0 closes the two escapes that attribution left open, both
+        // found by asking what a build file can do to the collector's root:
+        // (1) a `srcDir("../..")` or absolute `srcDir("/x")` makes
+        // `root.resolve(sourceRoot)` point OUTSIDE the analysis root, so a
+        // report could carry another project's code — the THREAT_MODEL.md
+        // claim, broken by data; out-of-root files are DROPPED, never
+        // collected. (2) the same file reachable at two relative paths (a
+        // root sweeping "." beside a module's precise roots) was collected
+        // TWICE — duplicated slices in one report — because the dedup keyed
+        // on the relative path; the dedup key is the ABSOLUTE path now.
+        val rootAbs = root.toAbsolutePath().normalize()
         return files
+            .filter { it.absolutePath.startsWith(rootAbs) }
             .sortedWith(
                 compareByDescending<CollectedFile> { it.modulePath.length }
                     .thenBy { it.modulePath }
                     .thenBy { it.modulePurl }
                     .thenBy { it.relativePath },
             )
-            .distinctBy { it.relativePath }
+            .distinctBy { it.absolutePath }
             .sortedBy { it.relativePath }
     }
 

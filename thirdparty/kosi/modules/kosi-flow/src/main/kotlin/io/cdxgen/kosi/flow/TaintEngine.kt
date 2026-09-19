@@ -34,8 +34,10 @@ import io.cdxgen.kosi.schema.DataFlowStats
 import io.cdxgen.kosi.schema.Diagnostic
 import io.cdxgen.kosi.schema.DiagnosticCodes
 import io.cdxgen.kosi.schema.FlowEdge
+import io.cdxgen.kosi.schema.FlowFrame
 import io.cdxgen.kosi.schema.FlowNode
 import io.cdxgen.kosi.schema.FlowSlice
+import io.cdxgen.kosi.schema.FrameRole
 import io.cdxgen.kosi.schema.ModelPackRef
 import io.cdxgen.kosi.schema.PathKind
 import io.cdxgen.kosi.schema.Position
@@ -437,6 +439,33 @@ object TaintEngine {
         fun recordPackPassthrough(fqn: String) = synchronized(lock) { packAppliedPassthroughs.add(fqn) }
         fun recordLambdaUnresolved() = synchronized(lock) { lambdaUnresolved += 1 }
         fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
+
+        // ---- P24 §3: the per-site evidence the frames read ------------------
+
+        /** Dispatch evidence per call site: targets considered, applied, narrowed by. */
+        data class DispatchInfo(val considered: Int, val applied: List<String>, val narrowedBy: String?)
+
+        val dispatchBySite = java.util.TreeMap<Int, DispatchInfo>()
+
+        fun recordDispatch(site: Int, considered: Int, applied: List<String>, narrowedBy: String?) = synchronized(lock) {
+            dispatchBySite[site] = DispatchInfo(considered, applied.sorted(), narrowedBy)
+        }
+
+        /**
+         * P24 §3: sanitizer sites where the flowing categories SURVIVED —
+         * the `sanitizer-not-applied` role's producer. Category set because
+         * a site can see several facts.
+         */
+        val sanitizerSurvivedBySite = java.util.TreeMap<Int, Set<String>>()
+
+        fun recordSanitizerSurvived(site: Int, survived: Set<String>) = synchronized(lock) {
+            sanitizerSurvivedBySite[site] = (sanitizerSurvivedBySite[site] ?: emptySet()) + survived
+        }
+
+        /** P24 §3: targets considered per virtual hop, pre-narrowing. */
+        val dispatchWidths = java.util.TreeMap<Int, Int>()
+
+        fun recordDispatchWidth(width: Int) = synchronized(lock) { dispatchWidths.merge(width, 1, Int::plus) }
     }
 
     /**
@@ -606,6 +635,27 @@ object TaintEngine {
                 }
             }
         }
+        // P24 §4: the access-path `*` collapse, counted where it binds —
+        // every collapsed path in the analysed bodies is a field the
+        // engine can no longer tell apart. Zero on the deep tier at the
+        // default depth is the depth doctrine's (a); non-zero is a
+        // measurement, never a shrug.
+        var accessPathCollapses = 0
+        for (cf in compiled) {
+            for (block in cf.blocks) {
+                for (ins in block.instructions) {
+                    when (ins) {
+                        is KirFieldGet -> if (ins.path.collapsed) accessPathCollapses++
+                        is KirFieldSet -> if (ins.path.collapsed) accessPathCollapses++
+                        else -> {}
+                    }
+                }
+            }
+        }
+        if (accessPathCollapses > 0) {
+            truncations.merge("access-path-collapse", accessPathCollapses, Int::plus)
+        }
+
         val context = EngineContext(
             pack = pack,
             siteIndex = siteIndex,
@@ -808,8 +858,13 @@ object TaintEngine {
             addAll(bytecodeSummaries)
         }.sortedBy { it.functionId }
 
+        // P24 §4: the caps live in the report, not in a diagnostic a
+        // consumer must parse — `truncations{}` per cap, empty when none
+        // bound (which is the depth doctrine's claim, checkable).
+        val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
+            .let { it.copy(stats = it.stats.copy(truncations = truncations)) }
         return Result(
-            evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size),
+            evidence = evidence,
             functionsAnalysed = functionsAnalysed,
             fixpointCapHits = fixpointCapHits,
             sourceSites = sourceSites,
@@ -980,9 +1035,46 @@ object TaintEngine {
         override val unknownCallPropagate: Boolean get() = context.options.unknownCallPropagate
         override val fieldSensitive: Boolean get() = context.options.accessPathDepth > 0
 
+        /**
+         * P24 §2: this function's alias classes, from the allocation-site
+         * fixpoint over the same CFG (the final summary table feeding it —
+         * the reporting engine runs after the summariser converged).
+         */
+        private val aliases: AliasAnalysis by lazy {
+            AliasAnalysis(compiled) { ins -> summaryForCall(ins) }.also { it.run() }
+        }
+
+        override fun aliasClass(register: String): Set<String> = aliases.aliasClass(register)
+
+        override fun lambdaTargets(register: String): List<String> = aliases.lambdaTargets(register)
+
+        /** One summary lookup for a call site (the alias feed; may-union across targets). */
+        private fun summaryForCall(ins: KirCall): FunctionSummary? {
+            if (ins.callee.kind == CallKind.CONSTRUCTOR) {
+                val name = ins.callee.fqn + ".<init>"
+                var joined: FunctionSummary? = null
+                for ((key, summary) in context.table) {
+                    if (key.substringBefore('\u0000') != name) continue
+                    joined = if (joined == null) summary else joined.join(summary)
+                }
+                return joined
+            }
+            val targets = context.callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
+            var joined: FunctionSummary? = null
+            for (target in targets) {
+                val summary = context.table[functionKey(target)] ?: continue
+                joined = if (joined == null) summary else joined.join(summary)
+            }
+            return joined
+        }
+
         override fun birthFact(site: Int, category: String): TaintFact = TaintFact(site, category)
 
         override fun packMoveOrigin(): String? = SummaryOrigin.PACK
+
+        override fun onSanitizerSurvived(site: Int, survived: Set<String>, collect: TransferEvents?) {
+            context.recordSanitizerSurvived(site, survived)
+        }
 
         override fun onSourceApplied(fqn: String, site: Int, fact: TaintFact, resultKey: TaintKey, collect: TransferEvents?) {
             if (collect != null) {
@@ -1112,6 +1204,13 @@ object TaintEngine {
          * the callee's recorded path; `paramToReturn`/`paramToParam`/
          * `paramToReceiver`/`sourceReturns` move the caller's facts with the
          * summary's origin stamped on every boundary move.
+         *
+         * P24 adds the object-identity channels: constructor calls apply the
+         * class's `<init>` summary with the NEW OBJECT as the receiver; calls
+         * through a KNOWN function value apply the target body's summary;
+         * field-write effects fan out through the argument's alias class;
+         * source-born field writes and invoke binds complete the circuits the
+         * register-keyed engine could not express.
          */
         override fun applyCalleeSummaries(
             ins: KirCall,
@@ -1121,6 +1220,29 @@ object TaintEngine {
             collect: TransferEvents?,
         ): Boolean {
             val options = context.options
+
+            // P24 §2d: a call through a function value this body DEFINED (or
+            // copied) — the value is an object whose target is known at its
+            // allocation site, and the invoke resolves to that target.
+            if (ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+                if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
+            }
+
+            // P24 §2b: a constructor applies the class's `<init>` summary —
+            // the constructor is a function that writes the object's fields,
+            // so `Job(tainted)` taints `job.command` through the same
+            // paramFieldWrites channel every member function uses. The NEW
+            // OBJECT (the call's result) is the receiver.
+            if (ins.callee.kind == CallKind.CONSTRUCTOR) {
+                val ctor = constructorSummary(ins)
+                if (ctor != null) {
+                    currentCallArgs = ins.args
+                    applyOne(ctor, ins.result, ins.result, site, state, chain, collect)
+                    return true
+                }
+                return false
+            }
+
             var targets = context.callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
             if (targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto")) {
                 // VTA narrows by the receiver's known construction types before
@@ -1163,123 +1285,24 @@ object TaintEngine {
             val width = applicable.size
             context.recordJoin(width)
             if (width > options.dispatchJoinBudget) context.recordJoinOverrun()
-            var moved = false
+            // P24 §3: the per-hop dispatch evidence the frames read — what
+            // was CONSIDERED, what was APPLIED, and what narrowed it.
+            val narrowedBy = when {
+                targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto") ->
+                    if (targets.size > applicable.size + 0 && applicable.size == 1) "vta" else null
 
-            // Summary parameter index -> the caller's register. A receiver-less
-            // call to a member function binds its implicit this to the CALLER's
-            // own receiver so member-to-member effects compose.
-            val callerThis = callerThisRegister(compiled)
-            fun mapParam(summary: FunctionSummary, index: Int): String? {
-                val receiverIndex = summary.function.params.indexOfFirst { it.receiver }
-                return if (receiverIndex >= 0 && index == 0) {
-                    ins.receiver ?: callerThis
-                } else if (receiverIndex >= 0) {
-                    ins.args.getOrNull(index - 1)
-                } else {
-                    ins.args.getOrNull(index)
-                }
+                targets.size == 1 -> "single-impl"
+                else -> null
             }
+            context.recordDispatch(site, targets.size, applicable.map { it.first.canonicalName }, narrowedBy)
+            if (ins.callee.kind == CallKind.VIRTUAL) {
+                context.recordDispatchWidth(targets.size)
+            }
+            var moved = false
+            currentCallArgs = ins.args
 
             for ((target, summary) in applicable.sortedBy { it.first.canonicalName }) {
-                val origin = summary.origin
-
-                // paramToReturn: the caller's facts move onto the result — fact
-                // identity preserved, so the caller's trace keeps walking.
-                val result = ins.result
-                if (result != null) {
-                    val resultKey = TaintKey(result, "")
-                    for (param in summary.paramToReturn.sorted()) {
-                        val from = mapParam(summary, param) ?: continue
-                        val fromKey = TaintKey(from, "")
-                        val facts = state.factsOf(fromKey)
-                        if (facts.isEmpty()) continue
-                        state.addFacts(resultKey, facts)
-                        moved = true
-                        for (fact in facts) {
-                            chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin)
-                        }
-                    }
-                    // sourceReturns: taint born at a source INSIDE the callee
-                    // comes back through the return; the caller's birth site is
-                    // this call, and the callee's path is prepended at slice
-                    // build so the trace still starts at the real source.
-                    for ((category, path) in summary.sourceReturns) {
-                        val fact = TaintFact(site, category)
-                        context.recordSourceReturn(fact, path)
-                        state.addFacts(resultKey, listOf(fact))
-                        moved = true
-                        chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
-                    }
-                }
-
-                // paramToParam: write effects — argument i's taint lands on
-                // argument j's register after the call.
-                for ((from, tos) in summary.paramToParam) {
-                    val fromReg = mapParam(summary, from) ?: continue
-                    for (to in tos.sorted()) {
-                        val toReg = mapParam(summary, to) ?: continue
-                        moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, ""), site, "summary", origin) || moved
-                    }
-                }
-
-                // Field write effects: parameter i's taint stored into
-                // parameter j's object (the receiver case included), field-
-                // sensitive through the recorded access-path suffixes.
-                for ((from, tos) in summary.paramFieldWrites) {
-                    val fromReg = mapParam(summary, from) ?: continue
-                    for ((to, suffixes) in tos) {
-                        val toReg = mapParam(summary, to) ?: continue
-                        for (suffix in suffixes.sorted()) {
-                            moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, suffix), site, "summary", origin) || moved
-                        }
-                    }
-                }
-
-                // paramToSink: interprocedural sink hits — the facts live on the
-                // caller's argument NOW, the sink site is inside the callee.
-                // FIELD-SENSITIVE at the boundary: the effect carries the access
-                // path from the callee's parameter to the sunk value, so the
-                // caller's taint must sit on the SAME path of its argument —
-                // taint on `job.command` cannot reach a callee that sinks
-                // `job.label`.
-                for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
-                    val fromReg = mapParam(summary, effect.paramIndex) ?: continue
-                    val argKey = TaintKey(fromReg, effect.paramPath)
-                    val facts = state.factsOf(argKey)
-                    if (facts.isEmpty()) continue
-                    moved = true
-                    collect?.interHits?.add(InterSinkHit(site, argKey, java.util.TreeSet(facts), effect, origin))
-                }
-
-                // Function-valued parameters the callee invokes: apply the
-                // PASSED lambda's summary with the captures bound from the
-                // caller's registers (the lambda body is just another function
-                // whose capture parameters carry the closure's taint).
-                for (param in summary.invokedParams.sorted()) {
-                    val argReg = mapParam(summary, param) ?: continue
-                    val lambdaCanonical = context.lambdaDefs[functionKey(compiled.function)]?.get(argReg)
-                    if (lambdaCanonical == null) {
-                        // A callable reference or local function: no extracted
-                        // body, so no summary — counted, never silent.
-                        collect?.let { context.recordLambdaUnresolved() }
-                        continue
-                    }
-                    // Lambdas carry no descriptor; the lowering's module-wide
-                    // ordinal makes the name unique, so the name-only key is
-                    // the function's (P22 §1).
-                    val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)] ?: continue
-                    val lambdaCaptured = context.captures[functionKey(compiled.function)]?.get(lambdaCanonical).orEmpty()
-                    val lambdaOrigin = lambdaSummary.origin
-                    for (effect in lambdaSummary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
-                        if (effect.paramIndex >= lambdaCaptured.size) continue // a value-parameter effect cannot be bound here
-                        val captureReg = lambdaCaptured[effect.paramIndex]
-                        val captureKey = TaintKey(captureReg, effect.paramPath)
-                        val facts = state.factsOf(captureKey)
-                        if (facts.isEmpty()) continue
-                        moved = true
-                        collect?.interHits?.add(InterSinkHit(site, captureKey, java.util.TreeSet(facts), effect, lambdaOrigin))
-                    }
-                }
+                moved = applyOne(summary, ins.receiver, ins.result, site, state, chain, collect) || moved
             }
             // The applied-summary publication (P9 gate denominator) counts
             // dependency summaries that MOVED something at a workspace call
@@ -1289,6 +1312,275 @@ object TaintEngine {
                     .forEach { context.recordBytecodeApplied(it.second.function.canonicalName) }
             }
             return true
+        }
+
+        /** The class's `<init>` summary for a constructor call, may-unioned across overloads. */
+        private fun constructorSummary(ins: KirCall): FunctionSummary? {
+            val name = ins.callee.fqn + ".<init>"
+            var joined: FunctionSummary? = null
+            for ((key, summary) in context.table) {
+                if (key.substringBefore('\u0000') != name) continue
+                joined = if (joined == null) summary else joined.join(summary)
+            }
+            return joined
+        }
+
+        /**
+         * P24 §2d: an invoke whose receiver holds KNOWN lambda objects — the
+         * bodies defined in this function. Their summaries apply with the
+         * invoke's arguments bound to the bodies' value parameters and the
+         * capture registers bound from the KirLambda site.
+         */
+        private fun applyLambdaInvoke(
+            ins: KirCall,
+            site: Int,
+            state: FlowState<TaintFact>,
+            chain: HashMap<ChainKey<TaintFact>, Move>,
+            collect: TransferEvents?,
+        ): Boolean {
+            val targets = lambdaTargets(ins.receiver!!)
+            if (targets.isEmpty()) return false
+            var applied = false
+            for (canonical in targets) {
+                val lambdaSummary = context.table[functionKeyByName(canonical)] ?: continue
+                val captured = context.captures[functionKey(compiled.function)]?.get(canonical).orEmpty()
+                val hit = applyOneWithBinding(lambdaSummary, { index ->
+                    if (index < captured.size) captured[index] else ins.args.getOrNull(index - captured.size)
+                }, ins.result, site, state, chain, collect)
+                applied = hit || applied
+            }
+            return applied
+        }
+
+        /** The call-site application of one summary (receiver/args mapping). */
+        private fun applyOne(
+            summary: FunctionSummary,
+            receiver: String?,
+            result: String?,
+            site: Int,
+            state: FlowState<TaintFact>,
+            chain: HashMap<ChainKey<TaintFact>, Move>,
+            collect: TransferEvents?,
+        ): Boolean {
+            val callerThis = callerThisRegister(compiled)
+            val receiverIndex = summary.function.params.indexOfFirst { it.receiver }
+            val args = currentCallArgs
+            return applyOneWithBinding(summary, { index ->
+                when {
+                    receiverIndex >= 0 && index == 0 -> receiver ?: callerThis
+                    receiverIndex >= 0 -> args.getOrNull(index - 1)
+                    else -> args.getOrNull(index)
+                }
+            }, result, site, state, chain, collect)
+        }
+
+        /** The args of the call being applied — set by [applyCalleeSummaries] around [applyOne]. */
+        private var currentCallArgs: List<String> = emptyList()
+
+        /**
+         * One summary applied over an explicit PARAMETER BINDING (a call
+         * site's receiver/args, or a lambda invoke's captures/args). Returns
+         * whether anything moved.
+         */
+        private fun applyOneWithBinding(
+            summary: FunctionSummary,
+            binding: (Int) -> String?,
+            result: String?,
+            site: Int,
+            state: FlowState<TaintFact>,
+            chain: HashMap<ChainKey<TaintFact>, Move>,
+            collect: TransferEvents?,
+        ): Boolean {
+            var moved = false
+            val origin = summary.origin
+            val callerThis = callerThisRegister(compiled)
+            val capturedHere = context.captures[functionKey(compiled.function)].orEmpty()
+
+            fun bindLambdaArg(lambdaCanonical: String, valueIndex: Int): String? {
+                val captures = capturedHere[lambdaCanonical].orEmpty()
+                return if (valueIndex < captures.size) captures[valueIndex] else null
+            }
+
+            // paramToReturn: the caller's facts move onto the result — fact
+            // identity preserved, so the caller's trace keeps walking.
+            if (result != null) {
+                val resultKey = TaintKey(result, "")
+                for (param in summary.paramToReturn.sorted()) {
+                    val from = binding(param) ?: continue
+                    val fromKey = TaintKey(from, "")
+                    val facts = state.factsOf(fromKey)
+                    if (facts.isEmpty()) continue
+                    state.addFacts(resultKey, facts)
+                    moved = true
+                    // P24 §3: the callee-internal witness splices into the
+                    // boundary move, so the frames name the callee's hops.
+                    val via = summary.paramToReturnPaths[param].orEmpty()
+                    for (fact in facts) {
+                        chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
+                    }
+                }
+                // sourceReturns: taint born at a source INSIDE the callee
+                // comes back through the return; the caller's birth site is
+                // this call, and the callee's path is prepended at slice
+                // build so the trace still starts at the real source.
+                for ((category, path) in summary.sourceReturns) {
+                    val fact = TaintFact(site, category)
+                    context.recordSourceReturn(fact, path)
+                    state.addFacts(resultKey, listOf(fact))
+                    moved = true
+                    chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
+                }
+                // P24 §2: the field channel — the callee stored param i's
+                // VALUE into the returned object's field, so the argument's
+                // BASE taint reaches the result's FIELD.
+                for ((param, suffixes) in summary.paramToReturnFields) {
+                    val from = binding(param) ?: continue
+                    for (suffix in suffixes.sorted()) {
+                        val via = summary.paramToReturnFieldPaths["$param\u0000$suffix"].orEmpty()
+                        val facts = state.factsOf(TaintKey(from, ""))
+                        if (facts.isEmpty()) continue
+                        state.addFacts(TaintKey(result, suffix), facts)
+                        moved = true
+                        for (fact in facts) {
+                            chain[ChainKey(fact, TaintKey(result, suffix))] = Move(site, TaintKey(from, ""), "summary", origin, via)
+                        }
+                    }
+                }
+            }
+
+            // P24 §2c: source-born FIELD WRITES — the caller's argument
+            // carries the write after the call, on every name of the object.
+            for ((category, writes) in summary.sourceFieldWrites) {
+                for (write in writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix }))) {
+                    val toReg = binding(write.paramIndex) ?: continue
+                    for (base in aliasClass(toReg).sorted()) {
+                        val fact = TaintFact(site, category)
+                        context.recordSourceReturn(fact, write.path)
+                        val key = TaintKey(base, write.suffix)
+                        state.addFacts(key, listOf(fact))
+                        moved = true
+                        chain[ChainKey(fact, key)] = Move(site, null, "source-field-write", origin)
+                    }
+                }
+            }
+
+            // paramToParam: write effects — argument i's taint lands on
+            // argument j's register after the call.
+            for ((from, tos) in summary.paramToParam) {
+                val fromReg = binding(from) ?: continue
+                for (to in tos.sorted()) {
+                    val toReg = binding(to) ?: continue
+                    moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(toReg, ""), site, "summary", origin) || moved
+                }
+            }
+
+            // Field write effects: parameter i's taint stored into
+            // parameter j's object (the receiver case included), field-
+            // sensitive through the recorded access-path suffixes.
+            // P24 §2: the write lands on every name of the object the
+            // caller named — the alias class of the bound argument.
+            for ((from, tos) in summary.paramFieldWrites) {
+                val fromReg = binding(from) ?: continue
+                for ((to, suffixes) in tos) {
+                    val toReg = binding(to) ?: continue
+                    for (suffix in suffixes.sorted()) {
+                        for (base in aliasClass(toReg).sorted()) {
+                            moved = moveChain(state, TaintKey(fromReg, ""), TaintKey(base, suffix), site, "summary", origin) || moved
+                        }
+                    }
+                }
+            }
+
+            // paramToSink: interprocedural sink hits — the facts live on the
+            // caller's argument NOW, the sink site is inside the callee.
+            // FIELD-SENSITIVE at the boundary: the effect carries the access
+            // path from the callee's parameter to the sunk value, so the
+            // caller's taint must sit on the SAME path of its argument —
+            // taint on `job.command` cannot reach a callee that sinks
+            // `job.label`.
+            for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
+                val fromReg = binding(effect.paramIndex) ?: continue
+                val argKey = TaintKey(fromReg, effect.paramPath)
+                val facts = state.factsOf(argKey)
+                if (facts.isEmpty()) continue
+                moved = true
+                collect?.interHits?.add(InterSinkHit(site, argKey, java.util.TreeSet(facts), effect, origin))
+            }
+
+            // Function-valued parameters the callee invokes: apply the
+            // PASSED lambda's summary with the captures bound from the
+            // caller's registers (the lambda body is just another function
+            // whose capture parameters carry the closure's taint).
+            for (param in summary.invokedParams.sorted()) {
+                val argReg = binding(param) ?: continue
+                val lambdaCanonical = context.lambdaDefs[functionKey(compiled.function)]?.get(argReg)
+                if (lambdaCanonical == null) {
+                    // A callable reference or local function: no extracted
+                    // body, so no summary — counted, never silent.
+                    collect?.let { context.recordLambdaUnresolved() }
+                    continue
+                }
+                // Lambdas carry no descriptor; the lowering's module-wide
+                // ordinal makes the name unique, so the name-only key is
+                // the function's (P22 §1).
+                val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)] ?: continue
+                val lambdaCaptured = context.captures[functionKey(compiled.function)]?.get(lambdaCanonical).orEmpty()
+                val lambdaOrigin = lambdaSummary.origin
+                for (effect in lambdaSummary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
+                    if (effect.paramIndex < lambdaCaptured.size) {
+                        // A capture-parameter effect: the closure's own taint.
+                        val captureReg = lambdaCaptured[effect.paramIndex]
+                        val captureKey = TaintKey(captureReg, effect.paramPath)
+                        val facts = state.factsOf(captureKey)
+                        if (facts.isEmpty()) continue
+                        moved = true
+                        collect?.interHits?.add(InterSinkHit(site, captureKey, java.util.TreeSet(facts), effect, lambdaOrigin))
+                    }
+                    // P24 §2d: a VALUE-parameter effect — the argument the
+                    // CALLEE passed at the invocation, recorded as a bind.
+                    // The lambda's value parameters follow its captures, so
+                    // the bind's argIndex addresses the effect's paramIndex
+                    // minus the capture count.
+                    val bindArgIndex = effect.paramIndex - lambdaCaptured.size
+                    if (bindArgIndex < 0) continue
+                    val bind = summary.invokedBinds.firstOrNull {
+                        it.invokedParam == param && it.argIndex == bindArgIndex
+                    } ?: continue
+                    // The value physically transited the callee (to the
+                    // invoke site) and then the lambda body: the stitched
+                    // walk is the bind's path through the callee followed by
+                    // the lambda's effect path, so the frames name BOTH the
+                    // invoking function and the body.
+                    val stitched = effect.copy(
+                        path = bind.path + effect.path,
+                        elided = effect.elided,
+                    )
+                    when {
+                        // The callee passed MY argument's taint into the
+                        // lambda: the caller's facts at the bound register.
+                        bind.fromParam != null -> {
+                            val sourceReg = binding(bind.fromParam) ?: continue
+                            val sourceKey = TaintKey(sourceReg, bind.fromParamPath)
+                            val facts = state.factsOf(sourceKey)
+                            if (facts.isEmpty()) continue
+                            moved = true
+                            collect?.interHits?.add(InterSinkHit(site, sourceKey, java.util.TreeSet(facts), stitched, lambdaOrigin))
+                        }
+
+                        // The callee passed a source born INSIDE it: birth
+                        // the fact here and stitch the callee's walk.
+                        bind.category != null -> {
+                            val fact = TaintFact(site, bind.category)
+                            context.recordSourceReturn(fact, bind.path)
+                            moved = true
+                            collect?.interHits?.add(
+                                InterSinkHit(site, TaintKey(argReg, ""), java.util.TreeSet(setOf(fact)), stitched, lambdaOrigin),
+                            )
+                        }
+                    }
+                }
+            }
+            return moved
         }
     }
 
@@ -1333,6 +1625,10 @@ object TaintEngine {
         /** P20 §1: the endpoint value-parameter the flow entered through, when it did. */
         val sourceParameter: String? = null,
         val sourceTransport: String? = null,
+        /** P24 §3: the named hops, source to sink. */
+        val frames: List<FlowFrame> = emptyList(),
+        /** P24 §3: the cap that cut the frame list, when it did. */
+        val framesCutBy: String? = null,
     )
 
     private class NodeInfo(val sortKey: String, val builder: (String) -> FlowNode)
@@ -1378,6 +1674,66 @@ object TaintEngine {
         val pattern: String,
         val upstream: List<Int>,
     )
+
+    /**
+     * P24 §3: the frame list of one trace — every hop named with its
+     * function, file, line and role. Roles resolve in a fixed order
+     * (source/sink first, then dispatch evidence, then summary boundaries,
+     * returns, surviving sanitizers, calls, and moves), so a hop has
+     * exactly one role however many things happened at it.
+     */
+    private fun buildFrames(
+        traceSites: List<Int>,
+        sourceNodeSite: Int,
+        sinkSite: Int,
+        moves: List<Move>,
+        context: EngineContext,
+        attribution: Attribution,
+        elided: Boolean,
+    ): Pair<List<FlowFrame>, String?> {
+        val moveBySite = HashMap<Int, Move>()
+        for (move in moves) moveBySite[move.site] = move
+        val siteIndex = context.siteIndex
+        val frames = mutableListOf<FlowFrame>()
+        for (siteId in traceSites) {
+            val ref = siteIndex[siteId] ?: continue
+            val fn = ref.first.function
+            val (filePath, _) = attribution.byAbsoluteFilePath[fn.file] ?: (fn.file to "")
+            val site = ref.second
+            val dispatch = context.dispatchBySite[siteId]
+            val role = when {
+                siteId == sourceNodeSite -> FrameRole.SOURCE
+                siteId == sinkSite -> FrameRole.SINK
+                dispatch != null && dispatch.considered > 1 -> FrameRole.DISPATCH
+                moveBySite[siteId]?.origin != null -> FrameRole.SUMMARY
+                site.ins is KirReturn -> FrameRole.RETURN
+                siteId in context.sanitizerSurvivedBySite -> FrameRole.SANITIZER_NOT_APPLIED
+                site.ins is KirCall || site.ins is KirDynamicCall -> FrameRole.CALL
+                else -> FrameRole.MOVE
+            }
+            val line = when (val ins = site.ins) {
+                is KirCall -> if (ins.line > 0) ins.line else fn.line
+                is KirDynamicCall -> if (ins.line > 0) ins.line else fn.line
+                is KirNew -> if (ins.line > 0) ins.line else fn.line
+                else -> fn.line
+            }
+            frames.add(
+                FlowFrame(
+                    function = fn.canonicalName,
+                    file = filePath,
+                    line = line,
+                    role = role,
+                    dispatchWidth = dispatch?.considered,
+                    dispatchTargets = dispatch?.applied.orEmpty(),
+                    dispatchNarrowedBy = dispatch?.narrowedBy,
+                ),
+            )
+        }
+        // A cut walk names the cap that cut it (the PARTIAL contract, frame
+        // form); a complete walk names nothing.
+        val cutBy = if (elided) "trace-nodes" else null
+        return frames to cutBy
+    }
 
     /**
      * P20 §1: the parameter identity of an ENDPOINT-PARAMETER birth — the
@@ -1478,8 +1834,11 @@ object TaintEngine {
         // that moved a fact without recording provenance — the source site
         // is prepended and the slice is marked elided, so a truncated trace
         // is visible as a truncated trace instead of one that quietly starts
-        // in the middle (R54).
-        val walked = moves.map { it.site }.reversed().filter { it != SummaryAnalysis.ENTRY_SITE }
+        // in the middle (R54). P24 §3: a boundary move's viaSites splice the
+        // callee-internal hops in, so the walk names where the VALUE went.
+        val walked = moves.reversed()
+            .flatMap { it.viaSites + listOf(it.site) }
+            .filter { it != SummaryAnalysis.ENTRY_SITE }
         val handlerEntrySite = compiled.blocks.firstOrNull()
             ?.let { compiled.sitesByBlock[it.id]?.firstOrNull()?.id }
         val traceSites = when {
@@ -1588,6 +1947,7 @@ object TaintEngine {
         }
         val entryParam = entryParameterInfo(context, compiled, fact)
 
+        val frames = buildFrames(traceNodesInput, sourceNodeSite, hit.sinkSite, moves, context, attribution, elided)
         val flowKey = sha256(
             listOf(
                 sourceIns?.callee?.fqn ?: sourceDisplayName,
@@ -1650,6 +2010,8 @@ object TaintEngine {
             crossesDependencyFlag = crossesDependency,
             sourceParameter = entryParam?.first,
             sourceTransport = entryParam?.second,
+            frames = frames.first,
+            framesCutBy = frames.second,
         )
     }
 
@@ -1724,6 +2086,7 @@ object TaintEngine {
         val traceSegments = mutableListOf<List<Int>>()
         val origins = sortedSetOf(hit.origin)
         var sourceNodeSite = -1
+        val allMovesCollected = mutableListOf<Move>()
         for (sourceRef in sourceRefs.sortedBy { it.fact.site }) {
             val fact = sourceRef.fact
             // Walk the caller's chain from the argument register back to the birth.
@@ -1749,8 +2112,12 @@ object TaintEngine {
                 current = move.prevKey
             }
             origins.addAll(moves.mapNotNull { it.origin })
+            allMovesCollected.addAll(moves)
             val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE
-            val walked = moves.map { it.site }.reversed().filter { it != SummaryAnalysis.ENTRY_SITE }
+            // P24 §3: callee-internal hops splice in at every boundary move.
+            val walked = moves.reversed()
+                .flatMap { it.viaSites + listOf(it.site) }
+                .filter { it != SummaryAnalysis.ENTRY_SITE }
             if (sourceRef.upstream.isNotEmpty()) {
                 // The real source call sits in the callee that RETURNED the
                 // taint: its path opens the trace.
@@ -1779,6 +2146,7 @@ object TaintEngine {
                 .takeIf { it != SummaryAnalysis.ENTRY_SITE && siteIndex.containsKey(it) }
                 ?: hit.callSite
         }
+        val allMoves = allMovesCollected
         val traceSites = traceSegments.flatten().filter { it != SummaryAnalysis.ENTRY_SITE }.distinct()
         // The SOURCE END's facts (file, module, purl) come from the function
         // holding the SOURCE NODE — for a source-return birth that is the
@@ -1800,6 +2168,7 @@ object TaintEngine {
         val sourcePattern = SourcePattern(firstRef.pattern, firstRef.fact.category)
         val fact = firstRef.fact
         val entryParam = entryParameterInfo(context, compiled, fact)
+        val frames = buildFrames(traceSites, sourceNodeSite, effect.sinkSite, allMovesCollected, context, attribution, elided)
 
         data class TraceNode(val kind: String, val name: String, val line: Int, val site: Int, val filePath: String, val modulePath: String, val purl: String, val functionLine: Int)
 
@@ -1923,6 +2292,8 @@ object TaintEngine {
             crossesDependencyFlag = crossesDependency,
             sourceParameter = entryParam?.first,
             sourceTransport = entryParam?.second,
+            frames = frames.first,
+            framesCutBy = frames.second,
         )
     }
 
@@ -2019,6 +2390,8 @@ object TaintEngine {
                 crossesModule = candidate.crossesModuleFlag,
                 crossesDependency = candidate.crossesDependencyFlag,
                 pathKind = pathKind,
+                frames = candidate.frames,
+                framesCutBy = candidate.framesCutBy,
                 ruleId = "taint/${candidate.sourceCategory}-to-${candidate.sinkCategory}",
                 ruleName = "${candidate.sourceCategory} to ${candidate.sinkCategory}",
                 description = "Value from ${candidate.sourceCategory} (${candidate.sourceName}) reaches " +
@@ -2098,6 +2471,9 @@ object TaintEngine {
                     slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
                 },
                 dispatchJoins = context.joinWidths.mapValues { it.value }.mapKeys { it.key.toString() },
+                maxObservedDepth = slicesOut.maxOfOrNull { it.frames.size } ?: 0,
+                depthHistogram = slicesOut.groupingBy { it.frames.size.toString() }.eachCount(),
+                dispatchWidthHistogram = context.dispatchWidths.mapValues { it.value }.mapKeys { it.key.toString() },
                 bytecodeSummaries = bytecodeSummaryCount,
                 crossDependencyBytecodeSlices = slicesOut.count {
                     it.crossesDependency && SummaryOrigin.BYTECODE in it.origins

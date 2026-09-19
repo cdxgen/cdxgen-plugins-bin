@@ -39,6 +39,22 @@ class ParsedArgs private constructor() {
     fun requireValue(name: String): String =
         value(name) ?: throw UsageException("missing required --$name")
 
+    /**
+     * P24 review: no command reads [positionals], so a bare path was
+     * COLLECTED AND DROPPED — `kosi analyze /some/project` analysed the
+     * working directory instead, silently, and every number it printed was
+     * about the wrong tree. (That is the whole of part 3's "429 files"
+     * observation: the baseline in 09-PRECISION.md §1 was measured that
+     * way.) An argument the tool cannot honour is a usage error, exactly as
+     * an unknown flag already is.
+     */
+    fun requireNoPositionals(command: String, hint: String) {
+        if (positionals.isEmpty()) return
+        throw UsageException(
+            "$command takes no positional arguments; got '${positionals.first()}' — did you mean $hint?",
+        )
+    }
+
     companion object {
         /**
          * Parses `args` accepting only the flags in [known] — an unknown flag

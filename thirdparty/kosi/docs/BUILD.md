@@ -205,6 +205,34 @@ kampkit, P16 nowinandroid, P12's pack growth), each time through a warm,
 a resolver, or a pack change — which is exactly the population the
 capability matching selects.
 
+### The deep tier: small, hard, and in CI (P24)
+
+The bundled corpus is ~100 single-concern fixtures — one construct, one
+lowering rule, a positive half and a negative half — and it cannot prove
+the claim part 3 exists to make: that a value is followed through many
+layers, across control flow, aliases and dynamic dispatch, with every hop
+named. The `deep` tier is the population that can. Its discipline, from
+`10-DEEP-EVIDENCE.md`:
+
+- **A deep fixture is layered, not large.** Six or more frames across
+  several files, an interface between layers with implementations that do
+  not all sink, aliasing, containers, control flow, async — and a negative
+  half of the same shape that must report nothing.
+- **It earns its place by failing something.** A deep fixture that passes
+  in every mode on the day it is written adds runtime and proves nothing
+  (R53); it is added with a `known-fail` and a tracker row, or as the
+  negative half of one that has one.
+- **Ten fixtures for the whole of part 3, one slot each.** The default
+  slot only (`resolved` + `security` + `auto`), one golden pair per
+  fixture, no matrix product.
+- **CI runs this tier** — it is the small hard subset that belongs there —
+  and `corpusFull` stays local and occasional, unchanged.
+- **No cap may bind on it.** `DeepTierTest` asserts every named cap is
+  zero at the DEFAULT configuration, that every published slice carries
+  complete frames source to sink, and that raising every cap to infinity
+  changes not one byte of the reports. A cap that binds here is a defect,
+  not a setting (`09-PRECISION.md` §3).
+
 ### What no corpus tier answers: is this code reachable from any input we have (P21)
 
 `corpusChanged` and `corpusFull` both answer one question: **did a

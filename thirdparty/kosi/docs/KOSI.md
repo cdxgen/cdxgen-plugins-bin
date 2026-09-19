@@ -42,6 +42,13 @@ kosi version    # versions, compiler band, capabilities
 Exit codes: `0` success, `1` an expectation failed (ratchet, golden, bench),
 `2` usage error, `3` runtime error.
 
+The project to analyse is named by `--dir`, and **a bare path is a usage
+error**: `kosi analyze /path/to/project` exits 2 naming the flag that takes
+it. It used to be accepted and dropped, which meant the run silently
+analysed the working directory and produced a perfectly valid report about
+a tree the caller never named — the one wrong answer no amount of
+determinism can catch.
+
 Output is minified and byte-identical across runs on the same input;
 `--pretty` only re-indents. Nothing in the report depends on filesystem
 ordering, hash iteration order or wall-clock time — that is a gated property,
@@ -104,6 +111,18 @@ the call graph's SCC condensation and applied at call sites in a fixed order
 `launch`/`async`/`withContext`/`runBlocking`, `flow { emit(x) }` to
 `collect`, `Channel.send`/`receive` — and `stats.suspendCrossingSlices`
 counts the slices that cross a suspend boundary.
+
+Since P24 the engine also tracks **object identity**: an allocation-site
+alias analysis runs over the same CFG, so a value reached through a second
+reference to one object, through a field of another object, or carried
+inside an object across a call boundary is followed rather than lost, and
+a lambda is an object whose target is known where it was allocated. Every
+slice publishes `frames[]` — the trace as named hops, `(function, file,
+line, role)`, source first and sink last, with callee-internal hops
+spliced in at each summary boundary — plus `stats.maxObservedDepth`, a
+depth histogram, a dispatch-width histogram and `truncations{}`, which
+names any cap that bound the run. A slice whose frame list was cut says so
+in `framesCutBy`; nothing infers depth from a silence.
 
 **Endpoints, services, URLs.** Inbound routes per framework (Spring MVC and
 WebFlux, Ktor, Micronaut, Quarkus/JAX-RS, http4k, gRPC, Android manifest

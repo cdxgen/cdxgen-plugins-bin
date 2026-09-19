@@ -418,6 +418,8 @@ first parameter is index 0.
 | `pathLength` | int | `edgeIds.size` |
 | `elided` | boolean? | true when the walk was cut — the trace cap (`--dataflow-max-trace-nodes`), a summary whose composed path was stabilized (`pathKind` is then `partial`); the endpoints survive and an `elided`-kind edge keeps the walk connected |
 | `pathKind` | string | P22 §2: what the slice's trace IS — `complete` (a full source→sink walk), `partial` (the walk was elided; endpoints guaranteed, the middle cut), `symbol-only` (no provable path; the finding stands on the symbol match alone — measured population zero on the whole corpus today, reserved so the vocabulary is closed). Replaces `reachableFromRoots` (false in every shipped slot, true by construction in the one mode that published it — the mode, not the slice, carried the information) and `rootWitness` (null everywhere). The depth report's reachability table reads this field |
+| `frames[]` | object[] | P24 §3: the trace as named hops — ordered `(function, file, line, role)`, source first, sink last, one per hop the VALUE took (callee-internal hops splice in at every summary boundary, so a six-frame chain names all six). `role` is from the closed vocabulary `FrameRole`: `source`, `move`, `call`, `return`, `dispatch`, `summary`, `sanitizer-not-applied`, `sink`. `dispatch` frames carry the per-hop evidence `dispatchWidth` (targets considered), `dispatchTargets[]` (applied) and `dispatchNarrowedBy` (`single-impl`, `vta`, ...). Empty only where `pathKind` is `symbol-only` (no walk, no hops to name). The corpus reads this list for the deep tier's `frames=N` and `via=fn:...` expectations; cdxgen renders it as `callstack` evidence |
+| `framesCutBy` | string? | P24 §3: when the frame list is not the whole walk, the cap that cut it (today `trace-nodes`) — the frame-list form of the PARTIAL contract. `null` on a complete list |
 | `kind` (nodes) | string | `source`, `sink`, or the propagation role — now including `suspend` (a coroutine boundary the trace crosses) |
 | `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
 | `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
@@ -479,7 +481,18 @@ whose trace crosses a suspend boundary (P6). Since P9:
 workspace call site actually applied with a taint move — the gate's
 producer-named numerator, never a count of every jar function summarised;
 `crossDependencyBytecodeSlices` — slices whose trace enters a jar the tier
-lowered AND whose boundary origins carry `bytecode`.
+lowered AND whose boundary origins carry `bytecode`. Since P24:
+`maxObservedDepth` — the deepest named-hop count any published slice
+carries ("how deep does kosi actually go" as a report field, not a review
+anecdote); `depthHistogram{}` — slice count by frame count, exact buckets;
+`dispatchWidthHistogram{}` — targets CONSIDERED per virtual hop,
+pre-narrowing (where `dispatchJoins{}` counts APPLIED summaries — both
+stay because the bench reads the old one); `truncations{}` — every dataflow
+cap that bound the run, by published name, with its cut count. Empty
+`truncations{}` is the claim "no cap bound", which is what the deep tier's
+gate asserts. Narrowing modes (`reachable`, `crypto`) recompute the depth
+measurements from the surviving slices and leave the run-level
+`dispatchWidthHistogram`/`truncations` alone.
 
 ### dataFlow.summaries[] — FlowSummary (P5)
 
@@ -498,6 +511,9 @@ function's parameter list (dispatch receiver first when present).
 | `functionId`, `function` | string | the function's canonical name (or the pack entry's pattern for pack-origin summaries) |
 | `parameterNames[]`, `parameterTypes[]` | string[] | the parameter list the `p<i>` ids index |
 | `paramToReturn[]` | string[] | parameters whose taint reaches the return value |
+| `paramToReturnFields[]` | string[] | P24 §2: parameter-object FIELDS reaching the return's same field, as `p<i>.<suffix>` — `fun get(raw: String) = Session(token = raw)` publishes `p1.token`: the callee stored the argument into the returned object's field, and the caller reads it back off the result |
+| `sourceFieldWrites[]` | string[] | P24 §2c: taint born at a source INSIDE the callee and stored into parameter i's object, as `p<i>.<suffix>:<category>` — after the call, the caller's argument carries the write (`fun taint(job: Job) { job.command = readLine() }`) |
+| `invokes[]` | string[] | P24 §2d: what the body passes when it invokes a function-valued parameter — `p<j>(arg<k>)<-p<i>` (my parameter i's taint) or `p<j>(arg<k>)<-source:<category>` (a source born in me). This is the channel that lets a passed lambda's body consume taint that never leaves the callee |
 | `paramToParam[]` | string[] | write effects `p<i>->p<j>` (parameter i's taint lands on parameter j) |
 | `paramToReceiver[]` | string[] | parameters whose taint is stored into the receiver |
 | `paramToSink{}` | map<string, int[]> | parameter -> argument indexes of the sinks it reaches inside the callee |

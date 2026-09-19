@@ -145,7 +145,7 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
     }
 
 kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async + vuln ratchets, no network.") {
-    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async,vuln", "--repo-root", rootDir.absolutePath)
+    args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async,vuln,deep", "--repo-root", rootDir.absolutePath)
 }
 
 kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {

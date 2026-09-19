@@ -263,19 +263,24 @@ object Promotion {
             )
         }
 
-        // 7. full fixture coverage
-        val slotsPerFixture = Matrix.defaultMatrix().size
-        val coverageOk = current.results.map { it.slug }.toSortedSet().size * slotsPerFixture ==
-            current.results.size && current.results.isNotEmpty()
+        // 7. full fixture coverage. A fixture runs its tier's slots — five
+        // for every bundled tier, ONE (the default `resolved` slot) for the
+        // deep tier (P24, 10-DEEP-EVIDENCE.md §3) — so the expected count
+        // is per-fixture over THIS run's entries, not a single constant
+        // times the fixture count.
+        val expectedSlots = current.results.groupBy { it.slug }.values.sumOf { rows ->
+            rows.maxOfOrNull { Matrix.slotsFor(it.tier).size } ?: 0
+        }
+        val coverageOk = expectedSlots == current.results.size && current.results.isNotEmpty()
         checks.add(
             if (coverageOk) {
                 Check(
                     "fixture-coverage",
                     State.PASS,
-                    "${current.results.size} slots run ($slotsPerFixture per fixture)",
+                    "${current.results.size} slots run ($expectedSlots expected, deep-tier fixtures one each)",
                 )
             } else {
-                Check("fixture-coverage", State.FAIL, "fixture/slot coverage incomplete")
+                Check("fixture-coverage", State.FAIL, "fixture/slot coverage incomplete: ${current.results.size} run, $expectedSlots expected")
             },
         )
 

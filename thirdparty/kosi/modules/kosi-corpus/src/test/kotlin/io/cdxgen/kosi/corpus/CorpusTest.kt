@@ -179,3 +179,57 @@ class CorpusManifestTest {
         assertEquals(emptyList(), fixture.toleratedResolutionErrors, "an explicit empty list is a declaration")
     }
 }
+
+/**
+ * P24 §1 (10-DEEP-EVIDENCE.md §2): the deep tier's two annotation forms.
+ * `frames=N` demands named hops; `via=fn:...,fn:...` demands named
+ * intermediate frames in order — and a segment that cannot match any
+ * function is an ANNOTATION ERROR (evaluated in `Evaluator`), never a
+ * vacuous pass on the negative half.
+ */
+class DeepAnnotationFormsTest {
+
+    @Test
+    fun framesAndViaParseAndCarryTheirValues() {
+        val good = AnnotationParser.parseFileText(
+            "// kosi:want flow source=untrusted-input sink=process-exec frames=6 via=fn:Repo.query,fn:~Mapper.map\n",
+            "T.kt",
+        )
+        assertEquals(1, good.size, "a well-formed deep expectation parses")
+        val annotation = (good[0] as AnnotationParser.Success).annotation
+        assertEquals(6, annotation.frames)
+        assertEquals(listOf("fn:Repo.query", "fn:~Mapper.map"), annotation.via)
+    }
+
+    @Test
+    fun theNewKeysAreFlowOnly() {
+        val bad = AnnotationParser.parseFileText("// kosi:want usage name=X frames=2\n", "T.kt")
+        assertTrue(bad[0] is AnnotationParser.Failure, "frames= is flow-only")
+        val badVia = AnnotationParser.parseFileText("// kosi:want usage name=X via=fn:Y\n", "T.kt")
+        assertTrue(badVia[0] is AnnotationParser.Failure, "via= is flow-only")
+    }
+
+    @Test
+    fun aViaSegmentMustNameAFunction() {
+        val bad = AnnotationParser.parseFileText(
+            "// kosi:want flow source=untrusted-input sink=process-exec via=Repo.query\n",
+            "T.kt",
+        )
+        assertTrue(bad[0] is AnnotationParser.Failure, "a via segment must be fn:-prefixed")
+        val badFrames = AnnotationParser.parseFileText(
+            "// kosi:want flow source=untrusted-input sink=process-exec frames=0\n",
+            "T.kt",
+        )
+        assertTrue(badFrames[0] is AnnotationParser.Failure, "frames must be >= 1")
+    }
+
+    @Test
+    fun viaSegmentsSeparateOnCommasWithinOneToken() {
+        val parsed = AnnotationParser.parseFileText(
+            "// kosi:want-not flow source=untrusted-input sink=process-exec via=fn:A,fn:B\n",
+            "T.kt",
+        )
+        val annotation = (parsed[0] as AnnotationParser.Success).annotation
+        assertEquals(listOf("fn:A", "fn:B"), annotation.via)
+    }
+}
