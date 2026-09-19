@@ -64,6 +64,11 @@ class DeepTierTest {
             dataflowMaxTraceEdges = Int.MAX_VALUE,
             dataflowMaxFunctionInstructions = Int.MAX_VALUE,
             dataflowMaxSummarySinkEffects = Int.MAX_VALUE,
+            // Named in the doc-comment above and left at its default by the
+            // first version of this leg, which made the comment a claim the
+            // code did not check (R117's shape, one level up).
+            maxPathsPerSymbol = Int.MAX_VALUE,
+            depsMaxClasses = Int.MAX_VALUE,
         )
 
     @Test

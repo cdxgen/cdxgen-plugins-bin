@@ -2613,6 +2613,30 @@ object KirLowering {
          * later defines the same v-name — the pre-definition read is the
          * capture, which is the semantics that matters for taint.
          */
+        /**
+         * Does this lambda body read the implicit `it` that belongs to THIS
+         * lambda? An inner lambda that declares no parameter of its own owns
+         * the `it` inside it, so the scan stops there; an inner lambda that
+         * declares one shadows nothing, and an `it` under it is still ours.
+         * Missing a reference costs a parameter that carries no taint;
+         * inventing one would mis-address every later argument, so the doubt
+         * is resolved toward not inventing.
+         */
+        private fun referencesImplicitIt(body: KtExpression): Boolean {
+            var found = false
+            body.accept(object : KtTreeVisitorVoid() {
+                override fun visitLambdaExpression(expression: KtLambdaExpression) {
+                    if (expression.valueParameters.isNotEmpty()) super.visitLambdaExpression(expression)
+                }
+
+                override fun visitSimpleNameExpression(expression: org.jetbrains.kotlin.psi.KtSimpleNameExpression) {
+                    if (expression.getReferencedName() == "it") found = true
+                    super.visitSimpleNameExpression(expression)
+                }
+            })
+            return found
+        }
+
         private fun extractLambda(psi: KtLambdaExpression, context: LambdaContext): Pair<String, List<String>>? {
             val bodyPsi = psi.bodyExpression ?: return null
             val ordinal = context.ordinal++
@@ -2626,8 +2650,22 @@ object KirLowering {
                 enclosingCanonical = canonical,
                 tempStart = temp,
             )
-            val valueParams = psi.valueParameters.mapIndexed { index, param ->
-                KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+            val valueParams = if (psi.valueParameters.isEmpty() && referencesImplicitIt(bodyPsi)) {
+                // Kotlin's implicit lambda parameter is a REAL parameter with
+                // no PSI: `{ exec(it) }` declares nothing, so the extraction
+                // gave the body no value parameter and the read of `it`
+                // became a register nothing defines. Every interprocedural
+                // channel that speaks parameter indices — P24 §2d's
+                // invoke-binds above all — then had nothing to bind, and the
+                // taint died at the invocation. The review's probe found
+                // this: `viaLambda { s -> exec(s) }` publishes the flow and
+                // `viaLambda { exec(it) }`, the far commoner spelling, does
+                // not. Declared here so the two spellings are one capability.
+                listOf(KirParam("%p0", "it", null, receiver = false))
+            } else {
+                psi.valueParameters.mapIndexed { index, param ->
+                    KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+                }
             }
             bodyLower.bindParameters(valueParams)
             val statements = bodyPsi.statements

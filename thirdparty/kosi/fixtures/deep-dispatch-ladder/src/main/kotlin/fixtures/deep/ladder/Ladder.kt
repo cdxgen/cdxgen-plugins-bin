@@ -10,6 +10,15 @@
 // Positive half: the function-valued bridge and the SAM bridge, each naming
 // its frames in order.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~walkDeep frames=6 via=fn:~Step.execute,fn:~ExecRung.apply
+//
+// The SAME rung reached through Kotlin's IMPLICIT lambda parameter. The
+// review's probe found that the function-valued channel worked only when the
+// lambda DECLARED its parameter: `{ payload -> ... }` published the flow and
+// `{ ... it ... }` — the commoner spelling by far — published nothing,
+// because the extraction gave a parameterless lambda no value parameter and
+// the invoke-bind had nothing to address. One capability, two spellings, and
+// this is the want that says so.
+// kosi:want flow source=untrusted-input sink=process-exec fn=~walkImplicit frames=6 via=fn:~Step.execute,fn:~ExecRung.apply
 // kosi:want flow source=untrusted-input sink=process-exec fn=~walkSam frames=5 via=fn:~ExecRung.apply known-fail=147
 //
 // R147: a SAM conversion's synthesized class is invisible to the workspace
@@ -52,6 +61,11 @@ class Ladder(private val step: Step, private val rung: Rung, private val safe: R
     fun walkDeep() {
         val raw = readLine() ?: ""
         step.execute(raw) { payload -> rung.apply(payload) }
+    }
+
+    fun walkImplicit() {
+        val raw = readLine() ?: ""
+        step.execute(raw) { rung.apply(it) }
     }
 
     fun walkSam() {
