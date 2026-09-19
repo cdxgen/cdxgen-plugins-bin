@@ -1149,6 +1149,39 @@ path = "fixtures/deserialization-fields"
 capabilities = ["taint", "deserialization", "dto-fields", "jackson", "kotlinx-serialization", "gson"]
 tolerated_resolution_errors = []
 
+# P26 §1.1: persistence as sinks — Spring Data repository interfaces
+# (derived query names and @Query), Room DAOs (@Dao/@Query), Exposed's
+# Transaction.exec. The interface is USER code: the sink matches what the
+# DECLARATION carries, not an FQN pattern.
+[[fixtures]]
+slug = "persistence-sinks"
+tier = "fixtures"
+path = "fixtures/persistence-sinks"
+capabilities = ["taint", "sql-query", "spring-data", "room", "exposed", "interface-sinks"]
+tolerated_resolution_errors = []
+
+# P26 §1.2: outbound as services — the annotated interface method IS the
+# call (Retrofit @GET family, Feign @RequestLine); the base URL rides the
+# existing builder row, resolved through the config resolver.
+[[fixtures]]
+slug = "outbound-interfaces"
+tier = "fixtures"
+path = "fixtures/outbound-interfaces"
+capabilities = ["outbound", "services", "urls", "retrofit2", "feign", "interface-outbound"]
+tolerated_resolution_errors = []
+
+# P26 §1.4: Android's cross-component channel — Intent/Bundle extras out of
+# one component and into another (the write half is a pack effect, the read
+# half the existing source), and a ContentProvider's query() arguments as
+# inputs any app on the device can supply (the provider framework entry
+# seeds them like every other handler).
+[[fixtures]]
+slug = "intent-extras-channel"
+tier = "fixtures"
+path = "fixtures/intent-extras-channel"
+capabilities = ["android", "intent", "extras", "content-provider", "endpoint-sources"]
+tolerated_resolution_errors = []
+
 # P25 §1: the same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
 # context-INSENSITIVE engine gets it right is the phase's §1 answer.

@@ -173,7 +173,7 @@ object Endpoints {
         }
 
         // ---- outbound services and URLs ---------------------------------------
-        val outbounds = OutboundDetector.detect(module, folder, pack)
+        val outbounds = OutboundDetector.detect(module, folder, pack, annotationValues)
         val services = outbounds.mapIndexed { index, outbound ->
             val modulePath = attribution.byAbsoluteFilePath[outbound.position.filename]?.second ?: ""
             ServiceRef(

@@ -189,6 +189,15 @@ internal interface TransferHost<F, C> {
     fun onPackPassthroughApplied(fqn: String, collect: C?)
 
     /**
+     * P26 §1.1: an INTERFACE-DECLARED sink for this call, when the callee's
+     * declaration (a bodyless interface method) matches a pack
+     * interfaceSinks row — a Spring Data repository method or a Room DAO
+     * query, where there is no body to walk and no FQN a sink pattern can
+     * name. Default null.
+     */
+    fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? = null
+
+    /**
      * P26 §1.3: a pack DESERIALIZER produced [result] — the value's FIELDS
      * carry whatever taint reached the result, and the engine whose facts
      * can say so marks them (the reporting engine's fieldBearing variants;
@@ -645,7 +654,11 @@ internal class FlowTransfer<F, C>(
         host.onResolvedCall(ins, site, collect)
 
         // SINK first, on the pre-call state: the sink reads its arguments.
+        // A named pattern wins; an interface-declared sink (P26 §1.1 — the
+        // callee is a bodyless method on a repository/DAO interface) answers
+        // second, still ahead of every computed summary.
         val sink = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
+            ?: host.interfaceSink(ins)
         if (sink != null) {
             matched = true
             host.onSinkMatched(collect)

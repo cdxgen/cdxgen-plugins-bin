@@ -20,6 +20,31 @@
       "pattern": "kotlinx.serialization.json.Json.decodeFromString"
     }
   ],
+  "interfaceSinks": [
+    {
+      "category": "sql-query",
+      "severity": "medium",
+      "supertypes": [
+        "org.springframework.data.repository.Repository",
+        "org.springframework.data.repository.CrudRepository",
+        "org.springframework.data.repository.ListCrudRepository",
+        "org.springframework.data.repository.JpaRepository",
+        "org.springframework.data.repository.PagingAndSortingRepository",
+        "org.springframework.data.repository.ReactiveCrudRepository",
+        "org.springframework.data.kotlin.coroutine.CoroutineCrudRepository"
+      ]
+    },
+    {
+      "category": "sql-query",
+      "interfaceAnnotations": [
+        "androidx.room.Dao"
+      ],
+      "methodAnnotations": [
+        "androidx.room.Query",
+        "androidx.room.RawQuery"
+      ]
+    }
+  ],
   "effects": [
     {
       "pattern": "kotlin.io.copyTo",
@@ -2023,6 +2048,15 @@
     },
     {
       "category": "sql-query",
+      "pattern": "org.jetbrains.exposed.sql.Transaction.exec",
+      "receiverType": null,
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical"
+    },
+    {
+      "category": "sql-query",
       "pattern": "org.jooq.DSLContext.execute",
       "receiverType": null,
       "relevantArguments": [
@@ -2430,6 +2464,10 @@
     {
       "category": "android-intent",
       "pattern": "android.content.Intent.getAction"
+    },
+    {
+      "category": "android-intent",
+      "pattern": "android.app.Activity.getIntent"
     },
     {
       "category": "android-intent",

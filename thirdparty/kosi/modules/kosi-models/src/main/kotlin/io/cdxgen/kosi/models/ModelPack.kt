@@ -131,6 +131,23 @@ data class LiteralSourcePattern(
  */
 data class DeserializerPattern(val pattern: String)
 
+/**
+ * P26 §1.1: a SINK declared by an INTERFACE the framework implements at
+ * runtime — there is no body to walk and no FQN a pattern can name, because
+ * the declaring interface is USER code. Matched on what the declaration
+ * carries: the enclosing interface's SUPERTYPES (Spring Data: every method
+ * on an interface extending a repository base is a query the framework
+ * derives or reads from @Query) or its ANNOTATIONS (Room: a @Dao interface's
+ * @Query/@RawQuery methods).
+ */
+data class InterfaceSinkPattern(
+    val supertypes: List<String> = emptyList(),
+    val interfaceAnnotations: List<String> = emptyList(),
+    val methodAnnotations: List<String> = emptyList(),
+    val category: String,
+    val severity: String = "high",
+)
+
 data class ModelPack(
     val name: String,
     val sources: List<SourcePattern>,
@@ -140,6 +157,7 @@ data class ModelPack(
     val effects: List<EffectPattern>,
     val literalSources: List<LiteralSourcePattern> = emptyList(),
     val deserializers: List<DeserializerPattern> = emptyList(),
+    val interfaceSinks: List<InterfaceSinkPattern> = emptyList(),
 ) {
     /** Every distinct category this pack can produce (sources and sinks). */
     val categories: Set<String>

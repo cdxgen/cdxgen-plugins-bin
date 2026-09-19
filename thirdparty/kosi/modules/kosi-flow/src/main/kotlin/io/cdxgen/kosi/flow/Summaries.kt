@@ -490,6 +490,25 @@ internal class CallIndex(
     val diManagedClasses: Set<String> =
         io.cdxgen.kosi.kir.DiStereotypes.managedClasses(allFunctions)
 
+    /**
+     * P26 §1.1: declarations by canonical name, BODYLESS INCLUDED — an
+     * interface method (`fun findByLastName(...)` on a repository interface)
+     * has no body, so the compiled index cannot see it, and the interface
+     * sink is declared exactly there.
+     */
+    val declarationsByCanonical: Map<String, List<KirFunction>> = allFunctions
+        .groupBy { it.canonicalName }
+        .mapValues { (_, fs) -> fs.sortedWith(compareBy({ it.jvmDescriptor ?: "" }, { it.file }, { it.line })) }
+
+    /** The declared callee (interface methods included); null when foreign. */
+    fun declaredCallee(fqn: String, descriptor: String?): KirFunction? {
+        val candidates = declarationsByCanonical[fqn] ?: return null
+        if (descriptor != null) {
+            return candidates.firstOrNull { it.jvmDescriptor == descriptor } ?: candidates.first()
+        }
+        return candidates.first()
+    }
+
     /** Workspace classes the engine saw constructed: KirNew sites + constructor calls + singletons. */
     private val instantiatedClasses: Set<String> = buildSet {
         for (cf in compiled) {
@@ -593,6 +612,66 @@ internal class CallIndex(
     private val diDecidedSites = java.util.Collections.synchronizedSet(sortedSetOf<String>())
 
     fun narrowedByDiBinding(calleeFqn: String): Boolean = calleeFqn in diDecidedSites
+}
+
+/**
+ * P26 §1.1: the ONE matcher for interface-declared sinks, read by both
+ * engines' hosts (P22's rule: one question, one answer). A declaration
+ * matches a pack row when its enclosing INTERFACE's direct supertypes name
+ * one (Spring Data: the repository bases) or its own and its owner's
+ * annotations do (Room: a @Dao interface's @Query methods).
+ */
+internal object InterfaceSinks {
+    /**
+     * The pack-sink SHAPE of an interface-declared sink for one call site —
+     * the synthesis both engines' hosts and the slice builder share (one
+     * question, one answer).
+     */
+    fun sinkPatternFor(
+        callIndex: CallIndex,
+        pack: io.cdxgen.kosi.models.ModelPack,
+        ins: KirCall,
+    ): io.cdxgen.kosi.models.SinkPattern? {
+        val declaration = callIndex.declaredCallee(ins.callee.fqn, ins.callee.descriptor) ?: return null
+        if (declaration.body != null) return null
+        val row = match(declaration, pack.interfaceSinks) ?: return null
+        val arity = if (ins.receiver != null) ins.args.size else ins.args.size - 1
+        return io.cdxgen.kosi.models.SinkPattern(
+            pattern = ins.callee.fqn,
+            category = row.category,
+            relevantArguments = (0..arity).toList(),
+            receiverType = null,
+            severity = row.severity,
+        )
+    }
+
+    fun match(
+        declaration: KirFunction,
+        rows: List<io.cdxgen.kosi.models.InterfaceSinkPattern>,
+    ): io.cdxgen.kosi.models.InterfaceSinkPattern? {
+        if (declaration.enclosingClass == null) return null
+        if (!declaration.ownerFlags.any { it == "interface" || it == "fun-interface" }) return null
+        for (row in rows) {
+            if (row.supertypes.isNotEmpty()) {
+                val hit = declaration.supertypes.any { supertype ->
+                    row.supertypes.any { it == supertype || supertype.endsWith(".$it") }
+                }
+                if (hit) return row
+            }
+            if (row.interfaceAnnotations.isNotEmpty() || row.methodAnnotations.isNotEmpty()) {
+                val ownerHit = row.interfaceAnnotations.all { pattern ->
+                    declaration.ownerAnnotations.any { it == pattern || it.endsWith(".$pattern") }
+                }
+                val methodHit = row.methodAnnotations.any { pattern ->
+                    declaration.annotations.any { it == pattern || it.endsWith(".$pattern") }
+                }
+                if (ownerHit && methodHit && (row.interfaceAnnotations.isNotEmpty() || row.methodAnnotations.isNotEmpty())) {
+                    return row
+                }
+            }
+        }
+        return null
+    }
 }
 
 /**
@@ -1133,6 +1212,10 @@ internal class SummaryAnalysis(
     override fun onPackPassthroughApplied(fqn: String, collect: Boolean?) {}
 
     override fun onSinkMatched(collect: Boolean?) {}
+
+    /** P26 §1.1: the interface-declared sink, seen from the summary side. */
+    override fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? =
+        InterfaceSinks.sinkPatternFor(callIndex, pack, ins)
 
     override fun onResolvedCall(ins: KirCall, site: Int, collect: Boolean?) {
         // An invoke of a function-valued PARAMETER (`block(x)` lowers to

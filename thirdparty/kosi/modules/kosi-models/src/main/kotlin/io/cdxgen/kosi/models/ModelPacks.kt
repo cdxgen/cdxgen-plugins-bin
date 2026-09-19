@@ -71,6 +71,15 @@ object ModelPacks {
                 pattern = require(entry.str("pattern"), "deserializers[].pattern", name),
             )
         } ?: emptyList()
+        val interfaceSinks = root.arr("interfaceSinks")?.objects()?.map { entry ->
+            InterfaceSinkPattern(
+                supertypes = entry.arr("supertypes")?.strings() ?: emptyList(),
+                interfaceAnnotations = entry.arr("interfaceAnnotations")?.strings() ?: emptyList(),
+                methodAnnotations = entry.arr("methodAnnotations")?.strings() ?: emptyList(),
+                category = require(entry.str("category"), "interfaceSinks[].category", name),
+                severity = entry.str("severity") ?: "high",
+            )
+        } ?: emptyList()
         return ModelPack(
             name = name,
             sources = sources,
@@ -80,6 +89,7 @@ object ModelPacks {
             effects = effects,
             literalSources = literalSources,
             deserializers = deserializers,
+            interfaceSinks = interfaceSinks,
         )
     }
 
@@ -96,6 +106,7 @@ object ModelPacks {
                 effects = dedupe(merged.effects, pack.effects) { it.pattern },
                 literalSources = dedupe(merged.literalSources, pack.literalSources) { it.namePattern },
                 deserializers = dedupe(merged.deserializers, pack.deserializers) { it.pattern },
+                interfaceSinks = merged.interfaceSinks + pack.interfaceSinks,
             )
         }
         return merged

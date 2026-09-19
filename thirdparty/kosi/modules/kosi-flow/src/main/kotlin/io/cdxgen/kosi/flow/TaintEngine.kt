@@ -1185,6 +1185,16 @@ object TaintEngine {
             collect?.let { it.sinkSites += 1 }
         }
 
+        /**
+         * P26 §1.1: the callee names a bodyless INTERFACE method whose
+         * declaration matches a pack interfaceSinks row — a Spring Data
+         * repository method (derived query or @Query) or a Room DAO query.
+         * Every argument is relevant: the method's parameters ARE the
+         * query's bind values.
+         */
+        override fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? =
+            InterfaceSinks.sinkPatternFor(context.callIndex, pack, ins)
+
         override fun onResolvedCall(ins: KirCall, site: Int, collect: TransferEvents?) {}
 
         override fun onSinkRead(
@@ -1196,6 +1206,9 @@ object TaintEngine {
             facts: Set<TaintFact>,
             collect: TransferEvents?,
         ) {
+            if (System.getenv("KOSI_DEBUG_DISPATCH") != null) {
+                System.err.println("DEBUG onSinkRead fqn=$fqn argIndex=$argIndex key=$argKey facts=$facts")
+            }
             collect?.sinkHits?.add(SinkHit(site, argIndex, argKey, facts))
         }
 
@@ -1942,7 +1955,11 @@ object TaintEngine {
         if (!entryFact && !literalBirth && sourcePattern == null && !upstreamBirth) return null
         if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
-        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
+        // P26 §1.1: a hit whose callee has no pack row may be an
+        // interface-declared sink (the host's interfaceSink arm produced it).
+        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
+            ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
+            ?: return null
 
         // The upstream path of a source-return birth: taint that came back
         // from a callee's internal source starts its trace THERE, not at the
@@ -2182,7 +2199,11 @@ object TaintEngine {
         val effect = hit.effect
         val sinkRef = siteIndex[effect.sinkSite] ?: return null
         val sinkIns = sinkRef.second.ins as? KirCall ?: return null
-        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) } ?: return null
+        // P26 §1.1: a hit whose callee has no pack row may be an
+        // interface-declared sink (the host's interfaceSink arm produced it).
+        val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
+            ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
+            ?: return null
         // The fact must have been born at a REAL source — a pack source call,
         // a call whose callee RETURNED source taint (the source-return birth:
         // the real source lives at the head of the recorded upstream path,
