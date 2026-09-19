@@ -132,6 +132,7 @@ object Analyzer {
             discoverVersionPolicy(root, discovery.modules, options)
         val collected = SourceCollector.collect(root, versionedModules.map { it.module })
         val syntax = runSyntaxBackend(root, collected)
+        val (coverage, coverageDiagnostic) = sourceCoverageOf(root, collected)
 
         return assemble(
             root = root,
@@ -162,7 +163,7 @@ object Analyzer {
             },
             usages = syntax.usages,
             imports = syntax.imports,
-            diagnostics = versionDiagnostics + overrideDiagnostics + syntax.diagnostics,
+            diagnostics = versionDiagnostics + overrideDiagnostics + syntax.diagnostics + listOfNotNull(coverageDiagnostic),
             stats = Stats(
                 fileCount = syntax.fileCount,
                 declarationCount = syntax.declarations.size,
@@ -185,8 +186,41 @@ object Analyzer {
                 reachableSliceCount = 0,
                 truncations = emptyMap(),
                 degraded = null,
+                sourceCoverage = coverage,
             ),
         )
+    }
+
+    /**
+     * P28 §4 (R179): files discovered against files present, under the
+     * collector's own exclusion policy, plus the loud diagnostic when the
+     * gap is large. kotlinx.coroutines analysed 1 of 1 039 files and the
+     * report read as clean — `no-sources` could not fire because one file
+     * WAS found; the ratio is what makes that shape visible. Threshold:
+     * less than half of at least 20 present files — a dropped-module
+     * failure leaves under 10% (1/1039), while a normal repo whose modules
+     * all have conventional roots sits near 1.0.
+     */
+    private fun sourceCoverageOf(
+        root: Path,
+        collected: List<SourceCollector.CollectedFile>,
+    ): Pair<io.cdxgen.kosi.schema.SourceCoverage, Diagnostic?> {
+        val present = SourceCollector.presentCount(root)
+        val coverage = io.cdxgen.kosi.schema.SourceCoverage(discovered = collected.size, present = present)
+        val diagnostic = if (present >= 20 && coverage.ratio < 0.5) {
+            Diagnostic(
+                code = DiagnosticCodes.SOURCE_COVERAGE_GAP,
+                severity = Severity.WARNING,
+                message = "source discovery collected ${collected.size} of $present Kotlin/Java file(s) present " +
+                    "under the analysed root (${(coverage.ratio * 100).toInt()}%); modules outside the " +
+                    "Maven/Gradle source-root convention may be missing from every downstream result",
+                position = Position(".", 1, 1),
+                count = present - collected.size,
+            )
+        } else {
+            null
+        }
+        return coverage to diagnostic
     }
 
     private fun runSyntaxBackend(
@@ -323,6 +357,7 @@ object Analyzer {
         val (versionedModules, versionDiagnostics, overrideDiagnostics) =
             discoverVersionPolicy(root, discovery.modules, options)
         val collected = SourceCollector.collect(root, versionedModules.map { it.module })
+        val (sourceCoverage, coverageDiagnostic) = sourceCoverageOf(root, collected)
 
         // Classpath acquisition (02-ARCHITECTURE.md §3): explicit flags first,
         // then offline resolution from the local caches. Every coordinate the
@@ -354,6 +389,20 @@ object Analyzer {
             explicitJars = options.classpath.map { Path.of(it) },
             explicitFile = classpathFile,
             moduleDirs = moduleDirs,
+            strategy = options.classpathStrategy,
+        )
+        // P28 §1: the acquisition record — which strategy produced the
+        // classpath, how many entries it attached, and what each tried
+        // strategy found — is REPORT DATA, not a log line: a classpath-less
+        // run and a run that found nothing publish the same sparse graph,
+        // and `strategy: none` with the attempts is what tells them apart.
+        val classpathStats = io.cdxgen.kosi.schema.ClasspathStats(
+            strategy = resolution.strategy,
+            entries = resolution.jars.size,
+            missing = resolution.missing.size,
+            attempts = resolution.attempts.map {
+                io.cdxgen.kosi.schema.ClasspathAttempt(it.strategy, it.jars, it.note)
+            },
         )
         val classpathDiagnostics = buildList {
             if (resolution.missing.isNotEmpty()) {
@@ -979,7 +1028,10 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic) +
+                    listOfNotNull(
+                        coverageDiagnostic,
+                        jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
+                    ) +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
                 stats = Stats(
                     fileCount = fileCount,
@@ -1033,6 +1085,8 @@ object Analyzer {
                     dependencyFunctions = flowResult?.dependencyFunctions ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
+                    classpath = classpathStats,
+                    sourceCoverage = sourceCoverage,
                 ),
                 callGraph = graphResult?.callGraph,
                 dataFlow = dataFlow,

@@ -108,6 +108,14 @@ object DiagnosticCodes {
 
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
+    /**
+     * P28 §4 (R179): discovery collected a small share of the source files
+     * present under the analysed root. The threshold (half of ≥20 files) is
+     * chosen so a dropped-module failure — which typically leaves under
+     * 10% (kotlinx.coroutines: 1/1039) — is loud while normal partial
+     * collection (a module with generated sources only) is not.
+     */
+    const val SOURCE_COVERAGE_GAP = "source-coverage-gap"
     const val UNREADABLE_SOURCE = "unreadable-source"
 
     /**
@@ -169,6 +177,9 @@ object DiagnosticCodes {
     /** P23 §0: the dependency tier built for a run with no taint engine to use it. */
     const val DEPS_WITHOUT_DATAFLOW = "deps-without-dataflow"
 
+    /** P28 §1: a forced `--classpath-strategy` that contradicts the explicit classpath flags. */
+    const val CLASSPATH_STRATEGY_CONFLICT = "classpath-strategy-conflict"
+
     val ALL: Set<String> = setOf(
         PARSE_ERROR,
         SYNTAX_BACKEND_NO_RESOLUTION,
@@ -191,6 +202,7 @@ object DiagnosticCodes {
         LAMBDA_UNRESOLVED,
         NO_BUILD_FILES,
         NO_SOURCES,
+        SOURCE_COVERAGE_GAP,
         UNREADABLE_SOURCE,
         DEPS_BODYLESS,
         DEPS_CLASS_NOT_FOUND,
@@ -204,6 +216,7 @@ object DiagnosticCodes {
         CALLGRAPH_NOT_RUN,
         REACHABLE_WITHOUT_CALLGRAPH,
         DEPS_WITHOUT_DATAFLOW,
+        CLASSPATH_STRATEGY_CONFLICT,
     )
 }
 

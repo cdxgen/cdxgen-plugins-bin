@@ -197,6 +197,8 @@ rather than a negative expectation that passes vacuously.
 | `kotlin-api-version` | warning | declared apiVersion above the language version; clamped |
 | `no-build-files` | info | no Gradle/Maven build files; analysed as a plain source tree |
 | `no-sources` | warning | no Kotlin/Java sources under the discovered roots |
+| `source-coverage-gap` | warning | P28 §4: discovery collected under half of the ≥20 Kotlin/Java files present under the analysed root (`stats.sourceCoverage{}` carries the ratio) — modules outside the Maven/Gradle source-root convention may be missing from every downstream result |
+| `classpath-strategy-conflict` | error | P28 §1: a forced `--classpath-strategy` contradicts the explicit classpath flags (refused before the run) |
 | `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists |
 | `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
 | `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
@@ -256,7 +258,19 @@ tier entirely, the population every dependency denominator excludes),
 `dependencyClasses` / `dependencyFunctions` (P9: classes lowered from jars
 and methods lowered WITH bodies — the tier's denominators),
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy
-resolution fallout — never read such a report as facts about the code).
+resolution fallout — never read such a report as facts about the code),
+`classpath{}` (P28 §1: the acquisition record — `strategy` names the ONE
+strategy that produced the attached classpath or `none` when nothing
+attached, `entries` counts the attached jars, `missing` the coordinates a
+fired strategy could not locate, and `attempts[]` records every strategy
+the chain tried with whether it fired; the vocabulary is
+`explicit|file|jars|cache|none`, forced with `--classpath-strategy`. A
+classpath-less run and a run that found nothing are the same sparse graph
+and opposite facts — R173/R179), and
+`sourceCoverage{}` (P28 §4: `discovered` against `present` — files[] against
+the same extensions under the analysed root under the collector's own
+exclusion policy, with `ratio`. A large gap also fires the
+`source-coverage-gap` diagnostic: less than half of ≥20 present files).
 
 **Deliberate deviation from the v1 sketch, for the PR:** the
 `analysisMillis{}` and `peakRssBytes` keys are NOT emitted. Embedding a

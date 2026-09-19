@@ -87,7 +87,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
-        "classpath", "classpath-file", "jdk-home", "reachable-symbols", "sarif-out",
+        "classpath", "classpath-file", "classpath-strategy", "jdk-home", "reachable-symbols", "sarif-out",
         "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
@@ -261,6 +261,13 @@ object Main {
             jvmTarget = parsed.value("jvm-target") ?: defaults.jvmTarget,
             classpath = parsed.values("classpath"),
             classpathFile = parsed.value("classpath-file"),
+            classpathStrategy = parsed.value("classpath-strategy")?.let {
+                io.cdxgen.kosi.schema.ClasspathStrategy.fromId(it)
+                    ?: throw UsageException(
+                        "unknown classpath strategy '$it' " +
+                            "(auto, explicit, file, jars, cache, none)",
+                    )
+            } ?: defaults.classpathStrategy,
             jdkHome = parsed.value("jdk-home"),
             progressive = parsed.bool("progressive", defaults.progressive),
             optIn = parsed.values("opt-in"),
@@ -722,6 +729,11 @@ object Main {
               --jvm-target <v>                override JVM target (diagnosed)
               --classpath <jar>               repeatable: explicit classpath jar for the resolved backend
               --classpath-file <file>         file of jar paths (one per line, # comments)
+              --classpath-strategy <strategy> auto (default: explicit -> file -> jars -> cache), or force
+                                              one: explicit (flags only), file (classpath.txt/.classpath
+                                              in the analysed tree), jars (libs/ directories), cache
+                                              (offline scan of ~/.gradle and ~/.m2), none; the winner is
+                                              published in stats.classpath on every run
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved|compile>
                                               analysis tier; `compile` is a DECLARED GAP: it runs the

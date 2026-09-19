@@ -51,18 +51,30 @@ object GradleDiscovery {
     private fun collectMembers(root: Path, settingsText: String?, rootName: String): List<Member> {
         val members = mutableListOf(Member(root, ":", rootName, findBuildFile(root)))
         if (settingsText != null) {
-            val includeRegex = Regex("""include\s*\(\s*(\"[^\"]+\"(?:\s*,\s*\"[^\"]+\")*)\s*\)""")
+            // `include(...)` plus the helper spellings real settings files
+            // use — `includeProject(":path", "dir")` (dagger) passes the
+            // project DIRECTORY as the second argument, and a member whose
+            // declaration shape kosi cannot see is a member whose sources
+            // are never collected (R178: dagger's 396 files, zero modules).
+            val includeRegex = Regex(
+                """include[A-Za-z]*\s*\(\s*(\"[^\"]+\"(?:\s*,\s*\"[^\"]+\")*)\s*\)""",
+            )
             for (match in includeRegex.findAll(settingsText)) {
-                for (quotePart in match.groupValues[1].split(',')) {
-                    val gradlePath = quotePart.trim().removeSurrounding("\"")
-                    if (gradlePath.isEmpty()) continue
-                    val rel = gradlePath.removePrefix(":").replace(':', '/')
-                    if (rel.isEmpty()) continue
-                    val dir = root.resolve(rel)
-                    if (!Files.isDirectory(dir)) continue
-                    val name = gradlePath.substringAfterLast(':')
-                    members.add(Member(dir, gradlePath, name, findBuildFile(dir)))
+                val quoted = Regex("\"([^\"]+)\"").findAll(match.groupValues[1]).map { it.groupValues[1] }.toList()
+                if (quoted.isEmpty()) continue
+                val gradlePath = quoted[0]
+                if (gradlePath.isEmpty()) continue
+                val rel = gradlePath.removePrefix(":").replace(':', '/')
+                // The second argument, when present, names the project dir
+                // directly (Gradle's includeBuild/helper convention).
+                val dir = if (quoted.size > 1 && quoted[1].isNotEmpty()) {
+                    root.resolve(quoted[1])
+                } else {
+                    root.resolve(rel)
                 }
+                if (!Files.isDirectory(dir)) continue
+                val name = gradlePath.substringAfterLast(':')
+                members.add(Member(dir, gradlePath, name, findBuildFile(dir)))
             }
         }
         return members
@@ -91,14 +103,20 @@ object GradleDiscovery {
     ): List<DiscoveredModule> {
         if (buildText.isBlank()) {
             // A member with no build file still contributes sources under the
-            // standard layout.
+            // standard layout. A member with no build file and NO standard
+            // layout keeps the member directory itself as its root — the
+            // same fallback the with-build-file branch below documents. R178:
+            // dagger's root member (settings present, no root build file,
+            // bazel-style `main/`+`test/` dirs) produced a module with ZERO
+            // source roots here and the whole repository read as no-sources.
+            val roots = standardRoots(root, member.dir).ifEmpty { listOf(rel(root, member.dir)) }
             return listOf(
                 DiscoveredModule(
                     name = member.name,
                     modulePath = rel(root, member.dir),
                     platform = DiscoveredModule.PLATFORM_JVM,
                     workspaceMember = member.gradlePath,
-                    sourceRoots = standardRoots(root, member.dir),
+                    sourceRoots = roots,
                     declaredLanguageVersion = null,
                     declaredApiVersion = null,
                     jvmTarget = null,
@@ -166,6 +184,57 @@ object GradleDiscovery {
                         purl = purlValue,
                     ),
                 )
+            }
+            if (modules.isEmpty()) {
+                // R179: a multiplatform module whose source sets live OUTSIDE
+                // `src/<set>/kotlin` used to vanish here — every set's roots
+                // came back empty and the `continue` above dropped the whole
+                // member, leaving kotlinx.coroutines' 1 039 files at ONE
+                // discovered file (the only sibling with a conventional
+                // layout) and a report that read as a clean run. The kotlinx
+                // convention puts each set at `<module>/<set>/src`
+                // (`jvm/src`, `common/src`); those become per-set modules,
+                // and a member with none of those keeps the member dir —
+                // the same fallback every other branch documents.
+                val childSets = try {
+                    Files.list(member.dir).use { it.toList() }
+                        .filter { Files.isDirectory(it) && Files.isDirectory(it.resolve("src")) }
+                        .sortedBy { it.fileName.toString() }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                if (childSets.isNotEmpty()) {
+                    for (child in childSets) {
+                        val setName = child.fileName.toString()
+                        modules.add(
+                            DiscoveredModule(
+                                name = if (member.name.isEmpty()) setName else "${member.name}:$setName",
+                                modulePath = modulePath,
+                                platform = platformOfSourceSet(setName),
+                                workspaceMember = member.gradlePath,
+                                sourceRoots = listOf("$modulePath/$setName/src".removePrefix("./")),
+                                declaredLanguageVersion = languageVersion,
+                                declaredApiVersion = apiVersion,
+                                jvmTarget = jvmTarget,
+                                purl = purlValue,
+                            ),
+                        )
+                    }
+                } else {
+                    modules.add(
+                        DiscoveredModule(
+                            name = member.name,
+                            modulePath = modulePath,
+                            platform = platformBase,
+                            workspaceMember = member.gradlePath,
+                            sourceRoots = listOf(modulePath),
+                            declaredLanguageVersion = languageVersion,
+                            declaredApiVersion = apiVersion,
+                            jvmTarget = jvmTarget,
+                            purl = purlValue,
+                        ),
+                    )
+                }
             }
             return modules
         }

@@ -70,6 +70,35 @@ enum class DependencyDetail(val id: String) {
     }
 }
 
+/**
+ * P28 §1: how the resolved tier ACQUIRES its classpath. Every strategy kosi
+ * itself runs is READ-ONLY (THREAT_MODEL.md — kosi never executes the
+ * analysed build); the build-executing strategies (Gradle dependency
+ * reports, `mvn dependency:build-classpath`) belong to the OPERATOR-side
+ * acquisition script, which writes the `classpath.txt` the `file` strategy
+ * then reads. The ids are the report vocabulary: `stats.classpath.strategy`
+ * names exactly one of these (or `none`) on every resolved-tier run.
+ */
+enum class ClasspathStrategy(val id: String) {
+    /** Try the chain in order: explicit -> file -> jars -> cache. */
+    AUTO("auto"),
+    /** `--classpath` / `--classpath-file` flags only (what cdxgen passes). */
+    EXPLICIT("explicit"),
+    /** A classpath file already present in the analysed tree: `classpath.txt` (the warmed convention) or an Eclipse `.classpath`. */
+    FILE("file"),
+    /** A jar directory already present in the analysed tree (`libs/` at the root or a module dir). */
+    JARS("jars"),
+    /** Offline scan: coordinates parsed as text from build files, located in `~/.gradle/caches/modules-2` / `~/.m2/repository` and project build outputs. */
+    CACHE("cache"),
+    /** No acquisition at all: the analysis runs classpath-less and says so. */
+    NONE("none"),
+    ;
+
+    companion object {
+        fun fromId(id: String): ClasspathStrategy? = entries.firstOrNull { it.id == id }
+    }
+}
+
 /** Root scopes (02-ARCHITECTURE.md §5); `symbol:<regex>` is represented by [Scope.SYMBOL]. */
 enum class RootScope(val id: String, val needsValue: Boolean = false) {
     MAIN("main"),
@@ -177,6 +206,14 @@ data class AnalyzeOptions(
     // --jdk-home names the SDK module, defaulting to the running JDK).
     val classpath: List<String> = emptyList(),
     val classpathFile: String? = null,
+    /**
+     * P28 §1 (`--classpath-strategy`): force one acquisition strategy, or
+     * `auto` for the chain explicit -> file -> jars -> cache. The winner —
+     * or `none` — is published in `stats.classpath` on every resolved-tier
+     * run; a forced strategy removes the fall-through, so a test (or a
+     * user) can measure exactly one mechanism.
+     */
+    val classpathStrategy: ClasspathStrategy = ClasspathStrategy.AUTO,
     val jdkHome: String? = null,
     val pretty: Boolean = false,
     val format: String = "json",
@@ -194,6 +231,7 @@ data class AnalyzeOptions(
         w.endArray()
         w.bool("endpointSources", endpointSources)
         w.str("classpathFile", classpathFile)
+        w.str("classpathStrategy", classpathStrategy.id)
         w.str("dataflow", dataflow.id)
         w.num("dataflowMaxFunctionInstructions", dataflowMaxFunctionInstructions)
         w.num("dataflowMaxSlices", dataflowMaxSlices)
@@ -320,6 +358,45 @@ fun AnalyzeOptions.degradations(): List<OptionDegradation> {
                 "--deps lowers and summarises dependency classes for the taint engine and " +
                     "--dataflow none runs no taint engine: the tier is built and discarded",
                 usageError = false,
+            ),
+        )
+    }
+    // P28 §1: a forced classpath strategy that contradicts the explicit
+    // flags is refused before the run — the alternative is a run whose
+    // report names a strategy the flags silently overrode (or one that
+    // ignored them), which is exactly the unattributable state §1 exists
+    // to end.
+    val hasExplicitClasspath = classpath.isNotEmpty() || classpathFile != null
+    if (classpathStrategy == ClasspathStrategy.NONE && hasExplicitClasspath) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.CLASSPATH_STRATEGY_CONFLICT,
+                "--classpath-strategy none refuses every classpath acquisition while " +
+                    "--classpath/--classpath-file name one: the run would report strategy none " +
+                    "against jars the flags supplied",
+                usageError = true,
+            ),
+        )
+    }
+    if (classpathStrategy != ClasspathStrategy.AUTO && classpathStrategy != ClasspathStrategy.EXPLICIT &&
+        hasExplicitClasspath
+    ) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.CLASSPATH_STRATEGY_CONFLICT,
+                "--classpath-strategy ${classpathStrategy.id} conflicts with --classpath/--classpath-file: " +
+                    "explicit flags are the explicit strategy; drop the flags or force explicit/auto",
+                usageError = true,
+            ),
+        )
+    }
+    if (classpathStrategy == ClasspathStrategy.EXPLICIT && !hasExplicitClasspath) {
+        out.add(
+            OptionDegradation(
+                DiagnosticCodes.CLASSPATH_STRATEGY_CONFLICT,
+                "--classpath-strategy explicit names no --classpath/--classpath-file: the run would " +
+                    "acquire nothing and report it as the explicit strategy",
+                usageError = true,
             ),
         )
     }
