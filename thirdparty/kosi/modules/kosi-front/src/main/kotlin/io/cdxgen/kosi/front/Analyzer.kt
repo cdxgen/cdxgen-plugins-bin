@@ -729,6 +729,24 @@ object Analyzer {
                         } else {
                             emptyMap()
                         },
+                        endpointContextParameterTypes = if (options.endpointSources) {
+                            io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
+                                .associate { it.id to it.contextParameterTypes }
+                        } else {
+                            emptyMap()
+                        },
+                        endpointNonInputAnnotations = if (options.endpointSources) {
+                            io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
+                                .associate { it.id to it.nonInputAnnotations }
+                        } else {
+                            emptyMap()
+                        },
+                        endpointSimpleParameterTypes = if (options.endpointSources) {
+                            io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
+                                .associate { it.id to it.simpleParameterTypes }
+                        } else {
+                            emptyMap()
+                        },
                         depsModule = depTier?.module,
                         depsPurls = depTier?.purlsUsed ?: emptySet(),
                         depsAliases = depTier?.aliases ?: emptyMap(),

@@ -1196,6 +1196,62 @@ path = "fixtures/layered-app"
 capabilities = ["taint", "spring-mvc", "spring-data", "di", "delegation", "deserialization", "object-identity", "sanitizers", "endpoint-sources"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
+# P27 §2: Spring MVC's argument-binding rule, one handler per row of the
+# framework's own table. The positives are the fallback rule ("simple type ->
+# @RequestParam, otherwise @ModelAttribute"); the 39 want-nots are the
+# framework-supplied rows, each of which becomes a false finding on every
+# controller in the corpus if its pack entry is dropped.
+[[fixtures]]
+slug = "spring-argument-binding"
+tier = "frameworks"
+path = "fixtures/spring-argument-binding"
+capabilities = ["endpoint-sources", "spring-mvc", "parameter-semantics", "command-objects"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P27 §2: quarkus / Jakarta RESTful Web Services's argument-binding rule, one handler per framework-supplied
+# type, transcribed from the framework's own documentation. Every one of
+# these frameworks was marked handlerInput=annotated, which seeds NOTHING
+# for a handler that binds without annotations.
+[[fixtures]]
+slug = "jaxrs-argument-binding"
+tier = "frameworks"
+path = "fixtures/jaxrs-argument-binding"
+capabilities = ["endpoint-sources", "parameter-semantics", "jax-rs"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P27 §2: micronaut's argument-binding rule, one handler per framework-supplied
+# type, transcribed from the framework's own documentation. Every one of
+# these frameworks was marked handlerInput=annotated, which seeds NOTHING
+# for a handler that binds without annotations.
+[[fixtures]]
+slug = "micronaut-argument-binding"
+tier = "frameworks"
+path = "fixtures/micronaut-argument-binding"
+capabilities = ["endpoint-sources", "parameter-semantics", "micronaut"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P27 §2: spring-messaging's argument-binding rule, one handler per framework-supplied
+# type, transcribed from the framework's own documentation. Every one of
+# these frameworks was marked handlerInput=annotated, which seeds NOTHING
+# for a handler that binds without annotations.
+[[fixtures]]
+slug = "messaging-argument-binding"
+tier = "frameworks"
+path = "fixtures/messaging-argument-binding"
+capabilities = ["endpoint-sources", "parameter-semantics", "spring-messaging"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# P27 §2: spring-graphql's argument-binding rule, one handler per framework-supplied
+# type, transcribed from the framework's own documentation. Every one of
+# these frameworks was marked handlerInput=annotated, which seeds NOTHING
+# for a handler that binds without annotations.
+[[fixtures]]
+slug = "graphql-argument-binding"
+tier = "frameworks"
+path = "fixtures/graphql-argument-binding"
+capabilities = ["endpoint-sources", "parameter-semantics", "graphql"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
 # P27 §1: the forwarders `by`-delegation generates — one override per
 # member, none of them with PSI. The other half of R161: P26 carried the
 # source back inside the returned object's FIELD, and http4k's consumers

@@ -18,9 +18,18 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~fromQuery sourceparam=#0 sourcetransport=query mode=endpoint
 // kosi:want flow source=untrusted-input sink=process-exec fn=~fromHeader sourceparam=#0 sourcetransport=header mode=endpoint
 //
-// The trusted parameter: an unannotated collaborator in the SAME signature
+// The trusted parameter: one the FRAMEWORK supplies, in the same signature
 // as the tainted one, with its own path to the SAME sink. Seeding at
 // function granularity reports it; parameter granularity does not.
+//
+// R174, corrected in P27 §2: this used to be an UNANNOTATED parameter of a
+// collaborator type, on the premise that "unannotated means injected".
+// Spring's own table says the opposite — "if a method argument is not
+// matched to any of the earlier values in this table and it is a simple
+// type it is resolved as a @RequestParam, otherwise as a @ModelAttribute" —
+// so that parameter was a command object, and the want-not below was
+// asserting that kosi must MISS it. `Model` is a framework-supplied row of
+// that same table, which is what "trusted" actually looks like here.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~onlyQueryIsTainted sourceparam=#0 sourcetransport=query mode=endpoint
 // kosi:want-not flow source=~ sink=~ fn=~onlyQueryIsTainted count=2 mode=endpoint
 package fixtures.parametertaint
@@ -30,13 +39,16 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
-/** A collaborator a container injects: trusted, and never annotated. */
+/**
+ * A collaborator the CONSTRUCTOR injects — which is how Spring supplies one
+ * to a controller. Nothing in a handler signature makes it input.
+ */
 class Audit(private val tag: String) {
     fun label(): String = tag
 }
 
 @RestController
-class ParamsApi {
+class ParamsApi(private val audit: Audit) {
 
     @GetMapping("/params/query")
     fun fromQuery(@RequestParam("q") query: String): Process =
@@ -48,14 +60,18 @@ class ParamsApi {
 
     /**
      * The near-miss the whole phase is about. `q` is the transport the
-     * framework named; `audit` sits in the same signature and reaches the
-     * same sink through its own path — it must not be reported, and the
-     * flow that IS reported must name `#0` and `query`.
+     * framework named; `view` is a framework-SUPPLIED parameter sitting in
+     * the same signature, reaching the same sink through its own path — it
+     * must not be reported, and the flow that IS reported must name `#0`
+     * and `query`.
      */
     @GetMapping("/params/mixed")
-    fun onlyQueryIsTainted(@RequestParam("q") query: String, audit: Audit): Process? {
+    fun onlyQueryIsTainted(
+        @RequestParam("q") query: String,
+        view: org.springframework.ui.Model,
+    ): Process? {
         if (query.isEmpty()) {
-            ProcessBuilder(audit.label()).start()
+            ProcessBuilder(view.render() + audit.label()).start()
         }
         return ProcessBuilder(query).start()
     }

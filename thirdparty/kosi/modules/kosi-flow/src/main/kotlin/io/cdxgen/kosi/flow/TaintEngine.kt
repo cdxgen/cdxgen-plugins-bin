@@ -263,6 +263,16 @@ object TaintEngine {
          */
         val endpointSources: Map<String, String> = emptyMap(),
         /**
+         * P27 §2: framework id -> the parameter types that are the
+         * framework's OWN collaborators rather than request data, for the
+         * `annotated-or-bound` shape (Spring MVC's implicit command object).
+         */
+        val endpointContextParameterTypes: Map<String, List<String>> = emptyMap(),
+        /** P27 §2: framework id -> annotations meaning "the framework supplies this". */
+        val endpointNonInputAnnotations: Map<String, List<String>> = emptyMap(),
+        /** P27 §2: framework id -> the types it resolves as a scalar query parameter. */
+        val endpointSimpleParameterTypes: Map<String, List<String>> = emptyMap(),
+        /**
          * Framework PARAMETER annotations: annotation FQN pattern -> the
          * full annotation data (the taint CATEGORY the parameter carries
          * and the TRANSPORT `kind` — path/query/header/cookie/form/body).
@@ -1293,6 +1303,80 @@ object TaintEngine {
                     matched?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it.category, index) }
                 }
 
+                // P27 §2: the framework names SOME transports and binds
+                // whatever else is not one of its own collaborators. Spring
+                // MVC's command object is this: `processFindForm(owner:
+                // Owner, result: BindingResult, model: Map)` annotates
+                // nothing, and `owner` is the submitted form. Seeding only
+                // the annotated parameters read three flows out of
+                // spring-petclinic and missed the six handlers whose whole
+                // input arrives this way.
+                //
+                // An annotated parameter keeps ITS transport and category; an
+                // unannotated one is data unless its TYPE is a declared
+                // context type. Matching is on the RESOLVED type by suffix
+                // segment, the rule every other type match here follows, and
+                // a parameter whose type did not resolve is treated as data
+                // — the direction that produces a finding to triage rather
+                // than a silence.
+                io.cdxgen.kosi.models.HANDLER_INPUT_ANNOTATED_OR_BOUND -> {
+                    val contextTypes = context.options.endpointContextParameterTypes[framework].orEmpty()
+                    val nonInput = context.options.endpointNonInputAnnotations[framework].orEmpty()
+                    val simpleTypes = context.options.endpointSimpleParameterTypes[framework].orEmpty()
+                    valueParams.mapIndexed { index, param ->
+                        val matched = param.annotations.firstNotNullOfOrNull { annotation ->
+                            annotations.entries.firstOrNull { (pattern, _) ->
+                                PatternMatcher.matches(pattern, annotation)
+                            }?.value
+                        }
+                        when {
+                            matched != null -> param.register to TaintFact(
+                                SummaryAnalysis.ENTRY_SITE,
+                                matched.category,
+                                index,
+                                fieldBearing = matched.kind in OBJECT_TRANSPORTS,
+                            )
+
+                            // Only a declared NON-INPUT annotation excludes
+                            // a parameter. `@Valid` is not one: Spring binds
+                            // a validated command object exactly as it binds
+                            // a bare one, and treating any annotation as
+                            // injection dropped most of spring-petclinic's
+                            // form handlers.
+                            param.annotations.any { annotation ->
+                                nonInput.any { annotation == it || annotation.endsWith(".$it") }
+                            } -> null
+
+                            isContextType(param.resolvedType, contextTypes) -> null
+
+                            // P27 §2, Spring's own fallback rule: "if it is
+                            // a simple type it is resolved as a
+                            // @RequestParam, otherwise as a @ModelAttribute".
+                            // Either way it is request data; the type decides
+                            // the TRANSPORT.
+                            //
+                            // A command object is bound as a WHOLE OBJECT, so
+                            // the request's data sits on its FIELDS —
+                            // `owner.lastName`, never `owner` — and a bare
+                            // fact derives nothing on a field read. That is
+                            // the shape P26 gave a deserializer's result, for
+                            // the same reason: no code the engine can see
+                            // wrote those fields, so there is no per-field
+                            // key to find. Without it the seed is real and
+                            // every USE of it is invisible, which is how
+                            // `processFindForm(owner)` reaching
+                            // `findByLastName(owner.lastName)` — the plainest
+                            // flow in spring-petclinic — went unreported.
+                            else -> param.register to TaintFact(
+                                SummaryAnalysis.ENTRY_SITE,
+                                category,
+                                index,
+                                fieldBearing = !isSimpleType(param.resolvedType, simpleTypes),
+                            )
+                        }
+                    }
+                }
+
                 // The parameter is a request CONTEXT, not data. Its reader
                 // methods are the modelled sources; seeding the context
                 // itself would taint the response object handed in beside
@@ -1307,7 +1391,45 @@ object TaintEngine {
             facts
         }
 
+        /**
+         * P27 §2: is this parameter's type one the framework hands the
+         * handler rather than one it binds from the request?
+         *
+         * A generic type matches on its RAW name (`kotlin.collections.Map`
+         * covers a model map spelled `MutableMap<String, Any>`), and an
+         * unresolved type is NOT treated as context: the framework's
+         * collaborator list is short and known, so an unknown type is far
+         * more likely to be a command object than a missing context class,
+         * and a false finding is triageable where a silence is not.
+         */
+        private fun isContextType(resolved: String?, contextTypes: List<String>): Boolean {
+            if (contextTypes.isEmpty()) return false
+            val type = resolved?.substringBefore('<') ?: return false
+            return contextTypes.any { type == it || type.endsWith(".$it") }
+        }
+
+        /**
+         * P27 §2: Spring's `BeanUtils.isSimpleProperty` — a simple value type
+         * or an ARRAY of one. An unresolved type is not simple, so it is
+         * treated as a command object: the direction that produces a finding
+         * to triage rather than a silence.
+         */
+        private fun isSimpleType(resolved: String?, simpleTypes: List<String>): Boolean {
+            if (simpleTypes.isEmpty()) return false
+            val type = (resolved ?: return false).substringBefore('<').removeSuffix("[]")
+            return simpleTypes.any { type == it || type.endsWith(".$it") }
+        }
+
         override fun entryBindings(): List<Pair<String, TaintFact>> = seededEntryFacts
+
+        private companion object {
+            /**
+             * P27 §2: transports that bind a whole OBJECT, whose fields
+             * therefore carry the request's data. A path or query parameter
+             * is a scalar and a field read of it means nothing.
+             */
+            val OBJECT_TRANSPORTS = setOf("body", "form")
+        }
 
         override fun entryBlockId(): String? = compiled.blocks.firstOrNull()?.id
 
