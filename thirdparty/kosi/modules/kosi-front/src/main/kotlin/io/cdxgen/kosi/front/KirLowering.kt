@@ -199,6 +199,22 @@ object KirLowering {
          * attacker input from the ones a container injects.
          */
         val paramAnnotations: List<List<String>> = emptyList(),
+        /**
+         * Resolved class-type FQNs per VALUE parameter, in declaration order
+         * (P26), aligned with [paramAnnotations]; null where the parameter's
+         * type is not a resolvable class. The DI binding reader maps
+         * `@Binds` parameters to implementations with these.
+         */
+        val paramTypes: List<String?> = emptyList(),
+        /**
+         * The function's own RESOLVED class-type FQN (P26); null for Unit,
+         * primitives, type parameters and anything unresolved. Unit is
+         * excluded on purpose: every `fun foo()` would carry it, it is
+         * already in the JVM descriptor, and the consumers of this fact
+         * (binding returns, outbound interface returns) are interested in
+         * exactly the non-Unit cases.
+         */
+        val returnTypeFq: String? = null,
     )
 
     private val NO_FACTS = Facts(
@@ -455,6 +471,25 @@ object KirLowering {
 
                     else -> null
                 }
+                // P26: resolved class-type FQNs for the return and each value
+                // parameter — the same suffix-segment-matchable notation the
+                // supertypes use. A binding method's signature IS the mapping
+                // the container reads, and the signature's source TEXT (what
+                // KirParam.type carries) cannot answer it.
+                fun classTypeFq(type: org.jetbrains.kotlin.analysis.api.types.KaType?): String? =
+                    (type as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                        ?.classId?.asSingleFqName()?.asString()
+                val paramTypes = (callable as? KaFunctionSymbol)
+                    ?.valueParameters
+                    ?.map { classTypeFq(it.returnType) }
+                    .orEmpty()
+                val returnTypeFq = when (callable) {
+                    is KaFunctionSymbol -> classTypeFq(callable.returnType)?.takeIf { it != "kotlin.Unit" }
+                    // A property initializer's "return" is the property's own
+                    // type.
+                    is KaPropertySymbol -> classTypeFq(callable.returnType)
+                    else -> null
+                }
                 Facts(
                     visibility = visibility,
                     modifiers = (psiModifiers(psi) + listOfNotNull(modalityModifier(callable))).toCollection(TreeSet()),
@@ -467,6 +502,8 @@ object KirLowering {
                     jvmDescriptor = descriptor,
                     factsAvailable = true,
                     paramAnnotations = paramAnnotations,
+                    paramTypes = paramTypes,
+                    returnTypeFq = returnTypeFq,
                 )
             } catch (_: Exception) {
                 symbolFactFailures++
@@ -652,6 +689,22 @@ object KirLowering {
             override fun visitProperty(property: KtProperty) {
                 property.getter?.let { out.add(it) }
                 property.setter?.let { out.add(it) }
+                // P26 §2: an INITIALIZER is executable code — the JVM runs
+                // it in the file's <clinit> (top level) or the constructor
+                // (a member) — and the KIR had no function for it, so a
+                // Koin module at top level (`val appModule = module {
+                // single<Api> { ApiImpl() } }`, the framework's own idiom)
+                // was invisible to the whole engine: no lambda, no
+                // construction, no binding. Only declarations and members
+                // are lowered; a LOCAL's initializer is a statement of the
+                // enclosing function and lowering it again would duplicate
+                // every local.
+                if (property.initializer != null && property.getter == null) {
+                    val parent = property.parent
+                    if (parent is org.jetbrains.kotlin.psi.KtFile || parent is org.jetbrains.kotlin.psi.KtClassBody) {
+                        out.add(property)
+                    }
+                }
                 super.visitProperty(property)
             }
 
@@ -745,6 +798,12 @@ object KirLowering {
     ): KirFunction? {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
+            // A property INITIALIZER lowers as the function that computes
+            // the initial value (P26 §2): the JVM runs it in <clinit> or the
+            // constructor, and until now the expression was invisible to the
+            // engine. Named for the PROPERTY — the accessor naming rule
+            // (get/set + property) is for accessors, and this is not one.
+            is KtProperty -> psi.name ?: return null
             // An accessor has no PSI name of its own; the JVM name is
             // get/setX after its PROPERTY. `<accessor>` gave every custom
             // accessor of one class the SAME canonical name — InsecureShop's
@@ -763,6 +822,7 @@ object KirLowering {
         val lower = BodyLower(failures, resolve, resolveProperty, psi, lambdaContext, enclosingCanonical = canonical)
         val bodyPsi: KtExpression? = when (psi) {
             is KtNamedFunction -> psi.bodyExpression
+            is KtProperty -> psi.initializer
             is KtPropertyAccessor -> psi.bodyExpression
             is KtSecondaryConstructor -> psi.bodyExpression
             else -> null
@@ -793,7 +853,7 @@ object KirLowering {
             line = psi.line(),
             column = psi.column(),
             params = signatureParams(psi, facts),
-            returnType = null,
+            returnType = facts.returnTypeFq,
             modifiers = facts.modifiers,
             visibility = facts.visibility,
             enclosingClass = chain.ifEmpty { null },
@@ -832,6 +892,7 @@ object KirLowering {
                         p.name,
                         p.typeReference?.text,
                         receiver = false,
+                        resolvedType = facts.paramTypes.getOrNull(position),
                         annotations = facts.paramAnnotations.getOrElse(position) { emptyList() },
                     ),
                 )

@@ -59,8 +59,19 @@ data class KirParam(
     /** `%<n>`, in declaration order; the dispatch/extension receiver is first when present. */
     val register: String,
     val name: String?,
+    /** The type reference's SOURCE TEXT (may be a short name, may carry generics). */
     val type: String?,
     val receiver: Boolean,
+    /**
+     * The parameter's RESOLVED class-type FQN (P26), the same notation
+     * [supertypes][KirFunction.supertypes] uses; null when the type did not
+     * resolve to a class (primitive, type parameter, unresolved). Where
+     * [type] is what the source SAYS, this is what the compiler decided it
+     * IS — the DI binding reader needs the second (a `@Binds fun x(impl:
+     * JdbcStore): AuditStore` written with imports is a workspace-class
+     * fact only when resolved).
+     */
+    val resolvedType: String? = null,
     /**
      * Fully-qualified annotations ON THE PARAMETER, sorted. Framework
      * semantics live here: `@RequestParam`, `@PathVariable`, `@RequestBody`,

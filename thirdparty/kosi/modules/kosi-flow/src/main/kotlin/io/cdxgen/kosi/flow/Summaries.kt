@@ -353,6 +353,16 @@ internal class FunctionSummary(
 internal class CallIndex(
     compiled: List<CompiledFunction>,
     private val dispatchMode: String,
+    /**
+     * EVERY lowered function of the analysed module, bodyless declarations
+     * included. The DI facts are SIGNATURE facts — an `@Binds` method is
+     * abstract by shape, an interface's methods have no bodies — and reading
+     * them off the compiled (bodies-only) list dropped exactly the binding
+     * declarations the container exists to read (P26 §2: the fixture's
+     * NoopAuditStore smear). Nothing else uses this list; dispatch itself
+     * stays over the compiled functions.
+     */
+    private val allFunctions: List<KirFunction> = compiled.map { it.function },
 ) {
     private val workspaceClasses: Set<String> = compiled
         .mapNotNull { it.function.enclosingClass }
@@ -459,7 +469,7 @@ internal class CallIndex(
 
     /** P25 §2: workspace classes a DI container constructs. */
     val diManagedClasses: Set<String> =
-        io.cdxgen.kosi.kir.DiStereotypes.managedClasses(compiled.map { it.function })
+        io.cdxgen.kosi.kir.DiStereotypes.managedClasses(allFunctions)
 
     /** Workspace classes the engine saw constructed: KirNew sites + constructor calls + singletons. */
     private val instantiatedClasses: Set<String> = buildSet {
@@ -531,7 +541,17 @@ internal class CallIndex(
         if (usesRta) {
             // Keep only targets whose owner the run saw instantiated; a class
             // with no constructor site and no singleton flag never executes.
+            // Keep only targets whose owner the run saw instantiated; a class
+            // with no constructor site and no singleton flag never executes.
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in instantiatedClasses }
+            if (System.getenv("KOSI_DEBUG_DISPATCH") != null && calleeFqn.contains("Notifier")) {
+                System.err.println(
+                    "DEBUG targets($calleeFqn): candidates=" + candidates.map { it.canonicalName } +
+                        " ready=" + ready.map { it.canonicalName } +
+                        " instantiatedHas=" + candidates.map { it.enclosingClass to (it.enclosingClass in instantiatedClasses) } +
+                        " diManagedHas=" + candidates.map { it.enclosingClass to (it.enclosingClass in diManagedClasses) },
+                )
+            }
             if (ready.isNotEmpty()) {
                 // P25 §2: remember WHEN the container's binding is what
                 // decided the site — survivors all container-managed, and

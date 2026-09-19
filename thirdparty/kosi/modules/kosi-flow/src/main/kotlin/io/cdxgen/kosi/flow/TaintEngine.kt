@@ -576,7 +576,10 @@ object TaintEngine {
         }
 
         // ---- P5: resolve callees, condense SCCs, compute summaries -----------
-        val callIndex = CallIndex(compiled, options.dispatchMode)
+        // allFunctions: the DI facts are SIGNATURE facts, and a binding
+        // method (`@Binds`) is abstract — bodyless, invisible to the compiled
+        // list (P26 §2).
+        val callIndex = CallIndex(compiled, options.dispatchMode, module.functions)
 
         // ---- P9: the `--deps` tier, summarised BEFORE the workspace's -------
         // (dependencies never call back into the workspace, so their
@@ -1325,11 +1328,16 @@ object TaintEngine {
             if (width > options.dispatchJoinBudget) context.recordJoinOverrun()
             // P24 §3: the per-hop dispatch evidence the frames read — what
             // was CONSIDERED, what was APPLIED, and what narrowed it.
+            // P26 §2: a binding that leaves TWO managed implementations is
+            // still the binding's decision — `di-binding` names the evidence
+            // (the container's wiring), not the count, and it outranks the
+            // blander width-based labels at every width.
             val narrowedBy = when {
+                context.callIndex.narrowedByDiBinding(ins.callee.fqn) -> "di-binding"
+
                 targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto") ->
                     if (targets.size > applicable.size + 0 && applicable.size == 1) "vta" else null
 
-                targets.size == 1 && context.callIndex.narrowedByDiBinding(ins.callee.fqn) -> "di-binding"
                 targets.size == 1 -> "single-impl"
                 else -> null
             }

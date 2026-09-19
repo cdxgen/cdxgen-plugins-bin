@@ -76,6 +76,11 @@ object KirReader {
                             register = rest.substringBefore(' '),
                             name = unqn(quotedToken(rest.substringAfter(" name=")).first),
                             type = unqn(quotedToken(rest.substringAfter(" type=")).first),
+                            resolvedType = if (" resolved=" in rest) {
+                                unqn(quotedToken(rest.substringAfter(" resolved=")).first)
+                            } else {
+                                null
+                            },
                             receiver = rest.substringAfter(" receiver=").substringBefore(' ') == "true",
                             annotations = if (" annotations=" in rest) {
                                 splitList(rest.substringAfter(" annotations="))

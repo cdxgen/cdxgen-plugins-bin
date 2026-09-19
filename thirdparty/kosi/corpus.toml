@@ -1114,6 +1114,18 @@ path = "fixtures/di-bound-dispatch"
 capabilities = ["dispatch", "di", "spring-mvc"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
+# P26 §2: finish the container — the BINDING METHODS. @Binds (the parameter
+# is the implementation, no construction anywhere), @Bean/@Provides by
+# parameter and by construction, Koin's provider lambdas in both package
+# spellings, two bindings of one interface (both targets, width 2,
+# `di-binding`), and the unbound siblings that must stay clean.
+[[fixtures]]
+slug = "di-module-bindings"
+tier = "frameworks"
+path = "fixtures/di-module-bindings"
+capabilities = ["dispatch", "di", "bindings", "koin", "dagger", "spring"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
 # P25 §1: the same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
 # context-INSENSITIVE engine gets it right is the phase's §1 answer.
