@@ -444,6 +444,21 @@ pub struct ApiEndpoint {
     pub response_type: Option<String>,
     #[serde(default)]
     pub properties: IndexMap<String, String>,
+    /// Requirements this route DECLARES, in the same vocabulary kosi and
+    /// golem emit (`middleware(RequireAuth)`), so a consumer needs one code
+    /// path rather than one per engine.
+    ///
+    /// Omitted when nothing was found. An absent or empty value means
+    /// "nothing declared" — never "anonymous": a route may sit behind a
+    /// tower layer rusi does not model, and only a positive finding of an
+    /// anonymity marker could justify calling a route open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authentication: Vec<String>,
+    /// Where the requirement was found (`axum-route-layer`, `axum-layer`,
+    /// `actix-wrap`), so a rendered tier can name its evidence instead of
+    /// asserting a verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authentication_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
