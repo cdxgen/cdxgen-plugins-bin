@@ -63,7 +63,17 @@ var authExcludeTokens = []string{"noauth", "skipauth", "withoutauth", "unauthent
 // isAuthMiddlewareName reports whether a middleware's name declares an
 // authentication requirement.
 func isAuthMiddlewareName(name string) bool {
-	lower := strings.ToLower(name)
+	// Separators are stripped before matching: `skip_auth`, `skip-auth` and
+	// `SkipAuth` are one name in three spellings, and an exclusion list that
+	// only knew the third would read the other two as a REQUIREMENT — the
+	// exact inversion this list exists to prevent.
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	lower := b.String()
 	if lower == "" {
 		return false
 	}
