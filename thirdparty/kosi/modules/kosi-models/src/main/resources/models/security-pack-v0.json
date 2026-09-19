@@ -15,10 +15,15 @@
     {
       "category": "sql-query",
       "severity": "medium",
+      "_p26_comment": "P26 §1.1: the bases a Spring Data repository interface extends. The FQNs are Spring's own, NOT the fixture's convenience: JpaRepository and MongoRepository live in the jpa/mongodb sub-packages, and a row spelled org.springframework.data.repository.JpaRepository matches a stub and no real application (found in the P26 review).",
       "supertypes": [
         "org.springframework.data.repository.Repository",
         "org.springframework.data.repository.CrudRepository",
-        "org.springframework.data.repository.JpaRepository"
+        "org.springframework.data.repository.ListCrudRepository",
+        "org.springframework.data.repository.PagingAndSortingRepository",
+        "org.springframework.data.repository.reactive.ReactiveCrudRepository",
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "org.springframework.data.mongodb.repository.MongoRepository"
       ]
     },
     {

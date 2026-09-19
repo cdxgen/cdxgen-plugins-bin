@@ -22,9 +22,10 @@ package fixtures.persist
 
 import androidx.room.Dao
 import androidx.room.Query
-import org.springframework.data.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.PagingAndSortingRepository
 import org.springframework.data.repository.Repository
-import org.springframework.data.repository.query.Query as SpringQuery
+import org.springframework.data.jpa.repository.Query as SpringQuery
 
 data class User(val name: String, val lastName: String)
 
@@ -47,6 +48,11 @@ interface UserDao {
 // The ROOT base spelled directly: `Repository` with a derived method.
 interface CountRepo : Repository<User, Long> {
     fun countByLastName(lastName: String): Long
+}
+
+// The paging base, a third real spelling of the same capability.
+interface PagedRepo : PagingAndSortingRepository<User, Long> {
+    fun findByName(name: String): List<User>
 }
 
 // The NEGATIVE interface: same method-name shape, no repository base, no
@@ -88,4 +94,10 @@ fun rootBaseFlow(repo: CountRepo) {
 fun exposedFlow(tx: org.jetbrains.exposed.sql.Transaction) {
     val raw = readLine() ?: ""
     tx.exec("UPDATE users SET name = '" + raw + "'")
+}
+
+// kosi:want flow source=untrusted-input sink=sql-query fn=~pagingBaseFlow known-fail=syntax:1
+fun pagingBaseFlow(repo: PagedRepo) {
+    val raw = readLine() ?: ""
+    repo.findByName(raw)
 }

@@ -1206,9 +1206,6 @@ object TaintEngine {
             facts: Set<TaintFact>,
             collect: TransferEvents?,
         ) {
-            if (System.getenv("KOSI_DEBUG_DISPATCH") != null) {
-                System.err.println("DEBUG onSinkRead fqn=$fqn argIndex=$argIndex key=$argKey facts=$facts")
-            }
             collect?.sinkHits?.add(SinkHit(site, argIndex, argKey, facts))
         }
 

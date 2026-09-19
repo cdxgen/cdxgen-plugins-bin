@@ -579,17 +579,7 @@ internal class CallIndex(
         if (usesRta) {
             // Keep only targets whose owner the run saw instantiated; a class
             // with no constructor site and no singleton flag never executes.
-            // Keep only targets whose owner the run saw instantiated; a class
-            // with no constructor site and no singleton flag never executes.
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in instantiatedClasses }
-            if (System.getenv("KOSI_DEBUG_DISPATCH") != null && calleeFqn.contains("Notifier")) {
-                System.err.println(
-                    "DEBUG targets($calleeFqn): candidates=" + candidates.map { it.canonicalName } +
-                        " ready=" + ready.map { it.canonicalName } +
-                        " instantiatedHas=" + candidates.map { it.enclosingClass to (it.enclosingClass in instantiatedClasses) } +
-                        " diManagedHas=" + candidates.map { it.enclosingClass to (it.enclosingClass in diManagedClasses) },
-                )
-            }
             if (ready.isNotEmpty()) {
                 // P25 §2: remember WHEN the container's binding is what
                 // decided the site — survivors all container-managed, and

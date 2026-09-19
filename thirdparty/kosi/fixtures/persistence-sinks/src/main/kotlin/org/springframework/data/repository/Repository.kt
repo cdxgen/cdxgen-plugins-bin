@@ -1,5 +1,6 @@
-// Spring Data's repository bases at their real package, with the shapes
-// the fixture exercises: user repository interfaces EXTEND these.
+// Spring Data's plain repository bases at their real package: user repository
+// interfaces EXTEND these. Spring Data JPA's own base and @Query live one
+// package deeper, under `org.springframework.data.jpa.repository`.
 package org.springframework.data.repository
 
 interface Repository<T, ID>
@@ -11,4 +12,4 @@ interface CrudRepository<T, ID> : Repository<T, ID> {
     fun deleteById(id: ID)
 }
 
-interface JpaRepository<T, ID> : CrudRepository<T, ID>
+interface PagingAndSortingRepository<T, ID> : Repository<T, ID>

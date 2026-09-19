@@ -55,6 +55,43 @@ class DiBindingFormsTest {
         commit = "test",
     ).dataFlow?.slices.orEmpty()
 
+    /**
+     * The binding MAP itself, not only its effect on dispatch.
+     *
+     * `managedClasses` consumes the map's VALUES — that is how the narrowing
+     * above happens, through RTA's instantiated set — and nothing yet reads
+     * the KEY. That makes the interface half of every binding an
+     * unwitnessed claim (R63), and an unwitnessed claim is where a wrong
+     * one hides: a `@Binds` whose return type resolved to the
+     * implementation rather than the interface would narrow dispatch
+     * correctly and still be reading the wiring backwards. This states what
+     * the reader decided, per spelling, so the day P27 narrows BY the key
+     * the key is already known good.
+     */
+    @Test
+    fun theBindingMapNamesTheInterfaceItBoundAndTheImplementationItBoundIt() {
+        val (dump, _) = KirDumper.dumpWithWarnings(
+            fixture("di-module-bindings"),
+            AnalyzeOptions(backend = Backend.RESOLVED),
+        )
+        val functions = io.cdxgen.kosi.kir.KirReader.read(dump).functions
+        val bindings = io.cdxgen.kosi.kir.DiStereotypes.bindings(functions)
+            .mapValues { (_, impls) -> impls.sorted() }
+        assertEquals(
+            mapOf(
+                "fixtures.di.AuditStore" to listOf("JdbcAuditStore"),
+                "fixtures.di.HealthApi" to listOf("RealHealthApi"),
+                "fixtures.di.Notifier" to listOf("EmailNotifier", "SlackNotifier"),
+                "fixtures.di.PaymentGateway" to listOf("StripeGateway"),
+                "fixtures.di.UserApi" to listOf("RealUserApi"),
+            ),
+            bindings,
+            "@Binds by parameter, @Bean by parameter, both Koin spellings by the provider " +
+                "lambda's construction, and the doubly-bound Notifier carrying two — each keyed " +
+                "by the INTERFACE the signature returned, never by the implementation",
+        )
+    }
+
     @Test
     fun bindsProvidedBeanAndKoinSpellingsAllNarrowToTheBoundImplementation() {
         val sinks = slicesOf("di-module-bindings").map { it.sinkFunction }.sorted()

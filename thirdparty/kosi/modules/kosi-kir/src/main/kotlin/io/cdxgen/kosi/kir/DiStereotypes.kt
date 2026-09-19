@@ -89,6 +89,15 @@ object DiStereotypes {
         "org.koin.core.module.dsl.single",
         "org.koin.core.module.dsl.factory",
         "org.koin.core.module.dsl.scoped",
+        // Koin 2.x's package for the same three functions. It is a separate
+        // FQN, not a suffix of the 3.x one, so it must be listed: without it
+        // a 2.x provider's implementation entered the managed set only
+        // because its lambda happened to CONSTRUCT the class, which is the
+        // accident `aKoinProviderDispatchIsNarrowedByTheBindingNotByLuck`
+        // exists to rule out.
+        "org.koin.dsl.single",
+        "org.koin.dsl.factory",
+        "org.koin.dsl.scoped",
         "org.koin.androidx.viewmodel.dsl.viewModel",
         "org.koin.androidx.viewmodel.dsl.sharedViewModel",
     )
@@ -123,8 +132,14 @@ object DiStereotypes {
             val annotations = function.ownerAnnotations + function.annotations
             if (annotations.any { isStereotype(it) }) out.add(klass)
         }
-        out.addAll(bindings(functions).values.flatten())
-        out.addAll(koinConstructed(functions))
+        // One scan of the bodies, not two — this runs once per CallIndex and
+        // once per Dispatch over every function of the module. [bindings]
+        // keeps only the sites whose type argument named the bound
+        // interface; a `single { Impl() }` written without one still
+        // CONSTRUCTS, so its implementations are managed either way.
+        val koinSites = koinBindingSites(functions)
+        out.addAll(bindings(functions, koinSites).values.flatten())
+        out.addAll(koinSites.flatMap { it.second })
         return out
     }
 
@@ -142,7 +157,10 @@ object DiStereotypes {
      * dropped — the container may bind a jar type, but dispatch over
      * workspace implementations is the only question this answers.
      */
-    fun bindings(functions: List<KirFunction>): Map<String, Set<String>> {
+    fun bindings(
+        functions: List<KirFunction>,
+        koinSites: List<Pair<String?, Set<String>>> = koinBindingSites(functions),
+    ): Map<String, Set<String>> {
         val workspace = functions.mapNotNull { it.enclosingClass }.toSortedSet()
         // A resolved type FQN against the workspace's chain-form classes, by
         // the suffix rule every other type match here follows.
@@ -170,7 +188,7 @@ object DiStereotypes {
         // Koin's provider lambdas: the call's type argument names the bound
         // interface (`single<Api> { ApiImpl() }`), the linked lambda's
         // constructions the implementations.
-        for ((bound, impls) in koinBindingSites(functions)) {
+        for ((bound, impls) in koinSites) {
             if (bound != null && impls.isNotEmpty()) {
                 out.getOrPut(bound) { sortedSetOf() }.addAll(impls)
             }
@@ -215,15 +233,6 @@ object DiStereotypes {
         }
         return out
     }
-
-    /**
-     * P26 §2: the workspace classes constructed inside a Koin provider
-     * lambda — `single { ApiImpl() }`. The lambda's body is a workspace
-     * function (the lowering names it); its constructions are the classes
-     * the container manages.
-     */
-    fun koinConstructed(functions: List<KirFunction>): Set<String> =
-        koinBindingSites(functions).flatMap { it.second }.toSortedSet()
 
     /** The workspace classes a function's body constructs (KirNew + constructor calls). */
     private fun constructedWorkspaceClasses(function: KirFunction, workspace: Set<String>): Set<String> {
