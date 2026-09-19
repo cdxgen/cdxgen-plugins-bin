@@ -114,9 +114,65 @@ object Evaluator {
             // P20 §1: parameter identity. `#0` and `query` are exactly the
             // strings the slice publishes; a want pins WHICH input.
             (ann.sourceParam == null || slice.sourceParameter == ann.sourceParam) &&
-            (ann.sourceTransport == null || slice.sourceTransport == ann.sourceTransport)
+            (ann.sourceTransport == null || slice.sourceTransport == ann.sourceTransport) &&
+            // P24 §1: the deep-tier forms. `frames` demands the finding carry
+            // at least N named hops — a source/sink pair without the walk is
+            // not the same capability. `via` demands the named functions
+            // appear, in order, among the frames' functions.
+            (ann.frames == null || slice.frames.size >= ann.frames) &&
+            (ann.via.isEmpty() || viaInOrder(slice, ann.via))
+
+    /** True when every `fn:` segment matches a frame function, in order. */
+    private fun viaInOrder(slice: FlowSlice, segments: List<String>): Boolean {
+        var index = 0
+        for (frame in slice.frames) {
+            val segment = segments.getOrNull(index) ?: return true
+            if (matches(segment.removePrefix("fn:"), frame.function)) index++
+        }
+        return index >= segments.size
+    }
+
+    /**
+     * P24 §1: the annotation-error rule. A `via=` segment that names a
+     * function the report never saw cannot match any frame — on a WANT that
+     * is a fail (fine), but on a WANT-NOT it would pass vacuously, which is
+     * exactly what the corpus exists to prevent. The function universe is
+     * everything the report can name: declarations, call-graph nodes,
+     * summary functions and slice ends.
+     */
+    private fun viaNamesResolvable(report: KosiReport, ann: Annotation): Boolean {
+        if (ann.via.isEmpty()) return true
+        val universe = buildSet {
+            report.declarations.forEach { add(it.canonicalName); add(it.name) }
+            report.callGraph?.nodes?.forEach { add(it.canonicalName); add(it.name) }
+            report.dataFlow?.summaries?.forEach { add(it.function) }
+            report.dataFlow?.slices?.forEach {
+                add(it.sourceFunction)
+                add(it.sinkFunction)
+            }
+        }
+        return ann.via.all { segment ->
+            val name = segment.removePrefix("fn:")
+            if (name.startsWith("~")) {
+                universe.any { it.contains(name.removePrefix("~")) }
+            } else {
+                name in universe
+            }
+        }
+    }
 
     private fun evaluateOne(report: KosiReport, ann: Annotation, backend: String): Outcome {
+        // P24 §1: a via= chain over functions the report never saw is an
+        // annotation error, never a satisfied expectation — on the negative
+        // half it would otherwise pass vacuously.
+        if (ann.kind == Annotation.Kind.FLOW && !viaNamesResolvable(report, ann)) {
+            val bad = ann.via.joinToString(",")
+            return Outcome(
+                ann,
+                Status.FAIL,
+                "annotation error: via names function(s) absent from the report: $bad",
+            )
+        }
         val satisfied = when (ann.kind) {
             Annotation.Kind.FLOW -> flowSatisfied(report, ann)
             Annotation.Kind.EDGE -> edgeSatisfied(report, ann)

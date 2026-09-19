@@ -160,6 +160,20 @@ type APIEndpoint struct {
 	RequestBodyType string              `json:"requestBodyType,omitempty"`
 	ResponseType    string              `json:"responseType,omitempty"`
 	Properties      map[string]string   `json:"properties,omitempty"`
+	// Authentication holds the requirements this route DECLARES, in the
+	// same vocabulary kosi emits (`middleware(RequireAuth)`, `role(admin)`),
+	// so a consumer needs one code path rather than one per engine.
+	//
+	// The field is omitted when nothing was found, and an absent or empty
+	// value means "nothing declared" — never "anonymous". A route may sit
+	// behind a filter golem does not model, so only a positive finding of
+	// an anonymity marker could justify calling a route open, and golem
+	// emits no such marker today.
+	Authentication []string `json:"authentication,omitempty"`
+	// AuthenticationSource names WHERE the requirement was found
+	// (`gin-group`, `echo-route`, `chi-use+route`), so a rendered tier can
+	// name its evidence instead of asserting a verdict.
+	AuthenticationSource string `json:"authenticationSource,omitempty"`
 }
 
 // EndpointParameter describes one path or query parameter an HTTP handler

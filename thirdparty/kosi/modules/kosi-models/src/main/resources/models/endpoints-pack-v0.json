@@ -1,4 +1,5 @@
 {
+  "_p19_outbound_comment": "P19 liveness sweep: nine outbound rows carried urlArgument -1 and OutboundDetector SKIPS models with no URL argument (`if (model.urlArgument < 0) continue`) \u2014 unread vocabulary, deleted: co.elastic.clients.transport.rest_client.RestClientTransport, com.google.cloud.storage.StorageOptions.getDefaultInstance, com.openai.client.okhttp.OpenAIOkHttpClient.builder, dev.langchain4j.model.openai.OpenAiChatModel.builder, io.ktor.client.HttpClient, io.ktor.client.request.request, java.net.http.HttpClient.newHttpClient, org.apache.kafka.clients.producer.KafkaProducer, software.amazon.awssdk.services.s3.S3Client.builder. The remaining rows are exercised by fixtures/outbound-clients.",
   "configReaders": [
     {
       "argument": 1,
@@ -74,10 +75,22 @@
       ]
     },
     {
+      "_p27_comment": "P27 \u00a72, from docs.spring.io/spring-graphql/reference/controllers.html rather than from memory. Verbatim: \"By default, if the method parameter name is available, for example with the -parameters compiler flag in Java 8+ or with debugging info from the compiler, it is used to look up the argument.\" An unannotated parameter is matched to a GraphQL argument by NAME, so it is client-supplied. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "classMarkers": [
         "org.springframework.stereotype.Controller"
       ],
-      "handlerInput": "annotated",
+      "contextParameterTypes": [
+        "graphql.schema.DataFetchingEnvironment",
+        "graphql.GraphQLContext",
+        "graphql.schema.DataFetchingFieldSelectionSet",
+        "org.dataloader.DataLoader",
+        "java.util.Locale",
+        "java.security.Principal",
+        "org.springframework.data.domain.Sort",
+        "org.springframework.graphql.data.query.ScrollSubrange",
+        "org.springframework.data.domain.Subrange"
+      ],
+      "handlerInput": "annotated-or-bound",
       "id": "graphql",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -102,15 +115,62 @@
           "pattern": "org.springframework.graphql.data.method.annotation.SchemaMapping"
         }
       ],
+      "nonInputAnnotations": [
+        "org.springframework.security.core.annotation.AuthenticationPrincipal",
+        "org.springframework.graphql.data.method.annotation.ContextValue",
+        "org.springframework.graphql.data.method.annotation.LocalContextValue"
+      ],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
           "kind": "body",
           "pattern": "org.springframework.graphql.data.method.annotation.Argument"
         }
+      ],
+      "simpleParameterTypes": [
+        "kotlin.Boolean",
+        "kotlin.Byte",
+        "kotlin.Char",
+        "kotlin.Short",
+        "kotlin.Int",
+        "kotlin.Long",
+        "kotlin.Float",
+        "kotlin.Double",
+        "kotlin.String",
+        "kotlin.CharSequence",
+        "kotlin.Enum",
+        "java.lang.Boolean",
+        "java.lang.Byte",
+        "java.lang.Character",
+        "java.lang.Short",
+        "java.lang.Integer",
+        "java.lang.Long",
+        "java.lang.Float",
+        "java.lang.Double",
+        "java.lang.String",
+        "java.lang.CharSequence",
+        "java.lang.Number",
+        "java.lang.Enum",
+        "java.lang.Class",
+        "java.math.BigDecimal",
+        "java.math.BigInteger",
+        "java.util.Date",
+        "java.util.UUID",
+        "java.util.Locale",
+        "java.net.URI",
+        "java.net.URL",
+        "java.time.Instant",
+        "java.time.LocalDate",
+        "java.time.LocalDateTime",
+        "java.time.LocalTime",
+        "java.time.OffsetDateTime",
+        "java.time.ZonedDateTime",
+        "java.time.Duration",
+        "java.time.Temporal"
       ]
     },
     {
+      "_p19_comment": "P19: the substring markers (Grpc, GrpcKt) STAY \u2014 restoring the liveness sweep's first deletion attempt: they are the disambiguator that refuses a homonym ImplBase without Grpc in its supertype name (fixtures/grpc-service's grpcbad half pins it), and each is individually inert only because the other carries the same conjunct for every real generated base.",
       "handlerInput": "all",
       "id": "grpc",
       "kind": "supertype",
@@ -121,13 +181,13 @@
       "supertypeSuffixes": [
         "CoroutineImplBase",
         "ImplBase"
-      ],
-      "_p19_comment": "P19: the substring markers (Grpc, GrpcKt) STAY \u2014 restoring the liveness sweep's first deletion attempt: they are the disambiguator that refuses a homonym ImplBase without Grpc in its supertype name (fixtures/grpc-service's grpcbad half pins it), and each is individually inert only because the other carries the same conjunct for every real generated base."
+      ]
     },
     {
       "_p15_comment": "P15, corrected in P17: http4k's CORE DSL (`\"/path\" bind METHOD to handler`) has no media/auth declaration site - the handler is a plain function, content types live in lenses and responses. That half was and remains the truth. The P15 claim that contract meta {} is 'OpenAPI documentation, not routing' was WRONG for the security field: see _p17_comment.",
       "_p17_comment": "P17, sourced against the pinned corpus clone (github.com/http4k/http4k at b051f89d, release 6.59.0.0): the contract DSL has TWO real auth declaration sites, both applied at RUN TIME. (1) The contract block's own `security` - ContractBuilder.security: Security? (core/api/openapi/src/main/kotlin/org/http4k/contract/extensions.kt:33), read by ContractRouteMatcher.kt:46 for every route in the block. (2) A route's meta lambda - RouteMetaDsl.security: Security? (routeMeta.kt:52) carried by RouteMeta.security: Security? (routeMeta.kt:228), attached with `\"/x\" meta { security = .. } bindContract GET to h` (String.meta and String.bindContract, extensions.kt:61-63). Precedence is the framework's own elvis at ContractRouteMatcher.kt:121: `it.meta.security?.filter ?: security?.filter ?: Filter.NoOp` - per-route meta OVERRIDES the block. Scheme constructors (core/security/core/src/main/kotlin/org/http4k/security/): BasicAuthSecurity.kt:8, ApiKeySecurity.kt:19, BearerAuthSecurity.kt:10, MutualTLSSecurity.kt:10, OpenIdConnectSecurity.kt:6 (NoSecurity is the absence of a requirement and is deliberately not modelled). P17 review: OAuthSecurity.kt:9 declares a SEALED class - it cannot be constructed, so modelling `org.http4k.security.OAuthSecurity` matched nothing and would never have fired. The constructible OAuth schemes are its five subclasses in the same file (AuthCodeOAuthSecurity:19, ImplicitOAuthSecurity:31, UserCredentialsOAuthSecurity:43, ClientCredentialsOAuthSecurity:65, DeviceCodeOAuthSecurity:87), and those are what is modelled. ContractRoute.kt:80 applies meta.security?.filter outside a contract block too. meta produces/consumes (routeMeta.kt:43-44) are NOT read by the matcher - they feed the OpenAPI renderer - so media on contract routes stays an honest empty.",
       "_p18_comment": "P18, re-examining the honest empties against the pinned clone (b051f89d): (1) contract meta MEDIA stands - meta.produces/consumes (routeMeta.kt:43-44) are read by OpenApi2.kt ONLY (grep over the whole clone: one non-test reader, the renderer); the matcher never reads them. (2) the CORE DSL media claim ('no declaration site') was NOT true as stated: routing.kt:83 declares `infix fun String.accepting(contentType: ContentType) = and(contentType.accepted())` (Accept.kt:19) - a per-route, runtime-applied PRODUCES-side predicate (`\"/x\" accepting applicationJson bind GET to h`). It is a capability nobody had looked for; not modelled yet because the content-type VALUE is an external constant (org.http4k.core.ContentType's fields) the value folder cannot fold from a stub classpath - modelling needs a pack-side constant table, named as follow-up. The consumes side has no core-DSL predicate; that half stays empty. (3) `proactiveContentNegotiation`/`contentLanguages` (negotiation.kt) are handler SELECTORS by Accept header, not per-route media declarations - out of scope by shape.",
+      "_p19_comment": "P19 liveness sweep: securityConstructors collapsed from ten entries to the one that carries the channel's flag. Post-R115 an assignment's rendering is the producer's own name whether the pack models the constructor or not (modelled and unmodelled produce the same string by design \u2014 the /custom route pins an unmodelled CustomSecurity rendering identically to a modelled one), so the ten entries were one boolean with nine inert duplicates; the constructibility evidence for the schemes the channel once listed (the five OAuth subclasses etc.) stays sourced in the _p17_comment.",
       "bindFunctions": [
         {
           "methods": [
@@ -187,8 +247,7 @@
       ],
       "securityConstructors": [
         "org.http4k.security.ApiKeySecurity"
-      ],
-      "_p19_comment": "P19 liveness sweep: securityConstructors collapsed from ten entries to the one that carries the channel's flag. Post-R115 an assignment's rendering is the producer's own name whether the pack models the constructor or not (modelled and unmodelled produce the same string by design \u2014 the /custom route pins an unmodelled CustomSecurity rendering identically to a modelled one), so the ten entries were one boolean with nine inert duplicates; the constructibility evidence for the schemes the channel once listed (the five OAuth subclasses etc.) stays sourced in the _p17_comment."
+      ]
     },
     {
       "_p15_comment": "P15: the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty. P18, sourced: at javalin-parent-6.7.0 (JavalinDefaultRoutingApi.kt:128-194) every route builder is (path, handler[, vararg roles]) - no content-type parameter exists on any of them; the only contentType in the routing API scopes ERROR handlers (error(status, contentType, handler), :44-96). The empty stands with evidence.",
@@ -300,6 +359,7 @@
     },
     {
       "_p18_comment": "P18, re-examining the honest empty ('media annotations do not exist for a bare DSL route', the Endpoints.kt comment): ktor HAS per-route media builders - RoutingBuilderKt (ktor-server-core-jvm 3.5.2, the artifact in the corpus warm cache) declares static `accept(ContentType...)` (matches the request's Accept header - the produces side) and `contentType(ContentType...)` (matches the request body's type - the consumes side). A capability nobody had looked for; not modelled yet because the argument is an external constant (io.ktor.http.ContentType.Application.Json etc.) whose STRING the value folder cannot derive - modelling needs a pack-side constant table sourced from ktor's own ContentType declarations, named as follow-up. Verified against the held jar's class file; same API present at 1.6.7 per ktor's compatibility history.",
+      "_p19_dedup": "P19 liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed.",
       "authenticationDsl": [
         "io.ktor.server.auth.authenticate",
         "io.ktor.auth.authenticate"
@@ -534,10 +594,10 @@
       "kind": "dsl",
       "resourceAnnotations": [
         "io.ktor.resources.Resource"
-      ],
-      "_p19_dedup": "P19 liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed."
+      ]
     },
     {
+      "_p27_comment": "P27 \u00a72, from docs.micronaut.io HTTP guide, Simple Request Binding rather than from memory. Verbatim: \"If there is a @Body and request allows the body, bind the body to it. If the request can have a body and no @Body is defined then try to parse the body (either JSON or form data) and bind the method arguments from the body.\" Resolution order is URI variables, then query parameters, then the body \u2014 all of them request data. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "authenticationAnnotations": [
         {
           "pattern": "io.micronaut.security.annotation.Secured",
@@ -559,7 +619,13 @@
       "classMarkers": [
         "io.micronaut.http.annotation.Controller"
       ],
-      "handlerInput": "annotated",
+      "contextParameterTypes": [
+        "io.micronaut.http.HttpRequest",
+        "io.micronaut.http.HttpResponse",
+        "io.micronaut.http.BasicAuth",
+        "io.micronaut.security.authentication.Authentication"
+      ],
+      "handlerInput": "annotated-or-bound",
       "id": "micronaut",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -604,6 +670,7 @@
           "pattern": "io.micronaut.http.annotation.Produces"
         }
       ],
+      "nonInputAnnotations": [],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
@@ -638,9 +705,51 @@
       ],
       "pathPrefixAnnotations": [
         "io.micronaut.http.annotation.Controller"
+      ],
+      "simpleParameterTypes": [
+        "kotlin.Boolean",
+        "kotlin.Byte",
+        "kotlin.Char",
+        "kotlin.Short",
+        "kotlin.Int",
+        "kotlin.Long",
+        "kotlin.Float",
+        "kotlin.Double",
+        "kotlin.String",
+        "kotlin.CharSequence",
+        "kotlin.Enum",
+        "java.lang.Boolean",
+        "java.lang.Byte",
+        "java.lang.Character",
+        "java.lang.Short",
+        "java.lang.Integer",
+        "java.lang.Long",
+        "java.lang.Float",
+        "java.lang.Double",
+        "java.lang.String",
+        "java.lang.CharSequence",
+        "java.lang.Number",
+        "java.lang.Enum",
+        "java.lang.Class",
+        "java.math.BigDecimal",
+        "java.math.BigInteger",
+        "java.util.Date",
+        "java.util.UUID",
+        "java.util.Locale",
+        "java.net.URI",
+        "java.net.URL",
+        "java.time.Instant",
+        "java.time.LocalDate",
+        "java.time.LocalDateTime",
+        "java.time.LocalTime",
+        "java.time.OffsetDateTime",
+        "java.time.ZonedDateTime",
+        "java.time.Duration",
+        "java.time.Temporal"
       ]
     },
     {
+      "_p27_comment": "P27 \u00a72, from Jakarta RESTful Web Services 3.1 specification, \u00a73.3.2.1 rather than from memory. Verbatim: \"The value of a parameter not annotated with @FormParam or any of the annotations listed in Fields and Bean Properties, called the entity parameter, is mapped from the request entity body. Resource methods MUST have at most one entity parameter.\" The unannotated parameter IS the request body, so it is never a scalar: simpleParameterTypes stays empty. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "applicationPathAnnotations": [
         "javax.ws.rs.ApplicationPath",
         "jakarta.ws.rs.ApplicationPath"
@@ -667,7 +776,27 @@
         "jakarta.ws.rs.Path",
         "javax.ws.rs.Path"
       ],
-      "handlerInput": "annotated",
+      "contextParameterTypes": [
+        "jakarta.ws.rs.core.UriInfo",
+        "jakarta.ws.rs.core.HttpHeaders",
+        "jakarta.ws.rs.core.SecurityContext",
+        "jakarta.ws.rs.core.Request",
+        "jakarta.ws.rs.core.Application",
+        "jakarta.ws.rs.core.Configuration",
+        "jakarta.ws.rs.ext.Providers",
+        "jakarta.ws.rs.container.ResourceContext",
+        "jakarta.ws.rs.sse.Sse",
+        "jakarta.ws.rs.sse.SseEventSink",
+        "javax.ws.rs.core.UriInfo",
+        "javax.ws.rs.core.HttpHeaders",
+        "javax.ws.rs.core.SecurityContext",
+        "javax.ws.rs.core.Request",
+        "javax.ws.rs.core.Application",
+        "javax.ws.rs.core.Configuration",
+        "javax.ws.rs.ext.Providers",
+        "javax.ws.rs.container.ResourceContext"
+      ],
+      "handlerInput": "annotated-or-bound",
       "id": "quarkus",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -750,6 +879,12 @@
           "pattern": "javax.ws.rs.Produces"
         }
       ],
+      "nonInputAnnotations": [
+        "jakarta.ws.rs.core.Context",
+        "javax.ws.rs.core.Context",
+        "jakarta.ws.rs.container.Suspended",
+        "javax.ws.rs.container.Suspended"
+      ],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
@@ -825,7 +960,8 @@
       "pathPrefixAnnotations": [
         "jakarta.ws.rs.Path",
         "javax.ws.rs.Path"
-      ]
+      ],
+      "simpleParameterTypes": []
     },
     {
       "_p15_comment": "P15: media has no declaration site for servlets - the content type is a response header the handler sets. Authentication IS declared, in the deployment descriptor's <security-constraint>, which the web.xml parser reads (P15) and attaches per url-pattern; it is not an annotation. P18, sourced: jakarta.servlet-api 6.0.0's own classes - setContentType lives on ServletResponse (the RESPONSE half); ServletRequest exposes only getContentType (reading the request body's type). No route-level media declaration exists in the servlet model; the empty stands with evidence.",
@@ -1072,8 +1208,17 @@
       "kind": "annotation"
     },
     {
+      "_p27_comment": "P27 \u00a72, from web/websocket/stomp/handle-annotations.html rather than from memory. Verbatim: \"The presence of this annotation is not required since it is, by default, assumed if no other argument is matched.\" The unannotated argument IS the message payload. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "classMarkers": [],
-      "handlerInput": "annotated",
+      "contextParameterTypes": [
+        "org.springframework.messaging.Message",
+        "org.springframework.messaging.MessageHeaders",
+        "org.springframework.messaging.support.MessageHeaderAccessor",
+        "org.springframework.messaging.simp.SimpMessageHeaderAccessor",
+        "org.springframework.messaging.simp.stomp.StompHeaderAccessor",
+        "java.security.Principal"
+      ],
+      "handlerInput": "annotated-or-bound",
       "id": "spring-messaging",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -1113,6 +1258,7 @@
           "pattern": "org.springframework.scheduling.annotation.Scheduled"
         }
       ],
+      "nonInputAnnotations": [],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
@@ -1129,9 +1275,11 @@
           "kind": "header",
           "pattern": "org.springframework.messaging.handler.annotation.Header"
         }
-      ]
+      ],
+      "simpleParameterTypes": []
     },
     {
+      "_p27_comment": "P27 \u00a72, from web/webmvc/mvc-controller/ann-methods/arguments.html and web/webflux/controller/ann-methods/arguments.html rather than from memory. Verbatim: \"If a method argument is not matched to any of the earlier values in this table and it is a simple type (as determined by BeanUtils#isSimpleProperty), it is resolved as a @RequestParam. Otherwise, it is resolved as a @ModelAttribute.\" This entry covers ANNOTATED controllers of both Spring MVC and Spring WebFlux \u2014 WebFlux's annotated model publishes the identical fallback rule, and kosi's spring-webflux entry is the FUNCTIONAL router DSL, where ServerRequest genuinely is a context. So WebFlux's own supplied types are listed here too. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "authenticationAnnotations": [
         {
           "pattern": "org.springframework.security.access.prepost.PreAuthorize",
@@ -1154,7 +1302,46 @@
         "org.springframework.web.bind.annotation.RestController",
         "org.springframework.stereotype.Controller"
       ],
-      "handlerInput": "annotated",
+      "contextParameterTypes": [
+        "org.springframework.web.context.request.WebRequest",
+        "org.springframework.web.context.request.NativeWebRequest",
+        "jakarta.servlet.ServletRequest",
+        "jakarta.servlet.ServletResponse",
+        "jakarta.servlet.http.HttpServletRequest",
+        "jakarta.servlet.http.HttpServletResponse",
+        "jakarta.servlet.http.HttpSession",
+        "jakarta.servlet.http.PushBuilder",
+        "javax.servlet.ServletRequest",
+        "javax.servlet.ServletResponse",
+        "javax.servlet.http.HttpServletRequest",
+        "javax.servlet.http.HttpServletResponse",
+        "javax.servlet.http.HttpSession",
+        "java.security.Principal",
+        "org.springframework.http.HttpMethod",
+        "java.util.Locale",
+        "java.util.TimeZone",
+        "java.time.ZoneId",
+        "java.io.InputStream",
+        "java.io.Reader",
+        "java.io.OutputStream",
+        "java.io.Writer",
+        "java.util.Map",
+        "kotlin.collections.Map",
+        "kotlin.collections.MutableMap",
+        "org.springframework.ui.Model",
+        "org.springframework.ui.ModelMap",
+        "org.springframework.web.servlet.mvc.support.RedirectAttributes",
+        "org.springframework.validation.Errors",
+        "org.springframework.validation.BindingResult",
+        "org.springframework.web.bind.support.SessionStatus",
+        "org.springframework.web.util.UriComponentsBuilder",
+        "org.springframework.web.bind.WebDataBinder",
+        "org.springframework.web.server.ServerWebExchange",
+        "org.springframework.http.server.reactive.ServerHttpRequest",
+        "org.springframework.http.server.reactive.ServerHttpResponse",
+        "org.springframework.web.server.WebSession"
+      ],
+      "handlerInput": "annotated-or-bound",
       "id": "spring-mvc",
       "kind": "annotation",
       "mappingAnnotations": [
@@ -1255,6 +1442,14 @@
           "pattern": "org.springframework.web.bind.annotation.PatchMapping"
         }
       ],
+      "nonInputAnnotations": [
+        "org.springframework.security.core.annotation.AuthenticationPrincipal",
+        "org.springframework.security.core.annotation.CurrentSecurityContext",
+        "org.springframework.web.bind.annotation.SessionAttribute",
+        "org.springframework.web.bind.annotation.RequestAttribute",
+        "org.springframework.beans.factory.annotation.Autowired",
+        "org.springframework.beans.factory.annotation.Value"
+      ],
       "parameterAnnotations": [
         {
           "category": "untrusted-input",
@@ -1313,6 +1508,47 @@
         "org.springframework.data.repository.ListCrudRepository",
         "org.springframework.data.jpa.repository.JpaRepository",
         "org.springframework.data.rest.core.annotation.RepositoryRestResource"
+      ],
+      "simpleParameterTypes": [
+        "kotlin.Boolean",
+        "kotlin.Byte",
+        "kotlin.Char",
+        "kotlin.Short",
+        "kotlin.Int",
+        "kotlin.Long",
+        "kotlin.Float",
+        "kotlin.Double",
+        "kotlin.String",
+        "kotlin.CharSequence",
+        "kotlin.Enum",
+        "java.lang.Boolean",
+        "java.lang.Byte",
+        "java.lang.Character",
+        "java.lang.Short",
+        "java.lang.Integer",
+        "java.lang.Long",
+        "java.lang.Float",
+        "java.lang.Double",
+        "java.lang.String",
+        "java.lang.CharSequence",
+        "java.lang.Number",
+        "java.lang.Enum",
+        "java.lang.Class",
+        "java.math.BigDecimal",
+        "java.math.BigInteger",
+        "java.util.Date",
+        "java.util.UUID",
+        "java.util.Locale",
+        "java.net.URI",
+        "java.net.URL",
+        "java.time.Instant",
+        "java.time.LocalDate",
+        "java.time.LocalDateTime",
+        "java.time.LocalTime",
+        "java.time.OffsetDateTime",
+        "java.time.ZonedDateTime",
+        "java.time.Duration",
+        "java.time.Temporal"
       ]
     },
     {
@@ -1448,6 +1684,7 @@
       ]
     },
     {
+      "_p19_comment": "P19 liveness sweep: the springfox-swagger coordinate marker removed \u2014 springfox is a different, archived project; the springdoc rows are what the fixtures exercise.",
       "dependencyMarkers": [
         "springdoc-openapi"
       ],
@@ -1479,12 +1716,12 @@
           "path": "/swagger-ui/index.html"
         }
       ],
-      "kind": "annotation",
-      "_p19_comment": "P19 liveness sweep: the springfox-swagger coordinate marker removed \u2014 springfox is a different, archived project; the springdoc rows are what the fixtures exercise."
+      "kind": "annotation"
     },
     {
       "_p15_comment": "P15: media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls.",
       "_p17_comment": "P17, closing the P15 honest-empty: Vert.x auth IS attributable to one route, because the requirement is attached THROUGH the same chained handler call the media ride - `route.handler(BasicAuthHandler.create(auth))`. Sourced from io.vertx:vertx-web:5.1.7 (the artifact in the corpus warm cache), class files read from the jar: io/vertx/ext/web/Route.class declares `handler(Handler<RoutingContext>)` returning Route (so the chain continues past an auth attach); io/vertx/ext/web/handler/AuthenticationHandler.class `extends Handler<RoutingContext>` - an auth handler IS a handler, no overload involved; the factories are interface statics on each handler class (BasicAuthHandler.create(AuthenticationProvider[, realm]), JWTAuthHandler.create(JWTAuth[, issuer]), DigestAuthHandler.create(Vertx, HtdigestAuth[, timeout]), OAuth2AuthHandler.create(Vertx, OAuth2Auth[, redirectUri]), OtpAuthHandler.create(TotpAuth|HotpAuth), RedirectAuthHandler.create(AuthenticationProvider[, loginRedirectURL]), WebAuthn4JHandler.create(WebAuthn4J)). P18 symbol-kind check (against the same 5.1.7 jar): the nesting entry was io.vertx.ext.web.Router.mountSubRouter - an API Vert.x 5 REMOVED (Router declares no mount* member; the 5.x spelling is Route.subRouter(Router), javap on io/vertx/ext/web/Route.class). The old entry named a symbol the cited evidence does not contain and was inert besides (no fixture exercises it and the prefix walk keys on route/path lambda links); it is replaced by the 5.x spelling. Vert.x sub-router PREFIX composition remains unmodelled for either spelling - a named gap, not a wrong answer. ChainAuthHandler.all()/any() and AuthorizationHandler.create() are deliberately not modelled: the former builds a composite with no single scheme to name, the latter is authorization (what may you do), not authentication (who are you). The P15 claim that the KIR cannot attribute the value was wrong for THIS shape: the factory call's own callee names the scheme.",
+      "_p19_comment": "P19: the sub-router mount moved here from dslFunctions (it was swapped there from Router.mountSubRouter in P18). Vert.x 5's own spelling (Route.subRouter(Router), javap on io/vertx/ext/web/Route.class in io.vertx:vertx-web:5.1.7): the ROUTE the mount is called on carries the path prefix, and every route declared on the MOUNTED router (the call's first argument) publishes under it, with the mount route's trailing `*` stripped. The entry is exercised by fixtures/vertx-subrouter; the prefix walk keys on the mounted router's register, not on lambda links. Same-function mounts only \u2014 a sub-router built in another function is a named gap.",
       "authHandlerFactories": [
         "io.vertx.ext.web.handler.BasicAuthHandler.create",
         "io.vertx.ext.web.handler.DigestAuthHandler.create",
@@ -1583,8 +1820,15 @@
       ],
       "mountFunctions": [
         "io.vertx.ext.web.Route.subRouter"
-      ],
-      "_p19_comment": "P19: the sub-router mount moved here from dslFunctions (it was swapped there from Router.mountSubRouter in P18). Vert.x 5's own spelling (Route.subRouter(Router), javap on io/vertx/ext/web/Route.class in io.vertx:vertx-web:5.1.7): the ROUTE the mount is called on carries the path prefix, and every route declared on the MOUNTED router (the call's first argument) publishes under it, with the mount route's trailing `*` stripped. The entry is exercised by fixtures/vertx-subrouter; the prefix walk keys on the mounted router's register, not on lambda links. Same-function mounts only \u2014 a sub-router built in another function is a named gap."
+      ]
+    },
+    {
+      "handlerInput": "all",
+      "id": "android-provider",
+      "kind": "supertype",
+      "supertypeMarkers": [
+        "android.content.ContentProvider"
+      ]
     }
   ],
   "name": "endpoints-pack-v0",
@@ -1646,12 +1890,12 @@
       "urlArgument": 0
     },
     {
+      "_p19_comment": "P19: urlArgument was 1, but uri(URI) is the builder call's ONLY argument \u2014 the row could never read a URL and the liveness sweep found it inert for exactly that reason.",
       "clientLibrary": "jdk-httpclient",
       "kind": "client",
       "pattern": "java.net.http.HttpRequest.Builder.uri",
       "protocol": "http",
-      "urlArgument": 0,
-      "_p19_comment": "P19: urlArgument was 1, but uri(URI) is the builder call's ONLY argument \u2014 the row could never read a URL and the liveness sweep found it inert for exactly that reason."
+      "urlArgument": 0
     },
     {
       "clientLibrary": "java.sql.DriverManager",
@@ -1696,12 +1940,12 @@
       "urlArgument": 0
     },
     {
+      "_p19_comment": "P19: urlArgument was 1 \u2014 JedisPool(host, port)'s PORT. The address argument is the host at 0; reading the port published the service name \"6379\".",
       "clientLibrary": "jedis",
       "kind": "client",
       "pattern": "redis.clients.jedis.JedisPool",
       "protocol": "redis",
-      "urlArgument": 0,
-      "_p19_comment": "P19: urlArgument was 1 \u2014 JedisPool(host, port)'s PORT. The address argument is the host at 0; reading the port published the service name \"6379\"."
+      "urlArgument": 0
     },
     {
       "clientLibrary": "retrofit2",
@@ -1711,5 +1955,31 @@
       "urlArgument": 0
     }
   ],
-  "_p19_outbound_comment": "P19 liveness sweep: nine outbound rows carried urlArgument -1 and OutboundDetector SKIPS models with no URL argument (`if (model.urlArgument < 0) continue`) \u2014 unread vocabulary, deleted: co.elastic.clients.transport.rest_client.RestClientTransport, com.google.cloud.storage.StorageOptions.getDefaultInstance, com.openai.client.okhttp.OpenAIOkHttpClient.builder, dev.langchain4j.model.openai.OpenAiChatModel.builder, io.ktor.client.HttpClient, io.ktor.client.request.request, java.net.http.HttpClient.newHttpClient, org.apache.kafka.clients.producer.KafkaProducer, software.amazon.awssdk.services.s3.S3Client.builder. The remaining rows are exercised by fixtures/outbound-clients."
+  "outboundInterfaces": [
+    {
+      "clientLibrary": "retrofit2",
+      "framework": "retrofit2",
+      "methodAnnotations": [
+        "retrofit2.http.GET",
+        "retrofit2.http.POST",
+        "retrofit2.http.PUT",
+        "retrofit2.http.DELETE",
+        "retrofit2.http.PATCH",
+        "retrofit2.http.HEAD",
+        "retrofit2.http.OPTIONS",
+        "retrofit2.http.HTTP",
+        "retrofit2.http.Multipart",
+        "retrofit2.http.FormUrlEncoded"
+      ],
+      "protocol": "https"
+    },
+    {
+      "clientLibrary": "feign",
+      "framework": "feign",
+      "methodAnnotations": [
+        "feign.RequestLine"
+      ],
+      "protocol": "https"
+    }
+  ]
 }

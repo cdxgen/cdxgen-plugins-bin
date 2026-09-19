@@ -56,7 +56,7 @@ class DepthReportTest {
 
     private val reportFile = Path.of("src/test/resources/depth/depth-report.json")
 
-    private val bundledTiers = setOf("fixtures", "frameworks", "crypto", "async", "vuln")
+    private val bundledTiers = setOf("fixtures", "frameworks", "crypto", "async", "vuln", "deep")
 
     private class ValueRow(
         val asked: Int,

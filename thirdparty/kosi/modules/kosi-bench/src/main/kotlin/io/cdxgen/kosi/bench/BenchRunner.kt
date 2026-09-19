@@ -545,7 +545,9 @@ object BenchRunner {
         for (entry in entries) {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
-            for (slot in Matrix.defaultMatrix()) {
+            // P24: the deep tier runs the default slot only (Matrix.slotsFor,
+            // 10-DEEP-EVIDENCE.md §3's cost discipline).
+            for (slot in Matrix.slotsFor(entry.tier)) {
                 // CI death diagnosis (the pkg corpusQuick hang): when a
                 // runner kills this JVM mid-run, stderr's last marker names
                 // the exact fixture and slot it died on.

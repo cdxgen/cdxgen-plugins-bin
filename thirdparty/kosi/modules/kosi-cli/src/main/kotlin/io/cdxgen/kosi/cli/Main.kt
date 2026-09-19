@@ -111,6 +111,7 @@ object Main {
             printAnalyzeUsage()
             return ExitCodes.OK
         }
+        parsed.requireNoPositionals("analyze", "--dir <path>")
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
         val options = optionsFrom(parsed)
@@ -305,6 +306,7 @@ object Main {
             printKirUsage()
             return ExitCodes.OK
         }
+        parsed.requireNoPositionals("kir dump", "--dir <path>")
         val dir = parsed.value("dir") ?: throw UsageException("kir dump requires --dir <path>")
         val outPath = parsed.value("out")
         val root = Path.of(dir)
@@ -362,6 +364,7 @@ object Main {
             printBenchUsage()
             return ExitCodes.OK
         }
+        parsed.requireNoPositionals("bench", "--repo-root <path>")
         val tiers = parsed.value("tier", "fixtures")!!.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
         val only = parsed.value("only")
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
@@ -463,6 +466,7 @@ object Main {
             printGoldenUsage()
             return ExitCodes.OK
         }
+        parsed.requireNoPositionals("golden", "--repo-root <path>")
         val repoRoot = Path.of(parsed.value("repo-root", ".")).toAbsolutePath().normalize()
         val goldensDir = Path.of(parsed.value("goldens", "goldens"))
         val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
@@ -536,7 +540,9 @@ object Main {
                     problems.add("${entry.slug}: declares classpath_file '${entry.classpathFile}' which is not on disk")
                     continue
                 }
-                for (slot in io.cdxgen.kosi.bench.Matrix.defaultMatrix()) {
+                // P24: a deep-tier fixture is golden-pinned in the default
+                // slot only - one pair per fixture, the tier's cost rule.
+                for (slot in io.cdxgen.kosi.bench.Matrix.slotsFor(entry.tier)) {
                     checked++
                     portabilityChecked++
                     // The ENTRY-RELATIVE value is what the report records: an

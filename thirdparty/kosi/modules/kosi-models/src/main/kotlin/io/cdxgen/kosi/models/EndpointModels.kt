@@ -52,11 +52,67 @@ data class FrameworkModel(
      *    security pack models as sources. Seeding the context taints
      *    everything reachable from it - including the RESPONSE object a
      *    servlet handler is handed in the same signature.
+     *  - `annotated-or-bound` - the signature names SOME transports, and
+     *    everything else that is not a framework collaborator is bound from
+     *    the request anyway (Spring MVC's command objects). Seed the
+     *    annotated parameters by their transport, and every unannotated
+     *    parameter whose type is not in [contextParameterTypes].
      *  - `all` - the handler's parameter IS the payload (a gRPC request
      *    message, a Lambda event, an Android lifecycle Bundle). This is the
      *    default, so a framework that says nothing keeps its behaviour.
      */
     val handlerInput: String = HANDLER_INPUT_ALL,
+    /**
+     * P27 §2: the types a handler parameter may have that are NOT request
+     * data — the framework's own collaborators, handed to the method beside
+     * the input (`Model`, `BindingResult`, `HttpServletRequest`,
+     * `WebDataBinder`, `Principal`, `RedirectAttributes`, a model `Map`).
+     *
+     * This exists because `annotated` is the wrong rule for Spring MVC and
+     * measuring said so. Spring binds an UNANNOTATED, non-context parameter
+     * from the request — the implicit `@ModelAttribute` command object, the
+     * form-handling idiom the framework's own sample application is written
+     * in. Seeding only annotated parameters found three flows in
+     * spring-petclinic and missed every `processCreationForm`,
+     * `processUpdateForm` and `processFindForm` in it: six handlers whose
+     * entire input was invisible.
+     *
+     * The rule a framework declares with [HANDLER_INPUT_ANNOTATED_OR_BOUND]
+     * is therefore "annotated parameters by their transport, plus every
+     * other parameter whose type is not named here". Listing the context
+     * types rather than guessing at the data ones keeps the failure
+     * direction right: a type we forgot to list produces a finding to
+     * triage, not a silence.
+     */
+    val contextParameterTypes: List<String> = emptyList(),
+    /**
+     * P27 §2: annotations that mean "the framework supplies this parameter",
+     * as opposed to binding it from the request.
+     *
+     * Needed because the presence of SOME annotation says nothing: Spring
+     * binds `@Valid owner: Owner` from the form exactly as it binds a bare
+     * `owner: Owner` — `@Valid` asks for validation, not for injection. A
+     * rule that read "annotated, but not with a transport, therefore
+     * injected" dropped every validated command object in
+     * spring-petclinic, which is most of them.
+     *
+     * So only these annotations exclude a parameter, and the type list does
+     * the rest.
+     */
+    val nonInputAnnotations: List<String> = emptyList(),
+    /**
+     * P27 §2: the types Spring calls SIMPLE, from `BeanUtils.isSimpleValueType`
+     * — "a primitive or primitive wrapper, an Enum, a String or other
+     * CharSequence, a Number, a Date, a Temporal, a UUID, a URI, a URL, a
+     * Locale, or a Class".
+     *
+     * The distinction is in the framework's own fallback rule and it decides
+     * the TRANSPORT: an unannotated simple type is resolved as a
+     * `@RequestParam` (a scalar out of the query string), anything else as a
+     * `@ModelAttribute` (a command object whose FIELDS carry the form). Both
+     * are request data; only the second is field-bearing.
+     */
+    val simpleParameterTypes: List<String> = emptyList(),
     /**
      * Frameworks whose ROUTE is declared on the class and whose handlers are
      * named by convention: `@WebServlet("/run")` on the class, `doGet` and
@@ -298,6 +354,9 @@ data class HandlerMethodName(val name: String, val methods: List<String>)
 
 /** Handler-input shapes; see [FrameworkModel.handlerInput]. */
 const val HANDLER_INPUT_ANNOTATED: String = "annotated"
+
+/** P27 §2: annotated transports PLUS every non-context parameter. */
+const val HANDLER_INPUT_ANNOTATED_OR_BOUND: String = "annotated-or-bound"
 const val HANDLER_INPUT_CONTEXT: String = "context"
 const val HANDLER_INPUT_ALL: String = "all"
 
@@ -310,6 +369,20 @@ data class ParameterAnnotation(
     val pattern: String,
     val category: String,
     val kind: String,
+)
+
+/**
+ * P26 §1.2: an OUTBOUND INTERFACE — Retrofit and Feign declare remote calls
+ * as annotated methods on an interface the library implements at runtime.
+ * There is no body to walk and no call-site URL argument: the ANNOTATED
+ * METHOD IS THE CALL, and the path is the annotation's value (resolved to
+ * the declaration's annotation VALUES where the pipeline carries them).
+ */
+data class OutboundInterfaceModel(
+    val framework: String,
+    val methodAnnotations: List<String>,
+    val protocol: String,
+    val clientLibrary: String,
 )
 
 /** One outbound client call shape: callee pattern plus where the URL argument sits. */
@@ -332,6 +405,8 @@ data class EndpointsPack(
     val name: String,
     val frameworks: List<FrameworkModel>,
     val outbound: List<OutboundModel>,
+    /** P26 §1.2: annotated-interface outbound declarations (Retrofit, Feign). */
+    val outboundInterfaces: List<OutboundInterfaceModel> = emptyList(),
     val configReaders: List<ConfigReaderModel>,
 ) {
     /** The closed framework vocabulary annotation validation reads. */
@@ -380,6 +455,9 @@ object EndpointModels {
                     )
                 } ?: emptyList(),
                 handlerInput = f.str("handlerInput") ?: HANDLER_INPUT_ALL,
+                contextParameterTypes = f.arr("contextParameterTypes")?.strings() ?: emptyList(),
+                nonInputAnnotations = f.arr("nonInputAnnotations")?.strings() ?: emptyList(),
+                simpleParameterTypes = f.arr("simpleParameterTypes")?.strings() ?: emptyList(),
                 classMappingAnnotations = f.arr("classMappingAnnotations")?.strings() ?: emptyList(),
                 resourceAnnotations = f.arr("resourceAnnotations")?.strings() ?: emptyList(),
                 applicationPathAnnotations = f.arr("applicationPathAnnotations")?.strings() ?: emptyList(),
@@ -456,6 +534,14 @@ object EndpointModels {
             name = root.str("name") ?: "endpoints-pack",
             frameworks = frameworks,
             outbound = outbound,
+            outboundInterfaces = root.arr("outboundInterfaces")?.objects()?.map { o ->
+                OutboundInterfaceModel(
+                    framework = require(o.str("framework"), "outboundInterfaces[].framework"),
+                    methodAnnotations = o.arr("methodAnnotations")?.strings() ?: emptyList(),
+                    protocol = require(o.str("protocol"), "outboundInterfaces[].protocol"),
+                    clientLibrary = require(o.str("clientLibrary"), "outboundInterfaces[].clientLibrary"),
+                )
+            } ?: emptyList(),
             configReaders = configReaders,
         )
     }

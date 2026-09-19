@@ -199,6 +199,22 @@ object KirLowering {
          * attacker input from the ones a container injects.
          */
         val paramAnnotations: List<List<String>> = emptyList(),
+        /**
+         * Resolved class-type FQNs per VALUE parameter, in declaration order
+         * (P26), aligned with [paramAnnotations]; null where the parameter's
+         * type is not a resolvable class. The DI binding reader maps
+         * `@Binds` parameters to implementations with these.
+         */
+        val paramTypes: List<String?> = emptyList(),
+        /**
+         * The function's own RESOLVED class-type FQN (P26); null for Unit,
+         * primitives, type parameters and anything unresolved. Unit is
+         * excluded on purpose: every `fun foo()` would carry it, it is
+         * already in the JVM descriptor, and the consumers of this fact
+         * (binding returns, outbound interface returns) are interested in
+         * exactly the non-Unit cases.
+         */
+        val returnTypeFq: String? = null,
     )
 
     private val NO_FACTS = Facts(
@@ -455,6 +471,25 @@ object KirLowering {
 
                     else -> null
                 }
+                // P26: resolved class-type FQNs for the return and each value
+                // parameter — the same suffix-segment-matchable notation the
+                // supertypes use. A binding method's signature IS the mapping
+                // the container reads, and the signature's source TEXT (what
+                // KirParam.type carries) cannot answer it.
+                fun classTypeFq(type: org.jetbrains.kotlin.analysis.api.types.KaType?): String? =
+                    (type as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                        ?.classId?.asSingleFqName()?.asString()
+                val paramTypes = (callable as? KaFunctionSymbol)
+                    ?.valueParameters
+                    ?.map { classTypeFq(it.returnType) }
+                    .orEmpty()
+                val returnTypeFq = when (callable) {
+                    is KaFunctionSymbol -> classTypeFq(callable.returnType)?.takeIf { it != "kotlin.Unit" }
+                    // A property initializer's "return" is the property's own
+                    // type.
+                    is KaPropertySymbol -> classTypeFq(callable.returnType)
+                    else -> null
+                }
                 Facts(
                     visibility = visibility,
                     modifiers = (psiModifiers(psi) + listOfNotNull(modalityModifier(callable))).toCollection(TreeSet()),
@@ -467,13 +502,48 @@ object KirLowering {
                     jvmDescriptor = descriptor,
                     factsAvailable = true,
                     paramAnnotations = paramAnnotations,
+                    paramTypes = paramTypes,
+                    returnTypeFq = returnTypeFq,
                 )
             } catch (_: Exception) {
                 symbolFactFailures++
                 NO_FACTS
             }
 
-            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty)
+            /**
+             * P25 §0: the canonical name a callable reference NAMES.
+             *
+             * `::sink`, `obj::method` and `Type::member` are function VALUES
+             * exactly as a lambda is, and P24 built the channel that carries
+             * taint through one — but the lowering wrote the reference's
+             * SOURCE TEXT (`::sink`) as the function value's name, and no
+             * table is keyed by source text, so every reference spelling
+             * died at the invocation while `{ s -> sink(s) }` went through.
+             * Resolved here, in the ambient analysis pass that already
+             * answers for call expressions, because the lowering itself may
+             * not call `KtReference.resolve()` (it re-enters `analyze` and
+             * deadlocks a native image — the rule at `isLocalReference`).
+             */
+            fun resolveReference(psi: org.jetbrains.kotlin.psi.KtCallableReferenceExpression): String? = try {
+                val call: org.jetbrains.kotlin.analysis.api.resolution.KaSingleCall<*, *> =
+                    psi.resolveCall() ?: return@resolveReference null
+                val symbol = call.signature.symbol as? KaCallableSymbol
+                when (symbol) {
+                    is KaConstructorSymbol ->
+                        symbol.containingClassId?.asSingleFqName()?.asString()?.let { "$it.<init>" }
+
+                    // A LOCAL function has no callableId — locals are not
+                    // addressable from outside — but the lowering hoists its
+                    // body to a package-qualified KIR function, so the
+                    // declaration is what names it.
+                    else -> symbol?.callableId?.asSingleFqName()?.asString()
+                        ?: (symbol?.psi as? KtNamedFunction)?.let { canonicalNameOfDeclaration(it) }
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference)
             for (file in files) {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
@@ -482,10 +552,248 @@ object KirLowering {
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
                 }
+                // P24 §2b: every class with a primary constructor gets its
+                // `<init>` lowered as the function it is — one that writes
+                // the object's fields. Until now a primary constructor
+                // existed in the KIR only as a CALL SITE (`kind=constructor`)
+                // with no body anywhere, so `Job(tainted)` could never taint
+                // `job.command`: the flow engine had no function to
+                // summarise. Secondary constructors were already lowered;
+                // this is the primary's turn.
+                for (klass in classesWithPrimaryConstructor(file)) {
+                    synthesizePrimaryConstructor(klass)?.let { functions.add(it) }
+                }
+                // P27 §1: the forwarders `by`-delegation generates. They have
+                // no PSI, so nothing above this line can see them.
+                for (klass in classesWithDelegation(file)) {
+                    functions.addAll(synthesizeDelegationForwarders(klass, failures))
+                }
             }
             functions.addAll(lambdaContext.functions)
         }
         return Result(functions, failures, functionCount, symbolFactFailures)
+    }
+
+    /**
+     * P27 §1: the forwarders Kotlin's CLASS DELEGATION generates.
+     *
+     * `class RequestWithContext(private val delegate: Request, ...) : Request
+     * by delegate` compiles to one override per member of `Request`, each
+     * body `delegate.member(...)`. Not one of them has PSI, and the lowering
+     * is PSI-driven, so the whole forwarding layer was absent from the KIR:
+     * `wrapped.body` resolved to an interface method with no implementation
+     * anywhere, the flow engine had nothing to summarise, and the value the
+     * delegate carried stopped at the wrapper.
+     *
+     * This is the other half of R161. P26 taught the summary to say "the
+     * source came back inside the returned object's FIELD"; the 22 http4k
+     * findings still did not return, because their consumers read that field
+     * through exactly these missing forwarders. The channel existed and the
+     * bridge did not.
+     *
+     * The synthesis is deliberately literal — a field read of the delegate
+     * and a virtual call on it — so that nothing here is a special case
+     * downstream: the summary machinery, the alias class, dispatch and the
+     * frames all see an ordinary member function whose body forwards, which
+     * is exactly what the JVM runs.
+     *
+     * Returns null members rather than guessing when the delegate is not a
+     * plain name (`: Request by wrap(other)` stores an unnamed
+     * `$$delegate_0` the object-identity model never wrote); those count as
+     * a `delegation-opaque` lowering failure so the gap is visible instead
+     * of silent.
+     */
+    private fun org.jetbrains.kotlin.analysis.api.KaSession.synthesizeDelegationForwarders(
+        klass: org.jetbrains.kotlin.psi.KtClassOrObject,
+        failures: MutableMap<String, Int>,
+    ): List<KirFunction> {
+        val entries = klass.superTypeListEntries
+            .filterIsInstance<org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry>()
+        if (entries.isEmpty()) return emptyList()
+
+        val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(klass)
+        // An object EXPRESSION delegating (`object : Payload by source {}`)
+        // has no name; `<anonymous>` is the convention the rest of the
+        // lowering already uses, and what identifies these forwarders to
+        // dispatch is their `overrides` edge, not their name.
+        val className = klass.name ?: "<anonymous>"
+        val base = listOf(pkg, chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val enclosing = listOf(chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val file = klass.containingFile?.virtualFile?.path ?: "<memory>"
+
+        // Members the class declares ITSELF always win: `override fun body()`
+        // beside `by delegate` is the idiom for "forward everything except
+        // this", and synthesizing over it would publish a forwarder the JVM
+        // never runs.
+        val declared = klass.declarations.mapNotNull { declaration ->
+            when (declaration) {
+                is KtNamedFunction -> declaration.name
+                is org.jetbrains.kotlin.psi.KtProperty -> declaration.name
+                else -> null
+            }
+        }.toSet()
+
+        val out = mutableListOf<KirFunction>()
+        val taken = sortedSetOf<String>()
+        for (entry in entries) {
+            val delegateName = (entry.delegateExpression as? KtNameReferenceExpression)
+                ?.getReferencedName()
+            if (delegateName == null) {
+                failures.merge("delegation-opaque", 1, Int::plus)
+                continue
+            }
+            val supertype = entry.typeReference?.type as? org.jetbrains.kotlin.analysis.api.types.KaClassType
+            val symbol = supertype?.symbol as? org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+            if (symbol == null) {
+                failures.merge("delegation-unresolved-supertype", 1, Int::plus)
+                continue
+            }
+            val supertypeFqn = supertype.classId?.asSingleFqName()?.asString() ?: continue
+
+            for (member in symbol.memberScope.callables.sortedBy { it.callableId?.asSingleFqName()?.asString() ?: "" }) {
+                val name = member.callableId?.callableName?.asString() ?: continue
+                // kotlin.Any's members are on every type and forwarding them
+                // says nothing about data.
+                if (name in ANY_MEMBERS || name in declared || !taken.add(name)) continue
+                val valueParams = (member as? KaFunctionSymbol)?.valueParameters.orEmpty()
+                val params = mutableListOf(io.cdxgen.kosi.kir.KirParam("%0", "this", null, receiver = true))
+                valueParams.forEachIndexed { index, parameter ->
+                    params.add(
+                        io.cdxgen.kosi.kir.KirParam(
+                            "%${index + 1}",
+                            parameter.name.asString(),
+                            null,
+                            receiver = false,
+                            resolvedType = (parameter.returnType as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                                ?.classId?.asSingleFqName()?.asString(),
+                        ),
+                    )
+                }
+                val args = valueParams.indices.map { "%${it + 1}" }
+                val delegateReg = "%d0"
+                val resultReg = "%d1"
+                out.add(
+                    KirFunction(
+                        canonicalName = "$base.$name",
+                        jvmDescriptor = null,
+                        purl = "",
+                        file = file,
+                        line = klass.line(),
+                        column = klass.column(),
+                        params = params,
+                        returnType = (member.returnType as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
+                            ?.classId?.asSingleFqName()?.asString()
+                            ?.takeIf { it != "kotlin.Unit" },
+                        modifiers = setOf("override"),
+                        visibility = "public",
+                        enclosingClass = enclosing.ifEmpty { null },
+                        // The dispatch edge: a call on the INTERFACE resolves
+                        // here, which is the whole point of the synthesis.
+                        overrides = listOf("$supertypeFqn.$name"),
+                        overriddenBy = emptyList(),
+                        annotations = emptyList(),
+                        syntheticCause = "class-delegation",
+                        body = io.cdxgen.kosi.kir.KirBody(
+                            listOf(
+                                io.cdxgen.kosi.kir.KirBlock(
+                                    "b0",
+                                    entry = true,
+                                    instructions = listOf(
+                                        io.cdxgen.kosi.kir.KirFieldGet(
+                                            delegateReg,
+                                            "%0",
+                                            io.cdxgen.kosi.kir.AccessPath.field("%0", delegateName),
+                                        ),
+                                        io.cdxgen.kosi.kir.KirCall(
+                                            result = resultReg,
+                                            callee = io.cdxgen.kosi.kir.KirCallee(
+                                                "$supertypeFqn.$name",
+                                                null,
+                                                io.cdxgen.kosi.kir.CallKind.VIRTUAL,
+                                            ),
+                                            receiver = delegateReg,
+                                            args = args,
+                                            line = klass.line(),
+                                        ),
+                                        io.cdxgen.kosi.kir.KirReturn(resultReg),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    /** Members every type has; forwarding them carries no data fact. */
+    private val ANY_MEMBERS = setOf("equals", "hashCode", "toString")
+
+    /** Classes declaring a primary constructor with at least one stored (`val`/`var`) parameter. */
+    private fun classesWithPrimaryConstructor(file: org.jetbrains.kotlin.psi.KtFile): List<org.jetbrains.kotlin.psi.KtClass> {
+        val out = mutableListOf<org.jetbrains.kotlin.psi.KtClass>()
+        file.accept(object : KtTreeVisitorVoid() {
+            override fun visitClass(klass: org.jetbrains.kotlin.psi.KtClass) {
+                val primary = klass.primaryConstructor
+                if (primary != null && primary.valueParameters.any { it.hasValOrVar() }) out.add(klass)
+                super.visitClass(klass)
+            }
+        })
+        return out
+    }
+
+    /**
+     * The primary constructor's body: `fieldSet this.<name> = <param>` for
+     * each stored parameter, in declaration order — the object-identity
+     * content of a construction. The receiver parameter mirrors a member
+     * function's `%0`/`this`, so the summary's `paramFieldWrites` reach the
+     * caller's NEW OBJECT through the same channel every member uses.
+     */
+    private fun synthesizePrimaryConstructor(klass: org.jetbrains.kotlin.psi.KtClass): KirFunction? {
+        val primary = klass.primaryConstructor ?: return null
+        val stored = primary.valueParameters.filter { it.hasValOrVar() }
+        if (stored.isEmpty()) return null
+        val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(klass)
+        val className = klass.name ?: "<anonymous>"
+        val base = listOf(pkg, chain, className).filter { it.isNotEmpty() }.joinToString(".")
+        val file = klass.containingFile?.virtualFile?.path ?: "<memory>"
+        val params = mutableListOf(io.cdxgen.kosi.kir.KirParam("%0", "this", null, receiver = true))
+        val writes = mutableListOf<io.cdxgen.kosi.kir.KirIns>()
+        stored.forEachIndexed { position, parameter ->
+            val name = parameter.name ?: return@forEachIndexed
+            params.add(io.cdxgen.kosi.kir.KirParam("%${position + 1}", name, parameter.typeReference?.text, receiver = false))
+            writes.add(
+                io.cdxgen.kosi.kir.KirFieldSet(
+                    "%0",
+                    io.cdxgen.kosi.kir.AccessPath.field("%0", name),
+                    "%${position + 1}",
+                ),
+            )
+        }
+        writes.add(io.cdxgen.kosi.kir.KirReturn(null))
+        return KirFunction(
+            canonicalName = "$base.<init>",
+            jvmDescriptor = null,
+            purl = "",
+            file = file,
+            line = klass.line(),
+            column = klass.column(),
+            params = params,
+            returnType = null,
+            modifiers = emptySet(),
+            visibility = "public",
+            enclosingClass = listOf(chain, className).filter { it.isNotEmpty() }.joinToString("."),
+            overrides = emptyList(),
+            overriddenBy = emptyList(),
+            annotations = emptyList(),
+            syntheticCause = "primary-constructor",
+            body = io.cdxgen.kosi.kir.KirBody(
+                listOf(io.cdxgen.kosi.kir.KirBlock("b0", entry = true, instructions = writes)),
+            ),
+        )
     }
 
     private fun modalityModifier(symbol: KaCallableSymbol?): String? = when (symbol?.modality) {
@@ -543,12 +851,46 @@ object KirLowering {
             override fun visitProperty(property: KtProperty) {
                 property.getter?.let { out.add(it) }
                 property.setter?.let { out.add(it) }
+                // P26 §2: an INITIALIZER is executable code — the JVM runs
+                // it in the file's <clinit> (top level) or the constructor
+                // (a member) — and the KIR had no function for it, so a
+                // Koin module at top level (`val appModule = module {
+                // single<Api> { ApiImpl() } }`, the framework's own idiom)
+                // was invisible to the whole engine: no lambda, no
+                // construction, no binding. Only declarations and members
+                // are lowered; a LOCAL's initializer is a statement of the
+                // enclosing function and lowering it again would duplicate
+                // every local.
+                if (property.initializer != null && property.getter == null) {
+                    val parent = property.parent
+                    if (parent is org.jetbrains.kotlin.psi.KtFile || parent is org.jetbrains.kotlin.psi.KtClassBody) {
+                        out.add(property)
+                    }
+                }
                 super.visitProperty(property)
             }
 
             override fun visitSecondaryConstructor(constructor: KtSecondaryConstructor) {
                 out.add(constructor)
                 super.visitSecondaryConstructor(constructor)
+            }
+        })
+        return out
+    }
+
+    /** Classes with at least one `by`-delegated supertype (P27 §1). */
+    private fun classesWithDelegation(
+        file: org.jetbrains.kotlin.psi.KtFile,
+    ): List<org.jetbrains.kotlin.psi.KtClassOrObject> {
+        val out = mutableListOf<org.jetbrains.kotlin.psi.KtClassOrObject>()
+        file.accept(object : KtTreeVisitorVoid() {
+            override fun visitClassOrObject(classOrObject: org.jetbrains.kotlin.psi.KtClassOrObject) {
+                if (classOrObject.superTypeListEntries
+                        .any { it is org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry }
+                ) {
+                    out.add(classOrObject)
+                }
+                super.visitClassOrObject(classOrObject)
             }
         })
         return out
@@ -619,6 +961,8 @@ object KirLowering {
         val failures: MutableMap<String, Int>,
         val resolve: (KtCallExpression) -> CallInfo?,
         val resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
+        /** P25 §0: the canonical name a `::reference` names; null when it does not resolve. */
+        val resolveReference: (org.jetbrains.kotlin.psi.KtCallableReferenceExpression) -> String? = { null },
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -634,6 +978,12 @@ object KirLowering {
     ): KirFunction? {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
+            // A property INITIALIZER lowers as the function that computes
+            // the initial value (P26 §2): the JVM runs it in <clinit> or the
+            // constructor, and until now the expression was invisible to the
+            // engine. Named for the PROPERTY — the accessor naming rule
+            // (get/set + property) is for accessors, and this is not one.
+            is KtProperty -> psi.name ?: return null
             // An accessor has no PSI name of its own; the JVM name is
             // get/setX after its PROPERTY. `<accessor>` gave every custom
             // accessor of one class the SAME canonical name — InsecureShop's
@@ -652,6 +1002,7 @@ object KirLowering {
         val lower = BodyLower(failures, resolve, resolveProperty, psi, lambdaContext, enclosingCanonical = canonical)
         val bodyPsi: KtExpression? = when (psi) {
             is KtNamedFunction -> psi.bodyExpression
+            is KtProperty -> psi.initializer
             is KtPropertyAccessor -> psi.bodyExpression
             is KtSecondaryConstructor -> psi.bodyExpression
             else -> null
@@ -682,7 +1033,7 @@ object KirLowering {
             line = psi.line(),
             column = psi.column(),
             params = signatureParams(psi, facts),
-            returnType = null,
+            returnType = facts.returnTypeFq,
             modifiers = facts.modifiers,
             visibility = facts.visibility,
             enclosingClass = chain.ifEmpty { null },
@@ -721,12 +1072,27 @@ object KirLowering {
                         p.name,
                         p.typeReference?.text,
                         receiver = false,
+                        resolvedType = facts.paramTypes.getOrNull(position),
                         annotations = facts.paramAnnotations.getOrElse(position) { emptyList() },
                     ),
                 )
             }
         }
         return params
+    }
+
+    /**
+     * The canonical name a declaration's lowered function carries: package,
+     * enclosing class chain, then the name (`<anonymous>` for an anonymous
+     * `fun`, which is exactly what the collector names it). The same three
+     * parts `lowerFunction` joins — kept here so a USE of a function as a
+     * value can name it the way its DECLARATION is named (P25 §0).
+     */
+    private fun canonicalNameOfDeclaration(psi: KtNamedFunction): String {
+        val pkg = (psi.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(psi)
+        val name = psi.name ?: "<anonymous>"
+        return listOf(pkg, chain, name).filter { it.isNotEmpty() }.joinToString(".")
     }
 
     private fun containerChain(psi: com.intellij.psi.PsiElement): String =
@@ -1465,15 +1831,29 @@ object KirLowering {
                 reg
             }
             is org.jetbrains.kotlin.psi.KtCallableReferenceExpression -> {
+                // P25 §0: the RESOLVED target, not the source text. A
+                // reference is a function value whose target is known at
+                // its allocation site — which is exactly what P24's
+                // invoke-bind channel needs to carry taint through it — and
+                // naming it `::sink` made that channel unreachable for
+                // every reference spelling in the language. The text
+                // survives as the fallback so an unresolvable reference is
+                // still visible as a function value rather than vanishing.
                 val reg = t()
-                emit(KirLambda(reg, psi.text, emptyList()))
+                emit(KirLambda(reg, lambdaContext?.resolveReference?.invoke(psi) ?: psi.text, emptyList()))
                 reg
             }
             is KtNamedFunction -> {
-                // A local function: its body lowers as its own KIR function
-                // (collectFunctionLikes visits it); the use site names it.
+                // A local or anonymous function at value position: its body
+                // lowers as its own KIR function (collectFunctionLikes
+                // visits it), and the use site must name it the way that
+                // function is NAMED — package-qualified, container chain and
+                // all. The bare `sink` / `<local-fun>` written here before
+                // matched no function in any table, so an anonymous `fun`
+                // and a `::reference` were function values pointing at
+                // nothing (P25 §0's sweep).
                 val reg = t()
-                emit(KirLambda(reg, psi.name ?: "<local-fun>", emptyList()))
+                emit(KirLambda(reg, canonicalNameOfDeclaration(psi), emptyList()))
                 reg
             }
             is KtProperty -> {
@@ -2464,7 +2844,23 @@ object KirLowering {
                     is KtBlockExpression, is org.jetbrains.kotlin.psi.KtClassBody -> {
                         for (child in cursor.children) {
                             if (child is KtProperty && child.isLocal && child.name == name) {
-                                if (child.initializer is KtLambdaExpression) return true
+                                // Every expression that PRODUCES a function
+                                // value, not only the lambda spelling: a
+                                // `::reference` and an anonymous `fun` are
+                                // function values too, and treating them as
+                                // ordinary locals dropped the receiver from
+                                // their invocation — which is the one fact
+                                // higher-order analysis needs (P25 §0).
+                                when (child.initializer) {
+                                    is KtLambdaExpression,
+                                    is org.jetbrains.kotlin.psi.KtCallableReferenceExpression,
+                                    -> return true
+
+                                    is KtNamedFunction ->
+                                        return (child.initializer as KtNamedFunction).name == null
+
+                                    else -> {}
+                                }
                                 return child.typeReference?.text?.contains("->") == true
                             }
                         }
@@ -2537,6 +2933,30 @@ object KirLowering {
          * later defines the same v-name — the pre-definition read is the
          * capture, which is the semantics that matters for taint.
          */
+        /**
+         * Does this lambda body read the implicit `it` that belongs to THIS
+         * lambda? An inner lambda that declares no parameter of its own owns
+         * the `it` inside it, so the scan stops there; an inner lambda that
+         * declares one shadows nothing, and an `it` under it is still ours.
+         * Missing a reference costs a parameter that carries no taint;
+         * inventing one would mis-address every later argument, so the doubt
+         * is resolved toward not inventing.
+         */
+        private fun referencesImplicitIt(body: KtExpression): Boolean {
+            var found = false
+            body.accept(object : KtTreeVisitorVoid() {
+                override fun visitLambdaExpression(expression: KtLambdaExpression) {
+                    if (expression.valueParameters.isNotEmpty()) super.visitLambdaExpression(expression)
+                }
+
+                override fun visitSimpleNameExpression(expression: org.jetbrains.kotlin.psi.KtSimpleNameExpression) {
+                    if (expression.getReferencedName() == "it") found = true
+                    super.visitSimpleNameExpression(expression)
+                }
+            })
+            return found
+        }
+
         private fun extractLambda(psi: KtLambdaExpression, context: LambdaContext): Pair<String, List<String>>? {
             val bodyPsi = psi.bodyExpression ?: return null
             val ordinal = context.ordinal++
@@ -2550,8 +2970,22 @@ object KirLowering {
                 enclosingCanonical = canonical,
                 tempStart = temp,
             )
-            val valueParams = psi.valueParameters.mapIndexed { index, param ->
-                KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+            val valueParams = if (psi.valueParameters.isEmpty() && referencesImplicitIt(bodyPsi)) {
+                // Kotlin's implicit lambda parameter is a REAL parameter with
+                // no PSI: `{ exec(it) }` declares nothing, so the extraction
+                // gave the body no value parameter and the read of `it`
+                // became a register nothing defines. Every interprocedural
+                // channel that speaks parameter indices — P24 §2d's
+                // invoke-binds above all — then had nothing to bind, and the
+                // taint died at the invocation. The review's probe found
+                // this: `viaLambda { s -> exec(s) }` publishes the flow and
+                // `viaLambda { exec(it) }`, the far commoner spelling, does
+                // not. Declared here so the two spellings are one capability.
+                listOf(KirParam("%p0", "it", null, receiver = false))
+            } else {
+                psi.valueParameters.mapIndexed { index, param ->
+                    KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+                }
             }
             bodyLower.bindParameters(valueParams)
             val statements = bodyPsi.statements

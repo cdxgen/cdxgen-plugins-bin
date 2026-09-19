@@ -1,167 +1,1124 @@
 {
-  "format": "kosi symbol evidence 1",
-  "frameworks": [
+ "format": "kosi symbol evidence 1",
+ "frameworks": [
+  {
+   "id": "android",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "aws-lambda",
+   "sources": [
+    "com.amazonaws:aws-lambda-java-core:1.4.0"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
     {
-      "id": "android",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": []
+     "fqn": "com.amazonaws.services.lambda.runtime.RequestHandler",
+     "kind": "interface",
+     "constructible": false
     },
     {
-      "id": "aws-lambda",
-      "sources": ["com.amazonaws:aws-lambda-java-core:1.4.0"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "com.amazonaws.services.lambda.runtime.RequestHandler", "kind": "interface", "constructible": false}, {"fqn": "com.amazonaws.services.lambda.runtime.RequestStreamHandler", "kind": "interface", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": []
-    },
-    {
-      "id": "azure-functions",
-      "sources": ["com.microsoft.azure.functions:azure-functions-java-library:3.3.0"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "com.microsoft.azure.functions.annotation.BindingName", "kind": "annotation", "constructible": false}, {"fqn": "com.microsoft.azure.functions.annotation.FunctionName", "kind": "annotation", "constructible": false}, {"fqn": "com.microsoft.azure.functions.annotation.HttpTrigger", "kind": "annotation", "constructible": false}, {"fqn": "com.microsoft.azure.functions.annotation.QueueTrigger", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": []
-    },
-    {
-      "id": "graphql",
-      "sources": ["org.springframework:spring-context:5.3.18"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "org.springframework.stereotype.Controller", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["org.springframework.graphql.data.method.annotation.Argument: no held jar covers its package family", "org.springframework.graphql.data.method.annotation.MutationMapping: no held jar covers its package family", "org.springframework.graphql.data.method.annotation.QueryMapping: no held jar covers its package family", "org.springframework.graphql.data.method.annotation.SchemaMapping: no held jar covers its package family", "org.springframework.graphql.data.method.annotation.SubscriptionMapping: no held jar covers its package family"]
-    },
-    {
-      "id": "grpc",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": []
-    },
-    {
-      "id": "http4k",
-      "sources": ["github.com/http4k/http4k@b051f89d35ab9190385a244e9e77149e77c55f4d"],
-      "covers": ["securityConstructors", "contractDsl", "routeMetaDsl", "bindFunctions", "contextReaders"],
-      "types": [{"fqn": "org.http4k.security.ApiKeySecurity", "kind": "class", "constructible": true}],
-      "members": [{"owner": "org.http4k.core.Request", "member": "bodyString", "static": false}, {"owner": "org.http4k.core.Request", "member": "cookie", "static": false}, {"owner": "org.http4k.core.Request", "member": "header", "static": false}, {"owner": "org.http4k.core.Request", "member": "query", "static": false}],
-      "functions": [{"package": "", "function": "bind"}, {"package": "", "function": "bindContract"}, {"package": "org.http4k.contract", "function": "contract"}, {"package": "org.http4k.contract", "function": "meta"}, {"package": "org.http4k.routing", "function": "path"}],
-      "gaps": []
-    },
-    {
-      "id": "javalin",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": ["io.javalin.Javalin.get: io.javalin absent from the warm cache — channels unchecked", "io.javalin.Javalin.post: io.javalin absent from the warm cache — channels unchecked", "io.javalin.Javalin.put: io.javalin absent from the warm cache — channels unchecked", "io.javalin.Javalin.patch: io.javalin absent from the warm cache — channels unchecked", "io.javalin.Javalin.delete: io.javalin absent from the warm cache — channels unchecked", "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache — channels unchecked", "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache — channels unchecked", "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.formParam: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.formParams: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.header: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.cookie: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.body: io.javalin absent from the warm cache — channels unchecked", "io.javalin.http.Context.bodyAsClass: io.javalin absent from the warm cache — channels unchecked"]
-    },
-    {
-      "id": "ktor",
-      "sources": ["io.ktor:ktor-server-core-jvm:3.5.2", "io.ktor:ktor-server-auth-jvm:3.5.2", "io.ktor:ktor-http-jvm:3.5.2"],
-      "covers": ["dslFunctions", "authenticationDsl", "contextReaders"],
-      "types": [],
-      "members": [{"owner": "io.ktor.server.application.ApplicationCall", "member": "parameters", "static": false}, {"owner": "io.ktor.server.request.ApplicationRequest", "member": "cookies", "static": false}, {"owner": "io.ktor.server.request.ApplicationRequest", "member": "headers", "static": false}, {"owner": "io.ktor.server.request.ApplicationRequest", "member": "queryParameters", "static": false}, {"owner": "io.ktor.server.routing.RoutingCall", "member": "pathParameters", "static": false}],
-      "functions": [{"package": "io.ktor.server.auth", "function": "authenticate"}, {"package": "io.ktor.server.request", "function": "header"}, {"package": "io.ktor.server.request", "function": "queryString"}, {"package": "io.ktor.server.request", "function": "receive"}, {"package": "io.ktor.server.request", "function": "receiveParameters"}, {"package": "io.ktor.server.request", "function": "receiveText"}, {"package": "io.ktor.server.routing", "function": "delete"}, {"package": "io.ktor.server.routing", "function": "get"}, {"package": "io.ktor.server.routing", "function": "head"}, {"package": "io.ktor.server.routing", "function": "options"}, {"package": "io.ktor.server.routing", "function": "patch"}, {"package": "io.ktor.server.routing", "function": "post"}, {"package": "io.ktor.server.routing", "function": "put"}, {"package": "io.ktor.server.routing", "function": "route"}],
-      "gaps": ["io.ktor.application.ApplicationCall.parameters: owner io.ktor.application.ApplicationCall not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm", "io.ktor.auth.authenticate: package io.ktor.auth has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.request.ApplicationRequest.cookies: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm", "io.ktor.request.ApplicationRequest.headers: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm", "io.ktor.request.ApplicationRequest.queryParameters: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm", "io.ktor.request.header: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.request.queryString: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.request.receive: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.request.receiveParameters: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.request.receiveText: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.accept: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.delete: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.get: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.head: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.options: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.patch: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.post: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.put: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.routing.route: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.server.resources.get: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.server.resources.post: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.server.websocket.webSocket: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)", "io.ktor.websocket.webSocket: package io.ktor.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)"]
-    },
-    {
-      "id": "micronaut",
-      "sources": ["io.micronaut:micronaut-http:4.10.23"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "io.micronaut.http.annotation.Body", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Consumes", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Controller", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Controller", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.CookieValue", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Delete", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Get", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Header", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Part", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Patch", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.PathVariable", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Post", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Produces", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.Put", "kind": "annotation", "constructible": false}, {"fqn": "io.micronaut.http.annotation.QueryValue", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["io.micronaut.security.Secured: no held jar covers its package family", "io.micronaut.security.annotation.Secured: no held jar covers its package family", "jakarta.annotation.security.RolesAllowed: no held jar covers its package family", "javax.annotation.security.RolesAllowed: no held jar covers its package family"]
-    },
-    {
-      "id": "quarkus",
-      "sources": ["jakarta.ws.rs:jakarta.ws.rs-api:4.0.0"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "jakarta.ws.rs.ApplicationPath", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.BeanParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.Consumes", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.CookieParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.DELETE", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.FormParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.GET", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.HeaderParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.MatrixParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.PATCH", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.POST", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.PUT", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.Path", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.Path", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.PathParam", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.Produces", "kind": "annotation", "constructible": false}, {"fqn": "jakarta.ws.rs.QueryParam", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["jakarta.annotation.security.DenyAll: no held jar covers its package family", "jakarta.annotation.security.RolesAllowed: no held jar covers its package family", "javax.annotation.security.DenyAll: no held jar covers its package family", "javax.annotation.security.RolesAllowed: no held jar covers its package family", "javax.ws.rs.ApplicationPath: no held jar covers its package family", "javax.ws.rs.BeanParam: no held jar covers its package family", "javax.ws.rs.Consumes: no held jar covers its package family", "javax.ws.rs.CookieParam: no held jar covers its package family", "javax.ws.rs.DELETE: no held jar covers its package family", "javax.ws.rs.FormParam: no held jar covers its package family", "javax.ws.rs.GET: no held jar covers its package family", "javax.ws.rs.HeaderParam: no held jar covers its package family", "javax.ws.rs.MatrixParam: no held jar covers its package family", "javax.ws.rs.PATCH: no held jar covers its package family", "javax.ws.rs.POST: no held jar covers its package family", "javax.ws.rs.PUT: no held jar covers its package family", "javax.ws.rs.Path: no held jar covers its package family", "javax.ws.rs.Path: no held jar covers its package family", "javax.ws.rs.PathParam: no held jar covers its package family", "javax.ws.rs.Produces: no held jar covers its package family", "javax.ws.rs.QueryParam: no held jar covers its package family"]
-    },
-    {
-      "id": "servlet",
-      "sources": ["jakarta.servlet:jakarta.servlet-api:4.0.4"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "javax.servlet.annotation.WebFilter", "kind": "annotation", "constructible": false}, {"fqn": "javax.servlet.annotation.WebFilter", "kind": "annotation", "constructible": false}, {"fqn": "javax.servlet.annotation.WebServlet", "kind": "annotation", "constructible": false}, {"fqn": "javax.servlet.annotation.WebServlet", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["jakarta.servlet.annotation.WebFilter: no held jar covers its package family", "jakarta.servlet.annotation.WebFilter: no held jar covers its package family", "jakarta.servlet.annotation.WebServlet: no held jar covers its package family", "jakarta.servlet.annotation.WebServlet: no held jar covers its package family"]
-    },
-    {
-      "id": "sparkjava",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": ["spark.Spark.get: com.sparkjava absent from the warm cache — channels unchecked", "spark.Spark.post: com.sparkjava absent from the warm cache — channels unchecked", "spark.Spark.put: com.sparkjava absent from the warm cache — channels unchecked", "spark.Spark.delete: com.sparkjava absent from the warm cache — channels unchecked", "spark.Spark.path: com.sparkjava absent from the warm cache — channels unchecked", "spark.Request.params: com.sparkjava absent from the warm cache — channels unchecked", "spark.Request.queryParams: com.sparkjava absent from the warm cache — channels unchecked", "spark.Request.headers: com.sparkjava absent from the warm cache — channels unchecked", "spark.Request.cookie: com.sparkjava absent from the warm cache — channels unchecked", "spark.Request.body: com.sparkjava absent from the warm cache — channels unchecked"]
-    },
-    {
-      "id": "spring-actuator",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": []
-    },
-    {
-      "id": "spring-messaging",
-      "sources": ["org.springframework:spring-context:5.3.18"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "org.springframework.scheduling.annotation.Scheduled", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["io.awspring.cloud.sqs.annotation.SqsListener: no held jar covers its package family", "org.springframework.amqp.rabbit.annotation.RabbitListener: no held jar covers its package family", "org.springframework.jms.annotation.JmsListener: no held jar covers its package family", "org.springframework.kafka.annotation.KafkaListener: no held jar covers its package family", "org.springframework.messaging.handler.annotation.DestinationVariable: no held jar covers its package family", "org.springframework.messaging.handler.annotation.Header: no held jar covers its package family", "org.springframework.messaging.handler.annotation.MessageMapping: no held jar covers its package family", "org.springframework.messaging.handler.annotation.Payload: no held jar covers its package family", "org.springframework.messaging.simp.annotation.SubscribeMapping: no held jar covers its package family"]
-    },
-    {
-      "id": "spring-mvc",
-      "sources": ["org.springframework:spring-webmvc:5.3.18", "org.springframework:spring-web:5.3.18", "org.springframework:spring-context:5.3.18"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "org.springframework.stereotype.Controller", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.CookieValue", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.DeleteMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.DeleteMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.DeleteMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.GetMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.GetMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.GetMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.MatrixVariable", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.ModelAttribute", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PatchMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PatchMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PatchMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PathVariable", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PostMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PostMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PostMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PutMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PutMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PutMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestBody", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestHeader", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestParam", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestPart", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RestController", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["jakarta.annotation.security.RolesAllowed: no held jar covers its package family", "javax.annotation.security.RolesAllowed: no held jar covers its package family", "org.springframework.data.jpa.repository.JpaRepository: no held jar covers its package family", "org.springframework.data.repository.CrudRepository: no held jar covers its package family", "org.springframework.data.repository.ListCrudRepository: no held jar covers its package family", "org.springframework.data.repository.PagingAndSortingRepository: no held jar covers its package family", "org.springframework.data.rest.core.annotation.RepositoryRestResource: no held jar covers its package family", "org.springframework.security.access.annotation.Secured: no held jar covers its package family", "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"]
-    },
-    {
-      "id": "spring-webflux",
-      "sources": ["org.springframework:spring-webflux:5.3.18", "org.springframework:spring-web:5.3.18", "org.springframework:spring-context:5.3.18"],
-      "covers": ["mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations", "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations", "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations"],
-      "types": [{"fqn": "org.springframework.web.bind.annotation.DeleteMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.DeleteMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.GetMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.GetMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PatchMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PatchMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PostMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PostMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PutMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.PutMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}, {"fqn": "org.springframework.web.bind.annotation.RequestMapping", "kind": "annotation", "constructible": false}],
-      "members": [],
-      "functions": [],
-      "gaps": ["jakarta.annotation.security.RolesAllowed: no held jar covers its package family", "javax.annotation.security.RolesAllowed: no held jar covers its package family", "org.springframework.security.access.annotation.Secured: no held jar covers its package family", "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"]
-    },
-    {
-      "id": "springdoc",
-      "sources": [],
-      "covers": [],
-      "types": [],
-      "members": [],
-      "functions": [],
-      "gaps": []
-    },
-    {
-      "id": "vertx",
-      "sources": ["io.vertx:vertx-web:5.1.7"],
-      "covers": ["dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions"],
-      "types": [],
-      "members": [{"owner": "io.vertx.ext.web.Route", "member": "consumes", "static": false}, {"owner": "io.vertx.ext.web.Route", "member": "handler", "static": false}, {"owner": "io.vertx.ext.web.Route", "member": "produces", "static": false}, {"owner": "io.vertx.ext.web.Route", "member": "subRouter", "static": false}, {"owner": "io.vertx.ext.web.Router", "member": "delete", "static": false}, {"owner": "io.vertx.ext.web.Router", "member": "get", "static": false}, {"owner": "io.vertx.ext.web.Router", "member": "post", "static": false}, {"owner": "io.vertx.ext.web.Router", "member": "put", "static": false}, {"owner": "io.vertx.ext.web.Router", "member": "route", "static": false}, {"owner": "io.vertx.ext.web.RoutingContext", "member": "body", "static": false}, {"owner": "io.vertx.ext.web.RoutingContext", "member": "pathParam", "static": false}, {"owner": "io.vertx.ext.web.RoutingContext", "member": "queryParam", "static": false}, {"owner": "io.vertx.ext.web.handler.BasicAuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.DigestAuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.JWTAuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.OAuth2AuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.OtpAuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.RedirectAuthHandler", "member": "create", "static": true}, {"owner": "io.vertx.ext.web.handler.WebAuthn4JHandler", "member": "create", "static": true}],
-      "functions": [],
-      "gaps": ["io.vertx.core.http.HttpServerRequest.getCookie: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web", "io.vertx.core.http.HttpServerRequest.getFormAttribute: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web", "io.vertx.core.http.HttpServerRequest.getHeader: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web", "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web"]
+     "fqn": "com.amazonaws.services.lambda.runtime.RequestStreamHandler",
+     "kind": "interface",
+     "constructible": false
     }
-  ]
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "azure-functions",
+   "sources": [
+    "com.microsoft.azure.functions:azure-functions-java-library:3.3.0"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "com.microsoft.azure.functions.annotation.BindingName",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "com.microsoft.azure.functions.annotation.FunctionName",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "com.microsoft.azure.functions.annotation.HttpTrigger",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "com.microsoft.azure.functions.annotation.QueueTrigger",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "graphql",
+   "sources": [
+    "org.springframework:spring-context:5.3.18"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "org.springframework.stereotype.Controller",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "org.springframework.graphql.data.method.annotation.Argument: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.MutationMapping: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.QueryMapping: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.SchemaMapping: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.SubscriptionMapping: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "grpc",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "http4k",
+   "sources": [
+    "github.com/http4k/http4k@b051f89d35ab9190385a244e9e77149e77c55f4d"
+   ],
+   "covers": [
+    "securityConstructors",
+    "contractDsl",
+    "routeMetaDsl",
+    "bindFunctions",
+    "contextReaders"
+   ],
+   "types": [
+    {
+     "fqn": "org.http4k.security.ApiKeySecurity",
+     "kind": "class",
+     "constructible": true
+    }
+   ],
+   "members": [
+    {
+     "owner": "org.http4k.core.Request",
+     "member": "bodyString",
+     "static": false
+    },
+    {
+     "owner": "org.http4k.core.Request",
+     "member": "cookie",
+     "static": false
+    },
+    {
+     "owner": "org.http4k.core.Request",
+     "member": "header",
+     "static": false
+    },
+    {
+     "owner": "org.http4k.core.Request",
+     "member": "query",
+     "static": false
+    }
+   ],
+   "functions": [
+    {
+     "package": "",
+     "function": "bind"
+    },
+    {
+     "package": "",
+     "function": "bindContract"
+    },
+    {
+     "package": "org.http4k.contract",
+     "function": "contract"
+    },
+    {
+     "package": "org.http4k.contract",
+     "function": "meta"
+    },
+    {
+     "package": "org.http4k.routing",
+     "function": "path"
+    }
+   ],
+   "gaps": []
+  },
+  {
+   "id": "javalin",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "io.javalin.Javalin.get: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.Javalin.post: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.Javalin.put: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.Javalin.patch: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.Javalin.delete: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.formParam: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.formParams: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.header: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.cookie: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.body: io.javalin absent from the warm cache \u2014 channels unchecked",
+    "io.javalin.http.Context.bodyAsClass: io.javalin absent from the warm cache \u2014 channels unchecked"
+   ]
+  },
+  {
+   "id": "ktor",
+   "sources": [
+    "io.ktor:ktor-server-core-jvm:3.5.2",
+    "io.ktor:ktor-server-auth-jvm:3.5.2",
+    "io.ktor:ktor-http-jvm:3.5.2"
+   ],
+   "covers": [
+    "dslFunctions",
+    "authenticationDsl",
+    "contextReaders"
+   ],
+   "types": [],
+   "members": [
+    {
+     "owner": "io.ktor.server.application.ApplicationCall",
+     "member": "parameters",
+     "static": false
+    },
+    {
+     "owner": "io.ktor.server.request.ApplicationRequest",
+     "member": "cookies",
+     "static": false
+    },
+    {
+     "owner": "io.ktor.server.request.ApplicationRequest",
+     "member": "headers",
+     "static": false
+    },
+    {
+     "owner": "io.ktor.server.request.ApplicationRequest",
+     "member": "queryParameters",
+     "static": false
+    },
+    {
+     "owner": "io.ktor.server.routing.RoutingCall",
+     "member": "pathParameters",
+     "static": false
+    }
+   ],
+   "functions": [
+    {
+     "package": "io.ktor.server.auth",
+     "function": "authenticate"
+    },
+    {
+     "package": "io.ktor.server.request",
+     "function": "header"
+    },
+    {
+     "package": "io.ktor.server.request",
+     "function": "queryString"
+    },
+    {
+     "package": "io.ktor.server.request",
+     "function": "receive"
+    },
+    {
+     "package": "io.ktor.server.request",
+     "function": "receiveParameters"
+    },
+    {
+     "package": "io.ktor.server.request",
+     "function": "receiveText"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "delete"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "get"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "head"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "options"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "patch"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "post"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "put"
+    },
+    {
+     "package": "io.ktor.server.routing",
+     "function": "route"
+    }
+   ],
+   "gaps": [
+    "io.ktor.application.ApplicationCall.parameters: owner io.ktor.application.ApplicationCall not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
+    "io.ktor.auth.authenticate: package io.ktor.auth has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.request.ApplicationRequest.cookies: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
+    "io.ktor.request.ApplicationRequest.headers: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
+    "io.ktor.request.ApplicationRequest.queryParameters: owner io.ktor.request.ApplicationRequest not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
+    "io.ktor.request.header: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.request.queryString: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.request.receive: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.request.receiveParameters: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.request.receiveText: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.accept: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.delete: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.get: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.head: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.options: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.patch: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.post: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.put: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.route: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.get: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.post: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.websocket.webSocket: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.websocket.webSocket: package io.ktor.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)"
+   ]
+  },
+  {
+   "id": "micronaut",
+   "sources": [
+    "io.micronaut:micronaut-http:4.10.23"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "io.micronaut.http.annotation.Body",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Consumes",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Controller",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Controller",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.CookieValue",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Delete",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Get",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Header",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Part",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Patch",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.PathVariable",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Post",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Produces",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.Put",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "io.micronaut.http.annotation.QueryValue",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "io.micronaut.security.Secured: no held jar covers its package family",
+    "io.micronaut.security.annotation.Secured: no held jar covers its package family",
+    "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "quarkus",
+   "sources": [
+    "jakarta.ws.rs:jakarta.ws.rs-api:4.0.0"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "jakarta.ws.rs.ApplicationPath",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.BeanParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.Consumes",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.CookieParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.DELETE",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.FormParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.GET",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.HeaderParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.MatrixParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.PATCH",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.POST",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.PUT",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.Path",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.Path",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.PathParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.Produces",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.QueryParam",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "jakarta.annotation.security.DenyAll: no held jar covers its package family",
+    "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
+    "javax.annotation.security.DenyAll: no held jar covers its package family",
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family",
+    "javax.ws.rs.ApplicationPath: no held jar covers its package family",
+    "javax.ws.rs.BeanParam: no held jar covers its package family",
+    "javax.ws.rs.Consumes: no held jar covers its package family",
+    "javax.ws.rs.CookieParam: no held jar covers its package family",
+    "javax.ws.rs.DELETE: no held jar covers its package family",
+    "javax.ws.rs.FormParam: no held jar covers its package family",
+    "javax.ws.rs.GET: no held jar covers its package family",
+    "javax.ws.rs.HeaderParam: no held jar covers its package family",
+    "javax.ws.rs.MatrixParam: no held jar covers its package family",
+    "javax.ws.rs.PATCH: no held jar covers its package family",
+    "javax.ws.rs.POST: no held jar covers its package family",
+    "javax.ws.rs.PUT: no held jar covers its package family",
+    "javax.ws.rs.Path: no held jar covers its package family",
+    "javax.ws.rs.Path: no held jar covers its package family",
+    "javax.ws.rs.PathParam: no held jar covers its package family",
+    "javax.ws.rs.Produces: no held jar covers its package family",
+    "javax.ws.rs.QueryParam: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "servlet",
+   "sources": [
+    "jakarta.servlet:jakarta.servlet-api:4.0.4"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "javax.servlet.annotation.WebFilter",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "javax.servlet.annotation.WebFilter",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "javax.servlet.annotation.WebServlet",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "javax.servlet.annotation.WebServlet",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "jakarta.servlet.annotation.WebFilter: no held jar covers its package family",
+    "jakarta.servlet.annotation.WebFilter: no held jar covers its package family",
+    "jakarta.servlet.annotation.WebServlet: no held jar covers its package family",
+    "jakarta.servlet.annotation.WebServlet: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "sparkjava",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "spark.Spark.get: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Spark.post: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Spark.put: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Spark.delete: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Spark.path: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Request.params: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Request.queryParams: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Request.headers: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Request.cookie: com.sparkjava absent from the warm cache \u2014 channels unchecked",
+    "spark.Request.body: com.sparkjava absent from the warm cache \u2014 channels unchecked"
+   ]
+  },
+  {
+   "id": "spring-actuator",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "spring-messaging",
+   "sources": [
+    "org.springframework:spring-context:5.3.18"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "org.springframework.scheduling.annotation.Scheduled",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "io.awspring.cloud.sqs.annotation.SqsListener: no held jar covers its package family",
+    "org.springframework.amqp.rabbit.annotation.RabbitListener: no held jar covers its package family",
+    "org.springframework.jms.annotation.JmsListener: no held jar covers its package family",
+    "org.springframework.kafka.annotation.KafkaListener: no held jar covers its package family",
+    "org.springframework.messaging.handler.annotation.DestinationVariable: no held jar covers its package family",
+    "org.springframework.messaging.handler.annotation.Header: no held jar covers its package family",
+    "org.springframework.messaging.handler.annotation.MessageMapping: no held jar covers its package family",
+    "org.springframework.messaging.handler.annotation.Payload: no held jar covers its package family",
+    "org.springframework.messaging.simp.annotation.SubscribeMapping: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "spring-mvc",
+   "sources": [
+    "org.springframework:spring-webmvc:5.3.18",
+    "org.springframework:spring-web:5.3.18",
+    "org.springframework:spring-context:5.3.18"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "org.springframework.stereotype.Controller",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.CookieValue",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.DeleteMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.DeleteMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.DeleteMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.GetMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.GetMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.GetMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.MatrixVariable",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.ModelAttribute",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PatchMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PatchMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PatchMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PathVariable",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PostMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PostMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PostMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PutMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PutMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PutMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestBody",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestHeader",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestPart",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RestController",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family",
+    "org.springframework.data.jpa.repository.JpaRepository: no held jar covers its package family",
+    "org.springframework.data.repository.CrudRepository: no held jar covers its package family",
+    "org.springframework.data.repository.ListCrudRepository: no held jar covers its package family",
+    "org.springframework.data.repository.PagingAndSortingRepository: no held jar covers its package family",
+    "org.springframework.data.rest.core.annotation.RepositoryRestResource: no held jar covers its package family",
+    "org.springframework.security.access.annotation.Secured: no held jar covers its package family",
+    "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "spring-webflux",
+   "sources": [
+    "org.springframework:spring-webflux:5.3.18",
+    "org.springframework:spring-web:5.3.18",
+    "org.springframework:spring-context:5.3.18"
+   ],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations"
+   ],
+   "types": [
+    {
+     "fqn": "org.springframework.web.bind.annotation.DeleteMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.DeleteMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.GetMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.GetMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PatchMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PatchMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PostMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PostMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PutMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.PutMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.bind.annotation.RequestMapping",
+     "kind": "annotation",
+     "constructible": false
+    }
+   ],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family",
+    "org.springframework.security.access.annotation.Secured: no held jar covers its package family",
+    "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "springdoc",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": []
+  },
+  {
+   "id": "vertx",
+   "sources": [
+    "io.vertx:vertx-web:5.1.7"
+   ],
+   "covers": [
+    "dslFunctions",
+    "mediaDsl",
+    "handlerDsl",
+    "authHandlerFactories",
+    "contextReaders",
+    "mountFunctions"
+   ],
+   "types": [],
+   "members": [
+    {
+     "owner": "io.vertx.ext.web.Route",
+     "member": "consumes",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Route",
+     "member": "handler",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Route",
+     "member": "produces",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Route",
+     "member": "subRouter",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Router",
+     "member": "delete",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Router",
+     "member": "get",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Router",
+     "member": "post",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Router",
+     "member": "put",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.Router",
+     "member": "route",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.RoutingContext",
+     "member": "body",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.RoutingContext",
+     "member": "pathParam",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.RoutingContext",
+     "member": "queryParam",
+     "static": false
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.BasicAuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.DigestAuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.JWTAuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.OAuth2AuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.OtpAuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.RedirectAuthHandler",
+     "member": "create",
+     "static": true
+    },
+    {
+     "owner": "io.vertx.ext.web.handler.WebAuthn4JHandler",
+     "member": "create",
+     "static": true
+    }
+   ],
+   "functions": [],
+   "gaps": [
+    "io.vertx.core.http.HttpServerRequest.getCookie: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
+    "io.vertx.core.http.HttpServerRequest.getFormAttribute: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
+    "io.vertx.core.http.HttpServerRequest.getHeader: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
+    "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web"
+   ]
+  },
+  {
+   "id": "android-provider",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "android.content.ContentProvider: the Android platform jar is not a Gradle-cache coordinate \u2014 the marker's kind (a class) is checked against the intent-extras-channel fixture's in-source stub, not against platform bytecode"
+   ]
+  }
+ ]
 }

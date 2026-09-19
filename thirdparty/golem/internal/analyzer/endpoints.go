@@ -74,14 +74,22 @@ func (a *Analyzer) endpointFactsForPackage(pkg *packages.Package) endpointFacts 
 func (a *Analyzer) endpointFactsForFile(pkg *packages.Package, file *ast.File) endpointFacts {
 	facts := endpointFacts{}
 	prefixByIdent := map[string]string{}
+	// P-auth: the authentication middleware each route group carries, keyed
+	// by the variable the group was assigned to, and the middleware attached
+	// to a receiver through `Use(...)`.
+	authByIdent := map[string][]string{}
+	useByIdent := map[string][]string{}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.AssignStmt:
 			a.recordRouteGroups(x, prefixByIdent)
+			a.recordGroupAuth(x, authByIdent)
 		case *ast.ValueSpec:
 			a.recordRouteGroupValues(x, prefixByIdent)
+			a.recordGroupAuthValues(x, authByIdent)
 		case *ast.CallExpr:
-			if ep, handlerExpr, ok := a.endpointForCall(pkg, x, prefixByIdent); ok {
+			a.recordUseMiddleware(x, useByIdent)
+			if ep, handlerExpr, ok := a.endpointForCall(pkg, x, prefixByIdent, authByIdent, useByIdent); ok {
 				facts.endpoints = append(facts.endpoints, ep)
 				if lit, ok := handlerExpr.(*ast.FuncLit); ok {
 					if facts.handlerLiterals == nil {
@@ -128,6 +136,82 @@ func (a *Analyzer) recordRouteGroupValues(spec *ast.ValueSpec, groups map[string
 	}
 }
 
+// recordGroupAuth records the authentication middleware a group assignment
+// carries: `api := r.Group("/api", RequireAuth)`.
+func (a *Analyzer) recordGroupAuth(stmt *ast.AssignStmt, groupAuth map[string][]string) {
+	for i, rhs := range stmt.Rhs {
+		call, ok := rhs.(*ast.CallExpr)
+		if !ok || i >= len(stmt.Lhs) {
+			continue
+		}
+		ident, ok := stmt.Lhs[i].(*ast.Ident)
+		if !ok || ident.Name == "_" {
+			continue
+		}
+		if decls, ok := a.groupAuthForCall(call, groupAuth); ok {
+			groupAuth[ident.Name] = decls
+		}
+	}
+}
+
+func (a *Analyzer) recordGroupAuthValues(spec *ast.ValueSpec, groupAuth map[string][]string) {
+	for i, rhs := range spec.Values {
+		call, ok := rhs.(*ast.CallExpr)
+		if !ok || i >= len(spec.Names) || spec.Names[i] == nil {
+			continue
+		}
+		if decls, ok := a.groupAuthForCall(call, groupAuth); ok {
+			groupAuth[spec.Names[i].Name] = decls
+		}
+	}
+}
+
+func (a *Analyzer) groupAuthForCall(call *ast.CallExpr, groupAuth map[string][]string) ([]string, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil {
+		return nil, false
+	}
+	// gin/fiber `Group(prefix, handlers...)`, echo `Group(prefix, m...)`,
+	// iris `Party(prefix, handlers...)`, and chi's `With(middlewares...)`
+	// which returns a router rather than taking a prefix.
+	switch sel.Sel.Name {
+	case "Group", "Party", "With":
+	default:
+		return nil, false
+	}
+	base := ""
+	if ident, ok := sel.X.(*ast.Ident); ok {
+		base = ident.Name
+	}
+	receiverAuth := append([]string(nil), groupAuth[base]...)
+	args := call.Args
+	if sel.Sel.Name != "With" && len(args) > 0 {
+		// The first argument is the path prefix, not middleware.
+		args = args[1:]
+	}
+	decls := dedupeAuth(append(receiverAuth, authFromExprs(args)...))
+	if len(decls) == 0 {
+		return nil, false
+	}
+	return decls, true
+}
+
+// recordUseMiddleware records `r.Use(RequireAuth)` against its receiver.
+// gin, echo, chi and fiber all spell this the same way.
+func (a *Analyzer) recordUseMiddleware(call *ast.CallExpr, useAuth map[string][]string) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "Use" || len(call.Args) == 0 {
+		return
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return
+	}
+	if found := authFromExprs(call.Args); len(found) > 0 {
+		useAuth[ident.Name] = dedupeAuth(append(useAuth[ident.Name], found...))
+	}
+}
+
 func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]string) (string, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel == nil || len(call.Args) == 0 {
@@ -150,7 +234,7 @@ func (a *Analyzer) groupPrefixForCall(call *ast.CallExpr, groups map[string]stri
 // endpointForCall recognizes one route-registration (or listener / RPC
 // registration) call. It returns the call's handler argument expression so
 // inline func literals can be joined back to the endpoint by position.
-func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, groups map[string]string) (model.APIEndpoint, ast.Expr, bool) {
+func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, groups map[string]string, groupAuth map[string][]string, useAuth map[string][]string) (model.APIEndpoint, ast.Expr, bool) {
 	name, receiver := callSelectorName(call)
 	if name == "" {
 		return model.APIEndpoint{}, nil, false
@@ -183,18 +267,26 @@ func (a *Analyzer) endpointForCall(pkg *packages.Package, call *ast.CallExpr, gr
 	if path == "" && kind != "http-listener" && kind != "rpc-service" {
 		return model.APIEndpoint{}, nil, false
 	}
+	// gin and fiber declare `GET(path string, handlers ...HandlerFunc)` and
+	// run the handlers in order, so the ENDPOINT is the last argument and
+	// everything before it is middleware. A fixed handler index named the
+	// first middleware as the handler on every guarded route.
+	if shapeForFramework(framework).handlerLast && len(call.Args) > handlerArg {
+		handlerArg = len(call.Args) - 1
+	}
 	handler := ""
 	var handlerExpr ast.Expr
 	if len(call.Args) > handlerArg {
 		handlerExpr = call.Args[handlerArg]
 		handler = exprEndpointName(handlerExpr)
 	}
+	auth, authSource := authForRoute(framework, receiver, call, handlerArg, groupAuth, useAuth[receiver])
 	r := a.nodeRange(call)
 	scheme, host, cleanPath, cleanURL := endpointAddressParts(kind, path)
 	if cleanPath != "" {
 		path = cleanPath
 	}
-	return model.APIEndpoint{ID: stableID(pkg.ID, "endpoint", kind, method, path, handler, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Kind: kind, Framework: framework, Method: method, Path: path, Host: host, Scheme: scheme, URL: cleanURL, Handler: handler, PackagePath: pkg.PkgPath, UsageScope: fileRole(r.Start.Filename), Range: r, Properties: cleanProperties(props)}, handlerExpr, true
+	return model.APIEndpoint{ID: stableID(pkg.ID, "endpoint", kind, method, path, handler, r.Start.Filename, fmt.Sprint(r.Start.Line), fmt.Sprint(r.Start.Column)), Kind: kind, Framework: framework, Method: method, Path: path, Host: host, Scheme: scheme, URL: cleanURL, Handler: handler, PackagePath: pkg.PkgPath, UsageScope: fileRole(r.Start.Filename), Range: r, Properties: cleanProperties(props), Authentication: auth, AuthenticationSource: authSource}, handlerExpr, true
 }
 
 func classifyEndpointCall(symbol, name, framework string, argCount int) (endpointCallClassification, bool) {

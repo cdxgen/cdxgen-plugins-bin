@@ -63,6 +63,76 @@ object PathKind {
 }
 
 /**
+ * P24 §3: the closed vocabulary of [FlowFrame.role] — what happened at one
+ * hop of a trace. Pinned by `FrameRoleVocabularyTest` beside
+ * [PathKind.ALL]: a ninth role does not ship, and a role with no producer
+ * anywhere in the corpus is a schema lie (R117's rule, applied to the new
+ * vocabulary on the day it is born, not one phase later).
+ */
+object FrameRole {
+    /** The taint's birth: a pack source call, an endpoint parameter, a literal. */
+    const val SOURCE = "source"
+
+    /** A register/field/index move carrying the value one hop within a frame. */
+    const val MOVE = "move"
+
+    /** A call whose callee (further frames) continues the trace. */
+    const val CALL = "call"
+
+    /** A value leaving a callee back to its caller. */
+    const val RETURN = "return"
+
+    /** A virtual call where more than one target was considered or narrowing applied. */
+    const val DISPATCH = "dispatch"
+
+    /** A summary boundary: the hop rests on an interprocedural summary. */
+    const val SUMMARY = "summary"
+
+    /** A sanitizer matched at this hop but did not clear the flowing category. */
+    const val SANITIZER_NOT_APPLIED = "sanitizer-not-applied"
+
+    /** The taint's consumption: a pack sink call. */
+    const val SINK = "sink"
+
+    val ALL = sortedSetOf(SOURCE, MOVE, CALL, RETURN, DISPATCH, SUMMARY, SANITIZER_NOT_APPLIED, SINK)
+}
+
+/**
+ * P24 §3: one named hop of a slice's trace — (function, file, line, role),
+ * the unit `09-PRECISION.md` §4 calls for. The frame list is ordered source
+ * to sink; [FlowSlice.pathKind] (with [FlowSlice.framesCutBy]) says whether
+ * the list is the whole walk.
+ *
+ * [dispatchWidth]/[dispatchTargets]/[dispatchNarrowedBy] carry the per-hop
+ * dispatch evidence on `dispatch` frames: how many targets the site
+ * considered, which were applied, and what narrowed them (`cha`, `rta`,
+ * `vta`, `single-impl`, `sealed`).
+ */
+data class FlowFrame(
+    val function: String,
+    val file: String,
+    val line: Int,
+    val role: String,
+    val dispatchWidth: Int? = null,
+    val dispatchTargets: List<String> = emptyList(),
+    val dispatchNarrowedBy: String? = null,
+) {
+    fun writeJson(w: JsonWriter, key: String? = null) {
+        w.beginObject(key)
+        if (dispatchNarrowedBy != null) w.str("dispatchNarrowedBy", dispatchNarrowedBy) else w.nul("dispatchNarrowedBy")
+        if (dispatchWidth != null) w.num("dispatchWidth", dispatchWidth) else w.nul("dispatchWidth")
+        w.beginArray("dispatchTargets")
+        for (t in dispatchTargets.sorted()) w.str(t)
+        w.endArray()
+        w.str("file", file)
+        w.str("function", function)
+        w.num("line", line)
+        w.str("role", role)
+        w.endObject()
+    }
+}
+
+/**
  * P23 §0: what makes a slice a CRYPTO flow — key or secret material (the
  * `hardcoded-secret` literal sources) reaching a crypto API (`crypto-asset`)
  * or a TLS misconfiguration (`insecure-tls`).
@@ -127,6 +197,20 @@ data class FlowSlice(
      * believe).
      */
     val pathKind: String,
+    /**
+     * P24 §3: the trace as named hops — ordered (function, file, line,
+     * role), source first, sink last. `frames>=N` and `via=fn:...` corpus
+     * expectations read this list; cdxgen renders it as `callstack`
+     * evidence. Empty only where [pathKind] is `symbol-only` (no walk, no
+     * hops to name).
+     */
+    val frames: List<FlowFrame> = emptyList(),
+    /**
+     * P24 §3: when [frames] is not the whole walk, the cap that cut it
+     * (e.g. `trace-nodes`) — the frame-list form of the PARTIAL contract.
+     * Null on a complete list.
+     */
+    val framesCutBy: String? = null,
     val ruleId: String,
     val ruleName: String,
     val description: String,
@@ -176,6 +260,10 @@ data class FlowSlice(
         w.endArray()
         w.num("pathLength", pathLength)
         w.str("pathKind", pathKind)
+        w.beginArray("frames")
+        for (f in frames) f.writeJson(w)
+        w.endArray()
+        if (framesCutBy != null) w.str("framesCutBy", framesCutBy) else w.nul("framesCutBy")
         w.str("riskScore", riskScore)
         w.str("ruleId", ruleId)
         w.str("ruleName", ruleName)
@@ -223,6 +311,45 @@ data class FlowSummary(
     val sanitizes: List<String>,
     val accessPaths: Map<String, String>,
     val origin: String,
+    /**
+     * P24 §2c: source-born field writes, as `p<i>.<suffix>:<category>`
+     * strings — taint born at a source inside the callee and stored into
+     * parameter i's object. The caller's argument carries the write after
+     * the call.
+     */
+    val sourceFieldWrites: List<String> = emptyList(),
+    /**
+     * P24 §2: parameter-object FIELDS reaching the return's same field, as
+     * `p<i>.<suffix>` strings — `fun get(raw: String) = Session(token =
+     * raw)` returns an object whose `token` carries the argument.
+     */
+    val paramToReturnFields: List<String> = emptyList(),
+    /**
+     * P24 §2d: what the body passes when it invokes function-valued
+     * parameters, as `p<j>(arg<k>)<-p<i>` (my parameter i's taint) or
+     * `p<j>(arg<k>)<-source:<category>` (a source born in me).
+     */
+    val invokes: List<String> = emptyList(),
+    /**
+     * P26 §0: source-born taint reaching the RETURN's FIELD, as
+     * `<suffix>:<category>` strings — `fun make() = Wrapped(readLine() ?:
+     * "")` returns an object whose field carries a source born inside it.
+     * The channel P24's constructor synthesis made load-bearing (it moved
+     * source facts off the bare return key into constructed objects'
+     * fields) and no vocabulary carried (R161: http4k's delegation
+     * factories went silent).
+     */
+    val sourceReturnFields: List<String> = emptyList(),
+    /**
+     * P27 §1: parameter i's FIELD reaching the RETURN value, as
+     * `p<i>.<suffix>` strings — the getter channel
+     * (`val body get() = raw`) and every `by`-delegation forwarder. The
+     * inverse of [paramToReturnFields], and the half that was missing: the
+     * summary said only that the parameter reached the return, and the
+     * caller then probed the argument's bare key, where an object carrying
+     * its taint in a field has nothing (R171).
+     */
+    val paramFieldToReturn: List<String> = emptyList(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -231,6 +358,9 @@ data class FlowSummary(
         w.endObject()
         w.str("function", function)
         w.str("functionId", functionId)
+        w.beginArray("invokes")
+        for (v in invokes.sorted()) w.str(v)
+        w.endArray()
         w.str("origin", origin)
         w.beginArray("paramToParam")
         for (v in paramToParam.sorted()) w.str(v)
@@ -260,6 +390,18 @@ data class FlowSummary(
         w.endArray()
         w.beginArray("sourceReturns")
         for (v in sourceReturns.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("sourceFieldWrites")
+        for (v in sourceFieldWrites.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("sourceReturnFields")
+        for (v in sourceReturnFields.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("paramFieldToReturn")
+        for (v in paramFieldToReturn.sorted()) w.str(v)
+        w.endArray()
+        w.beginArray("paramToReturnFields")
+        for (v in paramToReturnFields.sorted()) w.str(v)
         w.endArray()
         w.endObject()
     }
@@ -332,6 +474,13 @@ data class DataFlowEvidence(
                 suspendCrossingSlices = kept.count { slice ->
                     slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
                 },
+                // P24 §3: the depth measurements are properties of the
+                // SURVIVING slices (R145's rule — a narrowed document
+                // narrows its derived counters), while the dispatch-width
+                // histogram and truncations{} measure the RUN's call sites
+                // and caps and stay.
+                maxObservedDepth = kept.maxOfOrNull { it.frames.size } ?: 0,
+                depthHistogram = kept.groupingBy { it.frames.size.toString() }.eachCount(),
             ),
         )
     }
@@ -438,6 +587,34 @@ data class DataFlowStats(
      * exists to measure, with both producers named.
      */
     val crossDependencyBytecodeSlices: Int = 0,
+    /**
+     * P24 §3: the deepest named-hop count any published slice carries —
+     * "how deep does kosi actually go on this repo" as a number in the
+     * report rather than an anecdote (09-PRECISION.md §4). 0 when no slice
+     * carries frames.
+     */
+    val maxObservedDepth: Int = 0,
+    /**
+     * P24 §3: slice count by frame count (the depth histogram). Exact
+     * counts, like `dispatchJoins` — a bucket a reviewer can re-derive.
+     */
+    val depthHistogram: Map<String, Int> = emptyMap(),
+    /**
+     * P24 §3: dispatch-width histogram — targets CONSIDERED per virtual hop
+     * across the run, pre-narrowing, so the difference between considered
+     * and applied (the narrowing the trace names per hop) is a measurement.
+     * `dispatchJoins` keeps counting APPLIED summaries; both stay because
+     * the bench and BUILD.md read the old one.
+     */
+    val dispatchWidthHistogram: Map<String, Int> = emptyMap(),
+    /**
+     * P24 §4: every dataflow cap that bound this run, by its published
+     * name, with the number of times it cut. The depth doctrine's (a):
+     * every cap is declared, measured and visible IN THE REPORT — the
+     * `truncations{}` the deep tier's PASS line requires at zero. Empty is
+     * the claim "no cap bound".
+     */
+    val truncations: Map<String, Int> = emptyMap(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -451,8 +628,19 @@ data class DataFlowStats(
             w.num(key2, value.toLong())
         }
         w.endObject()
+        w.beginObject("dispatchWidthHistogram")
+        for ((key2, value) in dispatchWidthHistogram.toSortedMap(compareBy { it.toIntOrNull() ?: Int.MAX_VALUE })) {
+            w.num(key2, value.toLong())
+        }
+        w.endObject()
         w.num("defaultOriginSlices", defaultOriginSlices)
+        w.beginObject("depthHistogram")
+        for ((key2, value) in depthHistogram.toSortedMap(compareBy { it.toIntOrNull() ?: Int.MAX_VALUE })) {
+            w.num(key2, value.toLong())
+        }
+        w.endObject()
         w.num("integrityViolations", integrityViolations)
+        w.num("maxObservedDepth", maxObservedDepth)
         w.beginObject("summariesByOrigin")
         for (key in summariesByOrigin.keys.sorted()) {
             w.num(key, (summariesByOrigin[key] ?: 0).toLong())
@@ -464,6 +652,9 @@ data class DataFlowStats(
         w.num("reachableSlices", reachableSlices)
         w.num("summaryCrossingSlices", summaryCrossingSlices)
         w.num("suspendCrossingSlices", suspendCrossingSlices)
+        w.beginObject("truncations")
+        for ((key, value) in truncations.toSortedMap()) w.num(key, value.toLong())
+        w.endObject()
         w.endObject()
     }
 }

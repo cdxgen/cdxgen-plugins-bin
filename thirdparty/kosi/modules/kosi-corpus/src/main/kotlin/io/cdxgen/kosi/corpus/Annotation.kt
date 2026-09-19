@@ -83,6 +83,21 @@ data class Annotation(
     val sourceParam: String?,
     /** P20 §1: the transport that parameter's annotation names (path/query/header/cookie/form/body). */
     val sourceTransport: String?,
+    /**
+     * P24 §1 (10-DEEP-EVIDENCE.md §2): the minimum number of NAMED FRAMES
+     * the finding must carry. A one-hop finding that happens to pair the
+     * right source and sink is not the same capability and must not satisfy
+     * a deep expectation.
+     */
+    val frames: Int?,
+    /**
+     * P24 §1: named intermediate frames that must appear, IN ORDER, among
+     * the slice's frames — `via=fn:Repo.query,fn:Mapper.map`. Each segment
+     * is `fn:<canonical or ~substring>`; the Evaluator resolves every name
+     * against the report and an unknown function is an ANNOTATION ERROR
+     * (a want-not over a name that cannot match would pass vacuously).
+     */
+    val via: List<String>,
     val file: String,
     val line: Int,
 ) {
@@ -192,6 +207,19 @@ data class Annotation(
         if (sourceTransport != null && sourceTransport !in SOURCE_TRANSPORTS) {
             errors.add("sourcetransport must be one of $SOURCE_TRANSPORTS, got $sourceTransport")
         }
+        // The deep-tier keys ride on flows only: a frame count or a via=
+        // chain over an endpoint or a usage is a category error.
+        if (kind != Kind.FLOW && (frames != null || via.isNotEmpty())) {
+            errors.add("frames=/via= are only valid on flow expectations")
+        }
+        if (frames != null && frames < 1) {
+            errors.add("frames must be >= 1, got $frames")
+        }
+        for (segment in via) {
+            if (!VIA_SEGMENT.matches(segment)) {
+                errors.add("via segments must be fn:<name> (optional ~ for substring), got '$segment'")
+            }
+        }
         return errors
     }
 
@@ -222,6 +250,9 @@ data class Annotation(
         /** P20 §1: `sourceparam` shape and the transport vocabulary the pack's kinds name. */
         val SOURCE_PARAM = Regex("#[0-9]+")
         val SOURCE_TRANSPORTS = setOf("path", "query", "header", "cookie", "form", "body", "merged")
+
+        /** P24 §1: one `via=` segment — `fn:Name` or `fn:~substring`. */
+        val VIA_SEGMENT = Regex("fn:(~?[A-Za-z0-9_.<$>?]+)")
 
         /** `declarations[].kind` vocabulary. */
         val DECLARATION_KINDS = setOf(

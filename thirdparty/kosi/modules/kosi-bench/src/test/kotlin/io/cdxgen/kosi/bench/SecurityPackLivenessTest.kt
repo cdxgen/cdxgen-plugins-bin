@@ -100,6 +100,20 @@ class SecurityPackLivenessTest {
                 p.copy(literalSources = p.literalSources.filterNot { it == s })
             }
         }
+        pack.deserializers.forEach { s ->
+            entry("deserializers", s, s.pattern, s.pattern.substringAfterLast('.'), s.pattern) { p ->
+                p.copy(deserializers = p.deserializers.filterNot { it == s })
+            }
+        }
+        pack.interfaceSinks.forEach { s ->
+            val token = s.supertypes.firstOrNull()
+                ?: (s.interfaceAnnotations + s.methodAnnotations).firstOrNull()
+                ?: s.category
+            val id = (s.supertypes + s.interfaceAnnotations + s.methodAnnotations).joinToString("|")
+            entry("interfaceSinks", s, token, token, id) { p ->
+                p.copy(interfaceSinks = p.interfaceSinks.filterNot { it == s })
+            }
+        }
     }
 
     @Test
@@ -157,12 +171,22 @@ class SecurityPackLivenessTest {
         // Per fixture: the module content the engine's decisions match
         // against — every callee FQN plus every stored name (the literal
         // rule's match surface).
-        data class Content(val fqns: Set<String>, val storedNames: Set<String>)
+        data class Content(
+            val fqns: Set<String>,
+            val storedNames: Set<String>,
+            /** P26 §1.1: interface-sink rows match DECLARATIONS (supertypes, annotations), not callees. */
+            val declSupertypes: Set<String>,
+            val declAnnotations: Set<String>,
+        )
 
         val content = captured.associate { c ->
             val fqns = sortedSetOf<String>()
             val stored = sortedSetOf<String>()
+            val declSupertypes = sortedSetOf<String>()
+            val declAnnotations = sortedSetOf<String>()
             for (fn in c.capture.module.functions) {
+                declSupertypes.addAll(fn.supertypes)
+                declAnnotations.addAll(fn.annotations + fn.ownerAnnotations)
                 for (block in fn.body?.blocks.orEmpty()) {
                     for (ins in block.instructions) {
                         if (ins is io.cdxgen.kosi.kir.KirCall) fqns.add(ins.callee.fqn)
@@ -170,7 +194,7 @@ class SecurityPackLivenessTest {
                     }
                 }
             }
-            c.slug to Content(fqns, stored)
+            c.slug to Content(fqns, stored, declSupertypes, declAnnotations)
         }
 
         fun changesSomeFixture(minus: ModelPack, slugs: Collection<String>): Set<String> {
@@ -186,10 +210,16 @@ class SecurityPackLivenessTest {
         // Per entry: the fixtures whose module content could possibly react.
         fun candidateFixtures(r: Removable): Set<String> = content.entries
             .filter { (_, c) ->
-                if (r.channel.startsWith("literalSources[")) {
-                    c.storedNames.any { PatternMatcher.matches(r.pattern, it) }
-                } else {
-                    c.fqns.any { PatternMatcher.matches(r.pattern, it) }
+                when {
+                    r.channel.startsWith("literalSources[") -> c.storedNames.any { PatternMatcher.matches(r.pattern, it) }
+
+                    // An interface-sink row's match surface is what the
+                    // DECLARATION carries: the interface's supertypes and
+                    // its/its methods' annotations.
+                    r.channel.startsWith("interfaceSinks[") ->
+                        (c.declSupertypes + c.declAnnotations).any { PatternMatcher.matches(r.pattern, it) }
+
+                    else -> c.fqns.any { PatternMatcher.matches(r.pattern, it) }
                 }
             }
             .map { it.key }

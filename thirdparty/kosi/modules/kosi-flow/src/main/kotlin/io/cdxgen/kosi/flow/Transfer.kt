@@ -80,7 +80,27 @@ internal data class TaintKey(val base: String, val path: String) : Comparable<Ta
  * passed through, which is how a reviewer tells a computed summary from
  * blanket propagation (the R54 rule: the label has a producer per side).
  */
-internal data class Move(val site: Int, val prevKey: TaintKey?, val kind: String, val origin: String? = null)
+/**
+ * How a fact last moved into a key: at [site], from [prevKey], via [kind].
+ * [origin] is non-null exactly at interprocedural boundaries — the summary
+ * origin (`computed`, `pack`, `default`, `recursive-approx`) that moved the
+ * fact — and a slice collects the origins its trace passed through, which is
+ * how a reviewer tells a computed summary from blanket propagation (the R54
+ * rule: the label has a producer per side).
+ *
+ * P24 §3: [viaSites] carries the callee-internal sites a boundary move
+ * stitched past — the witness path the summary recorded for the effect. The
+ * trace walk splices them between [prevKey]'s site and [site], so a frame
+ * list names the hops the VALUE took, not only the hops the caller's
+ * registers took. Empty for every intraprocedural move.
+ */
+internal data class Move(
+    val site: Int,
+    val prevKey: TaintKey?,
+    val kind: String,
+    val origin: String? = null,
+    val viaSites: List<Int> = emptyList(),
+)
 
 internal data class ChainKey<F>(val fact: F, val key: TaintKey)
 
@@ -158,8 +178,41 @@ internal interface TransferHost<F, C> {
      */
     fun onSanitizerCleared(fqn: String, cleared: List<String>, collect: C?)
 
+    /**
+     * P24 §3: a sanitizer matched at [site] but these categories SURVIVED on
+     * its result — the hop the trace names `sanitizer-not-applied`. Default
+     * no-op: only the reporting engine records it.
+     */
+    fun onSanitizerSurvived(site: Int, survived: Set<String>, collect: C?) {}
+
     /** Called when a pack passthrough actually moved taint (counting, provenance). */
     fun onPackPassthroughApplied(fqn: String, collect: C?)
+
+    /**
+     * P26 §1.1: an INTERFACE-DECLARED sink for this call, when the callee's
+     * declaration (a bodyless interface method) matches a pack
+     * interfaceSinks row — a Spring Data repository method or a Room DAO
+     * query, where there is no body to walk and no FQN a sink pattern can
+     * name. Default null.
+     */
+    fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? = null
+
+    /**
+     * P26 §1.3: a pack DESERIALIZER produced [result] — the value's FIELDS
+     * carry whatever taint reached the result, and the engine whose facts
+     * can say so marks them (the reporting engine's fieldBearing variants;
+     * the summary engine's facts already derive along paths). The [chain]
+     * is handed over because the marking REPLACES fact identities, and a
+     * replaced fact without a chain entry dead-ends the backward walk.
+     * Default no-op.
+     */
+    fun onDeserializerResult(
+        result: String?,
+        site: Int,
+        state: FlowState<F>,
+        chain: HashMap<ChainKey<F>, Move>,
+        collect: C?,
+    ) {}
 
     /** A pack sink matched: the sink read its arguments (the reporting engine counts the site). */
     fun onSinkMatched(collect: C?)
@@ -217,6 +270,23 @@ internal interface TransferHost<F, C> {
      * engine tracks no literal sources.
      */
     fun literalSourceCategory(name: String): String? = null
+
+    /**
+     * P24 §2: the registers that may hold the SAME abstract object as
+     * [register] (allocation-site classes), itself included. Field and
+     * index reads/writes fan out over this set, so a value written through
+     * one name of an object is read through all of them. The default is the
+     * identity — the pre-P24 engine, register names as objects.
+     */
+    fun aliasClass(register: String): Set<String> = setOf(register)
+
+    /**
+     * P24 §2: the lambda bodies [register] may hold, when it holds function
+     * values — a call through the register resolves to those targets. Empty
+     * when the register holds no known function object.
+     */
+    fun lambdaTargets(register: String): List<String> = emptyList()
+
 
     /** An unknown call moved taint (the reporting engine counts the precision loss). */
     fun onUnknownPropagation(collect: C?)
@@ -435,13 +505,31 @@ internal class FlowTransfer<F, C>(
                 is KirTypeCheck -> state.removeKey(reg(ins.result))
 
                 is KirFieldGet -> {
-                    moveAll(TaintKey(ins.receiver, pathSuffix(ins.path)), reg(ins.result), site.id, "field", replace = true)
+                    // P24 §2: the read fans out over the receiver's alias
+                    // class — a value stored through one name of an object
+                    // is read through all of them. Per-fact blame, like
+                    // every other join: a fact on one alias is attributed to
+                    // THAT alias's key (R62's rule).
+                    val suffix = pathSuffix(ins.path)
+                    val merged = java.util.TreeSet<F>()
+                    val blame = HashMap<F, TaintKey>()
+                    for (base in host.aliasClass(ins.receiver).sorted()) {
+                        for (fact in state.factsOf(TaintKey(base, suffix))) {
+                            merged.add(fact)
+                            blame.putIfAbsent(fact, TaintKey(base, suffix))
+                        }
+                    }
+                    val resultKey = reg(ins.result)
+                    state.setFacts(resultKey, merged)
+                    for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site.id, blame[fact], "field")
                     // Parameter-rooted facts derive along the read — the
                     // summary engine's field sensitivity AT THE FACT, so
                     // `fun sink(job: Job) = exec(job.command)` records the
                     // extended path while `job.label` (the clean sibling)
                     // stays clean. Key-path facts were already moved above.
-                    deriveFieldRead(ins.receiver, pathSuffix(ins.path), ins.result, state, site.id)
+                    for (base in host.aliasClass(ins.receiver).sorted()) {
+                        deriveFieldRead(base, suffix, ins.result, state, site.id)
+                    }
                 }
 
                 is KirFieldSet -> {
@@ -451,9 +539,14 @@ internal class FlowTransfer<F, C>(
                     // what unions across paths and iterations). The summary
                     // engine used to weak-update here — an undocumented
                     // disagreement with the reporting engine (R65).
-                    val targetKey = TaintKey(ins.receiver, pathSuffix(ins.path))
-                    moveAll(reg(ins.value), targetKey, site.id, "field", replace = true)
-                    host.onFieldWriteEscape(ins.receiver, ins.value, pathSuffix(ins.path), state.factsOf(reg(ins.value)), collect)
+                    // P24 §2: the write lands on EVERY name of the object —
+                    // `g.v = tainted` with `val g = h` taints `h.v` too.
+                    val suffix = pathSuffix(ins.path)
+                    for (base in host.aliasClass(ins.receiver).sorted()) {
+                        val targetKey = TaintKey(base, suffix)
+                        moveAll(reg(ins.value), targetKey, site.id, "field", replace = true)
+                    }
+                    host.onFieldWriteEscape(ins.receiver, ins.value, suffix, state.factsOf(reg(ins.value)), collect)
                 }
 
                 is KirIndexGet -> {
@@ -464,14 +557,16 @@ internal class FlowTransfer<F, C>(
                     // only by the collection VALUE must not be blamed on the
                     // element key it was never in, or the backward walk
                     // dead-ends there (R54's shape, R62).
-                    val elementKey = TaintKey(ins.receiver, if (fieldSensitive) "[]" else "")
-                    val wholeKey = reg(ins.receiver)
+                    // P24 §2: the element state of every alias of the
+                    // collection is the element state of the collection.
                     val merged = java.util.TreeSet<F>()
                     val blame = HashMap<F, TaintKey>()
-                    for (sourceKey in listOf(elementKey, wholeKey)) {
-                        for (fact in state.factsOf(sourceKey)) {
-                            merged.add(fact)
-                            blame.putIfAbsent(fact, sourceKey)
+                    for (base in host.aliasClass(ins.receiver).sorted()) {
+                        for (sourceKey in listOf(TaintKey(base, if (fieldSensitive) "[]" else ""), reg(base))) {
+                            for (fact in state.factsOf(sourceKey)) {
+                                merged.add(fact)
+                                blame.putIfAbsent(fact, sourceKey)
+                            }
                         }
                     }
                     val resultKey = reg(ins.result)
@@ -479,8 +574,11 @@ internal class FlowTransfer<F, C>(
                     for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site.id, blame.getValue(fact), "index")
                 }
 
-                is KirIndexSet ->
-                    moveAll(reg(ins.value), TaintKey(ins.receiver, if (fieldSensitive) "[]" else ""), site.id, "index", replace = false)
+                is KirIndexSet -> {
+                    for (base in host.aliasClass(ins.receiver).sorted()) {
+                        moveAll(reg(ins.value), TaintKey(base, if (fieldSensitive) "[]" else ""), site.id, "index", replace = false)
+                    }
+                }
 
                 is KirSuspendPoint -> {
                     // A suspend boundary is TRANSPARENT to a may-analysis:
@@ -556,7 +654,11 @@ internal class FlowTransfer<F, C>(
         host.onResolvedCall(ins, site, collect)
 
         // SINK first, on the pre-call state: the sink reads its arguments.
+        // A named pattern wins; an interface-declared sink (P26 §1.1 — the
+        // callee is a bodyless method on a repository/DAO interface) answers
+        // second, still ahead of every computed summary.
         val sink = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
+            ?: host.interfaceSink(ins)
         if (sink != null) {
             matched = true
             host.onSinkMatched(collect)
@@ -601,6 +703,13 @@ internal class FlowTransfer<F, C>(
             if (remaining.size != before.size || argumentFacts) {
                 host.onSanitizerCleared(fqn, sanitizer.clears, collect)
             }
+            // P24 §3: a sanitizer that matched but did not clear what is
+            // flowing is a frame the trace must be able to name — the
+            // `sanitizer-not-applied` role. Without it, "we ran a sanitizer
+            // and the taint still arrived" is invisible in the evidence.
+            if (remaining.isNotEmpty()) {
+                host.onSanitizerSurvived(site, remaining.map { host.ops.categoryOf(it) }.toSortedSet(), collect)
+            }
             state.setFacts(resultKey, java.util.TreeSet(remaining))
         }
 
@@ -625,6 +734,15 @@ internal class FlowTransfer<F, C>(
                 moved = moveChain(state, chain, fromKey, TaintKey(to, ""), site, "call", host.packMoveOrigin()) || moved
             }
             if (moved) host.onPackPassthroughApplied(fqn, collect)
+        }
+
+        // DESERIALIZER (P26 §1.3): the call produced an OBJECT whose FIELDS
+        // carry the input's taint — the passthrough above moved the input to
+        // the result; this arm says the result's FIELD READS derive it. The
+        // host decides what "field-bearing" means for its fact type.
+        if (result != null && pack.deserializers.any { PatternMatcher.matches(it.pattern, fqn) }) {
+            matched = true
+            host.onDeserializerResult(result, site, state, chain, collect)
         }
 
         // EFFECT: a call that WRITES memory — argument taint flows into the

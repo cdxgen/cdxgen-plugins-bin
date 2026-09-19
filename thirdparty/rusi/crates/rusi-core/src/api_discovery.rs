@@ -108,6 +108,13 @@ enum RouteFragment {
         /// site. Resolved to a qualified declaration later.
         handler: String,
         position: Position,
+        /// Authentication middleware this route carries, filled in by the
+        /// layer/wrap arms of the chain walk once they are reached: axum's
+        /// `route_layer` applies to the routes declared BEFORE it, so the
+        /// fragments already emitted are exactly the ones it guards.
+        auth: Vec<String>,
+        /// Which construct the requirement came from.
+        auth_source: Option<String>,
     },
     Nest {
         prefix: String,
@@ -374,6 +381,7 @@ impl BuilderCollector {
 /// per `.route(...)` and `.nest(...)` call encountered.
 fn walk_axum_chain(expr: &Expr, out: &mut Vec<RouteFragment>, file_path: &str) {
     if let Expr::MethodCall(method) = expr {
+        let before = out.len();
         walk_axum_chain(&method.receiver, out, file_path);
         let position = position_from_span(file_path, method.span());
         match method.method.to_string().as_str() {
@@ -383,7 +391,105 @@ fn walk_axum_chain(expr: &Expr, out: &mut Vec<RouteFragment>, file_path: &str) {
                     out.push(fragment);
                 }
             }
+            // axum's docs name `route_layer` as the method for authorization
+            // middleware ("useful for middleware that return early (such as
+            // authorization)"); `layer` is the same construct applied to
+            // unmatched requests too. Either one guards the routes declared
+            // BEFORE it in the chain, which — because the walk descends into
+            // the receiver first — is precisely `out[..]` at this point.
+            name @ ("route_layer" | "layer") => {
+                let decls = axum_layer_auth(&method.args);
+                if !decls.is_empty() {
+                    let source = if name == "route_layer" {
+                        "axum-route-layer"
+                    } else {
+                        "axum-layer"
+                    };
+                    apply_auth(&mut out[..], &decls, source);
+                }
+            }
             _ => {}
+        }
+        let _ = before;
+    }
+}
+
+/// The authentication declarations a `.layer(...)` / `.route_layer(...)`
+/// argument carries. `ServiceBuilder::new().layer(a).layer(b)` nests, so the
+/// argument is walked rather than read once.
+fn axum_layer_auth(args: &syn::punctuated::Punctuated<Expr, syn::Token![,]>) -> Vec<String> {
+    let mut out = Vec::new();
+    for arg in args {
+        collect_layer_names(arg, &mut out);
+    }
+    crate::endpoint_auth::dedupe_auth(out)
+}
+
+fn collect_layer_names(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::Call(call) => {
+            // The layer is named by its TYPE, not by the constructor:
+            // `RequireAuth::new()` and `HttpAuthentication::bearer(v)` are
+            // the middleware `RequireAuth` and `HttpAuthentication`. Reading
+            // only the last segment names them `new` and `bearer`, and
+            // descending into the arguments names the validator function
+            // instead of the middleware.
+            if let Some(decl) = path_auth_declaration(&call.func) {
+                out.push(decl);
+                return;
+            }
+            for arg in &call.args {
+                collect_layer_names(arg, out);
+            }
+        }
+        Expr::MethodCall(method) => {
+            // `ServiceBuilder::new().layer(a).layer(b)` nests, so the
+            // receiver is walked; the method name itself can also be the
+            // middleware (`.bearer_auth(..)`).
+            collect_layer_names(&method.receiver, out);
+            if let Some(decl) =
+                crate::endpoint_auth::auth_declaration(&method.method.to_string())
+            {
+                out.push(decl);
+            }
+            for arg in &method.args {
+                collect_layer_names(arg, out);
+            }
+        }
+        Expr::Path(_) => {
+            if let Some(decl) = path_auth_declaration(expr) {
+                out.push(decl);
+            }
+        }
+        Expr::Reference(r) => collect_layer_names(&r.expr, out),
+        _ => {}
+    }
+}
+
+/// The declaration a path expression carries, named by the FIRST segment
+/// that reads as authentication — the type rather than the constructor.
+fn path_auth_declaration(expr: &Expr) -> Option<String> {
+    let Expr::Path(path) = expr else {
+        return None;
+    };
+    path.path
+        .segments
+        .iter()
+        .find_map(|seg| crate::endpoint_auth::auth_declaration(&seg.ident.to_string()))
+}
+
+/// Stamp declarations onto every Route fragment in `fragments`.
+fn apply_auth(fragments: &mut [RouteFragment], decls: &[String], source: &str) {
+    for fragment in fragments.iter_mut() {
+        if let RouteFragment::Route {
+            auth, auth_source, ..
+        } = fragment
+        {
+            auth.extend(decls.iter().cloned());
+            *auth = crate::endpoint_auth::dedupe_auth(std::mem::take(auth));
+            if auth_source.is_none() {
+                *auth_source = Some(source.to_string());
+            }
         }
     }
 }
@@ -424,6 +530,8 @@ fn walk_method_router_expr(
                     path: path.to_string(),
                     handler,
                     position: position.clone(),
+                    auth: Vec::new(),
+                    auth_source: None,
                 });
             }
         }
@@ -438,6 +546,8 @@ fn walk_method_router_expr(
                     path: path.to_string(),
                     handler,
                     position: position.clone(),
+                    auth: Vec::new(),
+                    auth_source: None,
                 });
             }
         }
@@ -463,6 +573,16 @@ fn walk_actix_chain(expr: &Expr, out: &mut Vec<RouteFragment>, file_path: &str) 
             "service" => extract_actix_service(&method.args, out, position),
             // App::new().route(PATH, web::get().to(handler))
             "route" => extract_actix_route_call(&method.args, out, position),
+            // actix registers middleware with `wrap`/`wrap_fn`, documented
+            // as running "across all requests managed by the `App`" — so a
+            // wrap guards the whole scope it sits on, which at this point in
+            // the receiver-first walk is every fragment already emitted.
+            "wrap" | "wrap_fn" => {
+                let decls = axum_layer_auth(&method.args);
+                if !decls.is_empty() {
+                    apply_auth(&mut out[..], &decls, "actix-wrap");
+                }
+            }
             _ => {}
         }
     } else if let Expr::Call(call) = expr {
@@ -521,7 +641,9 @@ fn extract_actix_service_expr(
                         path: full_path,
                         handler: String::new(),
                         position: position.clone(),
-                    });
+                    auth: Vec::new(),
+                    auth_source: None,
+                });
                     // The actual method/handler come from `.route(...)`
                     // chained onto this resource — handled in the
                     // MethodCall branch below; emit a placeholder above
@@ -560,7 +682,9 @@ fn extract_actix_service_expr(
                             path: join_prefix(prefix, resource_path),
                             handler,
                             position: position.clone(),
-                        });
+                    auth: Vec::new(),
+                    auth_source: None,
+                });
                     }
                 }
                 "service" => {
@@ -652,7 +776,9 @@ fn extract_actix_route_call(
             path,
             handler,
             position,
-        });
+                    auth: Vec::new(),
+                    auth_source: None,
+                });
     }
 }
 
@@ -726,7 +852,9 @@ fn attribute_macro_route_fragments(attrs: &[Attribute], file_path: &str) -> Vec<
             path: path_literal,
             handler: String::new(), // handler == enclosing function (set by record)
             position,
-        });
+                    auth: Vec::new(),
+                    auth_source: None,
+                });
     }
     out
 }
@@ -1301,6 +1429,8 @@ fn resolve_from_builder(
                 path,
                 handler,
                 position,
+                auth,
+                auth_source,
             } => {
                 // Attribute-macro builders use an empty handler string —
                 // the builder key (the handler's own qualified name) is
@@ -1361,6 +1491,8 @@ fn resolve_from_builder(
                     request_body_type: body,
                     response_type: response,
                     properties: IndexMap::new(),
+                    authentication: auth.clone(),
+                    authentication_source: auth_source.clone(),
                 });
             }
             RouteFragment::Nest {
@@ -1515,5 +1647,115 @@ mod path_param_tests {
         let params = synthesize_path_params("/x/:a", "()");
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "a");
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    fn fragments_axum(src: &str) -> Vec<RouteFragment> {
+        let expr: Expr = syn::parse_str(src).expect("parse");
+        let mut out = Vec::new();
+        walk_axum_chain(&expr, &mut out, "test.rs");
+        out
+    }
+
+    fn fragments_actix(src: &str) -> Vec<RouteFragment> {
+        let expr: Expr = syn::parse_str(src).expect("parse");
+        let mut out = Vec::new();
+        walk_actix_chain(&expr, &mut out, "test.rs");
+        out
+    }
+
+    fn auth_of(fragments: &[RouteFragment], want_path: &str) -> (Vec<String>, Option<String>) {
+        for f in fragments {
+            if let RouteFragment::Route {
+                path,
+                auth,
+                auth_source,
+                ..
+            } = f
+                && path == want_path
+            {
+                return (auth.clone(), auth_source.clone());
+            }
+        }
+        panic!("no route {want_path} in {fragments:?}");
+    }
+
+    /// axum's docs name `route_layer` as the method for authorization
+    /// middleware, and it guards the routes declared BEFORE it in the chain.
+    #[test]
+    fn axum_route_layer_guards_the_routes_before_it() {
+        let f = fragments_axum(
+            r#"Router::new()
+                .route("/users", get(list_users))
+                .route_layer(RequireAuth::new())"#,
+        );
+        let (auth, source) = auth_of(&f, "/users");
+        assert_eq!(auth, vec!["middleware(RequireAuth)".to_string()]);
+        assert_eq!(source.as_deref(), Some("axum-route-layer"));
+    }
+
+    /// `layer` is the same construct applied to unmatched requests too; the
+    /// source must say which one was seen, because they are not the same
+    /// statement about exposure.
+    #[test]
+    fn axum_layer_names_itself_distinctly() {
+        let f = fragments_axum(
+            r#"Router::new()
+                .route("/x", get(h))
+                .layer(ValidateJwtLayer::default())"#,
+        );
+        let (auth, source) = auth_of(&f, "/x");
+        assert_eq!(auth, vec!["middleware(ValidateJwtLayer)".to_string()]);
+        assert_eq!(source.as_deref(), Some("axum-layer"));
+    }
+
+    /// A route added AFTER the layer is not guarded by it. Stamping the whole
+    /// chain would claim a requirement the framework does not apply.
+    #[test]
+    fn axum_routes_after_the_layer_are_not_guarded() {
+        let f = fragments_axum(
+            r#"Router::new()
+                .route("/private", get(h))
+                .route_layer(RequireAuth::new())
+                .route("/public", get(h2))"#,
+        );
+        assert_eq!(auth_of(&f, "/private").0.len(), 1);
+        assert!(
+            auth_of(&f, "/public").0.is_empty(),
+            "a route declared after the layer is outside it"
+        );
+    }
+
+    /// Not every layer is authentication, and an empty result is not a
+    /// denial: it must stay empty so the tier reads as unknown.
+    #[test]
+    fn axum_non_auth_layers_declare_nothing() {
+        let f = fragments_axum(
+            r#"Router::new()
+                .route("/x", get(h))
+                .layer(TraceLayer::new_for_http())
+                .layer(CorsLayer::permissive())"#,
+        );
+        let (auth, source) = auth_of(&f, "/x");
+        assert!(auth.is_empty(), "got {auth:?}");
+        assert!(source.is_none());
+    }
+
+    /// actix registers middleware with `wrap`, documented as running across
+    /// all requests the App manages.
+    #[test]
+    fn actix_wrap_guards_the_scope() {
+        let f = fragments_actix(
+            r#"App::new()
+                .route("/items", web::get().to(list_items))
+                .wrap(HttpAuthentication::bearer(validator))"#,
+        );
+        let (auth, source) = auth_of(&f, "/items");
+        assert_eq!(auth, vec!["middleware(HttpAuthentication)".to_string()]);
+        assert_eq!(source.as_deref(), Some("actix-wrap"));
     }
 }

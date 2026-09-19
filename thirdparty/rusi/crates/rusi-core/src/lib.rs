@@ -28,6 +28,7 @@ use syn::{
 };
 
 mod api_discovery;
+mod endpoint_auth;
 mod cfg;
 mod import_resolution;
 mod modeling;

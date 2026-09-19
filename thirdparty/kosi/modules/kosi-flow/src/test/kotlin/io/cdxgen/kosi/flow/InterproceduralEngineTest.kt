@@ -405,7 +405,7 @@ class InterproceduralEngineTest {
     // ---- P15: the composed-escape bounds ---------------------------------------------
 
     @Test
-    fun composedParamPathsNoFactKeyCanSpellAreDropped() {
+    fun composedParamPathsPastTheCapCollapseRatherThanVanish() {
         // The P15 explosion, reduced: composition joins every callee effect
         // with every live fact, keyed by the JOINED param path, and a
         // recursive cluster (FragmentManagerImpl) grew one function's escape
@@ -455,14 +455,37 @@ class InterproceduralEngineTest {
             "a six-segment composed path is still a key the lowering can form",
         )
 
-        // Six wrappers: seven segments, a path no key can spell. Dropped —
-        // and with it the unbounded growth. Restore the defect (no depth
-        // check) and this publishes again: the assertion fails.
+        // Six wrappers: seven segments. P27 changed what happens here.
+        //
+        // P15 DROPPED this, on the reasoning that a seven-segment literal
+        // path is a key no lowering can spell, so it could never match. That
+        // was true only because the composition built the path with no cap
+        // while every real key collapses at AccessPath.DEFAULT_DEPTH — the
+        // two notations disagreed, and dropping was how the disagreement was
+        // survived. P27 capped the builder (`capPath`), so the composed path
+        // now collapses to `f5.f4.f3.f2.f1.*` exactly as a real key does,
+        // matches exactly as a real key does, and is published.
+        //
+        // The bound P15 was defending is still enforced — by the collapse
+        // rather than by the drop — and the measurement is on the corpus:
+        // `kosi-vulnerable-service/deps` reported the `composed-path-depth`
+        // cap firing 2 516 times and now reports it zero times, with the
+        // same nine slices. A cap that binds on the corpus is a defect, not
+        // a setting (09-PRECISION §3b).
         val pastCap = analyze(*chain(6).toTypedArray())
-        assertEquals(
-            emptyMap(),
-            pastCap.summaries.first { it.functionId == "test.w6" }.paramToSink,
-            "a composed path deeper than any fact key can never match and is dropped",
+        val w6 = pastCap.summaries.first { it.functionId == "test.w6" }
+        assertTrue(
+            w6.paramToSink.isNotEmpty(),
+            "past the cap the composed path collapses and still matches; it is not discarded",
+        )
+        // The growth P15 killed stays dead: whatever the depth of the chain,
+        // no published path exceeds DEFAULT_DEPTH segments plus the `*`.
+        val deepest = pastCap.summaries
+            .flatMap { it.accessPaths.values }
+            .maxOfOrNull { path -> path.split('.').size } ?: 0
+        assertTrue(
+            deepest <= AccessPath.DEFAULT_DEPTH + 1,
+            "composition must stay bounded: deepest published path had $deepest segments",
         )
     }
 

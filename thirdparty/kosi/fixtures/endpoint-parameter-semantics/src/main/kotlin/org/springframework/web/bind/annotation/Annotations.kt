@@ -8,3 +8,5 @@ package org.springframework.web.bind.annotation
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class RequestParam(val value: String = "")
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class PathVariable(val value: String = "")
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class RequestBody
+
+@Target(AnnotationTarget.FUNCTION) annotation class PostMapping(val value: String = "")

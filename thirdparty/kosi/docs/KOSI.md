@@ -42,6 +42,13 @@ kosi version    # versions, compiler band, capabilities
 Exit codes: `0` success, `1` an expectation failed (ratchet, golden, bench),
 `2` usage error, `3` runtime error.
 
+The project to analyse is named by `--dir`, and **a bare path is a usage
+error**: `kosi analyze /path/to/project` exits 2 naming the flag that takes
+it. It used to be accepted and dropped, which meant the run silently
+analysed the working directory and produced a perfectly valid report about
+a tree the caller never named — the one wrong answer no amount of
+determinism can catch.
+
 Output is minified and byte-identical across runs on the same input;
 `--pretty` only re-indents. Nothing in the report depends on filesystem
 ordering, hash iteration order or wall-clock time — that is a gated property,
@@ -104,6 +111,68 @@ the call graph's SCC condensation and applied at call sites in a fixed order
 `launch`/`async`/`withContext`/`runBlocking`, `flow { emit(x) }` to
 `collect`, `Channel.send`/`receive` — and `stats.suspendCrossingSlices`
 counts the slices that cross a suspend boundary.
+
+Since P24 the engine also tracks **object identity**: an allocation-site
+alias analysis runs over the same CFG, so a value reached through a second
+reference to one object, through a field of another object, or carried
+inside an object across a call boundary is followed rather than lost, and
+a lambda is an object whose target is known where it was allocated. Every
+slice publishes `frames[]` — the trace as named hops, `(function, file,
+line, role)`, source first and sink last, with callee-internal hops
+spliced in at each summary boundary — plus `stats.maxObservedDepth`, a
+depth histogram, a dispatch-width histogram and `truncations{}`, which
+names any cap that bound the run. A slice whose frame list was cut says so
+in `framesCutBy`; nothing infers depth from a silence.
+
+Since P25 the engine also reads **dependency injection as dispatch
+evidence**. A Spring, Micronaut, Dagger/Hilt or CDI application never
+constructs the implementation behind an interface — the container does, from
+an annotation — so an analysis that reasons only from `new` was blind to
+exactly the classes that run: the taint died at the service boundary and the
+report said nothing. A stereotype (`@Component`, `@Service`, `@Repository`,
+`@Controller`, `@RestController`, `@Configuration`, `@Singleton`,
+`@Inject`, `@ApplicationScoped`, `@Bean`, Hilt's entry points) is now a
+construction site the framework performs, matched on RESOLVED annotation
+FQNs. Where an interface has several implementations and the container binds
+one, the call narrows to it and the hop says `dispatchNarrowedBy:
+di-binding` — narrowing that rests on an annotation, named apart from
+narrowing that rests on a `new`. Since P26 the BINDING METHODS are read too:
+`@Binds` (the parameter IS the implementation — no construction anywhere),
+`@Provides`/`@Bean` by parameter or by construction, and Koin's provider
+lambdas (`single<Api> { ApiImpl() }`, `factory`, `viewModel`, both the 3.x
+and 2.x package spellings). A container that manages TWO implementations of
+one interface publishes BOTH — a dispatch width of 2, labelled `di-binding`,
+which is the honest answer — and a container that binds the non-sinking
+implementation publishes no finding at all.
+
+Since P26 the engine also models **what the framework does with the value**,
+not only where it enters. Persistence interfaces are sinks: a Spring Data
+repository method (a derived query name or `@Query`) and a Room
+`@Dao`/`@Query` method are matched on what the DECLARATION carries — the
+repository base it extends or the annotations on it — because the interface
+is user code and no callee pattern can name it; Exposed's `Transaction.exec`
+is a plain sink. Deserializers (Jackson `readValue`, kotlinx
+`decodeFromString`, Gson `fromJson`) produce FIELD-BEARING results: the
+produced object carries the input's taint on its fields, which is how a
+request body reaches a sink through a DTO. Retrofit and Feign INTERFACES are
+outbound services: the annotated method is the call, and the method's
+annotation value is the path, published in `services[]`/`urls[]`. Android's
+cross-component channel is modelled end to end — `getIntent()` is a source,
+`putExtra`/`putString` are write effects, and a `ContentProvider`'s
+`query`/`insert`/`update`/`delete` arguments are seeded inputs (any app on
+the device can call a provider). Property initializers are lowered as the
+executable code they are, so a Koin module at top level — the framework's
+own idiom — is visible to the whole engine.
+
+Function VALUES are followed in every spelling the language offers: a
+lambda (trailing, named-argument, implicit `it`, multi-parameter), a
+callable reference (`::top`, `obj::method`, a local `fun`), an anonymous
+`fun`, and a function held in a local. `fixtures/spelling-gallery` writes
+one flow twenty-five ways and carries a want per spelling that works and a
+numbered known-fail per spelling that does not — destructured lambda
+parameters, constructor references, function values in a field or a
+collection, SAM conversions, anonymous object expressions and extension
+lambdas are the six that do not, each with a tracker defect.
 
 **Endpoints, services, URLs.** Inbound routes per framework (Spring MVC and
 WebFlux, Ktor, Micronaut, Quarkus/JAX-RS, http4k, gRPC, Android manifest

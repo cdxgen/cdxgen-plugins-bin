@@ -105,6 +105,38 @@ internal data class SummaryFact(
 }
 
 /**
+ * P24 §2c: taint born at a source INSIDE the callee and stored into one of
+ * its parameters' objects — `fun taint(job: Job) { job.command = readLine()
+ * }`. The caller must see the write on its own argument's field after the
+ * call. [path] is the walk from the source site to the field write, for
+ * trace stitching.
+ */
+internal data class SourceFieldWrite(
+    val paramIndex: Int,
+    val suffix: String,
+    val path: List<Int>,
+)
+
+/**
+ * P24 §2d: what a function passes when it invokes a function-valued
+ * parameter — the channel that lets a passed lambda's body consume taint
+ * that never leaves the callee. `block(raw)` records, for the invoked
+ * parameter and each argument position, WHERE the argument's taint came
+ * from: [fromParam] (my parameter i, at [fromParamPath]) or a source born
+ * in me at [sourceSite] carrying [category]. [path] is the walk from the
+ * birth to the invoke site, for trace stitching.
+ */
+internal data class InvokeBind(
+    val invokedParam: Int,
+    val argIndex: Int,
+    val fromParam: Int?,
+    val fromParamPath: String,
+    val category: String?,
+    val sourceSite: Int?,
+    val path: List<Int>,
+)
+
+/**
  * The summary of one function: what taint entering through its parameters
  * does inside it. Parameter facts are tracked WITHOUT categories — a summary
  * says "p0 reaches the sink", and the caller's real categories travel over
@@ -135,6 +167,79 @@ internal class FunctionSummary(
     /** Function-valued parameters whose value the body invokes. */
     val invokedParams: Set<Int>,
     val origin: String,
+    /**
+     * P24 §3: witness path per returning parameter — the callee-internal
+     * sites the boundary move stitches past, so the frame list names the
+     * hops the value took (and the RETURN frame exists at all).
+     */
+    val paramToReturnPaths: Map<Int, List<Int>> = emptyMap(),
+    /**
+     * P24 §2: parameter i's object FIELD reaches the return's same field —
+     * `fun get(raw: String) = Session(token = raw)` returned and read as
+     * `session.token`. The base-key channel ([paramToReturn]) could not say
+     * this: the fact lives at (param, "token"), which the return probe at
+     * the bare key never saw, so an object carrying taint in a field lost it
+     * the moment it crossed back to the caller.
+     */
+    val paramToReturnFields: Map<Int, Set<String>> = emptyMap(),
+    /** P24 §3: witness path per field-channel return, keyed `param\u0000suffix`. */
+    val paramToReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
+    /** P24 §2c: source-born field writes into parameters' objects. */
+    val sourceFieldWrites: Map<String, List<SourceFieldWrite>> = emptyMap(),
+    /** P24 §2d: what the body passes when it invokes function-valued parameters. */
+    val invokedBinds: List<InvokeBind> = emptyList(),
+    /**
+     * P26 §0: source-born taint stored into a FIELD of the returned object —
+     * `fun make() = Wrapped(readLine() ?: "")`. The RETURN mirror of
+     * [sourceFieldWrites]'s write half: P24's constructor synthesis writes
+     * source facts into constructed objects' fields (where they belong), but
+     * the return channel probed only the bare key, so a summary whose source
+     * reaches the caller exclusively through a field said "returns nothing
+     * tainted" and every caller went clean — http4k's delegation getters,
+     * measured as 22 dropped findings no gate watched (R161).
+     */
+    val sourceReturnFields: Map<String, Set<String>> = emptyMap(),
+    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    val sourceReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
+    /**
+     * P27 §1: parameter i's FIELD reaches the return VALUE —
+     * `override val body: String get() = raw`, the getter every Kotlin class
+     * with a private backing property has.
+     *
+     * This is the INVERSE of [paramToReturnFields], and it was the missing
+     * one. That channel says "the argument's value lands on a FIELD of the
+     * result"; this one says "a FIELD of the argument becomes the result".
+     * Every accessor on a workspace class is this shape, and without it the
+     * summary recorded only `paramToReturn = {0}` — true, but path-less —
+     * while the caller-side application read the argument's BARE key, where
+     * an object carrying its taint in a field has nothing. Both ends were
+     * broken, so the channel could not be repaired from either alone.
+     *
+     * The measured consequence is R161's remainder: P26 got the source back
+     * inside the returned object's field and http4k's 22 findings still did
+     * not return, because their consumers read that field through a getter
+     * — and a getter is exactly this shape.
+     */
+    val paramFieldToReturn: Map<Int, Set<String>> = emptyMap(),
+    /** P27 §1: witness path per field-to-return channel, keyed `param suffix`. */
+    val paramFieldToReturnPaths: Map<String, List<Int>> = emptyMap(),
+    /**
+     * P27 §1: parameter i's FIELD reaches a FIELD of the return —
+     * `fun toCommand(r: Req) = Cmd(r.customerName, r.note)`, the mapper
+     * every layered application has between its DTO and its domain type.
+     *
+     * With [paramToReturn], [paramToReturnFields] and [paramFieldToReturn],
+     * this completes the matrix: the parameter channels record (path in,
+     * path out), and until this entry existed each channel carried ONE
+     * side's path and silently dropped the other's. A mapper was therefore
+     * summarised as "the whole argument reaches the result's `name` field"
+     * — both wrong (only one field does) and useless (the caller then
+     * probed the argument's bare key, where a DTO built by a constructor
+     * has nothing).
+     *
+     * Encoded `from\u0000to`, both sides non-empty.
+     */
+    val paramPathToReturnPath: Map<Int, Set<String>> = emptyMap(),
 ) {
     fun sameAs(other: FunctionSummary): Boolean =
         paramToReturn == other.paramToReturn &&
@@ -144,7 +249,26 @@ internal class FunctionSummary(
             sinkEffects == other.sinkEffects &&
             sourceReturns == other.sourceReturns &&
             sanitizes == other.sanitizes &&
-            invokedParams == other.invokedParams
+            invokedParams == other.invokedParams &&
+            // P24: the new channels are compared by their STRUCTURE — which
+            // effects exist — never by their witness PATHS. Two bodies
+            // declared under one function key (the corpus's duplicated
+            // framework stubs) compute the same effects with different site
+            // ids; comparing paths made `sameAs` flip every SCC round, and
+            // ten stubs came out `recursive-approx` on the merged tree for
+            // no semantic difference at all. A witness is a presentation of
+            // an effect, chosen deterministically by the last writer.
+            paramToReturnPaths.keys == other.paramToReturnPaths.keys &&
+            paramToReturnFields == other.paramToReturnFields &&
+            paramToReturnFieldPaths.keys == other.paramToReturnFieldPaths.keys &&
+            sourceFieldWrites.mapValues { (_, w) -> w.mapTo(sortedSetOf()) { "${it.paramIndex}\u0000${it.suffix}" } } ==
+                other.sourceFieldWrites.mapValues { (_, w) -> w.mapTo(sortedSetOf()) { "${it.paramIndex}\u0000${it.suffix}" } } &&
+            invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() ==
+                other.invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() &&
+            sourceReturnFields == other.sourceReturnFields &&
+            sourceReturnFieldPaths.keys == other.sourceReturnFieldPaths.keys &&
+            paramFieldToReturn == other.paramFieldToReturn &&
+            paramPathToReturnPath == other.paramPathToReturnPath
 
     /**
      * The may-analysis union with [other]: every effect either summary has,
@@ -179,11 +303,49 @@ internal class FunctionSummary(
         },
         sanitizes = sanitizes + other.sanitizes,
         invokedParams = invokedParams + other.invokedParams,
+        // P24: the new channels are effect sets with witness paths — the
+        // paths are CHOSEN per canonical key (shortest, lexicographic
+        // tie-break), the same rule `toSummary` applies. Unioning two
+        // witnesses would fabricate a walk no execution takes (R138).
+        paramToReturnPaths = mergeWitnesses(paramToReturnPaths, other.paramToReturnPaths),
+        paramToReturnFields = mergeSets(paramToReturnFields, other.paramToReturnFields),
+        paramToReturnFieldPaths = mergeWitnesses(paramToReturnFieldPaths, other.paramToReturnFieldPaths),
+        sourceFieldWrites = mergeWith(sourceFieldWrites, other.sourceFieldWrites) { a, b ->
+            (a + b)
+                .groupBy { it.paramIndex to it.suffix }
+                .map { (_, writes) -> writes.minWithOrNull(compareBy({ it.path.size }, { it.path.joinToString(",") }))!! }
+                .sortedWith(compareBy({ it.paramIndex }, { it.suffix }))
+        },
+        invokedBinds = run {
+            (invokedBinds + other.invokedBinds)
+                .groupBy { Triple(it.invokedParam, it.argIndex, it.fromParam ?: -(it.sourceSite ?: -1)) }
+                .map { (_, binds) -> binds.minWithOrNull(compareBy({ it.path.size }, { it.path.joinToString(",") }))!! }
+                .sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }))
+        },
+        sourceReturnFields = mergeSets(sourceReturnFields, other.sourceReturnFields),
+        paramFieldToReturn = mergeSets(paramFieldToReturn, other.paramFieldToReturn),
+        paramPathToReturnPath = mergeSets(paramPathToReturnPath, other.paramPathToReturnPath),
         // The join answers name-keyed lookups, and the only name-keyed
         // consumer is the deps tier, whose summaries uniformly carry
         // `bytecode` — so the joined origin is this one's.
         origin = origin,
     )
+
+    /** One shortest witness per key, chosen (never unioned — R138). */
+    private fun <K> mergeWitnesses(a: Map<K, List<Int>>, b: Map<K, List<Int>>): Map<K, List<Int>> {
+        val out = HashMap(a)
+        for ((key, path) in b) {
+            val existing = out[key]
+            out[key] = if (existing == null || path.size < existing.size ||
+                (path.size == existing.size && path.joinToString(",") < existing.joinToString(","))
+            ) {
+                path
+            } else {
+                existing
+            }
+        }
+        return out
+    }
 
     private fun <K, V> mergeSets(into: Map<K, Set<V>>, other: Map<K, Set<V>>): Map<K, Set<V>> {
         val out = HashMap(into)
@@ -226,6 +388,22 @@ internal class FunctionSummary(
             accessPaths = receiverWrites.entries
                 .filter { it.value.isNotEmpty() }
                 .associate { (param, suffixes) -> pid(param) to suffixes.sorted().joinToString("|") },
+            paramToReturnFields = paramToReturnFields.entries
+                .sortedWith(compareBy({ it.key }, { it.value.firstOrNull() ?: "" }))
+                .flatMap { (param, suffixes) -> suffixes.sorted().map { "${pid(param)}.${it}" } },
+            sourceFieldWrites = sourceFieldWrites.entries
+                .sortedWith(compareBy({ it.key }, { it.value.firstOrNull()?.paramIndex ?: 0 }, { it.value.firstOrNull()?.suffix ?: "" }))
+                .flatMap { (category, writes) -> writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix })).map { "${pid(it.paramIndex)}.${it.suffix}:${category}" } },
+            paramFieldToReturn = paramFieldToReturn.entries
+                .sortedWith(compareBy({ it.key }, { it.value.minOrNull() ?: "" }))
+                .flatMap { (param, suffixes) -> suffixes.sorted().map { sfx -> "${pid(param)}.$sfx" } },
+            sourceReturnFields = sourceReturnFields.entries
+                .sortedWith(compareBy({ it.key }, { it.value.minOrNull() ?: "" }))
+                .flatMap { (category, suffixes) -> suffixes.sorted().map { sfx -> "$sfx:$category" } },
+            invokes = invokedBinds.sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 })).map { bind ->
+                val from = bind.fromParam?.let { pid(it) } ?: "source:${bind.category}"
+                "${pid(bind.invokedParam)}(arg${bind.argIndex})<-$from"
+            },
             origin = origin,
         )
     }
@@ -240,6 +418,16 @@ internal class FunctionSummary(
 internal class CallIndex(
     compiled: List<CompiledFunction>,
     private val dispatchMode: String,
+    /**
+     * EVERY lowered function of the analysed module, bodyless declarations
+     * included. The DI facts are SIGNATURE facts — an `@Binds` method is
+     * abstract by shape, an interface's methods have no bodies — and reading
+     * them off the compiled (bodies-only) list dropped exactly the binding
+     * declarations the container exists to read (P26 §2: the fixture's
+     * NoopAuditStore smear). Nothing else uses this list; dispatch itself
+     * stays over the compiled functions.
+     */
+    private val allFunctions: List<KirFunction> = compiled.map { it.function },
 ) {
     private val workspaceClasses: Set<String> = compiled
         .mapNotNull { it.function.enclosingClass }
@@ -344,6 +532,29 @@ internal class CallIndex(
         .groupBy({ it.first }, { it.second })
         .mapValues { (_, fs) -> fs.sortedWith(compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" })) }
 
+    /** P25 §2: workspace classes a DI container constructs. */
+    val diManagedClasses: Set<String> =
+        io.cdxgen.kosi.kir.DiStereotypes.managedClasses(allFunctions)
+
+    /**
+     * P26 §1.1: declarations by canonical name, BODYLESS INCLUDED — an
+     * interface method (`fun findByLastName(...)` on a repository interface)
+     * has no body, so the compiled index cannot see it, and the interface
+     * sink is declared exactly there.
+     */
+    val declarationsByCanonical: Map<String, List<KirFunction>> = allFunctions
+        .groupBy { it.canonicalName }
+        .mapValues { (_, fs) -> fs.sortedWith(compareBy({ it.jvmDescriptor ?: "" }, { it.file }, { it.line })) }
+
+    /** The declared callee (interface methods included); null when foreign. */
+    fun declaredCallee(fqn: String, descriptor: String?): KirFunction? {
+        val candidates = declarationsByCanonical[fqn] ?: return null
+        if (descriptor != null) {
+            return candidates.firstOrNull { it.jvmDescriptor == descriptor } ?: candidates.first()
+        }
+        return candidates.first()
+    }
+
     /** Workspace classes the engine saw constructed: KirNew sites + constructor calls + singletons. */
     private val instantiatedClasses: Set<String> = buildSet {
         for (cf in compiled) {
@@ -365,7 +576,15 @@ internal class CallIndex(
             val owner = cf.function.enclosingClass
             if (owner != null && flags.any { it == "object" || it == "companion" || it == "enum" }) add(owner)
         }
+        // P25 §2: a DI stereotype is a construction site the CONTAINER
+        // performs. Without it an injected implementation is a class the run
+        // never saw constructed, so RTA dropped it and the taint died at the
+        // service boundary — the shape every Spring, Micronaut, Hilt and CDI
+        // application has. The same predicate the call graph's dispatch index
+        // reads (P22: one question, one answer).
+        addAll(diManagedClasses)
     }
+
 
     /** A package-qualified type FQN matches the KIR's chain-form classes by suffix. */
     private fun canonicalClasses(typeFqn: String): List<String> =
@@ -407,9 +626,87 @@ internal class CallIndex(
             // Keep only targets whose owner the run saw instantiated; a class
             // with no constructor site and no singleton flag never executes.
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in instantiatedClasses }
-            if (ready.isNotEmpty()) return ready
+            if (ready.isNotEmpty()) {
+                // P25 §2: remember WHEN the container's binding is what
+                // decided the site — survivors all container-managed, and
+                // something dropped. The narrowing reason belongs in the
+                // trace (a narrowing that rests on an annotation is
+                // different evidence from one that rests on a `new`), and
+                // only this function knows it.
+                if (ready.size < candidates.size &&
+                    ready.all { it.enclosingClass != null && it.enclosingClass in diManagedClasses }
+                ) {
+                    diDecidedSites.add(calleeFqn)
+                }
+                return ready
+            }
         }
         return candidates
+    }
+
+    /** Callee FQNs whose target set the DI bindings decided (P25 §2). */
+    private val diDecidedSites = java.util.Collections.synchronizedSet(sortedSetOf<String>())
+
+    fun narrowedByDiBinding(calleeFqn: String): Boolean = calleeFqn in diDecidedSites
+}
+
+/**
+ * P26 §1.1: the ONE matcher for interface-declared sinks, read by both
+ * engines' hosts (P22's rule: one question, one answer). A declaration
+ * matches a pack row when its enclosing INTERFACE's direct supertypes name
+ * one (Spring Data: the repository bases) or its own and its owner's
+ * annotations do (Room: a @Dao interface's @Query methods).
+ */
+internal object InterfaceSinks {
+    /**
+     * The pack-sink SHAPE of an interface-declared sink for one call site —
+     * the synthesis both engines' hosts and the slice builder share (one
+     * question, one answer).
+     */
+    fun sinkPatternFor(
+        callIndex: CallIndex,
+        pack: io.cdxgen.kosi.models.ModelPack,
+        ins: KirCall,
+    ): io.cdxgen.kosi.models.SinkPattern? {
+        val declaration = callIndex.declaredCallee(ins.callee.fqn, ins.callee.descriptor) ?: return null
+        if (declaration.body != null) return null
+        val row = match(declaration, pack.interfaceSinks) ?: return null
+        val arity = if (ins.receiver != null) ins.args.size else ins.args.size - 1
+        return io.cdxgen.kosi.models.SinkPattern(
+            pattern = ins.callee.fqn,
+            category = row.category,
+            relevantArguments = (0..arity).toList(),
+            receiverType = null,
+            severity = row.severity,
+        )
+    }
+
+    fun match(
+        declaration: KirFunction,
+        rows: List<io.cdxgen.kosi.models.InterfaceSinkPattern>,
+    ): io.cdxgen.kosi.models.InterfaceSinkPattern? {
+        if (declaration.enclosingClass == null) return null
+        if (!declaration.ownerFlags.any { it == "interface" || it == "fun-interface" }) return null
+        for (row in rows) {
+            if (row.supertypes.isNotEmpty()) {
+                val hit = declaration.supertypes.any { supertype ->
+                    row.supertypes.any { it == supertype || supertype.endsWith(".$it") }
+                }
+                if (hit) return row
+            }
+            if (row.interfaceAnnotations.isNotEmpty() || row.methodAnnotations.isNotEmpty()) {
+                val ownerHit = row.interfaceAnnotations.all { pattern ->
+                    declaration.ownerAnnotations.any { it == pattern || it.endsWith(".$pattern") }
+                }
+                val methodHit = row.methodAnnotations.any { pattern ->
+                    declaration.annotations.any { it == pattern || it.endsWith(".$pattern") }
+                }
+                if (ownerHit && methodHit && (row.interfaceAnnotations.isNotEmpty() || row.methodAnnotations.isNotEmpty())) {
+                    return row
+                }
+            }
+        }
+        return null
     }
 }
 
@@ -465,12 +762,28 @@ internal class Summarizer(
         compiledInOrder.groupBy { functionKey(it.function) }
 
     fun compute(): Result {
+        // P24 §2b: constructor call edges. `CallIndex.targets` answers empty
+        // for CONSTRUCTOR calls (a constructor has no dispatch), so the SCC
+        // graph had NO edge from a constructor call site to the synthesised
+        // `<init>` body — the caller's SCC could converge before the
+        // constructor was ever summarised, and the field-write channel was
+        // order-dependent (Box.<init> happened to sort first; Session.<init>
+        // did not). The edge resolves the same way the application does: by
+        // the class's `<init>` name.
+        val constructorKeysByName = compiledInOrder
+            .filter { it.function.canonicalName.endsWith(".<init>") }
+            .groupBy { it.function.canonicalName }
+            .mapValues { (_, cfs) -> cfs.map { functionKey(it.function) }.sorted() }
         val edges = HashMap<String, MutableSet<String>>()
         for (cf in compiledInOrder) {
             val out = edges.getOrPut(functionKey(cf.function)) { sortedSetOf() }
             for (block in cf.blocks) {
                 for (ins in block.instructions) {
                     if (ins !is KirCall) continue
+                    if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
+                        constructorKeysByName[ins.callee.fqn + ".<init>"]?.let { out.addAll(it) }
+                        continue
+                    }
                     for (target in callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)) {
                         out.add(functionKey(target))
                     }
@@ -502,6 +815,16 @@ internal class Summarizer(
                     break
                 }
                 changed = false
+                // P24: several bodies can share one function key (the
+                // corpus's duplicated framework stubs - and, since the
+                // primary-constructor synthesis, their `<init>`s with
+                // genuinely DIFFERENT parameter lists). The round's answer
+                // for a key is the may-UNION of its bodies (an effect any
+                // body has is an effect the key carries), REPLACED by the
+                // next round's union - never accumulated with it, which
+                // composes a recursive member's effects into itself and
+                // grows without bound.
+                val roundBodies = HashMap<String, FunctionSummary>()
                 for (member in members) {
                     for (cf in byKey[member].orEmpty()) {
                         // The same body budget the main analysis enforces — a
@@ -531,9 +854,12 @@ internal class Summarizer(
                             continue
                         }
                         val next = analysis.summary
+                        roundBodies[member] = roundBodies[member]?.join(next) ?: next
+                    }
+                    roundBodies.remove(member)?.let { union ->
                         val previous = table[member]
-                        if (previous == null || !next.sameAs(previous)) {
-                            table[member] = next
+                        if (previous == null || !union.sameAs(previous)) {
+                            table[member] = union
                             changed = true
                         }
                     }
@@ -563,6 +889,8 @@ internal class Summarizer(
     private fun FunctionSummary.withOrigin(origin: String): FunctionSummary = FunctionSummary(
         function, paramToReturn, paramToParam, paramFieldWrites, receiverWrites, sinkEffects,
         sourceReturns, sanitizes, invokedParams, origin,
+        paramToReturnPaths, paramToReturnFields, paramToReturnFieldPaths, sourceFieldWrites, invokedBinds,
+        sourceReturnFields, emptyMap(), paramFieldToReturn, emptyMap(), paramPathToReturnPath,
     )
 
     /**
@@ -651,12 +979,65 @@ internal object SummaryFactOps : FactOps<SummaryFact> {
         fact.param?.let { fact.withPath(joinPath(fact.path, suffix)) }
 }
 
+/**
+ * Joins two access-path suffixes, COLLAPSING to `*` past
+ * [AccessPath.DEFAULT_DEPTH] elements — the same cap
+ * [io.cdxgen.kosi.kir.AccessPath.of] applies to every path built from KIR.
+ *
+ * P27 §1: this was the one path builder in the engine with no cap, and it
+ * was harmless only because nothing RECORDED the result. The moment
+ * `paramFieldToReturn` published it, a decorator that forwards to its own
+ * interface (`class W(val inner: I) : I` — http4k's shape, and every
+ * `by`-delegation wrapper) made the SCC fixpoint chase
+ * `inner`, `inner.inner`, `inner.inner.inner`, … forever: the summary never
+ * converged, the iteration budget tripped, and the members shipped EMPTY
+ * under `origin=recursive-approx`. A wrapper around an interface summarised
+ * as "does nothing" is worse than an approximation — it is a silent zero.
+ */
+/**
+ * P27 §1: reads "register at access path" in the SUMMARY engine, which
+ * carries a value's path in two different places and needs both.
+ *
+ *  - on the FACT, when the value came from a parameter — an entry fact is
+ *    bare and a `fieldget` of `p` derives a fact whose path is `p`;
+ *  - on the KEY, when a callee's summary DEPOSITED it there (P24's
+ *    `paramToReturnFields`, and P27's path-to-path channel below).
+ *
+ * A caller that consulted only one representation saw half the state. That
+ * is why the layered fixture's flow died between its mapper and its getter
+ * while both worked alone: the mapper writes the key, the getter reads the
+ * fact.
+ */
+internal fun readAtPath(
+    state: FlowState<SummaryFact>,
+    register: String,
+    path: String,
+    aliases: Set<String> = setOf(register),
+): Pair<TaintKey, List<SummaryFact>> {
+    val out = mutableListOf<SummaryFact>()
+    for (base in aliases.sorted()) {
+        out += state.factsOf(TaintKey(base, path))
+        out += state.factsOf(TaintKey(base, ""))
+            .mapNotNull { SummaryFactOps.deriveOnFieldRead(it, path) }
+    }
+    return TaintKey(register, path) to out.distinct()
+}
+
 internal fun joinPath(prefix: String, suffix: String): String =
     when {
         prefix.isEmpty() -> suffix
         suffix.isEmpty() -> prefix
-        else -> "$prefix.$suffix"
+        else -> capPath("$prefix.$suffix")
     }
+
+/** Collapses an access path to `*` beyond the KIR's default depth. */
+internal fun capPath(path: String): String {
+    if (path.isEmpty()) return path
+    val elements = path.split('.')
+    if (elements.size <= io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) return path
+    if (elements.last() == "*" && elements.size == io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH + 1) return path
+    return (elements.take(io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) + "*").joinToString(".")
+}
 
 /**
  * The summary-mode analysis of one function. It is the ONE shared transfer
@@ -680,6 +1061,37 @@ internal class SummaryAnalysis(
     override val pack = pack
     override val unknownCallPropagate = options.unknownCallPropagate
     override val fieldSensitive = options.accessPathDepth > 0
+    override fun aliasClass(register: String): Set<String> = aliases.aliasClass(register)
+    override fun lambdaTargets(register: String): List<String> = aliases.lambdaTargets(register)
+
+    /**
+     * One summary lookup for a call site: the dispatch targets' summaries
+     * joined per effect is the CALLER's job; here a single named summary is
+     * enough for the alias feed (constructor field writes, param returns).
+     * Constructors resolve by `<init>` name — the call site's descriptor is
+     * the constructor-CALL shape, which no declared `<init>` matches.
+     */
+    private fun summaryForCall(ins: KirCall): FunctionSummary? {
+        if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
+            val key = functionKeyByName(ins.callee.fqn + ".<init>")
+            val overloads = table.keys.filter { it == key || it.substringBefore('\u0000') == ins.callee.fqn + ".<init>" }
+            // May-union across the class's constructor overloads: the site
+            // cannot narrow by descriptor, so every overload's writes hold.
+            var joined: FunctionSummary? = null
+            for (k in overloads.sorted()) {
+                val s = table[k] ?: continue
+                joined = if (joined == null) s else joined.join(s)
+            }
+            return joined
+        }
+        val targets = callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
+        var joined: FunctionSummary? = null
+        for (target in targets) {
+            val s = table[functionKey(target)] ?: continue
+            joined = if (joined == null) s else joined.join(s)
+        }
+        return joined
+    }
 
     private val chain = HashMap<ChainKey<SummaryFact>, Move>()
     private val state = FlowState<SummaryFact>()
@@ -703,6 +1115,46 @@ internal class SummaryAnalysis(
         }
     }
     private val sinkEffects = LinkedHashMap<SummarySinkEffect, SummarySinkEffect>()
+
+    /** P24 §3: witness paths for returning parameters (the callee's hops). */
+    private val paramToReturnPaths = HashMap<Int, MutableList<List<Int>>>()
+
+    /** P24 §2: parameter-object FIELDS reaching the return's same field. */
+    private val paramToReturnFields = HashMap<Int, MutableSet<String>>()
+
+    /** P24 §3: witness paths for the field channel, keyed `param\u0000suffix`. */
+    private val paramToReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
+
+    /** P24 §2c: source-born field writes into parameters' objects. */
+    private val sourceFieldWrites = HashMap<String, MutableList<SourceFieldWrite>>()
+
+    /** P26 §0 (R161): source-born taint reaching the RETURN's fields. */
+    private val sourceReturnFields = HashMap<String, MutableSet<String>>()
+
+    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    private val sourceReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
+
+    /** P27 §1 (R171): parameter i's FIELD reaching the return value. */
+    private val paramFieldToReturn = HashMap<Int, MutableSet<String>>()
+
+    /** P27 §1: witness path per field-to-return channel, keyed `param\u0000suffix`. */
+    private val paramFieldToReturnPaths = HashMap<String, MutableList<List<Int>>>()
+
+    /** P27 §1 (R171): parameter i's FIELD reaching a FIELD of the return. */
+    private val paramPathToReturnPath = HashMap<Int, MutableSet<String>>()
+
+    /** P24 §2d: what the body passes when it invokes function-valued parameters. */
+    private val invokedBinds = LinkedHashMap<String, InvokeBind>()
+
+    /**
+     * P24 §2: the function's alias classes — computed once per analysis from
+     * the CFG and the CURRENT summary table (the table's paramToReturn feeds
+     * it; each iterate's aliases are therefore deterministic in the
+     * iterate).
+     */
+    private val aliases: AliasAnalysis by lazy {
+        AliasAnalysis(cf) { ins -> summaryForCall(ins) }.also { it.run() }
+    }
 
     /**
      * One witness per (param, sink site, category, argument, access path):
@@ -859,6 +1311,10 @@ internal class SummaryAnalysis(
 
     override fun onSinkMatched(collect: Boolean?) {}
 
+    /** P26 §1.1: the interface-declared sink, seen from the summary side. */
+    override fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? =
+        InterfaceSinks.sinkPatternFor(callIndex, pack, ins)
+
     override fun onResolvedCall(ins: KirCall, site: Int, collect: Boolean?) {
         // An invoke of a function-valued PARAMETER (`block(x)` lowers to
         // Function1.invoke with the value on the receiver) is a fact about
@@ -937,9 +1393,23 @@ internal class SummaryAnalysis(
         val toParam = paramIndexOf(receiver) ?: return
         val fromParam = paramIndexOf(valueReg)
         for (fact in facts) {
-            val from = fact.param ?: continue
-            if (fromParam != null) {
-                recordFieldWrite(from, toParam, suffix)
+            when {
+                fact.param != null -> {
+                    if (fromParam != null) {
+                        recordFieldWrite(fromParam, toParam, suffix)
+                    }
+                }
+
+                // P24 §2c: taint born at a SOURCE inside me, stored into a
+                // parameter's object — the caller's argument carries the
+                // write after the call. Before this arm the fact was
+                // skipped (`fact.param ?: continue`), which is exactly the
+                // shape the probe's case 9 missed.
+                fact.site != null -> {
+                    val path = upstream[fact].orEmpty() + walkBack(fact, TaintKey(valueReg, ""))
+                    sourceFieldWrites.getOrPut(fact.category) { mutableListOf() }
+                        .add(SourceFieldWrite(toParam, suffix, path))
+                }
             }
         }
     }
@@ -947,12 +1417,72 @@ internal class SummaryAnalysis(
     override fun onReturn(ins: KirReturn, site: Int, state: FlowState<SummaryFact>, collect: Boolean?) {
         if (collect != true) return
         if (ins.value != null) {
+            // P24 §2: a fact sitting on a FIELD of the returned object is a
+            // field-channel return: the caller's argument's field reaches
+            // the result's field. The bare-key probe below cannot see it,
+            // and the scan is ALIAS-AWARE — the object may be named by any
+            // register of its class (`val second = first; return second`).
+            val returnBases = aliases.aliasClass(ins.value!!)
+            for ((key, facts) in state.map) {
+                if (key.base !in returnBases || key.path.isEmpty()) continue
+                for (fact in facts) {
+                    if (fact.param != null) {
+                        if (fact.path.isEmpty()) {
+                            paramToReturnFields.getOrPut(fact.param!!) { sortedSetOf() }.add(key.path)
+                            val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
+                            paramToReturnFieldPaths.getOrPut("${fact.param}\u0000${key.path}") { mutableListOf() }.add(walk)
+                        } else {
+                            // P27 §1 (R171): BOTH sides carry a path — the
+                            // mapper shape (`Cmd(r.customerName, r.note)`).
+                            // Recording it in the bare-param channel claimed
+                            // the WHOLE argument reached the field, and the
+                            // caller's bare-key probe then found nothing
+                            // anyway: wrong and inert at the same time.
+                            paramPathToReturnPath.getOrPut(fact.param!!) { sortedSetOf() }
+                                .add("${fact.path}\u0000${key.path}")
+                        }
+                    }
+                    // P26 §0 (R161): a SOURCE born in this body, stored into a
+                    // field of the returned object. The param half of this
+                    // scan existed; the source half did not, and P24's
+                    // constructor synthesis moved exactly these facts off the
+                    // bare key — silently emptying the summary's return
+                    // channel for every factory-shaped callee.
+                    if (fact.site != null) {
+                        sourceReturnFields.getOrPut(fact.category) { sortedSetOf() }.add(key.path)
+                        val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
+                        sourceReturnFieldPaths.getOrPut("${fact.category}\u0000${key.path}") { mutableListOf() }.add(walk)
+                    }
+                }
+            }
             val valueKey = TaintKey(ins.value!!, "")
             for (fact in state.factsOf(valueKey)) {
                 val up = upstream[fact].orEmpty()
                 val path = up + walkBack(fact, valueKey)
                 when {
-                    fact.param != null -> paramToReturn.add(fact.param!!)
+                    // P27 §1 (R171): the fact reached the return through a
+                    // FIELD READ of the parameter (`get() = raw` derives
+                    // (param 0, "raw") and returns it). Recording it as a
+                    // bare paramToReturn threw the path away, and the
+                    // caller then probed the argument's bare key — where an
+                    // object carrying taint in a field has nothing. The
+                    // split is also a PRECISION gain: a getter no longer
+                    // claims the whole parameter reaches the return.
+                    fact.param != null && fact.path.isNotEmpty() -> {
+                        paramFieldToReturn.getOrPut(fact.param!!) { sortedSetOf() }.add(fact.path)
+                        paramFieldToReturnPaths.getOrPut("${fact.param}\u0000${fact.path}") { mutableListOf() }
+                            .add(path + listOf(site))
+                    }
+
+                    fact.param != null -> {
+                        paramToReturn.add(fact.param!!)
+                        // P24 §3: the witness path, ending at the RETURN
+                        // instruction — the hop a boundary move splices in,
+                        // and the only producer of a `return` frame.
+                        paramToReturnPaths.getOrPut(fact.param!!) { mutableListOf() }
+                            .add(path + listOf(site))
+                    }
+
                     fact.site != null -> sourceReturns.getOrPut(fact.category) { mutableListOf() }.add(path)
                 }
             }
@@ -993,8 +1523,12 @@ internal class SummaryAnalysis(
         }
         // The walk's site list; an effect with a cut path is still published,
         // and the SLICE built from it carries the elided marker and a
-        // guaranteed source endpoint.
-        return moves.map { it.site }.filter { it >= 0 }.reversed()
+        // guaranteed source endpoint. P24 §3: boundary moves splice their
+        // callee-internal witness sites in, so composed paths (a chain of
+        // paramToReturn applications) name every level's hops.
+        return moves.reversed()
+            .flatMap { it.viaSites + listOf(it.site) }
+            .filter { it >= 0 }
     }
 
     private fun moveChain(
@@ -1005,11 +1539,22 @@ internal class SummaryAnalysis(
         site: Int,
         kind: String,
         origin: String?,
+    ): Boolean = moveChainVia(state, chain, from, to, site, kind, origin, emptyList())
+
+    private fun moveChainVia(
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+        from: TaintKey,
+        to: TaintKey,
+        site: Int,
+        kind: String,
+        origin: String?,
+        via: List<Int>,
     ): Boolean {
         val facts = state.factsOf(from)
         if (facts.isEmpty()) return false
         state.addFacts(to, facts)
-        for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind, origin)
+        for (fact in facts) chain[ChainKey(fact, to)] = Move(site, from, kind, origin, via)
         return true
     }
 
@@ -1021,11 +1566,45 @@ internal class SummaryAnalysis(
         collect: Boolean?,
     ): Boolean {
         val fqn = ins.callee.fqn
+
+        // P24 §2d: a call THROUGH a function value whose target this body
+        // knows — a lambda defined here (`val f = { .. }; f(x)`) or captured
+        // from an enclosing one. The function value is an abstract object
+        // whose target is known at its allocation site; the invoke applies
+        // that body's summary with the invoke's arguments bound to its
+        // value parameters and its captures to the allocation-site
+        // registers.
+        if (ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+            val applied = applyLambdaInvoke(ins, site, state, chain, collect)
+            if (applied) return true
+        }
+
+        // P24 §2b: a constructor call applies the class's `<init>` summary
+        // with the NEW OBJECT as the receiver — the constructor is a
+        // function that writes the object's fields, and its parameter field
+        // writes are what make `Job(tainted)` taint `job.command`.
+        if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
+            val ctor = summaryForCall(ins)
+            if (ctor != null) {
+                applySummary(ctor, ins.result, ins.args, ins.result, site, ctor.origin, state, chain)
+                return true
+            }
+            return false
+        }
+
         val targets = callIndex.targets(fqn, ins.callee.descriptor, ins.callee.kind)
         // Keyed by FUNCTION, not name: a descriptor-narrowed call site must
         // meet its own overload's summary, never a namesake's (P22 §1).
         val applicable = targets.mapNotNull { target -> table[functionKey(target)] }
         if (applicable.isEmpty()) {
+            // P24 §2d: an invoke of a function-valued PARAMETER records what
+            // this body PASSES — the channel the caller completes by binding
+            // the lambda it passed. Without it, `block(raw)` inside me is a
+            // fact about `block` only, and the lambda body's sinks can never
+            // fire on taint that never leaves me.
+            if (collect == true && ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+                recordInvokeBinds(ins, site, state)
+            }
             // No WORKSPACE summary applies here — the same condition the
             // taint host uses before it consults the tier, so a call site
             // that reaches a jar in one engine reaches it in the other. A
@@ -1042,10 +1621,86 @@ internal class SummaryAnalysis(
             // With no dispatch target either, the shared unknown default runs.
             return targets.isNotEmpty()
         }
+        if (collect == true && ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+            recordInvokeBinds(ins, site, state)
+        }
         for (summary in applicable) {
             applySummary(summary, ins.receiver, ins.args, ins.result, site, summary.origin, state, chain)
         }
         return true
+    }
+
+    /**
+     * Records [InvokeBind]s for an invoke of a function-valued parameter:
+     * for each argument carrying facts, WHERE the taint came from (one of my
+     * parameters, or a source born in me) and the walk to the invoke site.
+     */
+    private fun recordInvokeBinds(ins: KirCall, site: Int, state: FlowState<SummaryFact>) {
+        val receiver = ins.receiver ?: return
+        val invokedParam = paramIndexOf(receiver) ?: return
+        invokedParams.add(invokedParam)
+        for ((argIndex, arg) in ins.args.withIndex()) {
+            for (fact in state.factsOf(TaintKey(arg, ""))) {
+                val path = upstream[fact].orEmpty() + walkBack(fact, TaintKey(arg, ""))
+                val bind = when {
+                    fact.param != null -> InvokeBind(
+                        invokedParam = invokedParam,
+                        argIndex = argIndex,
+                        fromParam = fact.param,
+                        fromParamPath = fact.path,
+                        category = null,
+                        sourceSite = null,
+                        path = path + listOf(site),
+                    )
+
+                    fact.site != null -> InvokeBind(
+                        invokedParam = invokedParam,
+                        argIndex = argIndex,
+                        fromParam = null,
+                        fromParamPath = "",
+                        category = fact.category,
+                        sourceSite = fact.site,
+                        path = path + listOf(site),
+                    )
+
+                    else -> null
+                } ?: continue
+                val canonical = "${bind.invokedParam}\u0000${bind.argIndex}\u0000" +
+                    "${bind.fromParam ?: -(bind.sourceSite ?: -1)}"
+                val existing = invokedBinds[canonical]
+                if (existing == null || bind.path.size < existing.path.size) {
+                    invokedBinds[canonical] = bind
+                }
+            }
+        }
+    }
+
+    /**
+     * A call through a function value with a KNOWN target: applies the
+     * lambda body's summary here. Returns false when the receiver holds no
+     * known lambda (an invoke on a parameter keeps its summary channel).
+     */
+    private fun applyLambdaInvoke(
+        ins: KirCall,
+        site: Int,
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+        collect: Boolean?,
+    ): Boolean {
+        val targets = aliases.lambdaTargets(ins.receiver!!)
+        if (targets.isEmpty()) return false
+        var applied = false
+        for (canonical in targets) {
+            val lambdaSummary = table[functionKeyByName(canonical)] ?: continue
+            val captured = lambdaCaptures(cf, canonical)
+            // The extracted body's parameters are its captures followed by
+            // its value parameters; the invoke's arguments bind the latter.
+            fun binding(index: Int): String? =
+                if (index < captured.size) captured[index] else ins.args.getOrNull(index - captured.size)
+            applySummaryWith(lambdaSummary, ::binding, ins.result, site, lambdaSummary.origin, state, chain)
+            applied = true
+        }
+        return applied
     }
 
     /**
@@ -1072,19 +1727,71 @@ internal class SummaryAnalysis(
             receiverIndex >= 0 -> args.getOrNull(index - 1)
             else -> args.getOrNull(index)
         }
+        applySummaryWith(summary, ::mapping, result, site, origin, state, chain)
+    }
 
+    /**
+     * The shared application over an explicit PARAMETER BINDING — the
+     * call-site mapping, or the captures-plus-arguments mapping of an invoke
+     * through a known lambda (P24 §2d).
+     */
+    private fun applySummaryWith(
+        summary: FunctionSummary,
+        binding: (Int) -> String?,
+        result: String?,
+        site: Int,
+        origin: String,
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+    ) {
         fun reg(register: String): TaintKey = TaintKey(register, "")
 
         if (result != null) {
             val resultKey = reg(result)
             for (param in summary.paramToReturn.sorted()) {
-                val from = mapping(param) ?: continue
+                val from = binding(param) ?: continue
                 val fromKey = TaintKey(from, "")
                 val facts = state.factsOf(fromKey)
                 if (facts.isEmpty()) continue
                 state.addFacts(resultKey, facts)
+                // P24 §3: the callee-internal witness splices into the
+                // boundary move, so the frame list names the hops the value
+                // took inside the callee — and the return.
+                val via = summary.paramToReturnPaths[param].orEmpty()
                 for (fact in facts) {
-                    chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin)
+                    chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
+                }
+            }
+            // P27 §1 (R171): the argument's FIELD becomes the result — the
+            // getter channel. Read the argument at the recorded suffix, not
+            // at its bare key.
+            // P27 §1 (R171): the mapper channel — a FIELD of the argument
+            // becomes a FIELD of the result. Paths live on the FACT here,
+            // so the read derives and the write lands on the result's key.
+            for ((param, moves) in summary.paramPathToReturnPath) {
+                val from = binding(param) ?: continue
+                for (move in moves.sorted()) {
+                    val fromPath = move.substringBefore('\u0000')
+                    val toPath = move.substringAfter('\u0000')
+                    val (fromKey, derived) = readAtPath(state, from, fromPath, aliases.aliasClass(from))
+                    if (derived.isEmpty()) continue
+                    val toKey = TaintKey(result, toPath)
+                    state.addFacts(toKey, derived)
+                    for (fact in derived) {
+                        chain[ChainKey(fact, toKey)] = Move(site, fromKey, "summary", origin)
+                    }
+                }
+            }
+            for ((param, suffixes) in summary.paramFieldToReturn) {
+                val from = binding(param) ?: continue
+                for (suffix in suffixes.sorted()) {
+                    val (fromKey, derived) = readAtPath(state, from, suffix, aliases.aliasClass(from))
+                    if (derived.isEmpty()) continue
+                    state.addFacts(resultKey, derived)
+                    val via = summary.paramFieldToReturnPaths["$param\u0000$suffix"].orEmpty()
+                    for (fact in derived) {
+                        chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
+                    }
                 }
             }
             for ((category, path) in summary.sourceReturns) {
@@ -1093,41 +1800,130 @@ internal class SummaryAnalysis(
                 state.addFacts(resultKey, listOf(fact))
                 chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
             }
+            // P26 §0 (R161): the source-return FIELD channel — the source was
+            // born in the callee and stored into the returned object's field,
+            // so the caller's result carries it at that access path (a field
+            // read of it finds the fact; a getter call through a delegation
+            // still needs the delegation getter lowered — P27's list).
+            for ((category, suffixes) in summary.sourceReturnFields) {
+                for (suffix in suffixes.sorted()) {
+                    val fact = SummaryFact(null, site, category)
+                    upstream[fact] = listOf(site)
+                    val key = TaintKey(result, suffix)
+                    state.addFacts(key, listOf(fact))
+                    chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
+                }
+            }
+            // P24 §2: the field channel — the callee stored param i's
+            // VALUE into the returned object's field (`Session(token =
+            // raw)`), so the argument's BASE taint reaches the result's
+            // FIELD.
+            for ((param, suffixes) in summary.paramToReturnFields) {
+                val from = binding(param) ?: continue
+                for (suffix in suffixes.sorted()) {
+                    val via = summary.paramToReturnFieldPaths["$param\u0000$suffix"].orEmpty()
+                    moveChainVia(state, chain, TaintKey(from, ""), TaintKey(result, suffix), site, "summary", origin, via)
+                }
+            }
         }
-        if (summary.sinkEffects.isNotEmpty()) recordComposedSinkEffects(summary, receiver, args, site, state)
+
+        // P24 §2c: source-born FIELD WRITES — taint born inside the callee
+        // and stored into parameter i's object lands on my argument's field.
+        for ((category, writes) in summary.sourceFieldWrites) {
+            for (write in writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix }))) {
+                val toReg = binding(write.paramIndex) ?: continue
+                for (base in aliases.aliasClass(toReg).sorted()) {
+                    val fact = SummaryFact(null, site, category)
+                    upstream[fact] = listOf(site) + write.path
+                    state.addFacts(TaintKey(base, write.suffix), listOf(fact))
+                    chain[ChainKey(fact, TaintKey(base, write.suffix))] = Move(site, null, "source-field-write", origin)
+                }
+            }
+        }
+
+        if (summary.sinkEffects.isNotEmpty()) recordComposedSinkEffects(summary, binding, site, state)
         for ((from, tos) in summary.paramToParam) {
-            val fromReg = mapping(from) ?: continue
+            val fromReg = binding(from) ?: continue
             for (to in tos.sorted()) {
-                val toReg = mapping(to) ?: continue
+                val toReg = binding(to) ?: continue
                 moveChain(state, chain, reg(fromReg), reg(toReg), site, "summary", null)
             }
         }
         for ((param, suffixes) in summary.receiverWrites) {
-            if (receiverIndex < 0) continue
-            val targetBase = receiver ?: thisReceiver() ?: continue
-            val fromReg = mapping(param) ?: continue
+            val fromReg = binding(param) ?: continue
+            // The write lands on the RECEIVER's object — under every name
+            // the caller gave it (P24 §2's alias fan-out). The receiver is
+            // the summary's parameter 0 when it declares one; a receiver-less
+            // summary has no receiverWrites to apply.
+            val receiverReg = if (summary.function.params.any { it.receiver }) binding(0) else null
+            val targetBases = receiverReg?.let { aliases.aliasClass(it) } ?: emptySet()
             for (suffix in suffixes.sorted()) {
-                moveChain(state, chain, reg(fromReg), TaintKey(targetBase, suffix), site, "summary", null)
+                for (base in targetBases.sorted()) {
+                    moveChain(state, chain, reg(fromReg), TaintKey(base, suffix), site, "summary", null)
+                }
+            }
+        }
+
+        // P24 §2d: the callee invokes a function-valued parameter and my
+        // body supplied the function value: compose — if the invoked
+        // parameter binds to one of MY parameters, the bind becomes mine
+        // (what I pass when I invoke MY parameter); a source-born bind
+        // composes its path through the call site.
+        for (bind in summary.invokedBinds) {
+            val invokedReg = binding(bind.invokedParam) ?: continue
+            val myInvokedParam = paramIndexOf(invokedReg) ?: continue
+            invokedParams.add(myInvokedParam)
+            when {
+                bind.fromParam != null -> {
+                    val sourceReg = binding(bind.fromParam) ?: continue
+                    val mySourceParam = paramIndexOf(sourceReg) ?: continue
+                    recordBind(
+                        InvokeBind(
+                            invokedParam = myInvokedParam,
+                            argIndex = bind.argIndex,
+                            fromParam = mySourceParam,
+                            fromParamPath = bind.fromParamPath,
+                            category = null,
+                            sourceSite = null,
+                            path = listOf(site) + bind.path,
+                        ),
+                    )
+                }
+
+                bind.category != null -> recordBind(
+                    InvokeBind(
+                        invokedParam = myInvokedParam,
+                        argIndex = bind.argIndex,
+                        fromParam = null,
+                        fromParamPath = "",
+                        category = bind.category,
+                        sourceSite = bind.sourceSite,
+                        path = listOf(site) + bind.path,
+                    ),
+                )
             }
         }
     }
 
+    private fun recordBind(bind: InvokeBind) {
+        val canonical = "${bind.invokedParam}\u0000${bind.argIndex}\u0000" +
+            "${bind.fromParam ?: -(bind.sourceSite ?: -1)}"
+        val existing = invokedBinds[canonical]
+        if (existing == null || bind.path.size < existing.path.size) {
+            invokedBinds[canonical] = bind
+        }
+    }
+
+
+
     private fun recordComposedSinkEffects(
         summary: FunctionSummary,
-        receiver: String?,
-        args: List<String>,
+        binding: (Int) -> String?,
         site: Int,
         state: FlowState<SummaryFact>,
     ) {
-        val params = summary.function.params
-        val receiverIndex = params.indexOfFirst { it.receiver }
-        fun mapping(index: Int): String? = when {
-            receiverIndex >= 0 && index == 0 -> receiver ?: thisReceiver()
-            receiverIndex >= 0 -> args.getOrNull(index - 1)
-            else -> args.getOrNull(index)
-        }
         for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
-            val fromReg = mapping(effect.paramIndex) ?: continue
+            val fromReg = binding(effect.paramIndex) ?: continue
             val fromKey = TaintKey(fromReg, "")
             for (fact in state.factsOf(fromKey)) {
                 if (fact.param == null) continue
@@ -1181,6 +1977,11 @@ internal class SummaryAnalysis(
     fun toSummary(): FunctionSummary = FunctionSummary(
         function = cf.function,
         paramToReturn = paramToReturn.toSet(),
+        paramFieldToReturn = paramFieldToReturn.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        paramPathToReturnPath = paramPathToReturnPath.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        paramFieldToReturnPaths = paramFieldToReturnPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
         paramToParam = paramToParam.mapValues { it.value.toSet() },
         paramFieldWrites = paramFieldWrites.mapValues { (_, tos) -> tos.mapValues { it.value.toSet() } },
         receiverWrites = receiverWrites.mapValues { it.value.toSet() },
@@ -1214,6 +2015,24 @@ internal class SummaryAnalysis(
         }.filterValues { it.isNotEmpty() },
         sanitizes = sanitizes.toSet(),
         invokedParams = invokedParams.toSet(),
+        paramToReturnPaths = paramToReturnPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
+        paramToReturnFields = paramToReturnFields.mapValues { (_, v) -> v.toSet() },
+        paramToReturnFieldPaths = paramToReturnFieldPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
+        sourceFieldWrites = sourceFieldWrites.mapValues { (_, writes) ->
+            writes.distinctBy { it.paramIndex to it.suffix }
+                .sortedWith(compareBy({ it.paramIndex }, { it.suffix }))
+        }.filterValues { it.isNotEmpty() },
+        invokedBinds = invokedBinds.values.sortedWith(
+            compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }),
+        ),
+        sourceReturnFields = sourceReturnFields.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
+        sourceReturnFieldPaths = sourceReturnFieldPaths.mapValues { (_, paths) ->
+            paths.minWithOrNull(compareBy({ it.size }, { it.joinToString(",") })) ?: emptyList()
+        }.filterValues { it.isNotEmpty() },
         origin = if (capHit && originLabel == SummaryOrigin.COMPUTED) SummaryOrigin.RECURSIVE_APPROX else originLabel,
     )
 }

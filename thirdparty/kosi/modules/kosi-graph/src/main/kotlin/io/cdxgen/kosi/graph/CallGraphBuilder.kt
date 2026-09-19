@@ -63,6 +63,37 @@ object CallGraphBuilder {
                         is io.cdxgen.kosi.kir.KirNew ->
                             sites.add(Site.constructor(sourceKey, ins.type, ins.line))
 
+                        // P27 review: a lambda BODY is a node of its own, and
+                        // before this nothing pointed at it — 72 lambda nodes
+                        // in AndroGoat, zero with an incoming edge. The body
+                        // does not run where it is written, so there is no
+                        // CALL to it; it is installed as a value
+                        // (`setOnClickListener { ... }`) and the framework
+                        // runs it later.
+                        //
+                        // For REACHABILITY that distinction does not matter:
+                        // if the enclosing function runs, the lambda is
+                        // installed, and a handler that is installed may run.
+                        // Without the edge, `--dataflow reachable` — whose
+                        // whole job is to intersect findings with the reached
+                        // set — dropped 16 of AndroGoat's 17 findings, every
+                        // one of them a click handler. The edge is labelled
+                        // so a reader can tell it from a call.
+                        is io.cdxgen.kosi.kir.KirLambda ->
+                            sites.add(
+                                Site.call(
+                                    sourceKey = sourceKey,
+                                    calleeFqn = ins.function,
+                                    descriptor = null,
+                                    kind = CallKind.STATIC,
+                                    line = io.cdxgen.kosi.kir.KIR_NO_LINE,
+                                    receiver = null,
+                                    scopeFunction = false,
+                                    method = null,
+                                    lambdaValue = true,
+                                ),
+                            )
+
                         is io.cdxgen.kosi.kir.KirDynamicCall -> unresolvedCalls++
 
                         is io.cdxgen.kosi.kir.KirCall ->
@@ -172,6 +203,12 @@ internal data class Site(
     val isConstructor: Boolean,
     val isScopeFunction: Boolean,
     val method: String?,
+    /**
+     * The "call" is a lambda BODY being installed as a value rather than
+     * invoked. It carries a reachability edge (an installed handler may
+     * run) under its own `callType`, never `static`.
+     */
+    val isLambdaValue: Boolean = false,
 ) {
     companion object {
         fun constructor(sourceKey: String, type: String, line: Int) =
@@ -186,7 +223,11 @@ internal data class Site(
             receiver: String?,
             scopeFunction: Boolean,
             method: String?,
-        ) = Site(sourceKey, calleeFqn, descriptor, kind, line, receiver, false, scopeFunction, method)
+            lambdaValue: Boolean = false,
+        ) = Site(
+            sourceKey, calleeFqn, descriptor, kind, line, receiver, false, scopeFunction, method,
+            lambdaValue,
+        )
     }
 }
 
@@ -323,6 +364,14 @@ private class Dispatch(
             if (flags.any { it == "object" || it == "companion" || it == "enum" }) rtaInstantiated.add(klass)
         }
         rtaInstantiated.addAll(rootSeeds)
+        // P25 §2: a DI stereotype is a construction site the FRAMEWORK
+        // performs. Without this, the implementation behind an injected
+        // interface — which user code never constructs, that being the whole
+        // point of a container — is a class RTA is "still waiting on", so
+        // the interface call resolves to nothing and the taint dies with no
+        // diagnostic. Every Spring, Micronaut, Hilt and CDI service has this
+        // shape at its service boundary.
+        rtaInstantiated.addAll(index.diManagedClasses)
     }
 
     private fun reset() {
@@ -409,10 +458,21 @@ private class Dispatch(
                 }
 
                 else -> {
-                    val callType = if (site.isScopeFunction) "lambda-inlined" else "static"
+                    val callType = when {
+                        // Installed, not invoked: the edge carries
+                        // reachability and says so.
+                        site.isLambdaValue -> "lambda-value"
+                        site.isScopeFunction -> "lambda-inlined"
+                        else -> "static"
+                    }
                     val workspace = index.workspaceCallee(site.calleeFqn, site.descriptor)
                     val target = if (workspace != null) {
                         nodes.keyOf(workspace) ?: nodes.externalNode(site.calleeFqn, site.descriptor)
+                    } else if (site.isLambdaValue) {
+                        // A lambda body the lowering did not extract is not
+                        // an external symbol; inventing a leaf for it would
+                        // put a fictional node in the graph.
+                        return Pair(true, emptySet())
                     } else {
                         nodes.externalNode(site.calleeFqn, site.descriptor)
                     }
@@ -551,6 +611,11 @@ private class Dispatch(
         val callType = when {
             index.isSealedSite(declared) && gated.targets.size == 1 -> "sealed-exact"
             index.isSealedSite(declared) -> "sealed-bounded"
+            // P25 §2: the container's binding decided this site (gateRtaVta
+            // says so); it outranks the interface label because it names the
+            // EVIDENCE, and `interface-cha` would claim the site was never
+            // narrowed at all.
+            gated.callType == "di-binding" -> "di-binding"
             index.isInterfaceSite(declared) -> "interface-cha"
             else -> "receiver-typed"
         }
@@ -565,10 +630,19 @@ private class Dispatch(
     private fun gateRtaVta(site: Site, candidates: List<KirFunction>): Quad {
         var effective = candidates
         var waitingOn: Set<String> = emptySet()
+        var diDecided = false
         if (usesRta) {
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in rtaInstantiated }
             waitingOn = candidates.mapNotNull { it.enclosingClass }.filter { it !in rtaInstantiated }.toSortedSet()
             if (ready.isEmpty()) return Quad(emptyList(), callType = "", waitingOn = waitingOn)
+            // P25 §2: the container's binding is what decided this site when
+            // the survivors are DI-managed, something was dropped, and no
+            // survivor was constructed by user code. Labelled so a reader
+            // can tell a narrowing that rests on an annotation from one that
+            // rests on a `new` — they are different evidence and a wrong
+            // binding is a different bug from a wrong type.
+            diDecided = ready.size < candidates.size &&
+                ready.all { it.enclosingClass != null && it.enclosingClass in index.diManagedClasses }
             effective = ready
         }
         if (algorithmUsed == "vta") {
@@ -586,7 +660,7 @@ private class Dispatch(
                 if (narrowed.isNotEmpty()) effective = narrowed
             }
         }
-        return Quad(effective.mapNotNull { nodes.keyOf(it) }, "", waitingOn)
+        return Quad(effective.mapNotNull { nodes.keyOf(it) }, if (diDecided) "di-binding" else "", waitingOn)
     }
 }
 
