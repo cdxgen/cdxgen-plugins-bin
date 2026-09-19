@@ -63,6 +63,37 @@ object CallGraphBuilder {
                         is io.cdxgen.kosi.kir.KirNew ->
                             sites.add(Site.constructor(sourceKey, ins.type, ins.line))
 
+                        // P27 review: a lambda BODY is a node of its own, and
+                        // before this nothing pointed at it — 72 lambda nodes
+                        // in AndroGoat, zero with an incoming edge. The body
+                        // does not run where it is written, so there is no
+                        // CALL to it; it is installed as a value
+                        // (`setOnClickListener { ... }`) and the framework
+                        // runs it later.
+                        //
+                        // For REACHABILITY that distinction does not matter:
+                        // if the enclosing function runs, the lambda is
+                        // installed, and a handler that is installed may run.
+                        // Without the edge, `--dataflow reachable` — whose
+                        // whole job is to intersect findings with the reached
+                        // set — dropped 16 of AndroGoat's 17 findings, every
+                        // one of them a click handler. The edge is labelled
+                        // so a reader can tell it from a call.
+                        is io.cdxgen.kosi.kir.KirLambda ->
+                            sites.add(
+                                Site.call(
+                                    sourceKey = sourceKey,
+                                    calleeFqn = ins.function,
+                                    descriptor = null,
+                                    kind = CallKind.STATIC,
+                                    line = io.cdxgen.kosi.kir.KIR_NO_LINE,
+                                    receiver = null,
+                                    scopeFunction = false,
+                                    method = null,
+                                    lambdaValue = true,
+                                ),
+                            )
+
                         is io.cdxgen.kosi.kir.KirDynamicCall -> unresolvedCalls++
 
                         is io.cdxgen.kosi.kir.KirCall ->
@@ -172,6 +203,12 @@ internal data class Site(
     val isConstructor: Boolean,
     val isScopeFunction: Boolean,
     val method: String?,
+    /**
+     * The "call" is a lambda BODY being installed as a value rather than
+     * invoked. It carries a reachability edge (an installed handler may
+     * run) under its own `callType`, never `static`.
+     */
+    val isLambdaValue: Boolean = false,
 ) {
     companion object {
         fun constructor(sourceKey: String, type: String, line: Int) =
@@ -186,7 +223,11 @@ internal data class Site(
             receiver: String?,
             scopeFunction: Boolean,
             method: String?,
-        ) = Site(sourceKey, calleeFqn, descriptor, kind, line, receiver, false, scopeFunction, method)
+            lambdaValue: Boolean = false,
+        ) = Site(
+            sourceKey, calleeFqn, descriptor, kind, line, receiver, false, scopeFunction, method,
+            lambdaValue,
+        )
     }
 }
 
@@ -417,10 +458,21 @@ private class Dispatch(
                 }
 
                 else -> {
-                    val callType = if (site.isScopeFunction) "lambda-inlined" else "static"
+                    val callType = when {
+                        // Installed, not invoked: the edge carries
+                        // reachability and says so.
+                        site.isLambdaValue -> "lambda-value"
+                        site.isScopeFunction -> "lambda-inlined"
+                        else -> "static"
+                    }
                     val workspace = index.workspaceCallee(site.calleeFqn, site.descriptor)
                     val target = if (workspace != null) {
                         nodes.keyOf(workspace) ?: nodes.externalNode(site.calleeFqn, site.descriptor)
+                    } else if (site.isLambdaValue) {
+                        // A lambda body the lowering did not extract is not
+                        // an external symbol; inventing a leaf for it would
+                        // put a fictional node in the graph.
+                        return Pair(true, emptySet())
                     } else {
                         nodes.externalNode(site.calleeFqn, site.descriptor)
                     }
