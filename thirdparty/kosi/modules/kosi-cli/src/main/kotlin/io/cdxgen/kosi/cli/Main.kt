@@ -114,6 +114,10 @@ object Main {
         parsed.requireNoPositionals("analyze", "--dir <path>")
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
+        // P29 taxonomy: a FILE path analysed "successfully" as an empty
+        // tree — no build files, no sources, a clean-looking report about
+        // nothing. kir dump already refuses it; analyze does too now.
+        if (!Files.isDirectory(dir)) throw UsageException("--dir ${dir} is not a directory")
         val options = optionsFrom(parsed)
         // P23 §0: a pairing whose OUTPUT would mislead is refused before the
         // run, in the same spirit as `--reachable-symbols` and `--format
@@ -886,7 +890,14 @@ internal fun memoryAdvice(t: Throwable): String? {
     val memoryShaped = chain.any { it is OutOfMemoryError || it is NoClassDefFoundError }
     if (!memoryShaped) return null
     val maxHeapBytes = Runtime.getRuntime().maxMemory()
-    val heap = if (maxHeapBytes == Long.MAX_VALUE) "unbounded" else "${maxHeapBytes / (1L shl 30)} GiB"
+    // P29 taxonomy: "-Xmx256m" divided to "0 GiB" — an integer floor that
+    // misstates the very heap the advice is about. Sub-gigabyte heaps are
+    // named in MiB.
+    val heap = when {
+        maxHeapBytes == Long.MAX_VALUE -> "unbounded"
+        maxHeapBytes >= (1L shl 30) -> "${maxHeapBytes / (1L shl 30)} GiB"
+        else -> "${maxHeapBytes / (1L shl 20)} MiB"
+    }
     val physical = try {
         (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
             as? com.sun.management.OperatingSystemMXBean)
