@@ -261,6 +261,50 @@ cdxgen runs kosi through `lib/ecosystems/kosi.js` and evinse:
 stays valid with zero kosi artifacts. A missing or unusable kosi binary is a
 silent fallback by design, never a failed BOM.
 
+## How much memory
+
+kosi holds the whole analysed workspace — every source file's PSI, the
+resolved symbols behind it, and the attached classpath's classes — in one
+heap. Memory therefore scales with the repository, and the default JVM heap
+(a quarter of physical RAM) is not enough for a large one.
+
+| repository size | `-Xmx` | measured |
+|---|---|---|
+| up to ~500 source files | 4 GiB | AndroGoat (34 files, 223-jar classpath) peaks around 1 GiB |
+| ~500–2,000 files | 8 GiB | okhttp (573), coil (452), detekt (1,105) all complete |
+| ~2,000+ files, or a resolved classpath | **16 GiB or more** | dagger (1,950 files) produces **no report at all** under 8 GiB; it completes at 16 GiB. thunderbird-android (3,318) completes at 8 GiB |
+
+```
+java -Xmx16g -jar kosi-all.jar analyze --dir <repo> ...
+```
+
+**A starved run does not say "out of memory".** A JVM with no room to define
+one more class throws `NoClassDefFoundError` naming whichever class it
+happened to need next, which can be a kosi class, a Kotlin stdlib class, or an
+IntelliJ one. dagger at `-Xmx8g` failed with nothing but
+`kosi: io/cdxgen/kosi/flow/Summarizer$compute$4`. kosi now recognises that
+shape and prints the heap it was given, the machine's physical memory, and the
+suggestion to raise `-Xmx` — but if you see a bare class name from an older
+build, the heap is the first thing to check.
+
+Analysis time is bounded separately by `--max-analysis-seconds` and resident
+size by `--max-rss-mb`; both are reported as diagnostics rather than silent
+truncation. Some repositories are slow for reasons memory cannot fix — see the
+open summary-application cost in the tracker (R185).
+
+### Memory for the test tiers
+
+The corpus and bench tiers fork their own JVM. That fork takes **half of
+physical RAM, clamped to [6, 24] GiB**, and prints what it chose:
+
+```
+kosi tier JVM: 21 @ /path/to/java heap=24g (auto: half of physical)
+```
+
+Pin it with `-Pkosi.testHeapGb=<n>`. CI pins 6, the value P15 calibrated to
+the shared runners; a developer machine gets the larger share because the
+bigger corpus tiers are meant to run locally.
+
 ## Platform support
 
 kosi ships as a GraalVM native image per platform, plus a portable JVM jar.

@@ -198,6 +198,25 @@ private object TaintFactOps : FactOps<TaintFact> {
  * is sorted before ids are assigned. Two runs on one input produce
  * byte-identical evidence.
  */
+/**
+ * P28 §2: the value types an `all` payload can arrive as WITHOUT fields —
+ * framework-independent (kotlin/java String and primitives), so no pack can
+ * widen or narrow it by omission. An unresolved type is NOT simple: it seeds
+ * field-bearing, the triage-over-silence direction.
+ *
+ * Top-level and `internal` so `AllPayloadSimpleTypesTest` can check every
+ * spelling here against the pack's doc-derived `simpleParameterTypes`. It was
+ * private, and the copy had drifted: it said `java.lang.Char`, which is not a
+ * JVM type, and nothing could disagree with it (R168).
+ */
+internal val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
+    "kotlin.String", "kotlin.Int", "kotlin.Long", "kotlin.Short", "kotlin.Byte",
+    "kotlin.Double", "kotlin.Float", "kotlin.Boolean", "kotlin.Char",
+    "java.lang.String", "java.lang.Integer", "java.lang.Long", "java.lang.Short",
+    "java.lang.Byte", "java.lang.Double", "java.lang.Float", "java.lang.Boolean",
+    "java.lang.Character",
+)
+
 object TaintEngine {
 
     /** File path -> (relativePath, modulePath), plus the module purl lookup. Same shape as the graph's attribution. */
@@ -1475,21 +1494,6 @@ object TaintEngine {
             val type = resolved?.substringBefore('<') ?: return false
             return contextTypes.any { type == it || type.endsWith(".$it") }
         }
-
-        /**
-         * P28 §2: the value types an `all` payload can arrive as WITHOUT
-         * fields — framework-independent (kotlin/java String and
-         * primitives), so no pack can widen or narrow it by omission. An
-         * unresolved type is NOT simple: it seeds field-bearing, the
-         * triage-over-silence direction.
-         */
-        private val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
-            "kotlin.String", "kotlin.Int", "kotlin.Long", "kotlin.Short", "kotlin.Byte",
-            "kotlin.Double", "kotlin.Float", "kotlin.Boolean", "kotlin.Char",
-            "java.lang.String", "java.lang.Integer", "java.lang.Long", "java.lang.Short",
-            "java.lang.Byte", "java.lang.Double", "java.lang.Float", "java.lang.Boolean",
-            "java.lang.Char",
-        )
 
         /**
          * P27 §2: Spring's `BeanUtils.isSimpleProperty` — a simple value type

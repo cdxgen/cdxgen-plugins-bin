@@ -21,6 +21,32 @@ plugins {
  */
 val HEADLESS_JVM_ARGS = listOf("-Djava.awt.headless=true", "-Dapple.awt.UIElement=true")
 
+/**
+ * P28 review: the heap the corpus/bench tier forks with, in GiB.
+ *
+ * `-Pkosi.testHeapGb=<n>` pins it (CI passes 6, the number P15 calibrated to
+ * the runners). Unset, a developer's machine takes HALF its physical RAM,
+ * clamped to [6, 24] — the standing rule is that the big tests run locally,
+ * and a tier capped at a CI runner's budget cannot host the repos P28 exists
+ * to analyse: dagger produces no report at all under 8g.
+ *
+ * Clamped at both ends on purpose. The floor keeps a small machine at the
+ * measured-good 6g rather than something that GC-thrashes; the ceiling stops
+ * a 128 GiB workstation from reserving 64 GiB it will never touch, which
+ * turns a quick suite into a paging one.
+ */
+val kosiTestHeapGb: Int = (findProperty("kosi.testHeapGb") as String?)?.toIntOrNull()
+    ?: run {
+        val physicalGb = try {
+            (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+                as? com.sun.management.OperatingSystemMXBean)
+                ?.totalMemorySize?.div(1L shl 30)?.toInt()
+        } catch (_: Throwable) {
+            null
+        }
+        ((physicalGb ?: 12) / 2).coerceIn(6, 24)
+    }
+
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
@@ -126,7 +152,20 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
                 // the deps cap is retired. At 3g and 4g the warmed matrix
                 // GC-thrashed without dying (measured, P15); 6g completes,
                 // and the ceiling is a measurement, not a concession.
-                "-Xmx6g",
+                //
+                // P28 review: 6g stays the CI ceiling (it is calibrated to
+                // the runners the matrix runs on, and a fork that outgrows a
+                // shared box dies as a SIGKILL with no output). It is NOT a
+                // ceiling for a developer's machine, where the standing rule
+                // is that the bigger tests run locally: dagger needs more
+                // than 8g to produce a report at all, so a 6g tier is a tier
+                // that cannot host the repos this phase exists to analyse.
+                // Local runs take half of physical RAM, clamped to [6, 24]
+                // GiB; CI and anyone who wants the old number pass
+                // -Pkosi.testHeapGb=6. Whatever is chosen is PRINTED below
+                // beside the JVM, because a heap that changes by machine and
+                // is never stated is how a reproduction stops reproducing.
+                "-Xmx${kosiTestHeapGb}g",
                 "-XX:MaxMetaspaceSize=1g",
                 "-XX:MaxDirectMemorySize=256m",
                 "-XX:+ExitOnOutOfMemoryError",
@@ -138,7 +177,13 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
             // (silent, ~34s in, twice) was undiagnosable without this line.
             println(
                 "kosi tier JVM: " + javaLauncher.get().metadata.languageVersion.asInt() +
-                    " @ " + javaLauncher.get().executablePath.asFile.absolutePath,
+                    " @ " + javaLauncher.get().executablePath.asFile.absolutePath +
+                    // P28 review: the heap now varies by machine (half of
+                    // physical, unless -Pkosi.testHeapGb pins it). An
+                    // unstated varying heap is how one machine's green run
+                    // and another's OOM become impossible to compare.
+                    " heap=" + kosiTestHeapGb + "g" +
+                    if (findProperty("kosi.testHeapGb") != null) " (pinned)" else " (auto: half of physical)",
             )
         }
         configure(this)
