@@ -80,6 +80,12 @@ class DeepTierTest {
             for (cap in listOf("access-path-collapse", "slices", "composed-path-depth", "summary-effect-budget", "summary-state-budget")) {
                 if ((truncations[cap] ?: 0) > 0) binding.add("${entry.slug}: $cap=${truncations[cap]}")
             }
+            // P29: the front end's walk budget and stack-overflow skip are
+            // named caps too — a deep fixture (six or more real layers) that
+            // tripped either would be degraded, not analysed.
+            for (code in listOf(io.cdxgen.kosi.schema.DiagnosticCodes.PSI_DEPTH_CAP, io.cdxgen.kosi.schema.DiagnosticCodes.STACK_OVERFLOW_SKIPPED)) {
+                if (report.diagnostics.any { it.code == code }) binding.add("${entry.slug}: $code")
+            }
             val partial = report.dataFlow?.slices.orEmpty().count { it.pathKind == "partial" }
             if (partial > 0) binding.add("${entry.slug}: partial-traces=$partial")
             val fixpointCaps = report.stats.fixpointCapHits + report.stats.sccIterationCapHits

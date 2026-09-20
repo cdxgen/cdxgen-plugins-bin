@@ -114,6 +114,10 @@ object Main {
         parsed.requireNoPositionals("analyze", "--dir <path>")
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
+        // P29 taxonomy: a FILE path analysed "successfully" as an empty
+        // tree — no build files, no sources, a clean-looking report about
+        // nothing. kir dump already refuses it; analyze does too now.
+        if (!Files.isDirectory(dir)) throw UsageException("--dir ${dir} is not a directory")
         val options = optionsFrom(parsed)
         // P23 §0: a pairing whose OUTPUT would mislead is refused before the
         // run, in the same spirit as `--reachable-symbols` and `--format
@@ -876,16 +880,24 @@ internal fun memoryAdvice(t: Throwable): String? {
     // source, not the machine.
     if (chain.any { it is StackOverflowError }) {
         return "kosi: this is a CALL STACK overflow, not a heap problem — raising -Xmx will not help.\n" +
-            "kosi: kosi walks source syntax recursively, so a single deeply nested expression can " +
-            "exhaust the stack: a 2,000-term `a + b + c + ...` is enough, whatever the heap.\n" +
-            "kosi: retry with a larger thread stack, e.g. `java -Xss64m -jar kosi-all.jar ...`. " +
-            "If that does not do it, the file is beyond what this build can lower; " +
-            "see docs/KOSI.md, \"How much memory\"."
+            "kosi: kosi walks source syntax recursively and bounds every walk (per-file `psi-depth-cap` " +
+            "and `stack-overflow-skipped` diagnostics), so an overflow reaching here came from outside " +
+            "those boundaries.\n" +
+            "kosi: the analysis already runs on a 512 MB stack; retry with a larger one only if the report " +
+            "itself says which file was skipped, e.g. `java -Xss512m -jar kosi-all.jar ...`. " +
+            "See docs/KOSI.md, \"How much stack\"."
     }
     val memoryShaped = chain.any { it is OutOfMemoryError || it is NoClassDefFoundError }
     if (!memoryShaped) return null
     val maxHeapBytes = Runtime.getRuntime().maxMemory()
-    val heap = if (maxHeapBytes == Long.MAX_VALUE) "unbounded" else "${maxHeapBytes / (1L shl 30)} GiB"
+    // P29 taxonomy: "-Xmx256m" divided to "0 GiB" — an integer floor that
+    // misstates the very heap the advice is about. Sub-gigabyte heaps are
+    // named in MiB.
+    val heap = when {
+        maxHeapBytes == Long.MAX_VALUE -> "unbounded"
+        maxHeapBytes >= (1L shl 30) -> "${maxHeapBytes / (1L shl 30)} GiB"
+        else -> "${maxHeapBytes / (1L shl 20)} MiB"
+    }
     val physical = try {
         (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
             as? com.sun.management.OperatingSystemMXBean)

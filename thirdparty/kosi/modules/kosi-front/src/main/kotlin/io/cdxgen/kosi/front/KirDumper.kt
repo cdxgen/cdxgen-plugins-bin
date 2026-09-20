@@ -69,31 +69,36 @@ object KirDumper {
                 t,
             )
         }
-        env.use { env ->
-            val workspace = env.session.modulesWithFiles.keys
-                .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
-                .firstOrNull() ?: throw Analyzer.AnalysisException("kir dump: session built no workspace module")
-            val lowered = KirLowering.lower(env, workspace)
-            val module = KirModule(lowered.functions.sortedBy { it.canonicalName })
-            val findings = KirValidator.validate(module)
-            if (findings.isNotEmpty()) {
-                throw Analyzer.AnalysisException(
-                    "kir dump: CFG validation failed: " +
-                        findings.take(10).joinToString("; ") { "${it.function} ${it.block}: ${it.problem}" },
-                )
-            }
-            val warnings = buildList {
-                if (jdkResolution is JdkModules.Resolution.NotFound) {
-                    add(jdkResolution.tried)
-                }
-                if (lowered.failures.isNotEmpty()) {
-                    add(
-                        "lowering failures: " + lowered.failures.entries.sortedWith(compareBy({ it.key }, { it.value }))
-                            .joinToString(", ") { "${it.key}=${it.value}" },
+        // P29: the dump lowers the same PSI trees the analyze pipeline does,
+        // so it runs on the same explicit analysis stack for the same
+        // reason — the default stack is the ceiling that should not exist.
+        return runOnAnalysisStack {
+            env.use { env ->
+                val workspace = env.session.modulesWithFiles.keys
+                    .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
+                    .firstOrNull() ?: throw Analyzer.AnalysisException("kir dump: session built no workspace module")
+                val lowered = KirLowering.lower(env, workspace)
+                val module = KirModule(lowered.functions.sortedBy { it.canonicalName })
+                val findings = KirValidator.validate(module)
+                if (findings.isNotEmpty()) {
+                    throw Analyzer.AnalysisException(
+                        "kir dump: CFG validation failed: " +
+                            findings.take(10).joinToString("; ") { "${it.function} ${it.block}: ${it.problem}" },
                     )
                 }
+                val warnings = buildList {
+                    if (jdkResolution is JdkModules.Resolution.NotFound) {
+                        add(jdkResolution.tried)
+                    }
+                    if (lowered.failures.isNotEmpty()) {
+                        add(
+                            "lowering failures: " + lowered.failures.entries.sortedWith(compareBy({ it.key }, { it.value }))
+                                .joinToString(", ") { "${it.key}=${it.value}" },
+                        )
+                    }
+                }
+                KirWriter.write(module) to warnings
             }
-            return KirWriter.write(module) to warnings
         }
     }
 }

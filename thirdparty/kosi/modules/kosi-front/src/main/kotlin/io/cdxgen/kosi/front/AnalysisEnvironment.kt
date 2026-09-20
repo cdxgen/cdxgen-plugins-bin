@@ -57,7 +57,24 @@ class AnalysisEnvironment private constructor(
 
     private val psiFactory = KtPsiFactory(project, markGenerated = false)
 
-    fun parseFile(text: String): KtFile = psiFactory.createFile(text)
+    /**
+     * P29 crash taxonomy: a file of several MB is not Kotlin to the
+     * platform's file-type layer — it materialises as PsiPlainTextFileImpl
+     * and `createFile` died with a bare ClassCastException naming two
+     * classes and no action. The condition is diagnosable, so it says what
+     * happened and what it means; the per-file callers degrade this file to
+     * a diagnostic and keep the run.
+     */
+    fun parseFile(text: String): KtFile = try {
+        psiFactory.createFile(text)
+    } catch (e: ClassCastException) {
+        throw Analyzer.AnalysisException(
+            "the file text (${text.length} characters) could not be parsed as Kotlin: the platform's " +
+                "file-type layer classified it as plain text, which typically means the file is several " +
+                "megabytes of generated code; its declarations and usages are absent from the report",
+            e,
+        )
+    }
 
     fun collectParseErrors(file: KtFile): List<PsiErrorElement> {
         val errors = mutableListOf<PsiErrorElement>()

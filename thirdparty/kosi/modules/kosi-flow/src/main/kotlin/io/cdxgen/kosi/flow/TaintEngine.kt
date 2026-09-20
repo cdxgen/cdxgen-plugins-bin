@@ -842,12 +842,33 @@ object TaintEngine {
             options.shouldStop?.invoke()?.let { code ->
                 return Slot(cf, null, code)
             }
-            return Slot(cf, analyseFunction(cf, context), null)
+            // P29: the per-function boundary. The KIR this engine walks was
+            // produced under the front end's walk budget, so a stack
+            // overflow here should not happen — and if one ever does it
+            // degrades THIS function to a counted truncation named
+            // `stack-overflow` (merged on the collector thread, which is the
+            // only thread that touches the map), never the whole run.
+            val outcome = try {
+                analyseFunction(cf, context)
+            } catch (e: StackOverflowError) {
+                return Slot(cf, null, "stack-overflow")
+            }
+            return Slot(cf, outcome, null)
         }
 
-        val slots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {
-            val width = minOf(options.dataflowWorkers, compiled.size)
-            val pool = java.util.concurrent.Executors.newFixedThreadPool(width)
+        // P29: functions whose analysis hit StackOverflowError, collected on
+        // this (collector) thread in compiled order.
+        val stackOverflowFunctions = mutableListOf<String>()
+
+        val slots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {            val width = minOf(options.dataflowWorkers, compiled.size)
+            // P29: the workers carry the same explicit analysis stack as the
+            // front end's thread (kosi-front `WalkBudgets.ANALYSIS_STACK_BYTES`;
+            // duplicated here because this module deliberately does not see
+            // the front end) — default-sized stacks are the defect this
+            // phase removes, and a lazy-committed reservation costs nothing.
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(width) { runnable ->
+                Thread(null, runnable, "kosi-dataflow", 512L * 1024 * 1024)
+            }
             try {
                 val futures = compiled.map { cf -> pool.submit(java.util.concurrent.Callable { analyseSlot(cf) }) }
                 futures.map { it.get() }
@@ -871,6 +892,12 @@ object TaintEngine {
                 }
                 if (kind == DiagnosticCodes.ANALYSIS_TIME_BUDGET || kind == DiagnosticCodes.RSS_BUDGET) {
                     stopCode = kind
+                }
+                // P29: a stack-overflow skip is named, not just counted —
+                // the affected function is absent from every slice, and an
+                // operator has to be able to find it.
+                if (kind == "stack-overflow") {
+                    stackOverflowFunctions.add(slot.cf.function.canonicalName)
                 }
                 continue
             }
@@ -969,6 +996,18 @@ object TaintEngine {
                     severity = Severity.INFO,
                     message = "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent",
                     count = count,
+                ),
+            )
+        }
+        if (stackOverflowFunctions.isNotEmpty()) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.STACK_OVERFLOW_SKIPPED,
+                    severity = Severity.ERROR,
+                    message = "dataflow analysis exhausted the stack on ${stackOverflowFunctions.size} function(s), " +
+                        "which are absent from every slice: " +
+                        stackOverflowFunctions.take(10).joinToString(", "),
+                    count = stackOverflowFunctions.size,
                 ),
             )
         }
