@@ -120,4 +120,44 @@ class DeepTierTest {
         }
         assertTrue(deepest >= 6, "the deep tier's deepest named flow is $deepest frames; the axis demands six")
     }
+
+    /**
+     * P28 (R176): `generated-functions` is a POLICY skip, and the two
+     * vocabularies cannot leak into each other. The witness is a fixture
+     * that actually skips generated bodies (the tracker measured 21 on
+     * layered-app, 11 on class-delegation) — an invariant over fixtures
+     * that skip nothing would be vacuous, exactly the R63 shape. Restore
+     * the defect (generated-functions merged into `truncations{}`) and the
+     * first assertion fails by naming it.
+     */
+    @Test
+    fun generatedFunctionsArePolicySkipsNeverTruncations() {
+        val dir = repoRoot.resolve("fixtures/layered-app")
+        val report = Analyzer.analyze(dir, defaultOptionsFor(dir), "test")
+        val truncations = report.dataFlow?.stats?.truncations.orEmpty()
+        val skips = report.dataFlow?.stats?.skips.orEmpty()
+        assertEquals(
+            null,
+            truncations["generated-functions"],
+            "a policy skip reported as a truncation: $truncations (R176)",
+        )
+        val skipped = skips["generated-functions"] ?: 0
+        assertTrue(
+            skipped > 0 || report.stats.policySkips["generated-functions"] ?: 0 > 0,
+            "the witness fixture skips no generated body; the invariant is vacuous — pick a fixture that does " +
+                "(tracker measured 21 on layered-app at P27)",
+        )
+        assertEquals(
+            skipped,
+            report.stats.policySkips["generated-functions"] ?: 0,
+            "dataFlow.stats.skips and stats.policySkips are one fact; two answers is the R137 shape",
+        )
+    }
+
+    private fun defaultOptionsFor(dir: Path): AnalyzeOptions {
+        val manifest = CorpusManifest.load(repoRoot.resolve("corpus.toml"))
+        val entry = manifest.entries.firstOrNull { it.path != null && repoRoot.resolve(it.path!!) == dir.toAbsolutePath().normalize() }
+        return AnalyzeOptions(dataflow = DataflowMode.SECURITY, backend = Backend.RESOLVED)
+            .let { opts -> entry?.classpathFile?.let { opts.copy(classpathFile = it) } ?: opts }
+    }
 }

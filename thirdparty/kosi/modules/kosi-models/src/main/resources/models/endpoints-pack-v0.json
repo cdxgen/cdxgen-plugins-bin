@@ -25,6 +25,9 @@
   "description": "The framework registry for endpoint, service and URL detection (P7). The detector matches RESOLVED annotation FQNs, DSL callee FQNs and supertype names against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a framework. A framework the pack does not name is invisible by construction, and every pattern here is validated by a build-time test. annotation FQNs must resolve through the workspace declarations or a real classpath: an unresolved annotation keeps its PSI short name and only matches when the pack pattern is itself a short name, which is never \u2014 type identity, not name matching, is what keeps a homonym annotation from becoming an endpoint.",
   "frameworks": [
     {
+      "contextParameterTypes": [
+        "android.content.Context"
+      ],
       "handlerInput": "all",
       "id": "android",
       "kind": "manifest",
@@ -36,6 +39,9 @@
       ]
     },
     {
+      "contextParameterTypes": [
+        "com.amazonaws.services.lambda.runtime.Context"
+      ],
       "handlerInput": "all",
       "id": "aws-lambda",
       "kind": "supertype",
@@ -171,6 +177,9 @@
     },
     {
       "_p19_comment": "P19: the substring markers (Grpc, GrpcKt) STAY \u2014 restoring the liveness sweep's first deletion attempt: they are the disambiguator that refuses a homonym ImplBase without Grpc in its supertype name (fixtures/grpc-service's grpcbad half pins it), and each is individually inert only because the other carries the same conjunct for every real generated base.",
+      "contextParameterTypes": [
+        "io.grpc.stub.StreamObserver"
+      ],
       "handlerInput": "all",
       "id": "grpc",
       "kind": "supertype",

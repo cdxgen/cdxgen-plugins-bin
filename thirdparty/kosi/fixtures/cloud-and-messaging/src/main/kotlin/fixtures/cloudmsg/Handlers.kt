@@ -11,6 +11,12 @@
 // pack entry changes this fixture's report).
 // kosi:want endpoint framework=aws-lambda fn=~LambdaHandler.handleRequest mode=resolved
 // kosi:want endpoint framework=aws-lambda fn=~StreamLambdaHandler.handleRequest mode=resolved
+//
+// P28 §2 (docs: the Context argument is the runtime's, not the event's):
+// under handlerInput=all the event parameter still seeds, and the declared
+// context type does not. Both directions pinned.
+// kosi:want flow source=untrusted-input sink=process-exec fn=~LambdaHandler.handleRequest mode=endpoint
+// kosi:want-not flow source=~ sink=~ fn=~ContextOnlyHandler.handleRequest mode=endpoint
 // kosi:want endpoint framework=azure-functions path=hello mode=resolved
 // kosi:want endpoint framework=azure-functions path=queued mode=resolved
 // kosi:want endpoint framework=graphql fn=~GraphApi.book mode=resolved
@@ -27,6 +33,7 @@
 // kosi:want endpoint framework=spring-messaging fn=~Listeners.tick mode=resolved
 package fixtures.cloudmsg
 
+import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestHandler
 import com.amazonaws.services.lambda.runtime.RequestStreamHandler
 import com.microsoft.azure.functions.annotation.BindingName
@@ -53,12 +60,28 @@ import org.springframework.stereotype.Controller
 // ---- AWS Lambda: the supertype shape --------------------------------------
 
 class LambdaHandler : RequestHandler<String, String> {
-    fun handleRequest(input: String, context: Any): String = input
+    override fun handleRequest(input: String, context: Context): String {
+        // P28 §2: the EVENT is the payload (`all`), the Context beside it is
+        // the framework's own — the flow pins the first, the want-not below
+        // pins the second.
+        Runtime.getRuntime().exec(input)
+        return input
+    }
 }
 
 class StreamLambdaHandler : RequestStreamHandler {
-    override fun handleRequest(input: java.io.InputStream, output: java.io.OutputStream, context: Any) {
+    override fun handleRequest(input: java.io.InputStream, output: java.io.OutputStream, context: Context) {
     }
+}
+
+/**
+ * P28 §2: only the Context reaches a sink — nothing may flow from it. The
+ * FIELD read is the pin: under the defect the context seeds FIELD-BEARING
+ * and `context.functionName` derives taint, so the want-not fails.
+ */
+class ContextOnlyHandler : RequestHandler<String, String> {
+    override fun handleRequest(input: String, context: Context): String =
+        Runtime.getRuntime().exec(context.functionName).toString()
 }
 
 // ---- Azure Functions: the annotation shape --------------------------------

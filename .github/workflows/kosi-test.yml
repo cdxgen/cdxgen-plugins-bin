@@ -44,18 +44,18 @@ jobs:
           distribution: temurin
           java-version: 21
       - name: Gradle build (unit + fixture tiers)
-        run: ./gradlew build --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 build --no-daemon
       - name: Corpus ratchet (fixtures tier, security + all)
-        run: ./gradlew corpusQuick --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 corpusQuick --no-daemon
       - name: Digest goldens
-        run: ./gradlew golden --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 golden --no-daemon
       - name: PSI reflection metadata is current
         # Derived from the jar, not traced from a run: a Kotlin syntax kind
         # the fixtures do not contain used to kill the native binary at the
         # first file that used it (R98).
         run: make psi-metadata-check
       - name: Tier task presence
-        run: ./gradlew corpusTierList --no-daemon --console=plain -q
+        run: ./gradlew -Pkosi.testHeapGb=6 corpusTierList --no-daemon --console=plain -q
 
   # Pinned real-repo tiers. Fetches through git into .corpus-cache/ at exact
   # SHAs; a repo that moves upstream still resolves because of the pin.
@@ -94,7 +94,7 @@ jobs:
           done
         working-directory: thirdparty/kosi
       - name: Corpus full tier
-        run: ./gradlew corpusFull --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 corpusFull --no-daemon
 
   # ON DEMAND (workflow_dispatch). The native-image spike must keep working —
   # the binary builds, runs, and its output is byte-identical across runs —

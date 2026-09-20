@@ -27,6 +27,15 @@ data class ApiEndpoint(
      * point" with this field, so it travels on every endpoint.
      */
     val foundBy: String = "annotation",
+    /**
+     * P28 (R178): does the handler EXIST in the analysed code? A manifest
+     * endpoint names a class the AndroidManifest declares; when no analysed
+     * declaration matches (a library activity, or a run that discovered no
+     * sources — dagger published 53 of them beside `no-sources`), the
+     * endpoint is still a real manifest claim but kosi READ nothing of its
+     * behaviour: `substantiated=false` says "did not look", never "found".
+     */
+    val substantiated: Boolean = true,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -39,6 +48,7 @@ data class ApiEndpoint(
         w.str("foundBy", foundBy)
         w.str("handlerCanonicalName", handlerCanonicalName)
         w.str("handlerSymbol", handlerSymbol)
+        w.bool("substantiated", substantiated)
         w.beginArray("deepLinkHosts")
         for (d in (deepLinkHosts ?: emptyList()).sorted()) w.str(d)
         w.endArray()

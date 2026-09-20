@@ -87,7 +87,7 @@ object Main {
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
         "api-version", "jvm-target", "opt-in", "multiplatform-target", "format",
-        "classpath", "classpath-file", "jdk-home", "reachable-symbols", "sarif-out",
+        "classpath", "classpath-file", "classpath-strategy", "jdk-home", "reachable-symbols", "sarif-out",
         "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
@@ -261,6 +261,13 @@ object Main {
             jvmTarget = parsed.value("jvm-target") ?: defaults.jvmTarget,
             classpath = parsed.values("classpath"),
             classpathFile = parsed.value("classpath-file"),
+            classpathStrategy = parsed.value("classpath-strategy")?.let {
+                io.cdxgen.kosi.schema.ClasspathStrategy.fromId(it)
+                    ?: throw UsageException(
+                        "unknown classpath strategy '$it' " +
+                            "(auto, explicit, file, jars, cache, none)",
+                    )
+            } ?: defaults.classpathStrategy,
             jdkHome = parsed.value("jdk-home"),
             progressive = parsed.bool("progressive", defaults.progressive),
             optIn = parsed.values("opt-in"),
@@ -722,6 +729,11 @@ object Main {
               --jvm-target <v>                override JVM target (diagnosed)
               --classpath <jar>               repeatable: explicit classpath jar for the resolved backend
               --classpath-file <file>         file of jar paths (one per line, # comments)
+              --classpath-strategy <strategy> auto (default: explicit -> file -> jars -> cache), or force
+                                              one: explicit (flags only), file (classpath.txt/.classpath
+                                              in the analysed tree), jars (libs/ directories), cache
+                                              (offline scan of ~/.gradle and ~/.m2), none; the winner is
+                                              published in stats.classpath on every run
               --jdk-home <path>               JDK module for the resolved backend (default: running JVM)
               --backend <syntax|resolved|compile>
                                               analysis tier; `compile` is a DECLARED GAP: it runs the
@@ -819,8 +831,62 @@ fun main(args: Array<String>) {
         System.err.println(
             "kosi: " + (t.message?.take(400)?.ifBlank { null } ?: t::class.simpleName + " (no message)"),
         )
+        // P28 review: a heap-exhaustion death used to print its class name
+        // and nothing else. dagger (1,950 files) at -Xmx8g died with
+        // `kosi: io/cdxgen/kosi/flow/Summarizer$compute$4` — a
+        // NoClassDefFoundError, because a JVM too starved to load one more
+        // class reports the class it could not load, not the reason. That
+        // reads as a kosi bug, or as a corrupt jar; it is neither, and the
+        // one thing that would have fixed it (a bigger heap) was the one
+        // thing the message did not mention. R177's disease, one layer in:
+        // a failure whose entire message is a class name.
+        memoryAdvice(t)?.let { System.err.println(it) }
         if (System.getenv("KOSI_TRACE") != null) t.printStackTrace()
         io.cdxgen.kosi.cli.ExitCodes.RUNTIME
     }
     kotlin.system.exitProcess(code)
+}
+
+/**
+ * P28 review: the advice a memory-shaped death owes the operator.
+ *
+ * `OutOfMemoryError` says so itself. The one that does not is
+ * `NoClassDefFoundError`: a JVM with no room to define one more class fails
+ * at whichever class it happened to need, so the message is a class name and
+ * the cause is invisible. dagger (1,950 files) at `-Xmx8g` printed
+ * `io/cdxgen/kosi/flow/Summarizer$compute$4` and exited 3; the same run at
+ * `-Xmx16g` produces a complete 1,950-file report. Nothing about the first
+ * message pointed at the heap.
+ *
+ * The advice names the heap that was actually in effect, because "raise
+ * -Xmx" is useless without knowing what it is now, and reports the machine's
+ * physical memory so the suggestion is one the operator can actually take.
+ * Returns null for failures that are not memory-shaped — a wrong guess here
+ * would send someone tuning the JVM over a real defect.
+ */
+internal fun memoryAdvice(t: Throwable): String? {
+    val memoryShaped = generateSequence(t) { it.cause }.take(8).any {
+        it is OutOfMemoryError || it is NoClassDefFoundError || it is StackOverflowError
+    }
+    if (!memoryShaped) return null
+    val maxHeapBytes = Runtime.getRuntime().maxMemory()
+    val heap = if (maxHeapBytes == Long.MAX_VALUE) "unbounded" else "${maxHeapBytes / (1L shl 30)} GiB"
+    val physical = try {
+        (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+            as? com.sun.management.OperatingSystemMXBean)
+            ?.totalMemorySize?.let { "${it / (1L shl 30)} GiB" }
+    } catch (_: Throwable) {
+        null
+    }
+    return buildString {
+        append("kosi: this looks like memory exhaustion, not a defect in the analysed code. ")
+        append("The heap was $heap")
+        physical?.let { append("; this machine has $it physical") }
+        append(".\n")
+        append("kosi: a NoClassDefFoundError naming a kosi class is what a starved JVM reports — ")
+        append("it fails at whatever class it needed next, so the message is never the reason.\n")
+        append("kosi: retry with a larger heap, e.g. `java -Xmx16g -jar kosi-all.jar ...`. ")
+        append("Repositories of a few thousand source files with a resolved classpath need 16 GiB or more; ")
+        append("see docs/KOSI.md, \"How much memory\".")
+    }
 }

@@ -198,6 +198,25 @@ private object TaintFactOps : FactOps<TaintFact> {
  * is sorted before ids are assigned. Two runs on one input produce
  * byte-identical evidence.
  */
+/**
+ * P28 §2: the value types an `all` payload can arrive as WITHOUT fields —
+ * framework-independent (kotlin/java String and primitives), so no pack can
+ * widen or narrow it by omission. An unresolved type is NOT simple: it seeds
+ * field-bearing, the triage-over-silence direction.
+ *
+ * Top-level and `internal` so `AllPayloadSimpleTypesTest` can check every
+ * spelling here against the pack's doc-derived `simpleParameterTypes`. It was
+ * private, and the copy had drifted: it said `java.lang.Char`, which is not a
+ * JVM type, and nothing could disagree with it (R168).
+ */
+internal val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
+    "kotlin.String", "kotlin.Int", "kotlin.Long", "kotlin.Short", "kotlin.Byte",
+    "kotlin.Double", "kotlin.Float", "kotlin.Boolean", "kotlin.Char",
+    "java.lang.String", "java.lang.Integer", "java.lang.Long", "java.lang.Short",
+    "java.lang.Byte", "java.lang.Double", "java.lang.Float", "java.lang.Boolean",
+    "java.lang.Character",
+)
+
 object TaintEngine {
 
     /** File path -> (relativePath, modulePath), plus the module purl lookup. Same shape as the graph's attribution. */
@@ -340,6 +359,17 @@ object TaintEngine {
         /** Unknown calls through which taint actually propagated: measurable precision loss. */
         val unknownCallPropagations: Int,
         val truncations: Map<String, Int>,
+        /**
+         * P28 (R176): functions SKIPPED BY POLICY, not cut by a cap —
+         * `--dataflow-skip-generated` skipping synthetic bodies. Their
+         * summaries still apply, so nothing is lost and the counter was
+         * never a truncation: reporting it as one buried the real cap
+         * signal (coil's summary-state-budget beside 301
+         * "truncations" that meant "working as intended") and the number
+         * GROWS as the engine synthesises more, reading as a regression
+         * when it is the opposite. `truncations{}` is caps only.
+         */
+        val skips: Map<String, Int> = emptyMap(),
         val diagnostics: List<Diagnostic>,
         /** P5: the converged summaries (computed ones plus pack-derived ones). */
         val summaries: List<io.cdxgen.kosi.schema.FlowSummary>,
@@ -607,6 +637,13 @@ object TaintEngine {
     fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
         val diagnostics = mutableListOf<Diagnostic>()
         val truncations = java.util.TreeMap<String, Int>()
+        val skips = java.util.TreeMap<String, Int>()
+        /**
+         * R176: the skip kinds that are POLICY, not caps — reported in
+         * `skips{}`, never in `truncations{}`. Anything added here is a
+         * deliberate, lossless exclusion whose summaries still apply.
+         */
+        val POLICY_SKIPS = setOf("generated-functions")
         val candidates = mutableListOf<SliceCandidate>()
         val nodeInfos = java.util.TreeSet<NodeInfo>(compareBy { it.sortKey })
         var functionsAnalysed = 0
@@ -824,7 +861,14 @@ object TaintEngine {
             val outcome = slot.outcome
             if (outcome == null) {
                 val kind = slot.skippedKind ?: "dataflow-truncated"
-                truncations.merge(kind, 1, Int::plus)
+                // R176: policy skips are not truncations. The generated
+                // bodies' summaries still apply; a cap counter that includes
+                // them lies about what bounded the run.
+                if (kind in POLICY_SKIPS) {
+                    skips.merge(kind, 1, Int::plus)
+                } else {
+                    truncations.merge(kind, 1, Int::plus)
+                }
                 if (kind == DiagnosticCodes.ANALYSIS_TIME_BUDGET || kind == DiagnosticCodes.RSS_BUDGET) {
                     stopCode = kind
                 }
@@ -928,6 +972,22 @@ object TaintEngine {
                 ),
             )
         }
+        // R176: policy skips carry their own vocabulary — a diagnostic here
+        // would re-create the very confusion the split exists to end (a
+        // skip is not a truncation), but SILENCE is not the alternative
+        // either: the counts are published in stats.skips{} and
+        // stats.policySkips{} for consumers.
+        for ((kind, count) in skips) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.DATAFLOW_SKIPPED_POLICY,
+                    severity = Severity.INFO,
+                    message = "$count function(s) skipped by policy '$kind' (summaries still apply; nothing " +
+                        "was cut by a cap — see stats.policySkips)",
+                    count = count,
+                ),
+            )
+        }
 
         if (stopCode != null) {
             diagnostics.add(
@@ -962,7 +1022,7 @@ object TaintEngine {
         // consumer must parse — `truncations{}` per cap, empty when none
         // bound (which is the depth doctrine's claim, checkable).
         val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
-            .let { it.copy(stats = it.stats.copy(truncations = truncations)) }
+            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips)) }
         return Result(
             evidence = evidence,
             functionsAnalysed = functionsAnalysed,
@@ -971,6 +1031,7 @@ object TaintEngine {
             sinkSites = sinkSites,
             unknownCallPropagations = unknownCallPropagations,
             truncations = truncations,
+            skips = skips,
             diagnostics = diagnostics.sortedWith(Diagnostic.COMPARATOR),
             summaries = allSummaries,
             sccsProcessed = summaryResult.sccsProcessed,
@@ -1383,8 +1444,34 @@ object TaintEngine {
                 // it, and every unrelated value reachable through it.
                 "context" -> valueParams.map { null }
 
-                else -> valueParams.mapIndexed { index, param ->
-                    param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category, index)
+                // P28 §2: `all` means the parameter IS the payload — but the
+                // docs of the `all` frameworks themselves name collaborators
+                // handed in BESIDE it (AWS Lambda's runtime Context is "the
+                // second argument", gRPC's StreamObserver carries responses
+                // OUT, Android's onReceive Context is the framework's own).
+                // A declared context type is excluded under `all` exactly as
+                // under annotated-or-bound; a type not listed stays data —
+                // the same triage-over-silence direction.
+                //
+                // An OBJECT payload seeds FIELD-BEARING (the P27 §2 rule for
+                // Spring's command objects, and for the same measured
+                // reason): a gRPC request message, a Lambda event POJO, an
+                // Android Bundle all carry the request on their FIELDS, and
+                // a bare fact derives nothing on `request.name` — the
+                // plainest flow in any grpc service would be invisible.
+                else -> {
+                    val contextTypes = context.options.endpointContextParameterTypes[framework].orEmpty()
+                    valueParams.mapIndexed { index, param ->
+                        when {
+                            isContextType(param.resolvedType, contextTypes) -> null
+                            else -> param.register to TaintFact(
+                                SummaryAnalysis.ENTRY_SITE,
+                                category,
+                                index,
+                                fieldBearing = !isSimpleType(param.resolvedType, ALL_PAYLOAD_SIMPLE_TYPES),
+                            )
+                        }
+                    }
                 }
             }.filterNotNull()
             context.recordEntryFacts(facts.size)
@@ -1414,7 +1501,7 @@ object TaintEngine {
          * treated as a command object: the direction that produces a finding
          * to triage rather than a silence.
          */
-        private fun isSimpleType(resolved: String?, simpleTypes: List<String>): Boolean {
+        private fun isSimpleType(resolved: String?, simpleTypes: Collection<String>): Boolean {
             if (simpleTypes.isEmpty()) return false
             val type = (resolved ?: return false).substringBefore('<').removeSuffix("[]")
             return simpleTypes.any { type == it || type.endsWith(".$it") }

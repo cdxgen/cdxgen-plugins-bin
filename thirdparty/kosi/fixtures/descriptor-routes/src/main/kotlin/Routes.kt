@@ -77,3 +77,14 @@ class WrappingFilter {
     fun doFilter(request: HttpServletRequest, chain: FilterChain): String =
         request.getParameter("debug") ?: ""
 }
+
+// P28 §2: a filter reading a parameter through the BASE interface — the
+// type jakarta/javax.servlet.Filter.doFilter actually receives. The source
+// row javax.servlet.ServletRequest.getParameter was missing: the read was
+// endpoints evidence but never a taint source, on exactly the code an
+// audit cares about first.
+// kosi:want flow source=untrusted-input sink=process-exec fn=~BaseTypeFilter mode=resolved
+class BaseTypeFilter {
+    fun doFilter(request: javax.servlet.ServletRequest, chain: FilterChain): Process =
+        Runtime.getRuntime().exec(request.getParameter("cmd") ?: "")
+}

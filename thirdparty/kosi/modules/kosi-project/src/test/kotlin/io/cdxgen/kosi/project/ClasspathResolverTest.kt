@@ -55,7 +55,12 @@ class ClasspathResolverTest {
             """.trimIndent(),
         )
         assertEquals(
-            listOf(ClasspathResolver.Coordinate("org.jetbrains.kotlin", "kotlin-stdlib", null)),
+            // P28: a version.ref that resolves against [versions] yields the
+            // resolved version — previously this scanned version-less and
+            // the locator guessed the highest cached version. An unresolvable
+            // ref (rich versions) still yields null, pinned in
+            // versionCatalogGroupMapFormAndVersionRefsAreScanned.
+            listOf(ClasspathResolver.Coordinate("org.jetbrains.kotlin", "kotlin-stdlib", "2.4.0")),
             ClasspathResolver.scan(toml).filter { it.group == "org.jetbrains.kotlin" },
         )
 
@@ -421,6 +426,236 @@ class ClasspathResolverTest {
         assertTrue(
             result.missing.contains("io.example:unrelated-lib:1.0.0"),
             "a same-group library with a different base is NOT a variant sibling; missing=${result.missing}",
+        )
+    }
+
+    // ---- P28 §1: the acquisition strategy chain ---------------------------------
+
+    private fun writePlainJar(path: java.nio.file.Path) = writeJar(path, "io/example/x/Api.class")
+
+    /**
+     * A flag-less run discovers a `classpath.txt` at the analysed root — the
+     * warmed-corpus convention — and the report vocabulary names the FILE
+     * strategy as the producer. Restore-proof: before P28 there was no file
+     * strategy at all, so the same tree fell straight to the offline scan,
+     * attached nothing, and reported a clean classpath-less run.
+     */
+    @Test
+    fun autoDiscoversAClasspathFileAtTheAnalysedRoot() {
+        val root = Files.createTempDirectory("kosi-cp-file")
+        Files.createDirectories(root.resolve("libs"))
+        writePlainJar(root.resolve("libs/pinned-1.0.jar"))
+        root.resolve("classpath.txt").writeText("libs/pinned-1.0.jar\n")
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        assertEquals("file", result.strategy)
+        assertEquals(1, result.jars.size, "the discovered classpath.txt attaches its jar: ${result.jars}")
+        // file fires, so the chain stops: only file is attempted.
+        assertEquals(listOf("file"), result.attempts.map { it.strategy })
+    }
+
+    /** An Eclipse `.classpath` names jars by project-relative path. */
+    @Test
+    fun eclipseClasspathEntriesAttachRelativeToTheRoot() {
+        val root = Files.createTempDirectory("kosi-cp-eclipse")
+        Files.createDirectories(root.resolve("vendor"))
+        writePlainJar(root.resolve("vendor/lib-2.0.jar"))
+        root.resolve(".classpath").writeText(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <classpath>
+                <classpathentry kind="src" path="src"/>
+                <classpathentry kind="lib" path="vendor/lib-2.0.jar"/>
+                <classpathentry kind="lib" path="vendor/absent.jar"/>
+                <classpathentry kind="output" path="bin"/>
+            </classpath>
+            """.trimIndent(),
+        )
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        assertEquals("file", result.strategy)
+        assertEquals(listOf("lib-2.0.jar"), result.jars.map { it.jar.fileName.toString() })
+        assertEquals(listOf("vendor/absent.jar"), result.missing, "a lib entry with no jar on disk is reported, never skipped")
+    }
+
+    /**
+     * A `libs/` directory at the root or a module attaches as the JARS
+     * strategy — the Android convention for plain vendored jars.
+     */
+    @Test
+    fun jarDirectoriesAttachWhenNoClasspathFileExists() {
+        val root = Files.createTempDirectory("kosi-cp-jars")
+        val module = root.resolve("app")
+        Files.createDirectories(module.resolve("libs"))
+        writePlainJar(module.resolve("libs/vendored-1.0.jar"))
+        writePlainJar(module.resolve("libs/vendored-1.0-sources.jar"))
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root, module))
+        assertEquals("jars", result.strategy)
+        assertEquals(
+            listOf("vendored-1.0.jar"),
+            result.jars.map { it.jar.fileName.toString() },
+            "sources jars are never attached",
+        )
+    }
+
+    /**
+     * Forcing a strategy runs EXACTLY that one — the flag is how a test (or
+     * a user) measures a single mechanism with no fall-through, and the
+     * attempts list proves which strategies ran.
+     */
+    @Test
+    fun forcedStrategyRunsExactlyOneMechanism() {
+        val root = Files.createTempDirectory("kosi-cp-forced")
+        Files.createDirectories(root.resolve("libs"))
+        writePlainJar(root.resolve("libs/vendored-1.0.jar"))
+        root.resolve("classpath.txt").writeText("libs/vendored-1.0.jar\n")
+        root.resolve("build.gradle.kts").writeText(
+            """dependencies { implementation("io.example:missing-core:1.0.0") }""",
+        )
+
+        val forcedCache = ClasspathResolver.resolve(
+            root, emptyList(), null, listOf(root),
+            strategy = io.cdxgen.kosi.schema.ClasspathStrategy.CACHE,
+        )
+        assertEquals(listOf("cache"), forcedCache.attempts.map { it.strategy })
+        assertTrue(forcedCache.jars.isEmpty(), "nothing is in any cache; got ${forcedCache.jars}")
+        assertEquals(listOf("io.example:missing-core:1.0.0"), forcedCache.missing)
+
+        val forcedJars = ClasspathResolver.resolve(
+            root, emptyList(), null, listOf(root),
+            strategy = io.cdxgen.kosi.schema.ClasspathStrategy.JARS,
+        )
+        assertEquals(listOf("jars"), forcedJars.attempts.map { it.strategy })
+        assertEquals("jars", forcedJars.strategy)
+
+        val forcedNone = ClasspathResolver.resolve(
+            root, emptyList(), null, listOf(root),
+            strategy = io.cdxgen.kosi.schema.ClasspathStrategy.NONE,
+        )
+        assertEquals("none", forcedNone.strategy)
+        assertTrue(forcedNone.attempts.isEmpty(), "none runs nothing")
+        assertTrue(forcedNone.jars.isEmpty())
+    }
+
+    /**
+     * A tree where nothing fires reports `none` EXPLICITLY, with every
+     * discovery attempt recorded — the state R179 was: a classpath-less run
+     * that read as a clean one.
+     */
+    @Test
+    fun nothingAttachingReportsNoneExplicitlyWithEveryAttempt() {
+        val root = Files.createTempDirectory("kosi-cp-none")
+        Files.createDirectories(root)
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        assertEquals("none", result.strategy)
+        assertEquals(0, result.jars.size)
+        assertEquals(
+            listOf("file", "jars", "cache"),
+            result.attempts.map { it.strategy },
+            "the full discovery chain ran and every attempt is recorded",
+        )
+        assertTrue(result.attempts.all { it.jars == 0 })
+        assertTrue(result.attempts.all { it.note != null }, "each attempt says what it looked at")
+    }
+
+    /**
+     * Explicit flags are AUTHORITATIVE: a classpath.txt at the root does not
+     * merge into a flagged run, and a flagged run never falls through to
+     * discovery (flags say exactly what the classpath is).
+     */
+    @Test
+    fun explicitFlagsDoNotFallThroughToDiscovery() {
+        val root = Files.createTempDirectory("kosi-cp-explicit")
+        Files.createDirectories(root.resolve("libs"))
+        writePlainJar(root.resolve("libs/discovered-1.0.jar"))
+        root.resolve("classpath.txt").writeText("libs/discovered-1.0.jar\n")
+        writePlainJar(root.resolve("flagged-9.9.jar"))
+
+        val result = ClasspathResolver.resolve(
+            root, listOf(root.resolve("flagged-9.9.jar")), null, listOf(root),
+        )
+        assertEquals(listOf("explicit"), result.attempts.map { it.strategy })
+        assertEquals(listOf("flagged-9.9.jar"), result.jars.map { it.jar.fileName.toString() })
+    }
+
+    /**
+     * A version catalog's `group`/`name` map form — the spelling `exposed`
+     * declares its ENTIRE dependency set in — is one of the two forms
+     * Gradle's catalog documentation shows, and P28 found the scanner read
+     * neither it nor the `[versions]` alias its `version.ref` points at.
+     * Restore-proof: with the map form unscanned, exposed's cache strategy
+     * attached ZERO jars against a tree full of declarations.
+     */
+    @Test
+    fun versionCatalogGroupMapFormAndVersionRefsAreScanned() {
+        val toml = Files.createTempFile("kosi-cp-toml", ".versions.toml")
+        toml.writeText(
+            """
+            [versions]
+            kotlin = "2.1.0"
+            coroutines = { strictly = "[1.9, 2.0[", prefer = "1.9.0" }
+
+            [libraries]
+            kotlin-stdlib = { group = "org.jetbrains.kotlin", name = "kotlin-stdlib", version.ref = "kotlin" }
+            coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+            short-form = "org.slf4j:slf4j-api:2.0.13"
+            module-form = { module = "io.ktor:ktor-server-core", version.ref = "kotlin" }
+            """.trimIndent(),
+        )
+        val scanned = ClasspathResolver.scan(toml)
+        assertEquals(
+            ClasspathResolver.Coordinate("org.jetbrains.kotlin", "kotlin-stdlib", "2.1.0"),
+            scanned.first { it.artifact == "kotlin-stdlib" },
+            "group/name map form with a resolvable version.ref",
+        )
+        assertEquals(
+            ClasspathResolver.Coordinate("org.jetbrains.kotlinx", "kotlinx-coroutines-core", null),
+            scanned.first { it.artifact == "kotlinx-coroutines-core" },
+            "a rich (non-literal) version yields a version-less coordinate, never a guess",
+        )
+        assertEquals(
+            ClasspathResolver.Coordinate("org.slf4j", "slf4j-api", "2.0.13"),
+            scanned.first { it.artifact == "slf4j-api" },
+        )
+        assertEquals(
+            ClasspathResolver.Coordinate("io.ktor", "ktor-server-core", "2.1.0"),
+            scanned.first { it.artifact == "ktor-server-core" },
+            "module map form with a version.ref",
+        )
+    }
+
+    /**
+     * A repo whose root has no build file but whose dependencies live in
+     * NESTED independent builds (`koin`: `projects/` carries its own
+     * settings.gradle) — the cache scan falls back to the nested build
+     * files instead of reporting `none` against a tree full of
+     * declarations. The fallback only fires when the primary scan found
+     * nothing, so a normal repo's nested samples never merge in.
+     */
+    @Test
+    fun nestedIndependentBuildsAreScannedWhenTheRootDeclaresNothing() {
+        val root = Files.createTempDirectory("kosi-cp-nested")
+        val build = root.resolve("projects")
+        Files.createDirectories(build)
+        build.resolve("settings.gradle.kts").writeText("""include("core")""")
+        build.resolve("build.gradle.kts").writeText(
+            """dependencies { implementation("org.koin:koin-core:3.5.6") }""",
+        )
+
+        val result = ClasspathResolver.resolve(root, emptyList(), null, listOf(root))
+        val cache = result.attempts.first { it.strategy == "cache" }
+        assertTrue(
+            cache.note!!.startsWith("1 coordinate(s)") && cache.note.contains("nested"),
+            "the nested fallback scanned the one declaration: ${cache.note}",
+        )
+        // Whether it attaches is machine-cache-dependent; that it was SEEN
+        // is not: the coordinate is attached or reported missing.
+        assertTrue(
+            result.jars.any { it.coordinate?.toString() == "org.koin:koin-core:3.5.6" } ||
+                result.missing.contains("org.koin:koin-core:3.5.6"),
+            "the nested declaration is either attached or missing, never invisible; missing=${result.missing}",
         )
     }
 }

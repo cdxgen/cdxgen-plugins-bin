@@ -13,6 +13,8 @@ class XmlElement(
     val name: String,
     var text: String = "",
     val children: MutableList<XmlElement> = mutableListOf(),
+    /** `name="value"` attributes on the opening tag (P28: an Eclipse `.classpath` carries its jar rows as attributes). */
+    val attrs: Map<String, String> = emptyMap(),
 ) {
     fun child(name: String): XmlElement? = children.firstOrNull { it.name == name }
 
@@ -20,6 +22,8 @@ class XmlElement(
 
     fun textOr(name: String, fallback: String? = null): String? =
         child(name)?.text?.takeIf { it.isNotBlank() } ?: fallback
+
+    fun attr(name: String): String? = attrs[name]
 
     /** Depth-first search for the first element with [name] (e.g. build/plugins). */
     fun findRecursive(name: String): XmlElement? {
@@ -51,7 +55,7 @@ class XmlElement(
                     owner.text = if (owner.text.isEmpty()) textContent else owner.text
                 }
                 if (closing.isEmpty()) {
-                    val element = XmlElement(tagName, "")
+                    val element = XmlElement(tagName, "", attrs = parseAttrs(match.groupValues[3]))
                     stack.last().children.add(element)
                     if (selfClosing != "/") stack.addLast(element)
                 } else {
@@ -63,6 +67,18 @@ class XmlElement(
                 lastMatchEnd = match.range.last + 1
             }
             return fakeRoot.children.firstOrNull() ?: XmlElement("empty")
+        }
+
+        /** `name="value"` pairs from an opening tag's attribute text. */
+        private val ATTR = Regex("""([A-Za-z0-9_.:-]+)\s*=\s*("[^"]*"|'[^']*')""")
+
+        private fun parseAttrs(text: String): Map<String, String> {
+            if (text.isBlank()) return emptyMap()
+            val attrs = linkedMapOf<String, String>()
+            for (match in ATTR.findAll(text)) {
+                attrs[match.groupValues[1]] = match.groupValues[2].substring(1, match.groupValues[2].length - 1)
+            }
+            return attrs
         }
     }
 }

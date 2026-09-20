@@ -61,11 +61,26 @@ checkouts at the same commit under different Gradle cache states.
 
 ### Classpath
 
-The resolved tier needs the project's dependencies on disk. kosi resolves
-them from the build's own view (Gradle/Maven module metadata and the local
-caches) and reports what it could not find rather than guessing. Two numbers
-tell you how well it did:
+The resolved tier needs the project's dependencies on disk. kosi ACQUIRES
+them through a named chain of read-only strategies, tried in order until one
+attaches a jar — `--classpath-strategy` forces exactly one, and the report
+names the winner on every run:
 
+1. `explicit` — `--classpath` / `--classpath-file` flags (what cdxgen passes).
+2. `file` — a classpath file already in the analysed tree: `classpath.txt`
+   (the warmed convention) or an Eclipse `.classpath`.
+3. `jars` — a `libs/` directory of vendored jars.
+4. `cache` — offline: coordinates parsed as text from build files, located
+   in `~/.gradle/caches/modules-2` and `~/.m2/repository`.
+
+`stats.classpath` publishes `{strategy, entries, missing, attempts[]}` —
+`attempts[]` records every strategy the chain tried and whether it fired,
+`strategy` is the winner or **`none`, stated explicitly**: a classpath-less
+run and a run that found nothing produce the same sparse graph and are
+opposite facts, and the report is where you tell them apart. Three numbers
+tell you how well the attached classpath did:
+
+- `stats.classpath.entries` / `missing` — how much of it attached.
 - `stats.resolvedCallRatio` — the share of call sites whose callee kosi
   resolved. Below roughly 0.9 the call graph is partial, and everything
   downstream of it (reachability, interprocedural taint) is partial with it.
@@ -79,10 +94,20 @@ it never reaches the output. Each line is a jar path, or a
 `group:artifact:version=jar` binding when what matters is that a coordinate is
 present rather than what it contains.
 
-For repeatable measurement on a corpus, `scripts/warm-corpus-classpath.sh`
-fetches and pins the classpath first; a report taken against a cold cache and
-one taken against a warm cache are not comparable, and a measured finding
-floor belongs to the warm one.
+kosi itself never executes the analysed build (see THREAT_MODEL.md). The
+strategies that DO run build tooling live in the operator-side
+`scripts/acquire-classpath.sh <dir>`: Gradle dependency reports (per
+subproject, all configurations — Android variants included), Maven
+`dependency:build-classpath`, a present classpath file, a jar directory, and
+the text-declared coordinates handed to kosi's own cache scan. Each arm
+reports whether it fired; the winner writes `<dir>/classpath.txt` with a
+`# strategy:` provenance header, which the `file` strategy then picks up.
+`--pull` additionally downloads each coordinate's transitive closure into
+the local caches (a dependency report lists coordinates without downloading
+their jars). For pinned corpus repos,
+`scripts/warm-corpus-classpath.sh` remains the measurement-side warmer; a
+report taken against a cold cache and one taken against a warm cache are not
+comparable, and a measured finding floor belongs to the warm one.
 
 ## What the analysis sees
 
@@ -235,6 +260,50 @@ cdxgen runs kosi through `lib/ecosystems/kosi.js` and evinse:
 `CDXGEN_KOSI_DISABLE=1` skips kosi entirely: the run logs once and the BOM
 stays valid with zero kosi artifacts. A missing or unusable kosi binary is a
 silent fallback by design, never a failed BOM.
+
+## How much memory
+
+kosi holds the whole analysed workspace — every source file's PSI, the
+resolved symbols behind it, and the attached classpath's classes — in one
+heap. Memory therefore scales with the repository, and the default JVM heap
+(a quarter of physical RAM) is not enough for a large one.
+
+| repository size | `-Xmx` | measured |
+|---|---|---|
+| up to ~500 source files | 4 GiB | AndroGoat (34 files, 223-jar classpath) peaks around 1 GiB |
+| ~500–2,000 files | 8 GiB | okhttp (573), coil (452), detekt (1,105) all complete |
+| ~2,000+ files, or a resolved classpath | **16 GiB or more** | dagger (1,950 files) produces **no report at all** under 8 GiB; it completes at 16 GiB. thunderbird-android (3,318) completes at 8 GiB |
+
+```
+java -Xmx16g -jar kosi-all.jar analyze --dir <repo> ...
+```
+
+**A starved run does not say "out of memory".** A JVM with no room to define
+one more class throws `NoClassDefFoundError` naming whichever class it
+happened to need next, which can be a kosi class, a Kotlin stdlib class, or an
+IntelliJ one. dagger at `-Xmx8g` failed with nothing but
+`kosi: io/cdxgen/kosi/flow/Summarizer$compute$4`. kosi now recognises that
+shape and prints the heap it was given, the machine's physical memory, and the
+suggestion to raise `-Xmx` — but if you see a bare class name from an older
+build, the heap is the first thing to check.
+
+Analysis time is bounded separately by `--max-analysis-seconds` and resident
+size by `--max-rss-mb`; both are reported as diagnostics rather than silent
+truncation. Some repositories are slow for reasons memory cannot fix — see the
+open summary-application cost in the tracker (R185).
+
+### Memory for the test tiers
+
+The corpus and bench tiers fork their own JVM. That fork takes **half of
+physical RAM, clamped to [6, 24] GiB**, and prints what it chose:
+
+```
+kosi tier JVM: 21 @ /path/to/java heap=24g (auto: half of physical)
+```
+
+Pin it with `-Pkosi.testHeapGb=<n>`. CI pins 6, the value P15 calibrated to
+the shared runners; a developer machine gets the larger share because the
+bigger corpus tiers are meant to run locally.
 
 ## Platform support
 

@@ -171,6 +171,32 @@ object SourceCollector {
             .takeWhile { it.fileName != null }
             .any { it.toString() in EXCLUDED_DIRS }
 
+    /**
+     * P28 (R179): how many `.kt`/`.java` files exist under the analysed root
+     * under the SAME exclusion policy as [collect] — the denominator of
+     * source coverage. A report that discovered 1 file where 1 039 exist
+     * must be able to say so; without this number the two are the same
+     * report. `.kts` stays excluded for the same reason [collect] excludes
+     * it: build scripts are not application sources.
+     */
+    fun presentCount(root: Path): Int {
+        val rootAbs = root.toAbsolutePath().normalize()
+        return try {
+            Files.walk(rootAbs).use { stream ->
+                stream.filter { Files.isRegularFile(it) }
+                    .filter { p -> !isInExcludedDir(root, p) }
+                    .filter { p ->
+                        val n = p.fileName.toString()
+                        n.endsWith(".kt") || n.endsWith(".java")
+                    }
+                    .count()
+                    .toInt()
+            }
+        } catch (_: Exception) {
+            0
+        }
+    }
+
     private const val FileEvidence_LANGUAGE_KOTLIN = "kotlin"
     private const val FileEvidence_LANGUAGE_JAVA = "java"
 }

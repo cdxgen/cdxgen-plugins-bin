@@ -48,13 +48,13 @@ jobs:
           echo "version=${latest:-2.4.20-RC}" >> "$GITHUB_OUTPUT"
           echo "tracking Kotlin $latest"
       - name: Build against the EAP
-        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} build --no-daemon || true
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} build --no-daemon || true
       - name: Corpus ratchet (fixtures, both syntax slots + resolved)
         id: corpusQuick
-        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} corpusQuick --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} corpusQuick --no-daemon
       - name: eap tier (future-syntax fixture)
         id: eapTier
-        run: ./gradlew -PkotlinVersion=${{ steps.eap.outputs.version }} kosiEap --no-daemon
+        run: ./gradlew -Pkosi.testHeapGb=6 -PkotlinVersion=${{ steps.eap.outputs.version }} kosiEap --no-daemon
       - name: Report (the job warns; it never blocks a release)
         if: always()
         run: |

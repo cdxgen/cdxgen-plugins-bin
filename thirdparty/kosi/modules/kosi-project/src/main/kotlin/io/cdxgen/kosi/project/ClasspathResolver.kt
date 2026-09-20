@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.project
 
+import io.cdxgen.kosi.schema.ClasspathStrategy
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.streams.toList
@@ -7,11 +8,18 @@ import kotlin.streams.toList
 /**
  * Offline classpath resolution for the resolved tier (02-ARCHITECTURE.md §3,
  * acquisition order): explicit `--classpath`/`--classpath-file` jars first,
- * then coordinates parsed as text from the project's own build files located
- * in the local Gradle/Maven caches and project-local build outputs. Nothing is
- * downloaded and no build is executed; every coordinate that cannot be found
- * is reported to the caller so the analysis can emit a `classpath-partial`
- * diagnostic naming it — a partial classpath is never silent.
+ * then a classpath file already present in the analysed tree (`classpath.txt`,
+ * an Eclipse `.classpath`), then a jar directory (`libs/`), then coordinates
+ * parsed as text from the project's own build files located in the local
+ * Gradle/Maven caches and project-local build outputs. Nothing is downloaded
+ * and no build is executed; every coordinate that cannot be found is reported
+ * to the caller so the analysis can emit a `classpath-partial` diagnostic
+ * naming it — a partial classpath is never silent.
+ *
+ * P28 §1: the strategies are a NAMED CHAIN, not one silent path. Each
+ * attempt is recorded with whether it fired; the winner — or `none` — is
+ * published in `stats.classpath` so a classpath-less run and a run that
+ * found nothing are distinguishable in the report (R173/R179's zero).
  */
 object ClasspathResolver {
 
@@ -22,20 +30,23 @@ object ClasspathResolver {
 
     data class ResolvedJar(val jar: Path, val purl: String, val coordinate: Coordinate?)
 
+    /** One acquisition attempt; `jars > 0` means it fired. */
+    data class Attempt(val strategy: String, val jars: Int, val note: String?)
+
     data class Result(
         val jars: List<ResolvedJar>,
-        /** Coordinates named by build files but not found in any local cache. */
+        /** Coordinates named by the fired strategy but not found in any local cache. */
         val missing: List<String>,
         /** True when the classpath came from explicit flags rather than discovery. */
         val fromExplicitFlags: Boolean,
+        /** The winning [ClasspathStrategy] id, or `none` when nothing attached. */
+        val strategy: String,
+        /** Every strategy the chain tried, in order, with its outcome. */
+        val attempts: List<Attempt>,
     )
 
-    fun resolve(
-        root: Path,
-        explicitJars: List<Path>,
-        explicitFile: Path?,
-        moduleDirs: List<Path>,
-    ): Result {
+    /** One strategy's isolated collection: jars + what it could not attach. */
+    private class AttemptRun {
         val jars = linkedMapOf<String, ResolvedJar>()
         val missing = mutableSetOf<String>()
 
@@ -43,128 +54,324 @@ object ClasspathResolver {
             val key = jar.toAbsolutePath().normalize().toString()
             if (!jars.containsKey(key)) jars[key] = ResolvedJar(jar, purl, coordinate)
         }
+    }
 
-        var explicit = false
-        if (explicitJars.isNotEmpty() || explicitFile != null) {
-            explicit = true
-            val fileCoordinates = LinkedHashMap<Coordinate, Int>()
-            // P17: a coordinate BOUND to a committed jar
-            // (`g:a:v=libs/foo.jar`). A bare `g:a:v` line resolves against
-            // the machine-local Gradle cache, so a fixture pinning one was
-            // machine-dependent through the very `classpath-partial`
-            // diagnostic the pin was meant to make deterministic (R105).
-            // The bound form attaches the jar WITH the coordinate, so
-            // dependency markers, purls and diagnostics are identical on
-            // every machine.
-            val boundCoordinates = LinkedHashMap<Coordinate, Path>()
-            val paths = buildList {
-                addAll(explicitJars)
-                if (explicitFile != null && Files.isRegularFile(explicitFile)) {
-                    for (line in explicitFile.toFile().readLines()) {
-                        val trimmed = line.trim()
-                        if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
-                        // The file carries jar paths or dependency coordinates
-                        // (build-produced classpath files list g:a:v lines).
-                        val parts = trimmed.split(':')
-                        when {
-                            trimmed.endsWith(".jar") && trimmed.contains('=') && trimmed.substringBefore('=').split(':').size >= 3 -> {
-                                val coord = trimmed.substringBefore('=').split(':')
-                                val raw = Path.of(trimmed.substringAfter('='))
-                                val resolved = if (raw.isAbsolute) raw else {
-                                    explicitFile.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw
-                                }
-                                boundCoordinates.putIfAbsent(
-                                    Coordinate(coord[0], coord[1], coord.last()),
-                                    resolved,
-                                )
-                            }
-                            trimmed.endsWith(".jar") -> {
-                                // RELATIVE entries resolve against the
-                                // classpath file's own directory, so a
-                                // committed fixture file stays portable
-                                // (warm repo files carry absolute paths and
-                                // are unaffected).
-                                val raw = Path.of(trimmed)
-                                val resolved = if (raw.isAbsolute) raw else {
-                                    explicitFile.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw
-                                }
-                                add(resolved)
-                            }
-                            parts.size >= 3 -> fileCoordinates.putIfAbsent(
-                                // Gradle tree lines can carry
-                                // `requested -> resolved` version chains
-                                // after the arrow conversion; the resolved
-                                // (last) version is what the cache holds.
-                                Coordinate(parts[0], parts[1], parts.last()),
-                                0,
-                            )
-                            // Version-less lines cannot be located; ignoring
-                            // them keeps the missing list meaningful.
-                        }
-                    }
-                }
+    fun resolve(
+        root: Path,
+        explicitJars: List<Path>,
+        explicitFile: Path?,
+        moduleDirs: List<Path>,
+        strategy: ClasspathStrategy = ClasspathStrategy.AUTO,
+    ): Result {
+        // The chain. Explicit flags are AUTHORITATIVE: when the caller named
+        // jars, explicit is the only strategy that runs (flags say exactly
+        // what the classpath is — mixing a failed flag with discovery would
+        // attach jars the caller never named, silently). Discovery runs only
+        // flag-less: file -> jars -> cache, first to attach a jar wins.
+        val chain: List<ClasspathStrategy> = when (strategy) {
+            ClasspathStrategy.AUTO ->
+                if (explicitJars.isNotEmpty() || explicitFile != null) listOf(ClasspathStrategy.EXPLICIT)
+                else listOf(ClasspathStrategy.FILE, ClasspathStrategy.JARS, ClasspathStrategy.CACHE)
+            ClasspathStrategy.NONE -> emptyList()
+            else -> listOf(strategy)
+        }
+
+        val attempts = mutableListOf<Attempt>()
+        var winner: Pair<ClasspathStrategy, AttemptRun>? = null
+        var lastRun: AttemptRun? = null
+        for (step in chain) {
+            val run = AttemptRun()
+            val note = when (step) {
+                ClasspathStrategy.EXPLICIT -> runExplicit(run, explicitJars, explicitFile, root, moduleDirs.toSet())
+                ClasspathStrategy.FILE -> runPresentFile(run, root, moduleDirs)
+                ClasspathStrategy.JARS -> runJarDirectory(run, root, moduleDirs)
+                ClasspathStrategy.CACHE -> runCacheScan(run, root, moduleDirs)
+                else -> null
             }
-            for (p in paths) {
-                if (Files.isRegularFile(p)) {
-                    add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
-                } else {
-                    missing.add(p.toString())
-                }
-            }
-            for ((coordinate, jar) in boundCoordinates) {
-                if (Files.isRegularFile(jar)) {
-                    add(jar, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
-                } else {
-                    missing.add("${coordinate}=${jar.fileName}")
-                }
-            }
-            for (coordinate in fileCoordinates.keys) {
-                val found = locate(coordinate, root, moduleDirs.toSet())
-                if (found == null) {
-                    missing.add(coordinate.toString())
-                } else {
-                    add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
-                }
-            }
-        } else {
-            val coordinates = LinkedHashSet<Coordinate>()
-            val moduleSet = moduleDirs.toSet()
-            for (dir in moduleDirs) {
-                collectBuildFiles(root, dir, moduleSet).forEach { file ->
-                    coordinates.addAll(scan(file))
-                }
-            }
-            for (coordinate in coordinates) {
-                val found = locate(coordinate, root, moduleSet)
-                if (found == null) {
-                    missing.add(coordinate.toString())
-                } else {
-                    add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
-                }
-            }
-            // Project-local build outputs: jars this workspace itself produced.
-            for (dir in moduleDirs) {
-                val libs = dir.resolve("build/libs")
-                if (Files.isDirectory(libs)) {
-                    val names = Files.list(libs).use { it.toList() }
-                        .map { it.fileName.toString() }
-                        .filter { it.endsWith(".jar") }
-                        .filter { !it.endsWith("-sources.jar") && !it.endsWith("-javadoc.jar") }
-                        .sorted()
-                    for (name in names) {
-                        val jar = libs.resolve(name)
-                        add(jar, GradleDiscovery.purl(null, name.removeSuffix(".jar"), null), null)
-                    }
-                }
+            attempts.add(Attempt(step.id, run.jars.size, note))
+            lastRun = run
+            if (run.jars.isNotEmpty()) {
+                winner = step to run
+                break
             }
         }
 
+        // Nothing fired: the run that DIDN'T fire last still owns the missing
+        // list — the offline scan's unlocatable coordinates are the honest
+        // `classpath-partial` diagnostic, and dropping them because zero jars
+        // attached would report a clean classpath-less run (the R73 shape).
+        val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun()))
         return Result(
-            jars = jars.values.sortedBy { it.purl },
-            missing = missing.toList().sorted(),
-            fromExplicitFlags = explicit,
+            jars = run.jars.values.sortedBy { it.purl },
+            missing = run.missing.toList().sorted(),
+            fromExplicitFlags = winningStrategy == ClasspathStrategy.EXPLICIT,
+            strategy = winningStrategy.id,
+            attempts = attempts,
         )
     }
+
+    // ---- explicit flags -----------------------------------------------------
+
+    private fun runExplicit(
+        run: AttemptRun,
+        explicitJars: List<Path>,
+        explicitFile: Path?,
+        root: Path,
+        moduleDirs: Set<Path>,
+    ): String? {
+        if (explicitJars.isEmpty() && explicitFile == null) {
+            return "no flags given"
+        }
+        for (p in explicitJars) {
+            if (Files.isRegularFile(p)) {
+                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
+            } else {
+                run.missing.add(p.toString())
+            }
+        }
+        var lines = 0
+        if (explicitFile != null && Files.isRegularFile(explicitFile)) {
+            lines = applyClasspathFileLines(run, explicitFile, root, moduleDirs)
+        }
+        return "flags: ${explicitJars.size} jar path(s), $lines classpath-file line(s)"
+    }
+
+    // ---- a classpath file already present in the analysed tree ---------------
+
+    /**
+     * `classpath.txt` at the analysed root (the warmed-corpus convention: jar
+     * paths and `g:a:v` coordinates, `#` comments — the same grammar the
+     * `--classpath-file` flag accepts), then an Eclipse `.classpath` whose
+     * `<classpathentry kind="lib">` rows name jars relative to the project
+     * root. `kind="var"`/`"container"`/`"output"`/`"src"` rows are not jar
+     * locations and are skipped.
+     */
+    private fun runPresentFile(run: AttemptRun, root: Path, moduleDirs: List<Path>): String? {
+        val notes = mutableListOf<String>()
+        val classpathTxt = root.resolve("classpath.txt")
+        if (Files.isRegularFile(classpathTxt)) {
+            applyClasspathFileLines(run, classpathTxt, root, moduleDirs.toSet())
+            notes.add("classpath.txt")
+        }
+        val eclipse = root.resolve(".classpath")
+        if (Files.isRegularFile(eclipse)) {
+            val libs = eclipseLibEntries(eclipse)
+            for (jar in libs) {
+                val resolved = if (jar.isAbsolute) jar else root.resolve(jar)
+                if (Files.isRegularFile(resolved)) {
+                    run.add(resolved, GradleDiscovery.purl(null, resolved.fileName.toString().removeSuffix(".jar"), null), null)
+                } else {
+                    run.missing.add(jar.toString())
+                }
+            }
+            notes.add(".classpath: ${libs.size} lib entries")
+        }
+        if (notes.isEmpty()) return "no classpath.txt or .classpath at the analysed root"
+        return notes.joinToString("; ")
+    }
+
+    /**
+     * The classpath-file grammar shared by `--classpath-file` and a discovered
+     * `classpath.txt`. P17 (R105) lives here: a coordinate BOUND to a
+     * committed jar (`g:a:v=libs/foo.jar`) attaches the jar WITH the
+     * coordinate — dependency markers, purls and diagnostics are identical on
+     * every machine — while a bare `g:a:v` line resolves against the
+     * machine-local caches. Gradle tree lines can carry
+     * `requested -> resolved` chains as `g:a:v1:v2`; the resolved (last)
+     * version is what the cache holds. Version-less lines cannot be located;
+     * ignoring them keeps the missing list meaningful. Returns how many
+     * non-comment lines the file carried.
+     */
+    private fun applyClasspathFileLines(run: AttemptRun, file: Path, root: Path, moduleDirs: Set<Path>): Int {
+        val boundCoordinates = LinkedHashMap<Coordinate, Path>()
+        val fileCoordinates = LinkedHashMap<Coordinate, Int>()
+        val jarLines = mutableListOf<Path>()
+        var lines = 0
+        for (line in file.toFile().readLines()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            lines++
+            val parts = trimmed.split(':')
+            when {
+                trimmed.endsWith(".jar") && trimmed.contains('=') && trimmed.substringBefore('=').split(':').size >= 3 -> {
+                    val coord = trimmed.substringBefore('=').split(':')
+                    val raw = Path.of(trimmed.substringAfter('='))
+                    // RELATIVE entries resolve against the classpath file's
+                    // own directory, so a committed fixture file stays
+                    // portable (warm repo files carry absolute paths and
+                    // are unaffected).
+                    val resolved = if (raw.isAbsolute) raw else {
+                        file.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw
+                    }
+                    boundCoordinates.putIfAbsent(Coordinate(coord[0], coord[1], coord.last()), resolved)
+                }
+                trimmed.endsWith(".jar") -> {
+                    val raw = Path.of(trimmed)
+                    jarLines.add(if (raw.isAbsolute) raw else file.toAbsolutePath().normalize().parent?.resolve(raw) ?: raw)
+                }
+                parts.size >= 3 -> fileCoordinates.putIfAbsent(Coordinate(parts[0], parts[1], parts.last()), 0)
+            }
+        }
+        for (p in jarLines) {
+            if (Files.isRegularFile(p)) {
+                run.add(p, GradleDiscovery.purl(null, p.fileName.toString().removeSuffix(".jar"), null), null)
+            } else {
+                run.missing.add(p.fileName.toString())
+            }
+        }
+        for ((coordinate, jar) in boundCoordinates) {
+            if (Files.isRegularFile(jar)) {
+                run.add(jar, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+            } else {
+                run.missing.add("${coordinate}=${jar.fileName}")
+            }
+        }
+        for (coordinate in fileCoordinates.keys) {
+            val found = locate(coordinate, root, moduleDirs)
+            if (found == null) {
+                run.missing.add(coordinate.toString())
+            } else {
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+            }
+        }
+        return lines
+    }
+
+    private fun eclipseLibEntries(file: Path): List<Path> {
+        val document = try {
+            XmlElement.parse(Files.readString(file))
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        // parse() yields a #document wrapper whose child is <classpath>; the
+        // entries can also sit deeper in a hand-merged file, so the recursive
+        // scan is the robust spelling either way.
+        val entries = mutableListOf<XmlElement>()
+        fun walk(element: XmlElement) {
+            entries.addAll(element.childrenNamed("classpathentry"))
+            element.children.forEach(::walk)
+        }
+        walk(document)
+        return entries
+            .filter { it.attr("kind") == "lib" }
+            .mapNotNull { it.attr("path")?.takeIf { p -> p.isNotBlank() }?.let(Path::of) }
+    }
+
+    // ---- a jar directory ------------------------------------------------------
+
+    /**
+     * `libs/` directories at the analysed root and under the discovered
+     * module directories (the Android convention ships plain jars there),
+     * excluding `-sources`/`-javadoc`. Root first, then modules in sorted
+     * order; deterministic everywhere.
+     */
+    private fun runJarDirectory(run: AttemptRun, root: Path, moduleDirs: List<Path>): String? {
+        val dirs = (listOf(root) + moduleDirs).distinct()
+        var jarDirs = 0
+        for (dir in dirs) {
+            val libs = dir.resolve("libs")
+            if (!Files.isDirectory(libs)) continue
+            jarDirs++
+            val names = Files.list(libs).use { it.toList() }
+                .map { it.fileName.toString() }
+                .filter { it.endsWith(".jar") }
+                .filter { !it.endsWith("-sources.jar") && !it.endsWith("-javadoc.jar") }
+                .sorted()
+            for (name in names) {
+                val jar = libs.resolve(name)
+                run.add(jar, GradleDiscovery.purl(null, name.removeSuffix(".jar"), null), null)
+            }
+        }
+        if (jarDirs == 0) return "no libs/ directory at the root or a module"
+        return "libs/: $jarDirs dir(s)"
+    }
+
+    // ---- the offline cache scan ----------------------------------------------
+
+    private fun runCacheScan(run: AttemptRun, root: Path, moduleDirs: List<Path>): String? {
+        val coordinates = LinkedHashSet<Coordinate>()
+        val moduleSet = moduleDirs.toSet()
+        for (dir in moduleDirs) {
+            collectBuildFiles(root, dir, moduleSet).forEach { file ->
+                coordinates.addAll(scan(file))
+            }
+        }
+        // P28: NESTED INDEPENDENT BUILDS. A repo whose root has no build file
+        // (`koin`: `projects/` and `examples/` each carry their own
+        // settings.gradle) is discovered as a plain tree, so the module scan
+        // above sees zero build files and the cache strategy reports `none`
+        // against a tree full of declarations. The fallback only fires when
+        // the primary scan found NOTHING — a normal repo's nested samples
+        // are not merged into its classpath.
+        var nested = 0
+        if (coordinates.isEmpty() && collectBuildFiles(root, root, moduleSet).isEmpty()) {
+            val nestedFiles = findNestedBuildFiles(root)
+            nested = nestedFiles.size
+            nestedFiles.forEach { coordinates.addAll(scan(it)) }
+        }
+        for (coordinate in coordinates) {
+            val found = locate(coordinate, root, moduleSet)
+            if (found == null) {
+                run.missing.add(coordinate.toString())
+            } else {
+                run.add(found, GradleDiscovery.purl(coordinate.group, coordinate.artifact, coordinate.version), coordinate)
+            }
+        }
+        // Project-local build outputs: jars this workspace itself produced.
+        for (dir in moduleDirs) {
+            val libs = dir.resolve("build/libs")
+            if (Files.isDirectory(libs)) {
+                val names = Files.list(libs).use { it.toList() }
+                    .map { it.fileName.toString() }
+                    .filter { it.endsWith(".jar") }
+                    .filter { !it.endsWith("-sources.jar") && !it.endsWith("-javadoc.jar") }
+                    .sorted()
+                for (name in names) {
+                    val jar = libs.resolve(name)
+                    run.add(jar, GradleDiscovery.purl(null, name.removeSuffix(".jar"), null), null)
+                }
+            }
+        }
+        val nestedNote = if (nested > 0) ", $nested nested build file(s)" else ""
+        return "${coordinates.size} coordinate(s) declared in build files$nestedNote"
+    }
+
+    /**
+     * Build files of nested independent builds (dirs with their own
+     * settings/build file below the analysed root), bounded in depth and
+     * excluding the same trees source discovery excludes, sorted for
+     * determinism. Capped at 200 files — a monorepo's full tree is not a
+     * dependency declaration of the thing being analysed.
+     */
+    private fun findNestedBuildFiles(root: Path): List<Path> {
+        val out = mutableListOf<Path>()
+        val maxDepth = 4
+        val seen = HashSet<Path>()
+        fun walk(dir: Path, depth: Int) {
+            if (out.size >= 200) return
+            val entries = try {
+                Files.list(dir).use { it.toList() }.sortedBy { it.fileName.toString() }
+            } catch (_: Exception) {
+                return
+            }
+            for (entry in entries) {
+                val name = entry.fileName.toString()
+                if (Files.isDirectory(entry)) {
+                    if (name in NESTED_SCAN_EXCLUDED || depth >= maxDepth) continue
+                    walk(entry, depth + 1)
+                } else if (name == "build.gradle.kts" || name == "build.gradle" || name == "pom.xml") {
+                    if (seen.add(entry.toAbsolutePath().normalize())) out.add(entry)
+                }
+            }
+        }
+        walk(root, 0)
+        return out
+    }
+
+    private val NESTED_SCAN_EXCLUDED = setOf(
+        "build", "target", ".git", ".gradle", ".idea", ".corpus-cache",
+        "node_modules", ".kosi", "out", "buildSrc",
+    )
 
     // ---- build-file collection ------------------------------------------
 
@@ -230,26 +437,75 @@ object ClasspathResolver {
         return out
     }
 
-    /** `name = "group:artifact:version"` entries under `[libraries]`. */
+    /**
+     * Version-catalog `[libraries]` entries in BOTH forms Gradle documents
+     * (gradle docs, "Centralized declaration of versions": the short form
+     * `name = "group:artifact:version"` and the map form
+     * `name = { group = "...", name = "...", version = "..." }`), with
+     * `version.ref = "alias"` resolved against the catalog's `[versions]`
+     * table. A `version.ref` whose alias carries no literal (rich versions,
+     * `{ strictly = ... }` — P28 found `exposed` declaring its whole
+     * dependency set this way) yields a version-less coordinate: the
+     * locator's highest-cached-version rule applies, same as a build-script
+     * property indirection.
+     */
     private fun scanVersionsToml(text: String): List<Coordinate> {
         val out = mutableListOf<Coordinate>()
+        var inVersions = false
         var inLibraries = false
+        // [versions] aliases with a literal value, for version.ref lookups.
+        val versionAliases = mutableMapOf<String, String>()
         for (raw in text.lines()) {
             val line = raw.substringBefore('#').trim()
             if (line.isEmpty()) continue
             if (line.startsWith("[")) {
+                inVersions = line == "[versions]"
                 inLibraries = line == "[libraries]"
                 continue
             }
-            if (!inLibraries) continue
-            // Both short form (name = "g:a:v") and map form
-            // (name = { module = "g:a:v", ... }) appear in catalogs.
-            val value = TOML_MODULE.find(line)?.groupValues?.get(1)
-                ?: line.substringAfter('=').trim().trim('"', '\'')
-            val parts = value.split(':')
-            if (parts.size >= 2 && parts[0].contains('.')) {
-                out.add(Coordinate(parts[0], parts[1], parts.getOrNull(2)))
+            if (inVersions) {
+                val alias = line.substringBefore('=').trim()
+                val value = line.substringAfter('=', "").trim()
+                val literal = TOML_STRING.find(value)?.groupValues?.get(1)
+                if (literal != null && !literal.startsWith("{")) versionAliases[alias] = literal
+                continue
             }
+            if (!inLibraries) continue
+            val value = line.substringAfter('=', "").trim()
+            // Short form: alias = "g:a[:v]" — a bare quoted string.
+            if (value.startsWith("\"")) {
+                val literal = value.trim('"', '\'')
+                val parts = literal.split(':')
+                if (parts.size >= 2 && parts[0].contains('.')) {
+                    val version = parts.getOrNull(2)?.takeUnless { it.isEmpty() }
+                        ?.takeIf { !it.contains('$') && !it.contains('{') }
+                    out.add(Coordinate(parts[0], parts[1], version))
+                }
+                continue
+            }
+            // Map form, module spelling: { module = "g:a[:v]", version = ... }
+            val moduleShort = TOML_MODULE.find(value)?.groupValues?.get(1)
+            if (moduleShort != null) {
+                val parts = moduleShort.split(':')
+                if (parts.size >= 2 && parts[0].contains('.')) {
+                    val version = parts.getOrNull(2)?.takeUnless { it.isEmpty() }
+                        ?: TOML_VERSION_REF.find(value)?.groupValues?.get(1)?.let { ref -> versionAliases[ref] }
+                    out.add(Coordinate(parts[0], parts[1], version))
+                }
+                continue
+            }
+            // Map form, group/name spelling: { group = "...", name = "...", version[.ref] = "..." }
+            val group = TOML_GROUP.find(value)?.groupValues?.get(1) ?: continue
+            val name = TOML_NAME.find(value)?.groupValues?.get(1) ?: continue
+            if (!group.contains('.')) continue
+            val versionRef = TOML_VERSION_REF.find(value)?.groupValues?.get(1)
+            val versionLiteral = TOML_VERSION.find(value)?.groupValues?.get(1)
+            val version = when {
+                versionLiteral != null && versionLiteral.contains('.') -> versionLiteral
+                versionRef != null -> versionAliases[versionRef]
+                else -> null
+            }
+            out.add(Coordinate(group, name, version))
         }
         return out
     }
@@ -553,6 +809,11 @@ object ClasspathResolver {
     }
 
     private val TOML_MODULE = Regex("""module\s*=\s*"([^"]+)"""")
+    private val TOML_GROUP = Regex("""\bgroup\s*=\s*"([^"]+)"""")
+    private val TOML_NAME = Regex("""\bname\s*=\s*"([^"]+)"""")
+    private val TOML_VERSION_REF = Regex("""version\.ref\s*=\s*"([^"]+)"""")
+    private val TOML_VERSION = Regex("""\bversion\s*=\s*"([^"]+)"""")
+    private val TOML_STRING = Regex("""^\s*"([^"]+)"\s*$""")
 
     private val GRADLE_COORDINATE = Regex("""["']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.${'$'}{}-]+)?(?::[^"']*)?)["']""")
 

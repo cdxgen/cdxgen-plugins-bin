@@ -71,7 +71,19 @@ data class Stats(
     /** P9: dependency methods lowered WITH bodies (the summary count's denominator). */
     val dependencyFunctions: Int = 0,
     val truncations: Map<String, Int>,
+    /**
+     * P28 (R176): skips BY POLICY (`generated-functions` under
+     * `--dataflow-skip-generated`) — deliberate, lossless exclusions whose
+     * summaries still apply. Beside [truncations] so the two vocabularies
+     * stay separate: a cap that binds is a defect (09-PRECISION §3b), a
+     * policy skip is working as intended.
+     */
+    val policySkips: Map<String, Int> = emptyMap(),
     val degraded: String?,
+    /** P28 §1: how the classpath was acquired, and what each strategy found. */
+    val classpath: ClasspathStats = ClasspathStats(),
+    /** P28 §4 (R179): source files discovered against source files present. */
+    val sourceCoverage: SourceCoverage = SourceCoverage(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -82,6 +94,7 @@ data class Stats(
         w.num("callsTotal", callsTotal)
         w.num("crossDependencySliceCount", crossDependencySliceCount)
         w.num("crossModuleSliceCount", crossModuleSliceCount)
+        classpath.writeJson(w, "classpath")
         w.str("degraded", degraded)
         w.num("declarationCount", declarationCount)
         w.num("fileCount", fileCount)
@@ -107,8 +120,84 @@ data class Stats(
             w.num(key, (truncations[key] ?: 0).toLong())
         }
         w.endObject()
+        w.beginObject("policySkips")
+        for (key in policySkips.keys.sorted()) {
+            w.num(key, (policySkips[key] ?: 0).toLong())
+        }
+        w.endObject()
         w.num("unknownCallPropagations", unknownCallPropagations)
         w.num("usageCount", usageCount)
+        sourceCoverage.writeJson(w, "sourceCoverage")
         w.endObject()
     }
 }
+
+/**
+ * P28 §4 (R179): the coverage denominator. `discovered` is files[]
+ * (.kt/.java); `present` counts the same extensions under the analysed root
+ * with the collector's own exclusion policy, so the two numbers answer one
+ * question. kotlinx.coroutines published 1/1 039 as a CLEAN report before
+ * this existed; now the ratio is data and a large gap is a diagnostic, not
+ * silence.
+ */
+data class SourceCoverage(
+    val discovered: Int = 0,
+    val present: Int = 0,
+) {
+    /** present == 0 is full coverage of an empty tree, not a division by zero. */
+    val ratio: Double get() = if (present <= 0) 1.0 else discovered.toDouble() / present
+
+    fun writeJson(w: JsonWriter, key: String? = null) {
+        w.beginObject(key)
+        w.num("discovered", discovered.toLong())
+        w.num("present", present.toLong())
+        w.dbl("ratio", ratio)
+        w.endObject()
+    }
+}
+
+/**
+ * P28 §1: the classpath acquisition record. `strategy` names the ONE
+ * strategy that produced the attached classpath — or `none` when nothing
+ * attached, which is stated EXPLICITLY because a classpath-less run and a
+ * run that found nothing produce the same sparse graph and are opposite
+ * facts (R173's measured zero, R179's healthy-looking zero). `attempts[]`
+ * records every strategy the chain tried and whether it fired, so "cache
+ * located 4 of 41 declared coordinates" is readable from the report without
+ * re-running anything. `note` is portable vocabulary — no absolute paths,
+ * which is what keeps the golden digests location-independent.
+ */
+data class ClasspathStats(
+    /** The winning [ClasspathStrategy] id, or `none`. */
+    val strategy: String = "none",
+    /** Jars the winner attached (the stdlib kosi itself adds is not counted). */
+    val entries: Int = 0,
+    /** Coordinates or files a fired strategy named but could not attach. */
+    val missing: Int = 0,
+    val attempts: List<ClasspathAttempt> = emptyList(),
+) {
+    fun writeJson(w: JsonWriter, key: String? = null) {
+        w.beginObject(key)
+        w.beginArray("attempts")
+        for (attempt in attempts) {
+            w.beginObject()
+            w.str("strategy", attempt.strategy)
+            w.num("jars", attempt.jars.toLong())
+            w.str("note", attempt.note)
+            w.endObject()
+        }
+        w.endArray()
+        w.num("entries", entries.toLong())
+        w.num("missing", missing.toLong())
+        w.str("strategy", strategy)
+        w.endObject()
+    }
+}
+
+/** One acquisition attempt: jars > 0 means it fired. */
+data class ClasspathAttempt(
+    val strategy: String,
+    val jars: Int,
+    /** What the attempt looked at, in portable vocabulary (no absolute paths). */
+    val note: String?,
+)

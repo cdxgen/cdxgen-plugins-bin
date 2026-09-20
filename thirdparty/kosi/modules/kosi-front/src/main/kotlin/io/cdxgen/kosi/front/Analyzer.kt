@@ -132,6 +132,7 @@ object Analyzer {
             discoverVersionPolicy(root, discovery.modules, options)
         val collected = SourceCollector.collect(root, versionedModules.map { it.module })
         val syntax = runSyntaxBackend(root, collected)
+        val (coverage, coverageDiagnostic) = sourceCoverageOf(root, collected)
 
         return assemble(
             root = root,
@@ -162,7 +163,7 @@ object Analyzer {
             },
             usages = syntax.usages,
             imports = syntax.imports,
-            diagnostics = versionDiagnostics + overrideDiagnostics + syntax.diagnostics,
+            diagnostics = versionDiagnostics + overrideDiagnostics + syntax.diagnostics + listOfNotNull(coverageDiagnostic),
             stats = Stats(
                 fileCount = syntax.fileCount,
                 declarationCount = syntax.declarations.size,
@@ -185,8 +186,41 @@ object Analyzer {
                 reachableSliceCount = 0,
                 truncations = emptyMap(),
                 degraded = null,
+                sourceCoverage = coverage,
             ),
         )
+    }
+
+    /**
+     * P28 §4 (R179): files discovered against files present, under the
+     * collector's own exclusion policy, plus the loud diagnostic when the
+     * gap is large. kotlinx.coroutines analysed 1 of 1 039 files and the
+     * report read as clean — `no-sources` could not fire because one file
+     * WAS found; the ratio is what makes that shape visible. Threshold:
+     * less than half of at least 20 present files — a dropped-module
+     * failure leaves under 10% (1/1039), while a normal repo whose modules
+     * all have conventional roots sits near 1.0.
+     */
+    private fun sourceCoverageOf(
+        root: Path,
+        collected: List<SourceCollector.CollectedFile>,
+    ): Pair<io.cdxgen.kosi.schema.SourceCoverage, Diagnostic?> {
+        val present = SourceCollector.presentCount(root)
+        val coverage = io.cdxgen.kosi.schema.SourceCoverage(discovered = collected.size, present = present)
+        val diagnostic = if (present >= 20 && coverage.ratio < 0.5) {
+            Diagnostic(
+                code = DiagnosticCodes.SOURCE_COVERAGE_GAP,
+                severity = Severity.WARNING,
+                message = "source discovery collected ${collected.size} of $present Kotlin/Java file(s) present " +
+                    "under the analysed root (${(coverage.ratio * 100).toInt()}%); modules outside the " +
+                    "Maven/Gradle source-root convention may be missing from every downstream result",
+                position = Position(".", 1, 1),
+                count = present - collected.size,
+            )
+        } else {
+            null
+        }
+        return coverage to diagnostic
     }
 
     private fun runSyntaxBackend(
@@ -323,6 +357,7 @@ object Analyzer {
         val (versionedModules, versionDiagnostics, overrideDiagnostics) =
             discoverVersionPolicy(root, discovery.modules, options)
         val collected = SourceCollector.collect(root, versionedModules.map { it.module })
+        val (sourceCoverage, coverageDiagnostic) = sourceCoverageOf(root, collected)
 
         // Classpath acquisition (02-ARCHITECTURE.md §3): explicit flags first,
         // then offline resolution from the local caches. Every coordinate the
@@ -354,6 +389,20 @@ object Analyzer {
             explicitJars = options.classpath.map { Path.of(it) },
             explicitFile = classpathFile,
             moduleDirs = moduleDirs,
+            strategy = options.classpathStrategy,
+        )
+        // P28 §1: the acquisition record — which strategy produced the
+        // classpath, how many entries it attached, and what each tried
+        // strategy found — is REPORT DATA, not a log line: a classpath-less
+        // run and a run that found nothing publish the same sparse graph,
+        // and `strategy: none` with the attempts is what tells them apart.
+        val classpathStats = io.cdxgen.kosi.schema.ClasspathStats(
+            strategy = resolution.strategy,
+            entries = resolution.jars.size,
+            missing = resolution.missing.size,
+            attempts = resolution.attempts.map {
+                io.cdxgen.kosi.schema.ClasspathAttempt(it.strategy, it.jars, it.note)
+            },
         )
         val classpathDiagnostics = buildList {
             if (resolution.missing.isNotEmpty()) {
@@ -441,7 +490,15 @@ object Analyzer {
                 t,
             )
         }
-        env.use { env ->
+        // R177 (arrow): this used to be `env.use { ... }`. The `use` epilogue
+        // runs `AutoCloseable.closeFinally`, and on a run whose session
+        // classpath carried kotlin-stdlib-jdk7 (arrow's own resolution) the
+        // close itself failed with NoClassDefFoundError: kotlin/ExceptionsKt
+        // — which REPLACED the real exception and reported six characters of
+        // a class name. An explicit guarded close means the analysis's own
+        // failure (or success) is what the caller sees; a close failure is
+        // recorded and can never mask it.
+        try {
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: session built, modules=" + env.session.modulesWithFiles.size)
             val workspace = env.session.modulesWithFiles.keys
                 .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
@@ -812,7 +869,7 @@ object Analyzer {
             // P7: `--endpoint-sources` links endpoint-rooted slices to the
             // endpoint they enter through, and names the source categories
             // each endpoint introduces.
-            val apiEndpoints = if (options.endpointSources && dataFlow != null) {
+            var apiEndpoints = if (options.endpointSources && dataFlow != null) {
                 val handlers = endpoints.apiEndpoints.associate { ep -> ep.handlerCanonicalName to ep.id }
                 val bySlice = HashMap<String, MutableList<String>>()
                 endpoints.apiEndpoints.forEach { ep -> bySlice[ep.handlerCanonicalName] = mutableListOf() }
@@ -833,6 +890,37 @@ object Analyzer {
                 }
             } else {
                 endpoints.apiEndpoints
+            }
+
+            // P28 (R178): a manifest endpoint whose handler class matches no
+            // analysed declaration is a claim kosi READ NOTHING of — dagger
+            // published 53 of them beside `no-sources`, every one carrying
+            // an EMPTY handlerCanonicalName (the lifecycle matcher found no
+            // class to name). Marked, never silently asserted: the endpoint
+            // stays (the manifest IS real), `substantiated=false` and the
+            // diagnostic carry the "did not look" (P23's rule).
+            val analysedCanonicalNames = drafts.map { it.canonicalName }.toHashSet()
+            fun unsubstantiated(ep: io.cdxgen.kosi.schema.ApiEndpoint): Boolean =
+                ep.foundBy == "manifest" && (
+                    ep.handlerCanonicalName.isEmpty() ||
+                        ep.handlerCanonicalName !in analysedCanonicalNames
+                    )
+            val unsubstantiatedEndpoints = apiEndpoints.count(::unsubstantiated)
+            val unsubstantiatedDiagnostic = if (unsubstantiatedEndpoints > 0) {
+                apiEndpoints = apiEndpoints.map { ep ->
+                    if (unsubstantiated(ep)) ep.copy(substantiated = false) else ep
+                }
+                Diagnostic(
+                    code = DiagnosticCodes.ENDPOINT_UNSUBSTANTIATED,
+                    severity = Severity.WARNING,
+                    message = "$unsubstantiatedEndpoints manifest endpoint(s) name a handler class that is not " +
+                        "among the analysed declarations (library components, or a run that discovered none of " +
+                        "the sources); their behaviour was not read and they carry substantiated=false",
+                    position = Position(".", 1, 1),
+                    count = unsubstantiatedEndpoints,
+                )
+            } else {
+                null
             }
 
             val totalCalls = callsTotal
@@ -979,7 +1067,11 @@ object Analyzer {
                 usages = usages,
                 imports = imports,
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
-                    listOfNotNull(jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic) +
+                    listOfNotNull(
+                        coverageDiagnostic,
+                        unsubstantiatedDiagnostic,
+                        jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
+                    ) +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
                 stats = Stats(
                     fileCount = fileCount,
@@ -1032,7 +1124,10 @@ object Analyzer {
                     dependencyClasses = flowResult?.dependencyClasses ?: 0,
                     dependencyFunctions = flowResult?.dependencyFunctions ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
+                    policySkips = flowResult?.skips ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
+                    classpath = classpathStats,
+                    sourceCoverage = sourceCoverage,
                 ),
                 callGraph = graphResult?.callGraph,
                 dataFlow = dataFlow,
@@ -1053,6 +1148,16 @@ object Analyzer {
                     findings = crypto.findings,
                 ),
             )
+        } finally {
+            try {
+                env.close()
+            } catch (closeFailure: Throwable) {
+                System.err.println(
+                    "kosi: warning: the analysis session failed to close cleanly " +
+                        "(${closeFailure::class.simpleName}: ${closeFailure.message?.take(200)}); " +
+                        "the analysis result is unaffected",
+                )
+            }
         }
     }
 

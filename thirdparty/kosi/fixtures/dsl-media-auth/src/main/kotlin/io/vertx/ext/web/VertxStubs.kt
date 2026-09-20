@@ -23,4 +23,5 @@ class Route {
 class RoutingContext {
     fun pathParam(name: String): String = ""
     fun queryParam(name: String): String = ""
+    fun request(): io.vertx.core.http.HttpServerRequest = throw UnsupportedOperationException()
 }
