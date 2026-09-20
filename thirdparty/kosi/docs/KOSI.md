@@ -61,11 +61,26 @@ checkouts at the same commit under different Gradle cache states.
 
 ### Classpath
 
-The resolved tier needs the project's dependencies on disk. kosi resolves
-them from the build's own view (Gradle/Maven module metadata and the local
-caches) and reports what it could not find rather than guessing. Two numbers
-tell you how well it did:
+The resolved tier needs the project's dependencies on disk. kosi ACQUIRES
+them through a named chain of read-only strategies, tried in order until one
+attaches a jar — `--classpath-strategy` forces exactly one, and the report
+names the winner on every run:
 
+1. `explicit` — `--classpath` / `--classpath-file` flags (what cdxgen passes).
+2. `file` — a classpath file already in the analysed tree: `classpath.txt`
+   (the warmed convention) or an Eclipse `.classpath`.
+3. `jars` — a `libs/` directory of vendored jars.
+4. `cache` — offline: coordinates parsed as text from build files, located
+   in `~/.gradle/caches/modules-2` and `~/.m2/repository`.
+
+`stats.classpath` publishes `{strategy, entries, missing, attempts[]}` —
+`attempts[]` records every strategy the chain tried and whether it fired,
+`strategy` is the winner or **`none`, stated explicitly**: a classpath-less
+run and a run that found nothing produce the same sparse graph and are
+opposite facts, and the report is where you tell them apart. Three numbers
+tell you how well the attached classpath did:
+
+- `stats.classpath.entries` / `missing` — how much of it attached.
 - `stats.resolvedCallRatio` — the share of call sites whose callee kosi
   resolved. Below roughly 0.9 the call graph is partial, and everything
   downstream of it (reachability, interprocedural taint) is partial with it.
@@ -79,10 +94,20 @@ it never reaches the output. Each line is a jar path, or a
 `group:artifact:version=jar` binding when what matters is that a coordinate is
 present rather than what it contains.
 
-For repeatable measurement on a corpus, `scripts/warm-corpus-classpath.sh`
-fetches and pins the classpath first; a report taken against a cold cache and
-one taken against a warm cache are not comparable, and a measured finding
-floor belongs to the warm one.
+kosi itself never executes the analysed build (see THREAT_MODEL.md). The
+strategies that DO run build tooling live in the operator-side
+`scripts/acquire-classpath.sh <dir>`: Gradle dependency reports (per
+subproject, all configurations — Android variants included), Maven
+`dependency:build-classpath`, a present classpath file, a jar directory, and
+the text-declared coordinates handed to kosi's own cache scan. Each arm
+reports whether it fired; the winner writes `<dir>/classpath.txt` with a
+`# strategy:` provenance header, which the `file` strategy then picks up.
+`--pull` additionally downloads each coordinate's transitive closure into
+the local caches (a dependency report lists coordinates without downloading
+their jars). For pinned corpus repos,
+`scripts/warm-corpus-classpath.sh` remains the measurement-side warmer; a
+report taken against a cold cache and one taken against a warm cache are not
+comparable, and a measured finding floor belongs to the warm one.
 
 ## What the analysis sees
 
