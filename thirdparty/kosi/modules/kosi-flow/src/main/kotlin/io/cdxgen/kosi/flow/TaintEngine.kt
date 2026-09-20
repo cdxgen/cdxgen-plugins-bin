@@ -1425,8 +1425,34 @@ object TaintEngine {
                 // it, and every unrelated value reachable through it.
                 "context" -> valueParams.map { null }
 
-                else -> valueParams.mapIndexed { index, param ->
-                    param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, category, index)
+                // P28 §2: `all` means the parameter IS the payload — but the
+                // docs of the `all` frameworks themselves name collaborators
+                // handed in BESIDE it (AWS Lambda's runtime Context is "the
+                // second argument", gRPC's StreamObserver carries responses
+                // OUT, Android's onReceive Context is the framework's own).
+                // A declared context type is excluded under `all` exactly as
+                // under annotated-or-bound; a type not listed stays data —
+                // the same triage-over-silence direction.
+                //
+                // An OBJECT payload seeds FIELD-BEARING (the P27 §2 rule for
+                // Spring's command objects, and for the same measured
+                // reason): a gRPC request message, a Lambda event POJO, an
+                // Android Bundle all carry the request on their FIELDS, and
+                // a bare fact derives nothing on `request.name` — the
+                // plainest flow in any grpc service would be invisible.
+                else -> {
+                    val contextTypes = context.options.endpointContextParameterTypes[framework].orEmpty()
+                    valueParams.mapIndexed { index, param ->
+                        when {
+                            isContextType(param.resolvedType, contextTypes) -> null
+                            else -> param.register to TaintFact(
+                                SummaryAnalysis.ENTRY_SITE,
+                                category,
+                                index,
+                                fieldBearing = !isSimpleType(param.resolvedType, ALL_PAYLOAD_SIMPLE_TYPES),
+                            )
+                        }
+                    }
                 }
             }.filterNotNull()
             context.recordEntryFacts(facts.size)
@@ -1451,12 +1477,27 @@ object TaintEngine {
         }
 
         /**
+         * P28 §2: the value types an `all` payload can arrive as WITHOUT
+         * fields — framework-independent (kotlin/java String and
+         * primitives), so no pack can widen or narrow it by omission. An
+         * unresolved type is NOT simple: it seeds field-bearing, the
+         * triage-over-silence direction.
+         */
+        private val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
+            "kotlin.String", "kotlin.Int", "kotlin.Long", "kotlin.Short", "kotlin.Byte",
+            "kotlin.Double", "kotlin.Float", "kotlin.Boolean", "kotlin.Char",
+            "java.lang.String", "java.lang.Integer", "java.lang.Long", "java.lang.Short",
+            "java.lang.Byte", "java.lang.Double", "java.lang.Float", "java.lang.Boolean",
+            "java.lang.Char",
+        )
+
+        /**
          * P27 §2: Spring's `BeanUtils.isSimpleProperty` — a simple value type
          * or an ARRAY of one. An unresolved type is not simple, so it is
          * treated as a command object: the direction that produces a finding
          * to triage rather than a silence.
          */
-        private fun isSimpleType(resolved: String?, simpleTypes: List<String>): Boolean {
+        private fun isSimpleType(resolved: String?, simpleTypes: Collection<String>): Boolean {
             if (simpleTypes.isEmpty()) return false
             val type = (resolved ?: return false).substringBefore('<').removeSuffix("[]")
             return simpleTypes.any { type == it || type.endsWith(".$it") }

@@ -490,7 +490,15 @@ object Analyzer {
                 t,
             )
         }
-        env.use { env ->
+        // R177 (arrow): this used to be `env.use { ... }`. The `use` epilogue
+        // runs `AutoCloseable.closeFinally`, and on a run whose session
+        // classpath carried kotlin-stdlib-jdk7 (arrow's own resolution) the
+        // close itself failed with NoClassDefFoundError: kotlin/ExceptionsKt
+        // — which REPLACED the real exception and reported six characters of
+        // a class name. An explicit guarded close means the analysis's own
+        // failure (or success) is what the caller sees; a close failure is
+        // recorded and can never mask it.
+        try {
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: session built, modules=" + env.session.modulesWithFiles.size)
             val workspace = env.session.modulesWithFiles.keys
                 .filterIsInstance<org.jetbrains.kotlin.analysis.api.projectStructure.KaSourceModule>()
@@ -1140,6 +1148,16 @@ object Analyzer {
                     findings = crypto.findings,
                 ),
             )
+        } finally {
+            try {
+                env.close()
+            } catch (closeFailure: Throwable) {
+                System.err.println(
+                    "kosi: warning: the analysis session failed to close cleanly " +
+                        "(${closeFailure::class.simpleName}: ${closeFailure.message?.take(200)}); " +
+                        "the analysis result is unaffected",
+                )
+            }
         }
     }
 

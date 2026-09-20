@@ -10,6 +10,14 @@ class HelloReply(val message: String = "")
 object GreeterGrpcKt {
     abstract class GreeterImplBase {
         open suspend fun sayHello(request: HelloRequest): HelloReply = HelloReply()
+
+        /**
+         * P28 §2: the grpc-JAVA signature (grpc.io generated-code docs:
+         * "unaryExample(RequestType request, StreamObserver<ResponseType>
+         * responseObserver)") — the response observer rides beside the
+         * request as the framework's own parameter.
+         */
+        open fun sayHello(request: HelloRequest, responseObserver: io.grpc.stub.StreamObserver<HelloReply>) {}
     }
 }
 
