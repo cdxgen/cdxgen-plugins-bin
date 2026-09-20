@@ -292,6 +292,35 @@ size by `--max-rss-mb`; both are reported as diagnostics rather than silent
 truncation. Some repositories are slow for reasons memory cannot fix — see the
 open summary-application cost in the tracker (R185).
 
+## How much stack (P29)
+
+The stack is no longer yours to tune. kosi runs the whole analysis on a
+thread with an explicit **512 MB stack** (committed lazily — an unused
+reservation costs no memory), so one deeply nested source file cannot exhaust
+a default-sized stack; the dataflow workers carry the same stack. Measured on
+the generated `s + s + ...` fixture, darwin-aarch64:
+
+| stack | deepest source analysed | notes |
+|---|---|---|
+| default thread (pre-P29) | ~1,200 nesting levels | 1,250 overflows; 2,000 terms dies at any heap |
+| `-Xss64m` | ≥ 5,000 levels | the P28 workaround |
+| kosi's analysis thread (512 MB) | ≥ 400,000 levels | measured; the file's SIZE becomes the limit first |
+
+**The policy bound below the stack.** Anything past **2,000 nesting levels**
+is not walked at all, whatever the stack: a file over the budget keeps its
+package, imports and `files[]` entry, loses its declarations, usages and
+lowering, and the report carries a `psi-depth-cap` diagnostic naming the file
+and its depth. Deepest real-world code sits in the low hundreds; the bound
+exists so that a bounded run is distinguishable from a complete one. A file
+(or dataflow function) that somehow still overflows degrades to a
+`stack-overflow-skipped` diagnostic naming it — one pathological file costs
+its own evidence, never the report.
+
+**A file of several megabytes is not Kotlin to the platform.** IntelliJ's
+file-type layer classifies very large files as plain text; kosi reports that
+file via `unreadable-source` with the size, and analyses the rest (before P29
+this crashed with a bare `ClassCastException`).
+
 ### Memory for the test tiers
 
 The corpus and bench tiers fork their own JVM. That fork takes **half of
