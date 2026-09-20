@@ -2,6 +2,7 @@ package io.cdxgen.kosi.front
 
 import io.cdxgen.kosi.schema.AnnotationEvidence
 import io.cdxgen.kosi.schema.Diagnostic
+import io.cdxgen.kosi.schema.DiagnosticCodes
 import io.cdxgen.kosi.schema.ImportUsage
 import io.cdxgen.kosi.schema.Position
 import io.cdxgen.kosi.schema.Severity
@@ -79,6 +80,21 @@ class SyntaxAnalyzer(
     fun analyze(file: KtFile): FileResult {
         val lines = LineIndex(file.text)
         val diagnostics = mutableListOf<Diagnostic>()
+        val imports = file.importDirectives.mapNotNull { directive -> importUsage(directive, lines) }
+        val declarations = mutableListOf<RawDeclaration>()
+        val usages = mutableListOf<RawUsage>()
+        val pkg = file.packageFqName.asString()
+        // P29: the walk budget. The measure is iterative (it cannot die of
+        // the disease it diagnoses); the recursive visitors below — ours and
+        // the platform's own descent, which the default visitBinaryExpression
+        // runs for every `+` chain — are safe only under it. A file past the
+        // cap keeps its package, imports and parse errors and loses
+        // everything the walks would have derived, with the depth named.
+        val psiDepth = WalkBudgets.psiMaxDepth(file)
+        if (psiDepth > WalkBudgets.PSI_DEPTH_CAP) {
+            diagnostics.add(depthCapDiagnostic(psiDepth))
+            return FileResult(pkg, imports, declarations, usages, diagnostics)
+        }
         for (error in collectParseErrors(file)) {
             diagnostics.add(
                 Diagnostic(
@@ -89,16 +105,23 @@ class SyntaxAnalyzer(
                 ),
             )
         }
-        val imports = file.importDirectives.mapNotNull { directive -> importUsage(directive, lines) }
-        val declarations = mutableListOf<RawDeclaration>()
-        val usages = mutableListOf<RawUsage>()
-        val pkg = file.packageFqName.asString()
         file.accept(DeclarationVisitor(lines, pkg, declarations, usages, collectDeclarations))
         // Stamp the filename on every position now that we know it.
         declarations.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
         usages.replaceAll { it.copy(position = it.position.copy(filename = filePath)) }
         return FileResult(pkg, imports, declarations, usages, diagnostics)
     }
+
+    private fun depthCapDiagnostic(depth: Int): Diagnostic =
+        Diagnostic(
+            code = DiagnosticCodes.PSI_DEPTH_CAP,
+            severity = Severity.WARNING,
+            message = "$filePath nests $depth syntax level(s), past the ${WalkBudgets.PSI_DEPTH_CAP}-level walk " +
+                "budget; its declarations, usages and lowering were not derived (a generated or machine-written " +
+                "file, most likely), while the rest of the run completed",
+            position = Position(filePath, 1, 1),
+            count = 1,
+        )
 
     private fun collectParseErrors(file: KtFile): List<PsiErrorElement> = env.collectParseErrors(file)
 
@@ -507,18 +530,35 @@ class SyntaxAnalyzer(
          * Renders a qualified expression as a dotted name with argument lists
          * elided (`a.b(x).c()` -> `a.b.c`), so usage names are comparable to
          * model-pack patterns regardless of call arguments.
+         *
+         * Iterative on the receiver chain (P29: the chain is the axis an
+         * unbounded recursive form would overflow on — `a.b.c.d...` nests
+         * one level per selector), and the selector side recurses at most
+         * one level (a call's callee, or a qualified selector).
          */
         fun qualifiedNameWithoutArgs(expression: com.intellij.psi.PsiElement): String =
             renderQualified(expression)
 
-        private fun renderQualified(element: com.intellij.psi.PsiElement): String =
+        private fun renderQualified(element: com.intellij.psi.PsiElement): String {
+            // Walk DOWN the receiver chain collecting selectors, then render
+            // the base. For `a.b(x).c`: selectors collected c, then b(x)'s
+            // callee b; base a.
+            val selectors = ArrayDeque<String>()
+            var current = element
+            while (current is org.jetbrains.kotlin.psi.KtQualifiedExpression) {
+                val selector = current.selectorExpression
+                selectors.addFirst(renderQualifiedSelector(selector ?: current))
+                current = current.receiverExpression
+            }
+            val base = renderQualifiedSelector(current)
+            return (listOf(base) + selectors).joinToString(".")
+        }
+
+        private fun renderQualifiedSelector(element: com.intellij.psi.PsiElement): String =
             when (element) {
-                is org.jetbrains.kotlin.psi.KtQualifiedExpression ->
-                    renderQualified(element.receiverExpression) + "." +
-                        renderQualified(element.selectorExpression ?: element)
+                is org.jetbrains.kotlin.psi.KtQualifiedExpression -> renderQualified(element)
                 is org.jetbrains.kotlin.psi.KtCallExpression ->
-                    element.calleeExpression?.let { renderQualified(it) } ?: element.text.normalized()
-                is org.jetbrains.kotlin.psi.KtNameReferenceExpression -> normalizeName(element.text)
+                    element.calleeExpression?.let { renderQualifiedSelector(it) } ?: element.text.normalized()
                 else -> normalizeName(element.text)
             }
 

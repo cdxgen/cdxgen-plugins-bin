@@ -192,6 +192,24 @@ object DiagnosticCodes {
     /** P28 §1: a forced `--classpath-strategy` that contradicts the explicit classpath flags. */
     const val CLASSPATH_STRATEGY_CONFLICT = "classpath-strategy-conflict"
 
+    /**
+     * P29: a file's syntax nests deeper than the walk budget (2,000 PSI
+     * levels) and its recursive walks — declarations, usages, KIR lowering —
+     * were NOT run on it. The file stays in `files[]`; everything derived
+     * from walking its syntax is absent, and the diagnostic names the file
+     * and the measured depth. The companion safety net is
+     * [STACK_OVERFLOW_SKIPPED].
+     */
+    const val PSI_DEPTH_CAP = "psi-depth-cap"
+
+    /**
+     * P29: analysing this file (or, in the dataflow tier, this function)
+     * threw `StackOverflowError`; the unit was SKIPPED and the run completed
+     * for every other file. Before P29 the same error took the whole report
+     * down (one 8 KB generated file was a total loss, exit 3, no report).
+     */
+    const val STACK_OVERFLOW_SKIPPED = "stack-overflow-skipped"
+
     val ALL: Set<String> = setOf(
         PARSE_ERROR,
         SYNTAX_BACKEND_NO_RESOLUTION,
@@ -231,6 +249,8 @@ object DiagnosticCodes {
         REACHABLE_WITHOUT_CALLGRAPH,
         DEPS_WITHOUT_DATAFLOW,
         CLASSPATH_STRATEGY_CONFLICT,
+        PSI_DEPTH_CAP,
+        STACK_OVERFLOW_SKIPPED,
     )
 }
 

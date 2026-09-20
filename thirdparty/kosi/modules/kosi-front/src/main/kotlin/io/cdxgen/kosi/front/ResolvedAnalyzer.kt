@@ -149,146 +149,372 @@ object ResolvedAnalyzer {
         val unresolvedSample = mutableListOf<String>()
         val errorCodes = LinkedHashMap<String, Int>()
 
-        if (ktFile != null) {
-            // Usages keep the syntax tier's text shapes (model matching).
-            val syntax = SyntaxAnalyzer(env, relativePath, modulePath, collectDeclarations = false)
-            val syntaxResult = syntax.analyze(ktFile)
-            usages.addAll(syntaxResult.usages)
-            diagnostics.addAll(syntaxResult.diagnostics)
+        // P29: the file's walk budget. The measure is iterative; everything
+        // below descends the PSI (or Java) tree recursively — kosi's
+        // visitors, the syntax pass, the platform's own flattener inside the
+        // default visitBinaryExpression — and is safe only under the cap. A
+        // file over it ships with package-level facts only and the
+        // diagnostic names it and its depth.
+        val psiDepth = WalkBudgets.psiMaxDepth(psi)
+        if (psiDepth > WalkBudgets.PSI_DEPTH_CAP) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.PSI_DEPTH_CAP,
+                    severity = Severity.WARNING,
+                    message = "$relativePath nests $psiDepth syntax level(s), past the " +
+                        "${WalkBudgets.PSI_DEPTH_CAP}-level walk budget; its declarations, usages and " +
+                        "lowering were not derived",
+                    position = Position(relativePath, 1, 1),
+                    count = 1,
+                ),
+            )
+            out.add(
+                ResolvedFileFacts(
+                    relativePath = relativePath,
+                    modulePath = modulePath,
+                    packageName = (ktFile as? KtFile)?.packageFqName?.asString()
+                        ?: (psi as? PsiJavaFile)?.packageName ?: "",
+                    imports = emptyList(),
+                    declarations = emptyList(),
+                    usages = emptyList(),
+                    diagnostics = diagnostics,
+                    callsTotal = 0,
+                    callsResolved = 0,
+                    resolutionErrorCodes = emptyMap(),
+                    symbolFailures = 0,
+                ),
+            )
+            continue@fileLoop
+        }
 
-            val imports = ktFile.importDirectives.mapNotNull { directive ->
-                val fqName = directive.importedFqName?.asString() ?: return@mapNotNull null
-                ImportUsage(
-                    name = SyntaxAnalyzer.normalizeName(fqName),
-                    alias = directive.aliasName,
-                    star = directive.isAllUnder,
-                    purl = null,
-                    filePath = relativePath,
-                    position = positionAt(lines, relativePath, directive.textOffset),
+        // P29: the per-file boundary. Whatever below throws
+        // StackOverflowError degrades THIS file to a named diagnostic; the
+        // run completes for every other file.
+        try {
+
+            if (ktFile != null) {
+                // Usages keep the syntax tier's text shapes (model matching).
+                val syntax = SyntaxAnalyzer(env, relativePath, modulePath, collectDeclarations = false)
+                val syntaxResult = syntax.analyze(ktFile)
+                usages.addAll(syntaxResult.usages)
+                diagnostics.addAll(syntaxResult.diagnostics)
+
+                val imports = ktFile.importDirectives.mapNotNull { directive ->
+                    val fqName = directive.importedFqName?.asString() ?: return@mapNotNull null
+                    ImportUsage(
+                        name = SyntaxAnalyzer.normalizeName(fqName),
+                        alias = directive.aliasName,
+                        star = directive.isAllUnder,
+                        purl = null,
+                        filePath = relativePath,
+                        position = positionAt(lines, relativePath, directive.textOffset),
+                    )
+                }
+
+                val walked = mutableListOf<KtDeclaration>()
+                val callExpressions = mutableListOf<KtCallExpression>()
+                ktFile.accept(object : KtTreeVisitorVoid() {
+                    override fun visitDeclaration(declaration: KtDeclaration) {
+                        walked.add(declaration)
+                        super.visitDeclaration(declaration)
+                    }
+
+                    override fun visitCallExpression(expression: KtCallExpression) {
+                        callExpressions.add(expression)
+                        super.visitCallExpression(expression)
+                    }
+                })
+
+                // Pass 1: resolve every walked declaration to its symbol.
+                data class Sym(
+                    val declaration: KtDeclaration,
+                    val symbol: org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol?,
                 )
+                val resolved = walked.map { declaration ->
+                    val symbol = try {
+                        declaration.symbol
+                    } catch (_: Exception) {
+                        symbolFailures++
+                        null
+                    }
+                    Sym(declaration, symbol)
+                }
+
+                // Pass 2: compute every symbol-derived fact up front, keyed by
+                // symbol, so emission is pure data assembly.
+                val visibilityOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, String>()
+                val overridesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
+                val supertypesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
+                val annotationsOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<AnnotationEvidence>>()
+                val annotationFqns = HashMap<String, MutableSet<String>>()
+                val modifiersOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
+                val jvmOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, Pair<String?, String?>>()
+                for ((_, symbol) in resolved) {
+                    if (symbol == null || visibilityOf.containsKey(symbol)) continue
+                    visibilityOf[symbol] = visibilityName(symbol)
+                    overridesOf[symbol] = try {
+                        if (symbol is org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol) {
+                            symbol.allOverriddenSymbols
+                                .mapNotNull { it.callableId?.asSingleFqName()?.asString() }
+                                .toList()
+                                .distinct()
+                        } else {
+                            emptyList()
+                        }
+                    } catch (_: Exception) {
+                        symbolFailures++
+                        emptyList()
+                    }
+                    supertypesOf[symbol] = try {
+                        if (symbol is KaClassSymbol) {
+                            symbol.superTypes.mapNotNull { (it as? KaClassType)?.classId?.asSingleFqName()?.asString() }
+                                .filter { it != "kotlin.Any" }
+                                .distinct()
+                        } else {
+                            emptyList()
+                        }
+                    } catch (_: Exception) {
+                        symbolFailures++
+                        emptyList()
+                    }
+                    annotationsOf[symbol] = try {
+                        (symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
+                            ?.annotations
+                            ?.onEach { annotation ->
+                                val short = annotation.classId?.shortClassName?.asString()
+                                val fqn = annotation.classId?.asSingleFqName()?.asString()
+                                if (short != null && fqn != null) {
+                                    annotationFqns.getOrPut(short) { mutableSetOf() }.add(fqn)
+                                }
+                            }
+                            ?.map { AnnotationEvidence(
+                                name = it.classId?.shortClassName?.asString()
+                                    ?: it.classId?.asSingleFqName()?.asString()
+                                    ?: "<annotation>",
+                                value = it.arguments.asSequence()
+                                    .mapNotNull { arg -> arg.expression }
+                                    .mapNotNull { v -> (v as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue)?.value?.toString() }
+                                    .firstOrNull(),
+                                // The argument's NAME is the difference between
+                                // `consumes` and `produces`; without this map the
+                                // endpoint detector cannot tell them apart (P14).
+                                // A POSITIONAL argument lands under `value` — the
+                                // JAX-RS spellings (`@Consumes("application/json")`,
+                                // `@RolesAllowed(["admin"])`) read theirs from
+                                // there.
+                                namedValues = it.arguments.mapNotNull { arg ->
+                                    val argName = arg.name?.asString() ?: "value"
+                                    val constants = constantValuesOf(arg.expression) ?: return@mapNotNull null
+                                    argName to constants
+                                }.toMap(),
+                                // Placeholder: the real offset comes from the
+                                // declaration's PSI annotation entry at emission.
+                                position = positionAt(lines, relativePath, 0),
+                            ) }
+                            ?: emptyList()
+                    } catch (_: Exception) {
+                        symbolFailures++
+                        emptyList()
+                    }
+                    modifiersOf[symbol] = when (symbol) {
+                        is org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol ->
+                            if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT) {
+                                listOf("abstract")
+                            } else {
+                                emptyList()
+                            }
+
+                        is KaClassSymbol -> buildList {
+                            if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT) add("abstract")
+                            if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.SEALED) add("sealed")
+                        }
+
+                        else -> emptyList()
+                    }
+                    jvmOf[symbol] = try {
+                        val callable = symbol as? KaCallableSymbol
+                        if (callable == null) {
+                            null to null
+                        } else {
+                            val owner = callable.containingJvmClassName?.replace('.', '/')
+                            val descriptor = when (callable) {
+                                is KaConstructorSymbol ->
+                                    JvmSignatures.voidMethodDescriptor(
+                                        callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
+                                    )
+
+                                is KaPropertySymbol -> null // no single JVM member; accessors carry it
+
+                                is KaFunctionSymbol -> {
+                                    val params = buildList {
+                                        callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                                        callable.valueParameters.forEach { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                                    }
+                                    JvmSignatures.methodDescriptor(
+                                        callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
+                                        params,
+                                    )
+                                }
+
+                                else -> null
+                            }
+                            owner to descriptor
+                        }
+                    } catch (_: Exception) {
+                        symbolFailures++
+                        null to null
+                    }
+                }
+
+                // Pass 3: emission, pure PSI + computed facts.
+                for ((declaration, symbol) in resolved) {
+                    val shape = declarationShapes(declaration) ?: continue
+                    val name = declaration.name ?: "<anonymous>"
+                    val pkg = ktFile.packageFqName.asString()
+                    val canonical = SyntaxAnalyzer.joinCanonical(pkg, containerChain(declaration), name)
+                    declarations.add(
+                        ResolvedDeclaration(
+                            name = name,
+                            qualifiedName = "$modulePath:$canonical",
+                            canonicalName = canonical,
+                            kind = shape.kind,
+                            signature = shape.signature,
+                            returnType = shape.returnType,
+                            extensionReceiverType = shape.extensionReceiver,
+                            visibility = symbol?.let { visibilityOf[it] } ?: psiVisibility(declaration) ?: "public",
+                            // Distinct: `abstract`/`sealed` are visible both in
+                            // the PSI modifier list and in the symbol's modality,
+                            // and the same word twice in modifiers[] is not two
+                            // facts.
+                            modifiers = (psiModifiers(declaration) + (symbol?.let { modifiersOf[it] } ?: emptyList()))
+                                .distinct(),
+                            annotations = (symbol?.let { annotationsOf[it] } ?: emptyList()).map { evidence ->
+                                val entry = declaration.annotationEntries.firstOrNull { candidate ->
+                                    candidate.shortName?.asString() == evidence.name
+                                }
+                                evidence.copy(
+                                    position = positionAt(
+                                        lines,
+                                        relativePath,
+                                        entry?.textOffset ?: declaration.textOffset,
+                                    ),
+                                )
+                            },
+                            overrides = symbol?.let { overridesOf[it] } ?: emptyList(),
+                            supertypes = symbol?.let { supertypesOf[it] } ?: emptyList(),
+                            jvmOwner = symbol?.let { jvmOf[it]?.first },
+                            jvmDescriptor = symbol?.let { jvmOf[it]?.second },
+                            position = positionAt(lines, relativePath, declaration.textOffset),
+                        ),
+                    )
+                }
+
+                // Resolved-call counting: resolveCall yields the single-or-multi
+                // call container; a container with symbols is a resolved call.
+                for (expression in callExpressions) {
+                    callsTotal++
+                    val call = try {
+                        expression.resolveCall()
+                    } catch (_: Exception) {
+                        null
+                    }
+                    val resolved = try {
+                        call?.symbols?.isNotEmpty() == true
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (resolved) {
+                        callsResolved++
+                    } else if (System.getenv("KOSI_TRACE") != null && unresolvedSample.size < 25) {
+                        unresolvedSample.add(relativePath + ": " + expression.text.take(80))
+                    }
+                }
+                for (u in unresolvedSample) System.err.println("UNRESOLVED: " + u)
+
+                // Resolution diagnostics, summarised: per-error floods would dwarf
+                // the evidence on real projects; the count is the signal. Only
+                // ERROR-severity factories count (P18): the summary's own code is
+                // `resolution-errors`, but it used to include DEPRECATION and the
+                // other warning factories, which drowned the signal the §3
+                // corpus gate ratchets on — a stub that stops TYPECHECKING
+                // (R110) is indistinguishable from one that is merely deprecated.
+                val fileDiagnostics = try {
+                    ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                        .filter { it.severity == KaSeverity.ERROR }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                for (d in fileDiagnostics) {
+                    val code = d.factoryName ?: continue
+                    errorCodes[code] = (errorCodes[code] ?: 0) + 1
+                }
+                if (errorCodes.isNotEmpty()) {
+                    val summary = errorCodes.entries.sortedWith(
+                        compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key },
+                    ).joinToString(", ") { "${it.key}=${it.value}" }
+                    diagnostics.add(
+                        Diagnostic(
+                            code = DiagnosticCodes.RESOLUTION_ERRORS,
+                            severity = Severity.WARNING,
+                            message = "frontend resolution reported ${fileDiagnostics.size} diagnostic(s) in " +
+                                "$relativePath: $summary",
+                            position = Position(relativePath, 1, 1),
+                            count = fileDiagnostics.size,
+                        ),
+                    )
+                }
+
+                out.add(
+                    ResolvedFileFacts(
+                        relativePath = relativePath,
+                        modulePath = modulePath,
+                        packageName = ktFile.packageFqName.asString(),
+                        imports = imports,
+                        declarations = declarations,
+                        usages = usages,
+                        diagnostics = diagnostics,
+                        callsTotal = callsTotal,
+                        callsResolved = callsResolved,
+                        resolutionErrorCodes = errorCodes,
+                        symbolFailures = symbolFailures,
+                        annotationFqnsByShortName = annotationFqns.mapValues { (_, v) -> v.toSet() },
+                    ),
+                )
+                continue@fileLoop
             }
 
-            val walked = mutableListOf<KtDeclaration>()
-            val callExpressions = mutableListOf<KtCallExpression>()
-            ktFile.accept(object : KtTreeVisitorVoid() {
-                override fun visitDeclaration(declaration: KtDeclaration) {
-                    walked.add(declaration)
-                    super.visitDeclaration(declaration)
-                }
-
-                override fun visitCallExpression(expression: KtCallExpression) {
-                    callExpressions.add(expression)
-                    super.visitCallExpression(expression)
-                }
-            })
-
-            // Pass 1: resolve every walked declaration to its symbol.
-            data class Sym(
-                val declaration: KtDeclaration,
-                val symbol: org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol?,
-            )
-            val resolved = walked.map { declaration ->
-                val symbol = try {
-                    declaration.symbol
+            // Java source: same evidence through the same symbols, same pattern —
+            // resolve up front in the loop, emit from the maps.
+            val javaFile = psi as PsiJavaFile
+            val javaClasses = mutableListOf<PsiClass>()
+            collectJavaClasses(javaFile, javaClasses)
+            val classSymbols = javaClasses.associateWith { psiClass ->
+                try {
+                    psiClass.namedClassSymbol
                 } catch (_: Exception) {
                     symbolFailures++
                     null
                 }
-                Sym(declaration, symbol)
             }
-
-            // Pass 2: compute every symbol-derived fact up front, keyed by
-            // symbol, so emission is pure data assembly.
-            val visibilityOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, String>()
-            val overridesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
-            val supertypesOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
-            val annotationsOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<AnnotationEvidence>>()
-            val annotationFqns = HashMap<String, MutableSet<String>>()
-            val modifiersOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, List<String>>()
-            val jvmOf = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, Pair<String?, String?>>()
-            for ((_, symbol) in resolved) {
-                if (symbol == null || visibilityOf.containsKey(symbol)) continue
-                visibilityOf[symbol] = visibilityName(symbol)
-                overridesOf[symbol] = try {
-                    if (symbol is org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol) {
-                        symbol.allOverriddenSymbols
-                            .mapNotNull { it.callableId?.asSingleFqName()?.asString() }
-                            .toList()
-                            .distinct()
-                    } else {
-                        emptyList()
-                    }
+            val javaMembers = javaClasses.flatMap { psiClass ->
+                psiClass.methods.map { member -> member as com.intellij.psi.PsiMember } +
+                    psiClass.fields.map { member -> member as com.intellij.psi.PsiMember }
+            }
+            val memberSymbols = HashMap<com.intellij.psi.PsiMember, org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol?>()
+            for (member in javaMembers) {
+                memberSymbols[member] = try {
+                    member.callableSymbol
                 } catch (_: Exception) {
                     symbolFailures++
-                    emptyList()
+                    null
                 }
-                supertypesOf[symbol] = try {
-                    if (symbol is KaClassSymbol) {
-                        symbol.superTypes.mapNotNull { (it as? KaClassType)?.classId?.asSingleFqName()?.asString() }
-                            .filter { it != "kotlin.Any" }
-                            .distinct()
-                    } else {
-                        emptyList()
-                    }
-                } catch (_: Exception) {
-                    symbolFailures++
-                    emptyList()
-                }
-                annotationsOf[symbol] = try {
-                    (symbol as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated)
-                        ?.annotations
-                        ?.onEach { annotation ->
-                            val short = annotation.classId?.shortClassName?.asString()
-                            val fqn = annotation.classId?.asSingleFqName()?.asString()
-                            if (short != null && fqn != null) {
-                                annotationFqns.getOrPut(short) { mutableSetOf() }.add(fqn)
-                            }
-                        }
-                        ?.map { AnnotationEvidence(
-                            name = it.classId?.shortClassName?.asString()
-                                ?: it.classId?.asSingleFqName()?.asString()
-                                ?: "<annotation>",
-                            value = it.arguments.asSequence()
-                                .mapNotNull { arg -> arg.expression }
-                                .mapNotNull { v -> (v as? org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue)?.value?.toString() }
-                                .firstOrNull(),
-                            // The argument's NAME is the difference between
-                            // `consumes` and `produces`; without this map the
-                            // endpoint detector cannot tell them apart (P14).
-                            // A POSITIONAL argument lands under `value` — the
-                            // JAX-RS spellings (`@Consumes("application/json")`,
-                            // `@RolesAllowed(["admin"])`) read theirs from
-                            // there.
-                            namedValues = it.arguments.mapNotNull { arg ->
-                                val argName = arg.name?.asString() ?: "value"
-                                val constants = constantValuesOf(arg.expression) ?: return@mapNotNull null
-                                argName to constants
-                            }.toMap(),
-                            // Placeholder: the real offset comes from the
-                            // declaration's PSI annotation entry at emission.
-                            position = positionAt(lines, relativePath, 0),
-                        ) }
-                        ?: emptyList()
-                } catch (_: Exception) {
-                    symbolFailures++
-                    emptyList()
-                }
-                modifiersOf[symbol] = when (symbol) {
-                    is org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol ->
-                        if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT) {
-                            listOf("abstract")
-                        } else {
-                            emptyList()
-                        }
-
-                    is KaClassSymbol -> buildList {
-                        if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.ABSTRACT) add("abstract")
-                        if (symbol.modality == org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality.SEALED) add("sealed")
-                    }
-
-                    else -> emptyList()
-                }
-                jvmOf[symbol] = try {
+            }
+            val jvmByMember = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, Pair<String?, String?>>()
+            val visibilityByMember = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, String>()
+            for ((_, symbol) in memberSymbols) {
+                if (symbol == null || jvmByMember.containsKey(symbol)) continue
+                visibilityByMember[symbol] = visibilityName(symbol)
+                jvmByMember[symbol] = try {
                     val callable = symbol as? KaCallableSymbol
                     if (callable == null) {
                         null to null
@@ -300,7 +526,7 @@ object ResolvedAnalyzer {
                                     callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
                                 )
 
-                            is KaPropertySymbol -> null // no single JVM member; accessors carry it
+                            is KaPropertySymbol -> null
 
                             is KaFunctionSymbol -> {
                                 val params = buildList {
@@ -322,305 +548,150 @@ object ResolvedAnalyzer {
                     null to null
                 }
             }
-
-            // Pass 3: emission, pure PSI + computed facts.
-            for ((declaration, symbol) in resolved) {
-                val shape = declarationShapes(declaration) ?: continue
-                val name = declaration.name ?: "<anonymous>"
-                val pkg = ktFile.packageFqName.asString()
-                val canonical = SyntaxAnalyzer.joinCanonical(pkg, containerChain(declaration), name)
+            for (psiClass in javaClasses) {
+                val name = psiClass.name ?: "<anonymous>"
+                val canonical = javaCanonicalName(psiClass)
+                val symbol = classSymbols[psiClass]
                 declarations.add(
                     ResolvedDeclaration(
                         name = name,
                         qualifiedName = "$modulePath:$canonical",
                         canonicalName = canonical,
-                        kind = shape.kind,
-                        signature = shape.signature,
-                        returnType = shape.returnType,
-                        extensionReceiverType = shape.extensionReceiver,
-                        visibility = symbol?.let { visibilityOf[it] } ?: psiVisibility(declaration) ?: "public",
-                        // Distinct: `abstract`/`sealed` are visible both in
-                        // the PSI modifier list and in the symbol's modality,
-                        // and the same word twice in modifiers[] is not two
-                        // facts.
-                        modifiers = (psiModifiers(declaration) + (symbol?.let { modifiersOf[it] } ?: emptyList()))
-                            .distinct(),
-                        annotations = (symbol?.let { annotationsOf[it] } ?: emptyList()).map { evidence ->
-                            val entry = declaration.annotationEntries.firstOrNull { candidate ->
-                                candidate.shortName?.asString() == evidence.name
-                            }
-                            evidence.copy(
-                                position = positionAt(
-                                    lines,
-                                    relativePath,
-                                    entry?.textOffset ?: declaration.textOffset,
-                                ),
-                            )
+                        kind = when {
+                            psiClass.isAnnotationType -> "annotation"
+                            psiClass.isEnum -> "enum"
+                            psiClass.isInterface -> "interface"
+                            else -> "class"
                         },
-                        overrides = symbol?.let { overridesOf[it] } ?: emptyList(),
-                        supertypes = symbol?.let { supertypesOf[it] } ?: emptyList(),
-                        jvmOwner = symbol?.let { jvmOf[it]?.first },
-                        jvmDescriptor = symbol?.let { jvmOf[it]?.second },
-                        position = positionAt(lines, relativePath, declaration.textOffset),
-                    ),
-                )
-            }
-
-            // Resolved-call counting: resolveCall yields the single-or-multi
-            // call container; a container with symbols is a resolved call.
-            for (expression in callExpressions) {
-                callsTotal++
-                val call = try {
-                    expression.resolveCall()
-                } catch (_: Exception) {
-                    null
-                }
-                val resolved = try {
-                    call?.symbols?.isNotEmpty() == true
-                } catch (_: Exception) {
-                    false
-                }
-                if (resolved) {
-                    callsResolved++
-                } else if (System.getenv("KOSI_TRACE") != null && unresolvedSample.size < 25) {
-                    unresolvedSample.add(relativePath + ": " + expression.text.take(80))
-                }
-            }
-            for (u in unresolvedSample) System.err.println("UNRESOLVED: " + u)
-
-            // Resolution diagnostics, summarised: per-error floods would dwarf
-            // the evidence on real projects; the count is the signal. Only
-            // ERROR-severity factories count (P18): the summary's own code is
-            // `resolution-errors`, but it used to include DEPRECATION and the
-            // other warning factories, which drowned the signal the §3
-            // corpus gate ratchets on — a stub that stops TYPECHECKING
-            // (R110) is indistinguishable from one that is merely deprecated.
-            val fileDiagnostics = try {
-                ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
-                    .filter { it.severity == KaSeverity.ERROR }
-            } catch (_: Exception) {
-                emptyList()
-            }
-            for (d in fileDiagnostics) {
-                val code = d.factoryName ?: continue
-                errorCodes[code] = (errorCodes[code] ?: 0) + 1
-            }
-            if (errorCodes.isNotEmpty()) {
-                val summary = errorCodes.entries.sortedWith(
-                    compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key },
-                ).joinToString(", ") { "${it.key}=${it.value}" }
-                diagnostics.add(
-                    Diagnostic(
-                        code = DiagnosticCodes.RESOLUTION_ERRORS,
-                        severity = Severity.WARNING,
-                        message = "frontend resolution reported ${fileDiagnostics.size} diagnostic(s) in " +
-                            "$relativePath: $summary",
-                        position = Position(relativePath, 1, 1),
-                        count = fileDiagnostics.size,
-                    ),
-                )
-            }
-
-            out.add(
-                ResolvedFileFacts(
-                    relativePath = relativePath,
-                    modulePath = modulePath,
-                    packageName = ktFile.packageFqName.asString(),
-                    imports = imports,
-                    declarations = declarations,
-                    usages = usages,
-                    diagnostics = diagnostics,
-                    callsTotal = callsTotal,
-                    callsResolved = callsResolved,
-                    resolutionErrorCodes = errorCodes,
-                    symbolFailures = symbolFailures,
-                    annotationFqnsByShortName = annotationFqns.mapValues { (_, v) -> v.toSet() },
-                ),
-            )
-            continue@fileLoop
-        }
-
-        // Java source: same evidence through the same symbols, same pattern —
-        // resolve up front in the loop, emit from the maps.
-        val javaFile = psi as PsiJavaFile
-        val javaClasses = mutableListOf<PsiClass>()
-        collectJavaClasses(javaFile, javaClasses)
-        val classSymbols = javaClasses.associateWith { psiClass ->
-            try {
-                psiClass.namedClassSymbol
-            } catch (_: Exception) {
-                symbolFailures++
-                null
-            }
-        }
-        val javaMembers = javaClasses.flatMap { psiClass ->
-            psiClass.methods.map { member -> member as com.intellij.psi.PsiMember } +
-                psiClass.fields.map { member -> member as com.intellij.psi.PsiMember }
-        }
-        val memberSymbols = HashMap<com.intellij.psi.PsiMember, org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol?>()
-        for (member in javaMembers) {
-            memberSymbols[member] = try {
-                member.callableSymbol
-            } catch (_: Exception) {
-                symbolFailures++
-                null
-            }
-        }
-        val jvmByMember = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, Pair<String?, String?>>()
-        val visibilityByMember = HashMap<org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol, String>()
-        for ((_, symbol) in memberSymbols) {
-            if (symbol == null || jvmByMember.containsKey(symbol)) continue
-            visibilityByMember[symbol] = visibilityName(symbol)
-            jvmByMember[symbol] = try {
-                val callable = symbol as? KaCallableSymbol
-                if (callable == null) {
-                    null to null
-                } else {
-                    val owner = callable.containingJvmClassName?.replace('.', '/')
-                    val descriptor = when (callable) {
-                        is KaConstructorSymbol ->
-                            JvmSignatures.voidMethodDescriptor(
-                                callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
-                            )
-
-                        is KaPropertySymbol -> null
-
-                        is KaFunctionSymbol -> {
-                            val params = buildList {
-                                callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
-                                callable.valueParameters.forEach { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
-                            }
-                            JvmSignatures.methodDescriptor(
-                                callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
-                                params,
-                            )
-                        }
-
-                        else -> null
-                    }
-                    owner to descriptor
-                }
-            } catch (_: Exception) {
-                symbolFailures++
-                null to null
-            }
-        }
-        for (psiClass in javaClasses) {
-            val name = psiClass.name ?: "<anonymous>"
-            val canonical = javaCanonicalName(psiClass)
-            val symbol = classSymbols[psiClass]
-            declarations.add(
-                ResolvedDeclaration(
-                    name = name,
-                    qualifiedName = "$modulePath:$canonical",
-                    canonicalName = canonical,
-                    kind = when {
-                        psiClass.isAnnotationType -> "annotation"
-                        psiClass.isEnum -> "enum"
-                        psiClass.isInterface -> "interface"
-                        else -> "class"
-                    },
-                    signature = null,
-                    returnType = null,
-                    extensionReceiverType = null,
-                    visibility = symbol?.let { visibilityByMember[it] } ?: javaVisibility(psiClass),
-                    modifiers = javaModifiers(psiClass),
-                    annotations = emptyList(),
-                    overrides = emptyList(),
-                    supertypes = try {
-                        symbol?.let { s ->
-                            (s as? KaClassSymbol)?.superTypes
-                                ?.mapNotNull { (it as? KaClassType)?.classId?.asSingleFqName()?.asString() }
-                                ?.filter { it != "kotlin.Any" }
-                                ?.distinct()
-                        } ?: emptyList()
-                    } catch (_: Exception) {
-                        symbolFailures++
-                        emptyList()
-                    },
-                    jvmOwner = symbol?.let { jvmByMember[it]?.first },
-                    jvmDescriptor = symbol?.let { jvmByMember[it]?.second },
-                    position = positionAt(lines, relativePath, psiClass.textOffset),
-                ),
-            )
-
-            for (method in psiClass.methods) {
-                val methodSymbol = memberSymbols[method]
-                val callable = methodSymbol as? KaCallableSymbol
-                val params = method.parameterList.parameters.joinToString(", ") { p ->
-                    "${p.name ?: "_"}: ${p.type.canonicalText.normalized()}"
-                }
-                declarations.add(
-                    ResolvedDeclaration(
-                        name = method.name,
-                        qualifiedName = "$modulePath:${canonical}.${method.name}",
-                        canonicalName = "${canonical}.${method.name}",
-                        kind = if (method.isConstructor) "constructor" else "method",
-                        signature = "fun ${method.name}($params)" +
-                            method.returnType?.let { ": ${it.canonicalText.normalized()}" }.orEmpty(),
-                        returnType = method.returnType?.canonicalText?.normalized(),
+                        signature = null,
+                        returnType = null,
                         extensionReceiverType = null,
-                        visibility = methodSymbol?.let { visibilityByMember[it] } ?: javaVisibility(method),
-                        modifiers = javaModifiers(method),
+                        visibility = symbol?.let { visibilityByMember[it] } ?: javaVisibility(psiClass),
+                        modifiers = javaModifiers(psiClass),
                         annotations = emptyList(),
-                        overrides = try {
-                            if (callable != null) {
-                                callable.allOverriddenSymbols
-                                    .mapNotNull { it.callableId?.asSingleFqName()?.asString() }
-                                    .toList().distinct()
-                            } else {
-                                emptyList()
-                            }
+                        overrides = emptyList(),
+                        supertypes = try {
+                            symbol?.let { s ->
+                                (s as? KaClassSymbol)?.superTypes
+                                    ?.mapNotNull { (it as? KaClassType)?.classId?.asSingleFqName()?.asString() }
+                                    ?.filter { it != "kotlin.Any" }
+                                    ?.distinct()
+                            } ?: emptyList()
                         } catch (_: Exception) {
                             symbolFailures++
                             emptyList()
                         },
-                        supertypes = emptyList(),
-                        jvmOwner = methodSymbol?.let { jvmByMember[it]?.first },
-                        jvmDescriptor = methodSymbol?.let { jvmByMember[it]?.second },
-                        position = positionAt(lines, relativePath, method.textOffset),
+                        jvmOwner = symbol?.let { jvmByMember[it]?.first },
+                        jvmDescriptor = symbol?.let { jvmByMember[it]?.second },
+                        position = positionAt(lines, relativePath, psiClass.textOffset),
                     ),
                 )
+
+                for (method in psiClass.methods) {
+                    val methodSymbol = memberSymbols[method]
+                    val callable = methodSymbol as? KaCallableSymbol
+                    val params = method.parameterList.parameters.joinToString(", ") { p ->
+                        "${p.name ?: "_"}: ${p.type.canonicalText.normalized()}"
+                    }
+                    declarations.add(
+                        ResolvedDeclaration(
+                            name = method.name,
+                            qualifiedName = "$modulePath:${canonical}.${method.name}",
+                            canonicalName = "${canonical}.${method.name}",
+                            kind = if (method.isConstructor) "constructor" else "method",
+                            signature = "fun ${method.name}($params)" +
+                                method.returnType?.let { ": ${it.canonicalText.normalized()}" }.orEmpty(),
+                            returnType = method.returnType?.canonicalText?.normalized(),
+                            extensionReceiverType = null,
+                            visibility = methodSymbol?.let { visibilityByMember[it] } ?: javaVisibility(method),
+                            modifiers = javaModifiers(method),
+                            annotations = emptyList(),
+                            overrides = try {
+                                if (callable != null) {
+                                    callable.allOverriddenSymbols
+                                        .mapNotNull { it.callableId?.asSingleFqName()?.asString() }
+                                        .toList().distinct()
+                                } else {
+                                    emptyList()
+                                }
+                            } catch (_: Exception) {
+                                symbolFailures++
+                                emptyList()
+                            },
+                            supertypes = emptyList(),
+                            jvmOwner = methodSymbol?.let { jvmByMember[it]?.first },
+                            jvmDescriptor = methodSymbol?.let { jvmByMember[it]?.second },
+                            position = positionAt(lines, relativePath, method.textOffset),
+                        ),
+                    )
+                }
+                for (field in psiClass.fields) {
+                    val fieldSymbol = memberSymbols[field]
+                    val callable = fieldSymbol as? KaCallableSymbol
+                    declarations.add(
+                        ResolvedDeclaration(
+                            name = field.name,
+                            qualifiedName = "$modulePath:${canonical}.${field.name}",
+                            canonicalName = "${canonical}.${field.name}",
+                            kind = "property",
+                            signature = "val ${field.name}: ${field.type.canonicalText.normalized()}",
+                            returnType = field.type.canonicalText.normalized(),
+                            extensionReceiverType = null,
+                            visibility = fieldSymbol?.let { visibilityByMember[it] } ?: javaVisibility(field),
+                            modifiers = javaModifiers(field),
+                            annotations = emptyList(),
+                            overrides = emptyList(),
+                            supertypes = emptyList(),
+                            jvmOwner = fieldSymbol?.let { jvmByMember[it]?.first },
+                            jvmDescriptor = fieldSymbol?.let { jvmByMember[it]?.second },
+                            position = positionAt(lines, relativePath, field.textOffset),
+                        ),
+                    )
+                }
             }
-            for (field in psiClass.fields) {
-                val fieldSymbol = memberSymbols[field]
-                val callable = fieldSymbol as? KaCallableSymbol
-                declarations.add(
-                    ResolvedDeclaration(
-                        name = field.name,
-                        qualifiedName = "$modulePath:${canonical}.${field.name}",
-                        canonicalName = "${canonical}.${field.name}",
-                        kind = "property",
-                        signature = "val ${field.name}: ${field.type.canonicalText.normalized()}",
-                        returnType = field.type.canonicalText.normalized(),
-                        extensionReceiverType = null,
-                        visibility = fieldSymbol?.let { visibilityByMember[it] } ?: javaVisibility(field),
-                        modifiers = javaModifiers(field),
-                        annotations = emptyList(),
-                        overrides = emptyList(),
-                        supertypes = emptyList(),
-                        jvmOwner = fieldSymbol?.let { jvmByMember[it]?.first },
-                        jvmDescriptor = fieldSymbol?.let { jvmByMember[it]?.second },
-                        position = positionAt(lines, relativePath, field.textOffset),
+            out.add(
+                ResolvedFileFacts(
+                    relativePath = relativePath,
+                    modulePath = modulePath,
+                    packageName = javaFile.packageName,
+                    imports = emptyList(),
+                    declarations = declarations,
+                    usages = usages,
+                    diagnostics = diagnostics,
+                    callsTotal = 0,
+                    callsResolved = 0,
+                    resolutionErrorCodes = emptyMap(),
+                    symbolFailures = symbolFailures,
+                ),
+            )
+        } catch (e: StackOverflowError) {
+            out.add(
+                ResolvedFileFacts(
+                    relativePath = relativePath,
+                    modulePath = modulePath,
+                    packageName = "",
+                    imports = emptyList(),
+                    declarations = emptyList(),
+                    usages = emptyList(),
+                    diagnostics = listOf(
+                        Diagnostic(
+                            code = DiagnosticCodes.STACK_OVERFLOW_SKIPPED,
+                            severity = Severity.ERROR,
+                            message = "resolving $relativePath exhausted the stack; the file was skipped and " +
+                                "every other file was analysed (the analysis runs on a " +
+                                "${WalkBudgets.ANALYSIS_STACK_BYTES / (1L shl 20)} MB analysis stack)",
+                            position = Position(relativePath, 1, 1),
+                            count = 1,
+                        ),
                     ),
-                )
-            }
+                    callsTotal = 0,
+                    callsResolved = 0,
+                    resolutionErrorCodes = emptyMap(),
+                    symbolFailures = 0,
+                ),
+            )
+            continue@fileLoop
         }
-        out.add(
-            ResolvedFileFacts(
-                relativePath = relativePath,
-                modulePath = modulePath,
-                packageName = javaFile.packageName,
-                imports = emptyList(),
-                declarations = declarations,
-                usages = usages,
-                diagnostics = diagnostics,
-                callsTotal = 0,
-                callsResolved = 0,
-                resolutionErrorCodes = emptyMap(),
-                symbolFailures = symbolFailures,
-            ),
-        )
         }
         }
         return out
