@@ -865,9 +865,24 @@ fun main(args: Array<String>) {
  * would send someone tuning the JVM over a real defect.
  */
 internal fun memoryAdvice(t: Throwable): String? {
-    val memoryShaped = generateSequence(t) { it.cause }.take(8).any {
-        it is OutOfMemoryError || it is NoClassDefFoundError || it is StackOverflowError
+    val chain = generateSequence(t) { it.cause }.take(8).toList()
+    // A StackOverflowError is NOT a heap problem, and advising `-Xmx` for one
+    // sends the operator to the wrong knob entirely. It is the CALL STACK,
+    // and in kosi it means one thing in practice: a source file nested deeper
+    // than the recursive walkers can descend. Measured — a single expression
+    // of 2,000 `+` terms (one 8 KB file) kills the run at any heap size,
+    // while 1,000 terms analyses fine. Generated code, long `when` chains and
+    // large Compose trees all reach that shape, so the advice names the
+    // source, not the machine.
+    if (chain.any { it is StackOverflowError }) {
+        return "kosi: this is a CALL STACK overflow, not a heap problem — raising -Xmx will not help.\n" +
+            "kosi: kosi walks source syntax recursively, so a single deeply nested expression can " +
+            "exhaust the stack: a 2,000-term `a + b + c + ...` is enough, whatever the heap.\n" +
+            "kosi: retry with a larger thread stack, e.g. `java -Xss64m -jar kosi-all.jar ...`. " +
+            "If that does not do it, the file is beyond what this build can lower; " +
+            "see docs/KOSI.md, \"How much memory\"."
     }
+    val memoryShaped = chain.any { it is OutOfMemoryError || it is NoClassDefFoundError }
     if (!memoryShaped) return null
     val maxHeapBytes = Runtime.getRuntime().maxMemory()
     val heap = if (maxHeapBytes == Long.MAX_VALUE) "unbounded" else "${maxHeapBytes / (1L shl 30)} GiB"
