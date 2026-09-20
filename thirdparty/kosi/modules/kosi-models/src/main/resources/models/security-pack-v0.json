@@ -2703,7 +2703,15 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "io.ktor.server.routing.RoutingCall.pathParameters"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "io.ktor.server.request.ApplicationRequest.headers"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.ApplicationRequest.cookies"
     },
     {
       "category": "untrusted-input",
@@ -2723,6 +2731,10 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.header"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "io.ktor.server.request.receiveParameters"
     },
     {
@@ -2732,6 +2744,10 @@
     {
       "category": "untrusted-input",
       "pattern": "io.ktor.server.request.receiveText"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "io.ktor.server.request.queryString"
     },
     {
       "category": "untrusted-input",
@@ -2827,6 +2843,10 @@
     },
     {
       "category": "untrusted-input",
+      "pattern": "io.vertx.core.http.HttpServerRequest.getFormAttribute"
+    },
+    {
+      "category": "untrusted-input",
       "pattern": "jakarta.jms.TextMessage.getText"
     },
     {
@@ -2848,6 +2868,10 @@
     {
       "category": "untrusted-input",
       "pattern": "jakarta.servlet.http.HttpServletRequest.getParameter"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "jakarta.servlet.ServletRequest.getParameter"
     },
     {
       "category": "untrusted-input",
@@ -2916,6 +2940,10 @@
     {
       "category": "untrusted-input",
       "pattern": "javax.servlet.http.HttpServletRequest.getParameter"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "javax.servlet.ServletRequest.getParameter"
     },
     {
       "category": "untrusted-input",
@@ -3000,6 +3028,10 @@
     {
       "category": "untrusted-input",
       "pattern": "org.http4k.core.Request.query"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "org.http4k.routing.path"
     },
     {
       "category": "untrusted-input",

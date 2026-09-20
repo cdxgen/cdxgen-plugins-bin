@@ -83,6 +83,15 @@ object DiagnosticCodes {
     const val DATAFLOW_TRUNCATED = "dataflow-truncated"
 
     /**
+     * P28 (R176): functions skipped BY POLICY (`--dataflow-skip-generated`)
+     * — distinct from [DATAFLOW_TRUNCATED]: the skipped bodies' summaries
+     * still apply, nothing was cut by a cap, and the count lives in
+     * `stats.policySkips` (never in `stats.truncations`, whose non-zero
+     * entries mean a cap bound — 09-PRECISION §3b).
+     */
+    const val DATAFLOW_SKIPPED_POLICY = "dataflow-skipped-policy"
+
+    /**
      * P5 summaries: a strongly connected component of the call graph hit
      * its summary iteration budget before its members' summaries converged.
      * The last iterate is what callers applied — labelled
@@ -108,6 +117,9 @@ object DiagnosticCodes {
 
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
+    /** P28 (R178): manifest endpoints whose handler class is not among the analysed declarations. */
+    const val ENDPOINT_UNSUBSTANTIATED = "endpoint-unsubstantiated"
+
     /**
      * P28 §4 (R179): discovery collected a small share of the source files
      * present under the analysed root. The threshold (half of ≥20 files) is
@@ -197,12 +209,14 @@ object DiagnosticCodes {
         CALLGRAPH_ROOT_NOT_FOUND,
         FIXPOINT_CAP,
         DATAFLOW_TRUNCATED,
+        DATAFLOW_SKIPPED_POLICY,
         SUMMARY_ITERATION_CAP,
         DISPATCH_JOIN_WIDTH,
         LAMBDA_UNRESOLVED,
         NO_BUILD_FILES,
         NO_SOURCES,
         SOURCE_COVERAGE_GAP,
+        ENDPOINT_UNSUBSTANTIATED,
         UNREADABLE_SOURCE,
         DEPS_BODYLESS,
         DEPS_CLASS_NOT_FOUND,

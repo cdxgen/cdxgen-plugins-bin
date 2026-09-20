@@ -112,6 +112,13 @@
 // kosi:want-not endpoint framework=http4k path=/simple produces=~
 // kosi:want-not endpoint framework=http4k path=/simple consumes=~
 // kosi:want-not endpoint framework=http4k path=/simple authentication=~
+//
+// P28 §2: two readers that were endpoints evidence but NOT taint sources —
+// Vert.x's form-attribute read (context.request().getFormAttribute) and
+// http4k's routed path read (org.http4k.routing.path). Each flows to a real
+// sink; the wants fail if the source row is removed.
+// kosi:want flow source=untrusted-input sink=process-exec fn=~formHandler mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~routedPathHandler mode=resolved
 package fixtures.dslmedia
 
 import io.javalin.Javalin
@@ -129,6 +136,7 @@ import org.http4k.contract.meta
 import org.http4k.core.Method
 import org.http4k.core.Request
 import org.http4k.core.Response
+import org.http4k.routing.path
 import org.http4k.security.ApiKeySecurity
 import org.http4k.security.AuthCodeOAuthSecurity
 import org.http4k.security.BasicAuthSecurity
@@ -138,6 +146,9 @@ private infix fun String.bind(method: String) = "$this $method"
 private val authProvider = object : AuthenticationProvider {}
 
 fun chainHandler(ctx: RoutingContext): String = ctx.pathParam("id")
+
+fun formHandler(ctx: RoutingContext): Process =
+    Runtime.getRuntime().exec(ctx.request().getFormAttribute("name") ?: "")
 
 fun secureHandler(ctx: RoutingContext): String = ctx.queryParam("q")
 
@@ -172,6 +183,9 @@ fun buildJavalin(): Javalin {
 }
 
 private fun simpleHandler(request: org.http4k.core.Request): Response = Response.ok(request.uri)
+
+fun routedPathHandler(request: org.http4k.core.Request): Process =
+    Runtime.getRuntime().exec(request.path("title") ?: "")
 
 @Suppress("unused")
 fun http4kApp(): List<String> = listOf(

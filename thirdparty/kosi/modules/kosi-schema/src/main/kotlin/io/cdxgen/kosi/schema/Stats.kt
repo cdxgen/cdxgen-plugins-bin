@@ -71,6 +71,14 @@ data class Stats(
     /** P9: dependency methods lowered WITH bodies (the summary count's denominator). */
     val dependencyFunctions: Int = 0,
     val truncations: Map<String, Int>,
+    /**
+     * P28 (R176): skips BY POLICY (`generated-functions` under
+     * `--dataflow-skip-generated`) — deliberate, lossless exclusions whose
+     * summaries still apply. Beside [truncations] so the two vocabularies
+     * stay separate: a cap that binds is a defect (09-PRECISION §3b), a
+     * policy skip is working as intended.
+     */
+    val policySkips: Map<String, Int> = emptyMap(),
     val degraded: String?,
     /** P28 §1: how the classpath was acquired, and what each strategy found. */
     val classpath: ClasspathStats = ClasspathStats(),
@@ -110,6 +118,11 @@ data class Stats(
         w.beginObject("truncations")
         for (key in truncations.keys.sorted()) {
             w.num(key, (truncations[key] ?: 0).toLong())
+        }
+        w.endObject()
+        w.beginObject("policySkips")
+        for (key in policySkips.keys.sorted()) {
+            w.num(key, (policySkips[key] ?: 0).toLong())
         }
         w.endObject()
         w.num("unknownCallPropagations", unknownCallPropagations)

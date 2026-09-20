@@ -861,7 +861,7 @@ object Analyzer {
             // P7: `--endpoint-sources` links endpoint-rooted slices to the
             // endpoint they enter through, and names the source categories
             // each endpoint introduces.
-            val apiEndpoints = if (options.endpointSources && dataFlow != null) {
+            var apiEndpoints = if (options.endpointSources && dataFlow != null) {
                 val handlers = endpoints.apiEndpoints.associate { ep -> ep.handlerCanonicalName to ep.id }
                 val bySlice = HashMap<String, MutableList<String>>()
                 endpoints.apiEndpoints.forEach { ep -> bySlice[ep.handlerCanonicalName] = mutableListOf() }
@@ -882,6 +882,37 @@ object Analyzer {
                 }
             } else {
                 endpoints.apiEndpoints
+            }
+
+            // P28 (R178): a manifest endpoint whose handler class matches no
+            // analysed declaration is a claim kosi READ NOTHING of — dagger
+            // published 53 of them beside `no-sources`, every one carrying
+            // an EMPTY handlerCanonicalName (the lifecycle matcher found no
+            // class to name). Marked, never silently asserted: the endpoint
+            // stays (the manifest IS real), `substantiated=false` and the
+            // diagnostic carry the "did not look" (P23's rule).
+            val analysedCanonicalNames = drafts.map { it.canonicalName }.toHashSet()
+            fun unsubstantiated(ep: io.cdxgen.kosi.schema.ApiEndpoint): Boolean =
+                ep.foundBy == "manifest" && (
+                    ep.handlerCanonicalName.isEmpty() ||
+                        ep.handlerCanonicalName !in analysedCanonicalNames
+                    )
+            val unsubstantiatedEndpoints = apiEndpoints.count(::unsubstantiated)
+            val unsubstantiatedDiagnostic = if (unsubstantiatedEndpoints > 0) {
+                apiEndpoints = apiEndpoints.map { ep ->
+                    if (unsubstantiated(ep)) ep.copy(substantiated = false) else ep
+                }
+                Diagnostic(
+                    code = DiagnosticCodes.ENDPOINT_UNSUBSTANTIATED,
+                    severity = Severity.WARNING,
+                    message = "$unsubstantiatedEndpoints manifest endpoint(s) name a handler class that is not " +
+                        "among the analysed declarations (library components, or a run that discovered none of " +
+                        "the sources); their behaviour was not read and they carry substantiated=false",
+                    position = Position(".", 1, 1),
+                    count = unsubstantiatedEndpoints,
+                )
+            } else {
+                null
             }
 
             val totalCalls = callsTotal
@@ -1030,6 +1061,7 @@ object Analyzer {
                 diagnostics = versionDiagnostics + overrideDiagnostics + classpathDiagnostics +
                     listOfNotNull(
                         coverageDiagnostic,
+                        unsubstantiatedDiagnostic,
                         jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
                     ) +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
@@ -1084,6 +1116,7 @@ object Analyzer {
                     dependencyClasses = flowResult?.dependencyClasses ?: 0,
                     dependencyFunctions = flowResult?.dependencyFunctions ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
+                    policySkips = flowResult?.skips ?: emptyMap(),
                     degraded = degradedTag(versionDiagnostics, resolution, ratio),
                     classpath = classpathStats,
                     sourceCoverage = sourceCoverage,

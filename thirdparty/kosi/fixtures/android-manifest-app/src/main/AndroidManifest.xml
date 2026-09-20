@@ -16,6 +16,17 @@
             </intent-filter>
         </activity>
         <!-- <activity android:name=".GhostActivity" android:exported="true" /> -->
+        <!-- P28 (R178): a component whose class the analysed tree does not
+             hold — a LIBRARY activity, the normal reason. The endpoint is a
+             real manifest claim and stays published, marked
+             substantiated=false: the manifest says the attack surface
+             exists, kosi read none of its behaviour. -->
+        <activity android:name="com.example.library.LibraryActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <data android:scheme="kosilib" />
+            </intent-filter>
+        </activity>
         <receiver android:name=".PackageReceiver" android:exported="false" />
         <service android:name=".SyncService" />
         <provider android:name=".MetaProvider" android:exported="true" />

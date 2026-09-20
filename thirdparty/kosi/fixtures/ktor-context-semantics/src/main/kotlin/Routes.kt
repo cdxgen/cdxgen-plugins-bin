@@ -46,9 +46,22 @@
 // kosi:want endpoint framework=ktor path=/gateway/inbox mode=resolved method=GET
 // kosi:want-not endpoint framework=ktor path=~/inbox/t
 // kosi:want-not endpoint framework=ktor path=~/inbox/v
+//
+// P28 §2: the four ktor-3-generation readers that were endpoints evidence
+// but NOT taint sources — cookies, the single-header read, the raw query
+// string, and RoutingCall.pathParameters. Each flows to a real sink; the
+// wants fail if any source row is removed (R168's rule: the stub carries
+// the real FQNs, the wants carry the flow).
+// kosi:want flow source=untrusted-input sink=process-exec fn=~cookieSink mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~headerSink mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~queryStringSink mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~pathParametersSink mode=resolved
 package fixtures.ktorcontext
 
+import io.ktor.server.request.header
+import io.ktor.server.request.queryString
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.RoutingCall
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -75,3 +88,17 @@ fun module(root: Route) {
 }
 
 fun sink(value: String): String = value
+
+// P28 §2 arms: one per reader that had no source row. The sink is the
+// engine's own process-exec; every arm returns the Process it started.
+fun cookieSink(request: io.ktor.server.request.ApplicationRequest): Process =
+    Runtime.getRuntime().exec(request.cookies["session"].orEmpty())
+
+fun headerSink(request: io.ktor.server.request.ApplicationRequest): Process =
+    Runtime.getRuntime().exec(request.header("X-Request-Id") ?: "")
+
+fun queryStringSink(request: io.ktor.server.request.ApplicationRequest): Process =
+    Runtime.getRuntime().exec(request.queryString())
+
+fun pathParametersSink(call: RoutingCall): Process =
+    Runtime.getRuntime().exec(call.pathParameters["id"].orEmpty())

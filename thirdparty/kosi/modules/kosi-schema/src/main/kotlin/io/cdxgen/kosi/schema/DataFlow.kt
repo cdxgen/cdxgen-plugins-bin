@@ -615,6 +615,15 @@ data class DataFlowStats(
      * the claim "no cap bound".
      */
     val truncations: Map<String, Int> = emptyMap(),
+    /**
+     * P28 (R176): functions skipped BY POLICY (`--dataflow-skip-generated`),
+     * which is not a cap: the skipped bodies' summaries still apply and
+     * nothing is lost. Published beside `truncations{}` so "cut off by a
+     * budget" and "deliberately not reported" are different vocabularies —
+     * the counter used to ride `truncations{}`, burying real cap signal
+     * under numbers that meant "working as intended".
+     */
+    val skips: Map<String, Int> = emptyMap(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -654,6 +663,9 @@ data class DataFlowStats(
         w.num("suspendCrossingSlices", suspendCrossingSlices)
         w.beginObject("truncations")
         for ((key, value) in truncations.toSortedMap()) w.num(key, value.toLong())
+        w.endObject()
+        w.beginObject("skips")
+        for ((key, value) in skips.toSortedMap()) w.num(key, value.toLong())
         w.endObject()
         w.endObject()
     }

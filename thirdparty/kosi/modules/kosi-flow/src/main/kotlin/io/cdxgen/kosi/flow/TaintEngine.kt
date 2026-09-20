@@ -340,6 +340,17 @@ object TaintEngine {
         /** Unknown calls through which taint actually propagated: measurable precision loss. */
         val unknownCallPropagations: Int,
         val truncations: Map<String, Int>,
+        /**
+         * P28 (R176): functions SKIPPED BY POLICY, not cut by a cap —
+         * `--dataflow-skip-generated` skipping synthetic bodies. Their
+         * summaries still apply, so nothing is lost and the counter was
+         * never a truncation: reporting it as one buried the real cap
+         * signal (coil's summary-state-budget beside 301
+         * "truncations" that meant "working as intended") and the number
+         * GROWS as the engine synthesises more, reading as a regression
+         * when it is the opposite. `truncations{}` is caps only.
+         */
+        val skips: Map<String, Int> = emptyMap(),
         val diagnostics: List<Diagnostic>,
         /** P5: the converged summaries (computed ones plus pack-derived ones). */
         val summaries: List<io.cdxgen.kosi.schema.FlowSummary>,
@@ -607,6 +618,13 @@ object TaintEngine {
     fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
         val diagnostics = mutableListOf<Diagnostic>()
         val truncations = java.util.TreeMap<String, Int>()
+        val skips = java.util.TreeMap<String, Int>()
+        /**
+         * R176: the skip kinds that are POLICY, not caps — reported in
+         * `skips{}`, never in `truncations{}`. Anything added here is a
+         * deliberate, lossless exclusion whose summaries still apply.
+         */
+        val POLICY_SKIPS = setOf("generated-functions")
         val candidates = mutableListOf<SliceCandidate>()
         val nodeInfos = java.util.TreeSet<NodeInfo>(compareBy { it.sortKey })
         var functionsAnalysed = 0
@@ -824,7 +842,14 @@ object TaintEngine {
             val outcome = slot.outcome
             if (outcome == null) {
                 val kind = slot.skippedKind ?: "dataflow-truncated"
-                truncations.merge(kind, 1, Int::plus)
+                // R176: policy skips are not truncations. The generated
+                // bodies' summaries still apply; a cap counter that includes
+                // them lies about what bounded the run.
+                if (kind in POLICY_SKIPS) {
+                    skips.merge(kind, 1, Int::plus)
+                } else {
+                    truncations.merge(kind, 1, Int::plus)
+                }
                 if (kind == DiagnosticCodes.ANALYSIS_TIME_BUDGET || kind == DiagnosticCodes.RSS_BUDGET) {
                     stopCode = kind
                 }
@@ -928,6 +953,22 @@ object TaintEngine {
                 ),
             )
         }
+        // R176: policy skips carry their own vocabulary — a diagnostic here
+        // would re-create the very confusion the split exists to end (a
+        // skip is not a truncation), but SILENCE is not the alternative
+        // either: the counts are published in stats.skips{} and
+        // stats.policySkips{} for consumers.
+        for ((kind, count) in skips) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.DATAFLOW_SKIPPED_POLICY,
+                    severity = Severity.INFO,
+                    message = "$count function(s) skipped by policy '$kind' (summaries still apply; nothing " +
+                        "was cut by a cap — see stats.policySkips)",
+                    count = count,
+                ),
+            )
+        }
 
         if (stopCode != null) {
             diagnostics.add(
@@ -962,7 +1003,7 @@ object TaintEngine {
         // consumer must parse — `truncations{}` per cap, empty when none
         // bound (which is the depth doctrine's claim, checkable).
         val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
-            .let { it.copy(stats = it.stats.copy(truncations = truncations)) }
+            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips)) }
         return Result(
             evidence = evidence,
             functionsAnalysed = functionsAnalysed,
@@ -971,6 +1012,7 @@ object TaintEngine {
             sinkSites = sinkSites,
             unknownCallPropagations = unknownCallPropagations,
             truncations = truncations,
+            skips = skips,
             diagnostics = diagnostics.sortedWith(Diagnostic.COMPARATOR),
             summaries = allSummaries,
             sccsProcessed = summaryResult.sccsProcessed,

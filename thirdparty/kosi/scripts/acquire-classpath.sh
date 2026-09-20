@@ -89,23 +89,33 @@ tree_line='^[-+\\| ]*--- [a-zA-Z]'
 gradle_report() {
   local dir="$1" out="$2"
   [ -x "$dir/gradlew" ] || return 1
-  (cd "$dir" && ./gradlew -q projects --console=plain 2>/dev/null || true) \
+  # A WALL-CLOCK budget over the whole arm: a per-call timeout alone lets a
+  # broken multi-project build eat N x 3 x timeout (measured: mifos-mobile,
+  # ~20 subprojects whose dependency reports hang). Over budget the arm
+  # reports what it collected so far — possibly nothing, which is the next
+  # strategy's input.
+  local budget="${KOSI_ACQUIRE_GRADLE_BUDGET:-180}"
+  local started
+  started=$(date +%s)
+  over_budget() { [ $(( $(date +%s) - started )) -ge "$budget" ]; }
+  (cd "$dir" && timeout "${KOSI_ACQUIRE_GRADLE_TIMEOUT:-120}" ./gradlew -q projects --console=plain 2>/dev/null || true) \
     | { grep -oE "Project '(:[^']*)'" || true; } \
     | sed -E "s/Project '([^']*)'/\1/" | sed 's/^$/:/' >"$dir/.acq-projects"
   local projects=()
   while IFS= read -r p; do projects+=("$p"); done <"$dir/.acq-projects"
+  rm -f "$dir/.acq-projects"
   [ ${#projects[@]} -eq 0 ] && projects=(":")
   : >"$out"
   for p in "${projects[@]}"; do
+    over_budget && { echo "    (gradle budget spent at project $p)" >&2; break; }
     for extra in "" "--configuration testCompileClasspath" "--configuration testRuntimeClasspath"; do
-      (cd "$dir" && ./gradlew -q "$p:dependencies" $extra --console=plain 2>/dev/null || true) \
+      (cd "$dir" && timeout "${KOSI_ACQUIRE_GRADLE_TIMEOUT:-120}" ./gradlew -q "$p:dependencies" $extra --console=plain 2>/dev/null || true) \
         | { grep -E "$tree_line" || true; } \
         | sed -E 's/^[-+\\| ]*--- //; s/ \(.*\)$//; s/ -> /:/g' \
         | { grep -E "$coord_re" || true; } \
         >>"$out" || true
     done
   done
-  rm -f "$dir/.acq-projects"
   [ -s "$out" ]
 }
 
@@ -117,7 +127,7 @@ maven_report() {
   command -v mvn >/dev/null 2>&1 || return 1
   local tmp
   tmp="$(mktemp)"
-  (cd "$dir" && mvn -q -B dependency:build-classpath -Dmdep.outputFile="$tmp" \
+  (cd "$dir" && timeout "${KOSI_ACQUIRE_MAVEN_TIMEOUT:-120}" mvn -q -B dependency:build-classpath -Dmdep.outputFile="$tmp" \
      -Dmdep.includeScope=test >/dev/null 2>&1) || { rm -f "$tmp"; return 1; }
   [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
   tr ':' '\n' <"$tmp" | grep -E '\.jar$' | sort -u >"$out"
