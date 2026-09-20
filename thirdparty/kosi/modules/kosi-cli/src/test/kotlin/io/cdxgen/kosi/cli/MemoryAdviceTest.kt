@@ -31,9 +31,32 @@ class MemoryAdviceTest {
     }
 
     @Test
-    fun outOfMemoryAndStackOverflowAreDiagnosedToo() {
-        assertNotNull(memoryAdvice(OutOfMemoryError("Java heap space")))
-        assertNotNull(memoryAdvice(StackOverflowError()))
+    fun outOfMemoryIsDiagnosedAsTheHeap() {
+        val advice = memoryAdvice(OutOfMemoryError("Java heap space"))
+        assertNotNull(advice)
+        assertTrue("-Xmx" in advice, advice)
+    }
+
+    /**
+     * A stack overflow is NOT a heap problem, and the first cut of this advice
+     * said `-Xmx` for it — sending the operator to the wrong knob, confidently.
+     * Measured on a generated fixture: a single expression of 2,000 `+` terms
+     * (one 8 KB file) kills the run at ANY heap size, while 1,000 terms is
+     * fine. So the advice must name the stack and the source shape, and must
+     * NOT recommend the heap.
+     */
+    @Test
+    fun aStackOverflowIsDiagnosedAsTheStackAndNeverTheHeap() {
+        val advice = memoryAdvice(StackOverflowError())
+        assertNotNull(advice)
+        assertTrue("-Xss" in advice, "stack advice must name the stack flag: $advice")
+        assertTrue("nested" in advice, "the operator needs to know it is the source's shape: $advice")
+        // -Xmx may appear, but only to rule it OUT. What must never happen is
+        // the heap being offered as the remedy, which is what the first cut
+        // did. The retry line is the remedy, so that is the line checked.
+        val remedy = advice.lines().single { "retry with" in it }
+        assertTrue("-Xss" in remedy, "the remedy must be the stack flag: $remedy")
+        assertTrue("-Xmx" !in remedy, "a stack overflow must never be remedied with the heap: $remedy")
     }
 
     @Test
