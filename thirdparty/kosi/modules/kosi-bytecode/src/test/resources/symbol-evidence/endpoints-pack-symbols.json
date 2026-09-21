@@ -11,6 +11,17 @@
    "gaps": []
   },
   {
+   "id": "android-provider",
+   "sources": [],
+   "covers": [],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "android.content.ContentProvider: the Android platform jar is not a Gradle-cache coordinate — the marker's kind (a class) is checked against the intent-extras-channel fixture's in-source stub, not against platform bytecode"
+   ]
+  },
+  {
    "id": "aws-lambda",
    "sources": [
     "com.amazonaws:aws-lambda-java-core:1.4.0"
@@ -208,23 +219,23 @@
    "members": [],
    "functions": [],
    "gaps": [
-    "io.javalin.Javalin.get: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.Javalin.post: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.Javalin.put: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.Javalin.patch: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.Javalin.delete: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.formParam: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.formParams: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.header: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.cookie: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.body: io.javalin absent from the warm cache \u2014 channels unchecked",
-    "io.javalin.http.Context.bodyAsClass: io.javalin absent from the warm cache \u2014 channels unchecked"
+    "io.javalin.Javalin.get: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.post: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.put: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.patch: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.delete: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.formParam: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.formParams: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.header: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.cookie: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.body: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.http.Context.bodyAsClass: io.javalin absent from the warm cache — channels unchecked"
    ]
   },
   {
@@ -589,6 +600,65 @@
    ]
   },
   {
+   "id": "ratpack",
+   "sources": [
+    "io.ratpack:ratpack-core:1.9.0"
+   ],
+   "covers": [
+    "supertypeMarkers",
+    "contextReaders"
+   ],
+   "types": [
+    {
+     "fqn": "ratpack.handling.Handler",
+     "kind": "interface",
+     "constructible": false
+    }
+   ],
+   "members": [
+    {
+     "owner": "ratpack.http.Request",
+     "member": "getBody",
+     "static": false
+    },
+    {
+     "owner": "ratpack.http.Request",
+     "member": "getBodyStream",
+     "static": false
+    },
+    {
+     "owner": "ratpack.http.Request",
+     "member": "getCookies",
+     "static": false
+    },
+    {
+     "owner": "ratpack.http.Request",
+     "member": "getHeaders",
+     "static": false
+    },
+    {
+     "owner": "ratpack.http.Request",
+     "member": "getQueryParams",
+     "static": false
+    },
+    {
+     "owner": "ratpack.http.Request",
+     "member": "oneCookie",
+     "static": false
+    }
+   ],
+   "functions": [],
+   "gaps": [
+    "ratpack.core.handling.Handler: no held jar covers its package family",
+    "ratpack.core.http.Request.getBody: owner ratpack.core.http.Request not in any held ratpack-core",
+    "ratpack.core.http.Request.getBodyStream: owner ratpack.core.http.Request not in any held ratpack-core",
+    "ratpack.core.http.Request.getCookies: owner ratpack.core.http.Request not in any held ratpack-core",
+    "ratpack.core.http.Request.getHeaders: owner ratpack.core.http.Request not in any held ratpack-core",
+    "ratpack.core.http.Request.getQueryParams: owner ratpack.core.http.Request not in any held ratpack-core",
+    "ratpack.core.http.Request.oneCookie: owner ratpack.core.http.Request not in any held ratpack-core"
+   ]
+  },
+  {
    "id": "servlet",
    "sources": [
     "jakarta.servlet:jakarta.servlet-api:4.0.4"
@@ -646,16 +716,16 @@
    "members": [],
    "functions": [],
    "gaps": [
-    "spark.Spark.get: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Spark.post: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Spark.put: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Spark.delete: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Spark.path: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Request.params: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Request.queryParams: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Request.headers: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Request.cookie: com.sparkjava absent from the warm cache \u2014 channels unchecked",
-    "spark.Request.body: com.sparkjava absent from the warm cache \u2014 channels unchecked"
+    "spark.Spark.get: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.post: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.put: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.delete: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.path: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Request.params: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Request.queryParams: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Request.headers: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Request.cookie: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Request.body: com.sparkjava absent from the warm cache — channels unchecked"
    ]
   },
   {
@@ -1107,17 +1177,6 @@
     "io.vertx.core.http.HttpServerRequest.getFormAttribute: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getHeader: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web"
-   ]
-  },
-  {
-   "id": "android-provider",
-   "sources": [],
-   "covers": [],
-   "types": [],
-   "members": [],
-   "functions": [],
-   "gaps": [
-    "android.content.ContentProvider: the Android platform jar is not a Gradle-cache coordinate \u2014 the marker's kind (a class) is checked against the intent-extras-channel fixture's in-source stub, not against platform bytecode"
    ]
   }
  ]

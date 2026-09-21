@@ -418,6 +418,12 @@ class EndpointsPackSymbolEvidenceTest {
     private fun derive(): Map<String, Derived> {
         val jarCoordinates = mapOf(
             "vertx" to listOf(Coordinate("io.vertx", "vertx-web", "5.1.7")),
+            // P30: ratpack 1.9.0 is the 1.x generation, which is what the
+            // `ratpack.handling` / `ratpack.http` rows model. The 2.x rows
+            // (`ratpack.core.*`, the JPMS rename in 2.0.0-rc-1) are NOT in
+            // this artifact and are recorded as unheld rather than inferred
+            // from the 1.x ones — that inference is exactly R168.
+            "ratpack" to listOf(Coordinate("io.ratpack", "ratpack-core", "1.9.0")),
             "ktor" to listOf(
                 Coordinate("io.ktor", "ktor-server-core-jvm", "3.5.2"),
                 Coordinate("io.ktor", "ktor-server-auth-jvm", "3.5.2"),
@@ -448,6 +454,11 @@ class EndpointsPackSymbolEvidenceTest {
         val covers = mapOf(
             "vertx" to listOf("dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions"),
             "ktor" to listOf("dslFunctions", "authenticationDsl", "contextReaders"),
+            // P30: ratpack's two channels ARE checkable against the held 1.x
+            // jar — the Handler supertype and the six Request readers. Listing
+            // them is the difference between a committed record that verifies
+            // the pack and an empty one that verifies nothing.
+            "ratpack" to listOf("supertypeMarkers", "contextReaders"),
             "spring-mvc" to typeChannels,
             "spring-webflux" to typeChannels,
             "spring-messaging" to typeChannels,

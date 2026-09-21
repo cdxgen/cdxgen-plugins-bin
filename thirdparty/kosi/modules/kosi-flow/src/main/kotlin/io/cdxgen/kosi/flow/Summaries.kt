@@ -98,8 +98,23 @@ internal data class SummaryFact(
     val category: String,
     val path: String = "",
 ) : Comparable<SummaryFact> {
-    override fun compareTo(other: SummaryFact): Int =
-        compareValuesBy(this, other, { it.param ?: -1 }, { it.site ?: -1 }, { it.category }, { it.path })
+    // R185: hand-written, because this is the hottest frame in the engine.
+    // Every fact lives in a TreeSet, so every insertion runs this O(log n)
+    // times, and on a repo like Exposed jstack lands here on most samples.
+    // `compareValuesBy` builds a selector array and boxes both nullable Ints
+    // on EVERY call; the ordering below is identical, key for key, and the
+    // 599 goldens are what says so.
+    override fun compareTo(other: SummaryFact): Int {
+        val p1 = param ?: -1
+        val p2 = other.param ?: -1
+        if (p1 != p2) return if (p1 < p2) -1 else 1
+        val s1 = site ?: -1
+        val s2 = other.site ?: -1
+        if (s1 != s2) return if (s1 < s2) -1 else 1
+        val byCategory = category.compareTo(other.category)
+        if (byCategory != 0) return byCategory
+        return path.compareTo(other.path)
+    }
 
     fun withPath(newPath: String): SummaryFact = SummaryFact(param, site, category, newPath)
 }
@@ -806,66 +821,133 @@ internal class Summarizer(
                 break
             }
             val members = scc.sorted()
-            var changed = true
+            // R185: the fixpoint is driven by a WORKLIST over the SCC's own
+            // call edges, not by rounds over every member.
+            //
+            // The round-robin this replaces recomputed `computeSummary` — a
+            // full intraprocedural dataflow fixpoint over the whole body —
+            // for every member of the SCC on every round, whether or not
+            // anything that member reads had changed. In a large SCC almost
+            // every one of those recomputations re-derives the identical
+            // summary from identical inputs, and the cost is
+            // rounds x members x body, with the useful work a small fraction
+            // of it. That is the shape P28 profiled to `applySummaryWith`
+            // and P29 confirmed was not a hot constant: it is not that a
+            // summary application is slow, it is that we do enormously many
+            // that cannot possibly change anything.
+            //
+            // A member is re-examined exactly when a callee it actually
+            // calls, inside this SCC, has published a different summary.
+            // That is the standard worklist formulation of the SAME least
+            // fixed point: same lattice, same transfer function, same
+            // result — only the visit ORDER and the number of redundant
+            // visits differ. The gates that would catch any drift are the
+            // 599 goldens and the corpus digests, not this comment.
+            // Who must be re-examined when M changes: whoever READ M.
+            //
+            // The obvious dependency set is the SCC's call edges, and it is
+            // WRONG — measured, not reasoned: built that way, this loop
+            // moved `class-delegation`'s dataFlow in all four slots. The
+            // edges come from `callIndex.targets`, while `computeSummary`
+            // reads the table through the summary application, which
+            // resolves a callee by its own rules (delegation forwarders are
+            // the case that exposed it). An edge set that is narrower than
+            // the reads is under-propagation: a summary changes and someone
+            // who depended on it is never revisited.
+            //
+            // So the dependency is not inferred, it is OBSERVED: each visit
+            // records the keys its computation actually looked up, and those
+            // are exactly the keys whose change must bring it back. Reads of
+            // absent keys count too — that is how a REMOVED summary
+            // propagates.
+            val dependents = HashMap<String, MutableSet<String>>()
+            // Sorted worklist: determinism is a contract here (two runs on
+            // one input produce byte-identical evidence), so the visit order
+            // may not depend on hash iteration.
+            val worklist = java.util.TreeSet<String>(members)
             var rounds = 0
+            // The old budget counted PASSES over the SCC; this one counts
+            // member visits, so the equivalent ceiling is the old one times
+            // the member count. A single-member SCC keeps a usable budget
+            // through the lower bound.
+            val visitBudget = maxOf(
+                options.summaryIterationBudget.toLong() * members.size,
+                options.summaryIterationBudget.toLong(),
+            )
             val hit = { capHits++ }
-            while (changed) {
-                if (rounds++ > options.summaryIterationBudget) {
+            while (worklist.isNotEmpty()) {
+                if (rounds++ > visitBudget) {
                     hit()
                     break
                 }
-                changed = false
+                val member = worklist.pollFirst()!!
+                // Every table lookup this visit makes is a dependency of
+                // this member, recorded as it happens (see `dependents`).
+                val reads = ReadRecordingTable(table)
+                val previousSummary = table[member]
                 // P24: several bodies can share one function key (the
                 // corpus's duplicated framework stubs - and, since the
                 // primary-constructor synthesis, their `<init>`s with
-                // genuinely DIFFERENT parameter lists). The round's answer
-                // for a key is the may-UNION of its bodies (an effect any
-                // body has is an effect the key carries), REPLACED by the
-                // next round's union - never accumulated with it, which
-                // composes a recursive member's effects into itself and
-                // grows without bound.
-                val roundBodies = HashMap<String, FunctionSummary>()
-                for (member in members) {
-                    for (cf in byKey[member].orEmpty()) {
-                        // The same body budget the main analysis enforces — a
-                        // function too big to analyse is too big to summarise.
-                        val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
-                        if (instructionCount > options.maxFunctionInstructions) {
-                            skipped.merge("summary-oversized-function", 1, Int::plus)
-                            table.remove(member)
-                            continue
-                        }
-                        val analysis = computeSummary(cf, table)
-                        composedPathDrops += analysis.composedPathDrops
-                        if (analysis.overBudget) {
-                            // The state or the escape set exploded past its
-                            // budget: publish NO summary rather than a partial
-                            // one — callers then fall to the labelled unknown
-                            // default instead of a silently truncated summary.
-                            skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
-                            table.remove(member)
-                            // P16 §2 measurement aid: name the functions the
-                            // degradation touches, on stderr, only under
-                            // KOSI_TRACE — a number without names invited nobody
-                            // to ask what the budget cost.
-                            if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
-                                System.err.println("TRACE: summary-effect-budget dropped $member")
-                            }
-                            continue
-                        }
-                        val next = analysis.summary
-                        roundBodies[member] = roundBodies[member]?.join(next) ?: next
+                // genuinely DIFFERENT parameter lists). The answer for a key
+                // is the may-UNION of its bodies (an effect any body has is
+                // an effect the key carries), REPLACED by the next visit's
+                // union - never accumulated with it, which composes a
+                // recursive member's effects into itself and grows without
+                // bound.
+                var union: FunctionSummary? = null
+                for (cf in byKey[member].orEmpty()) {
+                    // The same body budget the main analysis enforces — a
+                    // function too big to analyse is too big to summarise.
+                    val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
+                    if (instructionCount > options.maxFunctionInstructions) {
+                        skipped.merge("summary-oversized-function", 1, Int::plus)
+                        table.remove(member)
+                        continue
                     }
-                    roundBodies.remove(member)?.let { union ->
-                        val previous = table[member]
-                        if (previous == null || !union.sameAs(previous)) {
-                            table[member] = union
-                            changed = true
+                    val analysis = computeSummary(cf, reads)
+                    composedPathDrops += analysis.composedPathDrops
+                    if (analysis.overBudget) {
+                        // The state or the escape set exploded past its
+                        // budget: publish NO summary rather than a partial
+                        // one — callers then fall to the labelled unknown
+                        // default instead of a silently truncated summary.
+                        skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
+                        table.remove(member)
+                        // P16 §2 measurement aid: name the functions the
+                        // degradation touches, on stderr, only under
+                        // KOSI_TRACE — a number without names invited nobody
+                        // to ask what the budget cost.
+                        if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
+                            System.err.println("TRACE: summary-effect-budget dropped $member")
                         }
+                        continue
                     }
+                    val next = analysis.summary
+                    union = union?.join(next) ?: next
                 }
+                // Record what this visit depended on, so a later change to
+                // any of it brings this member back.
+                // Self-dependency is kept, not filtered out: an SCC member
+                // that reads its OWN summary is a recursive function, and
+                // when its summary moves it must be recomputed against the
+                // new one — which is precisely what the round-robin did for
+                // free on the next pass.
+                for (key in reads.observed) {
+                    dependents.getOrPut(key) { sortedSetOf() }.add(member)
+                }
+                val nowSummary = if (union != null) union else table[member]
+                if (union != null) table[member] = union
+                // A change is a change in EITHER direction: a new or altered
+                // summary, or one a budget removed. Both alter what a
+                // dependent would compute, so both must propagate.
+                val movedOn = when {
+                    previousSummary == null && nowSummary == null -> false
+                    previousSummary == null || nowSummary == null -> true
+                    else -> !nowSummary.sameAs(previousSummary)
+                }
+                if (movedOn) worklist.addAll(dependents[member].orEmpty())
             }
-            if (rounds > options.summaryIterationBudget) {
+            if (rounds > visitBudget) {
                 // The last iterate is what callers saw: honest, but labelled
                 // — on the WORKSPACE tier. The `--deps` tier keeps
                 // `origin=bytecode` (the PRODUCER the gate reads; flipping it
@@ -908,6 +990,49 @@ internal class Summarizer(
         val overBudget: Boolean,
         val composedPathDrops: Int,
     )
+
+    /**
+     * R185: a read-through view of the summary table that remembers which
+     * keys were looked up.
+     *
+     * The worklist needs the data dependence of one visit, and the only
+     * authority on that is the computation itself — inferring it from the
+     * call edges was measurably wrong (`class-delegation` moved in all four
+     * slots, because the summary application resolves a delegation
+     * forwarder's callee by a key the edge builder never produced). Reads of
+     * ABSENT keys are recorded too: a caller that asked for a summary and
+     * found none must be revisited when one appears, and when one is removed.
+     */
+    private class ReadRecordingTable(
+        private val backing: Map<String, FunctionSummary>,
+    ) : Map<String, FunctionSummary> {
+        val observed = HashSet<String>()
+
+        override fun get(key: String): FunctionSummary? {
+            observed.add(key)
+            return backing[key]
+        }
+
+        override fun containsKey(key: String): Boolean {
+            observed.add(key)
+            return backing.containsKey(key)
+        }
+
+        // The rest delegate. Whole-map traversals record everything, which
+        // is conservative in the safe direction: too many revisits costs
+        // time, too few costs correctness.
+        override val entries: Set<Map.Entry<String, FunctionSummary>>
+            get() = backing.entries.also { observed.addAll(backing.keys) }
+        override val keys: Set<String> get() = backing.keys.also { observed.addAll(backing.keys) }
+        override val values: Collection<FunctionSummary>
+            get() = backing.values.also { observed.addAll(backing.keys) }
+        override val size: Int get() = backing.size
+        override fun isEmpty(): Boolean = backing.isEmpty()
+        override fun containsValue(value: FunctionSummary): Boolean {
+            observed.addAll(backing.keys)
+            return backing.containsValue(value)
+        }
+    }
 
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): SummaryOutcome {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
@@ -1033,10 +1158,33 @@ internal fun joinPath(prefix: String, suffix: String): String =
 /** Collapses an access path to `*` beyond the KIR's default depth. */
 internal fun capPath(path: String): String {
     if (path.isEmpty()) return path
-    val elements = path.split('.')
-    if (elements.size <= io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) return path
-    if (elements.last() == "*" && elements.size == io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH + 1) return path
-    return (elements.take(io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) + "*").joinToString(".")
+    // R185: allocation-free. This is called once per derived fact per field
+    // read, which on a DSL-heavy repo is the hottest line in the engine
+    // (jstack on koin lands here repeatedly), and the readable version
+    // allocated THREE objects every call — the `split` list, the `take`
+    // list, and the joined string — to answer a question about dot counts
+    // that needs none of them. Same answer, character for character; the
+    // 599 goldens are what says so.
+    //
+    // (P29 tried a memo over the old body and measured no gain on a repo
+    // that already completed. Not allocating at all is a different fix from
+    // caching the allocation, and it is measured below on one that did not.)
+    val depth = io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH
+    var dots = 0
+    for (i in path.indices) if (path[i] == '.') dots++
+    val size = dots + 1
+    if (size <= depth) return path
+    if (size == depth + 1 && path.length >= 2 && path[path.length - 1] == '*' && path[path.length - 2] == '.') {
+        return path
+    }
+    var seen = 0
+    for (i in path.indices) {
+        if (path[i] == '.') {
+            seen++
+            if (seen == depth) return path.substring(0, i) + ".*"
+        }
+    }
+    return path
 }
 
 /**

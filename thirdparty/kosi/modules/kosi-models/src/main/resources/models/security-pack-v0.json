@@ -3128,6 +3128,54 @@
     {
       "category": "untrusted-input",
       "pattern": "spark.Request.splat"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getHeaders"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.oneCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getBodyStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getHeaders"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.oneCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getBodyStream"
     }
   ]
 }
