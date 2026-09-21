@@ -1,0 +1,40 @@
+# Fixtures the native-vs-JVM comparison runs on every image build.
+#
+# The full sweep is 127 fixtures x up to 3 slots and belongs on a developer's
+# machine; this subset is chosen to span the SURFACES on which the image can
+# answer differently from the JVM, one fixture each, so that the gate a push
+# can afford still covers every shape:
+#
+#   java-interop           Java PSI reached from Kotlin. The one that caught
+#                          the JDK-discovery gap: 1 of 2 calls resolved
+#                          natively against the JVM's 2.
+#   android-agp-namespace  Java + a manifest + endpoint substantiation: the
+#                          only other fixture with .java sources, and the one
+#                          that exercises the endpoint path over them.
+#   latest-syntax          The widest spread of Kotlin syntax kinds, which is
+#                          the PSI-element reflection surface — the thing an
+#                          agent-derived metadata file under-covers.
+#   dep-taint-through-lib  The deps tier: dependency lowering and the
+#                          bytecode reader, over the committed helper jar.
+#   multi-module-gradle    Project discovery and per-module classpaths.
+#   ktor-app               Framework detection and endpoint extraction, which
+#                          run off descriptors and service registrations.
+#   crypto-algorithms      The crypto collector, which reads its own
+#                          resource-backed model packs.
+#   kosi-vulnerable-service  Taint: the deepest data-flow path in the tree.
+#
+# What this subset would have caught: the JDK gap (java-interop, on stats),
+# and the JavaClassSupersImpl crash (android-agp-namespace or java-interop,
+# on any comparison at all).
+#
+# What it would still miss: a divergence confined to a fixture outside the
+# list, and anything the corpus shows that no fixture does. The full sweep
+# stays the release check for that reason.
+java-interop
+android-agp-namespace
+latest-syntax
+dep-taint-through-lib
+multi-module-gradle
+ktor-app
+crypto-algorithms
+kosi-vulnerable-service

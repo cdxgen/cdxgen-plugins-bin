@@ -46,11 +46,102 @@ class JdkModulesTest {
 
     @Test
     fun aResolutionFailureNamesEverySourceTried() {
-        val none = JdkModules.resolve(null, property = { null }, env = { null })
+        // `installed` is stubbed empty on purpose: the real scan reads the
+        // host, and a linux runner with /usr/lib/jvm would resolve a JDK
+        // here and make this a test of the machine rather than the message.
+        val none = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { null },
+            installed = { emptyList() },
+        )
         assertTrue(none is JdkModules.Resolution.NotFound, "expected NotFound, got $none")
         assertTrue("java.home is unset" in none.tried, none.tried)
         assertTrue("JAVA_HOME is unset" in none.tried, none.tried)
         assertTrue("--jdk-home" in none.tried, "the message must name the escape hatch: ${none.tried}")
+    }
+
+    /**
+     * The image case. `java.home` is structurally unset in a native image,
+     * so with no `JAVA_HOME` the old order ran out of sources and every
+     * `java.*` symbol resolved to nothing — measured on
+     * `fixtures/java-interop` as 1 of 2 calls resolved against the JVM's 2,
+     * exit 0 and a warning either way. The launcher on `PATH` is where a
+     * JDK actually is.
+     */
+    @Test
+    fun aJdkOnThePathIsFoundWhenNeitherJavaHomeNorTheEnvironmentNamesOne() {
+        val real = Path.of(System.getProperty("java.home"))
+        val bin = real.resolve("bin")
+        if (!java.nio.file.Files.isRegularFile(bin.resolve("java"))) {
+            println("JdkModulesTest: no launcher at $bin; PATH discovery not exercised here")
+            return
+        }
+        val resolution = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { key -> if (key == "PATH") bin.toString() else null },
+            installed = { JdkModules.installedHomes(
+                env = { key -> if (key == "PATH") bin.toString() else null },
+                roots = emptyList(),
+            ) },
+        )
+        assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
+        assertEquals(real.toRealPath(), resolution.home.toRealPath())
+    }
+
+    /**
+     * Every macOS JDK unpacks to `<bundle>/Contents/Home`, and a user who
+     * points `JAVA_HOME` at the bundle gets a run with no JDK rather than an
+     * error. The bundle is one `resolve` away, so it is followed.
+     */
+    @Test
+    fun aMacOsBundleDirectoryResolvesToTheHomeInside() {
+        val bundle = Files.createTempDirectory("kosi-jdk-bundle")
+        val home = bundle.resolve("Contents").resolve("Home")
+        Files.createDirectories(home.resolve("lib"))
+        home.resolve("lib/modules").writeText("not a real image, but the marker this classifies on")
+        val resolution = JdkModules.resolve(
+            null,
+            property = { bundle.toString() },
+            env = { null },
+            installed = { emptyList() },
+        )
+        assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
+        assertEquals(home, resolution.home)
+    }
+
+    @Test
+    fun installedHomesInventsNothingFromAnEmptyPathAndNoRoots() {
+        // Hermetic on any host: both inputs are stubbed, so this asserts
+        // the scan's own behaviour rather than what the machine happens to
+        // have installed.
+        assertTrue(
+            JdkModules.installedHomes(env = { null }, roots = emptyList()).isEmpty(),
+            "with no PATH and no install roots the scan must find nothing",
+        )
+    }
+
+    @Test
+    fun installedHomesReadsAnInstallRootNewestNameFirst() {
+        val root = Files.createTempDirectory("kosi-jdk-root")
+        for (name in listOf("jdk-17", "jdk-25", "jdk-21")) {
+            Files.createDirectories(root.resolve(name).resolve("lib"))
+            root.resolve(name).resolve("lib/modules").writeText("marker")
+        }
+        val found = JdkModules.installedHomes(env = { null }, roots = listOf(root.toString()))
+        assertEquals(
+            listOf("jdk-25", "jdk-21", "jdk-17"),
+            found.map { it.fileName.toString() },
+            "directory enumeration order must not decide which JDK is picked",
+        )
+        val resolution = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { null },
+            installed = { found },
+        )
+        assertEquals(root.resolve("jdk-25"), (resolution as JdkModules.Resolution.Found).home)
     }
 
     @Test

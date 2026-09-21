@@ -146,6 +146,16 @@ jobs:
           ./kosi-darwin-arm64 analyze --backend resolved \
             --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/java-interop" --out /tmp/java.json
           python3 -c 'import json,sys; d=json.load(open("/tmp/java.json"))["declarations"]; j=[x for x in d if x["filePath"].endswith(".java")]; sys.exit("the resolved tier read no Java declarations" if not j else 0)'
+      - name: Native/JVM agreement (subset)
+        # The smoke above asserts the image produces SOMETHING. It cannot
+        # catch the image producing something DIFFERENT, and that was the
+        # live defect: with no JAVA_HOME the image found no JDK, resolved
+        # every `java.*` symbol to nothing, and exited 0 — java-interop 1 of
+        # 2 calls against the JVM's 2, and kosi-vulnerable-service 0 sinks
+        # against the JVM's 2. This compares `stats` against the fat jar
+        # over the subset in scripts/native-subset.txt, which states what it
+        # spans and what it leaves to the full local sweep.
+        run: make native-agreement
       - name: Reachability metadata drift check
         run: make native-metadata-check
 
@@ -200,3 +210,7 @@ jobs:
           ./kosi-linux-amd64 analyze --backend resolved \
             --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/java-interop" --out /tmp/java.json
           python3 -c 'import json,sys; d=json.load(open("/tmp/java.json"))["declarations"]; j=[x for x in d if x["filePath"].endswith(".java")]; sys.exit("the resolved tier read no Java declarations" if not j else 0)'
+      - name: Native/JVM agreement (subset)
+        # See the darwin job. A metadata or substrate gap is not confined to
+        # one OS, so the comparison runs on both images that are built.
+        run: make native-agreement
