@@ -36,6 +36,95 @@ class ReportSerializationTest {
         assertEquals(emptyList(), missing, "options JSON must carry every effective option (missing: $missing)")
     }
 
+    /**
+     * Every member of the report envelope reaches the JSON.
+     *
+     * `runtime` did not. It was built on every run, excluded from the
+     * golden digests as volatile — which only makes sense for a key that
+     * IS written — documented in the attribute reference, and read by
+     * cdxgen, whose `cdx:kosi:kotlinVersion` property had therefore never
+     * once been emitted. Five places agreed the key existed; the
+     * serializer alone disagreed, and nothing compared them.
+     *
+     * Written as a reflection over the declared members rather than a
+     * `runtime` assertion, because the defect is the CLASS of thing worth
+     * pinning: the next member added to the envelope and forgotten here
+     * fails this test instead of shipping silently.
+     */
+    @Test
+    fun everyReportMemberIsSerialized() {
+        val w = JsonWriter()
+        emptyReport().writeJson(w)
+        val json = JsonReader.parse(w.render()).asObject()
+        // Instance members only: `Companion` and the `SCHEMA_VERSION`
+        // constant are statics on the same class and are not envelope keys.
+        val missing = KosiReport::class.java.declaredFields
+            .filterNot { java.lang.reflect.Modifier.isStatic(it.modifiers) || it.isSynthetic }
+            .map { it.name }
+            .filterNot { it in json.members }
+        assertEquals(
+            emptyList(),
+            missing,
+            "the report envelope must carry every declared member (missing: $missing)",
+        )
+    }
+
+    private fun emptyReport() = KosiReport(
+        schemaVersion = "kosi/1",
+        tool = ToolInfo(name = "kosi", version = "0.0.0", description = "test", commit = "0000000"),
+        runtime = RuntimeInfo(
+            kotlinVersion = "2.4.0",
+            languageVersionRange = LanguageVersionRange("2.0", "2.2", "2.4"),
+            jvmVersion = "21",
+            host = "test",
+            workingDirectory = ".",
+            nativeImage = false,
+        ),
+        options = AnalyzeOptions(),
+        modules = emptyList(),
+        packages = emptyList(),
+        files = emptyList(),
+        imports = emptyList(),
+        declarations = emptyList(),
+        usages = emptyList(),
+        securitySignals = emptyList(),
+        crypto = CryptoEvidence(
+            libraries = emptyList(),
+            assets = emptyList(),
+            operations = emptyList(),
+            materials = emptyList(),
+            protocols = emptyList(),
+            findings = emptyList(),
+        ),
+        callGraph = null,
+        dataFlow = null,
+        apiEndpoints = emptyList(),
+        services = emptyList(),
+        urls = emptyList(),
+        diagnostics = emptyList(),
+        stats = Stats(
+            fileCount = 0,
+            declarationCount = 0,
+            usageCount = 0,
+            importCount = 0,
+            resolvedCallRatio = 0.0,
+            callsTotal = 0,
+            callsResolved = 0,
+            unknownCallPropagations = 0,
+            loweringFailures = linkedMapOf(),
+            functionsLowered = 0,
+            fixpointCapHits = 0,
+            functionsAnalysed = 0,
+            sourceCount = 0,
+            sinkCount = 0,
+            sliceCount = 0,
+            crossDependencySliceCount = 0,
+            reachableSliceCount = 0,
+            truncations = linkedMapOf(),
+            degraded = null,
+        ),
+    )
+
     @Test
     fun everyStatsMapKeyIsSorted() {
         val stats = Stats(

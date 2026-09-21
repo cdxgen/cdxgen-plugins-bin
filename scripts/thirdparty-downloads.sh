@@ -2,8 +2,8 @@
 set -euo pipefail
 
 readonly OSQUERY_VERSION="5.23.1"
-readonly UPX_VERSION="5.2.0"
-readonly DOSAI_VERSION="4.0.0"
+readonly UPX_VERSION="5.2.1"
+readonly DOSAI_VERSION="4.1.0"
 
 print_usage() {
   cat <<'EOF'
@@ -76,57 +76,57 @@ resolve_asset() {
     dosai-linux-amd64)
       asset_filename="Dosai-linux-amd64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="304f9d41cc1585a774c057a89220318bb8c9dcef1f674bef6ee5dbf4002af68f"
+      asset_sha256="466060fc222ce0050e853da9e4d5e602a82e5fdab4e6f27f6c7d3494145740fa"
       ;;
     dosai-linux-arm)
       asset_filename="Dosai-linux-arm"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="cbb9f586071e2a604764e19e531e5bc9afda2077cabb21eb02b7a41cbfc13762"
+      asset_sha256="d2e4aa7814301a6e9ccba5e77197f3b2def3f970f119d39a5020f08de10df5e5"
       ;;
     dosai-linux-arm64)
       asset_filename="Dosai-linux-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="0437847f402e97ba9815412504bfab2bf5a6d3783f5a48fd41a59e8bf46147bf"
+      asset_sha256="a40f45b5400e96d431042be015d340e5293688c43c17518247fd3ed6a36d60be"
       ;;
     dosai-linuxmusl-amd64)
       asset_filename="Dosai-linux-musl-x64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="ec5df05fc29f5a51d14355bdc6e678b2d2ea370a1de984bb524d4100dc8772e3"
+      asset_sha256="8eaee321818822ee24f2efa9ee4e08bf57dad5554169788c50fa5ed3a9354ce6"
       ;;
     dosai-linuxmusl-arm64)
       asset_filename="Dosai-linux-musl-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="14ab375efb5ed053f9c8d0172bbe42c72e8684dcaf85ab58cde41594fa0352f3"
+      asset_sha256="1220c14cefa61cd00b04c8d9a2370a059dea6947388f85a98d1cb92ed95616c5"
       ;;
     dosai-darwin-amd64)
       asset_filename="Dosai-osx-x64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="f2cb59de739321bfbe847d97a0b814c874f293e4d9d048cdac85e6cff19423e0"
+      asset_sha256="aca98b6c4fb7a64adc8414e1a7dadefdcaf38ffaf7313d5a30f9e8983f4ce3b6"
       ;;
     dosai-darwin-arm64)
       asset_filename="Dosai-osx-arm64"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="8d1736f03316d4d52a197143d8ca70011173ae6266ddb0ad4bb487fd784d4cb6"
+      asset_sha256="74a218d259e2d2a9956f0fa569cef06d07f6a4c5c50ad13ebd6b03fad37dcf12"
       ;;
     dosai-windows-amd64)
       asset_filename="Dosai.exe"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="8d4ed9585068cf2df6975e75fa981c39ea35a597e6b79572137dfa0dab28d31d"
+      asset_sha256="c804961ed46675a43718553bee5cbf1b74dbe90c318658b6df75f6aedc6aa36c"
       ;;
     dosai-windows-arm64)
       asset_filename="Dosai-windows-arm64.exe"
       asset_url="https://github.com/owasp-dep-scan/dosai/releases/download/v${DOSAI_VERSION}/${asset_filename}"
-      asset_sha256="3e5f4c3d4bae4e25953018944b1c17a24b4818ef68e84e95b6f55cc86e8df00c"
+      asset_sha256="29ef0541210a99e91571085bf258e7f7f113cba6268d0b79c7fb07e69a4961cd"
       ;;
     upx-linux-amd64)
       asset_filename="upx-${UPX_VERSION}-amd64_linux.tar.xz"
       asset_url="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${asset_filename}"
-      asset_sha256="3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1"
+      asset_sha256="402162aad30af47e60dbd767fb2e64ca394ace9727ba1f40283641f1d1b91657"
       ;;
     upx-linux-arm64)
       asset_filename="upx-${UPX_VERSION}-arm64_linux.tar.xz"
       asset_url="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${asset_filename}"
-      asset_sha256="55d48a61e8ffd17152db871c855376cba7f08e830b37799d0947a16dff8ec36c"
+      asset_sha256="a72d112c5970a904a31da0b9c84f919bc16b9a311787c12245508544a78c7d36"
       ;;
     *)
       echo "Unsupported asset key: $asset_key" >&2

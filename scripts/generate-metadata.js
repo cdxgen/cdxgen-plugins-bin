@@ -8,8 +8,8 @@ const pluginsPackageJson = JSON.parse(
 );
 const osqueryVersion = "5.23.1";
 const sourcekittenVersion = "0.38.0";
-const trivyVersion = "v0.68.2";
-const dosaiVersion = "v4.0.0";
+const trivyVersion = "v0.74.0";
+const dosaiVersion = "v4.1.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;

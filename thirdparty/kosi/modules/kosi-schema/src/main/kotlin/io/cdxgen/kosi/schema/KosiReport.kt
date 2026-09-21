@@ -110,6 +110,13 @@ data class KosiReport(
         w.beginArray("packages")
         for (p in packages.sortedWith(PackageEvidence.COMPARATOR)) p.writeJson(w)
         w.endArray()
+        // The runtime provenance was built on every run, excluded from the
+        // digests as volatile, documented in the attribute reference, and
+        // read by cdxgen — and never written. Five places agreed the key
+        // existed and only the serializer disagreed, so `cdx:kosi:
+        // kotlinVersion` had never once been emitted and no report could
+        // say which compiler band produced it.
+        runtime.writeJson(w, "runtime")
         w.str("schemaVersion", schemaVersion)
         w.beginArray("securitySignals")
         for (s in securitySignals.sortedWith(SecuritySignal.COMPARATOR)) s.writeJson(w)
