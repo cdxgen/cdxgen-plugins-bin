@@ -1,0 +1,31 @@
+thirdparty/kosi/modules/kosi-schema/src/test/kotlin/io/cdxgen/kosi/schema/ReportSerializationTest.kt
+  s_9d783fb1e8d1fd::t_8f1ac4df08c289 59-60,62
+  s_9d783fb1e8d1fd::t_3c5713a0aca0e3 39-58,61,63-73,75-90,99-104,126-127
+  s_9d783fb1e8d1fd::t_b89000c9442f01 74
+  s_9d783fb1e8d1fd::t_aa1185b43a9a42 114,123
+  s_9d783fb1e8d1fd::t_10941108383efa 91-98,105-113,115-122,124-125
+scripts/generate-metadata.js
+  s_9d783fb1e8d1fd::t_e331908d088a32 11-12
+scripts/thirdparty-downloads.sh
+  s_9d783fb1e8d1fd::t_e331908d088a32 5-6,79,84,89,94,99,104,109,114,119,124,129
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/KosiReport.kt
+  s_9d783fb1e8d1fd::t_ec3a0b7194cb10 113-119
+scripts/thirdparty-downloads.test.sh
+  s_9d783fb1e8d1fd::t_e331908d088a32 15,20-73,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "abcbebb112b5f11d73f0fad7cf0e14b547f724cf",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
