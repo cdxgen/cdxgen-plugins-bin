@@ -1272,3 +1272,18 @@ tier = "fixtures"
 path = "fixtures/context-shared-helper"
 capabilities = ["summaries", "sanitizers", "context"]
 tolerated_resolution_errors = []
+
+# P29: the walk budget, pinned from both sides. UnderBudget.kt nests ~1,505
+# PSI levels (measured default-stack overflow: ~1,250) and is analysed in
+# full on the 512 MB analysis stack; OverBudget.kt nests ~2,605 levels, past
+# the 2,000-level walk budget, and is skipped with `psi-depth-cap` naming the
+# file while Normal.kt still analyses. The goldens pin the diagnostic and the
+# sibling's declarations, so a budget that moves without a measurement fails
+# here; the 100k-level population that found the stack threshold itself stays
+# generated (WalkBudgetTest), never committed.
+[[fixtures]]
+slug = "deep-nesting"
+tier = "fixtures"
+path = "fixtures/deep-nesting"
+capabilities = ["deep-nesting", "walk-budget"]
+tolerated_resolution_errors = []

@@ -119,9 +119,11 @@ object Analyzer {
         options: AnalyzeOptions,
         commit: String,
         endpointCapture: ((EndpointCapture) -> Unit)?,
-    ): KosiReport = when (options.backend) {
-        Backend.SYNTAX -> analyzeSyntax(root, options, commit)
-        Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit, endpointCapture)
+    ): KosiReport = runOnAnalysisStack {
+        when (options.backend) {
+            Backend.SYNTAX -> analyzeSyntax(root, options, commit)
+            Backend.RESOLVED, Backend.COMPILE -> analyzeResolved(root, options, commit, endpointCapture)
+        }
     }
 
     // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
@@ -272,7 +274,43 @@ object Analyzer {
                     continue
                 }
                 val analyzer = SyntaxAnalyzer(env, source.relativePath, source.modulePath)
-                val result = analyzer.analyze(text)
+                // P29: the per-file boundary. A pathological file (nesting
+                // past the walk budget's headroom, or a shape the parser
+                // itself descends on) must degrade to a diagnostic NAMING
+                // the file, never take the whole report down — the
+                // no-sources/coverage lesson: a partial answer that says so
+                // beats no answer. AnalysisException here is parseFile's
+                // plain-text misclassification, never a downstream failure.
+                val result = try {
+                    analyzer.analyze(text)
+                } catch (e: StackOverflowError) {
+                    diagnostics.add(
+                        Diagnostic(
+                            code = DiagnosticCodes.STACK_OVERFLOW_SKIPPED,
+                            severity = Severity.ERROR,
+                            message = "analysing ${source.relativePath} exhausted the stack and the file was " +
+                                "skipped; every other file was analysed. The analysis runs on a " +
+                                "${WalkBudgets.ANALYSIS_STACK_BYTES / (1L shl 20)} MB stack, so a file that " +
+                                "still overflows it is far past the ${WalkBudgets.PSI_DEPTH_CAP}-level walk budget",
+                            position = Position(source.relativePath, 1, 1),
+                            count = 1,
+                        ),
+                    )
+                    fileCount++
+                    continue
+                } catch (e: Analyzer.AnalysisException) {
+                    diagnostics.add(
+                        Diagnostic(
+                            code = DiagnosticCodes.UNREADABLE_SOURCE,
+                            severity = Severity.ERROR,
+                            message = "${source.relativePath}: ${e.message}",
+                            position = Position(source.relativePath, 1, 1),
+                            count = 1,
+                        ),
+                    )
+                    fileCount++
+                    continue
+                }
                 fileCount++
                 imports.addAll(result.imports)
                 diagnostics.addAll(result.diagnostics)
@@ -524,6 +562,32 @@ object Analyzer {
                 )
             } else {
                 null
+            }
+            // P29: files whose lowering was skipped whole (walk budget or
+            // stack overflow), each named, with the relative path the report
+            // contract requires.
+            val kirSkippedDiagnostics = kir.skippedFiles.map { skip ->
+                val rel = fileRelPathByAbsolute[skip.file]?.first ?: skip.file
+                if (skip.reason == "psi-depth") {
+                    Diagnostic(
+                        code = DiagnosticCodes.PSI_DEPTH_CAP,
+                        severity = Severity.WARNING,
+                        message = "$rel nests ${skip.depth} syntax level(s), past the " +
+                            "${WalkBudgets.PSI_DEPTH_CAP}-level walk budget; its functions were not lowered " +
+                            "and their bodies are absent from the graph and the dataflow engine",
+                        position = Position(rel, 1, 1),
+                        count = 1,
+                    )
+                } else {
+                    Diagnostic(
+                        code = DiagnosticCodes.STACK_OVERFLOW_SKIPPED,
+                        severity = Severity.ERROR,
+                        message = "lowering $rel exhausted the stack; the file's functions are absent from the " +
+                            "KIR and every downstream result, while the rest of the run completed",
+                        position = Position(rel, 1, 1),
+                        count = 1,
+                    )
+                }
             }
             // Dispatch facts (visibility/modality/overrides/supertypes) that
             // could not be read join the resolution-failure count: the graph
@@ -1071,7 +1135,7 @@ object Analyzer {
                         coverageDiagnostic,
                         unsubstantiatedDiagnostic,
                         jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
-                    ) +
+                    ) + kirSkippedDiagnostics +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
                 stats = Stats(
                     fileCount = fileCount,

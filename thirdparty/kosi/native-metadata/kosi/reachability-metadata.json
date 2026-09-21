@@ -699,6 +699,23 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtDotQualifiedExpression"
     },
     {
@@ -2585,9 +2602,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtDeclarationModifierList[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry[]"

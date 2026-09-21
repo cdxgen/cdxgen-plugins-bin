@@ -42,15 +42,25 @@ class MemoryAdviceTest {
      * said `-Xmx` for it — sending the operator to the wrong knob, confidently.
      * Measured on a generated fixture: a single expression of 2,000 `+` terms
      * (one 8 KB file) kills the run at ANY heap size, while 1,000 terms is
-     * fine. So the advice must name the stack and the source shape, and must
-     * NOT recommend the heap.
+     * fine. So the advice must name the stack, and must NOT recommend the heap.
+     *
+     * P29 changed what is true underneath it: the analysis now runs on a
+     * 512 MB stack with per-file `psi-depth-cap` / `stack-overflow-skipped`
+     * boundaries, so an overflow that still reaches the CLI came from OUTSIDE
+     * those boundaries and a bigger `-Xss` is rarely the answer. The advice
+     * was rewritten to say that, which is right — this test moved with it
+     * rather than pinning the older, now-misleading wording.
      */
     @Test
     fun aStackOverflowIsDiagnosedAsTheStackAndNeverTheHeap() {
         val advice = memoryAdvice(StackOverflowError())
         assertNotNull(advice)
         assertTrue("-Xss" in advice, "stack advice must name the stack flag: $advice")
-        assertTrue("nested" in advice, "the operator needs to know it is the source's shape: $advice")
+        assertTrue(
+            "psi-depth-cap" in advice && "stack-overflow-skipped" in advice,
+            "the advice must point at the per-file boundaries that P29 added, so an operator knows an " +
+                "overflow reaching here is already outside them: $advice",
+        )
         // -Xmx may appear, but only to rule it OUT. What must never happen is
         // the heap being offered as the remedy, which is what the first cut
         // did. The retry line is the remedy, so that is the line checked.

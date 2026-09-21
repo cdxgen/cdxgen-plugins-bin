@@ -125,7 +125,18 @@ object KirLowering {
          * toward fewer. Surfaced through `symbol-resolution-failed`.
          */
         val symbolFactFailures: Int = 0,
+        /**
+         * P29: files whose lowering was skipped whole — past the walk budget
+         * (`psi-depth`), or after a `StackOverflowError` (`stack-overflow`)
+         * — with the run completing for every other file. Surfaced as
+         * `psi-depth-cap` / `stack-overflow-skipped` diagnostics by the
+         * pipeline; never a silent gap.
+         */
+        val skippedFiles: List<SkippedFile> = emptyList(),
     )
+
+    /** P29: a file the lowering did not walk, and the reason it was not. */
+    data class SkippedFile(val file: String, val reason: String, val depth: Int? = null)
 
     /** What the analyze-scoped resolver hands the lowering per call site. */
     data class CallInfo(
@@ -245,6 +256,7 @@ object KirLowering {
             .sortedBy { it.virtualFile?.path }
         val functions = mutableListOf<KirFunction>()
         val failures = LinkedHashMap<String, Int>()
+        val skippedFiles = mutableListOf<SkippedFile>()
         var functionCount = 0
         var symbolFactFailures = 0
         analyze(module) {
@@ -545,6 +557,17 @@ object KirLowering {
 
             val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference)
             for (file in files) {
+                // P29: the walk budget and the per-file boundary, exactly as
+                // in ResolvedAnalyzer — the same PSI trees are walked here,
+                // so the same file that would take resolution down would
+                // take lowering down. A skipped file is recorded and named;
+                // the run completes for every other file.
+                val psiDepth = WalkBudgets.psiMaxDepth(file)
+                if (psiDepth > WalkBudgets.PSI_DEPTH_CAP) {
+                    skippedFiles.add(SkippedFile(file.virtualFile?.path ?: file.name, "psi-depth", psiDepth))
+                    continue
+                }
+                try {
                 for (functionLike in collectFunctionLikes(file)) {
                     functionCount++
                     lowerFunction(functionLike, failures, ::resolve, ::resolveProperty, ::factsFor, lambdaContext)?.let { functions.add(it) }
@@ -568,10 +591,14 @@ object KirLowering {
                 for (klass in classesWithDelegation(file)) {
                     functions.addAll(synthesizeDelegationForwarders(klass, failures))
                 }
+                } catch (e: StackOverflowError) {
+                    failures["stack-overflow"] = (failures["stack-overflow"] ?: 0) + 1
+                    skippedFiles.add(SkippedFile(file.virtualFile?.path ?: file.name, "stack-overflow"))
+                }
             }
             functions.addAll(lambdaContext.functions)
         }
-        return Result(functions, failures, functionCount, symbolFactFailures)
+        return Result(functions, failures, functionCount, symbolFactFailures, skippedFiles)
     }
 
     /**

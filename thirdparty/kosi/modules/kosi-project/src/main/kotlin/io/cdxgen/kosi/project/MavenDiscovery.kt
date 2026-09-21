@@ -25,11 +25,24 @@ class XmlElement(
 
     fun attr(name: String): String? = attrs[name]
 
-    /** Depth-first search for the first element with [name] (e.g. build/plugins). */
+    /**
+     * Depth-first search for the first element with [name] (e.g. build/plugins).
+     *
+     * Iterative with an explicit stack (P29 recursion audit): a document's
+     * nesting depth is unbounded, and `XmlElement.parse` builds the tree
+     * iteratively, so a pathologically nested pom parses fine and must not
+     * overflow a recursive query over it. Same visit order as the recursive
+     * form it replaces.
+     */
     fun findRecursive(name: String): XmlElement? {
-        childrenNamed(name).firstOrNull()?.let { return it }
-        for (c in children) {
-            c.findRecursive(name)?.let { return it }
+        val stack = ArrayDeque<XmlElement>()
+        stack.addLast(this)
+        while (stack.isNotEmpty()) {
+            val element = stack.removeLast()
+            element.childrenNamed(name).firstOrNull()?.let { return it }
+            for (c in element.children.asReversed()) {
+                stack.addLast(c)
+            }
         }
         return null
     }
