@@ -46,7 +46,15 @@ class JdkModulesTest {
 
     @Test
     fun aResolutionFailureNamesEverySourceTried() {
-        val none = JdkModules.resolve(null, property = { null }, env = { null })
+        // `installed` is stubbed empty on purpose: the real scan reads the
+        // host, and a linux runner with /usr/lib/jvm would resolve a JDK
+        // here and make this a test of the machine rather than the message.
+        val none = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { null },
+            installed = { emptyList() },
+        )
         assertTrue(none is JdkModules.Resolution.NotFound, "expected NotFound, got $none")
         assertTrue("java.home is unset" in none.tried, none.tried)
         assertTrue("JAVA_HOME is unset" in none.tried, none.tried)
@@ -73,9 +81,13 @@ class JdkModulesTest {
             null,
             property = { null },
             env = { key -> if (key == "PATH") bin.toString() else null },
+            installed = { JdkModules.installedHomes(
+                env = { key -> if (key == "PATH") bin.toString() else null },
+                roots = emptyList(),
+            ) },
         )
         assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
-        assertEquals(real.toRealPath(), (resolution as JdkModules.Resolution.Found).home.toRealPath())
+        assertEquals(real.toRealPath(), resolution.home.toRealPath())
     }
 
     /**
@@ -89,20 +101,47 @@ class JdkModulesTest {
         val home = bundle.resolve("Contents").resolve("Home")
         Files.createDirectories(home.resolve("lib"))
         home.resolve("lib/modules").writeText("not a real image, but the marker this classifies on")
-        val resolution = JdkModules.resolve(null, property = { bundle.toString() }, env = { null })
+        val resolution = JdkModules.resolve(
+            null,
+            property = { bundle.toString() },
+            env = { null },
+            installed = { emptyList() },
+        )
         assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
-        assertEquals(home, (resolution as JdkModules.Resolution.Found).home)
+        assertEquals(home, resolution.home)
     }
 
     @Test
-    fun installedHomesIsEmptyWithoutAPathOrAnInstallRoot() {
-        // Hermetic: no PATH entry, and the conventional roots are absent on
-        // a machine that has none. The assertion that matters is that the
-        // scan never invents a home.
+    fun installedHomesInventsNothingFromAnEmptyPathAndNoRoots() {
+        // Hermetic on any host: both inputs are stubbed, so this asserts
+        // the scan's own behaviour rather than what the machine happens to
+        // have installed.
         assertTrue(
-            JdkModules.installedHomes { null }.none { Files.isRegularFile(it.resolve("lib/modules")) },
-            "an empty PATH must not yield a launcher-derived home",
+            JdkModules.installedHomes(env = { null }, roots = emptyList()).isEmpty(),
+            "with no PATH and no install roots the scan must find nothing",
         )
+    }
+
+    @Test
+    fun installedHomesReadsAnInstallRootNewestNameFirst() {
+        val root = Files.createTempDirectory("kosi-jdk-root")
+        for (name in listOf("jdk-17", "jdk-25", "jdk-21")) {
+            Files.createDirectories(root.resolve(name).resolve("lib"))
+            root.resolve(name).resolve("lib/modules").writeText("marker")
+        }
+        val found = JdkModules.installedHomes(env = { null }, roots = listOf(root.toString()))
+        assertEquals(
+            listOf("jdk-25", "jdk-21", "jdk-17"),
+            found.map { it.fileName.toString() },
+            "directory enumeration order must not decide which JDK is picked",
+        )
+        val resolution = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { null },
+            installed = { found },
+        )
+        assertEquals(root.resolve("jdk-25"), (resolution as JdkModules.Resolution.Found).home)
     }
 
     @Test

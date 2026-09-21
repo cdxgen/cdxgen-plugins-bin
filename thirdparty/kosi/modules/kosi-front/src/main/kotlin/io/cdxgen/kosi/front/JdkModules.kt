@@ -132,8 +132,16 @@ internal object JdkModules {
      * first so the choice does not depend on directory enumeration order.
      * No subprocess is spawned — a static-analysis binary that shells out to
      * find its own JDK is a worse trade than reading `PATH`.
+     *
+     * [roots] is a parameter because this function reads the HOST, and a
+     * test that asserts it finds nothing is otherwise a test of the machine
+     * it runs on: one written against a Mac with no `/usr/lib/jvm` passed
+     * here and failed on a Linux runner that has one.
      */
-    internal fun installedHomes(env: (String) -> String? = { System.getenv(it) }): List<Path> {
+    internal fun installedHomes(
+        env: (String) -> String? = { System.getenv(it) },
+        roots: List<String> = INSTALL_ROOTS,
+    ): List<Path> {
         val out = mutableListOf<Path>()
         for (entry in (env("PATH") ?: "").split(java.io.File.pathSeparatorChar)) {
             if (entry.isBlank()) continue
@@ -150,7 +158,7 @@ internal object JdkModules {
                 real.parent?.parent?.let(out::add)
             }
         }
-        for (root in INSTALL_ROOTS) {
+        for (root in roots) {
             val dir = Path.of(root)
             if (!Files.isDirectory(dir)) continue
             val children = try {
