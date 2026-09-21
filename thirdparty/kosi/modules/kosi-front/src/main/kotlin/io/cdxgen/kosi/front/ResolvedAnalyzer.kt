@@ -149,7 +149,7 @@ object ResolvedAnalyzer {
         val unresolvedSample = mutableListOf<String>()
         val errorCodes = LinkedHashMap<String, Int>()
 
-        // P29: the file's walk budget. The measure is iterative; everything
+        // The file's walk budget. The measure is iterative; everything
         // below descends the PSI (or Java) tree recursively — kosi's
         // visitors, the syntax pass, the platform's own flattener inside the
         // default visitBinaryExpression — and is safe only under the cap. A
@@ -187,7 +187,7 @@ object ResolvedAnalyzer {
             continue@fileLoop
         }
 
-        // P29: the per-file boundary. Whatever below throws
+        // The per-file boundary. Whatever below throws
         // StackOverflowError degrades THIS file to a named diagnostic; the
         // run completes for every other file.
         try {
@@ -297,7 +297,7 @@ object ResolvedAnalyzer {
                                     .firstOrNull(),
                                 // The argument's NAME is the difference between
                                 // `consumes` and `produces`; without this map the
-                                // endpoint detector cannot tell them apart (P14).
+                                // endpoint detector cannot tell them apart.
                                 // A POSITIONAL argument lands under `value` — the
                                 // JAX-RS spellings (`@Consumes("application/json")`,
                                 // `@RolesAllowed(["admin"])`) read theirs from
@@ -433,11 +433,11 @@ object ResolvedAnalyzer {
 
                 // Resolution diagnostics, summarised: per-error floods would dwarf
                 // the evidence on real projects; the count is the signal. Only
-                // ERROR-severity factories count (P18): the summary's own code is
+                // ERROR-severity factories count: the summary's own code is
                 // `resolution-errors`, but it used to include DEPRECATION and the
-                // other warning factories, which drowned the signal the §3
-                // corpus gate ratchets on — a stub that stops TYPECHECKING
-                // (R110) is indistinguishable from one that is merely deprecated.
+                // other warning factories, which drowned the signal the §3 corpus
+                // gate ratchets on — a stub that stops TYPECHECKING is
+                // indistinguishable from one that is merely deprecated.
                 val fileDiagnostics = try {
                     ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
                         .filter { it.severity == KaSeverity.ERROR }

@@ -1,7 +1,7 @@
 package io.cdxgen.kosi.kir
 
 /**
- * P25 §2: the annotations that mean **the container constructs this class**.
+ * The annotations that mean **the container constructs this class**.
  *
  * In a Spring, Micronaut, Dagger/Hilt or Jakarta application the
  * implementation behind an interface is never constructed by user code — that
@@ -14,14 +14,14 @@ package io.cdxgen.kosi.kir
  *
  * This is the one place that answers "is this class container-managed", read
  * by BOTH the graph's dispatch index and the flow engine's call index —
- * because two pieces of code answering the same question are a gate (P22),
+ * because two pieces of code answering the same question are a gate,
  * and two stereotype lists would drift the first time one gained an entry.
  *
  * Matching is on RESOLVED annotation FQNs by suffix segment, the rule the
  * root selection and the endpoint detector already follow: a short-name
  * match would make any `@Service` in any package a Spring bean.
  *
- * P26 §2 finishes the container: a stereotype is only the ANNOTATED half of
+ * finishes the container: a stereotype is only the ANNOTATED half of
  * the wiring. The other half is the BINDING METHOD — `@Binds`/`@Provides`
  * (Dagger), `@Bean` (Spring), `@Produces` (CDI) — which maps an interface to
  * its implementation by SIGNATURE, and Koin's provider lambdas
@@ -54,7 +54,7 @@ object DiStereotypes {
     )
 
     /**
-     * P26 §2: the METHOD annotations whose signatures are BINDINGS — a
+     * the METHOD annotations whose signatures are BINDINGS — a
      * mapping from interface to implementation the container reads.
      *
      *  - `@Binds` (Dagger/Hilt): the single parameter IS the implementation,
@@ -76,7 +76,7 @@ object DiStereotypes {
     )
 
     /**
-     * P26 §2: Koin's provider DSL. `single { ApiImpl() }` inside a `module
+     * Koin's provider DSL. `single { ApiImpl() }` inside a `module
      * { }` block is a binding written as a CONSTRUCTION inside a lambda the
      * container invokes — the interface is the call's type argument, which
      * the KIR does not carry, but the implementation is in the lambda's body
@@ -120,7 +120,7 @@ object DiStereotypes {
      * an `@Inject` constructor makes its class container-constructed even
      * when the class carries no stereotype.
      *
-     * P26 §2: the classes a BINDING names count as constructed even when no
+     * the classes a BINDING names count as constructed even when no
      * construction site exists anywhere — `@Binds` never constructs; it only
      * declares that the container will — and the classes constructed inside
      * a Koin provider lambda count the same way.
@@ -144,7 +144,7 @@ object DiStereotypes {
     }
 
     /**
-     * P26 §2: the interface -> implementation bindings the container reads,
+     * The interface -> implementation bindings the container reads,
      * from binding-method signatures and bodies.
      *
      * The KEY is the bound interface's resolved FQN, unnormalised — an
@@ -197,7 +197,7 @@ object DiStereotypes {
     }
 
     /**
-     * P26 §2: Koin's provider sites — `(bound interface FQN when the call's
+     * Koin's provider sites — `(bound interface FQN when the call's
      * type argument names one, the classes its lambda constructs)`. The
      * lambda links to its call by the argument register; a provider whose
      * lambda constructs nothing the workspace declares yields an empty set

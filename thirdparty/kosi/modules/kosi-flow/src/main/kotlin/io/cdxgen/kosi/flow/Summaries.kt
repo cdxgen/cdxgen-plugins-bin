@@ -13,8 +13,8 @@ import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.models.ModelPack
 
 /**
- * P5's interprocedural half: bottom-up function summaries over the call
- * graph's SCC condensation, applied at call sites under the P3 dispatch
+ * the interprocedural half: bottom-up function summaries over the call
+ * graph's SCC condensation, applied at call sites under the dispatch
  * modes, with an `origin` label on every boundary move so a reviewer can
  * tell a computed summary from blanket propagation.
  *
@@ -23,7 +23,7 @@ import io.cdxgen.kosi.models.ModelPack
  *   computed         — a real fixpoint over the callee's body;
  *   pack             — a model-pack entry supplied the effect;
  *   bytecode         — the fixpoint ran over a dependency jar's lowered
- *                      class file (P9, `--deps`);
+ *                      class file (`--deps`);
  *   recursive-approx — the SCC hit its iteration budget and this is the
  *                      last iterate;
  *   default          — the `--unknown-call` fallback, no body was seen.
@@ -37,9 +37,9 @@ object SummaryOrigin {
 }
 
 /**
- * P22 §1: the identity of one function in every map the flow engine keeps.
+ * The identity of one function in every map the flow engine keeps.
  * A canonical name is the package-and-member path with no descriptor, so
- * Kotlin overloads share one — R133's fold lost a verdict to a namesake
+ * Kotlin overloads share one — the fold lost a verdict to a namesake
  * through exactly such a key, and this module's summary table answered one
  * overload's question with another's by the same spelling (`associateBy`
  * kept the LAST overload and never summarised the rest). The descriptor
@@ -98,14 +98,29 @@ internal data class SummaryFact(
     val category: String,
     val path: String = "",
 ) : Comparable<SummaryFact> {
-    override fun compareTo(other: SummaryFact): Int =
-        compareValuesBy(this, other, { it.param ?: -1 }, { it.site ?: -1 }, { it.category }, { it.path })
+    // Hand-written, because this is the hottest frame in the engine.
+    // Every fact lives in a TreeSet, so every insertion runs this O(log n)
+    // times, and on a repo like Exposed jstack lands here on most samples.
+    // `compareValuesBy` builds a selector array and boxes both nullable Ints
+    // on EVERY call; the ordering below is identical, key for key, and the
+    // 599 goldens are what says so.
+    override fun compareTo(other: SummaryFact): Int {
+        val p1 = param ?: -1
+        val p2 = other.param ?: -1
+        if (p1 != p2) return if (p1 < p2) -1 else 1
+        val s1 = site ?: -1
+        val s2 = other.site ?: -1
+        if (s1 != s2) return if (s1 < s2) -1 else 1
+        val byCategory = category.compareTo(other.category)
+        if (byCategory != 0) return byCategory
+        return path.compareTo(other.path)
+    }
 
     fun withPath(newPath: String): SummaryFact = SummaryFact(param, site, category, newPath)
 }
 
 /**
- * P24 §2c: taint born at a source INSIDE the callee and stored into one of
+ * Taint born at a source INSIDE the callee and stored into one of
  * its parameters' objects — `fun taint(job: Job) { job.command = readLine()
  * }`. The caller must see the write on its own argument's field after the
  * call. [path] is the walk from the source site to the field write, for
@@ -118,7 +133,7 @@ internal data class SourceFieldWrite(
 )
 
 /**
- * P24 §2d: what a function passes when it invokes a function-valued
+ * What a function passes when it invokes a function-valued
  * parameter — the channel that lets a passed lambda's body consume taint
  * that never leaves the callee. `block(raw)` records, for the invoked
  * parameter and each argument position, WHERE the argument's taint came
@@ -168,13 +183,13 @@ internal class FunctionSummary(
     val invokedParams: Set<Int>,
     val origin: String,
     /**
-     * P24 §3: witness path per returning parameter — the callee-internal
+     * Witness path per returning parameter — the callee-internal
      * sites the boundary move stitches past, so the frame list names the
      * hops the value took (and the RETURN frame exists at all).
      */
     val paramToReturnPaths: Map<Int, List<Int>> = emptyMap(),
     /**
-     * P24 §2: parameter i's object FIELD reaches the return's same field —
+     * Parameter i's object FIELD reaches the return's same field —
      * `fun get(raw: String) = Session(token = raw)` returned and read as
      * `session.token`. The base-key channel ([paramToReturn]) could not say
      * this: the fact lives at (param, "token"), which the return probe at
@@ -182,27 +197,27 @@ internal class FunctionSummary(
      * the moment it crossed back to the caller.
      */
     val paramToReturnFields: Map<Int, Set<String>> = emptyMap(),
-    /** P24 §3: witness path per field-channel return, keyed `param\u0000suffix`. */
+    /** Witness path per field-channel return, keyed `param\u0000suffix`. */
     val paramToReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
-    /** P24 §2c: source-born field writes into parameters' objects. */
+    /** Source-born field writes into parameters' objects. */
     val sourceFieldWrites: Map<String, List<SourceFieldWrite>> = emptyMap(),
-    /** P24 §2d: what the body passes when it invokes function-valued parameters. */
+    /** What the body passes when it invokes function-valued parameters. */
     val invokedBinds: List<InvokeBind> = emptyList(),
     /**
-     * P26 §0: source-born taint stored into a FIELD of the returned object —
+     * Source-born taint stored into a FIELD of the returned object —
      * `fun make() = Wrapped(readLine() ?: "")`. The RETURN mirror of
-     * [sourceFieldWrites]'s write half: P24's constructor synthesis writes
+     * [sourceFieldWrites]'s write half: the constructor synthesis writes
      * source facts into constructed objects' fields (where they belong), but
      * the return channel probed only the bare key, so a summary whose source
      * reaches the caller exclusively through a field said "returns nothing
      * tainted" and every caller went clean — http4k's delegation getters,
-     * measured as 22 dropped findings no gate watched (R161).
+     * measured as 22 dropped findings no gate watched.
      */
     val sourceReturnFields: Map<String, Set<String>> = emptyMap(),
-    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    /** Witness path per source-return field, keyed `category\u0000suffix`. */
     val sourceReturnFieldPaths: Map<String, List<Int>> = emptyMap(),
     /**
-     * P27 §1: parameter i's FIELD reaches the return VALUE —
+     * Parameter i's FIELD reaches the return VALUE —
      * `override val body: String get() = raw`, the getter every Kotlin class
      * with a private backing property has.
      *
@@ -215,16 +230,16 @@ internal class FunctionSummary(
      * an object carrying its taint in a field has nothing. Both ends were
      * broken, so the channel could not be repaired from either alone.
      *
-     * The measured consequence is R161's remainder: P26 got the source back
+     * The measured consequence is the remainder: got the source back
      * inside the returned object's field and http4k's 22 findings still did
      * not return, because their consumers read that field through a getter
      * — and a getter is exactly this shape.
      */
     val paramFieldToReturn: Map<Int, Set<String>> = emptyMap(),
-    /** P27 §1: witness path per field-to-return channel, keyed `param suffix`. */
+    /** Witness path per field-to-return channel, keyed `param suffix`. */
     val paramFieldToReturnPaths: Map<String, List<Int>> = emptyMap(),
     /**
-     * P27 §1: parameter i's FIELD reaches a FIELD of the return —
+     * Parameter i's FIELD reaches a FIELD of the return —
      * `fun toCommand(r: Req) = Cmd(r.customerName, r.note)`, the mapper
      * every layered application has between its DTO and its domain type.
      *
@@ -250,7 +265,7 @@ internal class FunctionSummary(
             sourceReturns == other.sourceReturns &&
             sanitizes == other.sanitizes &&
             invokedParams == other.invokedParams &&
-            // P24: the new channels are compared by their STRUCTURE — which
+            // The new channels are compared by their STRUCTURE — which
             // effects exist — never by their witness PATHS. Two bodies
             // declared under one function key (the corpus's duplicated
             // framework stubs) compute the same effects with different site
@@ -275,7 +290,7 @@ internal class FunctionSummary(
      * the joined summary has. Used where a consumer can only name the
      * FUNCTION (the deps tier's FQN lookups), never one overload — the
      * honest answer to "what can this name do" is the union, not whichever
-     * overload a map happened to keep last (P22 §1). Sorted/merged fields
+     * overload a map happened to keep last. Sorted/merged fields
      * keep the join commutative and deterministic.
      */
     fun join(other: FunctionSummary): FunctionSummary = FunctionSummary(
@@ -289,7 +304,7 @@ internal class FunctionSummary(
         ),
         // NOT a union: this value is a WITNESS PATH, not a set of effects.
         // `recordSourceReturn` prepends it verbatim to the published slice's
-        // trace, so unioning two overloads' paths (the P22 review's R138 —
+        // trace, so unioning two overloads' paths (a later review —
         // `(a + b).distinct().sorted()`) fabricated a trace out of sites
         // interleaved from two different bodies, ordered by site id: a walk
         // no execution can take, published as evidence. Every other field
@@ -303,10 +318,10 @@ internal class FunctionSummary(
         },
         sanitizes = sanitizes + other.sanitizes,
         invokedParams = invokedParams + other.invokedParams,
-        // P24: the new channels are effect sets with witness paths — the
+        // The new channels are effect sets with witness paths — the
         // paths are CHOSEN per canonical key (shortest, lexicographic
         // tie-break), the same rule `toSummary` applies. Unioning two
-        // witnesses would fabricate a walk no execution takes (R138).
+        // witnesses would fabricate a walk no execution takes.
         paramToReturnPaths = mergeWitnesses(paramToReturnPaths, other.paramToReturnPaths),
         paramToReturnFields = mergeSets(paramToReturnFields, other.paramToReturnFields),
         paramToReturnFieldPaths = mergeWitnesses(paramToReturnFieldPaths, other.paramToReturnFieldPaths),
@@ -331,7 +346,7 @@ internal class FunctionSummary(
         origin = origin,
     )
 
-    /** One shortest witness per key, chosen (never unioned — R138). */
+    /** One shortest witness per key, chosen (never unioned). */
     private fun <K> mergeWitnesses(a: Map<K, List<Int>>, b: Map<K, List<Int>>): Map<K, List<Int>> {
         val out = HashMap(a)
         for ((key, path) in b) {
@@ -413,7 +428,7 @@ internal class FunctionSummary(
  * Resolves call sites to workspace callee sets, per the run's dispatch mode.
  * Built ONLY from the KIR's facts — canonical names, jvmDescriptors,
  * `overrides`, enclosing classes and owner flags — with missing facts
- * widening toward MORE candidates, never fewer (the P3 rule).
+ * widening toward MORE candidates, never fewer (the rule).
  */
 internal class CallIndex(
     compiled: List<CompiledFunction>,
@@ -423,7 +438,7 @@ internal class CallIndex(
      * included. The DI facts are SIGNATURE facts — an `@Binds` method is
      * abstract by shape, an interface's methods have no bodies — and reading
      * them off the compiled (bodies-only) list dropped exactly the binding
-     * declarations the container exists to read (P26 §2: the fixture's
+     * declarations the container exists to read (the fixture's
      * NoopAuditStore smear). Nothing else uses this list; dispatch itself
      * stays over the compiled functions.
      */
@@ -437,12 +452,12 @@ internal class CallIndex(
      * VTA's exact-type facts per function: registers whose type is known by
      * CONSTRUCTION (a `KirNew`, a constructor call), propagated through
      * copies, stores, phis and elvis joins to a per-function fixpoint — the
-     * same site-local pre-pass the P3 graph runs. Registers with no known
+     * same site-local pre-pass the graph runs. Registers with no known
      * type yield an empty set and their sites fall back to the RTA
      * candidate set; unknown never narrows. Keyed by [functionKey], not the
      * canonical name: overloads share a name, and an `associate` here kept
      * the LAST overload's type facts and answered the other's VTA question
-     * with them (the P22 §1 sweep's second instance of R133's shape).
+     * with them (the sweep's second instance of the shape).
      */
     private val registerTypesByFunction: Map<String, Map<String, Set<String>>> = compiled.associate { cf ->
         val body = cf.blocks
@@ -514,7 +529,7 @@ internal class CallIndex(
      * Overload candidates by canonical name — the value is the LIST of every
      * overload with that name, so the non-unique key is the point: a call
      * site names an FQN, and narrowing to one body is [targets]' job on
-     * descriptor/exactness evidence, never the index's (P22 §1 sweep: the
+     * descriptor/exactness evidence, never the index's (sweep: the
      * key is correct exactly because nothing reads it as one function).
      */
     private val byCanonical: Map<String, List<KirFunction>> = compiled
@@ -524,20 +539,19 @@ internal class CallIndex(
     /**
      * Overridden symbol fqn -> workspace functions with bodies overriding it.
      * The key names a SYMBOL, not one function, and the value is the list of
-     * every overrider — a dispatch candidate set, never one body (P22 §1
-     * sweep).
+     * every overrider — a dispatch candidate set, never one body (sweep).
      */
     private val overriders: Map<String, List<KirFunction>> = compiled
         .flatMap { cf -> cf.function.overrides.map { it to cf.function } }
         .groupBy({ it.first }, { it.second })
         .mapValues { (_, fs) -> fs.sortedWith(compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" })) }
 
-    /** P25 §2: workspace classes a DI container constructs. */
+    /** Workspace classes a DI container constructs. */
     val diManagedClasses: Set<String> =
         io.cdxgen.kosi.kir.DiStereotypes.managedClasses(allFunctions)
 
     /**
-     * P26 §1.1: declarations by canonical name, BODYLESS INCLUDED — an
+     * Declarations by canonical name, BODYLESS INCLUDED — an
      * interface method (`fun findByLastName(...)` on a repository interface)
      * has no body, so the compiled index cannot see it, and the interface
      * sink is declared exactly there.
@@ -576,12 +590,12 @@ internal class CallIndex(
             val owner = cf.function.enclosingClass
             if (owner != null && flags.any { it == "object" || it == "companion" || it == "enum" }) add(owner)
         }
-        // P25 §2: a DI stereotype is a construction site the CONTAINER
+        // A DI stereotype is a construction site the CONTAINER
         // performs. Without it an injected implementation is a class the run
         // never saw constructed, so RTA dropped it and the taint died at the
         // service boundary — the shape every Spring, Micronaut, Hilt and CDI
         // application has. The same predicate the call graph's dispatch index
-        // reads (P22: one question, one answer).
+        // reads (one question, one answer).
         addAll(diManagedClasses)
     }
 
@@ -590,7 +604,7 @@ internal class CallIndex(
     private fun canonicalClasses(typeFqn: String): List<String> =
         workspaceClasses.filter { typeFqn == it || typeFqn.endsWith(".$it") }
 
-    /** Exact dispatch needs positive evidence — the P3 [isExact] rule. */
+    /** Exact dispatch needs positive evidence — the [isExact] rule. */
     private fun isExact(f: KirFunction): Boolean {
         if (f.enclosingClass == null) return true
         if ("final" in f.modifiers) return true
@@ -627,7 +641,7 @@ internal class CallIndex(
             // with no constructor site and no singleton flag never executes.
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in instantiatedClasses }
             if (ready.isNotEmpty()) {
-                // P25 §2: remember WHEN the container's binding is what
+                // Remember WHEN the container's binding is what
                 // decided the site — survivors all container-managed, and
                 // something dropped. The narrowing reason belongs in the
                 // trace (a narrowing that rests on an annotation is
@@ -644,15 +658,15 @@ internal class CallIndex(
         return candidates
     }
 
-    /** Callee FQNs whose target set the DI bindings decided (P25 §2). */
+    /** Callee FQNs whose target set the DI bindings decided. */
     private val diDecidedSites = java.util.Collections.synchronizedSet(sortedSetOf<String>())
 
     fun narrowedByDiBinding(calleeFqn: String): Boolean = calleeFqn in diDecidedSites
 }
 
 /**
- * P26 §1.1: the ONE matcher for interface-declared sinks, read by both
- * engines' hosts (P22's rule: one question, one answer). A declaration
+ * The ONE matcher for interface-declared sinks, read by both
+ * engines' hosts (the rule: one question, one answer). A declaration
  * matches a pack row when its enclosing INTERFACE's direct supertypes name
  * one (Spring Data: the repository bases) or its own and its owner's
  * annotations do (Room: a @Dao interface's @Query methods).
@@ -716,7 +730,7 @@ internal object InterfaceSinks {
  * iterated to a fixpoint — recursion converges, it does not bail out. A
  * budget caps the per-SCC iterations; a hit stamps the members' summaries
  * `recursive-approx` and is COUNTED over the SCC count (a cap without its
- * population is R25's shape).
+ * population is the shape).
  */
 internal class Summarizer(
     private val compiledInOrder: List<CompiledFunction>,
@@ -725,13 +739,13 @@ internal class Summarizer(
     private val options: TaintEngine.Options,
     /**
      * The origin stamped on every summary this run computes: `computed` for
-     * the workspace tier, `bytecode` for the `--deps` tier (P9) — the label
+     * the workspace tier, `bytecode` for the `--deps` tier — the label
      * the promotion gate reads, so a jar-derived summary is never mistaken
      * for a workspace one.
      */
     private val originLabel: String = SummaryOrigin.COMPUTED,
     /**
-     * The P9 `--deps` tier, when present: workspace call sites whose callees
+     * The `--deps` tier, when present: workspace call sites whose callees
      * resolve to no workspace function look up dependency summaries here, so
      * a workspace summary composes the effects of a call that enters a jar.
      */
@@ -746,12 +760,12 @@ internal class Summarizer(
         val skipped: Map<String, Int>,
         /** The diagnostic code whose budget stopped the run early, when one did. */
         val stoppedBy: String? = null,
-        /** Composed param paths the depth cap dropped (exact drops; P16 §2). */
+        /** Composed param paths the depth cap dropped (exact drops). */
         val composedPathDrops: Int = 0,
     )
 
     /**
-     * All overloads by [functionKey]. Before P22 this was `associateBy`
+     * All overloads by [functionKey]. Previously, this was `associateBy`
      * canonical name — it kept the LAST overload and the other overloads
      * were never summarised at all, while the table's one name-keyed entry
      * answered every overload's call sites with that namesake's effects:
@@ -762,7 +776,7 @@ internal class Summarizer(
         compiledInOrder.groupBy { functionKey(it.function) }
 
     fun compute(): Result {
-        // P24 §2b: constructor call edges. `CallIndex.targets` answers empty
+        // Constructor call edges. `CallIndex.targets` answers empty
         // for CONSTRUCTOR calls (a constructor has no dispatch), so the SCC
         // graph had NO edge from a constructor call site to the synthesised
         // `<init>` body — the caller's SCC could converge before the
@@ -799,73 +813,140 @@ internal class Summarizer(
         var composedPathDrops = 0
         var stoppedBy: String? = null
         for (scc in sccs) {
-            // The P10 budget is checked between SCCs: a trip keeps every
+            // The budget is checked between SCCs: a trip keeps every
             // summary already converged and ships them, and the run says so.
             options.shouldStop?.invoke()?.let {
                 stoppedBy = it
                 break
             }
             val members = scc.sorted()
-            var changed = true
+            // The fixpoint is driven by a WORKLIST over the SCC's own
+            // call edges, not by rounds over every member.
+            //
+            // The round-robin this replaces recomputed `computeSummary` — a
+            // full intraprocedural dataflow fixpoint over the whole body —
+            // for every member of the SCC on every round, whether or not
+            // anything that member reads had changed. In a large SCC almost
+            // every one of those recomputations re-derives the identical
+            // summary from identical inputs, and the cost is
+            // rounds x members x body, with the useful work a small fraction
+            // of it. That is the shape profiled to `applySummaryWith`
+            // and confirmed was not a hot constant: it is not that a
+            // summary application is slow, it is that we do enormously many
+            // that cannot possibly change anything.
+            //
+            // A member is re-examined exactly when a callee it actually
+            // calls, inside this SCC, has published a different summary.
+            // That is the standard worklist formulation of the SAME least
+            // fixed point: same lattice, same transfer function, same
+            // result — only the visit ORDER and the number of redundant
+            // visits differ. The gates that would catch any drift are the
+            // 599 goldens and the corpus digests, not this comment.
+            // Who must be re-examined when M changes: whoever READ M.
+            //
+            // The obvious dependency set is the SCC's call edges, and it is
+            // WRONG — measured, not reasoned: built that way, this loop
+            // moved `class-delegation`'s dataFlow in all four slots. The
+            // edges come from `callIndex.targets`, while `computeSummary`
+            // reads the table through the summary application, which
+            // resolves a callee by its own rules (delegation forwarders are
+            // the case that exposed it). An edge set that is narrower than
+            // the reads is under-propagation: a summary changes and someone
+            // who depended on it is never revisited.
+            //
+            // So the dependency is not inferred, it is OBSERVED: each visit
+            // records the keys its computation actually looked up, and those
+            // are exactly the keys whose change must bring it back. Reads of
+            // absent keys count too — that is how a REMOVED summary
+            // propagates.
+            val dependents = HashMap<String, MutableSet<String>>()
+            // Sorted worklist: determinism is a contract here (two runs on
+            // one input produce byte-identical evidence), so the visit order
+            // may not depend on hash iteration.
+            val worklist = java.util.TreeSet<String>(members)
             var rounds = 0
+            // The old budget counted PASSES over the SCC; this one counts
+            // member visits, so the equivalent ceiling is the old one times
+            // the member count. A single-member SCC keeps a usable budget
+            // through the lower bound.
+            val visitBudget = maxOf(
+                options.summaryIterationBudget.toLong() * members.size,
+                options.summaryIterationBudget.toLong(),
+            )
             val hit = { capHits++ }
-            while (changed) {
-                if (rounds++ > options.summaryIterationBudget) {
+            while (worklist.isNotEmpty()) {
+                if (rounds++ > visitBudget) {
                     hit()
                     break
                 }
-                changed = false
-                // P24: several bodies can share one function key (the
+                val member = worklist.pollFirst()!!
+                // Every table lookup this visit makes is a dependency of
+                // this member, recorded as it happens (see `dependents`).
+                val reads = ReadRecordingTable(table)
+                val previousSummary = table[member]
+                // Several bodies can share one function key (the
                 // corpus's duplicated framework stubs - and, since the
                 // primary-constructor synthesis, their `<init>`s with
-                // genuinely DIFFERENT parameter lists). The round's answer
-                // for a key is the may-UNION of its bodies (an effect any
-                // body has is an effect the key carries), REPLACED by the
-                // next round's union - never accumulated with it, which
-                // composes a recursive member's effects into itself and
-                // grows without bound.
-                val roundBodies = HashMap<String, FunctionSummary>()
-                for (member in members) {
-                    for (cf in byKey[member].orEmpty()) {
-                        // The same body budget the main analysis enforces — a
-                        // function too big to analyse is too big to summarise.
-                        val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
-                        if (instructionCount > options.maxFunctionInstructions) {
-                            skipped.merge("summary-oversized-function", 1, Int::plus)
-                            table.remove(member)
-                            continue
-                        }
-                        val analysis = computeSummary(cf, table)
-                        composedPathDrops += analysis.composedPathDrops
-                        if (analysis.overBudget) {
-                            // The state or the escape set exploded past its
-                            // budget: publish NO summary rather than a partial
-                            // one — callers then fall to the labelled unknown
-                            // default instead of a silently truncated summary.
-                            skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
-                            table.remove(member)
-                            // P16 §2 measurement aid: name the functions the
-                            // degradation touches, on stderr, only under
-                            // KOSI_TRACE — a number without names invited nobody
-                            // to ask what the budget cost.
-                            if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
-                                System.err.println("TRACE: summary-effect-budget dropped $member")
-                            }
-                            continue
-                        }
-                        val next = analysis.summary
-                        roundBodies[member] = roundBodies[member]?.join(next) ?: next
+                // genuinely DIFFERENT parameter lists). The answer for a key
+                // is the may-UNION of its bodies (an effect any body has is
+                // an effect the key carries), REPLACED by the next visit's
+                // union - never accumulated with it, which composes a
+                // recursive member's effects into itself and grows without
+                // bound.
+                var union: FunctionSummary? = null
+                for (cf in byKey[member].orEmpty()) {
+                    // The same body budget the main analysis enforces — a
+                    // function too big to analyse is too big to summarise.
+                    val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
+                    if (instructionCount > options.maxFunctionInstructions) {
+                        skipped.merge("summary-oversized-function", 1, Int::plus)
+                        table.remove(member)
+                        continue
                     }
-                    roundBodies.remove(member)?.let { union ->
-                        val previous = table[member]
-                        if (previous == null || !union.sameAs(previous)) {
-                            table[member] = union
-                            changed = true
+                    val analysis = computeSummary(cf, reads)
+                    composedPathDrops += analysis.composedPathDrops
+                    if (analysis.overBudget) {
+                        // The state or the escape set exploded past its
+                        // budget: publish NO summary rather than a partial
+                        // one — callers then fall to the labelled unknown
+                        // default instead of a silently truncated summary.
+                        skipped.merge(analysis.overBudgetLabel, 1, Int::plus)
+                        table.remove(member)
+                        // Measurement aid: name the functions the
+                        // degradation touches, on stderr, only under
+                        // KOSI_TRACE — a number without names invited nobody
+                        // to ask what the budget cost.
+                        if (!System.getenv("KOSI_TRACE").isNullOrBlank() && analysis.overBudgetLabel == "summary-effect-budget") {
+                            System.err.println("TRACE: summary-effect-budget dropped $member")
                         }
+                        continue
                     }
+                    val next = analysis.summary
+                    union = union?.join(next) ?: next
                 }
+                // Record what this visit depended on, so a later change to
+                // any of it brings this member back.
+                // Self-dependency is kept, not filtered out: an SCC member
+                // that reads its OWN summary is a recursive function, and
+                // when its summary moves it must be recomputed against the
+                // new one — which is precisely what the round-robin did for
+                // free on the next pass.
+                for (key in reads.observed) {
+                    dependents.getOrPut(key) { sortedSetOf() }.add(member)
+                }
+                val nowSummary = if (union != null) union else table[member]
+                if (union != null) table[member] = union
+                // A change is a change in EITHER direction: a new or altered
+                // summary, or one a budget removed. Both alter what a
+                // dependent would compute, so both must propagate.
+                val movedOn = when {
+                    previousSummary == null && nowSummary == null -> false
+                    previousSummary == null || nowSummary == null -> true
+                    else -> !nowSummary.sameAs(previousSummary)
+                }
+                if (movedOn) worklist.addAll(dependents[member].orEmpty())
             }
-            if (rounds > options.summaryIterationBudget) {
+            if (rounds > visitBudget) {
                 // The last iterate is what callers saw: honest, but labelled
                 // — on the WORKSPACE tier. The `--deps` tier keeps
                 // `origin=bytecode` (the PRODUCER the gate reads; flipping it
@@ -900,7 +981,7 @@ internal class Summarizer(
      * unknown default). Escapes are recorded in the final sweep, at fixpoint.
      * Returns the summary, the over-budget LABEL (which budget tripped),
      * whether any budget tripped — a tripped budget drops the summary whole —
-     * and how many composed paths the depth cap dropped (P16 §2).
+     * and how many composed paths the depth cap dropped.
      */
     private class SummaryOutcome(
         val summary: FunctionSummary,
@@ -908,6 +989,49 @@ internal class Summarizer(
         val overBudget: Boolean,
         val composedPathDrops: Int,
     )
+
+    /**
+     * A read-through view of the summary table that remembers which
+     * keys were looked up.
+     *
+     * The worklist needs the data dependence of one visit, and the only
+     * authority on that is the computation itself — inferring it from the
+     * call edges was measurably wrong (`class-delegation` moved in all four
+     * slots, because the summary application resolves a delegation
+     * forwarder's callee by a key the edge builder never produced). Reads of
+     * ABSENT keys are recorded too: a caller that asked for a summary and
+     * found none must be revisited when one appears, and when one is removed.
+     */
+    private class ReadRecordingTable(
+        private val backing: Map<String, FunctionSummary>,
+    ) : Map<String, FunctionSummary> {
+        val observed = HashSet<String>()
+
+        override fun get(key: String): FunctionSummary? {
+            observed.add(key)
+            return backing[key]
+        }
+
+        override fun containsKey(key: String): Boolean {
+            observed.add(key)
+            return backing.containsKey(key)
+        }
+
+        // The rest delegate. Whole-map traversals record everything, which
+        // is conservative in the safe direction: too many revisits costs
+        // time, too few costs correctness.
+        override val entries: Set<Map.Entry<String, FunctionSummary>>
+            get() = backing.entries.also { observed.addAll(backing.keys) }
+        override val keys: Set<String> get() = backing.keys.also { observed.addAll(backing.keys) }
+        override val values: Collection<FunctionSummary>
+            get() = backing.values.also { observed.addAll(backing.keys) }
+        override val size: Int get() = backing.size
+        override fun isEmpty(): Boolean = backing.isEmpty()
+        override fun containsValue(value: FunctionSummary): Boolean {
+            observed.addAll(backing.keys)
+            return backing.containsValue(value)
+        }
+    }
 
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): SummaryOutcome {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
@@ -984,10 +1108,10 @@ internal object SummaryFactOps : FactOps<SummaryFact> {
  * [AccessPath.DEFAULT_DEPTH] elements — the same cap
  * [io.cdxgen.kosi.kir.AccessPath.of] applies to every path built from KIR.
  *
- * P27 §1: this was the one path builder in the engine with no cap, and it
+ * this was the one path builder in the engine with no cap, and it
  * was harmless only because nothing RECORDED the result. The moment
  * `paramFieldToReturn` published it, a decorator that forwards to its own
- * interface (`class W(val inner: I) : I` — http4k's shape, and every
+ * interface (`class W(val inner: I): I` — http4k's shape, and every
  * `by`-delegation wrapper) made the SCC fixpoint chase
  * `inner`, `inner.inner`, `inner.inner.inner`, … forever: the summary never
  * converged, the iteration budget tripped, and the members shipped EMPTY
@@ -995,13 +1119,13 @@ internal object SummaryFactOps : FactOps<SummaryFact> {
  * as "does nothing" is worse than an approximation — it is a silent zero.
  */
 /**
- * P27 §1: reads "register at access path" in the SUMMARY engine, which
+ * reads "register at access path" in the SUMMARY engine, which
  * carries a value's path in two different places and needs both.
  *
  *  - on the FACT, when the value came from a parameter — an entry fact is
  *    bare and a `fieldget` of `p` derives a fact whose path is `p`;
- *  - on the KEY, when a callee's summary DEPOSITED it there (P24's
- *    `paramToReturnFields`, and P27's path-to-path channel below).
+ *  - on the KEY, when a callee's summary DEPOSITED it there ('s
+ *    `paramToReturnFields`, and the path-to-path channel below).
  *
  * A caller that consulted only one representation saw half the state. That
  * is why the layered fixture's flow died between its mapper and its getter
@@ -1033,16 +1157,39 @@ internal fun joinPath(prefix: String, suffix: String): String =
 /** Collapses an access path to `*` beyond the KIR's default depth. */
 internal fun capPath(path: String): String {
     if (path.isEmpty()) return path
-    val elements = path.split('.')
-    if (elements.size <= io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) return path
-    if (elements.last() == "*" && elements.size == io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH + 1) return path
-    return (elements.take(io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH) + "*").joinToString(".")
+    // Allocation-free. This is called once per derived fact per field
+    // read, which on a DSL-heavy repo is the hottest line in the engine
+    // (jstack on koin lands here repeatedly), and the readable version
+    // allocated THREE objects every call — the `split` list, the `take`
+    // list, and the joined string — to answer a question about dot counts
+    // that needs none of them. Same answer, character for character; the
+    // 599 goldens are what says so.
+    //
+    // (tried a memo over the old body and measured no gain on a repo
+    // that already completed. Not allocating at all is a different fix from
+    // caching the allocation, and it is measured below on one that did not.)
+    val depth = io.cdxgen.kosi.kir.AccessPath.DEFAULT_DEPTH
+    var dots = 0
+    for (i in path.indices) if (path[i] == '.') dots++
+    val size = dots + 1
+    if (size <= depth) return path
+    if (size == depth + 1 && path.length >= 2 && path[path.length - 1] == '*' && path[path.length - 2] == '.') {
+        return path
+    }
+    var seen = 0
+    for (i in path.indices) {
+        if (path[i] == '.') {
+            seen++
+            if (seen == depth) return path.substring(0, i) + ".*"
+        }
+    }
+    return path
 }
 
 /**
  * The summary-mode analysis of one function. It is the ONE shared transfer
  * ([FlowTransfer]) over [SummaryFact]s — the reporting engine's transfer and
- * this one are the same function (R65); the summary's own work is in the
+ * this one are the same function; the summary's own work is in the
  * host callbacks: parameter seeds at entry, escape recording at sinks,
  * returns, field writes and invokes, and callee summary application.
  */
@@ -1054,7 +1201,7 @@ internal class SummaryAnalysis(
     private val options: TaintEngine.Options,
     /** The origin this tier's summaries carry (`computed`, or `bytecode` for the `--deps` tier). */
     private val originLabel: String = SummaryOrigin.COMPUTED,
-    /** The P9 `--deps` tier, for call sites whose callee lives in a jar. */
+    /** The `--deps` tier, for call sites whose callee lives in a jar. */
     private val deps: TaintEngine.DepsTier? = null,
 ) : TransferHost<SummaryFact, Boolean> {
     override val ops = SummaryFactOps
@@ -1116,38 +1263,38 @@ internal class SummaryAnalysis(
     }
     private val sinkEffects = LinkedHashMap<SummarySinkEffect, SummarySinkEffect>()
 
-    /** P24 §3: witness paths for returning parameters (the callee's hops). */
+    /** Witness paths for returning parameters (the callee's hops). */
     private val paramToReturnPaths = HashMap<Int, MutableList<List<Int>>>()
 
-    /** P24 §2: parameter-object FIELDS reaching the return's same field. */
+    /** Parameter-object FIELDS reaching the return's same field. */
     private val paramToReturnFields = HashMap<Int, MutableSet<String>>()
 
-    /** P24 §3: witness paths for the field channel, keyed `param\u0000suffix`. */
+    /** Witness paths for the field channel, keyed `param\u0000suffix`. */
     private val paramToReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
 
-    /** P24 §2c: source-born field writes into parameters' objects. */
+    /** Source-born field writes into parameters' objects. */
     private val sourceFieldWrites = HashMap<String, MutableList<SourceFieldWrite>>()
 
-    /** P26 §0 (R161): source-born taint reaching the RETURN's fields. */
+    /** Source-born taint reaching the RETURN's fields. */
     private val sourceReturnFields = HashMap<String, MutableSet<String>>()
 
-    /** P26 §0: witness path per source-return field, keyed `category\u0000suffix`. */
+    /** Witness path per source-return field, keyed `category\u0000suffix`. */
     private val sourceReturnFieldPaths = HashMap<String, MutableList<List<Int>>>()
 
-    /** P27 §1 (R171): parameter i's FIELD reaching the return value. */
+    /** Parameter i's FIELD reaching the return value. */
     private val paramFieldToReturn = HashMap<Int, MutableSet<String>>()
 
-    /** P27 §1: witness path per field-to-return channel, keyed `param\u0000suffix`. */
+    /** Witness path per field-to-return channel, keyed `param\u0000suffix`. */
     private val paramFieldToReturnPaths = HashMap<String, MutableList<List<Int>>>()
 
-    /** P27 §1 (R171): parameter i's FIELD reaching a FIELD of the return. */
+    /** Parameter i's FIELD reaching a FIELD of the return. */
     private val paramPathToReturnPath = HashMap<Int, MutableSet<String>>()
 
-    /** P24 §2d: what the body passes when it invokes function-valued parameters. */
+    /** What the body passes when it invokes function-valued parameters. */
     private val invokedBinds = LinkedHashMap<String, InvokeBind>()
 
     /**
-     * P24 §2: the function's alias classes — computed once per analysis from
+     * The function's alias classes — computed once per analysis from
      * the CFG and the CURRENT summary table (the table's paramToReturn feeds
      * it; each iterate's aliases are therefore deterministic in the
      * iterate).
@@ -1162,18 +1309,18 @@ internal class SummaryAnalysis(
      * of them is N slices for ONE flow. The shortest path wins — the most
      * direct trace, and the value that STABILIZES under path truncation.
      *
-     * P15 bounds, both applied before the map grows:
+     * bounds, both applied before the map grows:
      * 1. A composed `paramPath` deeper than [paramPathCap] — the deepest
      *    path the LOWERING can put on a fact key — is DROPPED, exactly. At
      *    application time the caller looks up
      *    `TaintKey(register, effect.paramPath)`, so an effect whose path no
      *    key can spell never matches a fact, in either engine. This was the
-     *    fuel of the P15 explosion: composing
+     *    fuel of the explosion: composing
      *    FragmentManagerImpl's recursive cluster appended another
      *    `.mActive.mChildFragmentManager...` segment per iteration
      *    (depth 8 -> 15 while the cap is 6), every deeper join a NEW map
      *    key, 8k entries -> 68M in one function.
-     * 2. The map itself is budgeted like the state (R58): past
+     * 2. The map itself is budgeted like the state: past
      *    [TaintEngine.Options.maxSummarySinkEffects] entries the summary is
      *    marked over-budget and dropped WHOLE by the Summarizer — callers
      *    fall to the labelled unknown default; a partial escape set is
@@ -1181,7 +1328,7 @@ internal class SummaryAnalysis(
      */
     private fun recordEffect(effect: SummarySinkEffect) {
         if (paramPathDepth(effect.paramPath) > paramPathCap) {
-            // P16 §2: the drop is EXACT (an effect deeper than the deepest
+            // The drop is EXACT (an effect deeper than the deepest
             // fact-key path can never match one), but until now it was also
             // invisible — a degradation nobody could count. The run publishes
             // the per-run total as `composed-path-depth` in
@@ -1244,7 +1391,7 @@ internal class SummaryAnalysis(
     var overBudgetLabel: String = "summary-state-budget"
         private set
 
-    /** Composed param paths dropped by [paramPathCap] in this analysis (P16 §2). */
+    /** Composed param paths dropped by [paramPathCap] in this analysis. */
     var composedPathDrops: Int = 0
         private set
 
@@ -1311,7 +1458,7 @@ internal class SummaryAnalysis(
 
     override fun onSinkMatched(collect: Boolean?) {}
 
-    /** P26 §1.1: the interface-declared sink, seen from the summary side. */
+    /** The interface-declared sink, seen from the summary side. */
     override fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? =
         InterfaceSinks.sinkPatternFor(callIndex, pack, ins)
 
@@ -1400,7 +1547,7 @@ internal class SummaryAnalysis(
                     }
                 }
 
-                // P24 §2c: taint born at a SOURCE inside me, stored into a
+                // Taint born at a SOURCE inside me, stored into a
                 // parameter's object — the caller's argument carries the
                 // write after the call. Before this arm the fact was
                 // skipped (`fact.param ?: continue`), which is exactly the
@@ -1417,7 +1564,7 @@ internal class SummaryAnalysis(
     override fun onReturn(ins: KirReturn, site: Int, state: FlowState<SummaryFact>, collect: Boolean?) {
         if (collect != true) return
         if (ins.value != null) {
-            // P24 §2: a fact sitting on a FIELD of the returned object is a
+            // A fact sitting on a FIELD of the returned object is a
             // field-channel return: the caller's argument's field reaches
             // the result's field. The bare-key probe below cannot see it,
             // and the scan is ALIAS-AWARE — the object may be named by any
@@ -1432,7 +1579,7 @@ internal class SummaryAnalysis(
                             val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
                             paramToReturnFieldPaths.getOrPut("${fact.param}\u0000${key.path}") { mutableListOf() }.add(walk)
                         } else {
-                            // P27 §1 (R171): BOTH sides carry a path — the
+                            // BOTH sides carry a path — the
                             // mapper shape (`Cmd(r.customerName, r.note)`).
                             // Recording it in the bare-param channel claimed
                             // the WHOLE argument reached the field, and the
@@ -1442,12 +1589,12 @@ internal class SummaryAnalysis(
                                 .add("${fact.path}\u0000${key.path}")
                         }
                     }
-                    // P26 §0 (R161): a SOURCE born in this body, stored into a
-                    // field of the returned object. The param half of this
-                    // scan existed; the source half did not, and P24's
-                    // constructor synthesis moved exactly these facts off the
-                    // bare key — silently emptying the summary's return
-                    // channel for every factory-shaped callee.
+                    // A SOURCE born in this body, stored into a field of the
+                    // returned object. The param half of this scan existed;
+                    // the source half did not, and the constructor synthesis
+                    // moved exactly these facts off the bare key — silently
+                    // emptying the summary's return channel for every factory-
+                    // shaped callee.
                     if (fact.site != null) {
                         sourceReturnFields.getOrPut(fact.category) { sortedSetOf() }.add(key.path)
                         val walk = upstream[fact].orEmpty() + walkBack(fact, key) + listOf(site)
@@ -1460,7 +1607,7 @@ internal class SummaryAnalysis(
                 val up = upstream[fact].orEmpty()
                 val path = up + walkBack(fact, valueKey)
                 when {
-                    // P27 §1 (R171): the fact reached the return through a
+                    // The fact reached the return through a
                     // FIELD READ of the parameter (`get() = raw` derives
                     // (param 0, "raw") and returns it). Recording it as a
                     // bare paramToReturn threw the path away, and the
@@ -1476,7 +1623,7 @@ internal class SummaryAnalysis(
 
                     fact.param != null -> {
                         paramToReturn.add(fact.param!!)
-                        // P24 §3: the witness path, ending at the RETURN
+                        // The witness path, ending at the RETURN
                         // instruction — the hop a boundary move splices in,
                         // and the only producer of a `return` frame.
                         paramToReturnPaths.getOrPut(fact.param!!) { mutableListOf() }
@@ -1523,7 +1670,7 @@ internal class SummaryAnalysis(
         }
         // The walk's site list; an effect with a cut path is still published,
         // and the SLICE built from it carries the elided marker and a
-        // guaranteed source endpoint. P24 §3: boundary moves splice their
+        // guaranteed source endpoint. Boundary moves splice their
         // callee-internal witness sites in, so composed paths (a chain of
         // paramToReturn applications) name every level's hops.
         return moves.reversed()
@@ -1567,7 +1714,7 @@ internal class SummaryAnalysis(
     ): Boolean {
         val fqn = ins.callee.fqn
 
-        // P24 §2d: a call THROUGH a function value whose target this body
+        // A call THROUGH a function value whose target this body
         // knows — a lambda defined here (`val f = { .. }; f(x)`) or captured
         // from an enclosing one. The function value is an abstract object
         // whose target is known at its allocation site; the invoke applies
@@ -1579,7 +1726,7 @@ internal class SummaryAnalysis(
             if (applied) return true
         }
 
-        // P24 §2b: a constructor call applies the class's `<init>` summary
+        // A constructor call applies the class's `<init>` summary
         // with the NEW OBJECT as the receiver — the constructor is a
         // function that writes the object's fields, and its parameter field
         // writes are what make `Job(tainted)` taint `job.command`.
@@ -1594,10 +1741,10 @@ internal class SummaryAnalysis(
 
         val targets = callIndex.targets(fqn, ins.callee.descriptor, ins.callee.kind)
         // Keyed by FUNCTION, not name: a descriptor-narrowed call site must
-        // meet its own overload's summary, never a namesake's (P22 §1).
+        // meet its own overload's summary, never a namesake's.
         val applicable = targets.mapNotNull { target -> table[functionKey(target)] }
         if (applicable.isEmpty()) {
-            // P24 §2d: an invoke of a function-valued PARAMETER records what
+            // An invoke of a function-valued PARAMETER records what
             // this body PASSES — the channel the caller completes by binding
             // the lambda it passed. Without it, `block(raw)` inside me is a
             // fact about `block` only, and the lambda body's sinks can never
@@ -1610,7 +1757,7 @@ internal class SummaryAnalysis(
             // that reaches a jar in one engine reaches it in the other. A
             // constructor callee simply misses: the lowerer never emits
             // `<init>` into the tier, so no carve-out is needed for it.
-            // P9: a workspace function whose body passes taint THROUGH a
+            // A workspace function whose body passes taint THROUGH a
             // dependency method must record the composed effect in its own
             // summary, exactly as it does for a workspace callee.
             val dep = deps?.summaries(ins.callee.fqn)
@@ -1733,7 +1880,7 @@ internal class SummaryAnalysis(
     /**
      * The shared application over an explicit PARAMETER BINDING — the
      * call-site mapping, or the captures-plus-arguments mapping of an invoke
-     * through a known lambda (P24 §2d).
+     * through a known lambda.
      */
     private fun applySummaryWith(
         summary: FunctionSummary,
@@ -1754,7 +1901,7 @@ internal class SummaryAnalysis(
                 val facts = state.factsOf(fromKey)
                 if (facts.isEmpty()) continue
                 state.addFacts(resultKey, facts)
-                // P24 §3: the callee-internal witness splices into the
+                // The callee-internal witness splices into the
                 // boundary move, so the frame list names the hops the value
                 // took inside the callee — and the return.
                 val via = summary.paramToReturnPaths[param].orEmpty()
@@ -1762,10 +1909,10 @@ internal class SummaryAnalysis(
                     chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
                 }
             }
-            // P27 §1 (R171): the argument's FIELD becomes the result — the
+            // The argument's FIELD becomes the result — the
             // getter channel. Read the argument at the recorded suffix, not
             // at its bare key.
-            // P27 §1 (R171): the mapper channel — a FIELD of the argument
+            // The mapper channel — a FIELD of the argument
             // becomes a FIELD of the result. Paths live on the FACT here,
             // so the read derives and the write lands on the result's key.
             for ((param, moves) in summary.paramPathToReturnPath) {
@@ -1800,11 +1947,11 @@ internal class SummaryAnalysis(
                 state.addFacts(resultKey, listOf(fact))
                 chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
             }
-            // P26 §0 (R161): the source-return FIELD channel — the source was
+            // The source-return FIELD channel — the source was
             // born in the callee and stored into the returned object's field,
             // so the caller's result carries it at that access path (a field
             // read of it finds the fact; a getter call through a delegation
-            // still needs the delegation getter lowered — P27's list).
+            // still needs the delegation getter lowered — the list).
             for ((category, suffixes) in summary.sourceReturnFields) {
                 for (suffix in suffixes.sorted()) {
                     val fact = SummaryFact(null, site, category)
@@ -1814,7 +1961,7 @@ internal class SummaryAnalysis(
                     chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
                 }
             }
-            // P24 §2: the field channel — the callee stored param i's
+            // The field channel — the callee stored param i's
             // VALUE into the returned object's field (`Session(token =
             // raw)`), so the argument's BASE taint reaches the result's
             // FIELD.
@@ -1827,7 +1974,7 @@ internal class SummaryAnalysis(
             }
         }
 
-        // P24 §2c: source-born FIELD WRITES — taint born inside the callee
+        // Source-born FIELD WRITES — taint born inside the callee
         // and stored into parameter i's object lands on my argument's field.
         for ((category, writes) in summary.sourceFieldWrites) {
             for (write in writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix }))) {
@@ -1852,7 +1999,7 @@ internal class SummaryAnalysis(
         for ((param, suffixes) in summary.receiverWrites) {
             val fromReg = binding(param) ?: continue
             // The write lands on the RECEIVER's object — under every name
-            // the caller gave it (P24 §2's alias fan-out). The receiver is
+            // the caller gave it (the alias fan-out). The receiver is
             // the summary's parameter 0 when it declares one; a receiver-less
             // summary has no receiverWrites to apply.
             val receiverReg = if (summary.function.params.any { it.receiver }) binding(0) else null
@@ -1864,7 +2011,7 @@ internal class SummaryAnalysis(
             }
         }
 
-        // P24 §2d: the callee invokes a function-valued parameter and my
+        // The callee invokes a function-valued parameter and my
         // body supplied the function value: compose — if the invoked
         // parameter binds to one of MY parameters, the bind becomes mine
         // (what I pass when I invoke MY parameter); a source-born bind
@@ -1985,7 +2132,7 @@ internal class SummaryAnalysis(
         paramToParam = paramToParam.mapValues { it.value.toSet() },
         paramFieldWrites = paramFieldWrites.mapValues { (_, tos) -> tos.mapValues { it.value.toSet() } },
         receiverWrites = receiverWrites.mapValues { it.value.toSet() },
-        // P22 §0's elided-trace fixture caught this: the dedup map's KEYS
+        // The elided-trace fixture caught this: the dedup map's KEYS
         // are the path-STRIPPED canonicals, so publishing `.keys` discarded
         // every composed site path at the publish boundary — an
         // interprocedural slice's callee-internal trace was structurally

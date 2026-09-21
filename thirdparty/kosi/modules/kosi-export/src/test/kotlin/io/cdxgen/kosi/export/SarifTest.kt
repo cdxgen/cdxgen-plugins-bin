@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The SARIF 2.1.0 export (P11): one rule per rule id, one result per slice,
+ * The SARIF 2.1.0 export: one rule per rule id, one result per slice,
  * the trace as related locations in walk order, deterministic bytes.
  */
 class SarifTest {
@@ -91,7 +91,7 @@ class SarifTest {
     }
 
     /**
-     * P15: a slice that entered through an endpoint carries the endpoint's
+     * A slice that entered through an endpoint carries the endpoint's
      * DECLARATION into the export — the authentication requirement above
      * all, which was a fact kosi computed and threw away at the SARIF
      * boundary. Restore the defect (endpoints not passed to the writer) and

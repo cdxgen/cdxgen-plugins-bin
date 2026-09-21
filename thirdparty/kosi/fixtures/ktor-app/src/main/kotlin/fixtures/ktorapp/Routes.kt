@@ -6,7 +6,7 @@
 //
 // ktor 2's no-path spelling (`get(path: String? = null)`): a PROVABLE null
 // path selects the route at its enclosing level — /metrics itself — and is
-// never a path called /metrics/null or a lowering register's name (P19 §1:
+// never a path called /metrics/null or a lowering register's name (
 // a null argument is not a path called /null).
 // kosi:want endpoint framework=ktor path=/metrics fn=~Routes mode=resolved method=GET
 // kosi:want-not endpoint framework=ktor path=~/metrics/t mode=resolved

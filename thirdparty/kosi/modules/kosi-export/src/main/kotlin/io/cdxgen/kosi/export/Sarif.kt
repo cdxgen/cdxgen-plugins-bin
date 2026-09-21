@@ -5,7 +5,7 @@ import io.cdxgen.kosi.schema.FlowNode
 import io.cdxgen.kosi.schema.JsonWriter
 
 /**
- * SARIF 2.1.0 export of the data-flow slices (the P11 item; the same shape
+ * SARIF 2.1.0 export of the data-flow slices (the item; the same shape
  * golem ships). One RULE per slice rule id, one RESULT per slice: the sink
  * is the result location, the trace is the RELATED LOCATIONS list in walk
  * order (source first), and the same walk is a `codeFlow` for consumers
@@ -57,7 +57,7 @@ object Sarif {
         w.endObject()
         val byId = dataFlow.nodes.associateBy { it.id }
         // A slice that entered through an endpoint carries the endpoint's
-        // declaration into the export (P15): without this, the
+        // declaration into the export: without this, the
         // authentication requirement and media types were facts kosi
         // computed and threw away at the first export boundary — a result
         // about a route nobody protects is exactly the fact a SARIF

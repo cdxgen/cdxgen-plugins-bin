@@ -30,9 +30,9 @@ import io.cdxgen.kosi.models.PatternMatcher
 import io.cdxgen.kosi.models.SinkPattern
 
 /**
- * The ONE transfer over the KIR (R65). `TaintEngine`'s reporting analysis and
+ * The ONE transfer over the KIR. `TaintEngine`'s reporting analysis and
  * `SummaryAnalysis`'s summary computation used to be two ~700-line copies of
- * the same function over two fact types; R62 was found in one of the four
+ * the same function over two fact types; was found in one of the four
  * merges and fixed in two, because the copies had to be compared by eye. This
  * file is the shared machinery — abstract state, the opcode switch, the
  * merges, the pack classification, the unknown-call default — written once
@@ -78,21 +78,18 @@ internal data class TaintKey(val base: String, val path: String) : Comparable<Ta
  * origin (`computed`, `pack`, `default`, `recursive-approx`) that moved the
  * fact — and a slice collects the origins of the boundary moves its trace
  * passed through, which is how a reviewer tells a computed summary from
- * blanket propagation (the R54 rule: the label has a producer per side).
- */
-/**
- * How a fact last moved into a key: at [site], from [prevKey], via [kind].
+ * blanket propagation (the rule: the label has a producer per side). How a
+ * fact last moved into a key: at [site], from [prevKey], via [kind].
  * [origin] is non-null exactly at interprocedural boundaries — the summary
  * origin (`computed`, `pack`, `default`, `recursive-approx`) that moved the
  * fact — and a slice collects the origins its trace passed through, which is
- * how a reviewer tells a computed summary from blanket propagation (the R54
- * rule: the label has a producer per side).
- *
- * P24 §3: [viaSites] carries the callee-internal sites a boundary move
- * stitched past — the witness path the summary recorded for the effect. The
- * trace walk splices them between [prevKey]'s site and [site], so a frame
- * list names the hops the VALUE took, not only the hops the caller's
- * registers took. Empty for every intraprocedural move.
+ * how a reviewer tells a computed summary from blanket propagation (the
+ * rule: the label has a producer per side). [viaSites] carries the callee-
+ * internal sites a boundary move stitched past — the witness path the
+ * summary recorded for the effect. The trace walk splices them between
+ * [prevKey]'s site and [site], so a frame list names the hops the VALUE
+ * took, not only the hops the caller's registers took. Empty for every
+ * intraprocedural move.
  */
 internal data class Move(
     val site: Int,
@@ -174,12 +171,12 @@ internal interface TransferHost<F, C> {
     /**
      * Called when pack sanitizer [fqn] cleared categories — something was
      * actually cleared, which is the event the depth report counts (a
-     * sanitizer that never fires is R63 for the security pack, P20 §0).
+     * sanitizer that never fires is for the security pack).
      */
     fun onSanitizerCleared(fqn: String, cleared: List<String>, collect: C?)
 
     /**
-     * P24 §3: a sanitizer matched at [site] but these categories SURVIVED on
+     * A sanitizer matched at [site] but these categories SURVIVED on
      * its result — the hop the trace names `sanitizer-not-applied`. Default
      * no-op: only the reporting engine records it.
      */
@@ -189,7 +186,7 @@ internal interface TransferHost<F, C> {
     fun onPackPassthroughApplied(fqn: String, collect: C?)
 
     /**
-     * P26 §1.1: an INTERFACE-DECLARED sink for this call, when the callee's
+     * An INTERFACE-DECLARED sink for this call, when the callee's
      * declaration (a bodyless interface method) matches a pack
      * interfaceSinks row — a Spring Data repository method or a Room DAO
      * query, where there is no body to walk and no FQN a sink pattern can
@@ -198,7 +195,7 @@ internal interface TransferHost<F, C> {
     fun interfaceSink(ins: KirCall): io.cdxgen.kosi.models.SinkPattern? = null
 
     /**
-     * P26 §1.3: a pack DESERIALIZER produced [result] — the value's FIELDS
+     * A pack DESERIALIZER produced [result] — the value's FIELDS
      * carry whatever taint reached the result, and the engine whose facts
      * can say so marks them (the reporting engine's fieldBearing variants;
      * the summary engine's facts already derive along paths). The [chain]
@@ -272,16 +269,16 @@ internal interface TransferHost<F, C> {
     fun literalSourceCategory(name: String): String? = null
 
     /**
-     * P24 §2: the registers that may hold the SAME abstract object as
+     * The registers that may hold the SAME abstract object as
      * [register] (allocation-site classes), itself included. Field and
      * index reads/writes fan out over this set, so a value written through
      * one name of an object is read through all of them. The default is the
-     * identity — the pre-P24 engine, register names as objects.
+     * identity — the earlier engine, register names as objects.
      */
     fun aliasClass(register: String): Set<String> = setOf(register)
 
     /**
-     * P24 §2: the lambda bodies [register] may hold, when it holds function
+     * The lambda bodies [register] may hold, when it holds function
      * values — a call through the register resolves to those targets. Empty
      * when the register holds no known function object.
      */
@@ -328,7 +325,7 @@ internal class FlowTransfer<F, C>(
     /**
      * The worklist to fixpoint. Returns the out-states plus whether the
      * iteration budget was hit; null when the engine's state budget was hit
-     * (the caller drops the whole analysis — R58's rule: a budget drops the
+     * (the caller drops the whole analysis — the rule: a budget drops the
      * SUMMARY, never publishes half of one).
      */
     fun runFixpoint(
@@ -443,9 +440,9 @@ internal class FlowTransfer<F, C>(
          * the operand that actually carried it. Blaming the first non-empty
          * operand for every fact sends the backward walk into a register
          * that never held it, and the walk then dead-ends — the trace ends
-         * up starting in the middle of the flow with nothing marking it
-         * (R54). Fixed at every merge of this shape (R62): the joins, the
-         * index read, the unknown call.
+         * up starting in the middle of the flow with nothing marking it.
+         * Fixed at every merge of this shape: the joins, the index read,
+         * the unknown call.
          */
         fun joinInto(result: String, operands: List<String>, site: Int, kind: String) {
             val merged = java.util.TreeSet<F>()
@@ -497,7 +494,7 @@ internal class FlowTransfer<F, C>(
                 // backward walk dead-ended at every `x ?: y` on a taint
                 // path: the emitted trace then began in the middle of the
                 // flow, unmarked, and the integrity check could not see it
-                // because it validates the emitted list against itself (R54).
+                // because it validates the emitted list against itself.
                 is KirElvis -> joinInto(ins.result, listOf(ins.value, ins.fallback), site.id, "elvis")
 
                 is KirCast -> moveAll(reg(ins.value), reg(ins.result), site.id, "assign", replace = true)
@@ -505,11 +502,11 @@ internal class FlowTransfer<F, C>(
                 is KirTypeCheck -> state.removeKey(reg(ins.result))
 
                 is KirFieldGet -> {
-                    // P24 §2: the read fans out over the receiver's alias
+                    // The read fans out over the receiver's alias
                     // class — a value stored through one name of an object
                     // is read through all of them. Per-fact blame, like
                     // every other join: a fact on one alias is attributed to
-                    // THAT alias's key (R62's rule).
+                    // THAT alias's key (the rule).
                     val suffix = pathSuffix(ins.path)
                     val merged = java.util.TreeSet<F>()
                     val blame = HashMap<F, TaintKey>()
@@ -538,8 +535,8 @@ internal class FlowTransfer<F, C>(
                     // intra-block level (the fixpoint's out-state merge is
                     // what unions across paths and iterations). The summary
                     // engine used to weak-update here — an undocumented
-                    // disagreement with the reporting engine (R65).
-                    // P24 §2: the write lands on EVERY name of the object —
+                    // disagreement with the reporting engine.
+                    // The write lands on EVERY name of the object —
                     // `g.v = tainted` with `val g = h` taints `h.v` too.
                     val suffix = pathSuffix(ins.path)
                     for (base in host.aliasClass(ins.receiver).sorted()) {
@@ -556,8 +553,8 @@ internal class FlowTransfer<F, C>(
                     // Per-fact blame, like every other merge: a fact carried
                     // only by the collection VALUE must not be blamed on the
                     // element key it was never in, or the backward walk
-                    // dead-ends there (R54's shape, R62).
-                    // P24 §2: the element state of every alias of the
+                    // dead-ends there (the shape).
+                    // The element state of every alias of the
                     // collection is the element state of the collection.
                     val merged = java.util.TreeSet<F>()
                     val blame = HashMap<F, TaintKey>()
@@ -584,7 +581,7 @@ internal class FlowTransfer<F, C>(
                     // A suspend boundary is TRANSPARENT to a may-analysis:
                     // the value crossing it is the value the suspending call
                     // just produced, and coroutine suspension does not
-                    // launder taint. Not an omission — the P6 report counts
+                    // launder taint. Not an omission — the report counts
                     // how many slices cross these boundaries, which requires
                     // the facts to persist across them. Both engines share
                     // this now: the summary engine used to drop the call's
@@ -621,7 +618,7 @@ internal class FlowTransfer<F, C>(
 
     /**
      * One resolved call, classified in a FIXED order (02-ARCHITECTURE.md §6,
-     * P5 restatement): the PACK first — sink, source, sanitizer,
+     * restatement): the PACK first — sink, source, sanitizer,
      * passthrough, effect — and it stays authoritative; then a COMPUTED
      * summary of a dispatch target when nothing matched; then the
      * `--unknown-call` default. Every move names which of the three acted.
@@ -654,7 +651,7 @@ internal class FlowTransfer<F, C>(
         host.onResolvedCall(ins, site, collect)
 
         // SINK first, on the pre-call state: the sink reads its arguments.
-        // A named pattern wins; an interface-declared sink (P26 §1.1 — the
+        // A named pattern wins; an interface-declared sink (— the
         // callee is a bodyless method on a repository/DAO interface) answers
         // second, still ahead of every computed summary.
         val sink = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, fqn) }
@@ -685,7 +682,7 @@ internal class FlowTransfer<F, C>(
 
         // SANITIZER: the named categories are cleared on the RESULT only — a
         // sanitizer must not hide the taint that stays behind in memory.
-        // P20 §0: a sanitizer "fires" when it actually stopped taint — a
+        // A sanitizer "fires" when it actually stopped taint — a
         // clear on the result, OR facts sitting on its arguments whose
         // propagation the entry suppresses (the pack entry's presence is
         // what keeps the unknown-call default from moving them). Either
@@ -703,7 +700,7 @@ internal class FlowTransfer<F, C>(
             if (remaining.size != before.size || argumentFacts) {
                 host.onSanitizerCleared(fqn, sanitizer.clears, collect)
             }
-            // P24 §3: a sanitizer that matched but did not clear what is
+            // A sanitizer that matched but did not clear what is
             // flowing is a frame the trace must be able to name — the
             // `sanitizer-not-applied` role. Without it, "we ran a sanitizer
             // and the taint still arrived" is invisible in the evidence.
@@ -736,7 +733,7 @@ internal class FlowTransfer<F, C>(
             if (moved) host.onPackPassthroughApplied(fqn, collect)
         }
 
-        // DESERIALIZER (P26 §1.3): the call produced an OBJECT whose FIELDS
+        // DESERIALIZER: the call produced an OBJECT whose FIELDS
         // carry the input's taint — the passthrough above moved the input to
         // the result; this arm says the result's FIELD READS derive it. The
         // host decides what "field-bearing" means for its fact type.
@@ -765,7 +762,7 @@ internal class FlowTransfer<F, C>(
 
         if (matched) return
 
-        // ---- summary application (P5) ------------------------------------
+        // ---- summary application ------------------------------------
         if (host.applyCalleeSummaries(ins, site, state, chain, collect)) {
             return
         }
@@ -810,7 +807,7 @@ internal class FlowTransfer<F, C>(
         val resultKey = TaintKey(result, "")
         val incoming = java.util.TreeSet<F>()
         // Per-fact blame: an argument's fact is attributed to THAT argument,
-        // not to whichever operand happened to be non-empty first (R62).
+        // not to whichever operand happened to be non-empty first.
         val blame = HashMap<F, TaintKey>()
         for (sourceReg in listOfNotNull(receiver) + args) {
             val sourceKey = TaintKey(sourceReg, "")

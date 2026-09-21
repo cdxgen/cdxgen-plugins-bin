@@ -16,10 +16,10 @@ import kotlin.streams.toList
  * to the caller so the analysis can emit a `classpath-partial` diagnostic
  * naming it — a partial classpath is never silent.
  *
- * P28 §1: the strategies are a NAMED CHAIN, not one silent path. Each
+ * the strategies are a NAMED CHAIN, not one silent path. Each
  * attempt is recorded with whether it fired; the winner — or `none` — is
  * published in `stats.classpath` so a classpath-less run and a run that
- * found nothing are distinguishable in the report (R173/R179's zero).
+ * found nothing are distinguishable in the report (the zero).
  */
 object ClasspathResolver {
 
@@ -99,7 +99,7 @@ object ClasspathResolver {
         // Nothing fired: the run that DIDN'T fire last still owns the missing
         // list — the offline scan's unlocatable coordinates are the honest
         // `classpath-partial` diagnostic, and dropping them because zero jars
-        // attached would report a clean classpath-less run (the R73 shape).
+        // attached would report a clean classpath-less run (the shape).
         val (winningStrategy, run) = winner ?: (ClasspathStrategy.NONE to (lastRun ?: AttemptRun()))
         return Result(
             jars = run.jars.values.sortedBy { it.purl },
@@ -172,7 +172,7 @@ object ClasspathResolver {
 
     /**
      * The classpath-file grammar shared by `--classpath-file` and a discovered
-     * `classpath.txt`. P17 (R105) lives here: a coordinate BOUND to a
+     * `classpath.txt`. Lives here: a coordinate BOUND to a
      * committed jar (`g:a:v=libs/foo.jar`) attaches the jar WITH the
      * coordinate — dependency markers, purls and diagnostics are identical on
      * every machine — while a bare `g:a:v` line resolves against the
@@ -296,7 +296,7 @@ object ClasspathResolver {
                 coordinates.addAll(scan(file))
             }
         }
-        // P28: NESTED INDEPENDENT BUILDS. A repo whose root has no build file
+        // NESTED INDEPENDENT BUILDS. A repo whose root has no build file
         // (`koin`: `projects/` and `examples/` each carry their own
         // settings.gradle) is discovered as a plain tree, so the module scan
         // above sees zero build files and the cache strategy reports `none`
@@ -444,7 +444,7 @@ object ClasspathResolver {
      * `name = { group = "...", name = "...", version = "..." }`), with
      * `version.ref = "alias"` resolved against the catalog's `[versions]`
      * table. A `version.ref` whose alias carries no literal (rich versions,
-     * `{ strictly = ... }` — P28 found `exposed` declaring its whole
+     * `{ strictly = ... }` — found `exposed` declaring its whole
      * dependency set this way) yields a version-less coordinate: the
      * locator's highest-cached-version rule applies, same as a build-script
      * property indirection.
@@ -538,7 +538,7 @@ object ClasspathResolver {
      * coroutines/ktor dependency read `classpath-partial` even against a
      * warm cache. The DECLARED coordinate keeps naming the purl.
      *
-     * P15 adds the next layer, both driven by nowinandroid's 266 named
+     * adds the next layer, both driven by nowinandroid's 266 named
      * unlocatable coordinates: (1) Gradle Module Metadata — a publisher may
      * name its artifact file anything (`androidx.window:window-core-android`
      * ships `window-core.aar`, `app.cash.turbine:turbine-jvm` ships
@@ -731,7 +731,7 @@ object ClasspathResolver {
         }
         if (suffixed.isNotEmpty()) return suffixed
         // The publisher's own file names, from the Gradle Module Metadata
-        // beside the artifact (P15): `window-core.aar`, `Turbine-jvm.jar`,
+        // beside the artifact: `window-core.aar`, `Turbine-jvm.jar`,
         // `roborazzi-painter-jvm.jar` — none derivable from the module
         // name, all declared in the `.module` file a warm cache always
         // carries. Variants whose usage is metadata-only (kotlin-metadata,

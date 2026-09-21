@@ -8,10 +8,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P24 §3: the frame-role vocabulary is closed and DRIVEN — the same gate
+ * The frame-role vocabulary is closed and DRIVEN — the same gate
  * `SlicePathKindVocabularyTest` holds for `pathKind`. A ninth role does not
  * ship; a role with no producer anywhere in the bundled corpus is a schema
- * lie (R117's rule, applied to the vocabulary on the day it is born).
+ * lie (the rule, applied to the vocabulary on the day it is born).
  *
  * The corpus side of the contract rides with it: `frames=`/`via=` parse and
  * validate, a via= segment naming a function nothing declares is an

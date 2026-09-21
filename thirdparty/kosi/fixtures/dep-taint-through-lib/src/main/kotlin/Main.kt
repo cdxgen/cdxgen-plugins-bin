@@ -1,4 +1,4 @@
-// P9 fixture: cross-dependency taint. The DEPENDENCY is libs/dep-helper.jar
+// fixture: cross-dependency taint. The DEPENDENCY is libs/dep-helper.jar
 // (committed; its source and build live in helper-src/). Every annotation
 // names which SIDE of the boundary it proves:
 //

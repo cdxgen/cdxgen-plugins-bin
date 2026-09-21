@@ -1,4 +1,4 @@
-// P27 §2 — Spring MVC's ARGUMENT BINDING rule, one handler per row of the
+// — Spring MVC's ARGUMENT BINDING rule, one handler per row of the
 // framework's own table.
 //
 // The rule, verbatim from Spring's reference documentation
@@ -10,7 +10,7 @@
 //    @ModelAttribute."
 //
 // So an UNANNOTATED parameter is always request data. Seeding only ANNOTATED
-// parameters read 3 of spring-petclinic's 11 real flows (R174).
+// parameters read 3 of spring-petclinic's 11 real flows.
 //
 // The cost of over-correcting is this file. Every type in that table's
 // framework-supplied rows must stay UNSEEDED, or every controller in the

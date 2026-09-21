@@ -1,13 +1,13 @@
 package io.cdxgen.kosi.kir
 
 /**
- * Structural checks over lowered bodies. The dead-block rule is the P2
- * gate's "CFG has no unreachable-but-emitted blocks": the lowering emits
- * blocks as it rewrites control flow, and a block that no edge reaches is
- * not dead code from the source — it is a lowering bug that would silently
- * carry stale registers into any dataflow. The validator is what fails when
- * the check is removed (KirValidatorTest disables it and asserts the
- * injected dead block is caught).
+ * Structural checks over lowered bodies. The dead-block rule is the gate's
+ * "CFG has no unreachable-but-emitted blocks": the lowering emits blocks as
+ * it rewrites control flow, and a block that no edge reaches is not dead
+ * code from the source — it is a lowering bug that would silently carry
+ * stale registers into any dataflow. The validator is what fails when the
+ * check is removed (KirValidatorTest disables it and asserts the injected
+ * dead block is caught).
  */
 object KirValidator {
 
@@ -16,9 +16,9 @@ object KirValidator {
 
     fun validate(module: KirModule): List<Finding> {
         val findings = mutableListOf<Finding>()
-        // Keyed by canonical name AND descriptor (P22 §1): overloads share
+        // Keyed by canonical name AND descriptor: overloads share
         // the name — flagging them as duplicates refused `kir dump` on any
-        // module holding real Kotlin overloads, R87's rule at the wrong
+        // module holding real Kotlin overloads, the rule at the wrong
         // granularity. Two functions with the SAME name and descriptor are
         // still a defect: one of them is not the function it claims to be.
         val seen = HashSet<String>()

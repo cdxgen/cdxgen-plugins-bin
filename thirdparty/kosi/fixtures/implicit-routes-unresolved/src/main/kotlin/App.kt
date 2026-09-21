@@ -1,10 +1,10 @@
 // No handler, no repository, no actuator anywhere: this fixture pins the
-// dependency-marker contract from both sides (R111).
+// dependency-marker contract from both sides.
 //
 //  - The PRESENT marker is bound to a committed jar whose file name does
 //    not contain the marker, so only the COORDINATE arm of the marker set
 //    can publish its tree. That arm rendered the literal string
-//    `${it.group}:${it.artifact}` since P13 — dead, and invisible because
+//    `${it.group}:${it.artifact}` since — dead, and invisible because
 //    every Gradle-cache jar's file name carries the artifact name anyway.
 //  - The ABSENT marker (actuator at a version no cache holds) must publish
 //    nothing: the resolver's missing[] list was fed into the marker set,

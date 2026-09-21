@@ -1,20 +1,20 @@
-// P26 §0 — the source that comes back inside an object.
+// — the source that comes back inside an object.
 //
-// R161's shape: the source is born INSIDE a factory callee and stored into
-// the constructed object's FIELD. P24's primary-constructor synthesis writes
+// the shape: the source is born INSIDE a factory callee and stored into
+// the constructed object's FIELD. the primary-constructor synthesis writes
 // source facts into constructed objects' fields — which is where they belong
 // — but the summary's return channel probed only the bare return key, so the
 // summary said "returns nothing tainted", every caller went clean, and 22
-// http4k findings disappeared between the P23 and P24 builds with no gate
+// http4k findings disappeared between the builds with no gate
 // watching. The channel is `sourceReturnFields` (category -> access path),
-// the RETURN mirror of P24's own paramToReturnFields.
+// the RETURN mirror of the own paramToReturnFields.
 //
 // Positive half: the field read in the caller must reach the sink.
 // kosi:want flow source=untrusted-input sink=sql-query fn=~consume known-fail=syntax:1
 //
 // Negative halves: a CONSTANT factory's object carries nothing, and the clean
 // sibling field must stay clean (the channel is field-sensitive, not a
-// blanket re-introduction of the pre-P24 propagation).
+// blanket re-introduction of the earlier propagation).
 // kosi:want-not flow source=untrusted-input sink=sql-query fn=~consumeLabel
 // kosi:want-not flow source=untrusted-input sink=sql-query fn=~consumeClean
 // kosi:want-not diagnostic code=parse-error

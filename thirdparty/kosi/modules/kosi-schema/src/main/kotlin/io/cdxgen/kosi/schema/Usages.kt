@@ -47,7 +47,7 @@ data class SecuritySignal(
     val filePath: String,
     val position: Position,
     /**
-     * P9: the symbol the signal attaches to (the `external fun`'s canonical
+     * The symbol the signal attaches to (the `external fun`'s canonical
      * name, the function containing the `loadLibrary` call), so corpus
      * annotations can demand a signal ON one function and the ABSENCE of the
      * same signal on its sibling — the same negative shape every other

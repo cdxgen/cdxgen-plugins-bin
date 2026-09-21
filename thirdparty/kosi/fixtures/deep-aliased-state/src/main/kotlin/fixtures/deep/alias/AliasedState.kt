@@ -2,7 +2,7 @@
 // reference, an object stored in another object's field, and a data class
 // copied with copy(). Every hop is at depth - the reaching functions are
 // layers, not locals - and the clean SIBLING field of the same object must
-// stay clean (the P4 negative, now at depth).
+// stay clean (the negative, now at depth).
 //
 // Negative half first: label is a sibling field of the SAME tainted object
 // and must never reach the sink.

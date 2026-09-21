@@ -8,7 +8,7 @@ import java.nio.file.Files
  * Reports whether the resolved front end can actually run in this
  * distribution: a real one-module standalone Analysis API session is built
  * over a temporary source root and one declaration is resolved through it.
- * Since P1 amended the dependency allowlist (02-ARCHITECTURE.md §1) to the
+ * Amended the dependency allowlist (02-ARCHITECTURE.md §1) to the
  * KSP2 working set — the unrelocated `-for-ide` artifacts, the unrelocated
  * IntelliJ platform and their third-party libraries — this is the substrate
  * both tiers run on, and the probe doubles as the self-check the version
@@ -19,7 +19,7 @@ object StandaloneSessionProbe {
     data class ProbeResult(val available: Boolean, val detail: String)
 
     /**
-     * Whether the SYNTAX backend can run here. Since P1 both tiers share one
+     * Whether the SYNTAX backend can run here. Both tiers share one
      * session substrate, so "syntax works" is no longer free: it is a claim
      * that has to be checked. `kosi version` used to print the constant
      * string "available" for this backend, which in a native image where the
@@ -84,7 +84,7 @@ object StandaloneSessionProbe {
                         // KaClassType shape ResolvedAnalyzer publishes in
                         // supertypes[]. An error type (no JDK visible)
                         // yields no classId and must not report available:
-                        // the R40 shape, a status that is not measured.
+                        // the shape, a status that is not measured.
                         val ktClass = declaration as? org.jetbrains.kotlin.psi.KtClass
                         val symbol = ktClass?.symbol
                         runnableResolved =

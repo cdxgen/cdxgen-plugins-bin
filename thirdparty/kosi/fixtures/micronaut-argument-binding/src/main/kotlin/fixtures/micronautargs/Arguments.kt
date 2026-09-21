@@ -1,4 +1,4 @@
-// P27 §2 — micronaut's ARGUMENT BINDING rule, one handler per framework-supplied type.
+// — micronaut's ARGUMENT BINDING rule, one handler per framework-supplied type.
 //
 // From docs.micronaut.io HTTP guide, Simple Request Binding, verbatim:
 //

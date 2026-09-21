@@ -13,7 +13,7 @@ class XmlElement(
     val name: String,
     var text: String = "",
     val children: MutableList<XmlElement> = mutableListOf(),
-    /** `name="value"` attributes on the opening tag (P28: an Eclipse `.classpath` carries its jar rows as attributes). */
+    /** `name="value"` attributes on the opening tag (an Eclipse `.classpath` carries its jar rows as attributes). */
     val attrs: Map<String, String> = emptyMap(),
 ) {
     fun child(name: String): XmlElement? = children.firstOrNull { it.name == name }
@@ -26,9 +26,9 @@ class XmlElement(
     fun attr(name: String): String? = attrs[name]
 
     /**
-     * Depth-first search for the first element with [name] (e.g. build/plugins).
+     * Depth-first search for the first element with [name] (e.g. Build/plugins).
      *
-     * Iterative with an explicit stack (P29 recursion audit): a document's
+     * Iterative with an explicit stack (recursion audit): a document's
      * nesting depth is unbounded, and `XmlElement.parse` builds the tree
      * iteratively, so a pathologically nested pom parses fine and must not
      * overflow a recursive query over it. Same visit order as the recursive

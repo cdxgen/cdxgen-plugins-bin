@@ -1,6 +1,6 @@
-// P22 §1: the corpus shape NO bundled fixture held — two real Kotlin
+// the corpus shape NO bundled fixture held — two real Kotlin
 // overloads sharing one canonical name whose bodies differ in control
-// flow. R133 survived P21 because of exactly this absence: the fold's
+// flow. survived because of exactly this absence: the fold's
 // CFG cache keyed by name answered one overload's dominator question
 // with its namesake's blocks, and no fixture, unit test, golden or
 // corpus tier could see it, because the corpus held no two same-named
@@ -13,11 +13,11 @@
 //    A's body is multi-block (an early return, a branch, a store) while
 //    its namesake's is a single-block parameter return: the fold's CFG,
 //    return-site and defined-register views must all be keyed by
-//    IDENTITY, or A's verdict is answered from B's blocks (the R133
+//    IDENTITY, or A's verdict is answered from B's blocks (the
 //    shape, held in the corpus from here on).
 //
 //  - The FLOW engine applies overload B's own summary at `endpoint(raw)`:
-//    B returns its parameter, so taint crosses. Pre-P22 the summary table
+//    B returns its parameter, so taint crosses. Pre-the summary table
 //    was keyed by canonical name and kept the overload whose descriptor
 //    sorts last — A, whose summary moves nothing — so the relay flow was
 //    MISSED: a false negative, not a refused answer. The want below is

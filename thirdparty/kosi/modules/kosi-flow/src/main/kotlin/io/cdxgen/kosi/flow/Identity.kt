@@ -21,7 +21,7 @@ import io.cdxgen.kosi.kir.KirStringConcat
 import io.cdxgen.kosi.kir.KirTypeCheck
 
 /**
- * P24 §2: the object that is the same object.
+ * the object that is the same object.
  *
  * Everything the taint engine tracks is keyed by `(register, access path)` —
  * a NAME, not a thing. Two names for one object are two unrelated keys, so
@@ -48,7 +48,7 @@ import io.cdxgen.kosi.kir.KirTypeCheck
  * WRITER's alias class, so a write through one name of an object is a write
  * through all of them.
  *
- * Soundness direction (the phase contract): the relation is MAY-alias.
+ * Soundness direction (the change contract): the relation is MAY-alias.
  * Re-assignment unions (a `var` re-pointed may still hold the old object),
  * allocation kills (a fresh object is not the old one), and nothing narrows
  * on types. A false alias can cost a finding's precision, never its

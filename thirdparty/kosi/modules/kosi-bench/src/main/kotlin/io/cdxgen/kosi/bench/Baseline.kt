@@ -92,7 +92,7 @@ object Baseline {
  * The promotion gate (06-CORPUS.md §4), adapted from golem's promotion.go plus
  * the two criteria it was missing (per-repo flow counts, per-repo wall clock).
  *
- * Phase-0 honesty rule: a criterion that cannot be evaluated with the current
+ * Honesty rule: a criterion that cannot be evaluated with the current
  * engine is reported as NOT_EVALUATED with the reason — it is never counted
  * as a pass. While any criterion is NOT_EVALUATED the gate verdict is HOLD.
  */
@@ -126,7 +126,7 @@ object Promotion {
     fun evaluate(current: BenchRunner.BenchResult, baseline: BenchRunner.BenchResult?): Report {
         val checks = mutableListOf<Check>()
 
-        // 1. recall improves >= 0.15 or holds (non-engine phase)
+        // 1. recall improves >= 0.15 or holds (non-engine change)
         val curTotal = current.totals()
         if (baseline == null) {
             checks.add(Check("recall", State.NOT_EVALUATED, "no baseline to compare"))
@@ -142,28 +142,28 @@ object Promotion {
             )
         }
 
-        // 2. precision per flow — LIVE since P4: over the fixture tier, the
+        // 2. precision per flow — LIVE later: over the fixture tier, the
         // fraction of reported slices some positive flow expectation actually
         // asked for, counted per FLOW and capped per expectation by its
         // count=. A slice nobody asked for is a false positive by definition.
         checks.add(precisionPerFlowCheck(current))
 
-        // 2b. taint recall over flow expectations on the fixture tier, as a
-        // fraction with BOTH counts (the P4 gate, raised to the P5 bar: 0.90).
+        // 2b. Taint recall over flow expectations on the fixture tier, as a
+        // fraction with BOTH counts (the gate, raised to the bar: 0.90).
         checks.add(taintRecallCheck(current))
 
-        // 2c. the worklist cap AND the P5 SCC iteration cap: 0 hits, each
+        // 2c. The worklist cap AND the SCC iteration cap: 0 hits, each
         // with its own denominator in the detail line.
         checks.add(fixpointCapCheck(current))
 
-        // 2d-2f. the P5 gates: computed summaries with a multi-key origin
+        // 2d-2f. The gates: computed summaries with a multi-key origin
         // distribution, the default-origin share under 10%, and the async
-        // tier's own recall (P6).
+        // tier's own recall.
         checks.add(summariesComputedCheck(current))
         checks.add(defaultOriginShareCheck(current))
         checks.add(asyncRecallCheck(current))
 
-        // 2g-2j. the P7 gates: per-framework endpoint recall, handlers that
+        // 2g-2j. The gates: per-framework endpoint recall, handlers that
         // resolve to real graph nodes, endpoint-rooted slices, and the
         // config-resolution fraction — each with both counts.
         checks.add(endpointRecallByFrameworkCheck(current))
@@ -171,7 +171,7 @@ object Promotion {
         checks.add(endpointRootedSlicesCheck(current))
         checks.add(configResolutionCheck(current))
 
-        // 2k-2m. the P8 gates: every shipped mapping exercised, per-form
+        // 2k-2m. The gates: every shipped mapping exercised, per-form
         // mode/padding extraction, and crypto-flow slices from the slices.
         checks.add(cryptoMappingCoverageCheck(current))
         checks.add(cryptoModePaddingByFormCheck(current))
@@ -179,7 +179,7 @@ object Promotion {
 
         // 3. connectivity 1.000, integrity 0 — evaluable, with the vacuity
         // caveat stated so a vacuous pass is never mistaken for a flow result.
-        // Since P4 the fixtures publish slices, so zero slices is
+        // The fixtures publish slices, so zero slices is
         // NOT_EVALUATED (the engine regressed) rather than a vacuous pass.
         checks.add(
             when {
@@ -220,10 +220,10 @@ object Promotion {
             )
         }
 
-        // 5. dependency-crossing flows, LIVE since P5. The summaries give a
+        // 5. dependency-crossing flows, LIVE. The summaries give a
         // slice two ENDS: source and sink functions with their own module
         // paths and purls, and the flags are computed from those ends — not
-        // written as a constant the gate then reads back (R55's rule). Zero
+        // written as a constant the gate then reads back (the rule). Zero
         // crossings over slices is still NOT_EVALUATED, never a pass; and a
         // run that LOSES every crossing its baseline measured is a
         // regression, the same two-way discipline the corpus ratchet uses.
@@ -265,7 +265,7 @@ object Promotion {
 
         // 7. full fixture coverage. A fixture runs its tier's slots — five
         // for every bundled tier, ONE (the default `resolved` slot) for the
-        // deep tier (P24, 10-DEEP-EVIDENCE.md §3) — so the expected count
+        // deep tier (10-DEEP-EVIDENCE.md §3) — so the expected count
         // is per-fixture over THIS run's entries, not a single constant
         // times the fixture count.
         val expectedSlots = current.results.groupBy { it.slug }.values.sumOf { rows ->
@@ -284,8 +284,8 @@ object Promotion {
             },
         )
 
-        // 8+9. per-real-repo flow counts and wall clock. The flow-count arm
-        // is LIVE since P4: a repo whose slice count drops below its
+        // 8+9. Per-real-repo flow counts and wall clock. The flow-count arm
+        // is LIVE later: a repo whose slice count drops below its
         // baseline is golem's SEAM regression, seen exactly where it happens.
         checks.add(perRepoFlowCountCheck(current, baseline))
         if (baseline != null) {
@@ -310,7 +310,7 @@ object Promotion {
             checks.add(Check("per-repo-wall-clock", State.NOT_EVALUATED, "no baseline to compare"))
         }
 
-        // 10. per-repo resolvedCallRatio (P1 gate). Reported PER REPO, never
+        // 10. Per-repo resolvedCallRatio (gate). Reported PER REPO, never
         // as an average, and enforced two ways so neither direction can pass
         // unnoticed: a repo may not fall below its baseline ratio (a
         // regression), and a repo at or above the 0.90 target may not fall
@@ -320,42 +320,42 @@ object Promotion {
         // exemption list.
         checks.add(resolvedRatioCheck(current, baseline))
 
-        // 10b. P9's own gate, the phase's headline number: cross-dependency
+        // 10b. The own gate, the headline number: cross-dependency
         // slices whose boundary moves carry `origin=bytecode`, on at least
         // [CROSS_DEPENDENCY_BYTECODE_REPOS] pinned repos — with the applied
         // bytecode-summary count beside it, so the numerator names its
         // producer instead of hiding behind a count.
         checks.add(crossDependencyBytecodeCheck(current))
 
-        // 10c. P9's recorded cost: per-repo time and RSS deltas of the deps
+        // 10c. The recorded cost: per-repo time and RSS deltas of the deps
         // slot against the plain resolved slot, measured in the SAME session
         // (a ratio against a number from a different machine or session is
         // not a measurement). Published with both sides; not a pass/fail bar.
         checks.add(depsDeltaCheck(current))
 
-        // 10d. P10 per-repo peak RSS: a repo may not exceed 1.5x its
+        // 10d. Per-repo peak RSS: a repo may not exceed 1.5x its
         // baseline row's RSS window. The golem SEAM lesson, memory-shaped:
         // an aggregate RSS number cannot see one repo exploding.
         checks.add(perRepoRssCheck(current, baseline))
 
-        // 10e. P14: the findings ratchet. The vuln tier's deliberately
+        // 10e. The findings ratchet. The vuln tier's deliberately
         // vulnerable apps are the only repo-tier rows whose FINDINGS are
         // the point — and until now a change could take any of them to zero
-        // with a green build, which is exactly how kosi arrived at P11
+        // with a green build, which is exactly how kosi arrived at
         // reporting zero findings on every real repo. Two-way, like every
         // other ratchet: below the floor FAILS, and materially above it
         // fails too until the floor is raised, so an improvement is
         // recorded rather than absorbed.
         checks.add(vulnFindingFloorCheck(current))
 
-        // 11. the P2 lowering gate: loweringFailures empty on every fixture
+        // 11. The lowering gate: loweringFailures empty on every fixture
         // slot, and below LOWERING_FAILURE_RATE_MAX of the functions lowered
         // on the repo tiers. Enforced here rather than measured by hand once
-        // in a PR body, because a lowering that regresses between phases is
+        // in a PR body, because a lowering that regresses between releases is
         // exactly what a ratchet is for.
         checks.add(loweringCheck(current))
 
-        // 12-14. the P3 call-graph gates: edge connectivity 1.000 with a REAL
+        // 12-14. The call-graph gates: edge connectivity 1.000 with a REAL
         // denominator (witness-confirmed reached nodes), `--roots exported`
         // reaching >= 95% of a library's public API with both counts
         // published, and node/edge breakdowns that are recorded AND add up.
@@ -374,22 +374,22 @@ object Promotion {
         return Report(verdict, checks)
     }
 
-    /** The P1 gate's per-repo resolved-call-ratio target. */
+    /** The gate's per-repo resolved-call-ratio target. */
     const val RESOLVED_RATIO_TARGET = 0.90
 
-    /** The P2 gate's ceiling on the repo-tier lowering failure rate. */
+    /** The gate's ceiling on the repo-tier lowering failure rate. */
     const val LOWERING_FAILURE_RATE_MAX = 0.005
 
-    /** The P4 gate, raised to the P5 bar: taint recall over flow expectations. */
+    /** The gate, raised to the bar: taint recall over flow expectations. */
     const val TAINT_RECALL_TARGET = 0.90
 
-    /** The P4 gate: precision per flow (slices asked-for over slices reported). */
+    /** The gate: precision per flow (slices asked-for over slices reported). */
     const val TAINT_PRECISION_TARGET = 0.95
 
     private fun fixtureRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
         current.results.filter { it.tier == "fixtures" && it.slug != "TOTAL" }
 
-    /** The async tier's rows (P6): bundled coroutine/Flow fixtures, gated separately. */
+    /** The async tier's rows: bundled coroutine/Flow fixtures, gated separately. */
     private fun asyncRows(current: BenchRunner.BenchResult): List<BenchRunner.FixtureResult> =
         current.results.filter { it.tier == "async" && it.slug != "TOTAL" }
 
@@ -472,8 +472,8 @@ object Promotion {
     /**
      * The worklist cap: on the fixture tier, `fixpointCapHits` must be 0 —
      * and the detail line carries the functions-analysed denominator, because
-     * a cap count without the population it was measured over is R25's shape
-     * one phase later. A run that analysed nothing cannot evaluate this.
+     * a cap count without the population it was measured over is the shape
+     * later. A run that analysed nothing cannot evaluate this.
      */
     private fun fixpointCapCheck(current: BenchRunner.BenchResult): Check {
         val name = "fixpoint-cap"
@@ -487,9 +487,9 @@ object Promotion {
         }
         val analysed = rows.sumOf { it.functionsAnalysed ?: 0 }
         val hits = rows.sumOf { it.fixpointCapHits ?: 0 }
-        // The P5 SCC iteration cap is a SECOND counter with its own
+        // The SCC iteration cap is a SECOND counter with its own
         // denominator (SCCs processed) — a cap without its population is
-        // R25's shape, in either counter.
+        // the shape, in either counter.
         val sccs = rows.sumOf { it.sccsProcessed ?: 0 }
         val sccHits = rows.sumOf { it.sccIterationCapHits ?: 0 }
         return if (hits == 0 && sccHits == 0) {
@@ -552,7 +552,7 @@ object Promotion {
      * anything, and under [LOWERING_FAILURE_RATE_MAX] on the repo tiers. Both
      * arms report the failure count over the function count it was measured
      * against — a rate with no denominator would repeat the defect this gate
-     * exists to catch (R25).
+     * exists to catch.
      */
     private fun loweringCheck(current: BenchRunner.BenchResult): Check {
         val name = "lowering-failures"
@@ -600,7 +600,7 @@ object Promotion {
         return Check(name, State.PASS, "fixtures clean over $fixtureFunctions functions; $repoDetail")
     }
 
-    /** The P3 gate's bar for `--roots exported` public-API reach. */
+    /** The gate's bar for `--roots exported` public-API reach. */
     const val EXPORTED_REACH_TARGET = 0.95
 
     private const val RESOLVED_RATIO_TOLERANCE = 0.01
@@ -728,12 +728,12 @@ object Promotion {
      * Against the front end's independent inventory, a public callable that
      * never became a node costs a point, which is the failure the gate is for.
      *
-     * Scope: the FIXTURE tier, as the P3 roadmap defined it ("a library
+     * Scope: the FIXTURE tier, as the roadmap defined it ("a library
      * fixture"). The pinned repos are REPORTED in the detail line but do not
-     * hold the bar: their denominators only became honest with R49's fix,
+     * hold the bar: their denominators only became honest with the fix,
      * and the real repo figures name a known, owned gap — public methods
      * DECLARED IN JAVA, whose bodies the Kotlin-only lowering never produces
-     * (R49's `Greeter.greet` at repo scale; P9's bytecode tier closes it).
+     * (the `Greeter.greet` at repo scale; the bytecode tier closes it).
      * A per-repo bar returns when that tier lands.
      */
     private fun exportedReachCheck(current: BenchRunner.BenchResult): Check {
@@ -756,7 +756,7 @@ object Promotion {
         val repoSummary = if (repoRows.isEmpty()) {
             ""
         } else {
-            "; repos (reported, not gated — Java-declared bodies await P9): $repoDetail"
+            "repos (reported, not gated — Java-declared bodies await): $repoDetail"
         }
         if (fixtureRows.isEmpty() || totalPublic == 0) {
             return Check(
@@ -788,16 +788,16 @@ object Promotion {
     /**
      * The repo half of exported reach, as a RATCHET rather than a bar.
      *
-     * P4 moved the 0.95 bar to the fixture tier for a defensible reason —
-     * the repo denominators only became honest with R49's fix, and the real
+     * moved the 0.95 bar to the fixture tier for a defensible reason —
+     * the repo denominators only became honest with the fix, and the real
      * figures are dominated by public methods declared in Java, whose bodies
-     * P9's bytecode tier owns. But narrowing a gate's population in the same
+     * the bytecode tier owns. But narrowing a gate's population in the same
      * change that would have made it fail leaves the excluded population
      * measured by nothing, and "reported in a detail line" is not a check:
      * spring-fu could fall from 0.5359 to 0.05 and every gate would still be
      * green. So the repo fractions hold no absolute bar and instead may not
      * DROP against the baseline — the same two-way discipline the corpus
-     * ratchet uses, and it costs this phase nothing because the numbers are
+     * ratchet uses, and it costs nothing because the numbers are
      * already measured.
      */
     private fun perRepoExportedReachCheck(
@@ -873,7 +873,7 @@ object Promotion {
                 name,
                 State.NOT_EVALUATED,
                 "0 crossing slices over ${rows.sumOf { it.sliceCount }} slice(s): no slice's source and sink " +
-                    "landed in different modules or dependencies (P5's cross-module fixture should make this nonzero)",
+                    "landed in different modules or dependencies (the cross-module fixture should make this nonzero)",
             )
         }
         return Check(
@@ -885,7 +885,7 @@ object Promotion {
     }
 
     /**
-     * The P5 summaries gate: computed summaries must EXIST and their origin
+     * The summaries gate: computed summaries must EXIST and their origin
      * distribution must name more than one producer — a single aggregate
      * number cannot answer the question the `origin` field exists to ask.
      * NOT_EVALUATED when no slot ran summaries — never a pass.
@@ -919,7 +919,7 @@ object Promotion {
     }
 
     /**
-     * The roadmap's P5 gate on blanket propagation: the fraction of slices
+     * The roadmap's gate on blanket propagation: the fraction of slices
      * whose existence depends ONLY on `origin=default` must stay under 10%.
      * The denominator is the slices whose trace crossed at least one summary
      * boundary — an intraprocedural slice depends on no propagation at all —
@@ -948,7 +948,7 @@ object Promotion {
     }
 
     /**
-     * The P6 async gate: recall >= 0.90 on the async tier SPECIFICALLY, as
+     * The async gate: recall >= 0.90 on the async tier SPECIFICALLY, as
      * its own fraction with both counts — not folded into the fixture-tier
      * number, where seven async fixtures would be diluted by thirty others.
      * NOT_EVALUATED when the async tier did not run.
@@ -976,22 +976,22 @@ object Promotion {
         }
     }
 
-    /** The roadmap P5 gate's ceiling on default-only propagation. */
+    /** The roadmap gate's ceiling on default-only propagation. */
     const val DEFAULT_ORIGIN_SHARE_MAX = 0.10
 
-    /** The roadmap P6 gate: async-tier recall. */
+    /** The roadmap gate: async-tier recall. */
     const val ASYNC_RECALL_TARGET = 0.90
 
-    /** The P7 gate's per-framework endpoint-recall bar. */
+    /** The gate's per-framework endpoint-recall bar. */
     const val ENDPOINT_RECALL_TARGET = 0.95
 
-    /** The P8 gate's mapping-coverage bar: every shipped row exercised. */
+    /** The gate's mapping-coverage bar: every shipped row exercised. */
     const val CRYPTO_MAPPING_COVERAGE_TARGET = 1.0
 
     /**
-     * The P9 gate's bar: pinned repos with bytecode-origin cross-dependency
-     * slices. Originally 5 (the roadmap's guess); P11 re-measured the whole
-     * repo tier per repo, named every zero's cause (docs/KOSI.md §P11), and
+     * The gate's bar: pinned repos with bytecode-origin cross-dependency
+     * slices. Originally 5 (the roadmap's guess); re-measured the whole
+     * repo tier per repo, named every zero's cause (docs/KOSI.md §), and
      * lowered the bar to the population the corpus honestly supports: ONE
      * repo-tier entry — the bundled vulnerable service, whose vulnerable
      * path runs through a real published jar. A bar of 5 over a tier whose
@@ -1004,14 +1004,14 @@ object Promotion {
      */
     const val CROSS_DEPENDENCY_BYTECODE_REPOS = 1
 
-    /** The P10 per-repo RSS ceiling against the baseline row. */
+    /** The per-repo RSS ceiling against the baseline row. */
     const val PER_REPO_RSS_MAX = 1.50
 
     /**
      * How far over its floor a vuln entry may measure before the floor is
-     * STALE (P14). Absorbing an improvement silently is the other half of
+     * STALE. Absorbing an improvement silently is the other half of
      * the ratchet: the floor exists so the next regression has a number to
-     * fall below, and a floor left two phases behind measures nothing. A
+     * fall below, and a floor left long behind measures nothing. A
      * small overshoot (a couple of slices, or a quarter) is re-modelling
      * noise, not a finding.
      */
@@ -1019,10 +1019,10 @@ object Promotion {
     const val FINDING_FLOOR_STALE_RATIO = 1.25
 
     /**
-     * The P14 findings ratchet over the vuln tiers' resolved slots. Each
+     * The findings ratchet over the vuln tiers' resolved slots. Each
      * row that carries a declared `min_findings` floor is checked three
      * ways, each named: a DECLARED classpath file that is missing (the tier
-     * is being measured against nothing — R73, which cost four phases), a
+     * is being measured against nothing, which cost four phases), a
      * count BELOW the floor (the regression the floor exists to catch), and
      * a count MATERIALLY above it (the floor is stale; raise it).
      */
@@ -1066,7 +1066,7 @@ object Promotion {
     }
 
     /**
-     * P9's headline gate. `crossDependencySliceCount > 0 with
+     * The headline gate. `crossDependencySliceCount > 0 with
      * summaries[].origin=bytecode` per pinned repo — BOTH counts read from
      * the deps-slot row the bench recorded. Fewer than
      * [CROSS_DEPENDENCY_BYTECODE_REPOS] qualifying repos FAILs, naming the
@@ -1091,10 +1091,10 @@ object Promotion {
                 (if (compiled != null) ", $compiled function(s) compiled" else "") +
                 (if (cut != null) ", $cut class(es) cut by budget" else "")
         }
-        // P11 lowered the bar from 5 to 1, and the qualifying entry is the
+        // Lowered the bar from 5 to 1, and the qualifying entry is the
         // BUNDLED vulnerable service — not a pinned upstream repo. A gate
         // that reports only its qualifiers would then have stopped printing
-        // the very thing the phase was run to find out: that every pinned
+        // the very thing the run existed to find out: that every pinned
         // upstream repo still measures zero, and why. So both branches
         // carry the full per-repo measurement, and the PASS line says in
         // its first clause how many PINNED repos qualify (today: none).
@@ -1121,7 +1121,7 @@ object Promotion {
     /**
      * The recorded cost of the tier, per repo, both sides re-measured in
      * THIS run: deps-slot wall and RSS against the plain resolved slot's.
-     * The detail line is the record the phase gate asks for; the check only
+     * The detail line is the record the gate asks for; the check only
      * demands the numbers exist.
      */
     private fun depsDeltaCheck(current: BenchRunner.BenchResult): Check {
@@ -1149,7 +1149,7 @@ object Promotion {
     }
 
     /**
-     * P10's per-repo memory criterion: every repo-tier row's RSS window may
+     * The per-repo memory criterion: every repo-tier row's RSS window may
      * not exceed [PER_REPO_RSS_MAX] of its baseline row's. Rows whose
      * baseline carries no RSS (written before the field) are skipped and the
      * check says so rather than passing silently.
@@ -1187,7 +1187,7 @@ object Promotion {
     }
 
     /**
-     * P7: endpoint recall PER FRAMEWORK, never pooled - eight frameworks in
+     * Endpoint recall PER FRAMEWORK, never pooled - eight frameworks in
      * one fraction would let one broken integration hide behind seven
      * working ones (the async-recall argument). Every framework with
      * expectations in the run holds the bar; a run with none is
@@ -1227,7 +1227,7 @@ object Promotion {
     }
 
     /**
-     * P7: every endpoint's handler symbol must resolve to a call-graph node
+     * Every endpoint's handler symbol must resolve to a call-graph node
      * that EXISTS - looked up in the graph, not merely non-empty. An empty
      * handler symbol counts as UNRESOLVED, so a detector that cannot find
      * the handler cannot hide behind a zero denominator.
@@ -1253,7 +1253,7 @@ object Promotion {
     }
 
     /**
-     * P7: endpoint-rooted slices, counted from the slices whose source
+     * Endpoint-rooted slices, counted from the slices whose source
      * function is an endpoint handler. Greater than zero PASSES with both
      * counts; zero is NOT_EVALUATED - a run where endpoint sources were
      * off proves nothing either way.
@@ -1277,7 +1277,7 @@ object Promotion {
     }
 
     /**
-     * P7 config resolution: resolved over total CONFIG-DERIVED values, both
+     * Config resolution: resolved over total CONFIG-DERIVED values, both
      * counts. A phase that resolves nothing and reports everything
      * unresolved passes nothing: total > 0 with resolved == 0 FAILS.
      */
@@ -1298,8 +1298,8 @@ object Promotion {
     }
 
     /**
-     * P8: every shipped algorithm mapping exercised by at least one fixture
-     * - R63's rule over a table. The denominator is the shipped mapping
+     * every shipped algorithm mapping exercised by at least one fixture
+     * - the rule over a table. The denominator is the shipped mapping
      * count (transform + algorithm + curve rows), the numerator the rows
      * the crypto tier's assets actually name. FAIL below 1.000: shipping a
      * mapping nothing touches and quoting recall over the tested third of
@@ -1343,7 +1343,7 @@ object Promotion {
     }
 
     /**
-     * P8: mode/padding extraction per FORM - literal, const, template,
+     * Mode/padding extraction per FORM - literal, const, template,
      * config - each with its own denominator. A form the fixtures claim
      * must extract at 1.000; the forms' totals are published either way so
      * a silent form cannot hide the misses.
@@ -1379,7 +1379,7 @@ object Promotion {
         }
     }
 
-    /** P8: crypto-flow slices counted from the slices; NOT_EVALUATED at zero. */
+    /** Crypto-flow slices counted from the slices; NOT_EVALUATED at zero. */
     private fun cryptoFlowSlicesCheck(current: BenchRunner.BenchResult): Check {
         val name = "crypto-flow-slices"
         val rows = current.results.filter { it.slug != "TOTAL" }

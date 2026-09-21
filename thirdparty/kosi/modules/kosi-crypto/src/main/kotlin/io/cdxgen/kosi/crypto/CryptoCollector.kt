@@ -18,7 +18,7 @@ import io.cdxgen.kosi.schema.CryptoOperation
 import io.cdxgen.kosi.schema.Position
 
 /**
- * The crypto/CBOM collector (P8). Transform strings and algorithm names are
+ * The crypto/CBOM collector. Transform strings and algorithm names are
  * resolved through the shipped mapping table DATA — the collector invents no
  * family, no mode, no padding and no finding. `AES` alone is reported as
  * `AES` without a mode or padding, because the JCA's defaults are the JCA's
@@ -557,7 +557,7 @@ object ConstTable {
         """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
     )
 
-    // P22 §1: keyed by the `const val` NAME — deliberately name-unique: a
+    // Keyed by the `const val` NAME — deliberately name-unique: a
     // name holding two values anywhere is ambiguous and is REFUSED below,
     // never guessed.
     fun fromSources(sourceTexts: Map<String, String>): Map<String, String> {

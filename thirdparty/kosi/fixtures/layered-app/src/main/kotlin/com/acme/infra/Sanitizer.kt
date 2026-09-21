@@ -8,7 +8,7 @@ object Escaping {
      * The first version of this fixture used a hand-written `escapeSql`, and
      * the want-not below it passed — because the flow it was meant to stop
      * was not arriving at all for an unrelated reason. A negative that holds
-     * while the positive beside it is broken is not evidence (R63); it was
+     * while the positive beside it is broken is not evidence; it was
      * the engine's silence, borrowed.
      */
     fun escapeSql(raw: String): String = java.util.regex.Pattern.quote(raw)

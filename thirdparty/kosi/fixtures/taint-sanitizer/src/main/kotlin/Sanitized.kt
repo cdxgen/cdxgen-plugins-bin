@@ -7,7 +7,7 @@
 // kosi:want-not flow source=untrusted-input sink=crypto-asset
 // kosi:want-not diagnostic code=parse-error
 //
-// P20 §0/R129: the sweep found NO bundled fixture in which a sanitizer was
+// the sweep found NO bundled fixture in which a sanitizer was
 // load-bearing — hashed() stayed silent even with the pack entry deleted,
 // because `hash.size` is a field read (no derivation) and the entry's
 // propagation suppression was never the deciding fact. `sanitizedResult`
@@ -15,7 +15,7 @@
 // reaches the sink DIRECTLY. With the pack entry present the result is
 // clean and this stays silent; with the entry removed the unknown-call
 // propagation carries the argument's taint through digest and the flow
-// appears — the want-not below FAILS. Proven both ways (R129).
+// appears — the want-not below FAILS. Proven both ways.
 // kosi:want-not flow source=untrusted-input sink=log-injection fn=~sanitizedResult
 //
 // Positive half: the same source, no sanitizer in the path. The marker is

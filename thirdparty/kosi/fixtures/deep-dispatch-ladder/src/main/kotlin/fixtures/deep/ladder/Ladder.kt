@@ -21,9 +21,9 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~walkImplicit frames=6 via=fn:~Step.execute,fn:~ExecRung.apply
 // kosi:want flow source=untrusted-input sink=process-exec fn=~walkSam frames=5 via=fn:~ExecRung.apply known-fail=147
 //
-// R147: a SAM conversion's synthesized class is invisible to the workspace
+// a SAM conversion's synthesized class is invisible to the workspace
 // KIR - `Bridge { ... }` has no lowered implementation, so `bridge.cross`
-// resolves to nothing and the taint dies at the call. P27 (Kotlin,
+// resolves to nothing and the taint dies at the call. (Kotlin,
 // precisely) owns the SAM lowering.
 package fixtures.deep.ladder
 

@@ -1,4 +1,4 @@
-// R69 construct-coverage fixture: CLASS-SHAPE declarations the fixture
+// construct-coverage fixture: CLASS-SHAPE declarations the fixture
 // tree had never contained — an `init` block, an `inner` class, an
 // anonymous object expression, a `data object`, `protected` members, a
 // `lateinit var`, a property with a custom getter and setter over its

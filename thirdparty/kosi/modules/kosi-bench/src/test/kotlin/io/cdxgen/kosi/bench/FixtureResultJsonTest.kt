@@ -136,7 +136,7 @@ class FixtureResultJsonTest {
     fun theSampleLeavesNoFieldAtItsDefault() {
         // The round-trip guard above compares field by field, which means a
         // NEW field left at its `null` default passes it vacuously — null in,
-        // null out, no evidence the parser ever heard of it. That is R44's
+        // null out, no evidence the parser ever heard of it. That is the
         // shape one level up, so the sample itself is checked: every
         // persisted field must carry a distinctive value before the
         // comparison can prove anything about it.
@@ -191,7 +191,7 @@ class FixtureResultJsonTest {
 
     @Test
     fun aPreP4BaselineHasNoFlowCountsAndTheGateSeesThat() {
-        // The P4 flow fields must be ABSENT in a pre-P4 baseline, not zero:
+        // The flow fields must be ABSENT in a earlier baseline, not zero:
         // zero would read as "measured, nothing found" and let the
         // per-repo flow ratchet compare against a measurement never made.
         val json = """

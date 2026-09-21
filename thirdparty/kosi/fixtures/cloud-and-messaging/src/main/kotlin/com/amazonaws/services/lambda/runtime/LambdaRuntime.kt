@@ -12,7 +12,7 @@ fun interface RequestStreamHandler {
 }
 
 /**
- * P28 §2: the runtime's own Context (AWS Lambda Java docs: "the context
+ * The runtime's own Context (AWS Lambda Java docs: "the context
  * object is of type com.amazonaws.services.lambda.runtime.Context, and is
  * the second argument of the main handler function") — a collaborator the
  * framework supplies, never event data. Stubbed as a class with a FIELD so

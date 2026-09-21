@@ -1,8 +1,8 @@
-// P23 §3: R63 applied to a VOCABULARY. The const folder records WHY a value
+// applied to a VOCABULARY. The const folder records WHY a value
 // defined by a call could not be folded — the producer bucket's arms — and
-// P22 §3 published the breakdown. But the folder recorded twelve arms and
+// published the breakdown. But the folder recorded twelve arms and
 // the corpus drove five: seven were names in the code with no measurement
-// behind them, which is the same "declared but never reached" state R63 is
+// behind them, which is the same "declared but never reached" state is
 // about, one level up from a capability.
 //
 // This fixture drives every workspace REFUSAL arm through

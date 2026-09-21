@@ -20,7 +20,7 @@ import io.cdxgen.kosi.models.FrameworkModel
 import io.cdxgen.kosi.schema.Position
 
 /**
- * Inbound endpoint detection (P7): one detector over the KIR + the resolved
+ * Inbound endpoint detection: one detector over the KIR + the resolved
  * declaration annotations, driven by the shipped framework registry DATA.
  * Four detection kinds, each publishing its `foundBy`:
  *
@@ -97,12 +97,21 @@ object EndpointDetector {
         val exported: Boolean?,
         val permissions: List<String>?,
         val deepLinkHosts: List<String>?,
-        /** Media types the handler's annotations name it as accepting (P14). */
+        /** Media types the handler's annotations name it as accepting. */
         val consumes: List<String> = emptyList(),
-        /** Media types the handler's annotations name it as producing (P14). */
+        /** Media types the handler's annotations name it as producing. */
         val produces: List<String> = emptyList(),
-        /** Authentication requirements, from annotations or the enclosing DSL (P14). */
+        /** Authentication requirements, from annotations or the enclosing DSL. */
         val authentication: List<String> = emptyList(),
+        /**
+         * Whether the detector could VERIFY that this endpoint's
+         * component was read. Null means "the question does not arise" —
+         * an annotation or DSL candidate exists BECAUSE a declaration was
+         * read, so it is substantiated by construction. Only the manifest
+         * branch, which names a class the analysed tree may not hold, has
+         * to answer it.
+         */
+        val substantiated: Boolean? = null,
     )
 
     fun detect(input: Input, pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin()): List<Candidate> {
@@ -271,8 +280,8 @@ object EndpointDetector {
                         // names that framework's package — and when nothing
                         // does, the route is published under the reserved
                         // pseudo-framework `unattributed` rather than handed
-                        // to whichever framework sat first in the pack. R84
-                        // showed the wrong-framework answer in production: a
+                        // to whichever framework sat first in the pack.
+                        // Showed the wrong-framework answer in production: a
                         // Ktor 1.x app's routes reported as Vert.x. A miss
                         // is never a WRONG answer.
                         val byName = pack.frameworks.filter { f ->
@@ -318,7 +327,7 @@ object EndpointDetector {
             else -> emptyList()
         }
         // The full prefix is the lambda-link chain (outermost) composed with
-        // the MOUNT prefix a mounted router publishes under (P19 §4).
+        // the MOUNT prefix a mounted router publishes under.
         val prefix = joinPaths(prefixChain(fn.canonicalName, input), mountedPrefix(fn, (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver, framework, input))
 
         // A TYPED route names its path on a class, not at the call site:
@@ -356,15 +365,15 @@ object EndpointDetector {
         // own builder spells it (`get(path: String? = null, body)`,
         // RoutingRoot.kt — the no-argument overload of the same generation),
         // and a null path selects the route at its ENCLOSING level, exactly
-        // as the lambda-only route above. Before the typed constants (R117)
+        // as the lambda-only route above. Before the typed constants
         // this compiled to the string "null" and published a route at
         // "/null"; after it, the register fallback would have published the
-        // register's own name as a URL. Neither is a path — P19 §1.
+        // register's own name as a URL. Neither is a path.
         if (folded?.status == KirValueFolder.ValueStatus.NULL) {
             val path = joinPaths(prefix, "").ifEmpty { "/" }
             // With the framework in hand: a role-tail builder's handler is
             // the argument BEFORE the roles, and resolving the LAST one
-            // publishes the ROLE register as the handler (P15's defect,
+            // publishes the ROLE register as the handler (the defect,
             // which this arm reintroduced by dropping the argument).
             publish(add, framework, methods, path, handlerOfRegs(fn, callArgs, input, framework) ?: "", fn, "dsl")
             return
@@ -380,7 +389,7 @@ object EndpointDetector {
             publish(add, framework, boundMethod?.let { listOf(it) } ?: methods, joinPaths(prefix, rawOf(fn, block, index, pathReg)), fn.canonicalName, fn, "dsl")
             return
         }
-        // P15: Vert.x builds routes as a CHAIN —
+        // Vert.x builds routes as a CHAIN —
         // `router.get("/x").produces("application/json").handler { .. }` —
         // so the media declarations and the real handler sit on calls that
         // CONSUME this call's result. Javalin declares auth as the route
@@ -411,7 +420,7 @@ object EndpointDetector {
      * handler. The walk follows the receiver chain one call at a time — a
      * `.produces` result is the input of the NEXT chained call — and stops
      * at the first call that consumes the chain without producing a route
-     * (the handler attach). P17: an attach whose argument is an
+     * (the handler attach). An attach whose argument is an
      * authentication handler FACTORY result (Vert.x's
      * `handler(BasicAuthHandler.create(auth))`) is an authentication
      * declaration, not the real handler — it is recorded and the chain
@@ -478,7 +487,7 @@ object EndpointDetector {
      * The scheme a chained handler attach DECLARED, when the attached value
      * is the result of one of the framework's authentication-handler
      * factories (Vert.x's `BasicAuthHandler.create(auth)`): the call that
-     * produced the argument names the scheme, and — unlike the P15 comment
+     * produced the argument names the scheme, and — unlike the comment
      * believed — the KIR attributes it to exactly one route, because the
      * factory result is attached through this route's own chain.
      */
@@ -608,7 +617,7 @@ object EndpointDetector {
 
     /**
      * http4k: `"/path" bind GET to { ... }` — receiver is the path, the `to`
-     * side the handler. P17: the CONTRACT spelling
+     * side the handler. The CONTRACT spelling
      * `"/path" meta { security = .. } bindContract GET to { .. }` puts a
      * META call between the path and the bind; the bind's receiver is then
      * the meta call's result, the path is the META call's receiver, and the
@@ -696,7 +705,7 @@ object EndpointDetector {
      * (`ContractBuilder.security`, `RouteMetaDsl.security`), so the field
      * name is the model's, matched here rather than guessed from the KIR.
      *
-     * R109's residual, closed (P18): an assignment whose producer matches
+     * the residual, closed: an assignment whose producer matches
      * NO modelled constructor used to return null here, and the caller fell
      * back to the CONTRACT BLOCK's scheme — naming the wrong requirement
      * with confidence, because the framework's own elvis
@@ -711,7 +720,7 @@ object EndpointDetector {
      * takes the block's arm for a null meta value exactly as it does for an
      * absent one, so an explicit null is not an unknown requirement — it is
      * the absence of a per-route requirement, and the block still applies.
-     * Reporting "unknown" there would be R109's own mistake in its other
+     * Reporting "unknown" there would be the own mistake in its other
      * direction: confident about a site the framework is not confused by.
      */
     private fun securityAssignmentOf(
@@ -828,7 +837,7 @@ object EndpointDetector {
     }
 
     /**
-     * The prefix a MOUNTED router publishes under (P19 §4): Vert.x 5's
+     * The prefix a MOUNTED router publishes under: Vert.x 5's
      * mount idiom — a wildcard route on the parent router whose subRouter
      * call takes the mounted router as its argument — puts every route
      * declared on the mounted router under the wildcard route's path. The

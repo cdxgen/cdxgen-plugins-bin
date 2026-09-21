@@ -40,7 +40,7 @@ class ParsedArgs private constructor() {
         value(name) ?: throw UsageException("missing required --$name")
 
     /**
-     * P24 review: no command reads [positionals], so a bare path was
+     * No command reads [positionals], so a bare path was
      * COLLECTED AND DROPPED — `kosi analyze /some/project` analysed the
      * working directory instead, silently, and every number it printed was
      * about the wrong tree. (That is the whole of part 3's "429 files"

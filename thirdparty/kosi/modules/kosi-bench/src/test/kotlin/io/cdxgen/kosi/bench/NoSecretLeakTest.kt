@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P8 no-literal-secret gate, as a test over a real corpus output: the
+ * The no-literal-secret gate, as a test over a real corpus output: the
  * crypto-material-flow fixture PLANTS secret values in its source, and no
  * report may carry them. Two directions, both real:
  *

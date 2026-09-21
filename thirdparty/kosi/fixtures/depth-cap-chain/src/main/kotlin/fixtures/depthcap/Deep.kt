@@ -1,4 +1,4 @@
-// P21 §0: the depth report's DEPTH_CAP bucket had never been non-zero —
+// the depth report's DEPTH_CAP bucket had never been non-zero —
 // the budget that bounds the fold had never BIND anywhere the report
 // measured, which means the budget's population was a number nobody could
 // see. The chain below assigns through ten hops, one past MAX_DEPTH = 8:

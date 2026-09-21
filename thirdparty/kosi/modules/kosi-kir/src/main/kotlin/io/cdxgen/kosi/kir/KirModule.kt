@@ -7,7 +7,7 @@ package io.cdxgen.kosi.kir
  * `componentN` of a data class, accessor bodies of delegated properties) so
  * synthetic evidence stays attributable.
  *
- * P3 added the facts dispatch resolution needs, all resolved through the
+ * added the facts dispatch resolution needs, all resolved through the
  * compiler's own symbols at lowering time and compiler-free from here on:
  * `supertypes` are the enclosing class's direct supertype FQNs, `ownerFlags`
  * its kind/modality facts (`sealed`, `interface`, `enum`, `object`,
@@ -63,7 +63,7 @@ data class KirParam(
     val type: String?,
     val receiver: Boolean,
     /**
-     * The parameter's RESOLVED class-type FQN (P26), the same notation
+     * The parameter's RESOLVED class-type FQN, the same notation
      * [supertypes][KirFunction.supertypes] uses; null when the type did not
      * resolve to a class (primitive, type parameter, unresolved). Where
      * [type] is what the source SAYS, this is what the compiler decided it

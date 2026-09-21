@@ -21,7 +21,7 @@
 // handler shape, the same sink, but the value comes from the INJECTED
 // collaborator, which no annotation marks. Seeding every parameter reports
 // this; seeding what the framework named does not.
-// R174, corrected in P27 §2. The near-miss below used to be an UNANNOTATED
+// Corrected. The near-miss below used to be an UNANNOTATED
 // handler parameter of a collaborator type, on the premise that "unannotated
 // means injected". Spring MVC does not do that: it never injects arbitrary
 // beans into handler parameters, it BINDS them, and a collaborator arrives

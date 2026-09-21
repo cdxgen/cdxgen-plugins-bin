@@ -1,4 +1,4 @@
-// R69 construct-coverage fixture: LOOP AND LABEL shapes the fixture tree
+// construct-coverage fixture: LOOP AND LABEL shapes the fixture tree
 // had never contained — a labelled BREAK and CONTINUE on nested loops, a
 // labelled RETURN out of a lambda, a do-while loop, the range family
 // (`..`, `until`, `downTo`, `step`), and a `tailrec` function. The taint

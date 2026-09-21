@@ -17,7 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P22 §2: the `pathKind` vocabulary is the reachability fact a consumer can
+ * The `pathKind` vocabulary is the reachability fact a consumer can
  * act on, published instead of the two fields that never varied
  * (`reachableFromRoots` was false in every shipped slot, `rootWitness` was
  * null everywhere). This pins the vocabulary the way `RootsVocabularyTest`

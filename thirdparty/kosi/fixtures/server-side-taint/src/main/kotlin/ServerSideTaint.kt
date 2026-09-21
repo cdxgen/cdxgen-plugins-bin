@@ -1,4 +1,4 @@
-// The server-side sink families the P12 model pass added, restricted to what
+// The server-side sink families the model pass added, restricted to what
 // the JDK itself provides so the fixture needs no third-party jar: JNDI
 // lookup, XML external entities, dynamic code execution, deserialization,
 // SSRF through the JDK HTTP client, and the sanitizers that legitimately

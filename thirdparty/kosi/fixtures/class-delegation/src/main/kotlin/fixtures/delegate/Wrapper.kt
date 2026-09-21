@@ -1,10 +1,10 @@
-// P27 §1 — the forwarders `by`-delegation generates.
+// — the forwarders `by`-delegation generates.
 //
-// `class W(private val d: I) : I by d` compiles to one override per member
+// `class W(private val d: I): I by d` compiles to one override per member
 // of I, each body `d.member(...)`. None of them has PSI, so a PSI-driven
 // lowering emits nothing at all and `wrapper.body` resolves to an interface
-// method with no implementation anywhere. This is the other half of R161:
-// P26 taught the summary to carry a source that comes back inside an
+// method with no implementation anywhere. This is the other half of
+// taught the summary to carry a source that comes back inside an
 // object's FIELD, and the 22 http4k findings still did not return because
 // their consumers read that field through exactly these missing forwarders.
 //
@@ -71,14 +71,14 @@ fun twoWrappersDeep() {
  * The delegate is an OBJECT expression's supertype, not a class's — the same
  * generated forwarders on a different declaration shape.
  *
- * R172, `known-fail=172`: the forwarders ARE synthesized here (the KIR
+ * `known-fail=172`: the forwarders ARE synthesized here (the KIR
  * carries `fixtures.delegate.<anonymous>.body` and the call site resolves to
  * it), and the flow still stops — because an object LITERAL is not lowered
- * as an object at all. `object : Payload by source {}` lowers to
+ * as an object at all. `object: Payload by source {}` lowers to
  * `load "object <Payload by source>"`, a string placeholder, so nothing
  * connects the literal to the `source` it captures and the delegate field is
  * never written. That is a lowering gap older and wider than delegation —
- * every capturing object expression has it — and it is P28's, not a
+ * every capturing object expression has it — and it is 's, not a
  * delegation defect.
  */
 fun delegateOfObject() {

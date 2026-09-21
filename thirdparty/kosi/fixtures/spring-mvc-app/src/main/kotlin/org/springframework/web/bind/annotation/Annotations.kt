@@ -2,7 +2,7 @@
 // package path so type identity, not name similarity, decides the match.
 // @Controller is NOT here: Spring declares it in org.springframework
 // .stereotype (see the sibling stub), and the pack carried the wrong FQN
-// until P18's symbol-kind check caught it.
+// until the symbol-kind check caught it.
 package org.springframework.web.bind.annotation
 
 annotation class RestController

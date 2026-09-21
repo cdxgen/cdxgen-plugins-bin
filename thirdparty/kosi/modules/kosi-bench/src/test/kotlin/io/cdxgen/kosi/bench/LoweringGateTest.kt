@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P2 lowering gate. P2 reported `loweringFailures` empty on every fixture
+ * The lowering gate. Reported `loweringFailures` empty on every fixture
  * and 0.000% on the pinned repos, but nothing in `Promotion` looked at the
  * map: the number was measured once, by hand, and could regress to any value
  * without a check firing. These are the tests that fail when the check is

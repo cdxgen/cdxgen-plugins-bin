@@ -77,7 +77,7 @@ import org.jetbrains.kotlin.psi.KtWhileExpression
 /**
  * PSI + one resolution pass -> [KirModule] (02-ARCHITECTURE.md §4). Lives in
  * kosi-front because lowering needs compiler types; nothing it EMITS does —
- * kosi-kir's types are compiler-free, which is the boundary the P2 gate
+ * kosi-kir's types are compiler-free, which is the boundary the gate
  * checks.
  *
  * Every desugaring in §4 happens here, at lowering time:
@@ -101,7 +101,7 @@ import org.jetbrains.kotlin.psi.KtWhileExpression
 object KirLowering {
 
     /**
-     * P16 §3: the reserved dynamic-call name for a thrown exception's
+     * The reserved dynamic-call name for a thrown exception's
      * binding to a catch parameter. A dynamic call routes through the
      * transfer's unknown-value default (receiver and argument taint reach
      * the result, origin `default`) and the call graph's existing
@@ -126,7 +126,7 @@ object KirLowering {
          */
         val symbolFactFailures: Int = 0,
         /**
-         * P29: files whose lowering was skipped whole — past the walk budget
+         * Files whose lowering was skipped whole — past the walk budget
          * (`psi-depth`), or after a `StackOverflowError` (`stack-overflow`)
          * — with the run completing for every other file. Surfaced as
          * `psi-depth-cap` / `stack-overflow-skipped` diagnostics by the
@@ -135,7 +135,7 @@ object KirLowering {
         val skippedFiles: List<SkippedFile> = emptyList(),
     )
 
-    /** P29: a file the lowering did not walk, and the reason it was not. */
+    /** A file the lowering did not walk, and the reason it was not. */
     data class SkippedFile(val file: String, val reason: String, val depth: Int? = null)
 
     /** What the analyze-scoped resolver hands the lowering per call site. */
@@ -148,7 +148,6 @@ object KirLowering {
          * True when this site is a Kotlin SYNTHETIC JAVA PROPERTY read —
          * `editText.text`, `intent.data`, `uri.host` — and [symbol] is the
          * Java getter it compiles to (`getText`, `getData`, `getHost`).
-         *
          * Kotlin lets you read a Java getter as a property, and the lowering
          * used to take that syntax at face value: a plain name selector
          * became a `fieldget` whose path is the LOCAL VARIABLE's name
@@ -157,11 +156,10 @@ object KirLowering {
          * was invisible to them — and it is the dominant source idiom in
          * Android code, where `EditText.text` is how user input enters an
          * app. Lowering it as the call it actually is on the JVM puts
-         * `android.widget.TextView.getText` in front of the matcher.
-         *
-         * Only synthetic JAVA properties take this route. A Kotlin property
-         * read stays a field access, because the field-sensitivity work in
-         * P4/P5 keys on those paths.
+         * `android.widget.TextView.getText` in front of the matcher. Only
+         * synthetic JAVA properties take this route. A Kotlin property read
+         * stays a field access, because the field-sensitivity work in keys
+         * on those paths.
          */
         val syntheticJavaProperty: Boolean = false,
         /**
@@ -211,14 +209,14 @@ object KirLowering {
          */
         val paramAnnotations: List<List<String>> = emptyList(),
         /**
-         * Resolved class-type FQNs per VALUE parameter, in declaration order
-         * (P26), aligned with [paramAnnotations]; null where the parameter's
+         * Resolved class-type FQNs per VALUE parameter, in declaration
+         * order, aligned with [paramAnnotations]; null where the parameter's
          * type is not a resolvable class. The DI binding reader maps
          * `@Binds` parameters to implementations with these.
          */
         val paramTypes: List<String?> = emptyList(),
         /**
-         * The function's own RESOLVED class-type FQN (P26); null for Unit,
+         * The function's own RESOLVED class-type FQN; null for Unit,
          * primitives, type parameters and anything unresolved. Unit is
          * excluded on purpose: every `fun foo()` would carry it, it is
          * already in the JVM descriptor, and the consumers of this fact
@@ -483,7 +481,7 @@ object KirLowering {
 
                     else -> null
                 }
-                // P26: resolved class-type FQNs for the return and each value
+                // Resolved class-type FQNs for the return and each value
                 // parameter — the same suffix-segment-matchable notation the
                 // supertypes use. A binding method's signature IS the mapping
                 // the container reads, and the signature's source TEXT (what
@@ -523,10 +521,10 @@ object KirLowering {
             }
 
             /**
-             * P25 §0: the canonical name a callable reference NAMES.
+             * The canonical name a callable reference NAMES.
              *
              * `::sink`, `obj::method` and `Type::member` are function VALUES
-             * exactly as a lambda is, and P24 built the channel that carries
+             * exactly as a lambda is, and built the channel that carries
              * taint through one — but the lowering wrote the reference's
              * SOURCE TEXT (`::sink`) as the function value's name, and no
              * table is keyed by source text, so every reference spelling
@@ -557,7 +555,7 @@ object KirLowering {
 
             val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference)
             for (file in files) {
-                // P29: the walk budget and the per-file boundary, exactly as
+                // The walk budget and the per-file boundary, exactly as
                 // in ResolvedAnalyzer — the same PSI trees are walked here,
                 // so the same file that would take resolution down would
                 // take lowering down. A skipped file is recorded and named;
@@ -575,7 +573,7 @@ object KirLowering {
                 for (klass in dataClasses(file)) {
                     functions.addAll(synthesizeDataClassMembers(klass, failures))
                 }
-                // P24 §2b: every class with a primary constructor gets its
+                // Every class with a primary constructor gets its
                 // `<init>` lowered as the function it is — one that writes
                 // the object's fields. Until now a primary constructor
                 // existed in the KIR only as a CALL SITE (`kind=constructor`)
@@ -586,7 +584,7 @@ object KirLowering {
                 for (klass in classesWithPrimaryConstructor(file)) {
                     synthesizePrimaryConstructor(klass)?.let { functions.add(it) }
                 }
-                // P27 §1: the forwarders `by`-delegation generates. They have
+                // The forwarders `by`-delegation generates. They have
                 // no PSI, so nothing above this line can see them.
                 for (klass in classesWithDelegation(file)) {
                     functions.addAll(synthesizeDelegationForwarders(klass, failures))
@@ -602,9 +600,9 @@ object KirLowering {
     }
 
     /**
-     * P27 §1: the forwarders Kotlin's CLASS DELEGATION generates.
+     * The forwarders Kotlin's CLASS DELEGATION generates.
      *
-     * `class RequestWithContext(private val delegate: Request, ...) : Request
+     * `class RequestWithContext(private val delegate: Request, ...): Request
      * by delegate` compiles to one override per member of `Request`, each
      * body `delegate.member(...)`. Not one of them has PSI, and the lowering
      * is PSI-driven, so the whole forwarding layer was absent from the KIR:
@@ -612,7 +610,7 @@ object KirLowering {
      * anywhere, the flow engine had nothing to summarise, and the value the
      * delegate carried stopped at the wrapper.
      *
-     * This is the other half of R161. P26 taught the summary to say "the
+     * This is the other half of. Taught the summary to say "the
      * source came back inside the returned object's FIELD"; the 22 http4k
      * findings still did not return, because their consumers read that field
      * through exactly these missing forwarders. The channel existed and the
@@ -640,7 +638,7 @@ object KirLowering {
 
         val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
         val chain = containerChain(klass)
-        // An object EXPRESSION delegating (`object : Payload by source {}`)
+        // An object EXPRESSION delegating (`object: Payload by source {}`)
         // has no name; `<anonymous>` is the convention the rest of the
         // lowering already uses, and what identifies these forwarders to
         // dispatch is their `overrides` edge, not their name.
@@ -878,7 +876,7 @@ object KirLowering {
             override fun visitProperty(property: KtProperty) {
                 property.getter?.let { out.add(it) }
                 property.setter?.let { out.add(it) }
-                // P26 §2: an INITIALIZER is executable code — the JVM runs
+                // An INITIALIZER is executable code — the JVM runs
                 // it in the file's <clinit> (top level) or the constructor
                 // (a member) — and the KIR had no function for it, so a
                 // Koin module at top level (`val appModule = module {
@@ -905,7 +903,7 @@ object KirLowering {
         return out
     }
 
-    /** Classes with at least one `by`-delegated supertype (P27 §1). */
+    /** Classes with at least one `by`-delegated supertype. */
     private fun classesWithDelegation(
         file: org.jetbrains.kotlin.psi.KtFile,
     ): List<org.jetbrains.kotlin.psi.KtClassOrObject> {
@@ -978,7 +976,7 @@ object KirLowering {
     // ---- signatures -----------------------------------------------------------------
 
     /**
-     * Per-`lower()`-run context for the standalone-lambda extraction (P5):
+     * Per-`lower()`-run context for the standalone-lambda extraction:
      * lambdas passed as VALUES (`runWith { .. }`, a function-valued argument)
      * lower into their own KIR functions so the summary engine can compute
      * and apply them like any other callee. The context owns the ordinal
@@ -988,7 +986,7 @@ object KirLowering {
         val failures: MutableMap<String, Int>,
         val resolve: (KtCallExpression) -> CallInfo?,
         val resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
-        /** P25 §0: the canonical name a `::reference` names; null when it does not resolve. */
+        /** The canonical name a `::reference` names; null when it does not resolve. */
         val resolveReference: (org.jetbrains.kotlin.psi.KtCallableReferenceExpression) -> String? = { null },
     ) {
         var ordinal = 0
@@ -1006,7 +1004,7 @@ object KirLowering {
         val name = when (psi) {
             is KtNamedFunction -> psi.name ?: "<anonymous>"
             // A property INITIALIZER lowers as the function that computes
-            // the initial value (P26 §2): the JVM runs it in <clinit> or the
+            // the initial value: the JVM runs it in <clinit> or the
             // constructor, and until now the expression was invisible to the
             // engine. Named for the PROPERTY — the accessor naming rule
             // (get/set + property) is for accessors, and this is not one.
@@ -1015,7 +1013,7 @@ object KirLowering {
             // get/setX after its PROPERTY. `<accessor>` gave every custom
             // accessor of one class the SAME canonical name — InsecureShop's
             // Prefs object lowered six colliding `Prefs.<accessor>` functions
-            // (P14, found promoting the repo into the corpus; the validator
+            // (found promoting the repo into the corpus; the validator
             // named the duplicates and `kir dump` refused the module).
             is KtPropertyAccessor -> psi.name ?: accessorName(psi)
             is KtSecondaryConstructor -> "<init>"
@@ -1113,7 +1111,7 @@ object KirLowering {
      * enclosing class chain, then the name (`<anonymous>` for an anonymous
      * `fun`, which is exactly what the collector names it). The same three
      * parts `lowerFunction` joins — kept here so a USE of a function as a
-     * value can name it the way its DECLARATION is named (P25 §0).
+     * value can name it the way its DECLARATION is named.
      */
     private fun canonicalNameOfDeclaration(psi: KtNamedFunction): String {
         val pkg = (psi.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
@@ -1133,7 +1131,7 @@ object KirLowering {
      * The JVM name of a property accessor: `getData` / `setData` after the
      * property it belongs to. The accessor PSI node carries no name of its
      * own, and a constant placeholder made every custom accessor of one
-     * class COLLIDE on the same canonical name (P14: InsecureShop's `Prefs`
+     * class COLLIDE on the same canonical name (InsecureShop's `Prefs`
      * lowered six `Prefs.<accessor>` functions).
      */
     private fun accessorName(accessor: org.jetbrains.kotlin.psi.KtPropertyAccessor): String {
@@ -1190,12 +1188,12 @@ object KirLowering {
          * innermost first. While non-empty, a receiver-less `emit`/`send`
          * call assigns its argument into the builder's value register — how
          * `flow { emit(tainted) }` puts the element's taint on the flow
-         * value the downstream operator and `collect` see (P6).
+         * value the downstream operator and `collect` see.
          */
         private val emitSinks = mutableListOf<String>()
 
         /**
-         * P16 §3: one frame per lexically enclosing `try` with catch
+         * One frame per lexically enclosing `try` with catch
          * clauses, innermost LAST. A `throw` lowered while frames are open
          * binds every frame's catch-parameter registers to the thrown value
          * (an inner throw can escape to an outer handler); a body that
@@ -1224,7 +1222,7 @@ object KirLowering {
 
         private fun emit(ins: KirIns) {
             definedRegisters.addAll(ins.defs)
-            // P16 §3: an enclosing try's dispatch seed reads the registers
+            // An enclosing try's dispatch seed reads the registers
             // its body left live, so every instruction emitted under an open
             // frame contributes its registers to that frame. The throw-site
             // binding also needs the registers its own thrown expression
@@ -1348,7 +1346,7 @@ object KirLowering {
                     val value = psi.thrownExpression?.let { lowerExpr(it, Pos.NESTED) } ?: throwNull()
                     val argRegs = throwArgRegs?.toList() ?: emptyList()
                     throwArgRegs = null
-                    // P16 §3: bind the exception registers of every enclosing
+                    // Bind the exception registers of every enclosing
                     // try to what this throw threw. The binding is a dynamic
                     // call over the thrown register AND its construction
                     // arguments: `throw RuntimeException(userInput)` puts no
@@ -1728,7 +1726,7 @@ object KirLowering {
             // try body, one catch path per clause, finally last — the shape
             // `use` lowering produces directly and source try lowers into.
             //
-            // P15: the CFG has no exceptional-edge instruction, so catch
+            // the CFG has no exceptional-edge instruction, so catch
             // handlers lowered as standalone blocks had NO incoming edge at
             // all — structurally unreachable, never analysed, and taint
             // through them silently dropped (InsecureShop's
@@ -1760,7 +1758,7 @@ object KirLowering {
                 emit(KirLoad(entryCond, KirConstant.Bool(true)))
                 emit(KirBranch(entryCond, bodyId, dispatchId))
                 startBlock(bodyId)
-                // P16 §3: the handler's own PARAMETER is a value a handler is
+                // The handler's own PARAMETER is a value a handler is
                 // written to read, and until now it existed nowhere in the KIR —
                 // `catch (e: Exception)` read `e` as a FIELD on `this`. The
                 // parameter is bound on the dispatch chain's edge in two shapes:
@@ -1858,14 +1856,14 @@ object KirLowering {
                 reg
             }
             is org.jetbrains.kotlin.psi.KtCallableReferenceExpression -> {
-                // P25 §0: the RESOLVED target, not the source text. A
-                // reference is a function value whose target is known at
-                // its allocation site — which is exactly what P24's
-                // invoke-bind channel needs to carry taint through it — and
-                // naming it `::sink` made that channel unreachable for
-                // every reference spelling in the language. The text
-                // survives as the fallback so an unresolvable reference is
-                // still visible as a function value rather than vanishing.
+                // The RESOLVED target, not the source text. A reference is
+                // a function value whose target is known at its allocation
+                // site — which is exactly what the invoke-bind channel
+                // needs to carry taint through it — and naming it `::sink`
+                // made that channel unreachable for every reference
+                // spelling in the language. The text survives as the
+                // fallback so an unresolvable reference is still visible as
+                // a function value rather than vanishing.
                 val reg = t()
                 emit(KirLambda(reg, lambdaContext?.resolveReference?.invoke(psi) ?: psi.text, emptyList()))
                 reg
@@ -1878,7 +1876,7 @@ object KirLowering {
                 // all. The bare `sink` / `<local-fun>` written here before
                 // matched no function in any table, so an anonymous `fun`
                 // and a `::reference` were function values pointing at
-                // nothing (P25 §0's sweep).
+                // nothing (the sweep).
                 val reg = t()
                 emit(KirLambda(reg, canonicalNameOfDeclaration(psi), emptyList()))
                 reg
@@ -2000,7 +1998,7 @@ object KirLowering {
             // `else`: `5`, `true` and `null` all became KirConstant.Str of
             // their source TEXT, so the typed constants were unreachable and
             // a null literal was indistinguishable from the string "null"
-            // (P18 review). The distinction is not cosmetic: the contract
+            // (a later review). The distinction is not cosmetic: the contract
             // DSL's `security = null` is the ABSENCE of a requirement, and
             // it read as a value.
             val constant = when (psi.node.elementType) {
@@ -2043,13 +2041,13 @@ object KirLowering {
                 return "v$name"
             }
             // Not a local. A BARE-NAME read can still RUN A METHOD on the JVM
-            // — R80's sibling: `call` inside a Ktor route lambda is an
+            // — the sibling: `call` inside a Ktor route lambda is an
             // implicit-receiver property whose getter runs, and lowering it
             // as `fieldget vthis vthis.call` hides the callee from every
-            // pack exactly the way `a.b` did before R80. The same rule as
+            // pack exactly the way `a.b` did previously. The same rule as
             // dotChain: resolve the reference, and lower as a call only when
             // the property demonstrably has NO backing field. A property with
-            // a backing field keeps its access path, so P4/P5 field
+            // a backing field keeps its access path, so field
             // sensitivity is untouched.
             val propertyInfo = resolvePropertyInfo(psi)
             if (propertyInfo != null) {
@@ -2131,7 +2129,7 @@ object KirLowering {
                         if (cursor.destructuringDeclaration?.entries?.any { it.name == name } == true) return true
                     }
 
-                    // P16 §3: a catch parameter is bound at the dispatch edge
+                    // A catch parameter is bound at the dispatch edge
                     // (`v<name>` <- the thrown value, or the unknown-exception
                     // seed); a read of it inside the handler is a local read,
                     // not a field on `this`.
@@ -2209,7 +2207,7 @@ object KirLowering {
                         fail("assignment-target")
                     } else {
                         // The whole qualifier chain, so the key this write
-                        // lands on is the key the matching read looks at (R63).
+                        // lands on is the key the matching read looks at.
                         val (base, path) = fieldAccess(target.receiverExpression, name)
                         emit(KirFieldSet(base, path, value))
                     }
@@ -2314,7 +2312,7 @@ object KirLowering {
             // A fallback that itself leaves the function (`x ?: return`) must
             // lower INSIDE the null arm's block — a terminator can never land
             // in the middle of the current one. Plain expressions at nested
-            // positions keep the Elvis opcode (the §4 shape P2 pinned).
+            // positions keep the Elvis opcode (the §4 shape pinned).
             val fallbackLeaves = psi.right.let { it is KtReturnExpression || it is KtThrowExpression }
             if (pos == Pos.NESTED && !fallbackLeaves) {
                 val fallback = psi.right?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
@@ -2471,13 +2469,13 @@ object KirLowering {
          * and a multi-element field path.
          *
          * `AccessPath` has carried `elements: List<Element>` with a depth cap
-         * of 5 since P2, and both dataflow engines join those elements into
+         * of 5, and both dataflow engines join those elements into
          * the key they read and write — but the lowering only ever emitted
          * paths of length ONE. `o.inner.a = tainted` became `t4 = fieldget vo
          * vo.inner; fieldset t4 t4.a`, and the read `o.inner.a` became a
          * fieldget off a DIFFERENT temp, so the write and the read never met:
          * every nested field flow was lost, intraprocedurally and across
-         * summaries alike (R63). Composing here fixes both engines at once,
+         * summaries alike. Composing here fixes both engines at once,
          * and `AccessPath.of` still collapses past the cap.
          *
          * The walk stops at anything that is not a plain name selector — a
@@ -2546,7 +2544,7 @@ object KirLowering {
                     } else if (name != null && selector.hasLambdaArgument()) {
                         // `flow { .. }.map { .. }.collect { .. }`: the flow
                         // operators inline their lambda with the flow value
-                        // bound (P6).
+                        // bound.
                         inlineCoroutineBuilder(selector, name, receiver) ?: callWithReceiver(selector, receiver)
                     } else {
                         callWithReceiver(selector, receiver)
@@ -2631,7 +2629,7 @@ object KirLowering {
                 return inlineScopeFunction(psi, name, receiver)
             }
             // Coroutine builders and flow operators: their trailing lambda is
-            // analysed in the caller's context (P6).
+            // analysed in the caller's context.
             if (psi.hasLambdaArgument()) {
                 inlineCoroutineBuilder(psi, name, receiver = null)?.let { return it }
             }
@@ -2784,7 +2782,7 @@ object KirLowering {
         /**
          * Coroutine builders and flow operators: the trailing lambda body is
          * lowered INTO the caller's context under the binding the builder
-         * names (P6), with the RESOLVED call retained as the evidence edge —
+         * names, with the RESOLVED call retained as the evidence edge —
          * the same shape the scope functions use. Returns the expression's
          * value register, or null when this call is not a builder the
          * lowering inlines (the caller falls through to the plain call path).
@@ -2877,7 +2875,7 @@ object KirLowering {
                                 // function values too, and treating them as
                                 // ordinary locals dropped the receiver from
                                 // their invocation — which is the one fact
-                                // higher-order analysis needs (P25 §0).
+                                // higher-order analysis needs.
                                 when (child.initializer) {
                                     is KtLambdaExpression,
                                     is org.jetbrains.kotlin.psi.KtCallableReferenceExpression,
@@ -2928,9 +2926,9 @@ object KirLowering {
             // A standalone lambda value (an argument to a higher-order call,
             // a function-valued local) is EXTRACTED into its own KIR function
             // so the summary engine can compute a summary for the body and
-            // apply it where the lambda is passed or invoked (P5's
-            // higher-order item; the P3 `lambda-inlined` deviation named this
-            // as the missing lowering). The KirLambda instruction keeps the
+            // apply it where the lambda is passed or invoked (the higher-
+            // order item; the `lambda-inlined` deviation named this as the
+            // missing lowering). The KirLambda instruction keeps the
             // canonical name of the extracted body plus the CAPTURES: the
             // enclosing registers the body reads, in the order the extracted
             // function's capture parameters expect them.
@@ -3002,12 +3000,12 @@ object KirLowering {
                 // no PSI: `{ exec(it) }` declares nothing, so the extraction
                 // gave the body no value parameter and the read of `it`
                 // became a register nothing defines. Every interprocedural
-                // channel that speaks parameter indices — P24 §2d's
-                // invoke-binds above all — then had nothing to bind, and the
-                // taint died at the invocation. The review's probe found
-                // this: `viaLambda { s -> exec(s) }` publishes the flow and
-                // `viaLambda { exec(it) }`, the far commoner spelling, does
-                // not. Declared here so the two spellings are one capability.
+                // channel that speaks parameter indices — the invoke-binds
+                // above all — then had nothing to bind, and the taint died at
+                // the invocation. The review's probe found this: `viaLambda {
+                // s -> exec(s) }` publishes the flow and `viaLambda {
+                // exec(it) }`, the far commoner spelling, does not. Declared
+                // here so the two spellings are one capability.
                 listOf(KirParam("%p0", "it", null, receiver = false))
             } else {
                 psi.valueParameters.mapIndexed { index, param ->
@@ -3082,7 +3080,7 @@ object KirLowering {
      * Coroutine builders whose trailing lambda produces the builder's own
      * value: `flow { emit(x) }` — the body's `emit` (and `channelFlow`'s
      * `send`) calls assign their argument into the builder's value register,
-     * which is what the downstream operators and `collect` read (P6).
+     * which is what the downstream operators and `collect` read.
      */
     private val FLOW_VALUE_BUILDERS = setOf("flow", "channelFlow")
 
@@ -3116,7 +3114,7 @@ object KirLowering {
      * Which binding a builder call gets. When resolution FAILED the call's
      * FQN is unknown and the NAME decides: an unresolved `collect { }` is
      * modelled the same way as the resolved one, because skipping the body
-     * (the pre-P6 behaviour) loses the very flows this phase exists for. A
+     * (the earlier behaviour) loses the very flows this change exists for. A
      * RESOLVED callee outside the coroutines packages never inlines —
      * `xs.map { }` over a collection keeps its pack passthrough, and the
      * lambda parameter keeps collection element semantics.

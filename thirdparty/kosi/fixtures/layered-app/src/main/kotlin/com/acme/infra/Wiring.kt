@@ -6,7 +6,7 @@ import com.acme.service.DefaultOrderService
 import com.acme.service.OrderService
 
 /**
- * The container's BINDING (P26 §2): the interface is bound to
+ * The container's BINDING: the interface is bound to
  * DefaultOrderService, wrapped in the audit decorator. LoggingOrderService is
  * never bound, so nothing it does may appear in a finding.
  */

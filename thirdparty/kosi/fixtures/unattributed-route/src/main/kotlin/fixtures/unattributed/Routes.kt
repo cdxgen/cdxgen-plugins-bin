@@ -1,6 +1,6 @@
-// P14 §2.3: a route whose framework cannot be evidenced SAYS SO.
+// a route whose framework cannot be evidenced SAYS SO.
 //
-// R84's production failure: a Ktor 1.x app's `route(...)` calls fell
+// the production failure: a Ktor 1.x app's `route(...)` calls fell
 // through to name-only attribution and were reported as Vert.x. The fix
 // then preferred a framework whose package is demonstrably present; this
 // fixture pins the remaining half — when NO framework's package is

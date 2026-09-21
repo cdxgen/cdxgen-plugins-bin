@@ -1,5 +1,5 @@
 {
-  "description": "The taint model pack. Sources, sinks, passthroughs, sanitizers and effects are DATA: the engine matches callee symbols against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a rule. Argument-index convention: 0 is the RECEIVER when the callee has one, otherwise the first argument; n is the n-th element of that (receiver,) arguments sequence; -1 is the call's result. Constructor callees render as the class FQN (no <init> suffix). P4 is the first phase that executes this pack, which is why several P0 seed entries carry corrected indexes. P26 \u00a71.3: deserializers name the calls whose PRODUCED OBJECT carries the input's taint on its FIELDS (Jackson readValue/readTree, kotlinx decodeFromString, Gson fromJson) - the boundary that makes a request body reach a sink through a DTO.",
+  "description": "The taint model pack. Sources, sinks, passthroughs, sanitizers and effects are DATA: the engine matches callee symbols against these patterns (suffix-segment match, see PatternMatcher) and never hard-codes a rule. Argument-index convention: 0 is the RECEIVER when the callee has one, otherwise the first argument; n is the n-th element of that (receiver,) arguments sequence; -1 is the call's result. Constructor callees render as the class FQN (no <init> suffix). is the first phase that executes this pack, which is why several seed entries carry corrected indexes. \u00a71.3: deserializers name the calls whose PRODUCED OBJECT carries the input's taint on its FIELDS (Jackson readValue/readTree, kotlinx decodeFromString, Gson fromJson) - the boundary that makes a request body reach a sink through a DTO.",
   "deserializers": [
     {
       "pattern": "com.fasterxml.jackson.databind.ObjectMapper.readValue"
@@ -15,7 +15,7 @@
     {
       "category": "sql-query",
       "severity": "medium",
-      "_p26_comment": "P26 §1.1: the bases a Spring Data repository interface extends. The FQNs are Spring's own, NOT the fixture's convenience: JpaRepository and MongoRepository live in the jpa/mongodb sub-packages, and a row spelled org.springframework.data.repository.JpaRepository matches a stub and no real application (found in the P26 review).",
+      "_p26_comment": "the bases a Spring Data repository interface extends. The FQNs are Spring's own, NOT the fixture's convenience: JpaRepository and MongoRepository live in the jpa/mongodb sub-packages, and a row spelled org.springframework.data.repository.JpaRepository matches a stub and no real application (found in the a later review).",
       "supertypes": [
         "org.springframework.data.repository.Repository",
         "org.springframework.data.repository.CrudRepository",
@@ -3128,6 +3128,54 @@
     {
       "category": "untrusted-input",
       "pattern": "spark.Request.splat"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getHeaders"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.oneCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.core.http.Request.getBodyStream"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getQueryParams"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getHeaders"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getCookies"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.oneCookie"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getBody"
+    },
+    {
+      "category": "untrusted-input",
+      "pattern": "ratpack.http.Request.getBodyStream"
     }
   ]
 }

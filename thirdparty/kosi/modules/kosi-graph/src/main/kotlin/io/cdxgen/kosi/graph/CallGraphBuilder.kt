@@ -63,7 +63,7 @@ object CallGraphBuilder {
                         is io.cdxgen.kosi.kir.KirNew ->
                             sites.add(Site.constructor(sourceKey, ins.type, ins.line))
 
-                        // P27 review: a lambda BODY is a node of its own, and
+                        // A lambda BODY is a node of its own, and
                         // before this nothing pointed at it — 72 lambda nodes
                         // in AndroGoat, zero with an incoming edge. The body
                         // does not run where it is written, so there is no
@@ -364,7 +364,7 @@ private class Dispatch(
             if (flags.any { it == "object" || it == "companion" || it == "enum" }) rtaInstantiated.add(klass)
         }
         rtaInstantiated.addAll(rootSeeds)
-        // P25 §2: a DI stereotype is a construction site the FRAMEWORK
+        // A DI stereotype is a construction site the FRAMEWORK
         // performs. Without this, the implementation behind an injected
         // interface — which user code never constructs, that being the whole
         // point of a container — is a class RTA is "still waiting on", so
@@ -611,7 +611,7 @@ private class Dispatch(
         val callType = when {
             index.isSealedSite(declared) && gated.targets.size == 1 -> "sealed-exact"
             index.isSealedSite(declared) -> "sealed-bounded"
-            // P25 §2: the container's binding decided this site (gateRtaVta
+            // The container's binding decided this site (gateRtaVta
             // says so); it outranks the interface label because it names the
             // EVIDENCE, and `interface-cha` would claim the site was never
             // narrowed at all.
@@ -635,7 +635,7 @@ private class Dispatch(
             val ready = candidates.filter { it.enclosingClass == null || it.enclosingClass in rtaInstantiated }
             waitingOn = candidates.mapNotNull { it.enclosingClass }.filter { it !in rtaInstantiated }.toSortedSet()
             if (ready.isEmpty()) return Quad(emptyList(), callType = "", waitingOn = waitingOn)
-            // P25 §2: the container's binding is what decided this site when
+            // The container's binding is what decided this site when
             // the survivors are DI-managed, something was dropped, and no
             // survivor was constructed by user code. Labelled so a reader
             // can tell a narrowing that rests on an annotation from one that

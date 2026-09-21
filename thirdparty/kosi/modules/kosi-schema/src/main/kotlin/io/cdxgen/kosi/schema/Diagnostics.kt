@@ -54,20 +54,20 @@ object DiagnosticCodes {
     const val RESOLUTION_ERRORS = "resolution-errors"
     const val SYMBOL_RESOLUTION_FAILED = "symbol-resolution-failed"
 
-    /** A construct the P2 lowering could not perform; the message names it. */
+    /** A construct the lowering could not perform; the message names it. */
     const val LOWERING_FAILED = "lowering-failed"
 
-    /** P3 call graph: an `auto` mode fell back down the chain (vta -> rta -> sealed). */
+    /** Call graph: an `auto` mode fell back down the chain (vta -> rta -> sealed). */
     const val CALLGRAPH_TIMEOUT = "callgraph-timeout"
 
-    /** P3 call graph: call sites that resolved to no callee and therefore emit no edge. */
+    /** Call graph: call sites that resolved to no callee and therefore emit no edge. */
     const val CALLGRAPH_UNRESOLVED_CALLS = "callgraph-unresolved-calls"
 
-    /** P3 call graph: a declared root scope matched no function. */
+    /** Call graph: a declared root scope matched no function. */
     const val CALLGRAPH_ROOT_NOT_FOUND = "callgraph-root-not-found"
 
     /**
-     * P4 taint: the worklist over one function's CFG hit its iteration
+     * Taint: the worklist over one function's CFG hit its iteration
      * budget before converging. The function's slices are best-effort, the
      * hit is counted in `stats.fixpointCapHits` over
      * `stats.functionsAnalysed`, and a fixed-cap engine that silently loses
@@ -76,14 +76,14 @@ object DiagnosticCodes {
     const val FIXPOINT_CAP = "fixpoint-cap"
 
     /**
-     * P4 taint: a limit shortened the analysis — a function skipped for
+     * Taint: a limit shortened the analysis — a function skipped for
      * exceeding `--dataflow-max-function-instructions`, or the slice cap
      * reached. Every hit is itemised in `stats.truncations`.
      */
     const val DATAFLOW_TRUNCATED = "dataflow-truncated"
 
     /**
-     * P28 (R176): functions skipped BY POLICY (`--dataflow-skip-generated`)
+     * Functions skipped BY POLICY (`--dataflow-skip-generated`)
      * — distinct from [DATAFLOW_TRUNCATED]: the skipped bodies' summaries
      * still apply, nothing was cut by a cap, and the count lives in
      * `stats.policySkips` (never in `stats.truncations`, whose non-zero
@@ -92,7 +92,7 @@ object DiagnosticCodes {
     const val DATAFLOW_SKIPPED_POLICY = "dataflow-skipped-policy"
 
     /**
-     * P5 summaries: a strongly connected component of the call graph hit
+     * Summaries: a strongly connected component of the call graph hit
      * its summary iteration budget before its members' summaries converged.
      * The last iterate is what callers applied — labelled
      * `origin=recursive-approx` — and the count is published over the SCC
@@ -101,7 +101,7 @@ object DiagnosticCodes {
     const val SUMMARY_ITERATION_CAP = "summary-iteration-cap"
 
     /**
-     * P5 summaries: a virtual call site joined more dispatch-target
+     * Summaries: a virtual call site joined more dispatch-target
      * summaries than the width budget; the JOIN was applied and precision
      * may suffer where the targets disagree. The histogram stays in
      * `dataFlow.stats.dispatchJoins{}`.
@@ -109,7 +109,7 @@ object DiagnosticCodes {
     const val DISPATCH_JOIN_WIDTH = "dispatch-join-width"
 
     /**
-     * P5 summaries: a lambda value the engine could not resolve to an
+     * Summaries: a lambda value the engine could not resolve to an
      * extracted body (a callable reference `Foo::bar`, a local function
      * value) — no summary was applied through it. Counted, never silent.
      */
@@ -117,11 +117,11 @@ object DiagnosticCodes {
 
     const val NO_BUILD_FILES = "no-build-files"
     const val NO_SOURCES = "no-sources"
-    /** P28 (R178): manifest endpoints whose handler class is not among the analysed declarations. */
+    /** Manifest endpoints whose handler class is not among the analysed declarations. */
     const val ENDPOINT_UNSUBSTANTIATED = "endpoint-unsubstantiated"
 
     /**
-     * P28 §4 (R179): discovery collected a small share of the source files
+     * Discovery collected a small share of the source files
      * present under the analysed root. The threshold (half of ≥20 files) is
      * chosen so a dropped-module failure — which typically leaves under
      * 10% (kotlinx.coroutines: 1/1039) — is loud while normal partial
@@ -131,20 +131,20 @@ object DiagnosticCodes {
     const val UNREADABLE_SOURCE = "unreadable-source"
 
     /**
-     * P9 `--deps`: a body-less class-file record (abstract/interface/native,
+     * `--deps`: a body-less class-file record (abstract/interface/native,
      * stripped, or declined by the lowering) was counted and EXCLUDED from
      * the dependency tier — never summarised as "no flow".
      */
     const val DEPS_BODYLESS = "deps-bodyless"
 
-    /** P9: a workspace call names a class absent from every classpath jar. */
+    /** A workspace call names a class absent from every classpath jar. */
     const val DEPS_CLASS_NOT_FOUND = "deps-class-not-found"
 
-    /** P9: the dependency-class budget capped the lowered set; the rest is absent. */
+    /** The dependency-class budget capped the lowered set; the rest is absent. */
     const val DEPS_CLASS_LIMIT = "deps-class-limit"
 
     /**
-     * P9: constructs the bytecode lowering could not translate (itemised by
+     * Constructs the bytecode lowering could not translate (itemised by
      * construct in `stats.loweringFailures`'s deps map); a method whose body
      * cannot be fully lowered is treated as BODY-LESS — ignored, never
      * concluded about.
@@ -152,27 +152,27 @@ object DiagnosticCodes {
     const val BYTECODE_UNLOWERED = "bytecode-unlowered"
 
     /**
-     * P10: the `--max-analysis-seconds` budget tripped. The run DEGRADED:
+     * The `--max-analysis-seconds` budget tripped. The run DEGRADED:
      * the named diagnostic ships and the partial report with it — never a
      * panic, never a discarded evidence report.
      */
     const val ANALYSIS_TIME_BUDGET = "analysis-time-budget"
 
-    /** P10: the `--max-rss-mb` budget tripped; same degradation contract. */
+    /** The `--max-rss-mb` budget tripped; same degradation contract. */
     const val RSS_BUDGET = "rss-budget"
 
     /**
-     * P10, golem's guardAlgorithm lesson: the call graph crashed, so the
+     * Golem's guardAlgorithm lesson: the call graph crashed, so the
      * graph section is absent NAMED as such while the already-computed
      * evidence report still ships.
      */
     const val CALLGRAPH_FAILED = "callgraph-failed"
 
-    /** P9: `--backend compile` runs the resolved tier; this names the gap. */
+    /** `--backend compile` runs the resolved tier; this names the gap. */
     const val COMPILE_BACKEND_GAP = "compile-backend-gap"
 
     /**
-     * P23 §0: the four codes below name an accepted OPTION PAIRING that
+     * The four codes below name an accepted OPTION PAIRING that
      * cannot deliver what it names. They are produced from one predicate
      * (`AnalyzeOptions.degradations()`), so the CLI's refusals and the
      * report's diagnostics cannot drift apart, and `OptionMatrixTest` walks
@@ -180,20 +180,20 @@ object DiagnosticCodes {
      */
     const val DATAFLOW_NOT_RUN = "dataflow-not-run"
 
-    /** P23 §0: a call graph was asked for on a tier that resolves no calls. */
+    /** A call graph was asked for on a tier that resolves no calls. */
     const val CALLGRAPH_NOT_RUN = "callgraph-not-run"
 
-    /** P23 §0: R137's pairing — reachability asked for with no graph to intersect. */
+    /** The pairing — reachability asked for with no graph to intersect. */
     const val REACHABLE_WITHOUT_CALLGRAPH = "reachable-without-callgraph"
 
-    /** P23 §0: the dependency tier built for a run with no taint engine to use it. */
+    /** The dependency tier built for a run with no taint engine to use it. */
     const val DEPS_WITHOUT_DATAFLOW = "deps-without-dataflow"
 
-    /** P28 §1: a forced `--classpath-strategy` that contradicts the explicit classpath flags. */
+    /** A forced `--classpath-strategy` that contradicts the explicit classpath flags. */
     const val CLASSPATH_STRATEGY_CONFLICT = "classpath-strategy-conflict"
 
     /**
-     * P29: a file's syntax nests deeper than the walk budget (2,000 PSI
+     * A file's syntax nests deeper than the walk budget (2,000 PSI
      * levels) and its recursive walks — declarations, usages, KIR lowering —
      * were NOT run on it. The file stays in `files[]`; everything derived
      * from walking its syntax is absent, and the diagnostic names the file
@@ -203,9 +203,9 @@ object DiagnosticCodes {
     const val PSI_DEPTH_CAP = "psi-depth-cap"
 
     /**
-     * P29: analysing this file (or, in the dataflow tier, this function)
+     * Analysing this file (or, in the dataflow tier, this function)
      * threw `StackOverflowError`; the unit was SKIPPED and the run completed
-     * for every other file. Before P29 the same error took the whole report
+     * for every other file. Previously, the same error took the whole report
      * down (one 8 KB generated file was a total loss, exit 3, no report).
      */
     const val STACK_OVERFLOW_SKIPPED = "stack-overflow-skipped"

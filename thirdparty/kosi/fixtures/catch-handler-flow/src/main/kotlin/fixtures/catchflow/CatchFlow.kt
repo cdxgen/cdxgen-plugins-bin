@@ -1,4 +1,4 @@
-// P15 §2: the CFG has no exceptional-edge instruction, so catch handlers
+// the CFG has no exceptional-edge instruction, so catch handlers
 // lowered as standalone blocks had NO incoming edge — structurally
 // unreachable, never analysed, and taint through them silently dropped. The
 // four reductions below are InsecureShop's four validator findings
@@ -34,7 +34,7 @@ private fun risky(): String = checkNotNull(readLine())
 
 /**
  * InsecureShop's SendingDataViaActionActivity.onSendData reduced: an EMPTY
- * catch handler. Pre-P15 this was an unreachable block of pure control flow;
+ * catch handler. Pre-this was an unreachable block of pure control flow;
  * the dispatch chain now reaches it and `kir dump` validates the module
  * clean (pinned by KirLoweringTest, which refuses a dirty CFG).
  */
@@ -49,7 +49,7 @@ fun emptyCatch(): String {
 /**
  * The dropped-flow pin (LoginActivity.onLogin's shape: the handler has a
  * real effect). The sink is inside the handler; the taint is born before the
- * try. Post-P15 both forks (try entry, try end) carry the tainted register
+ * try. Post-both forks (try entry, try end) carry the tainted register
  * into the dispatch chain, so the handler's sink reports.
  */
 fun sinkInHandler(): URI? {
@@ -94,7 +94,7 @@ fun cleanInHandler(): URI? {
 
 /**
  * LoginActivity.onLogin reduced to its rethrow: the handler rethrows a
- * wrapped exception. Pre-P15 the `throw` inside it was dead code to the
+ * wrapped exception. Pre-the `throw` inside it was dead code to the
  * engine; the CFG now reaches the handler and `kir dump` validates clean.
  */
 fun rethrowInHandler(): String {

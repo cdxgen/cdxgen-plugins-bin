@@ -9,7 +9,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * P9: the Kotlin/Native + JNI/cinterop seam as `native-interop` evidence
+ * The Kotlin/Native + JNI/cinterop seam as `native-interop` evidence
  * (02-ARCHITECTURE.md §8's `native-interop` signal). The seam is where a
  * managed value crosses into code the JVM never sees — an `external fun`
  * backed by a JNI library, a `System.loadLibrary` binding the two worlds, a

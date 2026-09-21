@@ -5,10 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The per-repo resolved-call-ratio gate (P1). Negative cases first: the check
+ * The per-repo resolved-call-ratio gate. Negative cases first: the check
  * must FAIL on a regression and on a repo falling through the target, and it
  * must report NOT_EVALUATED — never PASS — when it has nothing to look at.
- * A gate that cannot see the thing it checks was the P0 review's recurring
+ * A gate that cannot see the thing it checks was a later review recurring
  * defect; these are the tests that fail if this one is disabled.
  */
 class ResolvedRatioGateTest {

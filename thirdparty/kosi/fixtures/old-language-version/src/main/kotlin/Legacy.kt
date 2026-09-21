@@ -1,8 +1,8 @@
 // Negative half: UserRepo.save is a near-miss of the annotated findUser the
 // file does contain; an engine that invents flow through same-class names
-// would trip it. The flow is parameter-shaped as of P7: the handler's id
+// would trip it. The flow is parameter-shaped today: the handler's id
 // parameter is the untrusted input (endpoint sources), so the readLine()
-// P4 patched in is gone, and the expectation lives on the endpoint slot.
+// patched in is gone, and the expectation lives on the endpoint slot.
 // It must evaluate identically at every clamped language version, which is
 // what FlowFoundAcrossLanguageVersionRange asserts per version; the syntax
 // tier still has no flow engine (docs/KOSI.md defect 1).

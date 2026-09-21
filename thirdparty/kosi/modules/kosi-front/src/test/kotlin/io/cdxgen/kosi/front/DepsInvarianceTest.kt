@@ -14,7 +14,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * P9's gate, as an actual test: for the SAME fixture and the SAME options
+ * The gate, as an actual test: for the SAME fixture and the SAME options
  * except `--deps`, the WORKSPACE-ONLY findings must be byte-identical with
  * and without the tier — `--deps` may only ADD cross-dependency slices. It
  * also pins the body-less rule on the committed helper jar (an abstract

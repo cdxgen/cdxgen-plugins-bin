@@ -13,7 +13,7 @@ import io.cdxgen.kosi.schema.DiagnosticCodes
  *
  * kinds and keys:
  *   flow        source=<category> sink=<category> [count=N] [mode=M] [fn=<function>]
- *               [sourceparam=#N] [sourcetransport=T]   (P20 §1: which handler
+ *               [sourceparam=#N] [sourcetransport=T] (which handler
  *               parameter a flow entered through, and its transport)
  *   signal      code=<signal-code> [fn=<symbol>]   securitySignals[] evidence
  *   edge        from=<symbol> to=<symbol> [calltype=T]
@@ -70,7 +70,7 @@ data class Annotation(
      */
     val pathParam: String?,
     val queryParam: String?,
-    /** P14: media types / auth the endpoint must carry (or, negated, must not). */
+    /** Media types / auth the endpoint must carry (or, negated, must not). */
     val consumes: String?,
     val produces: String?,
     val authentication: String?,
@@ -79,19 +79,19 @@ data class Annotation(
     val form: String?,
     val protocol: String?,
     val resolution: String?,
-    /** P20 §1: the handler value-parameter a flow entered through (`#0` = first non-receiver). */
+    /** The handler value-parameter a flow entered through (`#0` = first non-receiver). */
     val sourceParam: String?,
-    /** P20 §1: the transport that parameter's annotation names (path/query/header/cookie/form/body). */
+    /** The transport that parameter's annotation names (path/query/header/cookie/form/body). */
     val sourceTransport: String?,
     /**
-     * P24 §1 (10-DEEP-EVIDENCE.md §2): the minimum number of NAMED FRAMES
+     * (10-DEEP-EVIDENCE.md §2): the minimum number of NAMED FRAMES
      * the finding must carry. A one-hop finding that happens to pair the
      * right source and sink is not the same capability and must not satisfy
      * a deep expectation.
      */
     val frames: Int?,
     /**
-     * P24 §1: named intermediate frames that must appear, IN ORDER, among
+     * Named intermediate frames that must appear, IN ORDER, among
      * the slice's frames — `via=fn:Repo.query,fn:Mapper.map`. Each segment
      * is `fn:<canonical or ~substring>`; the Evaluator resolves every name
      * against the report and an unknown function is an ANNOTATION ERROR
@@ -247,11 +247,11 @@ data class Annotation(
         /** The resolution vocabulary (03-SCHEMA.md UrlEvidence.resolution). */
         val RESOLUTIONS = setOf("literal", "folded", "config", "env", "unresolved")
 
-        /** P20 §1: `sourceparam` shape and the transport vocabulary the pack's kinds name. */
+        /** `sourceparam` shape and the transport vocabulary the pack's kinds name. */
         val SOURCE_PARAM = Regex("#[0-9]+")
         val SOURCE_TRANSPORTS = setOf("path", "query", "header", "cookie", "form", "body", "merged")
 
-        /** P24 §1: one `via=` segment — `fn:Name` or `fn:~substring`. */
+        /** One `via=` segment — `fn:Name` or `fn:~substring`. */
         val VIA_SEGMENT = Regex("fn:(~?[A-Za-z0-9_.<$>?]+)")
 
         /** `declarations[].kind` vocabulary. */
@@ -272,7 +272,7 @@ object Frameworks {
     /**
      * Reserved pseudo-ids the DETECTOR emits but no pack models:
      * `unattributed` is a route whose shape matched but whose framework
-     * could not be evidenced (P14) — valid in expectations, so a fixture
+     * could not be evidenced — valid in expectations, so a fixture
      * can pin that a miss is never a wrong attribution.
      */
     val RESERVED: Set<String> = setOf("unattributed")

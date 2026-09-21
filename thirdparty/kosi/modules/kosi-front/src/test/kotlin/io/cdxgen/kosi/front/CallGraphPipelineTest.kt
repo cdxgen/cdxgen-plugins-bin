@@ -13,7 +13,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The P3 call graph through the PRODUCTION pipeline: Analyzer.analyze on a
+ * The call graph through the PRODUCTION pipeline: Analyzer.analyze on a
  * real project directory, the same path the CLI and the bench run. Negative
  * cases first: a graph missing its edges silently, a stdlib filter that is
  * always-true (golem's defect), an exported root set that misses the public
@@ -187,13 +187,13 @@ class CallGraphPipelineTest {
     }
 
     /**
-     * The P22 review's R137. `--dataflow reachable` names what was ASKED
+     * A later review. `--dataflow reachable` names what was ASKED
      * for; the intersection that makes a slice reachable needs a call
      * GRAPH, and `--callgraph none` publishes none — so in that pairing
      * reachability is not computed at all and the only honest count is 0.
-     * P22 §2 replaced a `reachableFromRoots` flag that was false everywhere
+     * Replaced a `reachableFromRoots` flag that was false everywhere
      * with a count keyed off the mode, which read "every slice reachable"
-     * for a run that had measured nothing: R117's rule broken inside the
+     * for a run that had measured nothing: the rule broken inside the
      * change that was applying it, and the unmeasured answer was the
      * OPPOSITE of the measured one on the very first project tried.
      *
@@ -254,13 +254,13 @@ class CallGraphPipelineTest {
         val blindFlow = assertNotNull(noGraph.dataFlow)
         assertTrue(
             blindFlow.slices.isNotEmpty(),
-            "the fixture must publish slices, or the zero below proves nothing (R53)",
+            "the fixture must publish slices, or the zero below proves nothing",
         )
         assertEquals(
             0,
             blindFlow.stats.reachableSlices,
             "no call graph means reachability was never computed: the honest count is 0, not " +
-                "every slice. This read ${blindFlow.slices.size} before the R137 fix, for a project " +
+                "every slice. This read ${blindFlow.slices.size} before the fix, for a project" +
                 "whose graph-backed answer is ${graphFlow.stats.reachableSlices}",
         )
         assertEquals(

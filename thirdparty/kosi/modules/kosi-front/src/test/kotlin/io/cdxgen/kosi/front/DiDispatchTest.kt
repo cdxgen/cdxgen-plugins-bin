@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P25 §2: the container's binding is dispatch evidence.
+ * the container's binding is dispatch evidence.
  *
  * The `di-bound-dispatch` fixture is the service boundary every Spring,
  * Micronaut, Hilt or CDI application has: an interface with three
@@ -29,7 +29,7 @@ import kotlin.test.assertTrue
  *     is a different defect from a wrong type.
  *
  * Restoring the defect (dropping DI classes from the instantiated set) makes
- * the first assertion fail with two findings — the pre-P25 smear — and the
+ * the first assertion fail with two findings — the earlier smear — and the
  * second with no `di-binding` hop at all.
  */
 class DiDispatchTest {
@@ -61,7 +61,7 @@ class DiDispatchTest {
             listOf("fixtures.di.JdbcStore.save"),
             slices.map { it.sinkFunction }.sorted(),
             "the container binds JdbcStore; LoggingStore and InMemoryStore are implementations this " +
-                "application never wires, and a finding on either is the CHA smear this phase removed",
+                "application never wires, and a finding on either is the CHA smear this change removed",
         )
     }
 

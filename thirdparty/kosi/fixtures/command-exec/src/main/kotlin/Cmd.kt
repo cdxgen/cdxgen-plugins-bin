@@ -15,9 +15,9 @@
 // kosi:want usage name=~.start
 // kosi:want declaration name=runCommand kind=function
 //
-// P7: the flow is parameter-shaped again - the handler's request parameter
+// the flow is parameter-shaped again - the handler's request parameter
 // is the untrusted input, seeded by --endpoint-sources in the endpoint
-// slot, so the readLine() P4 patched in is gone. The expectation therefore
+// slot, so the readLine() patched in is gone. The expectation therefore
 // lives on the endpoint slot (the others seed no endpoint sources, which is
 // exactly the flag's contract).
 // kosi:want endpoint framework=spring-mvc path=/run fn=~CmdRunner.runCommand mode=resolved

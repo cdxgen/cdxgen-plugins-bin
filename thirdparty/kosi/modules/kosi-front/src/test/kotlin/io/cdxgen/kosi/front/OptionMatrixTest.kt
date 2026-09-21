@@ -15,10 +15,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P23 §0: the option pairings, walked.
+ * the option pairings, walked.
  *
- * The phase rule, written against R137 and R138: **a gate covers a
- * CONFIGURATION and a TYPE, not a code path.** R137 — a `reachableSlices`
+ * The rule, written against **a gate covers a
+ * CONFIGURATION and a TYPE, not a code path.** — a `reachableSlices`
  * count that claimed every slice reachable when no reachability had been
  * computed — shipped through 522 golden pairs, a 600-row corpusQuick, a full
  * corpus and a two-environment proof, because not one of them runs
@@ -85,7 +85,7 @@ class OptionMatrixTest {
      * the exhaustiveness assertion below rather than by a run of its own: it
      * executes the resolved tier verbatim and stamps `compile-backend-gap`,
      * which `ResolvedBackendTest` already pins — running it here would be a
-     * second answer to a question one test already answers (P22's rule).
+     * second answer to a question one test already answers (the rule).
      *
      * Only `NONE` and one non-`NONE` call-graph mode are run: the other five
      * choose a dispatch ALGORITHM, and the algorithm cannot change whether a
@@ -157,7 +157,7 @@ class OptionMatrixTest {
                     "${expected - actual}; the report carries $actual",
             )
 
-            // R137, as a contract rather than a comment: a reachable count is
+            // As a contract rather than a comment: a reachable count is
             // only ever non-zero when reachability was actually computed.
             val reachable = report.stats.reachableSliceCount
             if (!(options.dataflow == DataflowMode.REACHABLE && wantsGraph && resolves)) {
@@ -176,7 +176,7 @@ class OptionMatrixTest {
             .dataFlow!!.slices
 
         val security = slices(DataflowMode.SECURITY)
-        assertTrue(security.isNotEmpty(), "the matrix project must publish slices, or every cell below is vacuous (R53)")
+        assertTrue(security.isNotEmpty(), "the matrix project must publish slices, or every cell below is vacuous")
 
         // `all` is a DECLARED ALIAS of `security`: the shipped pack has no
         // category `security` leaves out, so there is nothing for `all` to
@@ -189,7 +189,7 @@ class OptionMatrixTest {
                 "the vocabulary changed and the docs and this line must change with it",
         )
 
-        // R139: `crypto` is a FILTER, and before P23 it filtered nothing —
+        // `crypto` is a FILTER, and previously, it filtered nothing —
         // a run that asked for crypto flows was handed log-injection
         // findings under `"mode": "crypto"`.
         val crypto = slices(DataflowMode.CRYPTO)
@@ -201,7 +201,7 @@ class OptionMatrixTest {
             crypto.size < security.size,
             "the matrix project carries both a crypto flow and a non-crypto one, so the crypto mode " +
                 "must publish strictly fewer slices than security — equal counts mean the filter is " +
-                "back to doing nothing (R139)",
+                "back to doing nothing",
         )
         assertTrue(
             security.any { CryptoFlow.isCryptoFlow(it) } && security.any { !CryptoFlow.isCryptoFlow(it) },
@@ -250,7 +250,7 @@ class OptionMatrixTest {
     }
 
     /**
-     * R63 for an option vocabulary: a value that no cell of the matrix
+     * For an option vocabulary: a value that no cell of the matrix
      * declares a contract for is a value nothing examines. Adding a
      * `DataflowMode` or `CallGraphMode` without deciding what it publishes
      * fails HERE, at the cost of one line, instead of shipping the way

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A manifest in the shape AGP 7 and later produce: no `package`
+     attribute. The package lives in the module's `namespace`, and every
+     relative `android:name` below must resolve against it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".HomeActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+        <!-- A nested component. The manifest and the JVM spell the nesting
+             with `$`; Kotlin source spells it with `.`. They are one class. -->
+        <activity android:name=".Screens$DetailActivity" android:exported="true" />
+        <!-- A component whose class is read but which overrides no
+             lifecycle method: it inherits the framework's. The endpoint is
+             substantiated (the class was read) and carries no handler. -->
+        <activity android:name=".Screens$InheritedActivity" android:exported="true" />
+        <!-- A Java component. Java declarations never enter the KIR, so the
+             lifecycle method has to be found in the declaration table. -->
+        <receiver android:name=".JavaReceiver" android:exported="false" />
+        <!-- A class the analysed tree does not hold. This one is genuinely
+             unread, and must stay marked. -->
+        <activity android:name="com.absent.library.GhostActivity" android:exported="true" />
+    </application>
+</manifest>

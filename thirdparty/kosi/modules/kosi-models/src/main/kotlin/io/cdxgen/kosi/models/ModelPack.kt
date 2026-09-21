@@ -6,7 +6,7 @@ package io.cdxgen.kosi.models
  * RECEIVER when the callee has one (otherwise the first argument), `n` = the
  * n-th element of that (receiver,) arguments sequence. Constructor callees
  * render as the class FQN with no `<init>` suffix, so a constructor's first
- * parameter is index 0. P4 executes these packs for the first time; the
+ * parameter is index 0. Executes these packs for the first time; the
  * argument convention and the renderer it must match are pinned by
  * ModelPackTest and by the taint fixtures.
  *
@@ -34,7 +34,7 @@ data class SinkPattern(
     val relevantArguments: List<Int>,
     val receiverType: String?,
     /**
-     * Severity as DATA (P4): the slice's severity comes from the matched
+     * Severity as DATA: the slice's severity comes from the matched
      * pack entry, never from a code-side category table. Packs that omit it
      * get "high" — the honest default for an unnamed risk.
      */
@@ -61,7 +61,7 @@ data class PassthroughPattern(
      * Element flows: same tuple notation, but index 0 reads the RECEIVER's
      * ELEMENT state (`xs[...]`, a channel's sent values) instead of the
      * receiver value itself — how `Channel.receive` yields what `send`
-     * delivered (P6).
+     * delivered.
      */
     val elementFlows: List<List<Int>> = emptyList(),
 ) {
@@ -109,7 +109,7 @@ data class EffectPattern(
 }
 
 /**
- * A LITERAL source (P8): a string literal stored into a local whose NAME
+ * A LITERAL source: a string literal stored into a local whose NAME
  * matches [namePattern] births a fact with [category] at the store. This is
  * how hardcoded secret/key material enters the flow graph — there is no
  * source call to hang a pack entry on, but the name rule is still DATA, and
@@ -121,7 +121,7 @@ data class LiteralSourcePattern(
 )
 
 /**
- * P26 §1.3: a call whose PRODUCED OBJECT carries the input's taint on its
+ * A call whose PRODUCED OBJECT carries the input's taint on its
  * FIELDS — Jackson `readValue`, kotlinx `decodeFromString`, Gson `fromJson`.
  * The input->result move is the passthrough table's job (format-adapter
  * rows); this entry adds what a passthrough cannot say: every FIELD READ of
@@ -132,7 +132,7 @@ data class LiteralSourcePattern(
 data class DeserializerPattern(val pattern: String)
 
 /**
- * P26 §1.1: a SINK declared by an INTERFACE the framework implements at
+ * A SINK declared by an INTERFACE the framework implements at
  * runtime — there is no body to walk and no FQN a pattern can name, because
  * the declaring interface is USER code. Matched on what the declaration
  * carries: the enclosing interface's SUPERTYPES (Spring Data: every method

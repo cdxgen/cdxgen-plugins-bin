@@ -200,7 +200,7 @@ class JsonWriter(private val pretty: Boolean = false) {
                         if (nextMeaningful(minified, i) == close) {
                             // An empty container is written inline. The input's
                             // own closing bracket must be CONSUMED here: leaving
-                            // `i` on it (P16 review: `i++` then `continue`, with
+                            // `i` on it (`i++` then `continue`, with
                             // the loop's own `i++` skipped) re-entered the close
                             // arm and emitted a second bracket, so every report
                             // with an empty array — that is, every report —

@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P24 §0: the report's population is the analysis root, and nothing else.
+ * The report's population is the analysis root, and nothing else.
  *
  * The two escapes this pins were handed over undiagnosed by the part-3
  * baseline work (09-PRECISION.md §1's incidental observations): a probe run

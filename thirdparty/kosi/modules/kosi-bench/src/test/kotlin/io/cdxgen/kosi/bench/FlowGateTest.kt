@@ -7,11 +7,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P4 promotion checks — taint recall, precision per flow, the fixpoint
+ * The promotion checks — taint recall, precision per flow, the fixpoint
  * cap and its denominator, connectivity over a NON-ZERO slice count, and the
  * per-repo flow ratchet — each tested THROUGH THE PATH PRODUCTION USES: the
  * bench result is written to a baseline file and read back with
- * [Baseline.load] before the gate sees it (the standing R44 rule).
+ * [Baseline.load] before the gate sees it (the standing rule).
  */
 class FlowGateTest {
 
@@ -142,7 +142,7 @@ class FlowGateTest {
         )
         val check = check(Promotion.evaluate(current, null), "fixpoint-cap")
         assertEquals(Promotion.State.PASS, check.state)
-        // P5 added the SCC iteration cap as a second counter, and the detail
+        // Added the SCC iteration cap as a second counter, and the detail
         // line now names both denominators.
         assertTrue(check.detail.contains("0 worklist cap hits over 100 analysed function(s)"), check.detail)
         assertTrue(check.detail.contains("0 SCC iteration cap hits over 0 SCC(s)"), check.detail)
@@ -164,7 +164,7 @@ class FlowGateTest {
     fun connectivityOverZeroSlicesIsNotEvaluatedNotPassed() {
         val current = throughBaseline(result(row("a", sliceCount = 0, functionsAnalysed = 1)))
         val check = check(Promotion.evaluate(current, null), "connectivity")
-        assertEquals(Promotion.State.NOT_EVALUATED, check.state, "1.000 over 0 slices is a vacuous pass (R49's shape)")
+        assertEquals(Promotion.State.NOT_EVALUATED, check.state, "1.000 over 0 slices is a vacuous pass (the shape)")
     }
 
     @Test

@@ -1,4 +1,4 @@
-// P19 §4: the outbound client rows the pack models, each called once with a
+// the outbound client rows the pack models, each called once with a
 // distinct literal URL so the row is LIVE (removing it changes this
 // fixture's services/urls) and the service row is pinned. The JDK clients
 // (java.net.URI, java.net.http) need no stub; the rest carry minimal

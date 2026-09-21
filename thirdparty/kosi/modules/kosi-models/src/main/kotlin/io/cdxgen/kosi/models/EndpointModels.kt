@@ -3,7 +3,7 @@ package io.cdxgen.kosi.models
 import io.cdxgen.kosi.schema.JsonReader
 
 /**
- * The framework registry (P7) and its loader. Everything the endpoint,
+ * The framework registry and its loader. Everything the endpoint,
  * service and URL detectors match against lives here as DATA — the detectors
  * in kosi-endpoints hard-code no framework, exactly like the taint engine
  * hard-codes no category. A framework this pack does not name is invisible
@@ -63,7 +63,7 @@ data class FrameworkModel(
      */
     val handlerInput: String = HANDLER_INPUT_ALL,
     /**
-     * P27 §2: the types a handler parameter may have that are NOT request
+     * The types a handler parameter may have that are NOT request
      * data — the framework's own collaborators, handed to the method beside
      * the input (`Model`, `BindingResult`, `HttpServletRequest`,
      * `WebDataBinder`, `Principal`, `RedirectAttributes`, a model `Map`).
@@ -86,7 +86,7 @@ data class FrameworkModel(
      */
     val contextParameterTypes: List<String> = emptyList(),
     /**
-     * P27 §2: annotations that mean "the framework supplies this parameter",
+     * Annotations that mean "the framework supplies this parameter",
      * as opposed to binding it from the request.
      *
      * Needed because the presence of SOME annotation says nothing: Spring
@@ -101,7 +101,7 @@ data class FrameworkModel(
      */
     val nonInputAnnotations: List<String> = emptyList(),
     /**
-     * P27 §2: the types Spring calls SIMPLE, from `BeanUtils.isSimpleValueType`
+     * The types Spring calls SIMPLE, from `BeanUtils.isSimpleValueType`
      * — "a primitive or primitive wrapper, an Enum, a String or other
      * CharSequence, a Number, a Date, a Temporal, a UUID, a URI, a URL, a
      * Locale, or a Class".
@@ -191,7 +191,7 @@ data class FrameworkModel(
     /**
      * Annotations that name the media types a handler accepts and produces:
      * Spring's `@RequestMapping(consumes = [...], produces = [...])` and
-     * JAX-RS's `@Consumes`/`@Produces`. P14: `consumes`/`produces` were
+     * JAX-RS's `@Consumes`/`@Produces`. `consumes`/`produces` were
      * `emptyList()` on every endpoint kosi had ever emitted, for every
      * framework — the information sat in annotations the detector already
      * read, and nothing looked at it.
@@ -212,20 +212,20 @@ data class FrameworkModel(
      */
     val authenticationDsl: List<String> = emptyList(),
     /**
-     * P15: chained DSL calls that declare media on the ROUTE OBJECT between
+     * Chained DSL calls that declare media on the ROUTE OBJECT between
      * the route call and its handler — Vert.x's
      * `router.get("/x").produces("application/json").handler { .. }`. The
      * value is the call's first (folded) argument.
      */
     val mediaDsl: List<MediaDsl> = emptyList(),
     /**
-     * P15: the chained DSL call that attaches the real handler to a route
+     * The chained DSL call that attaches the real handler to a route
      * object (Vert.x's `Route.handler { .. }`) — for route builders whose
      * route call takes only the path.
      */
     val handlerDsl: List<String> = emptyList(),
     /**
-     * P19 §4: a call that MOUNTS one router under another — Vert.x 5's
+     * A call that MOUNTS one router under another — Vert.x 5's
      * `Route.subRouter(router)`. The route object it is called ON carries
      * the prefix every route declared on the mounted router publishes
      * under. Distinct from a nesting `route("/x") { }` (a LAMBDA-shaped
@@ -235,14 +235,14 @@ data class FrameworkModel(
      */
     val mountFunctions: List<String> = emptyList(),
     /**
-     * P15: route-builder calls whose arguments from this index on name the
+     * Route-builder calls whose arguments from this index on name the
      * REQUIRED ROLES (Javalin's `get("/x", handler, Role.ADMIN)` — the
      * vararg `RouteRole...` tail). The handler is the last argument BEFORE
      * the roles begin.
      */
     val roleArgumentStart: Int = -1,
     /**
-     * P17: the DSL call that opens a CONTRACT BLOCK whose lambda sets a
+     * The DSL call that opens a CONTRACT BLOCK whose lambda sets a
      * block-wide security requirement (http4k's
      * `contract { security = ApiKeySecurity(..); routes += .. }`). Every
      * route declared inside the block inherits the requirement, and a
@@ -251,13 +251,13 @@ data class FrameworkModel(
      */
     val contractDsl: List<String> = emptyList(),
     /**
-     * P17: the infix that attaches a route META lambda to a path (http4k's
+     * The infix that attaches a route META lambda to a path (http4k's
      * `"/x" meta { security = BasicAuthSecurity(..) } bindContract GET to h`).
      * The lambda's own `security` assignment is the route's requirement.
      */
     val routeMetaDsl: List<String> = emptyList(),
     /**
-     * P17: SECURITY implementation constructors — a declaration site that
+     * SECURITY implementation constructors — a declaration site that
      * assigns one of these to `security` names its scheme. Only shapes the
      * framework itself applies at RUN TIME are modelled (http4k applies
      * `RouteMeta.security`'s filter per request; its meta `produces`/
@@ -266,7 +266,7 @@ data class FrameworkModel(
      */
     val securityConstructors: List<String> = emptyList(),
     /**
-     * P17: static factories whose result, passed to the chained handler
+     * Static factories whose result, passed to the chained handler
      * attach, IS the route's authentication requirement (Vert.x's
      * `route.handler(BasicAuthHandler.create(auth))` — an
      * `AuthenticationHandler`, which IS a `Handler<RoutingContext>`, so it
@@ -330,7 +330,7 @@ data class AuthAnnotation(
 )
 
 /**
- * P15: chained DSL calls that declare a route's media on the ROUTE OBJECT
+ * Chained DSL calls that declare a route's media on the ROUTE OBJECT
  * after the route call itself — Vert.x's
  * `router.get("/x").produces("application/json").handler { .. }`. The media
  * is not an annotation and not an argument of the route call; it is a call
@@ -355,7 +355,7 @@ data class HandlerMethodName(val name: String, val methods: List<String>)
 /** Handler-input shapes; see [FrameworkModel.handlerInput]. */
 const val HANDLER_INPUT_ANNOTATED: String = "annotated"
 
-/** P27 §2: annotated transports PLUS every non-context parameter. */
+/** Annotated transports PLUS every non-context parameter. */
 const val HANDLER_INPUT_ANNOTATED_OR_BOUND: String = "annotated-or-bound"
 const val HANDLER_INPUT_CONTEXT: String = "context"
 const val HANDLER_INPUT_ALL: String = "all"
@@ -372,7 +372,7 @@ data class ParameterAnnotation(
 )
 
 /**
- * P26 §1.2: an OUTBOUND INTERFACE — Retrofit and Feign declare remote calls
+ * An OUTBOUND INTERFACE — Retrofit and Feign declare remote calls
  * as annotated methods on an interface the library implements at runtime.
  * There is no body to walk and no call-site URL argument: the ANNOTATED
  * METHOD IS THE CALL, and the path is the annotation's value (resolved to
@@ -405,7 +405,7 @@ data class EndpointsPack(
     val name: String,
     val frameworks: List<FrameworkModel>,
     val outbound: List<OutboundModel>,
-    /** P26 §1.2: annotated-interface outbound declarations (Retrofit, Feign). */
+    /** Annotated-interface outbound declarations (Retrofit, Feign). */
     val outboundInterfaces: List<OutboundInterfaceModel> = emptyList(),
     val configReaders: List<ConfigReaderModel>,
 ) {

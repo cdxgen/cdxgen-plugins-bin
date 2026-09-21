@@ -18,13 +18,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P22 §1, the R133 shape at the SUMMARY layer: two real overloads share one
+ * The shape at the SUMMARY layer: two real overloads share one
  * canonical name and differ in body. The call sites carry descriptors, so
- * each must meet its OWN overload's summary — until P22 the summary table
+ * each must meet its OWN overload's summary — until the summary table
  * was keyed by name alone, `associateBy` kept the overload whose descriptor
  * sorts last (here the constant one), and the tainted overload's call site
  * applied the namesake's empty summary: a MISSED flow, the unsound
- * direction. The test also pins the P22 §0 projection the depth report's
+ * direction. The test also pins the projection the depth report's
  * agreement gate reads: per overload, whether a summary exists and whether
  * it claims taint can reach the return value.
  */
@@ -163,7 +163,7 @@ class SummaryOverloadTest {
         val slice = result.evidence.slices[0]
         assertEquals("test.caller", slice.sourceFunction)
 
-        // R133's assertion shape: the verdict for one overload must not
+        // The assertion shape: the verdict for one overload must not
         // depend on the presence of the namesake. (The alone-run drops the
         // constant-overload SITE too: with it gone and the overload gone,
         // the site's descriptor would match nothing and dispatch would
@@ -195,7 +195,7 @@ class SummaryOverloadTest {
     }
 
     /**
-     * The P22 review's R138. The deps tier answers a name-keyed lookup with
+     * A later review. The deps tier answers a name-keyed lookup with
      * the JOIN of every overload of that name, and the join is a may-union
      * — sound for every field that is a SET of effects. `sourceReturns` is
      * not one: its value is a witness PATH, which `recordSourceReturn`

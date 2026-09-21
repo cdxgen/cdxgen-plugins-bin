@@ -14,7 +14,7 @@ import io.cdxgen.kosi.schema.UrlEvidence
 import java.nio.file.Path
 
 /**
- * The P7 facade: inbound endpoints, outbound services and URL evidence from
+ * The facade: inbound endpoints, outbound services and URL evidence from
  * one deterministic pass over the lowered module, the resolved declaration
  * annotations, the config table and the Android manifests. Ids are assigned
  * after sorting — two runs on one input produce byte-identical arrays.
@@ -53,33 +53,41 @@ object Endpoints {
          */
         dependencyCoordinates: Set<String> = emptySet(),
         /**
+         * The canonical names of every declaration the run read —
+         * Kotlin AND Java, types and members alike. A manifest names a
+         * class; whether that class was READ is the only honest basis for
+         * `substantiated`, and the KIR alone cannot answer it because Java
+         * declarations never enter it.
+         */
+        analysedDeclarations: Set<String> = emptySet(),
+        /**
          * The pack to detect with. Production always loads the builtin; the
-         * P19 liveness gate re-runs THIS analysis once per removed pack
+         * liveness gate re-runs THIS analysis once per removed pack
          * entry over the SAME captured inputs, so an entry no fixture's
          * report depends on is a mechanical fact, not an anecdote.
          */
         pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
         /**
-         * P20 §0: when non-null, every value the consumers ask the folder
+         * When non-null, every value the consumers ask the folder
          * for is counted here with its failure reason — the depth report's
          * value-resolution table. Production passes null and pays nothing.
          */
         foldStats: KirValueFolder.FoldStats? = null,
         /**
-         * P20 §2: `false` restores the pre-P20 block-local scan — the depth
+         * `false` restores the earlier block-local scan — the depth
          * report's baseline column measures both ways over one capture.
          */
         crossBlock: Boolean = true,
     ): Result {
         val configTable = ConfigResolver.load(root)
-        // `value` is null for a key the config files DISAGREE about (P23 §1,
-        // R140): known key, unprovable value, so it is absent from the fold
-        // table and the site publishes `unresolved` with the key named. The
-        // `!!` that stood here was safe only while nothing could ever be
-        // ambiguous — the same read one layer up (`configValuesForCrypto`)
-        // has always used `mapNotNull` on the value, and two readers of one
-        // nullable field disagreeing about whether it can be null is the
-        // shape P22's rule is about.
+        // `value` is null for a key the config files DISAGREE about: known
+        // key, unprovable value, so it is absent from the fold table and the
+        // site publishes `unresolved` with the key named. The `!!` that
+        // stood here was safe only while nothing could ever be ambiguous —
+        // the same read one layer up (`configValuesForCrypto`) has always
+        // used `mapNotNull` on the value, and two readers of one nullable
+        // field disagreeing about whether it can be null is the shape the
+        // rule is about.
         val configValues = configTable.keys()
             .mapNotNull { key -> configTable[key]?.value?.let { key to it } }
             .toMap()
@@ -104,7 +112,7 @@ object Endpoints {
             pack,
         )
         val manifests = if (includeManifests) AndroidManifestParser.parse(root) else emptyList()
-        val manifestCandidates = manifestEndpoints(module, manifests, pack)
+        val manifestCandidates = manifestEndpoints(module, manifests, pack, analysedDeclarations)
         val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root), pack, root)
         val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable)
 
@@ -158,6 +166,7 @@ object Endpoints {
                 consumes = candidate.consumes,
                 produces = candidate.produces,
                 authentication = candidate.authentication,
+                substantiated = candidate.substantiated ?: true,
                 handlerSymbol = candidate.handlerSymbol,
                 handlerCanonicalName = candidate.handlerSymbol,
                 modulePath = modulePath,
@@ -256,7 +265,7 @@ object Endpoints {
 
     /**
      * A candidate's `consumes`/`produces`/`authentication`, filled from the
-     * same places the frameworks themselves read them (P14). These three
+     * same places the frameworks themselves read them. These three
      * lists were `emptyList()` on every endpoint kosi had ever emitted —
      * the information was in annotations the detector already loaded, and
      * in Ktor's case in the ENCLOSING call, and nothing looked at either.
@@ -553,12 +562,12 @@ object Endpoints {
     ): List<EndpointDetector.Candidate> {
         if (mappings.isEmpty()) return emptyList()
         val servlet = pack.frameworks.firstOrNull { it.handlerMethodNames.isNotEmpty() } ?: return emptyList()
-        // The descriptor's own authentication requirements (P15): a
+        // The descriptor's own authentication requirements: a
         // `<security-constraint>` names url-patterns and the roles that may
         // reach them — servlet spec 13.8 matching, exact / prefix / extension
         // — and every descriptor endpoint whose pattern matches carries the
         // requirement. The XML was already parsed for mappings; the
-        // constraint element had been parsed past since P13.
+        // constraint element had been parsed past.
         val constraints = WebXmlParser.securityConstraints(root)
         val out = mutableListOf<EndpointDetector.Candidate>()
         for (mapping in mappings) {
@@ -638,18 +647,37 @@ object Endpoints {
         return false
     }
 
+    /**
+     * `Outer$Inner` (the manifest and Java spelling) and `Outer.Inner`
+     * (the Kotlin one) are two spellings of ONE class. Comparing them
+     * literally left every nested component unmatched — 37 of dagger's 42
+     * unsubstantiated component names are nested test activities whose
+     * class kosi had read.
+     */
+    private fun flatten(name: String): String = name.replace('$', '.')
+
     private fun manifestEndpoints(
         module: KirModule,
         manifests: List<AndroidManifestParser.Manifest>,
         pack: EndpointsPack,
+        analysedDeclarations: Set<String>,
     ): List<EndpointDetector.Candidate> {
         val android = pack.frameworks.firstOrNull { it.kind == "manifest" } ?: return emptyList()
         val components = android.manifestComponents
+        val analysedFlat = analysedDeclarations.mapTo(HashSet()) { flatten(it) }
         val out = mutableListOf<EndpointDetector.Candidate>()
         for (manifest in manifests) {
             for (component in manifest.components) {
                 if (component.kind !in components && component.kind != "activity-alias") continue
-                val lifecycle = lifecycleHandler(component.kind, module, component.className)
+                val lifecycle = lifecycleHandler(component.kind, module, component.className, analysedDeclarations)
+                // The component's CLASS being among the analysed
+                // declarations is what "kosi read this" means. A class that
+                // was read but declares no lifecycle override (it inherits
+                // the framework's) is substantiated WITHOUT a handler —
+                // "read it, it overrides nothing" is a measurement, and
+                // the rule only forbids passing "did not look" off as a
+                // finding.
+                val classRead = flatten(component.className) in analysedFlat
                 out.add(
                     EndpointDetector.Candidate(
                         framework = android.id,
@@ -663,6 +691,7 @@ object Endpoints {
                         exported = component.exported,
                         permissions = component.permissions.ifEmpty { null },
                         deepLinkHosts = component.deepLinkHosts.ifEmpty { null },
+                        substantiated = classRead || lifecycle.isNotEmpty(),
                     ),
                 )
             }
@@ -670,7 +699,12 @@ object Endpoints {
         return out
     }
 
-    private fun lifecycleHandler(kind: String, module: KirModule, className: String): String {
+    private fun lifecycleHandler(
+        kind: String,
+        module: KirModule,
+        className: String,
+        analysedDeclarations: Set<String>,
+    ): String {
         val methodNames = when (kind) {
             "activity", "activity-alias" -> listOf("onCreate")
             "service" -> listOf("onStartCommand", "onCreate")
@@ -678,16 +712,27 @@ object Endpoints {
             "provider" -> listOf("query")
             else -> return ""
         }
-        val simple = className.substringAfterLast('.')
+        val flatClass = flatten(className)
+        val simple = flatClass.substringAfterLast('.')
         for (methodName in methodNames) {
             val found = module.functions.firstOrNull { fn ->
                 fn.enclosingClass != null && fn.canonicalName.endsWith(".$methodName") && (
                     fn.enclosingClass == simple ||
-                        fn.canonicalName.startsWith("$className.") ||
-                        className.endsWith("." + fn.enclosingClass)
+                        flatten(fn.canonicalName).startsWith("$flatClass.") ||
+                        flatClass.endsWith("." + flatten(fn.enclosingClass!!))
                     )
             } ?: continue
             return found.canonicalName
+        }
+        // The KIR holds Kotlin only, so a Java component's lifecycle
+        // method was invisible here and a Java-only Android module reported
+        // every component with an empty handler. The declaration table
+        // holds both languages; it is the same fact, read where it exists.
+        for (methodName in methodNames) {
+            val exact = "$className.$methodName"
+            if (exact in analysedDeclarations) return exact
+            val found = analysedDeclarations.firstOrNull { flatten(it) == flatten(exact) } ?: continue
+            return found
         }
         return ""
     }
@@ -746,7 +791,7 @@ object ConstTable {
         """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
     )
 
-    // P22 §1: keyed by the `const val` NAME — deliberately name-unique: a
+    // Keyed by the `const val` NAME — deliberately name-unique: a
     // name mapping to two values anywhere is ambiguous and is REFUSED below
     // (filterValues size == 1), never guessed, so the non-unique key is the
     // mechanism, not a defect.

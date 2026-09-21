@@ -1,6 +1,6 @@
 # kosi-bytecode
 
-P9: the dependency-jar tier (`--deps`). Reads class files from the resolved
+the dependency-jar tier (`--deps`). Reads class files from the resolved
 classpath with the allowlisted ASM, demangles Kotlin names through
 `@kotlin.Metadata` (the protobuf reader shipped inside
 `kotlin-compiler-common-for-ide` — no new dependencies), and lowers method
@@ -26,7 +26,7 @@ summariser.
   itemised; a method the lowering aborts on is treated as body-less, never
   summarised from a half-body.
 
-## Named limitations (the full list is in the phase tracker)
+## Named limitations (the full list is in the change tracker)
 
 - `@JvmName`-renamed file facades and multi-file facades are found only
   through the call closure, never by name.

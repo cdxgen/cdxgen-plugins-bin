@@ -1,5 +1,5 @@
 // The androidx symbols async-android-scopes imports, as the real artifacts
-// declare them (sourced, per the P17 rule, before the stub was written):
+// declare them (sourced, per the rule, before the stub was written):
 //
 //   androidx.lifecycle.ViewModel — open class with onCleared()
 //     (androidx.lifecycle:lifecycle-viewmodel 2.8.0). The -ktx AAR that

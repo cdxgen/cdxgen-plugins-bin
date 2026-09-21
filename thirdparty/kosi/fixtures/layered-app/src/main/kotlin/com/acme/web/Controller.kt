@@ -1,17 +1,17 @@
-// P27 — the corpus's first fixture that is an APPLICATION rather than a
+// — the corpus's first fixture that is an APPLICATION rather than a
 // feature.
 //
 // One request crosses, in order: a Spring MVC entry point (the source), a
-// Jackson deserialization boundary (the DTO's FIELDS carry the input, P26
-// §1.3), a container-bound service seam with an unbound sibling (P25/P26
-// §2), a `by`-delegation DECORATOR (P27 §1 — a generated forwarder with no
-// PSI), a mapper that moves the value between two objects (P24's object
-// identity), a GETTER that returns a field of its receiver (P27 §1), a
-// collection hop, and a Spring Data repository interface as the sink (P26
+// Jackson deserialization boundary (the DTO's FIELDS carry the input,
+// §1.3), a container-bound service seam with an unbound sibling (
+// §2), a `by`-delegation DECORATOR (— a generated forwarder with no
+// PSI), a mapper that moves the value between two objects (the object
+// identity), a GETTER that returns a field of its receiver, a
+// collection hop, and a Spring Data repository interface as the sink (
 // §1.1).
 //
 // Every one of those capabilities was proven by a fixture that exercised it
-// ALONE. This one makes them compose, which is where P27 found its three
+// ALONE. This one makes them compose, which is where found its three
 // defects: each appeared only when two layers stacked.
 //
 // Positive halves:

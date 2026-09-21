@@ -7,9 +7,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The three P3 promotion checks, tested THROUGH THE PATH PRODUCTION USES:
+ * The three promotion checks, tested THROUGH THE PATH PRODUCTION USES:
  * every case writes its bench result to a baseline file and reads it back
- * with [Baseline.load] before the gate sees it. R44 is the lesson — a gate
+ * with [Baseline.load] before the gate sees it. Is the lesson — a gate
  * whose input is a parsed artifact is not tested by in-memory objects, and a
  * field dropped by the parser turns every check here into the red "gate
  * cannot see what it checks" finding.
@@ -113,7 +113,7 @@ class CallGraphGateTest {
 
     @Test
     fun aRunThatReachedNothingIsNotEvaluatedRatherThanPassing() {
-        // The vacuity guard: 0 reached nodes everywhere is the P0 shape, and
+        // The vacuity guard: 0 reached nodes everywhere is the shape, and
         // it must say so instead of reporting a vacuous 1.000.
         val empty = row("some-fixture", reached = 0, connected = 0, reachedViaEdge = 0, connectedViaEdge = 0)
         val loaded = throughBaseline(bench(empty), tempDir(), "vacuous")
@@ -124,7 +124,7 @@ class CallGraphGateTest {
 
     @Test
     fun aRunWhoseReachedNodesAreAllRootsIsNotEvaluatedRatherThanPassing() {
-        // R50: this is the shape the P3 corpus actually had — 62 reached
+        // This is the shape the corpus actually had — 62 reached
         // nodes, every one of them a root at distance 0, confirmed by a walk
         // that followed no edge. Counting roots made a 1.000 out of nothing;
         // the denominator must be the edge-traversed subset, and when that is

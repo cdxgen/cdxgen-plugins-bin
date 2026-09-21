@@ -1,4 +1,4 @@
-// The crypto/CBOM collector (P8): consumes KIR + models + schema only.
+// The crypto/CBOM collector: consumes KIR + models + schema only.
 // Compiler types stop at kosi-front; nothing here imports them.
 dependencies {
     implementation(project(":kosi-kir"))

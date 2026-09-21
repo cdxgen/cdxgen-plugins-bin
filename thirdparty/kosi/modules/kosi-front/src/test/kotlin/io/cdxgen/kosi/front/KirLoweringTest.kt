@@ -266,7 +266,7 @@ class KirLoweringTest {
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.copy") }, "copy is synthesized")
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.component1") }, "component1 is synthesized")
         assertTrue(synthetic.any { it.canonicalName.endsWith("Point.component2") }, "component2 is synthesized")
-        // P24 §2b: a class with a STORED primary-constructor parameter gets
+        // A class with a STORED primary-constructor parameter gets
         // the `<init>` that writes the object's fields (the constructor is a
         // function); a class with no stored parameters gets nothing, and no
         // OTHER synthetic member exists for either.
@@ -300,7 +300,7 @@ class KirLoweringTest {
         assertTrue(checks[0].type == "String", "the check names the tested type: ${checks[0].type}")
     }
 
-// ---- P5/P6: lambda extraction, higher-order invocation, coroutine builders --
+// ---- lambda extraction, higher-order invocation, coroutine builders --
 
 @Test
 fun standaloneLambdasExtractIntoTheirOwnFunctionsWithCapturesRenamed() {
@@ -444,10 +444,10 @@ fun suspendingBuildersEmitSuspendBoundaries() {
 /**
  * A nested qualifier lowers to ONE path off the chain's base register, not
  * one hop per field off a fresh temporary. `AccessPath` has carried a list
- * of elements since P2 and both engines join them into the state key, but
+ * of elements since and both engines join them into the state key, but
  * the lowering emitted length-one paths only: `o.inner.a = x` wrote onto a
  * temp and the matching read looked at a different temp, so no nested field
- * flow could ever be seen (R63). The negative half is the shape that
+ * flow could ever be seen. The negative half is the shape that
  * regression would produce — a write path of length one.
  */
 @Test
@@ -491,12 +491,12 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
     assertEquals(listOf(listOf("inner", "a")), viaCall.map { fields(it.path) }, "composition stops at the call")
 }
 
-    // ---- bare-name accessor reads (P14, R80's sibling) ----------------------
+    // ---- bare-name accessor reads (the sibling) ----------------------
 
     @Test
     fun aBareNameAccessorReadLowersAsTheCallItIs() {
         // `parameters` inside an extension on ApplicationCall is read by
-        // BARE NAME through the implicit extension receiver. R80 fixed the
+        // BARE NAME through the implicit extension receiver. Fixed the
         // `a.b` spelling; this spelling stayed a field read whose path was
         // the RECEIVER's register, so no pack could ever see the callee —
         // and it is exactly what `call` is inside a Ktor route lambda.
@@ -531,7 +531,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
     @Test
     fun aBareNameBackingFieldReadStaysAFieldAccess() {
         // The negative half: a stored member read by bare name KEEPS its
-        // access path, or P4/P5 field sensitivity stops meeting writes.
+        // access path, or field sensitivity stops meeting writes.
         val root = project(
             mapOf(
                 "src/main/kotlin/Panel.kt" to """
@@ -594,7 +594,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
 
     @Test
     fun customAccessorsOfOneClassTakeDistinctJvmNames() {
-        // R87: every KtPropertyAccessor lowered under ONE placeholder name,
+        // Every KtPropertyAccessor lowered under ONE placeholder name,
         // so a class with several custom accessors emitted colliding
         // canonical names and the KIR validator refused the module
         // (InsecureShop's `Prefs` carried six). The JVM names are distinct.
@@ -630,7 +630,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
         )
     }
 
-    // ---- P15 §2: exceptional may-edges and dead-block emission ---------------
+    // ---- exceptional may-edges and dead-block emission ---------------
 
     /**
      * `loweredFunctions` goes through `kir dump`, which REFUSES a module whose
@@ -666,7 +666,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
                 """.trimIndent(),
             ),
         )
-        // Pre-P15 both functions lowered with catch-handler blocks no edge
+        // Pre-both functions lowered with catch-handler blocks no edge
         // reached; KirValidator named them and the dump failed. Reaching here
         // at all is the pin — and the handler BODIES must still be present,
         // not optimised away: the rethrow handler carries its KirThrow.
@@ -719,7 +719,7 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
 
     @Test
     fun catchParametersAreBoundToTheThrownValueAndReadAsLocals() {
-        // P16 §3: the handler's own parameter existed nowhere in the KIR — a
+        // The handler's own parameter existed nowhere in the KIR — a
         // read of `e` lowered as a FIELD READ on `this`, and no value the
         // guarded body threw could reach it. Restoring that defect fails
         // this test three ways: the parameter reads as `fieldget vthis`,

@@ -6,7 +6,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * P28 review: the message a memory-shaped death gives the operator.
+ * the message a memory-shaped death gives the operator.
  *
  * The defect this pins is not hypothetical — it is measured. dagger (1,950
  * source files) at `-Xmx8g` died with the whole of its output being
@@ -44,7 +44,7 @@ class MemoryAdviceTest {
      * (one 8 KB file) kills the run at ANY heap size, while 1,000 terms is
      * fine. So the advice must name the stack, and must NOT recommend the heap.
      *
-     * P29 changed what is true underneath it: the analysis now runs on a
+     * changed what is true underneath it: the analysis now runs on a
      * 512 MB stack with per-file `psi-depth-cap` / `stack-overflow-skipped`
      * boundaries, so an overflow that still reaches the CLI came from OUTSIDE
      * those boundaries and a bigger `-Xss` is rarely the answer. The advice
@@ -58,7 +58,7 @@ class MemoryAdviceTest {
         assertTrue("-Xss" in advice, "stack advice must name the stack flag: $advice")
         assertTrue(
             "psi-depth-cap" in advice && "stack-overflow-skipped" in advice,
-            "the advice must point at the per-file boundaries that P29 added, so an operator knows an " +
+            "the advice must point at the per-file boundaries that added, so an operator knows an" +
                 "overflow reaching here is already outside them: $advice",
         )
         // -Xmx may appear, but only to rule it OUT. What must never happen is

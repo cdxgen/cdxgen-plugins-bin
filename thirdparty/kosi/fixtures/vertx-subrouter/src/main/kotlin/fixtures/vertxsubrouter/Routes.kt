@@ -1,4 +1,4 @@
-// P19 §4: the Vert.x 5 sub-router mount — the shape P18 swapped INTO the
+// the Vert.x 5 sub-router mount — the shape swapped INTO the
 // pack (Route.subRouter, replacing Router.mountSubRouter, removed in
 // Vert.x 5) but left inert: no fixture exercised it and the prefix walk
 // only knew lambda-shaped nesting. Here the mounted router's routes

@@ -3,7 +3,7 @@
 # (runtime.kotlinVersion). Bump on every stable release; track the EAP in CI
 # only, never in the release.
 #
-# The resolved front end (P1) runs on the same substrate KSP2 declares for the
+# The resolved front end runs on the same substrate KSP2 declares for the
 # same Kotlin base version (google/ksp, kotlin-analysis-api): the unrelocated
 # `-for-ide` split artifacts at `kotlin`, the IntelliJ platform modules at
 # `intellijPlatform` — the version Kotlin itself pins in
@@ -43,7 +43,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 # set. Declared non-transitively: the POMs of the *-for-ide artifacts point
 # at shadowed modules (analysis-api, analysis-api-standalone[-base],
 # analysis-api-fir-standalone-base) that are not published anywhere (404 on
-# Maven Central and on the JetBrains repo at 2.4.0 — recorded as P0
+# Maven Central and on the JetBrains repo at 2.4.0 — recorded as
 # deviation 2); transitive resolution would fail outright.
 analysis-api-ide = { module = "org.jetbrains.kotlin:analysis-api-for-ide", version.ref = "kotlin" }
 analysis-api-k2-ide = { module = "org.jetbrains.kotlin:analysis-api-k2-for-ide", version.ref = "kotlin" }

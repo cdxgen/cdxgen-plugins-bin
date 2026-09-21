@@ -1,9 +1,9 @@
-// P25 §0 — one capability, every spelling.
+// — one capability, every spelling.
 //
-// P24 built the channel that carries taint through a function value and
+// built the channel that carries taint through a function value and
 // proved it with `{ payload -> ... }`. The review found the channel dead for
-// Kotlin's implicit `it`, because every fixture and every probe in the phase
-// spelled the parameter out (R152). This gallery is the generalisation: one
+// Kotlin's implicit `it`, because every fixture and every probe in the change
+// spelled the parameter out. This gallery is the generalisation: one
 // flow — `readLine()` to `Runtime.exec` — written in every spelling of the
 // language the engine claims to handle, so a capability that holds in one
 // spelling and not its sibling FAILS HERE rather than shipping.
@@ -87,7 +87,7 @@ fun viaTwoParameters() = feedTwo { s, _ -> Runtime.getRuntime().exec(s) }
 
 fun viaUnderscoreFirst() = feedIntFirst { _, s -> Runtime.getRuntime().exec(s) }
 
-// R154: a destructured lambda parameter binds no register the engine can
+// A destructured lambda parameter binds no register the engine can
 // name, so the component the taint is in is lost at the `(a, b)` binding.
 fun viaDestructured() = feedPair { (s, _) -> Runtime.getRuntime().exec(s) }
 
@@ -123,7 +123,7 @@ fun viaLocalValueReference() {
     f(readLine() ?: "")
 }
 
-// R155: a constructor reference names `<init>`, and the value the new object
+// A constructor reference names `<init>`, and the value the new object
 // carries then has to reach a method ON that object — the invoke channel
 // stops at the construction.
 class Command(val value: String) {
@@ -137,7 +137,7 @@ fun viaConstructorReference() {
     make(readLine() ?: "").run()
 }
 
-// R156: a function value stored in an object's field or in a collection is
+// A function value stored in an object's field or in a collection is
 // invoked through a field read, not through a register the def map or the
 // alias analysis names at the call.
 class FunctionHolder(val f: (String) -> Unit)
@@ -158,7 +158,7 @@ fun interface Bridge {
     fun cross(s: String)
 }
 
-// R147 (P24 §1): the SAM instance's synthesized class never reaches the KIR.
+// The SAM instance's synthesized class never reaches the KIR.
 fun viaFunInterface() {
     val b = Bridge { s -> Runtime.getRuntime().exec(s) }
     b.cross(readLine() ?: "")
@@ -170,7 +170,7 @@ fun viaJavaSam() {
     r.run()
 }
 
-// R157: an anonymous object's members lower as functions, but the object is
+// An anonymous object's members lower as functions, but the object is
 // not indexed as an implementation of its supertype, so the virtual call
 // resolves to nothing.
 interface Writer {
@@ -207,7 +207,7 @@ fun viaApplyScope() {
     Builder().apply { cmd = raw }.go()
 }
 
-// R158: an extension lambda's receiver is a parameter with no name at the
+// An extension lambda's receiver is a parameter with no name at the
 // call, so a write through `this` inside the block reaches no caller object.
 private fun build(block: Builder.() -> Unit) {
     val b = Builder()

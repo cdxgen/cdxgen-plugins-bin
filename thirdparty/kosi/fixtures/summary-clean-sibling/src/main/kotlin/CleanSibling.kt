@@ -1,5 +1,5 @@
-// The INTERPROCEDURAL clean-sibling negative (P5) — the engine-level twin of
-// P4's field-sensitivity fixture, written before any positive summary code.
+// The INTERPROCEDURAL clean-sibling negative — the engine-level twin of
+// the field-sensitivity fixture, written before any positive summary code.
 // A partly-tainted OBJECT crosses a call boundary; one callee sinks the
 // TAINTED field (the slice), the other sinks the CLEAN SIBLING field and
 // must stay silent. An engine that collapses access paths at the boundary

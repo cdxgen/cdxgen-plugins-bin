@@ -55,7 +55,7 @@ class ClasspathResolverTest {
             """.trimIndent(),
         )
         assertEquals(
-            // P28: a version.ref that resolves against [versions] yields the
+            // A version.ref that resolves against [versions] yields the
             // resolved version — previously this scanned version-less and
             // the locator guessed the highest cached version. An unresolvable
             // ref (rich versions) still yields null, pinned in
@@ -171,13 +171,13 @@ class ClasspathResolverTest {
     }
 
     /**
-     * P17 (R105): a classpath file may BIND a coordinate to a committed jar
+     * A classpath file may BIND a coordinate to a committed jar
      * (`g:a:v=libs/foo.jar`). A bare coordinate resolves against the
      * machine-local Gradle cache, so a fixture pinning one was
      * machine-dependent through the classpath-partial diagnostic; the bound
      * form attaches the jar with the coordinate (maven purl, marker-visible)
      * and resolves identically on every machine. A bound jar that is missing
-     * is LOUD — a pin nobody can read is a broken pin (R73's shape).
+     * is LOUD — a pin nobody can read is a broken pin (the shape).
      */
     @Test
     fun boundCoordinateLinesResolveToTheCommittedJar() {
@@ -290,7 +290,7 @@ class ClasspathResolverTest {
         }
     }
 
-    // ---- P15: Gradle Module Metadata file names, and AndroidX variant siblings
+    // ---- Gradle Module Metadata file names, and AndroidX variant siblings
 
     /**
      * A publisher may name its artifact file anything — `Turbine-jvm.jar`,
@@ -429,14 +429,14 @@ class ClasspathResolverTest {
         )
     }
 
-    // ---- P28 §1: the acquisition strategy chain ---------------------------------
+    // ---- the acquisition strategy chain ---------------------------------
 
     private fun writePlainJar(path: java.nio.file.Path) = writeJar(path, "io/example/x/Api.class")
 
     /**
      * A flag-less run discovers a `classpath.txt` at the analysed root — the
      * warmed-corpus convention — and the report vocabulary names the FILE
-     * strategy as the producer. Restore-proof: before P28 there was no file
+     * strategy as the producer. Restore-proof: previously, there was no file
      * strategy at all, so the same tree fell straight to the offline scan,
      * attached nothing, and reported a clean classpath-less run.
      */
@@ -540,7 +540,7 @@ class ClasspathResolverTest {
 
     /**
      * A tree where nothing fires reports `none` EXPLICITLY, with every
-     * discovery attempt recorded — the state R179 was: a classpath-less run
+     * discovery attempt recorded — the state was: a classpath-less run
      * that read as a clean one.
      */
     @Test
@@ -583,7 +583,7 @@ class ClasspathResolverTest {
     /**
      * A version catalog's `group`/`name` map form — the spelling `exposed`
      * declares its ENTIRE dependency set in — is one of the two forms
-     * Gradle's catalog documentation shows, and P28 found the scanner read
+     * Gradle's catalog documentation shows, and found the scanner read
      * neither it nor the `[versions]` alias its `version.ref` points at.
      * Restore-proof: with the map form unscanned, exposed's cache strategy
      * attached ZERO jars against a tree full of declarations.

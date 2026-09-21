@@ -49,7 +49,7 @@ import org.jetbrains.org.objectweb.asm.tree.VarInsnNode
 import java.util.jar.JarFile
 
 /**
- * P9: lowers dependency jars into the SAME KIR the source front end
+ * Lowers dependency jars into the SAME KIR the source front end
  * produces. One IR, one summariser — the engine in kosi-flow never learns
  * that a function came from a class file; this module is responsible for
  * producing KIR whose canonical names, jvmDescriptors, access paths and
@@ -61,7 +61,7 @@ import java.util.jar.JarFile
  * useful if the callees it needs inside the jar are lowered too. Everything
  * is bounded by `maxClasses` with a counted, diagnostic-backed cap.
  *
- * The body-less rule (the phase's most important sentence): a record with
+ * The body-less rule (the change's most important sentence): a record with
  * no body — abstract, interface, native, synthetic bridge, or a method the
  * lowering aborts on — is emitted with `body = null` and is therefore
  * IGNORED ENTIRELY by the engine (kosi-flow only compiles and summarises
@@ -96,7 +96,7 @@ object BytecodeLowerer {
         /**
          * Classes the workspace calls (or the closure reached) that the
          * budget CUT after lowering stopped: named here so a cap truncation
-         * is a counted row, never a silent zero. R70: when the wanted set
+         * is a counted row, never a silent zero. When the wanted set
          * alone exceeded the budget, the old check stopped the loop before
          * ANY class was lowered and the whole tier shipped empty behind a
          * cap diagnostic.
@@ -113,7 +113,7 @@ object BytecodeLowerer {
     fun lower(jars: List<JarSpec>, wantedCallables: Set<String>, maxClasses: Int): Result {
         val unlowered = sortedMapOf<String, Int>()
         val orderedJars = jars.sortedWith(compareBy({ it.purl }, { it.jar.toString() }))
-        // P22 §1: internal class name -> jar. The key is a CLASS internal
+        // Internal class name -> jar. The key is a CLASS internal
         // name (unique per class file); a shaded duplicate across jars keeps
         // the LAST jar — the resolver already picked one artifact per
         // coordinate, so the index mirrors that pick rather than guessing.
@@ -195,7 +195,7 @@ object BytecodeLowerer {
         var classLimitHit = false
         var rounds = 0
         val frontier = selected.toMutableList()
-        // R70: the budget bounds the LOWERED set, not the selected set. The
+        // The budget bounds the LOWERED set, not the selected set. The
         // wanted phase above is unbounded by design (index lookups only);
         // when it alone filled `selected` past maxClasses, the old
         // `selected.size >= maxClasses` guard broke the loop before the

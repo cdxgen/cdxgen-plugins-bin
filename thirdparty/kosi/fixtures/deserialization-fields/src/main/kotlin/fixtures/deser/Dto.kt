@@ -1,4 +1,4 @@
-// P26 §1.3 — the produced object carries the input's taint on its FIELDS.
+// — the produced object carries the input's taint on its FIELDS.
 //
 // A deserializer (Jackson readValue, kotlinx decodeFromString, Gson
 // fromJson) hands back an OBJECT whose fields hold the input's content —
@@ -80,7 +80,7 @@ fun cleanInputNoFlow() {
 }
 
 // A tainted value on an object that did NOT come out of a deserializer: the
-// taint sits on the object's own fields (P24's channels), and a field read
+// taint sits on the object's own fields (the channels), and a field read
 // derives nothing extra — fieldBearing must not leak to ordinary objects.
 fun unrelatedObjectNoFlow() {
     val dto = UserDto(name = "fixed", role = "user")

@@ -17,7 +17,7 @@
 //
 // The flow reads untrusted input through the shipped pack source
 // (kotlin.io.readLine) and concatenates it into the ProcessBuilder command
-// list. Real at the resolved tier since P4; the syntax tier still has no
+// list. Real at the resolved tier; the syntax tier still has no
 // flow engine (docs/KOSI.md defect 1), so the marker is scoped there — at
 // the resolved slots the expectation is a live ratchet, not a known-fail.
 // kosi:want flow source=untrusted-input sink=process-exec known-fail=syntax:1

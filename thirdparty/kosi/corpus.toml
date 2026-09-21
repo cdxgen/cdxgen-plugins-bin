@@ -3,9 +3,9 @@
 # Tiers:
 #   fixtures - bundled micro-projects under fixtures/, no network, run on every change
 #   small    - small real repos, SHA-pinned, fetched into .corpus-cache/<slug>/, run on every change
-#   medium   - larger repos, per phase / nightly (entries land with their enabling phase)
+#   medium   - larger repos, nightly
 #   large    - on demand
-#   android / kmp / hybrid - per phase
+#   android / kmp / hybrid - on demand
 #   vuln     - intentionally vulnerable, ground truth, every change
 #   ported   - DroidBench/Ghera cases rewritten in idiomatic Kotlin, every change
 #
@@ -13,9 +13,9 @@
 # file of hand-annotated ground truth for pinned repos; bundled fixtures carry
 # their expectations as kosi:want annotations in the sources themselves.
 #
-# tolerated_resolution_errors (P18): the ERROR-severity resolution classes the
+# tolerated_resolution_errors: the ERROR-severity resolution classes the
 # entry's sources legitimately carry. A class that appears without being
-# declared fails the row — a fixture whose stub stopped typechecking (R110)
+# declared fails the row — a fixture whose stub stopped typechecking
 # otherwise passed every want over code the compiler rejects. An empty list
 # declares "typechecks clean"; repo-tier entries carry no field (real code
 # under partial classpaths resolves legitimately imperfectly).
@@ -41,7 +41,7 @@ path = "fixtures/string-template"
 capabilities = ["string-template", "taint-concat"]
 tolerated_resolution_errors = []
 
-# P4 taint fixtures: intraprocedural, field-sensitive flows over the CFG.
+# Taint fixtures: intraprocedural, field-sensitive flows over the CFG.
 # field-sensitivity carries the corpus's most valuable negative: the clean
 # SIBLING field of a partly-tainted object must not report.
 
@@ -236,11 +236,11 @@ tier = "eap"
 path = "fixtures/future-syntax"
 capabilities = ["version-ceiling", "eap"]
 
-# P9: cross-dependency taint. The dependency is a COMMITTED jar
+# Cross-dependency taint. The dependency is a COMMITTED jar
 # (libs/dep-helper.jar, built by helper-src/build.sh from the Kotlin source
 # beside it); classpath.txt names it, and the `deps` matrix slot lowers it
 # into the KIR and summarises it (origin=bytecode). The body-less records
-# (an interface method, an abstract method) are the phase's most important
+# (an interface method, an abstract method) are the tier's most important
 # negative: they must be excluded entirely, never summarised as "no flow".
 
 [[fixtures]]
@@ -251,7 +251,7 @@ classpath_file = "classpath.txt"
 capabilities = ["deps", "bytecode-summaries", "cross-dependency", "bodyless-records", "source-returns"]
 tolerated_resolution_errors = []
 
-# P9 regression guard: an unresolved CONSTRUCTOR is an unresolved call. The
+# Regression guard: an unresolved CONSTRUCTOR is an unresolved call. The
 # branch that added the dependency tier briefly made it "handled" instead,
 # suppressing the conservative unknown-call default across every backend.
 # Positive and near-miss negative differ only in what enters the constructor.
@@ -263,7 +263,7 @@ path = "fixtures/unresolved-constructor"
 capabilities = ["unknown-call-default", "constructors", "summaries"]
 tolerated_resolution_errors = []
 
-# P9: the Kotlin/Native + JNI/cinterop seam as native-interop evidence.
+# The Kotlin/Native + JNI/cinterop seam as native-interop evidence.
 # Positives: an external fun, a loadLibrary binding site, a cinterop .def.
 # Negatives: plain functions with native-looking names, a commented-out
 # loadLibrary, a .def file outside the cinterop directories.
@@ -275,12 +275,12 @@ path = "fixtures/native-interop"
 capabilities = ["native-interop", "jni", "cinterop", "security-signals"]
 tolerated_resolution_errors = []
 
-# P3 call-graph fixtures: dispatch modes, sealed narrowing, exported roots
+# Call-graph fixtures: dispatch modes, sealed narrowing, exported roots
 # and framework-registration roots. Each carries a negative half naming what
 # a plausibly wrong dispatcher would emit.
 
-# Access paths deeper than one field (R63): the corpus was entirely flat, so
-# the depth-5 cap `AccessPath` has carried since P2 was never exercised and a
+# Access paths deeper than one field: the corpus was entirely flat, so
+# the depth-5 cap `AccessPath` has carried since was never exercised and a
 # lowering that emitted length-one paths only read 1.000 recall.
 
 [[fixtures]]
@@ -290,7 +290,7 @@ path = "fixtures/nested-field-path"
 capabilities = ["taint", "field-sensitivity", "summaries", "clean-sibling"]
 tolerated_resolution_errors = []
 
-# P5 summary fixtures: interprocedural flows, negatives first.
+# Summary fixtures: interprocedural flows, negatives first.
 
 [[fixtures]]
 slug = "summary-clean-sibling"
@@ -348,7 +348,7 @@ path = "fixtures/summary-higher-order"
 capabilities = ["taint", "summaries", "higher-order", "lambdas"]
 tolerated_resolution_errors = []
 
-# The cross-module fixture that makes `dependency-crossing-flows` real (R55).
+# The cross-module fixture that makes `dependency-crossing-flows` real.
 
 [[fixtures]]
 slug = "summary-cross-module"
@@ -395,7 +395,7 @@ path = "fixtures/framework-handlers"
 capabilities = ["call-graph", "framework-roots", "type-resolved"]
 tolerated_resolution_errors = []
 
-# P7 framework tier: one bundled fixture per framework, each carrying its
+# Framework tier: one bundled fixture per framework, each carrying its
 # positive endpoints AND its lookalike negatives (an annotated DTO, a
 # private method with a mapping-shaped name, a commented-out route, a
 # marker class with no mapped methods). Run by corpusQuick alongside the
@@ -472,7 +472,14 @@ path = "fixtures/android-manifest-app"
 capabilities = ["android", "manifest", "endpoints", "deep-links"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P8 crypto tier: transform forms, TLS/JWT/keystore, and material flows.
+[[fixtures]]
+slug = "android-agp-namespace"
+tier = "frameworks"
+path = "fixtures/android-agp-namespace"
+capabilities = ["android", "manifest", "endpoints", "agp-namespace", "nested-components", "java-interop"]
+tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
+
+# Crypto tier: transform forms, TLS/JWT/keystore, and material flows.
 # Every shipped mapping row is exercised somewhere in this tier, which the
 # crypto-mapping-coverage gate enforces at 1.000.
 
@@ -504,7 +511,7 @@ path = "fixtures/crypto-material-flow"
 capabilities = ["crypto", "materials", "crypto-flow", "pbkdf2", "ec-curve"]
 tolerated_resolution_errors = []
 
-# P6 async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
+# Async tier: coroutines, Flow, Channel, StateFlow, Android scopes. Run by
 # its own task (`corpusAsync`) AND by the bench/gate run, so `async-recall`
 # has its own denominator while the sweeps and the native metadata agent see
 # every fixture directory.
@@ -565,9 +572,9 @@ classpath_file = "classpath.txt"
 capabilities = ["coroutines", "stateflow", "collect"]
 tolerated_resolution_errors = []
 
-# P11: the R69 construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
+# The construct sweep. The fixture tree's set of SOURCE CONSTRUCTS
 # is a coverage denominator nothing measured — KDoc was found by accident
-# (R69), and the sweep found 29 constructs 68 fixtures had never contained.
+#and the sweep found 29 constructs 68 fixtures had never contained.
 # Four fixtures close the sweep; each names its constructs in capabilities
 # and carries the lowering-failed want-not, so a construct the lowering
 # declines is a corpus failure, not an invisible gap. A construct missing
@@ -601,7 +608,7 @@ path = "fixtures/expressions-and-literals"
 capabilities = ["raw-string", "notnull-assert", "safe-cast", "try-expression", "run-catching", "reflection-literal", "function-reference", "suspend-lambda"]
 tolerated_resolution_errors = []
 
-# P12: the Android taint shapes, and the lowering rule that makes them
+# The Android taint shapes, and the lowering rule that makes them
 # visible. `editText.text` and `intent.dataString` are Kotlin reads of JAVA
 # GETTERS; lowering them as field reads hid every getter-backed API from the
 # model packs, which is why two intentionally-vulnerable Kotlin apps reported
@@ -629,7 +636,7 @@ path = "fixtures/endpoint-parameter-semantics"
 capabilities = ["endpoint-sources", "parameter-annotations", "framework-semantics", "spring-mvc"]
 tolerated_resolution_errors = []
 
-# P20 §1: the taint source is a PARAMETER, not a function. The pack's
+# The taint source is a PARAMETER, not a function. The pack's
 # `kind`/`category` per parameter annotation change a verdict, and each
 # endpoint-rooted slice names the value-parameter (#N) and transport it
 # entered through.
@@ -690,10 +697,10 @@ classpath_file = "classpath.txt"
 capabilities = ["endpoints", "implicit-routes", "spring-data-rest", "actuator", "springdoc", "framework-semantics"]
 tolerated_resolution_errors = []
 
-# P18 (R111): the dependency-marker contract from both sides. The present
+# The dependency-marker contract from both sides. The present
 # marker is bound to a jar whose FILE NAME does not contain the marker (only
 # the coordinate arm can match); the absent marker is a version no cache
-# holds (missing[] must not publish). Until P18 the coordinate arm rendered
+# holds (missing[] must not publish). Until the coordinate arm rendered
 # a literal template and the missing list counted as presence — the wants on
 # implicit-routes passed through both holes on cold machines.
 
@@ -705,8 +712,8 @@ classpath_file = "classpath.txt"
 capabilities = ["implicit-routes", "dependency-markers", "classpath-partial"]
 tolerated_resolution_errors = []
 
-# P14 §2: framework GENERATIONS — the packs model one version of
-# everything, and every package rename is a silent zero (R84). javax AND
+# Framework GENERATIONS — the packs model one version of
+# everything, and every package rename is a silent zero. javax AND
 # jakarta JAX-RS/servlet side by side, OkHttp 3 and 4/5, HttpClient 4 and
 # 5, Ktor 3's moved handler receiver.
 
@@ -717,7 +724,7 @@ path = "fixtures/framework-generations"
 capabilities = ["generations", "jaxrs", "servlet", "okhttp", "httpclient", "ktor3", "endpoints"]
 tolerated_resolution_errors = []
 
-# P14 §2.3: a route whose framework cannot be evidenced is published under
+# A route whose framework cannot be evidenced is published under
 # the reserved pseudo-framework `unattributed` — a miss is never a WRONG
 # answer.
 
@@ -728,7 +735,7 @@ path = "fixtures/unattributed-route"
 capabilities = ["endpoints", "attribution", "unattributed"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P14 §5: consumes/produces/authentication, from the annotations the
+# Consumes/produces/authentication, from the annotations the
 # detector already reads and from Ktor's enclosing authenticate wrapper.
 
 [[fixtures]]
@@ -738,7 +745,7 @@ path = "fixtures/endpoint-media-auth"
 capabilities = ["endpoints", "media-types", "authentication", "spring", "jaxrs", "micronaut", "ktor"]
 tolerated_resolution_errors = ["NO_VALUE_FOR_PARAMETER", "UNRESOLVED_REFERENCE_WRONG_RECEIVER"]
 
-# P14 §4: the BARE-NAME read of an accessor-backed property (R80's
+# The BARE-NAME read of an accessor-backed property ('s
 # sibling), and the backing-field half that keeps field sensitivity.
 
 [[fixtures]]
@@ -748,7 +755,7 @@ path = "fixtures/bare-accessor-source"
 capabilities = ["lowering", "accessor-property", "bare-name", "field-sensitivity", "ktor"]
 tolerated_resolution_errors = []
 
-# P15 §2: catch handlers were emitted with NO incoming CFG edge — the CFG
+# Catch handlers were emitted with NO incoming CFG edge — the CFG
 # has no exceptional-edge instruction — so every `catch` body was structurally
 # unreachable, never analysed, and taint through it silently dropped (found as
 # five `unreachable-but-emitted block` validator findings on InsecureShop).
@@ -766,7 +773,7 @@ path = "fixtures/catch-handler-flow"
 capabilities = ["try-catch", "exceptional-edges", "catch-handler-flow", "dead-block"]
 tolerated_resolution_errors = ["NO_RETURN_IN_FUNCTION_WITH_BLOCK_BODY"]
 
-# P16 §3: the catch handler's own PARAMETER. P15's edges made the handler
+# The catch handler's own PARAMETER. the edges made the handler
 # reachable but bound `e` to nothing — a read of it lowered as a field read
 # on `this`, so `catch (e) { sink("$e") }` after `throw E(userInput)` (the
 # wrap-and-rethrow idiom InsecureShop itself uses) could never report. The
@@ -784,14 +791,14 @@ capabilities = ["try-catch", "catch-parameter", "exception-object", "wrap-and-re
 tolerated_resolution_errors = []
 
 
-# P15 §4: media and auth for the frameworks P14 did not model — declared at
+# Media and auth for the frameworks did not model — declared at
 # sites that are neither annotations nor named arguments: Vert.x chains them
 # on the ROUTE OBJECT (router.get("/x").produces(..).handler {}), Javalin's
 # route builder carries them as the vararg RouteRole tail, and the servlet
 # deployment descriptor's <security-constraint> names url-patterns and the
-# roles that may reach them (parsed for mappings since P13, parsed PAST for
+# roles that may reach them (parsed for mappings, parsed PAST for
 # access control). http4k's CORE DSL has no declaration site — the pack's
-# own comment says so, and the fixture pins the empties are real. P17 adds
+# own comment says so, and the fixture pins the empties are real. adds
 # the two REAL auth sites http4k's CONTRACT DSL has (block security +
 # per-route meta security, meta overriding the block) and Vert.x's
 # auth-handler chain.
@@ -803,7 +810,7 @@ path = "fixtures/dsl-media-auth"
 capabilities = ["endpoints", "media-types", "authentication", "vertx", "vertx-auth-handler", "javalin", "servlet", "web-xml", "security-constraint", "http4k", "http4k-contract-security"]
 tolerated_resolution_errors = ["ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "CANNOT_INFER_VALUE_PARAMETER_TYPE"]
 
-# P19 §4: the outbound client rows, each called once with a literal URL —
+# The outbound client rows, each called once with a literal URL —
 # the rows the liveness sweep found nothing exercising.
 [[fixtures]]
 slug = "outbound-clients"
@@ -812,11 +819,11 @@ path = "fixtures/outbound-clients"
 capabilities = ["endpoints", "outbound", "services", "urls"]
 tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
-# P20 §2 (review): the values the fold can only reach by leaving the block
+# (review): the values the fold can only reach by leaving the block
 # — the dominator walk and both verdicts of the conservative phi join. The
 # §0 depth report measured `crossBlock: 0` on all 93 bundled fixtures, so
 # the extension had no corpus evidence and its baseline column could not
-# differ from the shipped one (R63).
+# differ from the shipped one.
 [[fixtures]]
 slug = "cross-block-values"
 tier = "fixtures"
@@ -824,12 +831,12 @@ path = "fixtures/cross-block-values"
 capabilities = ["outbound", "services", "urls", "cross-block-fold"]
 tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
-# P21 §1: the producer bucket — values defined by a call — folded through
+# The producer bucket — values defined by a call — folded through
 # workspace callees with provable-constant returns (every return site the
 # same constant; disagreeing returns, open virtual targets and recursion
 # refuse). The fixture's outbound URLs and its route prefix all come from
 # workspace accessors; the defect restored publishes the register's machine
-# name where the host belongs (R131's outside view).
+# name where the host belongs (the outside view).
 [[fixtures]]
 slug = "workspace-call-constants"
 tier = "fixtures"
@@ -837,7 +844,7 @@ path = "fixtures/workspace-call-constants"
 capabilities = ["outbound", "services", "urls", "workspace-call-fold", "ktor", "endpoints"]
 tolerated_resolution_errors = []
 
-# P21 §0: the two failure buckets that had never been non-zero, each with
+# The two failure buckets that had never been non-zero, each with
 # the fixture that drives it — a value whose provenance is a handler
 # PARAMETER (the fold's honest boundary), and a chain deeper than the
 # fold's MAX_DEPTH budget. The buckets are load-bearing from here: a change
@@ -856,12 +863,12 @@ path = "fixtures/depth-cap-chain"
 capabilities = ["outbound", "services", "depth-budget"]
 tolerated_resolution_errors = []
 
-# P22 §1: the corpus shape no bundled fixture held — two real Kotlin
+# The corpus shape no bundled fixture held — two real Kotlin
 # overloads sharing one canonical name whose bodies differ in control flow.
-# R133 (a name-keyed fold cache answering one overload with its namesake's
+# (a name-keyed fold cache answering one overload with its namesake's
 # blocks) survived every gate because of exactly this absence; the folder
 # half pins identity-keyed folding, the flow half pins identity-keyed
-# summaries (the pre-P22 name-keyed table MISSED the relay flow entirely).
+# summaries (the earlier name-keyed table MISSED the relay flow entirely).
 [[fixtures]]
 slug = "overload-shapes"
 tier = "fixtures"
@@ -869,7 +876,7 @@ path = "fixtures/overload-shapes"
 capabilities = ["outbound", "services", "overloads", "workspace-call-fold"]
 tolerated_resolution_errors = []
 
-# P22 §2: the PARTIAL half of the pathKind vocabulary — a taint chain
+# The PARTIAL half of the pathKind vocabulary — a taint chain
 # through forty summary boundaries whose composed trace outgrows the trace
 # cap, so the published slice is elided (endpoints guaranteed, middle cut).
 # A value the corpus never drove is a value nothing holds honest.
@@ -880,7 +887,7 @@ path = "fixtures/elided-trace"
 capabilities = ["outbound", "trace-elision", "path-kind"]
 tolerated_resolution_errors = []
 
-# P21 §2: the ten sanitizers that had never fired, given the R129 shape —
+# The ten sanitizers that had never fired, given the shape —
 # the sanitized result reaches the sink directly, so entry present = flow
 # absent and entry removed = the want-not violates. Every non-JDK class is
 # a real API stubbed with its real signature; the four positive controls
@@ -892,7 +899,7 @@ path = "fixtures/sanitizer-gallery"
 capabilities = ["taint", "sanitizer", "xss", "path-traversal", "ssrf", "sql-quote", "uuid"]
 tolerated_resolution_errors = []
 
-# P19 §4: the frameworks the pack modelled but no fixture exercised (the
+# The frameworks the pack modelled but no fixture exercised (the
 # liveness sweep's whole-population finding): AWS Lambda's supertype
 # handlers, Azure Functions' annotations, spring-graphql's controller and
 # the spring-messaging listener family.
@@ -903,7 +910,7 @@ path = "fixtures/cloud-and-messaging"
 capabilities = ["endpoints", "aws-lambda", "azure-functions", "graphql", "spring-messaging"]
 tolerated_resolution_errors = ["VIRTUAL_MEMBER_HIDDEN"]
 
-# P19 §4: the Vert.x 5 sub-router mount, the entry P18 swapped into the pack
+# The Vert.x 5 sub-router mount, the entry swapped into the pack
 # and left inert (no fixture exercised either spelling, and the prefix walk
 # only knew lambda-shaped nesting). The mounted router's routes publish
 # under the mount route's path, trailing `*` stripped.
@@ -914,12 +921,12 @@ path = "fixtures/vertx-subrouter"
 capabilities = ["endpoints", "vertx", "sub-router-mount", "prefix-composition"]
 tolerated_resolution_errors = []
 
-# P11: the vuln tier — the honest population for the cross-dependency gate.
+# The vuln tier — the honest population for the cross-dependency gate.
 # A purpose-built Kotlin service whose vulnerable path runs through a REAL
 # published dependency (libs/timber-5.0.1.jar, the classes.jar inside the
 # AAR, committed verbatim), so a workspace source -> jar-internal sink chain
 # exists under the shipped pack. The eight pinned repos were pinned for
-# other phases' questions and carry named zero-causes (docs/KOSI.md, P11
+# other tiers' questions and carry named zero-causes (docs/KOSI.md,
 # section); this entry is the repo-tier row the gate can measure.
 
 [[fixtures]]
@@ -930,10 +937,10 @@ classpath_file = "classpath.txt"
 capabilities = ["deps", "bytecode-summaries", "cross-dependency", "vulnerable-service", "log-injection", "sql-query", "services"]
 tolerated_resolution_errors = []
 
-# P14 §3: the findings ratchet as a tier. Three deliberately vulnerable
+# The findings ratchet as a tier. Three deliberately vulnerable
 # real applications, SHA-pinned, whose measured slices are the only
 # repo-tier numbers a change could silently zero — which is how kosi
-# arrived at P11 reporting zero findings everywhere. Each carries
+# arrived at reporting zero findings everywhere. Each carries
 # `min_findings` (enforced two-way by the `vuln-finding-floor` promotion
 # check: below FAILS, and materially above FAILS until the floor is
 # raised, so an improvement is recorded rather than absorbed) and a
@@ -943,8 +950,8 @@ tolerated_resolution_errors = []
 # measured against an empty classpath is a floor nobody measured. The tier
 # is separate from `vuln` so corpusQuick (no network) keeps its bundled
 # population while corpusFull measures these. `min_findings` values are
-# the P14 measurements on this machine; kosi-vulnerable-app-kotlin-ktor is
-# the single-file Ktor app that exposed R80-R84, kept as their regression
+# the measurements on this machine; kosi-vulnerable-app-kotlin-ktor is
+# the single-file Ktor app that exposed -, kept as their regression
 # anchor.
 
 [[fixtures]]
@@ -954,13 +961,13 @@ repo = "https://github.com/satishpatnayak/AndroGoat"
 sha = "77996f239587a8ed2691629777374b5f4a364589"
 classpath_file = "classpath.txt"
 min_findings = 16
-# P14 pinned deps_max_classes = 50 here: the transitive classpath's
-# 500-class lowering filled the 8g corpus heap. P15 removed the cause —
+# Pinned deps_max_classes = 50 here: the transitive classpath's
+# 500-class lowering filled the 8g corpus heap. removed the cause —
 # composed summary sink-effects multiplied through unbounded param-path
 # joins (FragmentManagerImpl's recursive cluster grew one function's escape
 # set to 68M entries / ~8GB); the joins are now capped at the engine's
 # access-path depth (deeper effects can never match a fact key) and the
-# escape set is budgeted like the state (R58's drop-whole degradation,
+# escape set is budgeted like the state (the drop-whole degradation,
 # counted in stats.truncations as summary-effect-budget). The default
 # 500-class cap now runs this classpath at a ~1 GiB peak in ~16 s, and the
 # cap entry is deleted — a cap nobody needs is a number nobody measures.
@@ -993,7 +1000,7 @@ sha = "69dcff3fa81daa85f936cfb7f17007761363c303"
 classpath_file = "classpath.txt"
 capabilities = ["ktor", "web", "coroutines"]
 
-# P1 gate: five pinned real repos spanning Spring / Ktor / Android / KMP /
+# Gate: five pinned real repos spanning Spring / Ktor / Android / KMP /
 # mixed-Java. resolvedCallRatio is reported PER REPO against these (never an
 # average), and the hybrid entry declares old language versions so the clamp
 # path is exercised on real code (08-VERSION-POLICY.md §4). Pinned
@@ -1031,7 +1038,7 @@ sha = "b1d3c81dfe304c19bf544a33923ab1042e28fe4b"
 classpath_file = "classpath.txt"
 capabilities = ["android", "mixed-java", "legacy-language-version"]
 
-# P7: one pinned repo per framework tier. heterogeneous-microservices is
+# One pinned repo per framework tier. heterogeneous-microservices is
 # one Kotlin codebase implementing the same service on Spring Boot, Ktor,
 # Micronaut and Quarkus - four frameworks' endpoints in one pinned tree.
 
@@ -1059,7 +1066,7 @@ sha = "fffe0320d3c6af86e466f96bb3ec424f1c36a063"
 classpath_file = "classpath.txt"
 capabilities = ["grpc", "rpc", "endpoints"]
 
-# ---- P24: the deep tier (10-DEEP-EVIDENCE.md). Layered applications, small
+# ---- the deep tier (10-DEEP-EVIDENCE.md). Layered applications, small
 # in lines and deep in frames, each with a negative half. One slot per
 # fixture (the default `resolved` one - Matrix.slotsFor), added WITH its
 # known-fails: the inventory is the measurement.
@@ -1093,9 +1100,9 @@ path = "fixtures/deep-dispatch-ladder"
 capabilities = ["deep", "dispatch", "higher-order", "sam"]
 tolerated_resolution_errors = []
 
-# P25 §0: one capability, every spelling. One flow written 25 ways, with a
+# One capability, every spelling. One flow written 25 ways, with a
 # want per spelling that works and a known-fail per spelling that does not —
-# so a channel that holds for `{ s -> }` and dies for `{ it }` (R152, the
+# so a channel that holds for `{ s -> }` and dies for `{ it }` (the
 # defect this fixture generalises) cannot ship again.
 [[fixtures]]
 slug = "spelling-gallery"
@@ -1104,7 +1111,7 @@ path = "fixtures/spelling-gallery"
 capabilities = ["higher-order", "dispatch", "sam", "references", "receivers"]
 tolerated_resolution_errors = []
 
-# P25 §2: DI as dispatch evidence. The container constructs the bound
+# DI as dispatch evidence. The container constructs the bound
 # implementation, so the interface call has ONE target and the edge says
 # `di-binding`; the two unbound siblings must stay clean.
 [[fixtures]]
@@ -1114,7 +1121,7 @@ path = "fixtures/di-bound-dispatch"
 capabilities = ["dispatch", "di", "spring-mvc"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P26 §2: finish the container — the BINDING METHODS. @Binds (the parameter
+# Finish the container — the BINDING METHODS. @Binds (the parameter
 # is the implementation, no construction anywhere), @Bean/@Provides by
 # parameter and by construction, Koin's provider lambdas in both package
 # spellings, two bindings of one interface (both targets, width 2,
@@ -1126,10 +1133,10 @@ path = "fixtures/di-module-bindings"
 capabilities = ["dispatch", "di", "bindings", "koin", "dagger", "spring"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P26 §0 (R161): the source that comes back inside an object. A source born
+# The source that comes back inside an object. A source born
 # in a factory callee, stored into the constructed object's FIELD — the shape
-# P24's constructor synthesis made load-bearing and no summary channel
-# carried (http4k's delegation factories went silent between the P23 and P24
+# The constructor synthesis made load-bearing and no summary channel
+# carried (http4k's delegation factories went silent between the and
 # builds; 22 findings, no gate watching).
 [[fixtures]]
 slug = "source-return-fields"
@@ -1138,10 +1145,10 @@ path = "fixtures/source-return-fields"
 capabilities = ["taint", "summaries", "source-returns", "object-identity", "constructor-synthesis"]
 tolerated_resolution_errors = []
 
-# P26 §1.3: deserialization as a boundary — the produced OBJECT carries the
+# Deserialization as a boundary — the produced OBJECT carries the
 # source's taint on its FIELDS (Jackson readValue, kotlinx
 # decodeFromString, Gson fromJson), the hop that makes a request body reach
-# a sink through a DTO. The cross-boundary wildcard channel is R163.
+# a sink through a DTO. The cross-boundary wildcard channel is.
 [[fixtures]]
 slug = "deserialization-fields"
 tier = "fixtures"
@@ -1149,7 +1156,7 @@ path = "fixtures/deserialization-fields"
 capabilities = ["taint", "deserialization", "dto-fields", "jackson", "kotlinx-serialization", "gson"]
 tolerated_resolution_errors = []
 
-# P26 §1.1: persistence as sinks — Spring Data repository interfaces
+# Persistence as sinks — Spring Data repository interfaces
 # (derived query names and @Query), Room DAOs (@Dao/@Query), Exposed's
 # Transaction.exec. The interface is USER code: the sink matches what the
 # DECLARATION carries, not an FQN pattern.
@@ -1160,7 +1167,7 @@ path = "fixtures/persistence-sinks"
 capabilities = ["taint", "sql-query", "spring-data", "room", "exposed", "interface-sinks"]
 tolerated_resolution_errors = []
 
-# P26 §1.2: outbound as services — the annotated interface method IS the
+# Outbound as services — the annotated interface method IS the
 # call (Retrofit @GET family, Feign @RequestLine); the base URL rides the
 # existing builder row, resolved through the config resolver.
 [[fixtures]]
@@ -1170,7 +1177,7 @@ path = "fixtures/outbound-interfaces"
 capabilities = ["outbound", "services", "urls", "retrofit2", "feign", "interface-outbound"]
 tolerated_resolution_errors = []
 
-# P26 §1.4: Android's cross-component channel — Intent/Bundle extras out of
+# Android's cross-component channel — Intent/Bundle extras out of
 # one component and into another (the write half is a pack effect, the read
 # half the existing source), and a ContentProvider's query() arguments as
 # inputs any app on the device can supply (the provider framework entry
@@ -1182,13 +1189,13 @@ path = "fixtures/intent-extras-channel"
 capabilities = ["android", "intent", "extras", "content-provider", "endpoint-sources"]
 tolerated_resolution_errors = []
 
-# P27: the corpus's first fixture that is an APPLICATION rather than a
+# The corpus's first fixture that is an APPLICATION rather than a
 # feature. One request crosses a Spring MVC entry, a Jackson deserialization
 # boundary, a container-bound service seam with an unbound sibling, a
 # `by`-delegation decorator, a DTO->domain mapper, a getter, a collection,
 # and a Spring Data repository interface as the sink — eleven frames. Every
 # capability in that list had a fixture that exercised it ALONE; this one
-# makes them COMPOSE, which is where P27 found all four of its defects.
+# makes them COMPOSE, which is where found all four of its defects.
 [[fixtures]]
 slug = "layered-app"
 tier = "frameworks"
@@ -1196,11 +1203,25 @@ path = "fixtures/layered-app"
 capabilities = ["taint", "spring-mvc", "spring-data", "di", "delegation", "deserialization", "object-identity", "sanitizers", "endpoint-sources"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §2: Spring MVC's argument-binding rule, one handler per row of the
+# Spring MVC's argument-binding rule, one handler per row of the
 # framework's own table. The positives are the fallback rule ("simple type ->
 # @RequestParam, otherwise @ModelAttribute"); the 39 want-nots are the
 # framework-supplied rows, each of which becomes a false finding on every
 # controller in the corpus if its pack entry is dropped.
+# Short tail: ratpack and dropwizard, the two frameworks listed as
+# unaudited and found were not in the pack AT ALL. Ratpack is a context
+# framework (`void handle(Context)`, ratpack.io handlers manual) whose readers
+# needed security-pack source rows as well as endpoints rows — the lesson.
+# Dropwizard needs no framework of its own (its resources are Jakarta REST);
+# it needs `@Auth` known as the injected principal, or every secured resource
+# grows a false source. The want-not on `whoami` is that entry's whole gate.
+[[fixtures]]
+slug = "ratpack-dropwizard"
+tier = "frameworks"
+path = "fixtures/ratpack-dropwizard"
+capabilities = ["taint", "endpoints", "framework-semantics", "endpoint-sources"]
+tolerated_resolution_errors = []
+
 [[fixtures]]
 slug = "spring-argument-binding"
 tier = "frameworks"
@@ -1208,7 +1229,7 @@ path = "fixtures/spring-argument-binding"
 capabilities = ["endpoint-sources", "spring-mvc", "parameter-semantics", "command-objects"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §2: quarkus / Jakarta RESTful Web Services's argument-binding rule, one handler per framework-supplied
+# Quarkus / Jakarta RESTful Web Services's argument-binding rule, one handler per framework-supplied
 # type, transcribed from the framework's own documentation. Every one of
 # these frameworks was marked handlerInput=annotated, which seeds NOTHING
 # for a handler that binds without annotations.
@@ -1219,7 +1240,7 @@ path = "fixtures/jaxrs-argument-binding"
 capabilities = ["endpoint-sources", "parameter-semantics", "jax-rs"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §2: micronaut's argument-binding rule, one handler per framework-supplied
+# Micronaut's argument-binding rule, one handler per framework-supplied
 # type, transcribed from the framework's own documentation. Every one of
 # these frameworks was marked handlerInput=annotated, which seeds NOTHING
 # for a handler that binds without annotations.
@@ -1230,7 +1251,7 @@ path = "fixtures/micronaut-argument-binding"
 capabilities = ["endpoint-sources", "parameter-semantics", "micronaut"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §2: spring-messaging's argument-binding rule, one handler per framework-supplied
+# Spring-messaging's argument-binding rule, one handler per framework-supplied
 # type, transcribed from the framework's own documentation. Every one of
 # these frameworks was marked handlerInput=annotated, which seeds NOTHING
 # for a handler that binds without annotations.
@@ -1241,7 +1262,7 @@ path = "fixtures/messaging-argument-binding"
 capabilities = ["endpoint-sources", "parameter-semantics", "spring-messaging"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §2: spring-graphql's argument-binding rule, one handler per framework-supplied
+# Spring-graphql's argument-binding rule, one handler per framework-supplied
 # type, transcribed from the framework's own documentation. Every one of
 # these frameworks was marked handlerInput=annotated, which seeds NOTHING
 # for a handler that binds without annotations.
@@ -1252,8 +1273,8 @@ path = "fixtures/graphql-argument-binding"
 capabilities = ["endpoint-sources", "parameter-semantics", "graphql"]
 tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 
-# P27 §1: the forwarders `by`-delegation generates — one override per
-# member, none of them with PSI. The other half of R161: P26 carried the
+# The forwarders `by`-delegation generates — one override per
+# member, none of them with PSI. The other half of carried the
 # source back inside the returned object's FIELD, and http4k's consumers
 # still could not read it, because they read through exactly these.
 [[fixtures]]
@@ -1263,9 +1284,9 @@ path = "fixtures/class-delegation"
 capabilities = ["taint", "delegation", "dispatch", "object-identity", "synthesis"]
 tolerated_resolution_errors = []
 
-# P25 §1: the same helper called three ways — tainted, constant, sanitized.
+# The same helper called three ways — tainted, constant, sanitized.
 # Exactly one finding is correct, and the measurement of whether a
-# context-INSENSITIVE engine gets it right is the phase's §1 answer.
+# context-INSENSITIVE engine gets it right is the answer.
 [[fixtures]]
 slug = "context-shared-helper"
 tier = "fixtures"
@@ -1273,7 +1294,7 @@ path = "fixtures/context-shared-helper"
 capabilities = ["summaries", "sanitizers", "context"]
 tolerated_resolution_errors = []
 
-# P29: the walk budget, pinned from both sides. UnderBudget.kt nests ~1,505
+# The walk budget, pinned from both sides. UnderBudget.kt nests ~1,505
 # PSI levels (measured default-stack overflow: ~1,250) and is analysed in
 # full on the 512 MB analysis stack; OverBudget.kt nests ~2,605 levels, past
 # the 2,000-level walk budget, and is skipped with `psi-depth-cap` naming the

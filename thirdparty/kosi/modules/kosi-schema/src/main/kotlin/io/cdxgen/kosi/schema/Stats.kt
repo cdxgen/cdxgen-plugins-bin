@@ -34,12 +34,12 @@ data class Stats(
      * How many functions the lowering attempted — the denominator the
      * loweringFailures map was computed over. "0 failures" means nothing
      * until the function count says what was lowered; the map and the count
-     * travel together (the P2 gate's rule for the lowering rate).
+     * travel together (the gate's rule for the lowering rate).
      */
     val functionsLowered: Int,
     val fixpointCapHits: Int,
     /**
-     * How many functions the P4 taint engine's worklist actually ran over —
+     * How many functions the taint engine's worklist actually ran over —
      * the denominator [fixpointCapHits] was measured against, exactly as
      * [functionsLowered] is the denominator of [loweringFailures]. Zero with
      * no flow run (the syntax tier, or `--dataflow none`); a run that
@@ -52,13 +52,13 @@ data class Stats(
     val crossDependencySliceCount: Int,
     val crossModuleSliceCount: Int = 0,
     val reachableSliceCount: Int,
-    /** P5: SCCs the summary fixpoint processed — the cap counter's denominator. */
+    /** SCCs the summary fixpoint processed — the cap counter's denominator. */
     val sccsProcessed: Int = 0,
     val sccIterationCapHits: Int = 0,
-    /** P6: slices whose source and sink are separated by a suspend boundary. */
+    /** Slices whose source and sink are separated by a suspend boundary. */
     val suspendCrossingSliceCount: Int = 0,
     /**
-     * P9, the `--deps` tier: class-file records whose body does not exist —
+     * The `--deps` tier: class-file records whose body does not exist —
      * abstract/interface/native methods, stripped or non-`-parameters` classes,
      * methods the bytecode lowering declines. They are IGNORED ENTIRELY, never
      * concluded about: an empty body is indistinguishable from a no-op, so a
@@ -66,13 +66,13 @@ data class Stats(
      * is the population excluded from every dependency-tier denominator.
      */
     val bodylessRecords: Int = 0,
-    /** P9: classes actually lowered from dependency jars (the tier's denominator). */
+    /** Classes actually lowered from dependency jars (the tier's denominator). */
     val dependencyClasses: Int = 0,
-    /** P9: dependency methods lowered WITH bodies (the summary count's denominator). */
+    /** Dependency methods lowered WITH bodies (the summary count's denominator). */
     val dependencyFunctions: Int = 0,
     val truncations: Map<String, Int>,
     /**
-     * P28 (R176): skips BY POLICY (`generated-functions` under
+     * Skips BY POLICY (`generated-functions` under
      * `--dataflow-skip-generated`) — deliberate, lossless exclusions whose
      * summaries still apply. Beside [truncations] so the two vocabularies
      * stay separate: a cap that binds is a defect (09-PRECISION §3b), a
@@ -80,9 +80,9 @@ data class Stats(
      */
     val policySkips: Map<String, Int> = emptyMap(),
     val degraded: String?,
-    /** P28 §1: how the classpath was acquired, and what each strategy found. */
+    /** How the classpath was acquired, and what each strategy found. */
     val classpath: ClasspathStats = ClasspathStats(),
-    /** P28 §4 (R179): source files discovered against source files present. */
+    /** Source files discovered against source files present. */
     val sourceCoverage: SourceCoverage = SourceCoverage(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
@@ -133,35 +133,53 @@ data class Stats(
 }
 
 /**
- * P28 §4 (R179): the coverage denominator. `discovered` is files[]
+ * The coverage denominator. `discovered` is files[]
  * (.kt/.java); `present` counts the same extensions under the analysed root
  * with the collector's own exclusion policy, so the two numbers answer one
- * question. kotlinx.coroutines published 1/1 039 as a CLEAN report before
+ * question. Kotlinx.coroutines published 1/1 039 as a CLEAN report before
  * this existed; now the ratio is data and a large gap is a diagnostic, not
  * silence.
  */
 data class SourceCoverage(
     val discovered: Int = 0,
     val present: Int = 0,
+    /**
+     * How many of [present] sit under a recognised test directory. A source
+     * root is a MAIN source root, so test files are present-but-not-sought:
+     * counting them in the denominator makes a repository with a large test
+     * suite look like one whose modules were dropped, and those are opposite
+     * facts. Both numbers are published; [nonTestRatio] is the one that
+     * measures discovery.
+     */
+    val testPresent: Int = 0,
 ) {
     /** present == 0 is full coverage of an empty tree, not a division by zero. */
     val ratio: Double get() = if (present <= 0) 1.0 else discovered.toDouble() / present
+
+    /** Discovery against the files a main source root could have held. */
+    val nonTestRatio: Double get() {
+        val denominator = present - testPresent
+        if (denominator <= 0) return 1.0
+        return minOf(1.0, discovered.toDouble() / denominator)
+    }
 
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
         w.num("discovered", discovered.toLong())
         w.num("present", present.toLong())
+        w.num("testPresent", testPresent.toLong())
         w.dbl("ratio", ratio)
+        w.dbl("nonTestRatio", nonTestRatio)
         w.endObject()
     }
 }
 
 /**
- * P28 §1: the classpath acquisition record. `strategy` names the ONE
+ * The classpath acquisition record. `strategy` names the ONE
  * strategy that produced the attached classpath — or `none` when nothing
  * attached, which is stated EXPLICITLY because a classpath-less run and a
  * run that found nothing produce the same sparse graph and are opposite
- * facts (R173's measured zero, R179's healthy-looking zero). `attempts[]`
+ * facts (the measured zero, the healthy-looking zero). `attempts[]`
  * records every strategy the chain tried and whether it fired, so "cache
  * located 4 of 41 declared coordinates" is readable from the report without
  * re-running anything. `note` is portable vocabulary — no absolute paths,

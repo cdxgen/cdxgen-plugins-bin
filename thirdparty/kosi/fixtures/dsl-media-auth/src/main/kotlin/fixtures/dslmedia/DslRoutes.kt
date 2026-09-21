@@ -1,4 +1,4 @@
-// P15 §4: media and auth for the frameworks P14 did not model. Three
+// media and auth for the frameworks did not model. Three
 // declaration sites that are NOT annotations and NOT named arguments:
 //
 //  - Vert.x chains them on the ROUTE OBJECT between the route call and the
@@ -7,9 +7,9 @@
 //    `app.get("/x", handler, Role.ADMIN)`.
 //  - The servlet deployment descriptor's <security-constraint> names
 //    url-patterns and the roles that may reach them (the web.xml of this
-//    fixture, parsed for mappings since P13 and parsed PAST for auth).
+//    fixture, parsed for mappings since and parsed PAST for auth).
 //
-// P17 §0 adds the two REAL auth declaration sites http4k's contract DSL has
+// adds the two REAL auth declaration sites http4k's contract DSL has
 // (the core DSL below keeps its honest empty): the contract BLOCK's security
 // and a route's own meta security, which overrides it. Vert.x's auth-handler
 // chain (`route.handler(BasicAuthHandler.create(auth))`) is modelled here
@@ -38,7 +38,7 @@
 // A chained route whose media argument is the null LITERAL (legal against
 // the Java platform type, a warning not an error): a null media type is the
 // ABSENCE of a declaration — no produces entry exists for this route, and
-// certainly not one called "null" (P19 §1).
+// certainly not one called "null".
 // kosi:want endpoint framework=vertx path=/chain-null mode=resolved fn=~lambda
 // kosi:want-not endpoint framework=vertx path=/chain-null produces=null
 //
@@ -88,7 +88,7 @@
 // An UNMODELLED meta scheme (app code implementing Security, not one of the
 // pack's constructors): the requirement EXISTS — http4k's elvis ignores the
 // block whenever meta declares any security — so the fallback must not name
-// the BLOCK's scheme (R109's residual, P18). The entry names the site and
+// the BLOCK's scheme (the residual). The entry names the site and
 // the constructor the CODE declares, without claiming the pack models it.
 // kosi:want endpoint framework=http4k path=/custom mode=resolved authentication=~meta-security
 // kosi:want endpoint framework=http4k path=/custom mode=resolved authentication=~CustomSecurity
@@ -98,7 +98,7 @@
 // (`meta.security?.filter ?: security?.filter`) takes the block's arm for a
 // null meta value exactly as it does for an absent one, so /explicit-null
 // inherits ApiKeySecurity and must NOT be reported as an unknown scheme —
-// the other direction of R109's mistake (P18 review).
+// the other direction of the mistake (a later review).
 // kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~contract-security
 // kosi:want endpoint framework=http4k path=/explicit-null mode=resolved authentication=~ApiKeySecurity
 // kosi:want-not endpoint framework=http4k path=/explicit-null authentication=~meta-security
@@ -113,7 +113,7 @@
 // kosi:want-not endpoint framework=http4k path=/simple consumes=~
 // kosi:want-not endpoint framework=http4k path=/simple authentication=~
 //
-// P28 §2: two readers that were endpoints evidence but NOT taint sources —
+// two readers that were endpoints evidence but NOT taint sources —
 // Vert.x's form-attribute read (context.request().getFormAttribute) and
 // http4k's routed path read (org.http4k.routing.path). Each flows to a real
 // sink; the wants fail if the source row is removed.

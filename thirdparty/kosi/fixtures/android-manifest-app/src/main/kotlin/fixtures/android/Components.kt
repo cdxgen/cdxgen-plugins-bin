@@ -7,7 +7,7 @@
 // kosi:want endpoint framework=android path=~SyncService fn=~SyncService.onStartCommand mode=resolved
 // kosi:want endpoint framework=android path=~MetaProvider fn=~MetaProvider.query mode=resolved
 // kosi:want-not endpoint framework=android path=~GhostActivity mode=resolved
-// P28 (R178): the library activity's endpoint is published (the manifest
+// the library activity's endpoint is published (the manifest
 // declares it) but marked — its handlerCanonicalName is EMPTY (the
 // lifecycle matcher found no class to name, dagger's exact 53-endpoint
 // shape) and substantiated=false. The endpoint itself has no fn to match,

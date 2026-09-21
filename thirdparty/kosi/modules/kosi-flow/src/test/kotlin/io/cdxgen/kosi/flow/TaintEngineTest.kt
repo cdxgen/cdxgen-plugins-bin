@@ -364,7 +364,7 @@ class TaintEngineTest {
         assertEquals(0, result.functionsAnalysed, "the function exceeded the cap and was skipped")
         assertEquals(0, result.evidence.slices.size)
         // The oversized function is skipped from BOTH analyses: the main
-        // worklist (function-instructions) and the P5 summarizer.
+        // worklist (function-instructions) and the summarizer.
         assertEquals(mapOf("function-instructions" to 1, "summary-oversized-function" to 1), result.truncations)
         assertTrue(result.diagnostics.any { it.code == DiagnosticCodes.DATAFLOW_TRUNCATED })
     }
@@ -425,7 +425,7 @@ class TaintEngineTest {
         assertEquals(1, result.sinkSites)
     }
 
-    // ---- R54: the endpoints a trace claims must be the endpoints it has ----
+    // ---- the endpoints a trace claims must be the endpoints it has ----
 
     /**
      * `sourceId in nodeIds` is trivially true — `materialise` assigns it from
@@ -527,7 +527,7 @@ class TaintEngineTest {
 
     @Test
     fun everyMergeAttributesPerFactNotJustTheJoins() {
-        // R54 was fixed at the concat/phi/elvis join and nowhere else. The
+        // Was fixed at the concat/phi/elvis join and nowhere else. The
         // OTHER two merges — an element read, and the blanket propagation an
         // unresolvable call performs by default — still blamed the first
         // non-empty operand for every fact they merged. Two sources into

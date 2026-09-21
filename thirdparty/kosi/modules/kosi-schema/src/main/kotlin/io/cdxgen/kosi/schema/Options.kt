@@ -1,7 +1,7 @@
 package io.cdxgen.kosi.schema
 
 /**
- * Analysis tiers (02-ARCHITECTURE.md §3). Phase 0 implements `syntax`; the
+ * Analysis tiers. `syntax` needs no classpath; the
  * others exist so option validation and the report contract are stable before
  * the engines behind them land.
  */
@@ -9,7 +9,7 @@ enum class Backend(val id: String) {
     SYNTAX("syntax"),
     RESOLVED("resolved"),
     /**
-     * P9, opt-in (`--backend compile`): a real compilation for generated
+     * Opt-in (`--backend compile`): a real compilation for generated
      * sources (KSP/Compose/Room). DECLARED GAP: this release cannot execute
      * the analysed build offline, so selecting `compile` runs the resolved
      * tier and stamps a `compile-backend-gap` diagnostic on the report — the
@@ -71,7 +71,7 @@ enum class DependencyDetail(val id: String) {
 }
 
 /**
- * P28 §1: how the resolved tier ACQUIRES its classpath. Every strategy kosi
+ * How the resolved tier ACQUIRES its classpath. Every strategy kosi
  * itself runs is READ-ONLY (THREAT_MODEL.md — kosi never executes the
  * analysed build); the build-executing strategies (Gradle dependency
  * reports, `mvn dependency:build-classpath`) belong to the OPERATOR-side
@@ -149,24 +149,24 @@ data class AnalyzeOptions(
     val includeStdlib: Boolean = false,
     val unknownCall: String = "propagate",
     /**
-     * P7: endpoint handlers' parameters are taint sources (`--endpoint-sources`),
+     * Endpoint handlers' parameters are taint sources (`--endpoint-sources`),
      * so `--dataflow` links slices to the endpoint they enter through. The
      * default is off: without the flag a run's slices start only at pack
      * sources, exactly as before.
      */
     val endpointSources: Boolean = false,
     /**
-     * P9 (`--deps`): read dependency jars from the resolved classpath, lower
+     * (`--deps`): read dependency jars from the resolved classpath, lower
      * their class files into the SAME KIR, summarise them with the SAME
      * engine (summaries carry `origin=bytecode`), and feed
      * `paramToSink`/`paramToReturn` effects back into the workspace analysis.
      * `--dataflow security-deps` implies this. Off by default: without it the
-     * analysis is workspace-only and byte-identical to every pre-P9 run —
+     * analysis is workspace-only and byte-identical to every earlier run —
      * the invariance the corpus asserts.
      */
     val deps: Boolean = false,
     /**
-     * P9: the cap on dependency classes lowered in one run (bounded tier).
+     * The cap on dependency classes lowered in one run (bounded tier).
      * 500, not larger: the tier's lowered bodies and their summaries share
      * the pinned 2 GiB corpus JVM with the workspace session, and a 2000-class
      * tier on an Android repo OOMed the run (ExitOnOutOfMemoryError fired —
@@ -175,22 +175,22 @@ data class AnalyzeOptions(
      */
     val depsMaxClasses: Int = 500,
     /**
-     * P16 §2 (`--max-summary-sink-effects`): the summary escape-set budget
-     * (P15's `summary-effect-budget` degradation). The default is P15's;
+     * (`--max-summary-sink-effects`): the summary escape-set budget
+     * (the `summary-effect-budget` degradation). The default is 's;
      * the flag exists so the budget's cost is a MEASUREMENT (findings at
      * default, 4x, 64k) rather than an assumption, reproducible from the
      * report's own options section.
      */
     val dataflowMaxSummarySinkEffects: Int = 8192,
     /**
-     * P10 (`--max-analysis-seconds`): wall-clock budget. Null or omitted =
+     * (`--max-analysis-seconds`): wall-clock budget. Null or omitted =
      * off. When the budget trips the run DEGRADES — every trip emits a named
      * `analysis-time-budget` diagnostic and the partial report still ships;
      * it never panics and never discards already-computed evidence.
      */
     val maxAnalysisSeconds: Int? = null,
     /**
-     * P10 (`--max-rss-mb`): peak-RSS budget, sampled while the analysis runs.
+     * (`--max-rss-mb`): peak-RSS budget, sampled while the analysis runs.
      * Tripping emits `rss-budget` and ships the partial report, like the time
      * budget. Off (null) by default.
      */
@@ -207,7 +207,7 @@ data class AnalyzeOptions(
     val classpath: List<String> = emptyList(),
     val classpathFile: String? = null,
     /**
-     * P28 §1 (`--classpath-strategy`): force one acquisition strategy, or
+     * (`--classpath-strategy`): force one acquisition strategy, or
      * `auto` for the chain explicit -> file -> jars -> cache. The winner —
      * or `none` — is published in `stats.classpath` on every resolved-tier
      * run; a forced strategy removes the fall-through, so a test (or a
@@ -270,16 +270,16 @@ data class AnalyzeOptions(
 }
 
 /**
- * P23 §0: one accepted-but-degenerate option pairing — a run that names
+ * One accepted-but-degenerate option pairing — a run that names
  * something it cannot deliver.
  *
  * The whole point is that there is ONE definition. The CLI refuses the
  * [usageError] subset before a run starts; the Analyzer stamps every one of
  * them on the report, because the Analyzer is also a library (the bench, the
  * corpus and evinse call it directly and never see a usage message). Before
- * P23 neither existed: `--dataflow reachable --callgraph none` was accepted,
+ * neither existed: `--dataflow reachable --callgraph none` was accepted,
  * computed no reachability, and published a count claiming every slice was
- * reachable (the P22 review's R137), and the default pairing — the syntax
+ * reachable (a later review), and the default pairing — the syntax
  * backend with `--dataflow security` — silently produced no `dataFlow` at
  * all, with the only hint a diagnostic that talks about `resolvedCallRatio`.
  */
@@ -300,12 +300,12 @@ data class OptionDegradation(
 )
 
 /**
- * P23 §0: every accepted pairing in [AnalyzeOptions] that cannot deliver
+ * Every accepted pairing in [AnalyzeOptions] that cannot deliver
  * what it names, in a stable order. Empty for a coherent run.
  *
  * `OptionMatrixTest` walks the accepted product of the option enums and
  * asserts each cell against its declared contract, so a pairing cannot be
- * both accepted and unexamined — the state R137 came out of.
+ * both accepted and unexamined — the state came out of.
  */
 fun AnalyzeOptions.degradations(): List<OptionDegradation> {
     val out = mutableListOf<OptionDegradation>()
@@ -334,7 +334,7 @@ fun AnalyzeOptions.degradations(): List<OptionDegradation> {
             ),
         )
     }
-    // R137's pairing. Reachability is an INTERSECTION with the call graph;
+    // The pairing. Reachability is an INTERSECTION with the call graph;
     // with no graph there is nothing to intersect, and a consumer reading
     // `reachable` in `dataFlow.mode` would take the published slices for
     // reachable ones.
@@ -361,7 +361,7 @@ fun AnalyzeOptions.degradations(): List<OptionDegradation> {
             ),
         )
     }
-    // P28 §1: a forced classpath strategy that contradicts the explicit
+    // A forced classpath strategy that contradicts the explicit
     // flags is refused before the run — the alternative is a run whose
     // report names a strategy the flags silently overrode (or one that
     // ignored them), which is exactly the unattributable state §1 exists

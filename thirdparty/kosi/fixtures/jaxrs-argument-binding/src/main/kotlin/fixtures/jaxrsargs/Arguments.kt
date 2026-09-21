@@ -1,4 +1,4 @@
-// P27 §2 — quarkus's ARGUMENT BINDING rule, one handler per framework-supplied type.
+// — quarkus's ARGUMENT BINDING rule, one handler per framework-supplied type.
 //
 // From Jakarta RESTful Web Services 3.1 specification, §3.3.2.1, verbatim:
 //

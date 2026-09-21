@@ -1,12 +1,12 @@
-// P20 §1: the taint source is a PARAMETER, not a function.
+// the taint source is a PARAMETER, not a function.
 //
-// Until this phase an endpoint-rooted slice could say "this handler is
+// Until this change an endpoint-rooted slice could say "this handler is
 // reachable from untrusted input" and nothing more: every seeded parameter
 // of a handler produced the SAME fact (same site, same category), so the
 // report could not say WHICH parameter was untrusted, what transport it
 // arrived on, or that a second parameter was trusted and contributed
 // nothing. The pack's `kind` and `category` per parameter annotation had no
-// consumer that changed a verdict (R128) — the defect this fixture pins.
+// consumer that changed a verdict — the defect this fixture pins.
 //
 // kosi:want-not diagnostic code=parse-error
 // kosi:want-not diagnostic code=lowering-failed
@@ -22,7 +22,7 @@
 // as the tainted one, with its own path to the SAME sink. Seeding at
 // function granularity reports it; parameter granularity does not.
 //
-// R174, corrected in P27 §2: this used to be an UNANNOTATED parameter of a
+// Corrected later: this used to be an UNANNOTATED parameter of a
 // collaborator type, on the premise that "unannotated means injected".
 // Spring's own table says the opposite — "if a method argument is not
 // matched to any of the earlier values in this table and it is a simple

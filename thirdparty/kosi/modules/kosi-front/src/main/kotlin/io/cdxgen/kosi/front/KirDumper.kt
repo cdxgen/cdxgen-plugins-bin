@@ -12,7 +12,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * The `kir dump` pipeline (P2 gate): the resolved tier's discovery,
+ * The `kir dump` pipeline (gate): the resolved tier's discovery,
  * classpath resolution and JDK attachment feeding [KirLowering], validated
  * and written by [KirWriter]. A dump whose CFG validates dirty is an error,
  * not a best-effort text file.
@@ -69,7 +69,7 @@ object KirDumper {
                 t,
             )
         }
-        // P29: the dump lowers the same PSI trees the analyze pipeline does,
+        // The dump lowers the same PSI trees the analyze pipeline does,
         // so it runs on the same explicit analysis stack for the same
         // reason — the default stack is the ceiling that should not exist.
         return runOnAnalysisStack {

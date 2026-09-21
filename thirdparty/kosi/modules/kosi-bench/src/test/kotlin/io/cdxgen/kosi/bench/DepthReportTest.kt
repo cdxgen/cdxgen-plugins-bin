@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P20 §0: publish the depth you actually have, before improving it — a
+ * publish the depth you actually have, before improving it — a
  * claim about precision without a denominator is the thing this project
  * does not do. For every bundled fixture this gate answers three questions
  * and commits the answers as a golden ([depth-report.json]):
@@ -24,14 +24,14 @@ import kotlin.test.assertTrue
  *     for each named reason: cross-block, depth cap, parameter,
  *     non-constant producer. Measured BOTH ways over one captured front
  *     end: the shipped cross-block fold, and `crossBlock = false` — the
- *     pre-P20 block-local scan, whose breakdown is the design input the
+ *     earlier block-local scan, whose breakdown is the design input the
  *     §2 extension was judged against.
  *  2. TAINT — sources seeded (pack sites + endpoint parameters), sinks
  *     reached, slices published, and the three ways a finding dies before
  *     or degrades at publication: no provable path, fixpoint cap,
  *     missing summary. The sanitizers that actually cleared a fact are
  *     named; the ones that never fired in any measured fixture are named
- *     louder — a sanitizer that never fires is R63 for the security pack.
+ *     louder — a sanitizer that never fires is for the security pack.
  *  3. REACHABILITY — of the published findings, how many carry a COMPLETE
  *     entrypoint→sink path, how many a PARTIAL one (elided, endpoints
  *     guaranteed), and how many carry NONE and stand on the strength of a
@@ -69,7 +69,7 @@ class DepthReportTest {
         val producer: Int,
     )
 
-    /** P22 §0: the two answers to "what does this call return", compared. */
+    /** The two answers to "what does this call return", compared. */
     private class CallReturnRow(
         /** Workspace call sites whose return the folder folded. */
         val folderFolded: Int,
@@ -101,7 +101,7 @@ class DepthReportTest {
         val noPath: Int,
         val integrityViolations: Int,
         val callReturn: CallReturnRow,
-        /** P22 §3: the producer bucket by callee arm. */
+        /** The producer bucket by callee arm. */
         val producerArms: Map<String, Int>,
     )
 
@@ -139,7 +139,7 @@ class DepthReportTest {
 
             val dataFlow = report?.dataFlow
             val slices = dataFlow?.slices.orEmpty()
-            // P22 §2: counted from the schema's own `pathKind` — the field is
+            // Counted from the schema's own `pathKind` — the field is
             // the published fact now, and deriving the report from anything
             // else would let the two answers drift.
             var complete = 0
@@ -153,7 +153,7 @@ class DepthReportTest {
                 }
             }
 
-            // P22 §0: the two answers to "what does this call return". The
+            // The two answers to "what does this call return". The
             // folder's: every return site of the callee folds to one
             // constant (a MUST analysis over constants). The flow module's:
             // param taint or a source birth MAY reach the return value (a
@@ -220,16 +220,16 @@ class DepthReportTest {
         assertTrue(
             json == expected,
             "depth report moved against the golden — an intentional depth change regenerates it " +
-                "(KOSI_UPDATE_DEPTH_REPORT=1) and the phase report accounts for the delta by name",
+                "(KOSI_UPDATE_DEPTH_REPORT=1) and the change notes accounts for the delta by name",
         )
         println("depth-report: ${rows.size} fixtures measured, golden matched")
     }
 
     /**
-     * P21 §4: the cheap structural gate the corpusChanged replay earned.
+     * the cheap structural gate the corpusChanged replay earned.
      * corpusChanged and corpusFull both answer "did a behaviour move" and
      * NEITHER answers "is this code reachable from any input we have" —
-     * R131 ran green through every tier because no corpus input reached the
+     * ran green through every tier because no corpus input reached the
      * new code. The gate that answers THAT is a fixture, so every named
      * way the fold can fail must be non-zero in the committed report: a new
      * [FoldFailure] constant, or a widening that reclassifies an existing
@@ -263,21 +263,21 @@ class DepthReportTest {
             assertTrue(
                 counted!! > 0,
                 "FoldFailure.$failure has never fired: its '$key' bucket is zero in the committed depth report. " +
-                    "A capability no fixture exercises does not exist (R63) — add the fixture that drives it " +
-                    "through Analyzer.analyze, or delete the constant (the P21 phase rule, written against R131)",
+                    "A capability no fixture exercises does not exist — add the fixture that drives it" +
+                    "through Analyzer.analyze, or delete the constant (the rule, written against)",
             )
         }
     }
 
     /**
-     * P21 §2's bar, moved into the PASS line (rule 9). The phase took the
+     * The bar, moved into the PASS line (rule 9). The phase took the
      * pack's fired-sanitizer count from 2 of 12 to 12 of 12 and recorded it
      * in the committed report — but a count that only lives in a golden
-     * moves whenever the golden is regenerated, and P21 also removed the
+     * moves whenever the golden is regenerated, and also removed the
      * liveness sweep's blanket sanitizer allowance that had covered the
      * other ten. So the count is asserted here instead: every sanitizer the
      * pack ships fires in at least one measured fixture, or it is not a
-     * sanitizer this project can claim (R63).
+     * sanitizer this project can claim.
      */
     @Test
     fun everySanitizerFiresInTheCommittedReport() {
@@ -302,14 +302,14 @@ class DepthReportTest {
         assertTrue(
             inert.isEmpty(),
             "sanitizers that fire in no measured fixture: $inert — a sanitizer nothing exercises is a silent " +
-                "false-negative guarantee. Give it the R129 shape in fixtures/sanitizer-gallery (the sanitized " +
+                "false-negative guarantee. Give it the shape in fixtures/sanitizer-gallery (the sanitized" +
                 "result reaches the sink directly, so removing the entry violates a want-not), or delete it. " +
-                "P21 §2 took this count from 2 of 12 to 12 of 12; it only goes up.",
+                "took this count from 2 of 12 to 12 of 12; it only goes up.",
         )
     }
 
     /**
-     * P22 §0: the phase rule, written against R131/R133 — when two pieces of
+     * The rule, written against — when two pieces of
      * code answer the same question, the answers are a GATE, not a
      * coincidence. The folder answers "what does this call return" with its
      * workspace walk (a MUST analysis over constants: every return site of
@@ -342,7 +342,7 @@ class DepthReportTest {
     }
 
     /**
-     * P22 §3: a bucket with a breakdown is a design input; a bucket with a
+     * A bucket with a breakdown is a design input; a bucket with a
      * total is a number. The producer bucket must be fully classified by
      * callee arm — dependency call (out of scope by construction), the
      * workspace refusal arms, or a shape the folder does not recognise —
@@ -371,10 +371,10 @@ class DepthReportTest {
             )
         }
 
-        // P23 §3, rule 9: the bar moved, so the measurement moves into the
-        // PASS line. P22 §3 published the breakdown and the corpus drove
+        // Rule 9: the bar moved, so the measurement moves into the
+        // PASS line. Published the breakdown and the corpus drove
         // five of the folder's twelve arms; the other seven were names in
-        // the code with nothing behind them — R63 applied to a vocabulary.
+        // the code with nothing behind them — applied to a vocabulary.
         // Two of the seven (`workspace-unit-return`, `workspace-no-return-
         // site`) turned out to be distinctions no Kotlin a fixture can write
         // reaches, and were FOLDED INTO `workspace-return-unprovable` rather
@@ -399,7 +399,7 @@ class DepthReportTest {
             "every arm the folder can record must be DRIVEN by a bundled fixture and every arm " +
                 "driven must be declared. A new arm with no fixture belongs in `producer-arms`; " +
                 "an arm no Kotlin can reach belongs folded into the arm that subsumes it, not " +
-                "sitting at zero (P23 §3)",
+                "sitting at zero",
         )
         for (arm in expectedArms) {
             assertTrue(
@@ -410,10 +410,10 @@ class DepthReportTest {
     }
 
     /**
-     * P22 §2: the PARTIAL half of the pathKind vocabulary must be driven —
+     * The PARTIAL half of the pathKind vocabulary must be driven —
      * the elided-trace fixture's composed trace outgrows the trace cap, so
      * the committed report holds a finding whose witness is an elided walk.
-     * A vocabulary value nothing drives is R63 applied to a schema.
+     * A vocabulary value nothing drives is applied to a schema.
      */
     @Test
     fun aPartialFindingExistsInTheCommittedReport() {
@@ -481,7 +481,7 @@ class DepthReportTest {
         w.endObject()
         w.endObject()
 
-        // The sanitizer verdict is the security pack's R63 line: a pack
+        // The sanitizer verdict is the security pack's line: a pack
         // sanitizer no measured fixture ever cleared is named, never
         // silently skipped.
         val fired = rows.flatMapTo(sortedSetOf()) { it.sanitizersFired }

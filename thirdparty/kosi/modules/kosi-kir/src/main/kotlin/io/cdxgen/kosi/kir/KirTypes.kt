@@ -4,7 +4,7 @@ package io.cdxgen.kosi.kir
  * kosi's owned intermediate representation (02-ARCHITECTURE.md §4). Nothing
  * in this module depends on a compiler type: functions arrive lowered from
  * kosi-front as interned strings, ids and small value types, and everything
- * downstream of the lowering (the flow engine from P4 on, the exporters, the
+ * downstream of the lowering (the flow engine from on, the exporters, the
  * `kir dump` reader) consumes only what is defined here.
  *
  * Registers are strings with a fixed shape: `%<n>` for parameters, `t<n>`
@@ -57,7 +57,7 @@ enum class CallKind {
     VIRTUAL,
     // No SUPER: a `super.foo()` call lowers as VIRTUAL on the reserved
     // `v super` receiver register, and no consumer ever branched on the
-    // distinction — P19's vocabulary audit found the arm produced by
+    // distinction — the vocabulary audit found the arm produced by
     // neither tier and read by nothing.
     EXTENSION,
     OPERATOR,

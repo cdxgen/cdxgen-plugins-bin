@@ -1,4 +1,4 @@
-// P26 §1.2 — outbound as SERVICES: the annotated interface method IS the call.
+// — outbound as SERVICES: the annotated interface method IS the call.
 //
 // Retrofit and Feign declare remote calls as annotated methods on an
 // interface the library implements at runtime: there is no body to walk and

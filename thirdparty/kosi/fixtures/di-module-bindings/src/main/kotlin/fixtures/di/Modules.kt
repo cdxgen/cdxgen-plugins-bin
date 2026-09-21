@@ -1,7 +1,7 @@
-// P26 §2 — finish the container: the binding is a mapping, written in a
+// — finish the container: the binding is a mapping, written in a
 // module, and it is dispatch evidence exactly as a stereotype is.
 //
-// P25 read the ANNOTATED half of the wiring (a stereotype is a construction
+// read the ANNOTATED half of the wiring (a stereotype is a construction
 // site the framework performs). What a real app uses as much is the BINDING
 // METHOD — `@Binds` never constructs anything, `@Bean`/`@Provides` often
 // return a parameter instead of constructing, and Koin's provider lambdas
@@ -23,7 +23,7 @@
 // kosi:want-not flow source=untrusted-input sink=sql-query fn=~PagerNotifier.notify
 // kosi:want-not diagnostic code=parse-error
 //
-// The TWO-BINDINGS shape (Notifier) is the phase's answer to "what do you
+// The TWO-BINDINGS shape (Notifier) is the change's answer to "what do you
 // publish when the container manages two implementations of one interface":
 // BOTH findings, a dispatch width of 2, and the narrowing reason
 // `di-binding` — asserted by DiBindingFormsTest, which can state the width
@@ -57,7 +57,7 @@ class JdbcAuditStore : AuditStore {
 
 class NoopAuditStore : AuditStore {
     // The sink is deliberate: a sibling whose body CANNOT sink makes the
-    // want-not vacuous — under the pre-P26 smear this finding appears, and
+    // want-not vacuous — under the earlier smear this finding appears, and
     // only a sibling that would sink can show that.
     override fun save(record: String) {
         val conn = java.sql.DriverManager.getConnection("jdbc:h2:mem:noop")

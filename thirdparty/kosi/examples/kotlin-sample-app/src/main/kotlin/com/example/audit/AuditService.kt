@@ -1,4 +1,4 @@
-// The Kotlin sample project for the P11 end-to-end gate. One small audit
+// The Kotlin sample project for the end-to-end gate. One small audit
 // service carrying every evidence kind cdxgen/evinse consumes from the kosi
 // report: occurrences (usages with positions), callstacks (slice traces),
 // reachability (reachableFromRoots from main), data-flow slices, crypto

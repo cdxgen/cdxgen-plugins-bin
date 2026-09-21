@@ -1,4 +1,4 @@
-// P14 §5: `consumes`, `produces` and `authentication` were `emptyList()`
+// `consumes`, `produces` and `authentication` were `emptyList()`
 // on every endpoint kosi had ever emitted, for every framework. All three
 // are sitting in annotations the detector already reads — and, for Ktor,
 // in the ENCLOSING call. This fixture pins all three mechanisms:

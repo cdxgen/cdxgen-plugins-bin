@@ -1,4 +1,4 @@
-// P9: the dependency-jar tier. Reads class files with the same allowlisted
+// The dependency-jar tier. Reads class files with the same allowlisted
 // ASM the front end ships, demangles Kotlin names via `@kotlin.Metadata`
 // (the protobuf reader ships in kotlin-compiler-common-for-ide, already on
 // the runtime classpath), and lowers method bodies into the SAME KIR the
@@ -9,16 +9,16 @@ dependencies {
     implementation(project(":kosi-kir"))
     // The `@kotlin.Metadata` protobuf reader lives in the same compiler
     // artifact the front already ships. Non-transitive like every -for-ide
-    // jar: their POMs name shadowed modules published nowhere (P0
-    // deviation 2).
+    // jar: their POMs name shadowed modules published nowhere (deviation
+    // 2).
     implementation(libs.compiler.common.ide) { isTransitive = false }
     implementation(libs.aa.asm)
     implementation(libs.kotlin.stdlib)
-    // Test-only: P18's symbol-kind validation reads the endpoints pack from
+    // Test-only: the symbol-kind validation reads the endpoints pack from
     // kosi-models and checks its modelled symbols against the framework
     // sources/jars the corpus machine holds (ASM is here for the jar half).
     testImplementation(project(":kosi-models"))
-    // P19 §3: the committed symbol-evidence extract is JSON, read with the
+    // The committed symbol-evidence extract is JSON, read with the
     // same hand-rolled reader the reports use.
     testImplementation(project(":kosi-schema"))
     testImplementation(libs.kotlin.test)

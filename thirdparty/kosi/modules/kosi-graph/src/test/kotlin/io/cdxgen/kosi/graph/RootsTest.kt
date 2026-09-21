@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * R51, negative first: `--roots all` is the UNION of the concrete scopes,
+ * Negative first: `--roots all` is the UNION of the concrete scopes,
  * never "every node". Rooting the stdlib and every dependency would make
  * reachability say "everything runs" and hand every connectivity denominator
  * a free pass — a root needs no edge to be reached.

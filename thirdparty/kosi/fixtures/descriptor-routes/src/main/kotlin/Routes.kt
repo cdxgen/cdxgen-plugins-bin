@@ -78,7 +78,7 @@ class WrappingFilter {
         request.getParameter("debug") ?: ""
 }
 
-// P28 §2: a filter reading a parameter through the BASE interface — the
+// a filter reading a parameter through the BASE interface — the
 // type jakarta/javax.servlet.Filter.doFilter actually receives. The source
 // row javax.servlet.ServletRequest.getParameter was missing: the read was
 // endpoints evidence but never a taint source, on exactly the code an

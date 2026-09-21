@@ -19,8 +19,8 @@ internal object Roots {
 
     /**
      * Framework registration patterns (suffix segment match on RESOLVED
-     * annotation FQNs). P3 ships the annotation-driven set; DSL-routed and
-     * manifest-declared handlers are P7's endpoint work and deliberately not
+     * annotation FQNs). Ships the annotation-driven set; DSL-routed and
+     * manifest-declared handlers are the endpoint work and deliberately not
      * approximated here.
      */
     private val FRAMEWORK_ANNOTATIONS = listOf(

@@ -33,7 +33,7 @@ import java.util.Locale
 /**
  * The analysis pipeline: project discovery (read-only), the chosen backend,
  * and report assembly with deterministic ordering and stable ids. The syntax
- * backend parses PSI without a classpath; the resolved backend (P1) runs the
+ * backend parses PSI without a classpath; the resolved backend runs the
  * standalone Analysis API session over the discovered modules, the
  * offline-resolved classpath and the JDK module. Nothing downstream of
  * kosi-front sees compiler types.
@@ -72,7 +72,7 @@ object Analyzer {
     }
 
     /**
-     * The endpoint-detection inputs, captured mid-pipeline (P19 §4): the
+     * The endpoint-detection inputs, captured mid-pipeline: the
      * lowered module, the source texts, the resolved declaration-annotation
      * values and the resolved dependency coordinates. The pack-entry
      * liveness gate re-runs [io.cdxgen.kosi.endpoints.Endpoints.analyze]
@@ -86,24 +86,24 @@ object Analyzer {
         val annotationValues: Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>,
         val dependencyCoordinates: Set<String>,
         /**
-         * P20 §0: the endpoint pass's OWN result — including the value
+         * The endpoint pass's OWN result — including the value
          * folder's fold statistics, the config-resolution counts and the
          * source-handler map — captured so the depth report and the
          * liveness gates can measure the consumers without re-running the
          * front end. Null for runs that disable endpoint detection.
          */
         val endpoints: io.cdxgen.kosi.endpoints.Endpoints.Result? = null,
-        /** P20 §0: the value folder's fold counters for this run's consumers. */
+        /** The value folder's fold counters for this run's consumers. */
         val foldStats: io.cdxgen.kosi.kir.KirValueFolder.FoldStats = io.cdxgen.kosi.kir.KirValueFolder.FoldStats(),
         /**
-         * P20 §0: the taint engine's depth scoreboard for this run —
+         * The taint engine's depth scoreboard for this run —
          * sources seeded, sink hits dropped unprovable, cap-affected hits,
          * summary-missing call sites, sanitizers that actually fired. Null
          * when the run asked for no dataflow.
          */
         val flowDepth: io.cdxgen.kosi.flow.TaintEngine.DepthStats? = null,
         /**
-         * P22 §0: the flow module's verdicts on "can taint reach this
+         * The flow module's verdicts on "can taint reach this
          * function's return value" — the second answer to the question the
          * const folder answers with its workspace walk. The depth report's
          * agreement gate compares the two; null when no dataflow ran.
@@ -126,7 +126,7 @@ object Analyzer {
         }
     }
 
-    // ---- syntax tier (phase 0 behaviour, unchanged) -------------------------
+    // ---- syntax tier ---------------------------------------------------------
 
     private fun analyzeSyntax(root: Path, options: AnalyzeOptions, commit: String): KosiReport {
         val discovery = ProjectDiscovery.discover(root)
@@ -194,30 +194,43 @@ object Analyzer {
     }
 
     /**
-     * P28 §4 (R179): files discovered against files present, under the
+     * Files discovered against files present, under the
      * collector's own exclusion policy, plus the loud diagnostic when the
-     * gap is large. kotlinx.coroutines analysed 1 of 1 039 files and the
+     * gap is large. Kotlinx.coroutines analysed 1 of 1 039 files and the
      * report read as clean — `no-sources` could not fire because one file
      * WAS found; the ratio is what makes that shape visible. Threshold:
-     * less than half of at least 20 present files — a dropped-module
-     * failure leaves under 10% (1/1039), while a normal repo whose modules
-     * all have conventional roots sits near 1.0.
+     * less than half of at least 20 present NON-TEST files — a
+     * dropped-module failure leaves under 10% (1/1039), while a normal repo
+     * whose modules all have conventional roots sits near 1.0.
+     *
+     * The denominator excludes test sources because a source ROOT is a main
+     * source root: counting `src/test` against discovery makes a repository
+     * with a large test suite indistinguishable from one whose modules were
+     * dropped. kotlinx.coroutines is the measured case — 651 of its 1 061
+     * files are tests, so the raw ratio reads 0.54 where discovery of the
+     * files a root could hold is 0.97.
      */
     private fun sourceCoverageOf(
         root: Path,
         collected: List<SourceCollector.CollectedFile>,
     ): Pair<io.cdxgen.kosi.schema.SourceCoverage, Diagnostic?> {
-        val present = SourceCollector.presentCount(root)
-        val coverage = io.cdxgen.kosi.schema.SourceCoverage(discovered = collected.size, present = present)
-        val diagnostic = if (present >= 20 && coverage.ratio < 0.5) {
+        val (present, testPresent) = SourceCollector.presentCounts(root)
+        val coverage = io.cdxgen.kosi.schema.SourceCoverage(
+            discovered = collected.size,
+            present = present,
+            testPresent = testPresent,
+        )
+        val diagnostic = if (present - testPresent >= 20 && coverage.nonTestRatio < 0.5) {
             Diagnostic(
                 code = DiagnosticCodes.SOURCE_COVERAGE_GAP,
                 severity = Severity.WARNING,
-                message = "source discovery collected ${collected.size} of $present Kotlin/Java file(s) present " +
-                    "under the analysed root (${(coverage.ratio * 100).toInt()}%); modules outside the " +
-                    "Maven/Gradle source-root convention may be missing from every downstream result",
+                message = "source discovery collected ${collected.size} of ${present - testPresent} non-test " +
+                    "Kotlin/Java file(s) present under the analysed root " +
+                    "(${(coverage.nonTestRatio * 100).toInt()}%; $testPresent further test file(s) are not " +
+                    "counted); modules outside the Maven/Gradle source-root convention may be missing from " +
+                    "every downstream result",
                 position = Position(".", 1, 1),
-                count = present - collected.size,
+                count = present - testPresent - collected.size,
             )
         } else {
             null
@@ -274,7 +287,7 @@ object Analyzer {
                     continue
                 }
                 val analyzer = SyntaxAnalyzer(env, source.relativePath, source.modulePath)
-                // P29: the per-file boundary. A pathological file (nesting
+                // The per-file boundary. A pathological file (nesting
                 // past the walk budget's headroom, or a shape the parser
                 // itself descends on) must degrade to a diagnostic NAMING
                 // the file, never take the whole report down — the
@@ -369,10 +382,10 @@ object Analyzer {
         val fileCount: Int,
     )
 
-    // ---- resolved tier (P1) -------------------------------------------------
+    // ---- resolved tier -------------------------------------------------
 
     private fun analyzeResolved(root: Path, options: AnalyzeOptions, commit: String, endpointCapture: ((EndpointCapture) -> Unit)? = null): KosiReport {
-        // P10: the budgets (time, RSS) live across the whole resolved run and
+        // The budgets (time, RSS) live across the whole resolved run and
         // degrade it — never panic, never discard computed evidence. Off by
         // default; when both budgets are unset no sampler thread exists and
         // shouldStop() is a constant null.
@@ -405,14 +418,14 @@ object Analyzer {
             root.resolve(vm.module.modulePath).toAbsolutePath().normalize()
         }
         // A named classpath file that does not exist is an error, not a
-        // silently empty classpath: the P0 review's `--compare` defect was
+        // silently empty classpath: a later review `--compare` defect was
         // exactly this shape — a flag the run echoed but never applied.
         // A RELATIVE --classpath-file resolves against the analysed directory,
         // not the process's working directory. The recorded option is part of
         // the report, and an absolute path records the checkout's LOCATION —
         // which is not an analysis input, and which made the golden gate's
         // `options` digest differ between two machines analysing the same tree
-        // (P17 review). Absolute paths are unchanged: resolve() returns them
+        // (a later review). Absolute paths are unchanged: resolve() returns them
         // as given.
         val classpathFile = options.classpathFile?.let { root.resolve(it) }
         classpathFile?.let { file ->
@@ -429,7 +442,7 @@ object Analyzer {
             moduleDirs = moduleDirs,
             strategy = options.classpathStrategy,
         )
-        // P28 §1: the acquisition record — which strategy produced the
+        // The acquisition record — which strategy produced the
         // classpath, how many entries it attached, and what each tried
         // strategy found — is REPORT DATA, not a log line: a classpath-less
         // run and a run that found nothing publish the same sparse graph,
@@ -528,7 +541,7 @@ object Analyzer {
                 t,
             )
         }
-        // R177 (arrow): this used to be `env.use { ... }`. The `use` epilogue
+        // (arrow): this used to be `env.use { ... }`. The `use` epilogue
         // runs `AutoCloseable.closeFinally`, and on a run whose session
         // classpath carried kotlin-stdlib-jdk7 (arrow's own resolution) the
         // close itself failed with NoClassDefFoundError: kotlin/ExceptionsKt
@@ -546,7 +559,7 @@ object Analyzer {
             val facts = ResolvedAnalyzer.run(env, workspace, fileRelPathByAbsolute)
             if (System.getenv("KOSI_TRACE") != null) System.err.println("TRACE: facts=" + facts.size)
 
-            // P2: lower the same session to the KIR. The failures map is the
+            // Lower the same session to the KIR. The failures map is the
             // itemised breakdown; the function count is what it was computed
             // over — neither travels without the other.
             val kir = KirLowering.lower(env, workspace)
@@ -563,7 +576,7 @@ object Analyzer {
             } else {
                 null
             }
-            // P29: files whose lowering was skipped whole (walk budget or
+            // Files whose lowering was skipped whole (walk budget or
             // stack overflow), each named, with the relative path the report
             // contract requires.
             val kirSkippedDiagnostics = kir.skippedFiles.map { skip ->
@@ -609,12 +622,12 @@ object Analyzer {
             val sourceByRelPath = collected.associateBy { it.relativePath }
             val purlByModulePath = versionedModules.associate { it.module.modulePath to it.module.purl }
 
-            // P3: the call graph and reachability, built from the KIR in
+            // The call graph and reachability, built from the KIR in
             // kosi-graph (compiler types stop at this module's boundary).
             // `--callgraph none` publishes no graph at all — `options`
             // already records that nothing was requested.
             //
-            // P10, golem's guardAlgorithm lesson: a call-graph crash must
+            // Golem's guardAlgorithm lesson: a call-graph crash must
             // not discard the already-computed evidence report. The failure
             // becomes a NAMED diagnostic and the report ships without the
             // graph; it is never swallowed into a green result.
@@ -698,9 +711,9 @@ object Analyzer {
                 }
             }
 
-            // P7: framework endpoints, outbound services and URL evidence,
+            // Framework endpoints, outbound services and URL evidence,
             // resolved from the lowered module plus the declaration
-            // annotations' values; and P8's crypto/CBOM evidence. Both live
+            // annotations' values; and the crypto/CBOM evidence. Both live
             // in their own modules; the pipeline only wires them.
             val kirModule = io.cdxgen.kosi.kir.KirModule(kir.functions)
             val sourceTexts = collected.associate { source ->
@@ -726,7 +739,7 @@ object Analyzer {
             val resolvedDependencyCoordinates = buildSet {
                 for (jar in resolution.jars) {
                     // The real coordinate, interpolated: this arm read
-                    // `"${'$'}{it.group}:${'$'}{it.artifact}"` since P13,
+                    // `"${'$'}{it.group}:${'$'}{it.artifact}"`,
                     // which renders the LITERAL `${it.group}:...` — a
                     // dead arm nobody noticed because the FILE-NAME arm
                     // below matched every Gradle-cache jar anyway
@@ -737,11 +750,11 @@ object Analyzer {
                     add(jar.jar.fileName.toString())
                 }
             }
-            // P19 §4: the pack-entry liveness gate re-runs endpoint
+            // The pack-entry liveness gate re-runs endpoint
             // DETECTION once per removed pack entry over exactly these
             // captured products, so the front-end analysis runs once per
             // fixture regardless of how many entries the pack carries.
-            // P20 §0: the capture carries the endpoint pass's own Result
+            // The capture carries the endpoint pass's own Result
             // (fold statistics included), computed in the same run.
             val capture = EndpointCapture(
                 module = kirModule,
@@ -762,9 +775,15 @@ object Analyzer {
                 // missing[] list is deliberately NOT fed here: a marker
                 // coordinate that failed to resolve is an ABSENT dependency,
                 // and treating it as present published the implicit trees on
-                // machines whose cache was cold (R111), the exact
+                // machines whose cache was cold, the exact
                 // wrong-reason pass implicit-routes-unresolved pins.
                 dependencyCoordinates = resolvedDependencyCoordinates,
+                // Every declaration this run READ, both languages.
+                // A manifest component's substantiation is decided against
+                // this set, and the KIR cannot stand in for it — Java
+                // declarations never enter the KIR, so a Java-only Android
+                // module answered "did not look" about classes it had read.
+                analysedDeclarations = drafts.mapTo(HashSet()) { it.canonicalName },
                 foldStats = capture.foldStats,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
@@ -792,7 +811,7 @@ object Analyzer {
                 )
             }
 
-            // P4: the intraprocedural taint engine (kosi-flow, compiler-free).
+            // The intraprocedural taint engine (kosi-flow, compiler-free).
             // Sources, sinks, passthroughs, sanitizers and effects are DATA
             // (the shipped model pack); the engine walks each lowered
             // function's CFG to a worklist fixpoint. `--dataflow reachable`
@@ -800,7 +819,7 @@ object Analyzer {
             // the roots — a slice whose function no root reaches is not
             // published, and the surviving ones carry the flag.
             //
-            // P9 `--deps`: when the run asks for it, the resolved classpath
+            // `--deps`: when the run asks for it, the resolved classpath
             // jars are lowered to the SAME KIR by kosi-bytecode and handed to
             // the SAME engine, whose summaries then carry `origin=bytecode`.
             val depsEnabled = options.deps || options.dataflow == io.cdxgen.kosi.schema.DataflowMode.SECURITY_DEPS
@@ -828,7 +847,7 @@ object Analyzer {
                         // The framework's own statement about which handler
                         // parameters carry attacker input, WHAT KIND of
                         // input each annotation names, and the category it
-                        // carries (P20 §1: the source is a parameter, not
+                        // carries (the source is a parameter, not
                         // a function).
                         endpointParameterAnnotations = if (options.endpointSources) {
                             io.cdxgen.kosi.models.EndpointModels.loadBuiltin().frameworks
@@ -888,13 +907,13 @@ object Analyzer {
                 ),
             )
             val dataFlow = if (flowResult != null) {
-                // P23 §0, R139: `--dataflow crypto` is a FILTER, and until
-                // this phase it filtered nothing — `security`, `crypto`,
+                // `--dataflow crypto` is a FILTER, and until
+                // this change it filtered nothing — `security`, `crypto`,
                 // `all` and `security-deps` published byte-identical slice
                 // sets, so a run that asked for crypto flows was handed
                 // log-injection findings under `"mode": "crypto"`. The
                 // predicate is the one the bench has counted
-                // `cryptoFlowSlices` with since P6, now shared rather than
+                // `cryptoFlowSlices`, now shared rather than
                 // duplicated. The other modes keep their meanings exactly:
                 // `security` is every pack flow, `all` is its declared alias
                 // (the pack has nothing `security` leaves out), `reachable`
@@ -913,10 +932,10 @@ object Analyzer {
                         .mapNotNull { entry -> graphResult.callGraph.nodes.firstOrNull { it.id == entry.nodeId }?.canonicalName }
                         .toSet()
                     val kept = evidence.slices.filter { it.sinkFunction in reachedFunctions }
-                    // P22 §2: the intersection IS the reachability fact — the
+                    // The intersection IS the reachability fact — the
                     // per-slice flag that used to be stamped true here said
                     // only "this run was the reachable one", which
-                    // `dataFlow.mode` already says. P23 §0: it narrows the
+                    // `dataFlow.mode` already says. It narrows the
                     // whole document (nodes, edges and every derived counter)
                     // through the one function that does that, instead of
                     // recomputing four counters and leaving five plus the
@@ -930,10 +949,10 @@ object Analyzer {
                 null
             }
 
-            // P7: `--endpoint-sources` links endpoint-rooted slices to the
+            // `--endpoint-sources` links endpoint-rooted slices to the
             // endpoint they enter through, and names the source categories
             // each endpoint introduces.
-            var apiEndpoints = if (options.endpointSources && dataFlow != null) {
+            val apiEndpoints = if (options.endpointSources && dataFlow != null) {
                 val handlers = endpoints.apiEndpoints.associate { ep -> ep.handlerCanonicalName to ep.id }
                 val bySlice = HashMap<String, MutableList<String>>()
                 endpoints.apiEndpoints.forEach { ep -> bySlice[ep.handlerCanonicalName] = mutableListOf() }
@@ -956,28 +975,28 @@ object Analyzer {
                 endpoints.apiEndpoints
             }
 
-            // P28 (R178): a manifest endpoint whose handler class matches no
+            // A manifest endpoint whose handler class matches no
             // analysed declaration is a claim kosi READ NOTHING of — dagger
             // published 53 of them beside `no-sources`, every one carrying
             // an EMPTY handlerCanonicalName (the lifecycle matcher found no
             // class to name). Marked, never silently asserted: the endpoint
             // stays (the manifest IS real), `substantiated=false` and the
-            // diagnostic carry the "did not look" (P23's rule).
-            val analysedCanonicalNames = drafts.map { it.canonicalName }.toHashSet()
-            fun unsubstantiated(ep: io.cdxgen.kosi.schema.ApiEndpoint): Boolean =
-                ep.foundBy == "manifest" && (
-                    ep.handlerCanonicalName.isEmpty() ||
-                        ep.handlerCanonicalName !in analysedCanonicalNames
-                    )
+            // diagnostic carry the "did not look" (the rule).
+            //
+            // moved the DECISION to the detector, which is the only
+            // place that still knows the component's class name: the old
+            // rule here read `handlerCanonicalName`, so a component whose
+            // class kosi had read but which overrides no lifecycle method
+            // (every nested `TestActivity` in dagger) was reported as
+            // unread. What survives here is the counting and the
+            // diagnostic; the verdict arrives on the endpoint.
+            fun unsubstantiated(ep: io.cdxgen.kosi.schema.ApiEndpoint): Boolean = !ep.substantiated
             val unsubstantiatedEndpoints = apiEndpoints.count(::unsubstantiated)
             val unsubstantiatedDiagnostic = if (unsubstantiatedEndpoints > 0) {
-                apiEndpoints = apiEndpoints.map { ep ->
-                    if (unsubstantiated(ep)) ep.copy(substantiated = false) else ep
-                }
                 Diagnostic(
                     code = DiagnosticCodes.ENDPOINT_UNSUBSTANTIATED,
                     severity = Severity.WARNING,
-                    message = "$unsubstantiatedEndpoints manifest endpoint(s) name a handler class that is not " +
+                    message = "$unsubstantiatedEndpoints manifest endpoint(s) name a component class that is not " +
                         "among the analysed declarations (library components, or a run that discovered none of " +
                         "the sources); their behaviour was not read and they carry substantiated=false",
                     position = Position(".", 1, 1),
@@ -990,7 +1009,7 @@ object Analyzer {
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
-            // P9 dependency-tier diagnostics: every miss is a counted,
+            // Dependency-tier diagnostics: every miss is a counted,
             // named row, never a silent gap in the tier.
             val depsDiagnostics = if (depTier != null) {
                 buildList {
@@ -1152,13 +1171,13 @@ object Analyzer {
                     unknownCallPropagations = flowResult?.unknownCallPropagations
                         ?: graphResult?.unresolvedCalls ?: 0,
                     // Workspace lowering only. The dependency tier's misses
-                    // are NOT folded in here: `loweringFailures` is the P2
+                    // are NOT folded in here: `loweringFailures` is the
                     // gate's numerator over `functionsLowered`, which counts
                     // workspace functions alone — adding jar records to the
-                    // numerator and none to the denominator is the R49/R54
-                    // shape, and it would silently change what the gate
-                    // means (empty on every fixture slot). The tier's misses
-                    // are carried by the BYTECODE_UNLOWERED diagnostic, with
+                    // numerator and none to the denominator is the shape,
+                    // and it would silently change what the gate means
+                    // (empty on every fixture slot). The tier's misses are
+                    // carried by the BYTECODE_UNLOWERED diagnostic, with
                     // their own breakdown and their own count.
                     loweringFailures = kir.failures,
                     functionsLowered = kir.functionCount,
@@ -1171,11 +1190,11 @@ object Analyzer {
                     crossModuleSliceCount = dataFlow?.stats?.crossModuleSlices ?: 0,
                     // READ, never re-derived: the intersection above is the
                     // only place that can answer this, and it has already
-                    // written its answer into `dataFlow.stats`. The P22
-                    // review's R137 is what the second derivation cost —
-                    // this line asked the MODE ("was reachability wanted?")
-                    // where the intersection asks whether a graph existed,
-                    // so `--dataflow reachable --callgraph none` published
+                    // written its answer into `dataFlow.stats`. A later
+                    // review is what the second derivation cost — this line
+                    // asked the MODE ("was reachability wanted?") where the
+                    // intersection asks whether a graph existed, so
+                    // `--dataflow reachable --callgraph none` published
                     // every slice as reachable with nothing computed. The
                     // phase's own rule: when two pieces of code answer the
                     // same question, the answers are a gate — so there is
@@ -1525,11 +1544,11 @@ object Analyzer {
 
         val diagnosticsOut = buildList {
             addAll(diagnostics)
-            // P23 §0: every accepted option pairing that cannot deliver what
+            // Every accepted option pairing that cannot deliver what
             // it names, from the ONE predicate the CLI's refusals also read.
             // Stamped here, in `assemble`, because both tiers end up here and
             // a degradation that depended on which tier stamped it would be
-            // the R137 shape again. The Analyzer is a library — the bench,
+            // the shape again. The Analyzer is a library — the bench,
             // the corpus and evinse call it directly and never see a usage
             // message — so it names all of them, including the ones the CLI
             // refuses outright.
@@ -1617,7 +1636,7 @@ object Analyzer {
         System.getProperty("org.graalvm.nativeimage.enabled") != null ||
             System.getProperty("org.graalvm.nativeimage.imagecode") != null
 
-    // ---- P9: the --deps dependency tier ---------------------------------------
+    // ---- the --deps dependency tier ---------------------------------------
 
     private class DepTierBuild(
         val module: io.cdxgen.kosi.kir.KirModule,

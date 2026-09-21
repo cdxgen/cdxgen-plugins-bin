@@ -79,14 +79,14 @@ class JsonWriterTest {
     fun nestedStructureAndPretty() {
         // The pretty half used to assert one hand-written expected string —
         // an example that happened to parse, which is exactly the class the
-        // P16 review found in this file (R103: the pretty test contained no
+        // a later review found in this file (the pretty test contained no
         // empty container, so a prettifier that emitted invalid JSON passed
         // it). The properties `--pretty` actually promises: it ONLY
         // re-indents — the pretty render parses to the same value as the
         // minified one, and differs from it by whitespace OUTSIDE strings
         // alone. The string values deliberately contain characters the
-        // prettifier's state machine must NOT treat as structure ({, }, ,,
-        // : and escapes).
+        // prettifier's state machine must NOT treat as structure ({, },,,
+        // And escapes).
         fun write(w: JsonWriter): JsonWriter {
             w.beginObject()
             w.beginArray("items")
@@ -135,7 +135,7 @@ class JsonWriterTest {
 
     @Test
     fun prettyRendersEmptyContainersAsValidJson() {
-        // P16 review: the prettifier emitted the inline `[]`/`{}` and then
+        // The prettifier emitted the inline `[]`/`{}` and then
         // re-read the input's own closing bracket as a close, so every
         // document containing an empty container — every kosi report —
         // came out of `--pretty` with a stray bracket and did not parse.

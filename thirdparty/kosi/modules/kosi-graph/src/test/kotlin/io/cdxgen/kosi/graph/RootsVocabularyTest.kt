@@ -8,7 +8,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * P20 §4: name what kosi treats as an ENTRYPOINT, and pin it — "an
+ * name what kosi treats as an ENTRYPOINT, and pin it — "an
  * entrypoint set that includes every public callable makes `reachable`
  * mean `exists`", so the scopes' definitions are a consumer contract, not
  * an implementation detail. Three facts are pinned:
@@ -23,7 +23,7 @@ import kotlin.test.assertTrue
  *  2. `exported` roots every public/protected callable: in the `exported`
  *     slot, a slice's presence is the fact that a function EXISTS in the
  *     workspace, never that anything calls it (`reachableFromRoots` was
- *     deleted in P22 §2 — it was false in every shipped slot and true by
+ *     deleted in — it was false in every shipped slot and true by
  *     construction in the reachable mode; `pathKind` is the per-slice fact
  *     now). Pinned by a public orphan — a root at distance zero with no
  *     caller anywhere.
@@ -75,7 +75,7 @@ class RootsVocabularyTest {
         // The named gap: a Ktor/Vert.x/Javalin/http4k route is a LAMBDA
         // passed to a DSL call — no annotation exists for this scope to
         // read. Their entrypoints live in the endpoints pack's handler set
-        // (which the taint engine seeds), and the phase report says so;
+        // (which the taint engine seeds), and the change notes says so;
         // this pin keeps the graph scope from silently pretending.
         val nodes = nodesWith(
             GraphFixtures.function(

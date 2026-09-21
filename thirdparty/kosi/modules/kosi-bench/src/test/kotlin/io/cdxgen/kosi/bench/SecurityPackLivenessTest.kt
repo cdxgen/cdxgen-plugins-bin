@@ -15,7 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * P20 §3: the R63 gate the SECURITY pack never had. P19 built the sweep for
+ * the gate the SECURITY pack never had. built the sweep for
  * the endpoints pack and found 210 of ~330 entries inert; the security pack
  * — sources, sinks, passthroughs, sanitizers, effects, the literal-source
  * name rule — decides what kosi REPORTS as a vulnerability and had never
@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
  *
  *  - LIVE — some fixture's ENTIRE [TaintEngine.Result] changed: evidence,
  *    stats, summaries, diagnostics, truncations, the depth counters, all of
- *    it compared whole (R126 — a gate that compares the fields it happens
+ *    it compared whole (— a gate that compares the fields it happens
  *    to think matter pronounces on surfaces it never looked at).
  *  - ALIAS-COVERED — removing the entry alone changes nothing, but
  *    removing its whole NAME-CLASS (same channel, same pattern last
@@ -40,7 +40,7 @@ import kotlin.test.assertTrue
  * a per-instruction match on module content — so those pairs are skipped
  * mechanically, which is what keeps a 415-entry sweep a test rather than a
  * night. A NEW list-shaped channel on [ModelPack] that this sweep does not
- * drive fails [everySecurityPackChannelIsSwept] in the same build (R127's
+ * drive fails [everySecurityPackChannelIsSwept] in the same build ('s
  * rule, applied to this pack).
  */
 class SecurityPackLivenessTest {
@@ -174,7 +174,7 @@ class SecurityPackLivenessTest {
         data class Content(
             val fqns: Set<String>,
             val storedNames: Set<String>,
-            /** P26 §1.1: interface-sink rows match DECLARATIONS (supertypes, annotations), not callees. */
+            /** Interface-sink rows match DECLARATIONS (supertypes, annotations), not callees. */
             val declSupertypes: Set<String>,
             val declAnnotations: Set<String>,
         )
@@ -262,7 +262,7 @@ class SecurityPackLivenessTest {
         assertTrue(
             unexplained.isEmpty(),
             "security-pack entries no bundled fixture exercises and nobody recorded a reason for " +
-                "(R63 — add a fixture, remove the entry, or record the reason in inertAllowance()):\n" +
+                "(— add a fixture, remove the entry, or record the reason in inertAllowance()):\n" +
                 unexplained.joinToString("\n") { it.id },
         )
     }
@@ -304,7 +304,7 @@ class SecurityPackLivenessTest {
     /**
      * The recorded reasons for entries left in place knowingly — the §0
      * exit. The security pack's inert population is RECORDED, not deleted
-     * (the deliberate inverse of P19's endpoints sweep): a sink or
+     * (the deliberate inverse of the endpoints sweep): a sink or
      * sanitizer no bundled fixture reaches is load-bearing on REAL
      * repositories — the pinned vuln repos' finding floors are measured
      * against this pack on the corpus machine — and deleting it would be
@@ -321,14 +321,14 @@ class SecurityPackLivenessTest {
             reasons[id] = reason
         }
 
-        // 1. The sanitizers have NO allowance any more. R129's sweep found
-        //    none load-bearing; P21 §2 gave all twelve the R129 shape in
+        // 1. The sanitizers have NO allowance any more. the sweep found
+        //    none load-bearing; gave all twelve the shape in
         //    fixtures/sanitizer-gallery, and the committed depth report
         //    records every one as `fired: true`. An allowance kept "as an
         //    audit trail" is not inert text — it is a standing excuse, and
         //    the next sanitizer to go inert would be covered by it in
         //    silence. When a gate's bar moves up, the allowance that held
-        //    it down comes out (rule 9, P21 review). The bar itself is
+        //    it down comes out (rule 9, a later review). The bar itself is
         //    asserted in DepthReportTest.everySanitizerFiresInTheCommittedReport.
 
         // 2. Android sources and sinks: the pinned vuln repos exercise this
@@ -381,7 +381,7 @@ class SecurityPackLivenessTest {
             }
         }
 
-        // 5. Cloud/AI/queue source shapes (P12/P19-sourced SDKs): the
+        // 5. Cloud/AI/queue source shapes (-sourced SDKs): the
         //    cloud-and-messaging fixture pins the frameworks' DETECTION;
         //    no bundled handler body calls these readers.
         val cloudPrefixes = listOf(
@@ -396,7 +396,7 @@ class SecurityPackLivenessTest {
                 record(
                     id,
                     "cloud/AI/queue reader modelled from the SDK's real shapes; the bundled tier pins the " +
-                        "framework's detection but no bundled handler calls this reader (R63 note, P20 §3)",
+                        "framework's detection but no bundled handler calls this reader (note)",
                 )
             }
         }
@@ -430,7 +430,7 @@ class SecurityPackLivenessTest {
             record(
                 "literalSources[${s.namePattern}]",
                 "hardcoded-secret NAME rule: no bundled fixture stores a secret-named literal that reaches " +
-                    "a sink; crypto-material-flow pins the material itself (P8)",
+                    "a sink; crypto-material-flow pins the material itself",
             )
         }
         return reasons

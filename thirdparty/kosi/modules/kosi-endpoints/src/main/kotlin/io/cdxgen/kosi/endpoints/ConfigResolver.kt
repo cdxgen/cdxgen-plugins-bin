@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * Config-file value resolution (P7). `application.yml` (a flat subset:
+ * Config-file value resolution. `application.yml` (a flat subset:
  * `key: value` lines with indentation ignored for keys, no anchors, no
  * lists), `*.properties` and `BuildConfig.{java,kt}` fields are read into a
  * table; a `${key}` template or a config-reader call with a literal key
@@ -32,13 +32,13 @@ object ConfigResolver {
      * [ConfigValue.value] is null: the key is known, the value is not. That
      * is the discipline the `const val` tables already use — "a name holding
      * two values anywhere is ambiguous and is REFUSED, never guessed" — and
-     * until P23 §1 this table did the opposite, keeping the FIRST reader's
+     * until this table did the opposite, keeping the FIRST reader's
      * value in sorted-path order and publishing it as a resolved fact (the
-     * P23 review's R140). A multi-module repo where two modules'
+     * a later review). A multi-module repo where two modules'
      * `application.properties` both set `spring.datasource.url` published one
      * module's host, as a confident `resolution=config` service, chosen by
      * filename order. Two tables answered "what constant does this name
-     * hold"; one refused ambiguity and one guessed (P22's rule).
+     * hold"; one refused ambiguity and one guessed (the rule).
      */
     class ConfigTable internal constructor(private val values: Map<String, ConfigValue>) {
 
@@ -68,7 +68,7 @@ object ConfigResolver {
                 // decide either way.
                 existing.value == null || existing.value == value -> Unit
                 // Two files, two values, no ground to prefer one: the key is
-                // known and its value is not (R140).
+                // known and its value is not.
                 else -> values[key] = ConfigValue(key, null, existing.source)
             }
         }
