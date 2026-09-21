@@ -135,6 +135,17 @@ jobs:
           ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/a.json
           ./kosi-darwin-arm64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/weak-crypto" --out /tmp/b.json
           cmp /tmp/a.json /tmp/b.json
+          # The RESOLVED tier over Java sources. The smoke test was pure
+          # Kotlin at the syntax tier, so the image's Java-PSI surface — a
+          # different parser, a different set of lazily-constructed platform
+          # services — went unexercised by every gate, and the published
+          # binary exited 3 on any Java-heavy repository. Asserting on the
+          # Java DECLARATIONS is the point: the analysis exiting 0 while
+          # silently reading none of the Java is the other half of the same
+          # failure.
+          ./kosi-darwin-arm64 analyze --backend resolved \
+            --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/java-interop" --out /tmp/java.json
+          python3 -c 'import json,sys; d=json.load(open("/tmp/java.json"))["declarations"]; j=[x for x in d if x["filePath"].endswith(".java")]; sys.exit("the resolved tier read no Java declarations" if not j else 0)'
       - name: Reachability metadata drift check
         run: make native-metadata-check
 
@@ -183,3 +194,9 @@ jobs:
           ./kosi-linux-amd64 analyze --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/command-exec" \
             --backend resolved --dataflow all --out /tmp/c.json
           grep -q 'taint/untrusted-input-to-process-exec' /tmp/c.json
+          # Java PSI at the resolved tier — the surface the darwin job's
+          # comment explains. Both images are built from the same metadata,
+          # so both must prove they can read Java.
+          ./kosi-linux-amd64 analyze --backend resolved \
+            --dir "$GITHUB_WORKSPACE/thirdparty/kosi/fixtures/java-interop" --out /tmp/java.json
+          python3 -c 'import json,sys; d=json.load(open("/tmp/java.json"))["declarations"]; j=[x for x in d if x["filePath"].endswith(".java")]; sys.exit("the resolved tier read no Java declarations" if not j else 0)'

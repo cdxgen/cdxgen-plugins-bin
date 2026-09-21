@@ -9,16 +9,29 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 /**
- * Generates reflection metadata for the Kotlin PSI element classes.
+ * Generates reflection metadata for the two surfaces the platform builds
+ * REFLECTIVELY AND LAZILY, both of which are knowable from the jar and
+ * neither of which a tracing agent can be trusted to cover.
  *
- * <p>The PSI element factory constructs one class per Kotlin SYNTAX KIND
- * reflectively. The tracing agent only ever sees the kinds the fixture corpus
- * happens to contain, so an agent-derived list is a list of the syntax kosi
- * has been pointed at — and the first file using a kind it has not seen kills
- * the native binary with "Cannot reflectively invoke constructor" (measured:
- * {@code KtAnnotatedExpression}, analysing kosi's own sources with the
- * published darwin binary). The set of PSI classes is knowable from the jar
- * rather than from a run, so it is derived here instead of traced.
+ * <p><b>1. Kotlin PSI elements.</b> The PSI element factory constructs one
+ * class per Kotlin SYNTAX KIND reflectively. The tracing agent only ever sees
+ * the kinds the fixture corpus happens to contain, so an agent-derived list is
+ * a list of the syntax kosi has been pointed at — and the first file using a
+ * kind it has not seen kills the native binary with "Cannot reflectively
+ * invoke constructor" (measured: {@code KtAnnotatedExpression}, analysing
+ * kosi's own sources with the published darwin binary).
+ *
+ * <p><b>2. Platform services and extensions.</b> The IntelliJ container
+ * instantiates the classes named by {@code serviceImplementation},
+ * {@code implementationClass}, {@code implementation} and {@code instance} in
+ * the plugin descriptors the jar ships — and it does so ON FIRST USE, which
+ * makes agent coverage a lottery over which services a given run happened to
+ * wake. Measured: 89 of the 133 registered classes were absent from the
+ * metadata, and analysing a Java-heavy repository died on one of them —
+ * {@code com.intellij.psi.impl.JavaClassSupersImpl}, reached only when a Java
+ * class hierarchy is queried, so every small fixture passed and dagger's 1,559
+ * Java files exited 3 with no report. The registrations are in the jar, so the
+ * set is derived here rather than waited for.
  *
  * <p>Usage: {@code java -cp <fat.jar> scripts/GenPsiReflection.java <out.json>}
  */
@@ -29,6 +42,17 @@ public final class GenPsiReflection {
         "org/jetbrains/kotlin/kdoc/psi/",
     };
 
+    /**
+     * Plugin-descriptor attributes whose value is a class the container
+     * constructs. {@code instance} is included because an extension point can
+     * name a singleton that way; a value that is not a loadable class in this
+     * jar is dropped below, so a false positive costs nothing.
+     */
+    private static final java.util.regex.Pattern SERVICE_ATTRIBUTE =
+        java.util.regex.Pattern.compile(
+            "(?:serviceImplementation|implementationClass|implementation|instance)"
+                + "\\s*=\\s*\"([A-Za-z_][\\w.$]*)\"");
+
     public static void main(String[] args) throws Exception {
         if (args.length != 2) {
             System.err.println("usage: GenPsiReflection <fat.jar> <out.json>");
@@ -38,7 +62,12 @@ public final class GenPsiReflection {
         try (JarFile jar = new JarFile(args[0])) {
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
-                String name = entries.nextElement().getName();
+                JarEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (name.startsWith("META-INF/") && name.endsWith(".xml")) {
+                    collectServiceImplementations(jar, entry, types);
+                    continue;
+                }
                 if (!name.endsWith(".class") || name.contains("$")) {
                     continue;
                 }
@@ -68,6 +97,32 @@ public final class GenPsiReflection {
         lines.add("}");
         Files.write(Path.of(args[1]), String.join("\n", lines).concat("\n").getBytes("UTF-8"));
         System.out.println("wrote " + types.size() + " PSI reflection entries to " + args[1]);
+    }
+
+    /**
+     * Adds every class a plugin descriptor registers as a service or
+     * extension implementation. A name that does not load from THIS jar is
+     * dropped: the descriptors also mention classes from IDE modules kosi
+     * does not ship, and registering a class the image has no bytecode for
+     * fails the build rather than the run.
+     */
+    private static void collectServiceImplementations(JarFile jar, JarEntry entry, TreeSet<String> types)
+            throws IOException {
+        String xml;
+        try (var in = jar.getInputStream(entry)) {
+            xml = new String(in.readAllBytes(), "UTF-8");
+        }
+        var matcher = SERVICE_ATTRIBUTE.matcher(xml);
+        while (matcher.find()) {
+            String type = matcher.group(1);
+            if (type.indexOf('.') < 0) {
+                continue;
+            }
+            if (jar.getEntry(type.replace('.', '/') + ".class") == null) {
+                continue;
+            }
+            types.add(type);
+        }
     }
 
     /** True when the class is instantiable by the PSI factory from an AST node. */
