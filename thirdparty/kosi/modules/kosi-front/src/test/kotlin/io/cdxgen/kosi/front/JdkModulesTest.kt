@@ -53,6 +53,58 @@ class JdkModulesTest {
         assertTrue("--jdk-home" in none.tried, "the message must name the escape hatch: ${none.tried}")
     }
 
+    /**
+     * The image case. `java.home` is structurally unset in a native image,
+     * so with no `JAVA_HOME` the old order ran out of sources and every
+     * `java.*` symbol resolved to nothing — measured on
+     * `fixtures/java-interop` as 1 of 2 calls resolved against the JVM's 2,
+     * exit 0 and a warning either way. The launcher on `PATH` is where a
+     * JDK actually is.
+     */
+    @Test
+    fun aJdkOnThePathIsFoundWhenNeitherJavaHomeNorTheEnvironmentNamesOne() {
+        val real = Path.of(System.getProperty("java.home"))
+        val bin = real.resolve("bin")
+        if (!java.nio.file.Files.isRegularFile(bin.resolve("java"))) {
+            println("JdkModulesTest: no launcher at $bin; PATH discovery not exercised here")
+            return
+        }
+        val resolution = JdkModules.resolve(
+            null,
+            property = { null },
+            env = { key -> if (key == "PATH") bin.toString() else null },
+        )
+        assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
+        assertEquals(real.toRealPath(), (resolution as JdkModules.Resolution.Found).home.toRealPath())
+    }
+
+    /**
+     * Every macOS JDK unpacks to `<bundle>/Contents/Home`, and a user who
+     * points `JAVA_HOME` at the bundle gets a run with no JDK rather than an
+     * error. The bundle is one `resolve` away, so it is followed.
+     */
+    @Test
+    fun aMacOsBundleDirectoryResolvesToTheHomeInside() {
+        val bundle = Files.createTempDirectory("kosi-jdk-bundle")
+        val home = bundle.resolve("Contents").resolve("Home")
+        Files.createDirectories(home.resolve("lib"))
+        home.resolve("lib/modules").writeText("not a real image, but the marker this classifies on")
+        val resolution = JdkModules.resolve(null, property = { bundle.toString() }, env = { null })
+        assertTrue(resolution is JdkModules.Resolution.Found, "expected Found, got $resolution")
+        assertEquals(home, (resolution as JdkModules.Resolution.Found).home)
+    }
+
+    @Test
+    fun installedHomesIsEmptyWithoutAPathOrAnInstallRoot() {
+        // Hermetic: no PATH entry, and the conventional roots are absent on
+        // a machine that has none. The assertion that matters is that the
+        // scan never invents a home.
+        assertTrue(
+            JdkModules.installedHomes { null }.none { Files.isRegularFile(it.resolve("lib/modules")) },
+            "an empty PATH must not yield a launcher-derived home",
+        )
+    }
+
     @Test
     fun anEmptyDirectoryIsNotAJdkHome() {
         val empty = Files.createTempDirectory("kosi-jdk-empty")

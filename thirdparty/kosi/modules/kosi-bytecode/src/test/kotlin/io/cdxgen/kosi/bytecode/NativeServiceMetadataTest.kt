@@ -74,14 +74,52 @@ class NativeServiceMetadataTest {
             "expected the platform descriptors to register a substantial service surface, found ${registered.size}",
         )
 
+        assertMetadataCarries(registered, "registered service implementations")
+    }
+
+    /**
+     * The same rule for the other registration mechanism the jar carries.
+     * `META-INF/services/` names nine providers the jar ships, and all nine
+     * were absent from both metadata files — including `BuiltInsLoaderImpl`
+     * (Kotlin's builtin descriptors), `KotlinToJvmSignatureMapperImpl` (JVM
+     * descriptors) and the three `OverridabilityCondition` providers that
+     * decide Java member overriding. A `ServiceLoader` lookup resolves on
+     * first use exactly as the container does, so the exposure is the same:
+     * whichever repository first needs one.
+     */
+    @Test
+    fun everyServiceLoaderProviderIsInTheCommittedMetadata() {
+        val jar = File(kosiRoot, "modules/kosi-cli/build/dist/kosi-all.jar")
+        if (!jar.isFile) {
+            println("NativeServiceMetadataTest: no fat jar at $jar; run :kosi-cli:kosiFatJar")
+            return
+        }
+        val providers = sortedSetOf<String>()
+        JarFile(jar).use { archive ->
+            for (entry in archive.entries()) {
+                val name = entry.name
+                if (!name.startsWith("META-INF/services/") || name.endsWith("/")) continue
+                val text = archive.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+                for (line in text.lines()) {
+                    val type = line.substringBefore('#').trim()
+                    if (type.isEmpty() || '.' !in type) continue
+                    if (archive.getEntry(type.replace('.', '/') + ".class") == null) continue
+                    providers.add(type)
+                }
+            }
+        }
+        assertTrue(providers.isNotEmpty(), "the fat jar declares no ServiceLoader providers at all")
+        assertMetadataCarries(providers, "ServiceLoader providers")
+    }
+
+    private fun assertMetadataCarries(types: Set<String>, what: String) {
         val metadata = File(kosiRoot, "native-metadata/kosi-psi/reachability-metadata.json").readText()
-        val missing = registered.filterNot { "\"type\": \"$it\"" in metadata }
+        val missing = types.filterNot { "\"type\": \"$it\"" in metadata }
         assertTrue(
             missing.isEmpty(),
-            "${missing.size} of ${registered.size} registered service implementations are missing from the " +
-                "native reachability metadata; run `make psi-metadata`. The native binary dies at RUNTIME on the " +
-                "first one the platform decides to construct, which may be any repository and no fixture. " +
-                "Missing: ${missing.take(10)}",
+            "${missing.size} of ${types.size} $what are missing from the native reachability metadata; run " +
+                "`make psi-metadata`. The native binary fails at RUNTIME on the first one something decides to " +
+                "construct, which may be any repository and no fixture. Missing: ${missing.take(10)}",
         )
     }
 }

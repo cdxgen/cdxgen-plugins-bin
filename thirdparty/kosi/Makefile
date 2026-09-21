@@ -267,6 +267,27 @@ linuxmusl: check-linuxmusl-host $(build_dir)/kosi-linuxmusl-$(host_arch)
 ## windows: host-arch Windows binary (MSVC toolchain; docs/BUILD.md §6).
 windows: check-windows-host $(build_dir)/kosi-windows-$(host_arch).exe
 
+## native-agreement: the host binary answers what the JVM answers.
+## The image is the artifact that ships and the JVM is the one every gate
+## runs, so a divergence between them is invisible to everything else in
+## this Makefile — and one was: with no JAVA_HOME the image found no JDK,
+## resolved `java.*` to nothing, and reported exit 0 (java-interop, 1 of 2
+## calls against the JVM's 2; kosi-vulnerable-service, 0 sinks against the
+## JVM's 2). This compares
+## `stats` over the subset in scripts/native-subset.txt, with the native
+## side's JAVA_HOME unset because that is the condition the shipped binary
+## meets. ~1 minute on a warm machine, so it is affordable per image build.
+.PHONY: native-agreement native-agreement-full
+native-agreement: $(build_dir)/kosi-$(host_os)-$(host_arch) $(fat_jar)
+	@KOSI_NVJ_COMPARE=stats \
+	 KOSI_NVJ_FIXTURES="$$(grep -v '^#' scripts/native-subset.txt | tr '\n' ' ')" \
+	 scripts/native-vs-jvm.sh $(build_dir)/kosi-$(host_os)-$(host_arch) $(fat_jar)
+
+## native-agreement-full: every fixture, whole report. The release check —
+## minutes, not seconds, and local by design.
+native-agreement-full: $(build_dir)/kosi-$(host_os)-$(host_arch) $(fat_jar)
+	@scripts/native-vs-jvm.sh $(build_dir)/kosi-$(host_os)-$(host_arch) $(fat_jar)
+
 ## psi-metadata: regenerate the PSI reflection metadata from the JAR.
 ## The PSI factory builds one class per Kotlin SYNTAX KIND reflectively, so
 ## an agent-traced list is a list of the syntax the fixtures happen to

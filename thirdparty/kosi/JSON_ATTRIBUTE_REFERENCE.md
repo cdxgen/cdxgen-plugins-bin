@@ -81,9 +81,15 @@ report still ships).
 An explicit `--classpath`/`--classpath-file` replaces offline resolution
 entirely (02-ARCHITECTURE.md §3 acquisition order); otherwise the resolved
 backend scans build files as text and locates coordinates in the local
-Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
-defaults to the running JVM. Unknown flags are a usage error, never a silent
-degrade.
+Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module; without
+it kosi tries the running JVM's `java.home`, then `JAVA_HOME`, then the
+`java` launcher on `PATH`, then the conventional install roots, and accepts
+a macOS bundle directory in place of the `Contents/Home` inside it. The
+chain past `java.home` is what a NATIVE binary depends on — an image has no
+`java.home` — and a run that reaches the end of it is tagged
+`stats.degraded = "no-jdk"`, because a resolved tier with no JDK resolves
+every `java.*` symbol to nothing. Unknown flags are a usage error, never a
+silent degrade.
 
 **Which option values travel.** The report records every effective
 option verbatim — reproduction needs the real jar paths and JDK home. The
@@ -258,8 +264,13 @@ source and sink are separated by a suspend boundary),
 tier entirely, the population every dependency denominator excludes),
 `dependencyClasses` / `dependencyFunctions` (classes lowered from jars
 and methods lowered WITH bodies — the tier's denominators),
-`degraded` (`kotlin-version` when a version mismatch coincides with heavy
-resolution fallout — never read such a report as facts about the code),
+`degraded` (`no-jdk` when the resolved tier ran with no JDK attached, so
+every `java.*` symbol resolved to nothing; `kotlin-version` when a version
+mismatch coincides with heavy resolution fallout — never read such a
+report as facts about the code. `no-jdk` is the tag to check on a native
+binary in particular: it has no `java.home` of its own and falls back to
+`JAVA_HOME`, the `java` launcher on `PATH`, and the conventional install
+roots, in that order, before giving up),
 `classpath{}` (the acquisition record — `strategy` names the ONE
 strategy that produced the attached classpath or `none` when nothing
 attached, `entries` counts the attached jars, `missing` the coordinates a

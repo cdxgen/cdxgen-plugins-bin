@@ -33,6 +33,16 @@ import java.util.jar.JarFile;
  * Java files exited 3 with no report. The registrations are in the jar, so the
  * set is derived here rather than waited for.
  *
+ * <p><b>3. {@code ServiceLoader} providers.</b> The jar ships seven
+ * {@code META-INF/services/} files naming nine provider classes it carries,
+ * and every one of them was absent from both metadata files — among them
+ * {@code BuiltInsLoaderImpl} (Kotlin's builtin descriptors),
+ * {@code KotlinToJvmSignatureMapperImpl} (JVM descriptors) and the three
+ * {@code OverridabilityCondition} providers that decide Java member
+ * overriding. These load by exactly the mechanism above — reflectively, on
+ * first lookup — and the provider files are in the jar, so the same rule
+ * applies: derive them, do not wait for a run to touch them.
+ *
  * <p>Usage: {@code java -cp <fat.jar> scripts/GenPsiReflection.java <out.json>}
  */
 public final class GenPsiReflection {
@@ -66,6 +76,10 @@ public final class GenPsiReflection {
                 String name = entry.getName();
                 if (name.startsWith("META-INF/") && name.endsWith(".xml")) {
                     collectServiceImplementations(jar, entry, types);
+                    continue;
+                }
+                if (name.startsWith("META-INF/services/") && !name.endsWith("/")) {
+                    collectServiceLoaderProviders(jar, entry, types);
                     continue;
                 }
                 if (!name.endsWith(".class") || name.contains("$")) {
@@ -116,6 +130,31 @@ public final class GenPsiReflection {
         while (matcher.find()) {
             String type = matcher.group(1);
             if (type.indexOf('.') < 0) {
+                continue;
+            }
+            if (jar.getEntry(type.replace('.', '/') + ".class") == null) {
+                continue;
+            }
+            types.add(type);
+        }
+    }
+
+    /**
+     * Adds every provider named by a {@code META-INF/services/} file, on the
+     * same terms as the descriptor attributes: a name the jar does not carry
+     * is dropped, because a provider file may list implementations from
+     * modules kosi does not ship.
+     */
+    private static void collectServiceLoaderProviders(JarFile jar, JarEntry entry, TreeSet<String> types)
+            throws IOException {
+        String text;
+        try (var in = jar.getInputStream(entry)) {
+            text = new String(in.readAllBytes(), "UTF-8");
+        }
+        for (String raw : text.split("\\R")) {
+            int hash = raw.indexOf('#');
+            String type = (hash < 0 ? raw : raw.substring(0, hash)).trim();
+            if (type.isEmpty() || type.indexOf('.') < 0) {
                 continue;
             }
             if (jar.getEntry(type.replace('.', '/') + ".class") == null) {

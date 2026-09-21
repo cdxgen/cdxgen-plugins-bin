@@ -53,10 +53,24 @@ internal object JdkModules {
     /**
      * Where a JDK home comes from, in order: the explicit `--jdk-home` flag,
      * the running JVM's `java.home` (set on the JVM, unset in an image), the
-     * `JAVA_HOME` environment (the image case, when the caller's shell has
-     * one). A home that names no modular JDK is [Resolution.Invalid] — a
-     * flag that cannot work must be rejected with the reason, never
-     * silently downgraded to a partial classpath.
+     * `JAVA_HOME` environment, the `java` launcher on `PATH`, and finally
+     * the platform's conventional install roots. A home that names no
+     * modular JDK is [Resolution.Invalid] — a flag that cannot work must be
+     * rejected with the reason, never silently downgraded to a partial
+     * classpath.
+     *
+     * Everything after `JAVA_HOME` exists because of what a missing JDK
+     * costs in an IMAGE, where `java.home` is structurally unset. A resolved
+     * run with no JDK does not fail: it resolves every `java.*` symbol to
+     * nothing and reports a warning. Measured against the fat jar with
+     * `JAVA_HOME` unset: `fixtures/java-interop` 1 of 2 calls resolved
+     * against the JVM's 2, and `fixtures/kosi-vulnerable-service` 15 of 25
+     * with ZERO sinks and zero slices against the JVM's 2 and 1 — the
+     * security fixture finding nothing, at exit 0. A shell with no
+     * `JAVA_HOME` is the ordinary case for
+     * someone running the published binary, not an exotic one, so the
+     * locations a JDK is actually installed in are searched rather than
+     * waited for.
      */
     sealed interface Resolution {
         data class Found(val home: Path, val exploded: Boolean) : Resolution
@@ -70,9 +84,10 @@ internal object JdkModules {
         explicit: Path?,
         property: (String) -> String? = { System.getProperty(it) },
         env: (String) -> String? = { System.getenv(it) },
+        installed: () -> List<Path> = { installedHomes(env) },
     ): Resolution {
         if (explicit != null) {
-            return classify(explicit) ?: Resolution.Invalid(
+            return classifyCandidate(explicit) ?: Resolution.Invalid(
                 "--jdk-home $explicit is not a modular JDK home: no lib/modules image and no " +
                     "exploded modules/ tree. kosi resolves the JDK from a modular (9+) JDK home; " +
                     "the resolved backend cannot attach a JDK from this path.",
@@ -81,22 +96,94 @@ internal object JdkModules {
         val tried = mutableListOf<String>()
         val prop = property("java.home")
         if (prop != null) {
-            classify(Path.of(prop))?.let { return it }
+            classifyCandidate(Path.of(prop))?.let { return it }
             tried.add("java.home=$prop (not a modular JDK home)")
         } else {
             tried.add("java.home is unset")
         }
         val envHome = env("JAVA_HOME")
         if (envHome != null) {
-            classify(Path.of(envHome))?.let { return it }
+            classifyCandidate(Path.of(envHome))?.let { return it }
             tried.add("JAVA_HOME=$envHome (not a modular JDK home)")
         } else {
             tried.add("JAVA_HOME is unset")
         }
+        val scanned = installed()
+        for (candidate in scanned) {
+            classifyCandidate(candidate)?.let { return it }
+        }
+        tried.add(
+            if (scanned.isEmpty()) {
+                "no java launcher on PATH and no JDK in the conventional install roots"
+            } else {
+                "${scanned.size} installed location(s) hold no modular JDK"
+            },
+        )
         return Resolution.NotFound(
             "no JDK home found (${tried.joinToString("; ")}); pass --jdk-home to name one",
         )
     }
+
+    /**
+     * Homes a JDK is plausibly installed at, most authoritative first: the
+     * `java` launcher on `PATH` (which covers sdkman, asdf, homebrew, apt
+     * and a hand-unpacked tarball alike, because all of them put the
+     * launcher there), then the per-platform install roots, newest name
+     * first so the choice does not depend on directory enumeration order.
+     * No subprocess is spawned — a static-analysis binary that shells out to
+     * find its own JDK is a worse trade than reading `PATH`.
+     */
+    internal fun installedHomes(env: (String) -> String? = { System.getenv(it) }): List<Path> {
+        val out = mutableListOf<Path>()
+        for (entry in (env("PATH") ?: "").split(java.io.File.pathSeparatorChar)) {
+            if (entry.isBlank()) continue
+            for (exe in listOf("java", "java.exe")) {
+                val launcher = Path.of(entry).resolve(exe)
+                if (!Files.isRegularFile(launcher)) continue
+                // <home>/bin/java, through however many symlinks the
+                // version manager put in the way.
+                val real = try {
+                    launcher.toRealPath()
+                } catch (_: IOException) {
+                    launcher.toAbsolutePath().normalize()
+                }
+                real.parent?.parent?.let(out::add)
+            }
+        }
+        for (root in INSTALL_ROOTS) {
+            val dir = Path.of(root)
+            if (!Files.isDirectory(dir)) continue
+            val children = try {
+                Files.list(dir).use { stream -> stream.filter { Files.isDirectory(it) }.toList() }
+            } catch (_: IOException) {
+                continue
+            }
+            out.addAll(children.sortedByDescending { it.fileName.toString() })
+        }
+        return out.distinct()
+    }
+
+    /**
+     * Conventional per-platform install roots, each holding one directory
+     * per installed JDK. Listing all of them on every platform costs one
+     * `isDirectory` per miss and removes a per-OS branch.
+     */
+    private val INSTALL_ROOTS = listOf(
+        "/Library/Java/JavaVirtualMachines",
+        "/usr/lib/jvm",
+        "/usr/java",
+        "/opt/java",
+        "C:\\Program Files\\Java",
+        "C:\\Program Files\\Eclipse Adoptium",
+    )
+
+    /**
+     * A home, or the macOS bundle that holds one at `Contents/Home` — the
+     * shape every macOS JDK distribution unpacks to, and the shape a user
+     * who sets `JAVA_HOME` to the unpacked directory gets wrong.
+     */
+    private fun classifyCandidate(home: Path): Resolution.Found? =
+        classify(home) ?: classify(home.resolve("Contents").resolve("Home"))
 
     /** Modular (`lib/modules` image) or exploded (`modules/java.base` tree); null for neither. */
     private fun classify(home: Path): Resolution.Found? = when {

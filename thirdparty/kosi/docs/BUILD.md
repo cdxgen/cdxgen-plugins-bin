@@ -82,15 +82,24 @@ itself. A real defect reached the gate that way: the image could not analyse
 any fixture containing an `object`, and the native-vs-JVM sweep reported
 every fixture identical. The recipe is now a script that
 cannot be run wrong — outputs deleted before every run, exit codes checked,
-sizes asserted, `tool.commit` normalised, and the per-fixture slice/node/edge
-counts printed so the sweep shows what it compared:
+sizes asserted, and the per-fixture slice/node/edge counts printed so the
+sweep shows what it compared:
 
 ```bash
 scripts/determinism-sweep.sh --jar modules/kosi-cli/build/dist/kosi-all.jar JVM
 scripts/determinism-sweep.sh build/kosi-darwin-arm64 native
-scripts/native-vs-jvm.sh build/kosi-darwin-arm64 \
-  modules/kosi-cli/build/dist/kosi-all.jar
+make native-agreement        # the subset, on stats — ~1 min, also runs in CI
+make native-agreement-full   # every fixture, whole report — the release check
 ```
+
+Two things are normalised out of the comparison and only two: `tool.commit`
+(the image bakes in its build commit) and the whole `runtime` section, whose
+`jvmVersion` and `nativeImage` differ between the sides ON PURPOSE.
+Everything else is analysis.
+
+**The native side runs with `JAVA_HOME` unset.** That is the condition the
+shipped binary meets — cdxgen invokes it from whatever shell the user has —
+and it is where the comparison earns its keep: see below.
 
 ### When this is worth running
 
@@ -108,19 +117,32 @@ break:
 | lowering, KIR shape, reflection, resources, `native-image` flags, the CLI entry | the full pass: rebuild, both sweeps, and the metadata check. |
 | a squash-merge that touched none of those | nothing native. |
 
-**`native-vs-jvm.sh` is the expensive one and it is NOT a per-merge gate.**
-Every divergence it has ever caught — an image that could not analyse an
-`object`, one that could not analyse a KDoc comment, one that could not
-start on linux — was a REFLECTION or RESOURCE failure, and
-`native-metadata-check` sees that class of problem from a trace, with no
-image build, for a fraction of the cost. So metadata drift is the routine
-gate; the comparison runs only when the change is in the image's own
-surface (the row above), and otherwise on a release build. Running it after
-a data or fixture change buys nothing and costs half an hour.
+**The full sweep is the expensive one and it is NOT a per-merge gate.** The
+SUBSET is, and the distinction was bought:
 
-The discipline is real — a green JVM suite has repeatedly shipped a broken
-image — but it is a reason to watch reflection metadata, not a reason to
-rebuild an image after editing a JSON file.
+For a long time the argument here was that every divergence the comparison
+had ever caught — an image that could not analyse an `object`, one that
+could not analyse a KDoc comment, one that could not start on linux — was a
+REFLECTION or RESOURCE failure, which `native-metadata-check` sees from a
+trace with no image build. That argument was true and it was not enough.
+The next divergence was neither: with no `JAVA_HOME` the image found no JDK
+at all, because `java.home` is structurally unset in an image, and it then
+resolved every `java.*` symbol to nothing and exited 0. No metadata check
+could see it, because no metadata was missing. Measured: `java-interop` 1 of
+2 calls resolved against the JVM's 2, and `kosi-vulnerable-service` 15 of
+25 with 0 sinks and 0 slices against the JVM's 2 and 1 — the security
+fixture finding nothing at all, at exit 0. The one gate that would
+have seen it compared the two binaries' answers, and nobody was running it.
+
+So there are now two tiers. `make native-agreement` compares `stats` over
+the eight fixtures in `scripts/native-subset.txt` — chosen to span the
+surfaces, with the file itself stating what it covers and what it leaves
+out — and runs in both on-demand native CI jobs, costing about a minute on
+top of an image build that already took much longer.
+`make native-agreement-full` compares whole reports over all 127 fixtures
+and stays local, for a release or for a change in the image's own surface.
+Metadata drift remains the cheap routine gate, and a data or fixture change
+still needs nothing native.
 
 Both sweeps run **both** graph-bearing slots (`resolved` and `--roots
 exported`), not `resolved` alone: the lesson is that a slot nobody runs is

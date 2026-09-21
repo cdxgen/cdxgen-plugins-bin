@@ -1208,7 +1208,7 @@ object Analyzer {
                     dependencyFunctions = flowResult?.dependencyFunctions ?: 0,
                     truncations = flowResult?.truncations ?: emptyMap(),
                     policySkips = flowResult?.skips ?: emptyMap(),
-                    degraded = degradedTag(versionDiagnostics, resolution, ratio),
+                    degraded = degradedTag(versionDiagnostics, resolution, ratio, noJdk = jdkHome == null),
                     classpath = classpathStats,
                     sourceCoverage = sourceCoverage,
                 ),
@@ -1302,7 +1302,15 @@ object Analyzer {
         versionDiagnostics: List<Diagnostic>,
         resolution: ClasspathResolver.Result,
         ratio: Double,
+        noJdk: Boolean,
     ): String? {
+        // A resolved run with no JDK resolves every `java.*` symbol to
+        // nothing. That is not a partial classpath, it is a missing floor:
+        // `fixtures/java-interop` drops from 2 of 2 resolved calls to 1, and
+        // `fixtures/kosi-vulnerable-service` from 2 sinks and 1 slice to
+        // none at all — with exit 0 and a warning nobody reads. The tag is
+        // what a consumer checks instead.
+        if (noJdk) return "no-jdk"
         val versionMismatch = versionDiagnostics.any {
             it.code == DiagnosticCodes.KOTLIN_LANGUAGE_VERSION || it.code == DiagnosticCodes.KOTLIN_VERSION
         }
