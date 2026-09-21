@@ -44,7 +44,7 @@ data class FlowEdge(
 }
 
 /**
- * P22 §2: the closed vocabulary of [FlowSlice.pathKind] — what a slice's
+ * The closed vocabulary of [FlowSlice.pathKind] — what a slice's
  * trace IS. Pinned by `SlicePathKindVocabularyTest` the way
  * `RootsVocabularyTest` pins the roots vocabulary: a fourth value does not
  * ship, and every published slice carries exactly one.
@@ -63,11 +63,11 @@ object PathKind {
 }
 
 /**
- * P24 §3: the closed vocabulary of [FlowFrame.role] — what happened at one
+ * The closed vocabulary of [FlowFrame.role] — what happened at one
  * hop of a trace. Pinned by `FrameRoleVocabularyTest` beside
  * [PathKind.ALL]: a ninth role does not ship, and a role with no producer
- * anywhere in the corpus is a schema lie (R117's rule, applied to the new
- * vocabulary on the day it is born, not one phase later).
+ * anywhere in the corpus is a schema lie (the rule, applied to the new
+ * vocabulary on the day it is born, not later).
  */
 object FrameRole {
     /** The taint's birth: a pack source call, an endpoint parameter, a literal. */
@@ -98,7 +98,7 @@ object FrameRole {
 }
 
 /**
- * P24 §3: one named hop of a slice's trace — (function, file, line, role),
+ * One named hop of a slice's trace — (function, file, line, role),
  * the unit `09-PRECISION.md` §4 calls for. The frame list is ordered source
  * to sink; [FlowSlice.pathKind] (with [FlowSlice.framesCutBy]) says whether
  * the list is the whole walk.
@@ -133,17 +133,16 @@ data class FlowFrame(
 }
 
 /**
- * P23 §0: what makes a slice a CRYPTO flow — key or secret material (the
- * `hardcoded-secret` literal sources) reaching a crypto API (`crypto-asset`)
- * or a TLS misconfiguration (`insecure-tls`).
- *
- * It lives in the schema module, beside [FlowSlice], because two pieces of
- * code answer this question and they must answer it the same way (P22's
- * rule). The bench has counted `cryptoFlowSlices` with this predicate since
- * P6; `--dataflow crypto` never consulted it and published every slice the
- * `security` mode does, so the mode named a filter that did not exist — and
- * a consumer who asked for crypto flows was handed log-injection findings
- * labelled `"mode": "crypto"` (the P23 §0 matrix's first finding, R139).
+ * What makes a slice a CRYPTO flow — key or secret material (the `hardcoded-
+ * secret` literal sources) reaching a crypto API (`crypto-asset`) or a TLS
+ * misconfiguration (`insecure-tls`). It lives in the schema module, beside
+ * [FlowSlice], because two pieces of code answer this question and they must
+ * answer it the same way (the rule). The bench has counted
+ * `cryptoFlowSlices` with this predicate; `--dataflow crypto` never
+ * consulted it and published every slice the `security` mode does, so the
+ * mode named a filter that did not exist — and a consumer who asked for
+ * crypto flows was handed log-injection findings labelled `"mode": "crypto"`
+ * (the matrix's first finding).
  */
 object CryptoFlow {
     const val SOURCE_CATEGORY = "hardcoded-secret"
@@ -179,8 +178,8 @@ data class FlowSlice(
     val crossesModule: Boolean,
     val crossesDependency: Boolean,
     /**
-     * P22 §2: what the slice's trace IS, published rather than left for the
-     * consumer to re-derive from `nodeIds` (P21 §3's schema gap):
+     * what the slice's trace IS, published rather than left for the
+     * consumer to re-derive from `nodeIds` (the schema gap):
      *
      *  - `complete`    — a full source→sink walk, not cut;
      *  - `partial`     — the walk was elided (trace cap, missing middle);
@@ -192,13 +191,13 @@ data class FlowSlice(
      * was false on every slice in every shipped slot and true by
      * construction in the one mode that published it (the mode, not the
      * slice, carried the information — `dataFlow.mode` still does), and
-     * `rootWitness` was null everywhere (R117's rule: a field that never
+     * `rootWitness` was null everywhere (the rule: a field that never
      * varies is not a fact, it is a schema lie a consumer will eventually
      * believe).
      */
     val pathKind: String,
     /**
-     * P24 §3: the trace as named hops — ordered (function, file, line,
+     * The trace as named hops — ordered (function, file, line,
      * role), source first, sink last. `frames>=N` and `via=fn:...` corpus
      * expectations read this list; cdxgen renders it as `callstack`
      * evidence. Empty only where [pathKind] is `symbol-only` (no walk, no
@@ -206,7 +205,7 @@ data class FlowSlice(
      */
     val frames: List<FlowFrame> = emptyList(),
     /**
-     * P24 §3: when [frames] is not the whole walk, the cap that cut it
+     * When [frames] is not the whole walk, the cap that cut it
      * (e.g. `trace-nodes`) — the frame-list form of the PARTIAL contract.
      * Null on a complete list.
      */
@@ -219,7 +218,7 @@ data class FlowSlice(
     val riskScore: String,
     val flowKey: String,
     /**
-     * P5: the summary origins this slice's trace crossed at interprocedural
+     * The summary origins this slice's trace crossed at interprocedural
      * boundaries, sorted and distinct — `computed`, `pack`, `default`,
      * `recursive-approx`. Empty for a purely intraprocedural slice. This is
      * the per-slice half of the default-origin measurement: a slice whose
@@ -228,11 +227,11 @@ data class FlowSlice(
      */
     val origins: List<String> = emptyList(),
     /**
-     * P20 §1: for a slice that entered through an ENDPOINT HANDLER's
+     * For a slice that entered through an ENDPOINT HANDLER's
      * parameter, the value-parameter it entered through (`#0` = the first
      * non-receiver parameter) and the transport the parameter's annotation
      * names (path/query/header/cookie/form/body). Null for every other
-     * birth — before P20 an endpoint-rooted slice could say "this handler
+     * birth — previously, an endpoint-rooted slice could say "this handler
      * is reachable from untrusted input" but never WHICH parameter, which
      * is the difference between "guard this input" and "audit the handler".
      */
@@ -312,42 +311,42 @@ data class FlowSummary(
     val accessPaths: Map<String, String>,
     val origin: String,
     /**
-     * P24 §2c: source-born field writes, as `p<i>.<suffix>:<category>`
+     * Source-born field writes, as `p<i>.<suffix>:<category>`
      * strings — taint born at a source inside the callee and stored into
      * parameter i's object. The caller's argument carries the write after
      * the call.
      */
     val sourceFieldWrites: List<String> = emptyList(),
     /**
-     * P24 §2: parameter-object FIELDS reaching the return's same field, as
+     * Parameter-object FIELDS reaching the return's same field, as
      * `p<i>.<suffix>` strings — `fun get(raw: String) = Session(token =
      * raw)` returns an object whose `token` carries the argument.
      */
     val paramToReturnFields: List<String> = emptyList(),
     /**
-     * P24 §2d: what the body passes when it invokes function-valued
+     * What the body passes when it invokes function-valued
      * parameters, as `p<j>(arg<k>)<-p<i>` (my parameter i's taint) or
      * `p<j>(arg<k>)<-source:<category>` (a source born in me).
      */
     val invokes: List<String> = emptyList(),
     /**
-     * P26 §0: source-born taint reaching the RETURN's FIELD, as
+     * Source-born taint reaching the RETURN's FIELD, as
      * `<suffix>:<category>` strings — `fun make() = Wrapped(readLine() ?:
      * "")` returns an object whose field carries a source born inside it.
-     * The channel P24's constructor synthesis made load-bearing (it moved
+     * The channel the constructor synthesis made load-bearing (it moved
      * source facts off the bare return key into constructed objects'
-     * fields) and no vocabulary carried (R161: http4k's delegation
+     * fields) and no vocabulary carried (http4k's delegation
      * factories went silent).
      */
     val sourceReturnFields: List<String> = emptyList(),
     /**
-     * P27 §1: parameter i's FIELD reaching the RETURN value, as
+     * Parameter i's FIELD reaching the RETURN value, as
      * `p<i>.<suffix>` strings — the getter channel
      * (`val body get() = raw`) and every `by`-delegation forwarder. The
      * inverse of [paramToReturnFields], and the half that was missing: the
      * summary said only that the parameter reached the return, and the
      * caller then probed the argument's bare key, where an object carrying
-     * its taint in a field has nothing (R171).
+     * its taint in a field has nothing.
      */
     val paramFieldToReturn: List<String> = emptyList(),
 ) {
@@ -418,7 +417,7 @@ data class DataFlowEvidence(
     val diagnostics: List<Diagnostic>,
 ) {
     /**
-     * P23 §0: this evidence narrowed to [kept], as a WHOLE — the slices, the
+     * This evidence narrowed to [kept], as a WHOLE — the slices, the
      * nodes and edges those slices still reference, and every counter derived
      * from them.
      *
@@ -429,8 +428,8 @@ data class DataFlowEvidence(
      * `defaultOriginSlices`, `integrityViolations`) still measuring the
      * unfiltered population. The reachable-mode intersection recomputed four
      * of those counters and left the other five plus the node and edge
-     * arrays; the P23 crypto filter, written from it, reproduced the same
-     * gap. Two places narrowing one document is exactly the shape this phase
+     * arrays; the crypto filter, written from it, reproduced the same
+     * gap. Two places narrowing one document is exactly the shape this change
      * is about, so there is now one place.
      *
      * `summaries[]` is deliberately NOT narrowed: a summary is a fact about a
@@ -474,8 +473,8 @@ data class DataFlowEvidence(
                 suspendCrossingSlices = kept.count { slice ->
                     slice.nodeIds.any { nodesById[it]?.kind == "suspend" }
                 },
-                // P24 §3: the depth measurements are properties of the
-                // SURVIVING slices (R145's rule — a narrowed document
+                // The depth measurements are properties of the
+                // SURVIVING slices (the rule — a narrowed document
                 // narrows its derived counters), while the dispatch-width
                 // histogram and truncations{} measure the RUN's call sites
                 // and caps and stay.
@@ -557,7 +556,7 @@ data class DataFlowStats(
      * when the run both asked for `--dataflow reachable` AND produced a call
      * graph to intersect with. Asking without a graph (`--callgraph none`)
      * computes nothing, and the field then reads 0 meaning "not measured",
-     * never "every slice" (the P22 review's R137). The taint engine always
+     * never "every slice" (a later review). The taint engine always
      * writes 0 here; the Analyzer's intersection is the only writer of a
      * non-zero value, and `summary.reachableSliceCount` reads this field
      * rather than deriving a second answer.
@@ -571,36 +570,36 @@ data class DataFlowStats(
     val defaultOriginSlices: Int = 0,
     /** Slices whose trace crossed >= 1 summary boundary — the default-origin denominator. */
     val summaryCrossingSlices: Int = 0,
-    /** P6: slices whose trace crosses a suspend boundary. */
+    /** Slices whose trace crosses a suspend boundary. */
     val suspendCrossingSlices: Int = 0,
-    /** P5: dispatch joins by candidate width, e.g. {"2": 5}. */
+    /** Dispatch joins by candidate width, e.g. {"2": 5}. */
     val dispatchJoins: Map<String, Int> = emptyMap(),
     /**
-     * P9: summaries derived from dependency bytecode (`origin=bytecode`) that
+     * Summaries derived from dependency bytecode (`origin=bytecode`) that
      * a workspace call site actually applied — the gate's numerator is taken
      * over THESE, never over every jar function summarised.
      */
     val bytecodeSummaries: Int = 0,
     /**
-     * P9: slices whose trace enters a dependency jar AND whose boundary moves
+     * Slices whose trace enters a dependency jar AND whose boundary moves
      * carry `origin=bytecode` — the cross-dependency taint the whole phase
      * exists to measure, with both producers named.
      */
     val crossDependencyBytecodeSlices: Int = 0,
     /**
-     * P24 §3: the deepest named-hop count any published slice carries —
+     * The deepest named-hop count any published slice carries —
      * "how deep does kosi actually go on this repo" as a number in the
      * report rather than an anecdote (09-PRECISION.md §4). 0 when no slice
      * carries frames.
      */
     val maxObservedDepth: Int = 0,
     /**
-     * P24 §3: slice count by frame count (the depth histogram). Exact
+     * Slice count by frame count (the depth histogram). Exact
      * counts, like `dispatchJoins` — a bucket a reviewer can re-derive.
      */
     val depthHistogram: Map<String, Int> = emptyMap(),
     /**
-     * P24 §3: dispatch-width histogram — targets CONSIDERED per virtual hop
+     * Dispatch-width histogram — targets CONSIDERED per virtual hop
      * across the run, pre-narrowing, so the difference between considered
      * and applied (the narrowing the trace names per hop) is a measurement.
      * `dispatchJoins` keeps counting APPLIED summaries; both stay because
@@ -608,7 +607,7 @@ data class DataFlowStats(
      */
     val dispatchWidthHistogram: Map<String, Int> = emptyMap(),
     /**
-     * P24 §4: every dataflow cap that bound this run, by its published
+     * Every dataflow cap that bound this run, by its published
      * name, with the number of times it cut. The depth doctrine's (a):
      * every cap is declared, measured and visible IN THE REPORT — the
      * `truncations{}` the deep tier's PASS line requires at zero. Empty is
@@ -616,7 +615,7 @@ data class DataFlowStats(
      */
     val truncations: Map<String, Int> = emptyMap(),
     /**
-     * P28 (R176): functions skipped BY POLICY (`--dataflow-skip-generated`),
+     * Functions skipped BY POLICY (`--dataflow-skip-generated`),
      * which is not a cap: the skipped bodies' summaries still apply and
      * nothing is lost. Published beside `truncations{}` so "cut off by a
      * budget" and "deliberately not reported" are different vocabularies —

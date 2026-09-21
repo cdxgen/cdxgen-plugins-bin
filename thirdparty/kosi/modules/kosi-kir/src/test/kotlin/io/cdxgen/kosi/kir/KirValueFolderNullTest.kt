@@ -7,9 +7,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * P19 §1: the folder's null contract. "The register provably holds null"
+ * The folder's null contract. "The register provably holds null"
  * and "the value could not be proved" are different facts, and until the
- * P18 review every null literal folded as the STRING "null" — so no caller
+ * a later review every null literal folded as the STRING "null" — so no caller
  * could have told them apart even if it had tried. [KirValueFolder.ValueStatus.NULL]
  * is the distinction; these properties pin it from both sides, because a
  * consumer that branches on it (route paths, outbound raw renderings) has
@@ -63,11 +63,11 @@ class KirValueFolderNullTest {
 
     @Test
     fun anUnprovableRegisterReturnsNothingAtAll() {
-        // A parameter's value cannot be proved from the module. Since P20
-        // §0 the miss is a NAMED failure (PARAMETER) rather than a silent
-        // null — the depth report counts it as a folding boundary, not a
-        // folding miss — but the value is absent either way, which is what
-        // every consumer reads.
+        // A parameter's value cannot be proved from the module. The miss
+        // is a NAMED failure (PARAMETER) rather than a silent null — the
+        // depth report counts it as a folding boundary, not a folding miss
+        // — but the value is absent either way, which is what every
+        // consumer reads.
         val fn = function(KirAssign("t0", "%0")).let {
             it.copy(params = listOf(KirParam("%0", "p", "kotlin.String", receiver = false)))
         }

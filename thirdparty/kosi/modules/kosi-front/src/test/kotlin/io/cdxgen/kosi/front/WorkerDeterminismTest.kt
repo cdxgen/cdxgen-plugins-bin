@@ -9,7 +9,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P10's parallelism contract: `--dataflow-workers > 1` must produce a
+ * The parallelism contract: `--dataflow-workers > 1` must produce a
  * byte-identical REPORT at any worker width — parallel speedup is worthless
  * if ids, slices or digests shift with the schedule.
  */

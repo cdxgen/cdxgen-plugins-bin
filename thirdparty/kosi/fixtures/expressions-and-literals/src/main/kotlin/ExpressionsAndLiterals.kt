@@ -1,4 +1,4 @@
-// R69 construct-coverage fixture: EXPRESSION AND LITERAL shapes the
+// construct-coverage fixture: EXPRESSION AND LITERAL shapes the
 // fixture tree had never contained — a raw string, the not-null assertion
 // (`!!`), a safe cast (`as?`), `try` used as an EXPRESSION, `runCatching`,
 // a reflection literal over a class and over a function reference, and a

@@ -1,4 +1,4 @@
-// The P6 gate's named case: taint survives flow { emit(t) } .map { } .collect { }.
+// The gate's named case: taint survives flow { emit(t) } .map { } .collect { }.
 // Negatives first: the clean chain reports nothing, and a SANITIZING map
 // body sanitizes everything downstream of it.
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~flowClean known-fail=syntax:1

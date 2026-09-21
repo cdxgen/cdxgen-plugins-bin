@@ -1,7 +1,7 @@
 package io.cdxgen.kosi.kir
 
 /**
- * Const-folding over the KIR for the evidence consumers (P7/P8): what a call
+ * Const-folding over the KIR for the evidence consumers: what a call
  * argument's register provably contains, from the module alone plus the
  * caller-supplied workspace `const val` table and config table. A value that
  * cannot be proved is [ValueStatus.UNRESOLVED], never a guess — the
@@ -11,7 +11,7 @@ package io.cdxgen.kosi.kir
  * defines a value register at most once per block on the straight-line path
  * to its use, so the nearest prior definition is the value.
  *
- * P20 §2 extended the fold ACROSS BLOCKS along the dominator chain, with the
+ * extended the fold ACROSS BLOCKS along the dominator chain, with the
  * conservative join the project's temperament demands:
  *
  *  - a definition in a strict dominator D of the use block folds when EVERY
@@ -27,14 +27,14 @@ package io.cdxgen.kosi.kir
  *    a loop latch) is unresolved: loop-carried values have no single
  *    provenance the KIR can name.
  *
- * P20 §0 instruments WHY a fold fails. A claim about precision without a
+ * instruments WHY a fold fails. A claim about precision without a
  * denominator is the thing this project does not do: [FoldFailure] names the
  * four ways a value stays unresolved (cross-block, the depth budget, a
  * parameter, a producer the folder cannot see through), and [FoldStats]
  * counts them so the depth report can say which reason dominates and what a
  * widening bought.
  *
- * P21 §1 widened the PRODUCER bucket, the largest one every measurement this
+ * widened the PRODUCER bucket, the largest one every measurement this
  * project has taken: a register defined by a call now folds when the callee
  * is in the workspace and EVERY return site of EVERY candidate body folds to
  * the same constant. Conservative by construction: disagreeing returns,
@@ -59,14 +59,14 @@ class KirValueFolder(
     private val envReaders: Set<String> = DEFAULT_ENV_READERS,
     configTable: Map<String, String> = emptyMap(),
     /**
-     * P20 §2: cross-block folding off restores the pre-P20 block-local scan
+     * Cross-block folding off restores the earlier block-local scan
      * exactly — the restored-defect proof for every cross-block behaviour,
      * and the depth report's baseline column (the same fixtures measured
      * both ways in one run).
      */
     private val crossBlock: Boolean = true,
     /**
-     * P20 §0: when non-null, every [valueAt] outcome is counted here — the
+     * When non-null, every [valueAt] outcome is counted here — the
      * depth report's value-resolution table. Production passes null and
      * pays nothing.
      */
@@ -79,16 +79,16 @@ class KirValueFolder(
      * string-template concat are different syntactic shapes).
      *
      * NULL is the one status whose VALUE is absent on purpose: a null
-     * literal is not the four characters "null" (R117 made it visible to
+     * literal is not the four characters "null" (made it visible to
      * the fold), and a consumer must be able to tell "the register
      * provably holds null" from "the value could not be proved" — the
      * route-path and outbound-URL consumers branch on exactly that
-     * difference (P19 §1).
+     * difference.
      */
     enum class ValueStatus { LITERAL, FOLDED_CONST, FOLDED_TEMPLATE, CONFIG, ENV, NULL, UNRESOLVED }
 
     /**
-     * P20 §0: WHY a value did not fold. The breakdown is the design input
+     * WHY a value did not fold. The breakdown is the design input
      * for widening the fold — a [PARAMETER] population is not a folding
      * problem at all, a [DEPTH_CAP] population is a budget question, and a
      * [CROSS_BLOCK] one is the folding frontier itself.
@@ -106,14 +106,14 @@ class KirValueFolder(
         /**
          * Cross-block hops whose folding was refused by the conservative
          * rules — the §2 verdict's refusal half, published in the depth
-         * report since P21 §0 (a counter FoldStats kept but the report
-         * never showed was R117's unread-vocabulary shape).
+         * report (a counter FoldStats kept but the report
+         * never showed was the unread-vocabulary shape).
          */
         var crossBlockRefused: Int = 0
         /** Values resolved by walking the dominator chain (zero when disabled). */
         var crossBlockResolved: Int = 0
         /**
-         * P22 §0: the workspace call sites whose return the folder FOLDED,
+         * The workspace call sites whose return the folder FOLDED,
          * as `fqn\0descriptor` keys, in fold order. The depth report asks
          * the flow module's summaries about exactly these callees — the
          * agreement gate. Bounded by the folded-site count; production
@@ -121,7 +121,7 @@ class KirValueFolder(
          */
         val workspaceFolds: MutableList<String> = mutableListOf()
         /**
-         * P22 §3: the producer bucket BY CALLEE ARM. A bucket with a total
+         * The producer bucket BY CALLEE ARM. A bucket with a total
          * is a number; a bucket with a breakdown is a design input —
          * `dependency-call` (out of scope by construction), the workspace
          * refusal arms, and the shapes the folder does not recognise.
@@ -131,13 +131,13 @@ class KirValueFolder(
         val producerArms: java.util.TreeMap<String, Int> = java.util.TreeMap()
 
         /**
-         * P23 §3: whether the ask in flight has already been classified.
-         * The arms are recorded where the refusal is decided — at every
-         * depth of the walk — and `producer` counts one per top-level ask,
-         * so without this latch a nested refusal and its caller's re-refusal
-         * both counted and the breakdown over-ran the bucket it explains
-         * (R141). Null between asks; the innermost arm wins, because it is
-         * the one that names the shape.
+         * Whether the ask in flight has already been classified. The arms
+         * are recorded where the refusal is decided — at every depth of the
+         * walk — and `producer` counts one per top-level ask, so without
+         * this latch a nested refusal and its caller's re-refusal both
+         * counted and the breakdown over-ran the bucket it explains. Null
+         * between asks; the innermost arm wins, because it is the one that
+         * names the shape.
          */
         private var armRecorded: Boolean = false
         private var armLatched: Boolean = false
@@ -178,18 +178,18 @@ class KirValueFolder(
     private val configValues: Map<String, String> = configTable
 
     /**
-     * P21 §1: the workspace call surface, keyed by the FQN a call site names
+     * The workspace call surface, keyed by the FQN a call site names
      * (the function's canonical name — the same key the flow engine's
      * CallIndex resolves through). Built once per folder; the folder holds
      * the whole module, so no second summary pass is needed.
      */
     private val workspaceByFqn: Map<String, List<KirFunction>> = module.functions.groupBy { it.canonicalName }
 
-    /** P21 §1: recursion guard for the workspace-return walk (see [workspaceReturnValue]). */
+    /** Recursion guard for the workspace-return walk (see [workspaceReturnValue]). */
     private val workspaceInFlight = HashSet<String>()
 
     /**
-     * P21 §1: return sites per function. Keyed by IDENTITY, not canonical
+     * Return sites per function. Keyed by IDENTITY, not canonical
      * name: overloads share a canonical name and must not share sites.
      */
     private val workspaceReturnSites = java.util.IdentityHashMap<KirFunction, List<Pair<KirBlock, Pair<Int, String?>>>>()
@@ -200,7 +200,7 @@ class KirValueFolder(
      * one — and `associate` kept the LAST, which is to say a function could
      * be asked about its registers and answered about its namesake's. Same
      * view, same key, everywhere: [cfgs] and [workspaceReturnSites] are
-     * keyed the same way, and the P21 review's R133 is what happens when
+     * keyed the same way, and a later review is what happens when
      * one of the three is not (the review's rule: two maps describing the
      * same function must agree on what a function IS).
      */
@@ -222,7 +222,7 @@ class KirValueFolder(
         }
 
     /**
-     * P20 §2: per-function CFG facts for the dominator walk, built lazily
+     * Per-function CFG facts for the dominator walk, built lazily
      * and cached (fixtures and route trees are small; real repos hit this
      * only where a consumer folds, and the cache is per folder instance,
      * which lives for one analysis pass).
@@ -245,7 +245,7 @@ class KirValueFolder(
      * Keyed by IDENTITY, like [definedRegisters] and [workspaceReturnSites]:
      * overloads share a canonical name, and a name-keyed cache answers one
      * overload's dominator question with its namesake's control flow. That
-     * is not a missed fold but a WRONG one — the review's R133 probe folded
+     * is not a missed fold but a WRONG one — the review's probe folded
      * a value defined on one arm of a branch into a confident constant,
      * because the cached CFG said the defining block dominated the use when
      * in that body it did not.
@@ -360,7 +360,7 @@ class KirValueFolder(
         val value: String?,
         val status: ValueStatus,
         val detail: String? = null,
-        /** P20 §0: why an unresolved value stayed unresolved. Null when resolved (or NULL). */
+        /** Why an unresolved value stayed unresolved. Null when resolved (or NULL). */
         val failure: FoldFailure? = null,
     ) {
         val resolved: Boolean get() = value != null && status != ValueStatus.UNRESOLVED
@@ -375,16 +375,16 @@ class KirValueFolder(
      * and the callers that care branch on the status.
      */
     fun valueAt(fn: KirFunction, block: KirBlock, index: Int, register: String): FoldedValue? {
-        // P23 §3: one ask, one arm. The arms are recorded wherever the
+        // One ask, one arm. The arms are recorded wherever the
         // refusal is DECIDED, which is at every depth of the walk, while
         // `producer` counts only this top-level ask — so a nested refusal
         // that the outer frame then re-refuses recorded two arms for one
         // failure. `recursive(n)`'s inner call names `workspace-recursion`
         // and its caller then names `workspace-return-unprovable` for the
-        // same ask. P22 §3's gate asserted arms == producer and passed only
+        // same ask. The gate asserted arms == producer and passed only
         // because no bundled fixture had a nested refusal; driving the
-        // arms (R141) made the over-count visible at once, which is the
-        // gate doing its job a phase late. The INNERMOST arm wins: it is
+        // arms made the over-count visible at once, which is the
+        // gate doing its job a change late. The INNERMOST arm wins: it is
         // the one that names the actual shape, where the outer frame can
         // only say "the callee did not fold".
         statsSink?.armLatchOpen()
@@ -423,7 +423,7 @@ class KirValueFolder(
                     // keeps the template's source text); strip them.
                     is KirConstant.Str -> FoldedValue(constant.value.removeSurrounding("\""), ValueStatus.LITERAL)
                     is KirConstant.IntConst -> FoldedValue(constant.value.toString(), ValueStatus.LITERAL)
-                    // Typed since the P18 review's lowering fix: these used
+                    // Typed since a later review lowering fix: these used
                     // to arrive as Str of their source text and fold as
                     // literals, so they keep folding as literals — with the
                     // exception of Null, which is the absence of a value and
@@ -466,7 +466,7 @@ class KirValueFolder(
         // Not defined in this block above the use. A parameter is the
         // caller's value — a folding boundary by definition, named as its
         // own failure so the depth report never counts it as a folding
-        // miss (P20 §0). Anything else is defined elsewhere in the
+        // miss. Anything else is defined elsewhere in the
         // function: the cross-block walk.
         if (fn.params.any { it.register == register }) {
             return FoldedValue(null, ValueStatus.UNRESOLVED, failure = FoldFailure.PARAMETER)
@@ -479,7 +479,7 @@ class KirValueFolder(
      * fragments (not registers of this function) are the lowering's literal
      * text. The FIRST failing part's failure reason is the concat's — that
      * is why the template stayed unresolved, and the depth report counts it
-     * there (P20 §0).
+     * there.
      */
     private fun foldConcat(fn: KirFunction, block: KirBlock, index: Int, parts: List<String>, depth: Int): FoldedValue {
         val sb = StringBuilder()
@@ -518,7 +518,7 @@ class KirValueFolder(
     }
 
     /**
-     * P20 §2: the fold past the block boundary, along the dominator chain.
+     * The fold past the block boundary, along the dominator chain.
      *
      * Sound rule: the register's definitions in this function must ALL sit
      * on the use block's dominator chain (the chain is totally ordered and
@@ -531,7 +531,7 @@ class KirValueFolder(
     private fun foldCrossBlock(fn: KirFunction, block: KirBlock, register: String, depth: Int): FoldedValue? {
         // The disabled fold refuses past the boundary with the refusal
         // NAMED — the depth report's baseline column counts exactly these,
-        // which is how the §2 extension was judged (P20 §0). Consumers see
+        // which is how the §2 extension was judged. Consumers see
         // an unresolved value either way.
         if (!crossBlock) {
             statsSink?.let { it.crossBlockRefused++ }
@@ -670,7 +670,7 @@ class KirValueFolder(
             val configValue = configValues[keyValue] ?: return FoldedValue(null, ValueStatus.UNRESOLVED, keyValue)
             return FoldedValue(configValue, ValueStatus.CONFIG, keyValue)
         }
-        // P21 §1: a workspace callee whose every return is the same provable
+        // A workspace callee whose every return is the same provable
         // constant folds to it. The env/config arms above keep precedence —
         // a workspace function that SHADOWS a config-reader FQN is answered
         // by the config table, the arm with the older contract. No depth
@@ -678,7 +678,7 @@ class KirValueFolder(
         // one more hop and the nested fold's own entry check names
         // DEPTH_CAP — guarding here would misname it PRODUCER.
         workspaceReturnValue(ins, depth)?.let {
-            // P22 §0: a FOLDED workspace return — resolved, or provably null
+            // A FOLDED workspace return — resolved, or provably null
             // (a NULL-status value is a fact the consumers branch on). The
             // internal refusals also come back non-null (an UNRESOLVED
             // FoldedValue carrying its producer arm), and they are not
@@ -689,7 +689,7 @@ class KirValueFolder(
             }
             return it
         }
-        // The refusal's ARM is the design input (P22 §3): a call into a
+        // The refusal's ARM is the design input: a call into a
         // constructor, into a dependency (no workspace body — out of scope
         // by construction). A workspace body that refused recorded its
         // precise arm inside [workspaceReturnValue] before this line.
@@ -707,55 +707,46 @@ class KirValueFolder(
     }
 
     /**
-     * P21 §1: the value of a call whose callee is in the workspace, when
-     * that value is provably constant. Null when the callee is not a
-     * workspace call at all (the caller answers PRODUCER).
-     *
-     * The rule is the flow engine's CallIndex narrowed to constants:
-     * candidates are the workspace bodies the callee FQN (and the site's
-     * descriptor, when it carries one) resolves to; a VIRTUAL call whose
-     * bodies are not EXACT — the flow engine's own rule (final/private
-     * member, object/companion/enum owner, or a top-level function) — may
-     * dispatch to an override kosi cannot see (a dependency jar's subclass),
-     * so it refuses. Every candidate's every return site must fold to the
-     * SAME value; the callee's parameters are never folded through (a
-     * function returning its parameter is not a constant function); a
-     * recursive cycle refuses; the depth budget binds through the walk the
-     * same as through any other hop and names [FoldFailure.DEPTH_CAP] when
-     * it does.
-     *
-     * ---
-     *
-     * P23 §2 — WHY THIS WALK IS NOT THE FLOW MODULE'S SUMMARIES, decided and
-     * written here because this is the only place both can be read at once.
-     *
-     * P22 §0 built the gate that compares this walk's answer to "what does
-     * this call return" against `kosi-flow`'s summaries, and published three
-     * counters. The committed result was 5 folded, 5 agree, 0 disagree and
-     * **0 no-opinion**, and the plan read the no-opinion counter as the
-     * design input: the population one side could INHERIT from the other. An
-     * empty no-opinion column was therefore taken to mean "the flow module
-     * already knows about every callee this walk folds — so why two walks?"
-     *
-     * That reading does not survive contact with what the two analyses
-     * compute. This walk is a MUST analysis over VALUES: it must come back
-     * with the string `"https://api.example.com"` or refuse, because its
-     * consumers publish the value as a service name, a route path, a cipher
-     * transform. A summary is a MAY analysis over LABELS: it says whether
-     * taint can reach the return, and it carries no value at all — there is
-     * nothing in a `FunctionSummary` from which a returned constant could be
-     * recovered, for any callee, ever. The zero in the no-opinion column
-     * says the flow module has an opinion about TAINT on every callee this
-     * walk folds. It does not say, and cannot say, that it has the VALUE.
-     *
-     * So the two walks stay, and they are not duplication: two analyses of
-     * different kinds that happen to traverse the same call. What the P22
-     * gate proves is a CONSISTENCY property, not an inheritance opportunity
-     * — a callee this walk proves constant carries no taint to its return,
-     * so a summary claiming otherwise means one of the two is wrong. Worth
-     * gating permanently; worth nothing as a refactor. That is the decision
-     * P23 §2 asked for, with the number that prompted the question explained
-     * rather than acted on.
+     * The value of a call whose callee is in the workspace, when that value
+     * is provably constant. Null when the callee is not a workspace call at
+     * all (the caller answers PRODUCER). The rule is the flow engine's
+     * CallIndex narrowed to constants: candidates are the workspace bodies
+     * the callee FQN (and the site's descriptor, when it carries one)
+     * resolves to; a VIRTUAL call whose bodies are not EXACT — the flow
+     * engine's own rule (final/private member, object/companion/enum owner,
+     * or a top-level function) — may dispatch to an override kosi cannot see
+     * (a dependency jar's subclass), so it refuses. Every candidate's every
+     * return site must fold to the SAME value; the callee's parameters are
+     * never folded through (a function returning its parameter is not a
+     * constant function); a recursive cycle refuses; the depth budget binds
+     * through the walk the same as through any other hop and names
+     * [FoldFailure.DEPTH_CAP] when it does. --- — WHY THIS WALK IS NOT THE
+     * FLOW MODULE'S SUMMARIES, decided and written here because this is the
+     * only place both can be read at once. built the gate that compares this
+     * walk's answer to "what does this call return" against `kosi-flow`'s
+     * summaries, and published three counters. The committed result was 5
+     * folded, 5 agree, 0 disagree and **0 no-opinion**, and the plan read
+     * the no-opinion counter as the design input: the population one side
+     * could INHERIT from the other. An empty no-opinion column was therefore
+     * taken to mean "the flow module already knows about every callee this
+     * walk folds — so why two walks?" That reading does not survive contact
+     * with what the two analyses compute. This walk is a MUST analysis over
+     * VALUES: it must come back with the string `"https://api.example.com"`
+     * or refuse, because its consumers publish the value as a service name,
+     * a route path, a cipher transform. A summary is a MAY analysis over
+     * LABELS: it says whether taint can reach the return, and it carries no
+     * value at all — there is nothing in a `FunctionSummary` from which a
+     * returned constant could be recovered, for any callee, ever. The zero
+     * in the no-opinion column says the flow module has an opinion about
+     * TAINT on every callee this walk folds. It does not say, and cannot
+     * say, that it has the VALUE. So the two walks stay, and they are not
+     * duplication: two analyses of different kinds that happen to traverse
+     * the same call. What the gate proves is a CONSISTENCY property, not an
+     * inheritance opportunity — a callee this walk proves constant carries
+     * no taint to its return, so a summary claiming otherwise means one of
+     * the two is wrong. Worth gating permanently; worth nothing as a
+     * refactor. That is the decision asked for, with the number that
+     * prompted the question explained rather than acted on.
      */
     private fun workspaceReturnValue(ins: KirCall, depth: Int): FoldedValue? {
         val candidates = workspaceCandidates(ins.callee) ?: return null
@@ -771,20 +762,20 @@ class KirValueFolder(
                 for ((block, site) in returnSitesOf(candidate)) {
                     val (retIndex, returned) = site
                     // A Unit return (`return` with no value) is not a
-                    // value. P23 §3 folded this into the general arm: as its
+                    // value. Folded this into the general arm: as its
                     // own name it was a distinction the measurement never
                     // made — no Kotlin a fixture can write reaches a Unit
                     // return site through a VALUE ask, and an arm nothing
-                    // drives is a vocabulary entry R63 is about.
+                    // drives is a vocabulary entry is about.
                     val reg = returned ?: return unresolved("workspace-return-unprovable")
                     val siteValue = fold(candidate, block, retIndex, reg, depth + 1)
                     if (siteValue == null || (!siteValue.resolved && siteValue.status != ValueStatus.NULL)) {
                         // The budget binds INSIDE the callee's body: keep its
                         // name — a silent stop is the one answer the depth
-                        // report cannot use (P21 §1).
+                        // report cannot use.
                         if (siteValue?.failure == FoldFailure.DEPTH_CAP) return siteValue
                         // The callee returns its PARAMETER: the arm the next
-                        // widening question names (P22 §3).
+                        // widening question names.
                         return if (siteValue?.failure == FoldFailure.PARAMETER) {
                             unresolved("workspace-parameter-return")
                         } else {
@@ -797,7 +788,7 @@ class KirValueFolder(
                     // SITE, and only the depth report needs the finer
                     // provenance. NULL keeps its status: a function whose
                     // every return is provably null gives the consumers the
-                    // absence they branch on (P19 §1), never a guess.
+                    // absence they branch on, never a guess.
                     val normalized = when {
                         siteValue.status == ValueStatus.NULL -> siteValue
                         else -> siteValue.copy(status = ValueStatus.FOLDED_CONST)
@@ -816,7 +807,7 @@ class KirValueFolder(
             }
         }
         if (value == null) {
-            // No candidate offered a readable return site. P23 §3 folded
+            // No candidate offered a readable return site. Folded
             // this into the general arm too: every Kotlin body the lowering
             // produces carries a return site — a `throw` gets one whose
             // value is the exception, and so does a `while (true)` — both of
@@ -845,7 +836,7 @@ class KirValueFolder(
         if (callee.kind == CallKind.VIRTUAL) {
             if (candidates.any { !isExactWorkspaceTarget(it) }) {
                 // An override can hide in a jar: recorded as its own
-                // producer arm (P22 §3), refused.
+                // producer arm, refused.
                 statsSink?.recordProducer("workspace-virtual-open")
                 return null
             }
@@ -892,7 +883,7 @@ class KirValueFolder(
         // instruction it could not recognise and fell through to
         // CROSS_BLOCK. The two views of "what defines this register" — the
         // CFG's `ins.defs` and this function — must be the same view
-        // (P20 review, R131).
+        // (a later review).
         is KirStore -> ins.target
         is KirCall -> ins.result
         is KirNew -> ins.result

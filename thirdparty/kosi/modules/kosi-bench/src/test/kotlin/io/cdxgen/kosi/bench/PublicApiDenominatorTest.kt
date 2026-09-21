@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * R49: the exported-reach denominator must come from a source the call graph
+ * The exported-reach denominator must come from a source the call graph
  * did not produce. Counting public GRAPH NODES made the gate a tautology —
  * the exported root selector picks exactly the public local nodes and a root
  * is reached at distance 0, so numerator and denominator were the same set

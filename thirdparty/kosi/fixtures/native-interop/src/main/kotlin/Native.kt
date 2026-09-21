@@ -1,4 +1,4 @@
-// P9 fixture: the Kotlin/Native + JNI/cinterop seam as native-interop
+// fixture: the Kotlin/Native + JNI/cinterop seam as native-interop
 // evidence. The positive half declares the seam three ways (an `external fun`
 // bound by loadLibrary, the loadLibrary binding site itself, and a cinterop
 // .def under the conventional directory); the negative half is the near-miss

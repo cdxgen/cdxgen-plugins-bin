@@ -1,5 +1,5 @@
 // Spring's routing annotations with the media-type arguments, at their
-// real FQNs. `consumes`/`produces` are NAMED arguments — the channel P14
+// real FQNs. `consumes`/`produces` are NAMED arguments — the channel
 // added to the annotation evidence, because the argument's name is the
 // only difference between the two lists.
 package org.springframework.web.bind.annotation

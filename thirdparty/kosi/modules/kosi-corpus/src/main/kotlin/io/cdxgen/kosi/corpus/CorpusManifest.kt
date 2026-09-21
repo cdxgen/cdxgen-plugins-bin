@@ -28,17 +28,17 @@ data class CorpusEntry(
      */
     val classpathFile: String?,
     /**
-     * The FINDING FLOOR (P14): the minimum slices this entry's resolved
-     * slot must publish. The vuln tier carries one per repo — a change that
-     * takes a deliberately vulnerable app to zero findings currently does so
-     * with a green build, which is exactly how kosi arrived at P11
-     * reporting zero findings on every real repo. Two-way, like every
-     * ratchet: below FAILS, and materially above FAILS too until the floor
-     * is raised, so an improvement is recorded rather than absorbed.
+     * The FINDING FLOOR: the minimum slices this entry's resolved slot must
+     * publish. The vuln tier carries one per repo — a change that takes a
+     * deliberately vulnerable app to zero findings currently does so with a
+     * green build, which is exactly how kosi arrived at reporting zero
+     * findings on every real repo. Two-way, like every ratchet: below FAILS,
+     * and materially above FAILS too until the floor is raised, so an
+     * improvement is recorded rather than absorbed.
      */
     val minFindings: Int? = null,
     /**
-     * A per-entry override of `--deps-max-classes` for the deps slot (P14).
+     * A per-entry override of `--deps-max-classes` for the deps slot.
      * AndroGoat's TRANSITIVE-warmed classpath (161 coordinates of AndroidX)
      * makes the default 500-class lowering fill any heap the corpus JVM can
      * spare; a per-entry cap keeps the slot measurable instead of letting
@@ -47,21 +47,21 @@ data class CorpusEntry(
      */
     val depsMaxClasses: Int? = null,
     /**
-     * The RESOLUTION-ERROR classes this entry's sources legitimately carry
-     * (P18 §3): the frontend's `resolution-errors` diagnostic names the
-     * ERROR-severity factories the analysis saw, and a class that is NOT
-     * here fails the row — a fixture whose stub stopped typechecking (R110:
-     * a missing import, an unimplemented member) otherwise passed every
-     * want over code the compiler rejects. The list is a RATCHET, not a
-     * licence: adding a class is a reviewed change, and the count rides
-     * the diagnostic for drift both ways. NULL = ungated (repo tiers: real
-     * code under partial classpaths legitimately resolves imperfectly —
+     * The RESOLUTION-ERROR classes this entry's sources legitimately carry:
+     * the frontend's `resolution-errors` diagnostic names the ERROR-
+     * severity factories the analysis saw, and a class that is NOT here
+     * fails the row — a fixture whose stub stopped typechecking (a missing
+     * import, an unimplemented member) otherwise passed every want over
+     * code the compiler rejects. The list is a RATCHET, not a licence:
+     * adding a class is a reviewed change, and the count rides the
+     * diagnostic for drift both ways. NULL = ungated (repo tiers: real code
+     * under partial classpaths legitimately resolves imperfectly —
      * corpusFull measured ABSTRACT_MEMBER_NOT_IMPLEMENTED and a dozen
      * inference classes on the pinned repos, none of them a fixture
      * regression); an EMPTY list is a POSITIVE declaration that the entry
-     * typechecks clean, and the two must not collapse into each other
-     * (the first implementation parsed absent as empty and failed every
-     * repo row — caught by this phase's own corpusFull, not by review).
+     * typechecks clean, and the two must not collapse into each other (the
+     * first implementation parsed absent as empty and failed every repo row
+     * — caught by the corpusFull, not by review).
      */
     val toleratedResolutionErrors: List<String>? = null,
 ) {
@@ -85,27 +85,22 @@ data class CorpusManifest(
      * A tier no entry carries is a TYPO, not an empty selection. `corpusFull`
      * asked for `vuln` and `ported` — neither has ever existed in the
      * manifest — and quietly ran one of the five pinned repos while calling
-     * itself the full run (R64). Silently dropping an unknown tier turns a
-     * misspelling into missing coverage that still exits zero.
-     */
-    /**
-     * P23 §0: the BUNDLED entries — the ones whose sources live in this
-     * repository under `fixtures/`, so their reports are reproducible from a
-     * checkout alone with no external clone. This is the golden gate's
-     * population, derived rather than listed.
-     *
-     * It used to be the tier list `{"fixtures", "async"}`, written two lines
-     * under a comment claiming "every bundled fixture tier is
-     * golden-ratcheted ... a tier the goldens never see is a tier whose
-     * drift they prove nothing about" — which was false for five tiers and
-     * seventeen bundled fixtures the moment `frameworks` was added (the P23
-     * review's R142). Every crypto fixture, every framework fixture (ktor,
+     * itself the full run. Silently dropping an unknown tier turns a
+     * misspelling into missing coverage that still exits zero. the BUNDLED
+     * entries — the ones whose sources live in this repository under
+     * `fixtures/`, so their reports are reproducible from a checkout alone
+     * with no external clone. This is the golden gate's population, derived
+     * rather than listed. It used to be the tier list `{"fixtures",
+     * "async"}`, written two lines under a comment claiming "every bundled
+     * fixture tier is golden-ratcheted ... A tier the goldens never see is a
+     * tier whose drift they prove nothing about" — which was false for five
+     * tiers and seventeen bundled fixtures the moment `frameworks` was added
+     * (a later review). Every crypto fixture, every framework fixture (ktor,
      * spring, micronaut, quarkus, http4k, grpc) and the bundled vulnerable
      * service were outside the pin. A tier list has to be remembered; a
      * predicate over `path` cannot be forgotten, and a new bundled tier is
-     * golden-ratcheted the day it is added.
-     *
-     * [excludedTiers] is the one place an exception is stated out loud.
+     * golden-ratcheted the day it is added. [excludedTiers] is the one place
+     * an exception is stated out loud.
      */
     fun bundled(only: String? = null, excludedTiers: Set<String> = GOLDEN_EXCLUDED_TIERS): List<CorpusEntry> {
         val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
@@ -122,7 +117,7 @@ data class CorpusManifest(
         require(unknown.isEmpty()) {
             "unknown corpus tier(s) ${unknown.joinToString(", ")}; corpus.toml has ${known.sorted().joinToString(", ")}"
         }
-        // P20 §5: `only` is a comma-separated slug list — the corpusChanged
+        // `only` is a comma-separated slug list — the corpusChanged
         // middle tier selects many repo rows in one invocation.
         val onlySlugs = only?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
         return entries.filter { it.tier in tiers && (onlySlugs == null || it.slug in onlySlugs) }
@@ -130,7 +125,7 @@ data class CorpusManifest(
 
     companion object {
         /**
-         * P23 §0: the bundled tiers the golden gate deliberately does NOT
+         * the bundled tiers the golden gate deliberately does NOT
          * pin, each for a reason that is stated rather than implied.
          *
          *  - `eap` targets a Kotlin EAP language version, so its report
@@ -170,7 +165,7 @@ data class CorpusManifest(
                 } else if (value.startsWith("\"")) {
                     value.removeSurrounding("\"")
                 } else if (value.toIntOrNull() != null) {
-                    // Integers: the vuln tier's min_findings floor (P14).
+                    // Integers: the vuln tier's min_findings floor.
                     value.toInt()
                 } else {
                     throw IllegalArgumentException("corpus.toml:$lineNo: unsupported value for $key: $value")
@@ -205,7 +200,7 @@ data class CorpusManifest(
                 depsMaxClasses = int("deps_max_classes"),
                 // NOT the `list()` helper: that coerces an absent key to
                 // emptyList, collapsing "ungated" into "declared clean" —
-                // R116's fix only holds if absence parses as null.
+                // the fix only holds if absence parses as null.
                 toleratedResolutionErrors = table["tolerated_resolution_errors"] as? List<String>,
             )
         }

@@ -114,12 +114,12 @@ object Main {
         parsed.requireNoPositionals("analyze", "--dir <path>")
         val dir = Path.of(parsed.value("dir", "."))
         if (!dir.exists()) throw UsageException("--dir ${dir} does not exist")
-        // P29 taxonomy: a FILE path analysed "successfully" as an empty
+        // Taxonomy: a FILE path analysed "successfully" as an empty
         // tree — no build files, no sources, a clean-looking report about
-        // nothing. kir dump already refuses it; analyze does too now.
+        // nothing. Kir dump already refuses it; analyze does too now.
         if (!Files.isDirectory(dir)) throw UsageException("--dir ${dir} is not a directory")
         val options = optionsFrom(parsed)
-        // P23 §0: a pairing whose OUTPUT would mislead is refused before the
+        // A pairing whose OUTPUT would mislead is refused before the
         // run, in the same spirit as `--reachable-symbols` and `--format
         // graphml` below — but derived from `AnalyzeOptions.degradations()`,
         // the one predicate the report's diagnostics also come from, so a
@@ -178,7 +178,7 @@ object Main {
             target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
             Files.writeString(target, io.cdxgen.kosi.graph.WitnessPaths.write(graph, options.maxPathsPerSymbol))
         }
-        // P11: SARIF export of the data-flow slices, the trace as related
+        // SARIF export of the data-flow slices, the trace as related
         // locations. A sidecar beside the report, the shape evinse and
         // SARIF consumers read; a run with no dataFlow writes no file.
         parsed.value("sarif-out")?.let { sarifOut ->
@@ -289,7 +289,7 @@ object Main {
     // ---- kir ----------------------------------------------------------------
 
     /**
-     * `kosi kir dump` (P2 gate): lower the resolved tier to the KIR and dump
+     * `kosi kir dump` (gate): lower the resolved tier to the KIR and dump
      * it. The round-trip is enforced HERE on every dump — dump, re-read,
      * dump again must be byte-identical, or the command fails loudly instead
      * of publishing a format nothing can re-read.
@@ -324,7 +324,7 @@ object Main {
         if (!Files.isDirectory(root)) throw UsageException("--dir $dir does not exist or is not a directory")
         val options = optionsFrom(parsed).copy(backend = Backend.RESOLVED)
         val dump = KirDumper.dump(root.toAbsolutePath(), options)
-        // Round-trip enforcement (P2 gate): dump -> read -> dump byte-identical.
+        // Round-trip enforcement (gate): dump -> read -> dump byte-identical.
         val reRead = KirReader.read(dump)
         val second = KirWriter.write(reRead)
         if (second != dump) {
@@ -483,24 +483,24 @@ object Main {
         val manifest = io.cdxgen.kosi.corpus.CorpusManifest.load(repoRoot.resolve("corpus.toml"))
         // Every BUNDLED fixture is golden-ratcheted — derived from the
         // manifest's paths, not from a tier list somebody has to remember to
-        // extend. This comment made that claim from P0 while the line under
+        // extend. This comment made that claim from while the line under
         // it named two tiers of the eleven; `frameworks` and `crypto` were
         // added later and silently fell outside the pin, which left every
         // ktor/spring/micronaut/quarkus/http4k/grpc fixture, every crypto
-        // fixture and the bundled vulnerable service unpinned (R142). The
+        // fixture and the bundled vulnerable service unpinned. The
         // exclusions are stated in `GOLDEN_EXCLUDED_TIERS`.
         val entries = manifest.bundled(parsed.value("only"))
         val problems = mutableListOf<String>()
         var checked = 0
         var portabilityChecked = 0
-        // P18: the gate proves its own portability instead of trusting a
+        // The gate proves its own portability instead of trusting a
         // reviewer to try it. Every fixture is analysed from TWO absolute
         // locations in this run — the checkout and a relocated copy under
         // the system temp dir — and any section digest that differs fails
         // the gate. This is the in-gate form of the report contract's
-        // "two machines compare equal byte for byte": R104 and R108 were
+        // "two machines compare equal byte for byte": were
         // both one-environment proofs of cross-environment properties, and
-        // the relocated run would have caught R108 on the commit that
+        // the relocated run would have caught on the commit that
         // introduced it. The digests compared here are RAW — the golden
         // pin tolerates option values that name one machine, but a report
         // whose own bytes name their location is not portable whatever the
@@ -540,10 +540,10 @@ object Main {
                 // The classpath_file a corpus entry declares is part of the
                 // INPUT the report contract pins: the bench runner already
                 // applies it (BenchRunner.runSlot), but this gate analysed the
-                // bare slot options until P17 — every classpath_file fixture
+                // bare slot options until — every classpath_file fixture
                 // was golden-checked against the machine-cache scan instead of
                 // its pinned classpath, so its digests were machine-dependent
-                // exactly where the pin existed to make them not (R105). A
+                // exactly where the pin existed to make them not. A
                 // declared file that is missing fails the entry outright: a
                 // pin nobody can read is a broken pin.
                 val declaredClasspath = entry.classpathFile?.let { dir.resolve(it) }
@@ -551,7 +551,7 @@ object Main {
                     problems.add("${entry.slug}: declares classpath_file '${entry.classpathFile}' which is not on disk")
                     continue
                 }
-                // P24: a deep-tier fixture is golden-pinned in the default
+                // A deep-tier fixture is golden-pinned in the default
                 // slot only - one pair per fixture, the tier's cost rule.
                 for (slot in io.cdxgen.kosi.bench.Matrix.slotsFor(entry.tier)) {
                     checked++
@@ -559,7 +559,7 @@ object Main {
                     // The ENTRY-RELATIVE value is what the report records: an
                     // absolute path would put this checkout's location into the
                     // `options` digest, so the gate would only ever pass in the
-                    // directory the goldens were generated in (P17 review).
+                    // directory the goldens were generated in (a later review).
                     // Both runs get the SAME relative options, and that is
                     // the point: each resolves the pin against its own root,
                     // so neither reads the other's jars. An absolute pin here
@@ -673,7 +673,7 @@ object Main {
         val w = io.cdxgen.kosi.schema.JsonWriter(pretty = parsed.bool("pretty"))
         w.beginObject()
         w.beginObject("components")
-        // Both backends are PROBED, never asserted: since P1 they share one
+        // Both backends are PROBED, never asserted: since they share one
         // session substrate, so a build where the session cannot be created
         // has no working syntax tier either — and a constant "available"
         // string would report the opposite of the truth.
@@ -743,20 +743,20 @@ object Main {
                                               analysis tier; `compile` is a DECLARED GAP: it runs the
                                               resolved tier and stamps compile-backend-gap on the report
               --include-stdlib                keep stdlib nodes in the graph view (--no-include-stdlib to drop)
-              --endpoint-sources              seed handler parameters as taint sources (P7); endpoint-rooted
+              --endpoint-sources              seed handler parameters as taint sources; endpoint-rooted
                                               slices then carry the endpoint they enter through
               --deps                          analyse dependency jars from the resolved classpath: their
                                               bodies lower to the same KIR, summaries carry origin=bytecode,
-                                              and cross-dependency slices are added (P9); --dataflow
+                                              and cross-dependency slices are added; --dataflow
                                               security-deps implies this
               --deps-max-classes <n>          cap on dependency classes lowered per run (default 500)
               --max-summary-sink-effects <n>  summary escape-set budget; past it a summary is dropped
-                                              whole and callers fall to the labelled default (P15;
-                                              default 8192; the trips are counted in stats.truncations
-                                              as summary-effect-budget)
+                                              whole and callers fall to the labelled default
+                                              (default 8192); the trips are counted in
+                                              stats.truncations as summary-effect-budget
               --max-analysis-seconds <n>      wall-clock budget; tripping emits a named diagnostic and the
-                                              partial report still ships (P10; 0 trips at the first boundary)
-              --max-rss-mb <n>                peak-RSS budget; same degradation contract (P10)
+                                              partial report still ships (0 trips at the first boundary)
+              --max-rss-mb <n>                peak-RSS budget; same degradation contract
               --reachable-symbols <file>      write shortest witness paths for reached symbols (JSON)
               --format <fmt>                  json (full report), graphml or gexf (call graph)
               --pretty                        indented JSON
@@ -820,7 +820,7 @@ fun main(args: Array<String>) {
     // branches on `isHeadless()` alone — so the no-op toolkit was never
     // once selected on this toolchain, on any platform (measured: with the
     // property set, `getDefaultToolkit()` still returns `LWCToolkit`). It
-    // is removed rather than left as a comfort: R66's real linux fix is the
+    // is removed rather than left as a comfort: the real linux fix is the
     // build-time headless bake plus the JNI registrations in the Makefile,
     // and the inert property was what made that fix look unnecessary for
     // eleven phases.
@@ -835,14 +835,14 @@ fun main(args: Array<String>) {
         System.err.println(
             "kosi: " + (t.message?.take(400)?.ifBlank { null } ?: t::class.simpleName + " (no message)"),
         )
-        // P28 review: a heap-exhaustion death used to print its class name
+        // a heap-exhaustion death used to print its class name
         // and nothing else. dagger (1,950 files) at -Xmx8g died with
         // `kosi: io/cdxgen/kosi/flow/Summarizer$compute$4` — a
         // NoClassDefFoundError, because a JVM too starved to load one more
         // class reports the class it could not load, not the reason. That
         // reads as a kosi bug, or as a corrupt jar; it is neither, and the
         // one thing that would have fixed it (a bigger heap) was the one
-        // thing the message did not mention. R177's disease, one layer in:
+        // thing the message did not mention. the disease, one layer in:
         // a failure whose entire message is a class name.
         memoryAdvice(t)?.let { System.err.println(it) }
         if (System.getenv("KOSI_TRACE") != null) t.printStackTrace()
@@ -852,12 +852,12 @@ fun main(args: Array<String>) {
 }
 
 /**
- * P28 review: the advice a memory-shaped death owes the operator.
+ * The advice a memory-shaped death owes the operator.
  *
  * `OutOfMemoryError` says so itself. The one that does not is
  * `NoClassDefFoundError`: a JVM with no room to define one more class fails
  * at whichever class it happened to need, so the message is a class name and
- * the cause is invisible. dagger (1,950 files) at `-Xmx8g` printed
+ * the cause is invisible. Dagger (1,950 files) at `-Xmx8g` printed
  * `io/cdxgen/kosi/flow/Summarizer$compute$4` and exited 3; the same run at
  * `-Xmx16g` produces a complete 1,950-file report. Nothing about the first
  * message pointed at the heap.
@@ -890,7 +890,7 @@ internal fun memoryAdvice(t: Throwable): String? {
     val memoryShaped = chain.any { it is OutOfMemoryError || it is NoClassDefFoundError }
     if (!memoryShaped) return null
     val maxHeapBytes = Runtime.getRuntime().maxMemory()
-    // P29 taxonomy: "-Xmx256m" divided to "0 GiB" — an integer floor that
+    // Taxonomy: "-Xmx256m" divided to "0 GiB" — an integer floor that
     // misstates the very heap the advice is about. Sub-gigabyte heaps are
     // named in MiB.
     val heap = when {

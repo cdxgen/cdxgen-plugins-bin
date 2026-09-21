@@ -1,4 +1,4 @@
-// P20 §2 (review): the value the fold can only reach by leaving the block.
+// (review): the value the fold can only reach by leaving the block.
 //
 // §2 extended `KirValueFolder` across blocks along the dominator chain,
 // with a conservative phi join. The §0 depth report then measured the
@@ -6,9 +6,9 @@
 // — and both columns read `crossBlock: 0` over all 93 bundled fixtures:
 // not one asked value ever left its block, so the two columns agreed on
 // every row and the baseline could not tell the extension from its own
-// absence. A capability no fixture exercises does not exist (R63), and a
+// absence. A capability no fixture exercises does not exist, and a
 // baseline column that never differs from the shipped one proves nothing
-// (R53's shape, one layer inside the depth report). This fixture is the
+// (the shape, one layer inside the depth report). This fixture is the
 // shape that makes the distinction observable in the REPORT, not only in
 // `KirValueFolderCrossBlockTest`'s hand-built IR.
 //

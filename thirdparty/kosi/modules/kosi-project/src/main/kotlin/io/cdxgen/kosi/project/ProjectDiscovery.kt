@@ -143,7 +143,7 @@ object SourceCollector {
         // every multi-module file silently attributed to "." and per-module
         // consumers (cross-module slice flags among them) read one blob.
         //
-        // P24 §0 closes the two escapes that attribution left open, both
+        // closes the two escapes that attribution left open, both
         // found by asking what a build file can do to the collector's root:
         // (1) a `srcDir("../..")` or absolute `srcDir("/x")` makes
         // `root.resolve(sourceRoot)` point OUTSIDE the analysis root, so a
@@ -172,28 +172,55 @@ object SourceCollector {
             .any { it.toString() in EXCLUDED_DIRS }
 
     /**
-     * P28 (R179): how many `.kt`/`.java` files exist under the analysed root
+     * How many `.kt`/`.java` files exist under the analysed root
      * under the SAME exclusion policy as [collect] — the denominator of
      * source coverage. A report that discovered 1 file where 1 039 exist
      * must be able to say so; without this number the two are the same
      * report. `.kts` stays excluded for the same reason [collect] excludes
      * it: build scripts are not application sources.
      */
-    fun presentCount(root: Path): Int {
+    fun presentCount(root: Path): Int = presentCounts(root).first
+
+    /**
+     * Directory names that mark test sources, in every layout kosi reads:
+     * Maven/Gradle (`src/test/...`), Android (`androidTest`), Kotlin
+     * Multiplatform (`commonTest`, `jvmTest`, ...) and the kotlinx
+     * convention (`<module>/<set>/test`).
+     */
+    private val TEST_DIRS = setOf(
+        "test", "tests", "androidTest", "androidUnitTest", "testFixtures",
+        "integrationTest", "sharedTest", "jmh",
+    )
+
+    private fun isTestPath(root: Path, file: Path): Boolean =
+        root.toAbsolutePath().normalize().relativize(file.toAbsolutePath().normalize())
+            .takeWhile { it.fileName != null }
+            .any { segment ->
+                val s = segment.toString()
+                s in TEST_DIRS || (s.endsWith("Test") && s.first().isLowerCase())
+            }
+
+    /** Total present files, and how many of them are test sources. */
+    fun presentCounts(root: Path): Pair<Int, Int> {
         val rootAbs = root.toAbsolutePath().normalize()
         return try {
             Files.walk(rootAbs).use { stream ->
+                var total = 0
+                var tests = 0
                 stream.filter { Files.isRegularFile(it) }
                     .filter { p -> !isInExcludedDir(root, p) }
                     .filter { p ->
                         val n = p.fileName.toString()
                         n.endsWith(".kt") || n.endsWith(".java")
                     }
-                    .count()
-                    .toInt()
+                    .forEach { p ->
+                        total++
+                        if (isTestPath(root, p)) tests++
+                    }
+                total to tests
             }
         } catch (_: Exception) {
-            0
+            0 to 0
         }
     }
 

@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
  * Negative-first: the validator must FAIL a body whose lowering emitted an
  * unreachable block, and must pass a loop-and-join CFG that only looks
  * suspicious. These tests are the "test that fails if the check is removed"
- * the P2 gate asks for: delete the reachability walk in KirValidator and the
+ * the gate asks for: delete the reachability walk in KirValidator and the
  * first test here fails.
  */
 class KirValidatorTest {

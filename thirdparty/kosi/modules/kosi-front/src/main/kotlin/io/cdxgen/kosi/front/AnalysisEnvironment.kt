@@ -58,7 +58,7 @@ class AnalysisEnvironment private constructor(
     private val psiFactory = KtPsiFactory(project, markGenerated = false)
 
     /**
-     * P29 crash taxonomy: a file of several MB is not Kotlin to the
+     * Crash taxonomy: a file of several MB is not Kotlin to the
      * platform's file-type layer — it materialises as PsiPlainTextFileImpl
      * and `createFile` died with a bare ClassCastException naming two
      * classes and no action. The condition is diagnosable, so it says what

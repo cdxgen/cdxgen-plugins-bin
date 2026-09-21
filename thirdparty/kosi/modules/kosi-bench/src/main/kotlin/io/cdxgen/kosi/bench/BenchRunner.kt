@@ -15,7 +15,7 @@ import java.nio.file.Path
 /**
  * Runs the corpus matrix and computes the metrics (06-CORPUS.md §4).
  * Structural recall, per-mode, per fixture; flow recall/precision become
- * measurable once slices exist (phase 3) and are reported as
+ * measurable once slices exist and are reported as
  * not-yet-evaluatable until then, never as zeros that look like results.
  */
 object BenchRunner {
@@ -45,10 +45,10 @@ object BenchRunner {
         val wallMillis: Long,
         val parseErrors: Int,
         /**
-         * stats.resolvedCallRatio of this slot's report, surfaced so the P1
+         * stats.resolvedCallRatio of this slot's report, surfaced so the
          * gate reads per-repo ratios directly from the bench result (the
          * gate is per repo, never an average). Null only for legacy
-         * baselines written before P1.
+         * baselines written previously.
          */
         val resolvedCallRatio: Double? = null,
         /**
@@ -57,23 +57,23 @@ object BenchRunner {
          * reads its ratios from here, so dropping the denominator here makes
          * the GATE unable to tell 0 of 0 calls (a fixture with no call sites)
          * from 0 of 400 (a resolved tier that resolved nothing). Null only
-         * for baselines written before P2.
+         * for baselines written previously.
          */
         val callsTotal: Int? = null,
         val callsResolved: Int? = null,
         /**
          * The lowering's failures by construct and the function count they
          * were computed over (03-SCHEMA.md `stats.loweringFailures` /
-         * `stats.functionsLowered`), surfaced so the P2 lowering gate reads
+         * `stats.functionsLowered`), surfaced so the lowering gate reads
          * them from the bench result instead of being measured by hand once
-         * and never again. Empty map + null count is a pre-P2 baseline.
+         * and never again. Empty map + null count is a earlier baseline.
          */
         val loweringFailures: Map<String, Int> = emptyMap(),
         val functionsLowered: Int? = null,
         /**
-         * P3 call-graph facts, read from the slot's report. Null only for
+         * Call-graph facts, read from the slot's report. Null only for
          * slots that publish no graph (the syntax tiers) or baselines
-         * written before P3 — never defaulted to zero, which would read as
+         * written previously, — never defaulted to zero, which would read as
          * an empty graph that was actually measured.
          */
         val graphNodes: Int? = null,
@@ -100,7 +100,7 @@ object BenchRunner {
         val reachedPublicCallables: Int? = null,
         val graphAlgorithm: String? = null,
         /**
-         * P4 taint facts. `flowPositives`/`flowPositivesMatched` are the
+         * taint facts. `flowPositives`/`flowPositivesMatched` are the
          * non-known-fail flow EXPECTATIONS evaluated in this slot and how
          * many were satisfied — taint recall's numerator and denominator.
          * `flowTruePositives` counts reported slices an expectation actually
@@ -109,7 +109,7 @@ object BenchRunner {
          * and the function count it was measured over. `crossDependencySlices`
          * is the report's count of slices claiming to cross a dependency,
          * which the intraprocedural engine cannot produce. Null only for
-         * baselines written before P4.
+         * baselines written previously.
          */
         val flowPositives: Int = 0,
         val flowPositivesMatched: Int = 0,
@@ -118,8 +118,8 @@ object BenchRunner {
         val fixpointCapHits: Int? = null,
         val functionsAnalysed: Int? = null,
         /**
-         * P5 summary facts, read from the slot's report. Null/empty only for
-         * slots that ran no dataflow or baselines written before P5 — never
+         * Summary facts, read from the slot's report. Null/empty only for
+         * slots that ran no dataflow or baselines written previously, — never
          * defaulted to a measured-looking zero.
          */
         val summariesComputed: Int? = null,
@@ -127,53 +127,53 @@ object BenchRunner {
         val defaultOriginSlices: Int? = null,
         val summaryCrossingSlices: Int? = null,
         val crossModuleSlices: Int? = null,
-        /** P5 SCC counters: the summary cap and the population it was measured over. */
+        /** SCC counters: the summary cap and the population it was measured over. */
         val sccsProcessed: Int? = null,
         val sccIterationCapHits: Int? = null,
-        /** P6: slices crossing a suspend boundary. */
+        /** Slices crossing a suspend boundary. */
         val suspendCrossingSlices: Int? = null,
         /**
-         * P7 endpoint facts: the endpoint count and how many handler symbols
+         * Endpoint facts: the endpoint count and how many handler symbols
          * resolve to a call-graph node (the resolved-handler gate's two
          * counts), endpoint-rooted slices, and the per-framework endpoint
          * expectations [matched, total]. Null/empty only for baselines
-         * written before P7.
+         * written previously.
          */
         val endpointCount: Int? = null,
         val endpointsResolvedHandler: Int? = null,
         val endpointRootedSlices: Int? = null,
         val endpointRecallByFramework: Map<String, List<Int>> = emptyMap(),
-        /** P7 config-resolution counts (the gate's denominator and numerator). */
+        /** Config-resolution counts (the gate's denominator and numerator). */
         val configValuesTotal: Int? = null,
         val configValuesResolved: Int? = null,
-        /** P8 crypto facts. `cryptoMappingHits` name the mapping rows this fixture exercised. */
+        /** Crypto facts. `cryptoMappingHits` name the mapping rows this fixture exercised. */
         val cryptoAssets: Int? = null,
         val cryptoMappingHits: List<String> = emptyList(),
         val cryptoFlowSlices: Int? = null,
         /** Per-form Cipher mode/padding extraction: form -> [extracted, total]. */
         val cryptoModePaddingByForm: Map<String, List<Int>> = emptyMap(),
         /**
-         * P9 `--deps` facts: summaries the workspace applied from the
+         * `--deps` facts: summaries the workspace applied from the
          * bytecode tier, and the slices whose trace enters a jar with a
          * `bytecode` boundary origin — the cross-dependency gate's two
          * counts. Null for slots that never asked for the tier.
          */
         val bytecodeSummaries: Int? = null,
         val crossDependencyBytecodeSlices: Int? = null,
-        /** P9: body-less records excluded from the tier (never summarised). */
+        /** Body-less records excluded from the tier (never summarised). */
         val bodylessRecords: Int? = null,
-        /** P9: classes lowered from the jars (the tier's denominator). */
+        /** Classes lowered from the jars (the tier's denominator). */
         val dependencyClasses: Int? = null,
         /**
-         * P11: dependency methods lowered WITH bodies (what summaries were
+         * Dependency methods lowered WITH bodies (what summaries were
          * computed over) and classes selected but CUT by the budget — the
-         * two numbers that tell a zero apart from an absent tier (R70's
+         * two numbers that tell a zero apart from an absent tier (the
          * 571-classes-zero-functions shape) from a cap truncation.
          */
         val dependencyFunctions: Int? = null,
         val depsCutClasses: Int? = null,
         /**
-         * P10: this slot's peak RSS window (max of the samples around the
+         * This slot's peak RSS window (max of the samples around the
          * run). Process-cumulative peak stays on [BenchResult]; the per-repo
          * criterion needs a per-row number. Null for rows that predate the
          * field.
@@ -181,7 +181,7 @@ object BenchRunner {
         val peakRssBytes: Long? = null,
         val digest: Digests.FixtureDigest,
         /**
-         * The entry's declared `min_findings` floor (P14), carried across
+         * The entry's declared `min_findings` floor, carried across
          * the bench boundary so the promotion gate reads it from the row it
          * measures — the same pattern as `tier`. Null on entries that
          * declare none.
@@ -189,11 +189,11 @@ object BenchRunner {
         val minFindings: Int? = null,
         /**
          * True when the entry DECLARES a `classpath_file` that is not on
-         * disk: a warm-classpath step that never ran (R73's shape). The
+         * disk: a warm-classpath step that never ran (the shape). The
          * vuln tier's finding floors are measured against a warmed
          * classpath; measuring them against an empty one quietly reports
-         * zero findings with a green build — the exact failure mode P11
-         * shipped. Null on rows written before P14.
+         * zero findings with a green build — the exact failure mode
+         * shipped. Null on rows written previously.
          */
         val classpathFileMissing: Boolean? = null,
         val failures: List<String> = emptyList(),
@@ -392,7 +392,7 @@ object BenchRunner {
                 flowPositives = results.sumOf { it.flowPositives },
                 flowPositivesMatched = results.sumOf { it.flowPositivesMatched },
                 flowTruePositives = results.sumOf { it.flowTruePositives },
-                // An absent measurement (pre-P4 baseline) must stay absent,
+                // An absent measurement (earlier baseline) must stay absent,
                 // never read as a measured zero.
                 crossDependencySlices = if (crossDependency.isEmpty()) null else crossDependency.sum(),
                 fixpointCapHits = if (capHits.isEmpty()) null else capHits.sum(),
@@ -545,7 +545,7 @@ object BenchRunner {
         for (entry in entries) {
             val dir = materialize(repoRoot, entry, runOptions.skipMissingRepos) ?: continue
             val annotations = parseAnnotations(dir, entry)
-            // P24: the deep tier runs the default slot only (Matrix.slotsFor,
+            // The deep tier runs the default slot only (Matrix.slotsFor,
             // 10-DEEP-EVIDENCE.md §3's cost discipline).
             for (slot in Matrix.slotsFor(entry.tier)) {
                 // CI death diagnosis (the pkg corpusQuick hang): when a
@@ -693,10 +693,10 @@ object BenchRunner {
         // A build-produced classpath file (warm-corpus-classpath.sh) rides
         // the entry; kosi itself never executes the project's build to make
         // one. Absent file -> offline resolution, gaps diagnosed. A DECLARED
-        // file that is missing is not a quiet condition: R73's warming
+        // file that is missing is not a quiet condition: the warming
         // script failure downloaded nothing for every repo while the runs
         // looked fine, so the row carries the fact and the vuln tier's
-        // finding-floor gate fails on it (P14).
+        // finding-floor gate fails on it.
         val declaredClasspath = entry.classpathFile?.let { entryDir -> dir.resolve(entryDir) }
         val classpathFileMissing = declaredClasspath != null && !Files.isRegularFile(declaredClasspath)
         // Entry-relative, like the golden runner: the recorded option must not
@@ -710,13 +710,13 @@ object BenchRunner {
         // classpath the default 500-class lowering fills any heap the
         // corpus JVM can spare, `ExitOnOutOfMemoryError` then ends the
         // whole run mid-tier, and the cut is still named by the
-        // deps-class-limit diagnostic (P14).
+        // deps-class-limit diagnostic.
         val optionsWithCaps = entry.depsMaxClasses
             ?.takeIf { slot.deps }
             ?.let { options.copy(depsMaxClasses = it) }
             ?: options
         // Wall clock is measured OUTSIDE the report: the report itself must
-        // stay byte-identical across runs on the same input. The P10 per-row
+        // stay byte-identical across runs on the same input. The per-row
         // RSS window brackets the run the same way.
         val rssBefore = PeakRss.currentBytes()
         val start = System.nanoTime()
@@ -732,7 +732,7 @@ object BenchRunner {
         // A DECLARED classpath that is missing fails the row itself — for
         // the entries whose MEASUREMENT the classpath makes or breaks: the
         // floor-carrying vuln tier, which would otherwise ratchet a number
-        // nobody measured (R73's shape, P14). Entries without a floor keep
+        // nobody measured (the shape). Entries without a floor keep
         // the documented offline behaviour: the detail line below names the
         // gap, their analysis failures stay counted rows, and pathological
         // monorepos (http4k's build resolves 16k coordinates) are not
@@ -745,10 +745,10 @@ object BenchRunner {
                     "reports zero findings with a green build",
             )
         }
-        // P18 §3: a fixture's resolution-error classes are a RATCHET. The
+        // A fixture's resolution-error classes are a RATCHET. The
         // entry declares the ERROR-severity factories its sources carry
         // (`tolerated_resolution_errors`); a class that appears without
-        // being declared fails the row — R110 shipped a stub package that
+        // being declared fails the row — shipped a stub package that
         // did not typecheck (missing import, unimplemented member) and every
         // want passed over it, because nothing compared the fixture's
         // compiler diagnostics against what it used to carry. Absent field
@@ -767,7 +767,7 @@ object BenchRunner {
                     failureDetails.add(
                         "${entry.slug}/${slot.label}: UNDECLARED resolution error class $code — the sources no longer " +
                             "typecheck as declared; fix the fixture or add the class to tolerated_resolution_errors " +
-                            "as a reviewed change (R110's shape)",
+                            "as a reviewed change (the shape)",
                     )
                 }
             }
@@ -867,7 +867,7 @@ object BenchRunner {
 /**
  * The tiers that name real PINNED REPOSITORIES. Several gates are per-repo
  * and must not mistake other fixture tiers for repos: the async tier is
- * bundled fixtures (P6), the eap tier is a syntax probe — counting either as
+ * bundled fixtures, the eap tier is a syntax probe — counting either as
  * repo mass would let micro-fixtures hold a repo gate (or fail it) for the
  * wrong reason.
  */
@@ -879,12 +879,12 @@ val REPO_TIERS: Set<String> = setOf("small", "medium", "large", "android", "kmp"
  * is the numerator of edge connectivity: reached view nodes a breadth-first
  * walk over the EMITTED edges confirms, root nodes (distance 0) included.
  * A view filter that severed a path without re-bridging it shows up here as
- * connectedNodes < reachedNodes, which is exactly what the P3 gate fails on.
+ * connectedNodes < reachedNodes, which is exactly what the gate fails on.
  *
  * [reachedViaEdge] is the honest denominator underneath that. A ROOT is
  * reached at distance 0 by definition — no edge is involved — so a gate that
  * divides by [reachedNodes] can read 1.000 having followed no edge at all,
- * which is what the P3 corpus did before `reachable-depth` existed. Only
+ * which is what the corpus did before `reachable-depth` existed. Only
  * nodes at distance > 0 are reached BECAUSE of an edge, and only those can
  * witness a severance.
  */

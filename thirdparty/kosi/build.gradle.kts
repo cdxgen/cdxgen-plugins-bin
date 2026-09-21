@@ -22,12 +22,12 @@ plugins {
 val HEADLESS_JVM_ARGS = listOf("-Djava.awt.headless=true", "-Dapple.awt.UIElement=true")
 
 /**
- * P28 review: the heap the corpus/bench tier forks with, in GiB.
+ * The heap the corpus/bench tier forks with, in GiB.
  *
- * `-Pkosi.testHeapGb=<n>` pins it (CI passes 6, the number P15 calibrated to
+ * `-Pkosi.testHeapGb=<n>` pins it (CI passes 6, the number calibrated to
  * the runners). Unset, a developer's machine takes HALF its physical RAM,
  * clamped to [6, 24] — the standing rule is that the big tests run locally,
- * and a tier capped at a CI runner's budget cannot host the repos P28 exists
+ * and a tier capped at a CI runner's budget cannot host the repos exists
  * to analyse: dagger produces no report at all under 8g.
  *
  * Clamped at both ends on purpose. The floor keeps a small machine at the
@@ -126,40 +126,40 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
                 // Heap, metaspace and direct memory are all pinned so the
                 // fork's total RSS stays bounded; ExitOnOutOfMemoryError
                 // makes exhaustion a LOUD failure, not a vanished runner.
-                // 3g, recalibrated in P9: the --deps tier adds the lowered
+                // 3g, recalibrated in the --deps tier adds the lowered
                 // dependency KIR and its summaries to the workspace session,
                 // and at 2g the pinned repo tiers OOMed the fork (loud, via
                 // ExitOnOutOfMemoryError, but dead). ~4 GiB total still fits
                 // the CI runners the matrix runs on.
-                // Metaspace 512m -> 1g in P14 (the fully-warmed resolved
+                // Metaspace 512m -> 1g (the fully-warmed resolved
                 // sessions attach far more dependency classes than 512m
                 // survives — NoClassDefFoundError 65 minutes into a run).
                 // The heap went 3g -> 8g in the same change and comes BACK
-                // to 3g in P15: the 8g was never the workspace sessions'
+                // to 3g in the 8g was never the workspace sessions'
                 // cost, it was the deps tier's composed summary sink-effects
                 // multiplying through unbounded param-path joins until one
                 // function's escape set held 68M entries (measured with a
                 // mid-run GC.class_histogram: 3.8GB SummarySinkEffect +
-                // 3.8GB byte[]/String). P15 caps the joins at the engine's
+                // 3.8GB byte[]/String). Caps the joins at the engine's
                 // access-path depth and budgets the escape set like the
                 // state; AndroGoat's 161-jar classpath now lowers its whole
                 // 300-class closure at a ~1 GiB peak in a FRESH JVM. The
                 // matrix still needs 6g: ~500 sessions share one JVM and the
                 // Analysis API's per-session caches accumulate (the
-                // pre-P9 note in this file), the from-empty warm attaches
+                // earlier note in this file), the from-empty warm attaches
                 // each repo's FULL transitive closure (20-40% more jars
-                // than the stale partial lists P14 measured against), and
+                // than the stale partial lists measured against), and
                 // the deps cap is retired. At 3g and 4g the warmed matrix
-                // GC-thrashed without dying (measured, P15); 6g completes,
+                // GC-thrashed without dying (measured); 6g completes,
                 // and the ceiling is a measurement, not a concession.
                 //
-                // P28 review: 6g stays the CI ceiling (it is calibrated to
+                // 6g stays the CI ceiling (it is calibrated to
                 // the runners the matrix runs on, and a fork that outgrows a
                 // shared box dies as a SIGKILL with no output). It is NOT a
                 // ceiling for a developer's machine, where the standing rule
                 // is that the bigger tests run locally: dagger needs more
                 // than 8g to produce a report at all, so a 6g tier is a tier
-                // that cannot host the repos this phase exists to analyse.
+                // that cannot host the repos this change exists to analyse.
                 // Local runs take half of physical RAM, clamped to [6, 24]
                 // GiB; CI and anyone who wants the old number pass
                 // -Pkosi.testHeapGb=6. Whatever is chosen is PRINTED below
@@ -178,7 +178,7 @@ fun kosiTask(name: String, description: String, configure: JavaExec.() -> Unit) 
             println(
                 "kosi tier JVM: " + javaLauncher.get().metadata.languageVersion.asInt() +
                     " @ " + javaLauncher.get().executablePath.asFile.absolutePath +
-                    // P28 review: the heap now varies by machine (half of
+                    // The heap now varies by machine (half of
                     // physical, unless -Pkosi.testHeapGb pins it). An
                     // unstated varying heap is how one machine's green run
                     // and another's OOM become impossible to compare.
@@ -193,7 +193,7 @@ kosiTask("corpusQuick", "Bundled tiers: fixture + framework + crypto + async + v
     args = listOf("bench", "--tier", "fixtures,frameworks,crypto,async,vuln,deep", "--repo-root", rootDir.absolutePath)
 }
 
-kosiTask("corpusAsync", "Async tier (P6): coroutine/Flow fixtures, run and gated separately.") {
+kosiTask("corpusAsync", "Async tier: coroutine/Flow fixtures, run and gated separately.") {
     args = listOf("bench", "--tier", "async", "--repo-root", rootDir.absolutePath)
 }
 
@@ -202,9 +202,9 @@ kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required fo
         // Every tier the manifest actually carries. The old list named
         // `vuln` and `ported`, which have never existed, and omitted
         // `medium`, `android`, `kmp` and `hybrid` — four of the five pinned
-        // repos — so the "full" run measured one of them (R64). `vuln`
-        // exists since P11 (the bundled vulnerable service); `vuln-repo`
-        // since P14 (the pinned deliberately-vulnerable apps whose finding
+        // repos — so the "full" run measured one of them. `vuln`
+        // exists (the bundled vulnerable service); `vuln-repo`
+        // (the pinned deliberately-vulnerable apps whose finding
         // floors the findings ratchet enforces).
         "bench", "--tier", "fixtures,async,vuln,vuln-repo,small,medium,android,kmp,hybrid",
         "--repo-root", rootDir.absolutePath,
@@ -212,7 +212,7 @@ kosiTask("corpusFull", "Fixture + async + pinned-repo tiers (network required fo
     )
 }
 
-// P20 §5: the corpusChanged middle tier's repo-row runner. scripts/
+// the corpusChanged middle tier's repo-row runner. scripts/
 // corpus-changed.sh selects the repo slugs whose declared capabilities the
 // change can move, then invokes this with -Pkosi.only=slug1,slug2. A cold
 // cache on one repo is a skipped row (--skip-missing-repos), never a dead

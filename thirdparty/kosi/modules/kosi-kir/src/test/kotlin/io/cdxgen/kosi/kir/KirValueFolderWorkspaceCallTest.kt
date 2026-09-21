@@ -6,7 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * P21 §1: the fold's producer bucket — a register defined by a call — now
+ * The fold's producer bucket — a register defined by a call — now
  * folds when the callee is in the workspace and every return site of every
  * candidate body folds to the same constant. The conservative arms are the
  * point of the design, so each is pinned here: disagreeing returns, an open
@@ -293,9 +293,9 @@ class KirValueFolderWorkspaceCallTest {
     }
 
     /**
-     * R133 (P21 review): overloads share a canonical name, so a cache keyed
+     * (a later review): overloads share a canonical name, so a cache keyed
      * by that name answers one overload's question with its namesake's
-     * facts. P21 §1 saw this for the return-site cache and keyed it by
+     * facts. Saw this for the return-site cache and keyed it by
      * identity; the CFG cache and the defined-register table, which the
      * same walk reads, stayed name-keyed.
      *
@@ -337,7 +337,7 @@ class KirValueFolderWorkspaceCallTest {
         val viaShared = shared.valueAt(callerB, callerB.body!!.blocks.first(), 1, "t1")!!
         assertFalse(
             viaShared.resolved,
-            "a value defined on one arm of a branch is path-dependent: refusing is the whole design (R133)",
+            "a value defined on one arm of a branch is path-dependent: refusing is the whole design",
         )
 
         // The same question asked of a module holding B alone — the answer

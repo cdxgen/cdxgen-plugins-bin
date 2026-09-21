@@ -1,4 +1,4 @@
-// P30 short tail: the two frameworks P28 §2 listed as "in the pack" and found
+// short tail: the two frameworks listed as "in the pack" and found
 // were not in it at all. Both are modelled from their own documentation.
 //
 // RATPACK — ratpack.io/manual/current/handlers.html: `void handle(Context
@@ -6,7 +6,7 @@
 // The single parameter is the framework's own collaborator, so handlerInput is
 // `context` (the javalin/http4k conclusion, for the javalin/http4k reason) and
 // request data arrives through `context.getRequest()`. Those readers are named
-// in the endpoints pack AND carry source rows in the security pack — R180's
+// in the endpoints pack AND carry source rows in the security pack — 's
 // lesson: a contextReader that is endpoints evidence and nothing else means a
 // header read into a sink is not a flow.
 //
@@ -29,7 +29,7 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~CookiesSink mode=resolved
 // kosi:want flow source=untrusted-input sink=process-exec fn=~BodyStreamSink mode=resolved
 //
-// The SAME six readers at ratpack 1.x's package. R168: a framework named in
+// The SAME six readers at ratpack 1.x's package. a framework named in
 // one spelling is invisible in the other, and the only way to know the 1.x
 // rows work is to exercise them.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~LegacyQueryParamSink mode=resolved
@@ -119,7 +119,7 @@ class BodyStreamSink : Handler {
 // ---- Ratpack 1.x, the pre-JPMS package -----------------------------------
 // Identical handlers against `ratpack.handling` / `ratpack.http`. If the pack
 // carried only the 2.x spelling these would all fall silent, which is the
-// failure R168 is named after.
+// failure is named after.
 
 class LegacyQueryParamSink : LegacyHandler {
     override fun handle(context: LegacyContext) {

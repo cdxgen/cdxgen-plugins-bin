@@ -1,4 +1,4 @@
-// Framework/endpoint/service/URL detection (P7): consumes KIR + models +
+// Framework/endpoint/service/URL detection: consumes KIR + models +
 // schema only. Compiler types stop at kosi-front; nothing here imports them.
 dependencies {
     implementation(project(":kosi-kir"))

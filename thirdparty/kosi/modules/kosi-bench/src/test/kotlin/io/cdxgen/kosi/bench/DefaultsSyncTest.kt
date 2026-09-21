@@ -37,20 +37,20 @@ class DefaultsSyncTest {
     fun bothShippingModesAreInTheMatrix() {
         val labels = Matrix.defaultMatrix().map { it.label }.toSet()
         assertTrue("security" in labels, "the shipping default mode must be exercised")
-        // P23 §0: the `all` slot is GONE, and this line used to demand it.
+        // The `all` slot is GONE, and this line used to demand it.
         // It ran the syntax backend, which lowers no IR and runs no dataflow,
         // so `--dataflow all` changed nothing but the echo of the flag: the
         // `all` and `security` goldens were identical in every analysis
         // section across all 87 fixtures. `DataflowMode.ALL` is asserted to
         // be a declared alias of `security` by `OptionMatrixTest`, on the
         // resolved backend where the two COULD differ — which is what
-        // "exercised" has to mean (R53).
+        // "exercised" has to mean.
         assertTrue(
             "all" !in labels,
             "the all slot proves nothing the security slot does not: if it is back, say what it " +
                 "measures that security cannot",
         )
-        assertTrue("resolved" in labels, "the resolved backend must be exercised for every case (P1)")
+        assertTrue("resolved" in labels, "the resolved backend must be exercised for every case")
     }
 
     @Test
@@ -61,7 +61,7 @@ class DefaultsSyncTest {
 
     @Test
     fun exportedSlotRootsAtThePublicApi() {
-        // P3: a library yields nothing from `main` alone (golem's lesson);
+        // A library yields nothing from `main` alone (golem's lesson);
         // the exported slot is where the edge gates get a real denominator.
         val exported = Matrix.defaultMatrix().single { it.label == "exported" }
         assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, exported.backend)
@@ -71,12 +71,12 @@ class DefaultsSyncTest {
     @Test
     fun theExportedSlotIsInTheMatrixForEveryCase() {
         val labels = Matrix.defaultMatrix().map { it.label }.toSet()
-        assertTrue("exported" in labels, "the exported slot must run for every corpus case (P3)")
+        assertTrue("exported" in labels, "the exported slot must run for every corpus case")
     }
 
     @Test
     fun theEndpointSlotRootsTaintAtHandlers() {
-        // P7: the endpoint slot is where endpoint-rooted slices come from;
+        // The endpoint slot is where endpoint-rooted slices come from;
         // without it the endpoint-rooted-slices gate has no population.
         val endpoint = Matrix.defaultMatrix().single { it.label == MatrixSlot.ENDPOINT_LABEL }
         assertEquals(io.cdxgen.kosi.schema.Backend.RESOLVED, endpoint.backend)

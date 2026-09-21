@@ -137,7 +137,7 @@ the call graph's SCC condensation and applied at call sites in a fixed order
 `collect`, `Channel.send`/`receive` — and `stats.suspendCrossingSlices`
 counts the slices that cross a suspend boundary.
 
-Since P24 the engine also tracks **object identity**: an allocation-site
+The engine also tracks **object identity**: an allocation-site
 alias analysis runs over the same CFG, so a value reached through a second
 reference to one object, through a field of another object, or carried
 inside an object across a call boundary is followed rather than lost, and
@@ -149,7 +149,7 @@ depth histogram, a dispatch-width histogram and `truncations{}`, which
 names any cap that bound the run. A slice whose frame list was cut says so
 in `framesCutBy`; nothing infers depth from a silence.
 
-Since P25 the engine also reads **dependency injection as dispatch
+The engine also reads **dependency injection as dispatch
 evidence**. A Spring, Micronaut, Dagger/Hilt or CDI application never
 constructs the implementation behind an interface — the container does, from
 an annotation — so an analysis that reasons only from `new` was blind to
@@ -161,7 +161,7 @@ construction site the framework performs, matched on RESOLVED annotation
 FQNs. Where an interface has several implementations and the container binds
 one, the call narrows to it and the hop says `dispatchNarrowedBy:
 di-binding` — narrowing that rests on an annotation, named apart from
-narrowing that rests on a `new`. Since P26 the BINDING METHODS are read too:
+narrowing that rests on a `new`. The BINDING METHODS are read too:
 `@Binds` (the parameter IS the implementation — no construction anywhere),
 `@Provides`/`@Bean` by parameter or by construction, and Koin's provider
 lambdas (`single<Api> { ApiImpl() }`, `factory`, `viewModel`, both the 3.x
@@ -170,7 +170,7 @@ one interface publishes BOTH — a dispatch width of 2, labelled `di-binding`,
 which is the honest answer — and a container that binds the non-sinking
 implementation publishes no finding at all.
 
-Since P26 the engine also models **what the framework does with the value**,
+The engine also models **what the framework does with the value**,
 not only where it enters. Persistence interfaces are sinks: a Spring Data
 repository method (a derived query name or `@Query`) and a Room
 `@Dao`/`@Query` method are matched on what the DECLARATION carries — the
@@ -289,10 +289,9 @@ build, the heap is the first thing to check.
 
 Analysis time is bounded separately by `--max-analysis-seconds` and resident
 size by `--max-rss-mb`; both are reported as diagnostics rather than silent
-truncation. Some repositories are slow for reasons memory cannot fix — see the
-open summary-application cost in the tracker (R185).
+truncation.
 
-## How much stack (P29)
+## How much stack
 
 The stack is no longer yours to tune. kosi runs the whole analysis on a
 thread with an explicit **512 MB stack** (committed lazily — an unused
@@ -302,8 +301,8 @@ the generated `s + s + ...` fixture, darwin-aarch64:
 
 | stack | deepest source analysed | notes |
 |---|---|---|
-| default thread (pre-P29) | ~1,200 nesting levels | 1,250 overflows; 2,000 terms dies at any heap |
-| `-Xss64m` | ≥ 5,000 levels | the P28 workaround |
+| a default-sized thread | ~1,200 nesting levels | 1,250 overflows; 2,000 terms dies at any heap |
+| `-Xss64m` | ≥ 5,000 levels | what tuning the flag by hand buys |
 | kosi's analysis thread (512 MB) | ≥ 400,000 levels | measured; the file's SIZE becomes the limit first |
 
 **The policy bound below the stack.** Anything past **2,000 nesting levels**
@@ -318,8 +317,7 @@ its own evidence, never the report.
 
 **A file of several megabytes is not Kotlin to the platform.** IntelliJ's
 file-type layer classifies very large files as plain text; kosi reports that
-file via `unreadable-source` with the size, and analyses the rest (before P29
-this crashed with a bare `ClassCastException`).
+file via `unreadable-source` with the size, and analyses the rest.
 
 ### Memory for the test tiers
 
@@ -330,7 +328,7 @@ physical RAM, clamped to [6, 24] GiB**, and prints what it chose:
 kosi tier JVM: 21 @ /path/to/java heap=24g (auto: half of physical)
 ```
 
-Pin it with `-Pkosi.testHeapGb=<n>`. CI pins 6, the value P15 calibrated to
+Pin it with `-Pkosi.testHeapGb=<n>`. CI pins 6, the value calibrated to
 the shared runners; a developer machine gets the larger share because the
 bigger corpus tiers are meant to run locally.
 

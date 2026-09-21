@@ -1,16 +1,16 @@
-// P14 §2: framework GENERATIONS. Every rename on the JVM is a silent zero
-// — R84 modelled Ktor 2 only, and a Ktor 1.x application reported zero
+// framework GENERATIONS. Every rename on the JVM is a silent zero
+// — modelled Ktor 2 only, and a Ktor 1.x application reported zero
 // sources, zero sinks and its routes attributed to Vert.x. This fixture
 // stubs several generations side by side at their REAL package names, so
 // one detector run must find every generation's routes and flows:
 //
-//   - JAX-RS javax AND jakarta: routing (@GET, the PATCH twin P14 added),
-//     the UriInfo readers, and a @BeanParam binding (the javax twin P14
+//   - JAX-RS javax AND jakarta: routing (@GET, the PATCH twin added),
+//     the UriInfo readers, and a @BeanParam binding (the javax twin
 //     added)
 //   - Servlet jakarta (the javax twin is pinned by handler-input-semantics)
-//   - OkHttp 3's Java static AND the 4/5 companion extensions (P14)
+//   - OkHttp 3's Java static AND the 4/5 companion extensions
 //   - Apache HttpClient 4 and 5's request constructors (both modelled
-//     since P12, pinned here for the first time)
+// Pinned here for the first time)
 //   - Ktor 3: the routing FQNs are Ktor 2's; the RECEIVER is new
 //
 // kosi:want-not diagnostic code=parse-error
@@ -23,7 +23,7 @@
 // kosi:want-not endpoint framework=vertx path=~legacy
 // kosi:want-not endpoint framework=javalin path=~legacy
 //
-// javax UriInfo.getPathParameters — the twin P14 added (jakarta shipped
+// javax UriInfo.getPathParameters — the twin added (jakarta shipped
 // both readers; javax shipped only getQueryParameters).
 // kosi:want flow source=untrusted-input sink=ssrf fn=~legacyPathParams mode=resolved
 // jakarta UriInfo.getQueryParameters, same run.
@@ -31,20 +31,20 @@
 // The jakarta servlet source, end to end.
 // kosi:want flow source=untrusted-input sink=ssrf fn=~servletSide mode=resolved
 //
-// javax JAX-RS routing: GET, and PATCH — the mapping twin P14 added.
+// javax JAX-RS routing: GET, and PATCH — the mapping twin added.
 // kosi:want endpoint framework=quarkus path=/legacy mode=resolved method=GET
 // kosi:want endpoint framework=quarkus path=/legacy mode=resolved method=PATCH
 // jakarta JAX-RS routing, same file.
 // kosi:want endpoint framework=quarkus path=/modern mode=resolved method=GET
 //
 // A @BeanParam parameter is a body-shaped aggregate, never a URL parameter
-// (the javax twin P14 added).
+// (the javax twin added).
 // kosi:want endpoint framework=quarkus path=/bound mode=resolved method=GET
 // kosi:want-not endpoint framework=quarkus path=/bound pathparam=payload
 //
-// OkHttp 4/5's companion extensions — sinks since P14.
+// OkHttp 4/5's companion extensions — sinks.
 // kosi:want flow source=untrusted-input sink=ssrf fn=~okhttp4Target mode=resolved
-// HttpClient 5's request constructor (modelled since P12, pinned here).
+// HttpClient 5's request constructor (modelled, pinned here).
 // kosi:want flow source=untrusted-input sink=ssrf fn=~hc5Target mode=resolved
 // HttpClient 4's, both generations one fixture.
 // kosi:want flow source=untrusted-input sink=ssrf fn=~hc4Target mode=resolved
@@ -156,7 +156,7 @@ fun ktor3(root: Route, sink: (String) -> Unit) {
     }
 }
 
-// P19 §4: the verb builders both generations spell — every modelled verb
+// The verb builders both generations spell — every modelled verb
 // row, one route each, so removing any row changes this fixture's report.
 fun ktor3Verbs(root: Route) {
     root.put("/ktor3/put") { }

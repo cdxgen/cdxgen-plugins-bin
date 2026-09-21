@@ -21,7 +21,7 @@ data class GraphOptions(
      * wall-clock reading (recorded in docs/KOSI.md): the budget is units of
      * deterministic work (worklist pops), `WORK_UNITS_PER_SECOND` per declared
      * second, so a fallback near the boundary cannot make two runs of the same
-     * input disagree — byte-identical output is a P3 gate, and a wall-clock
+     * input disagree — byte-identical output is a gate, and a wall-clock
      * trigger would break it precisely on the largest inputs the fallback
      * exists for.
      */

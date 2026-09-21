@@ -55,7 +55,7 @@ object GradleDiscovery {
             // use — `includeProject(":path", "dir")` (dagger) passes the
             // project DIRECTORY as the second argument, and a member whose
             // declaration shape kosi cannot see is a member whose sources
-            // are never collected (R178: dagger's 396 files, zero modules).
+            // are never collected (dagger's 396 files, zero modules).
             val includeRegex = Regex(
                 """include[A-Za-z]*\s*\(\s*(\"[^\"]+\"(?:\s*,\s*\"[^\"]+\")*)\s*\)""",
             )
@@ -75,6 +75,39 @@ object GradleDiscovery {
                 if (!Files.isDirectory(dir)) continue
                 val name = gradlePath.substringAfterLast(':')
                 members.add(Member(dir, gradlePath, name, findBuildFile(dir)))
+            }
+            // a settings file may include its members through a LOCAL
+            // HELPER —
+            //   fun module(path: String) {
+            //       val name = path.substringAfterLast("/")
+            //       include(name); project(":$name").projectDir = file(path)
+            //   }
+            //   module("reactive/kotlinx-coroutines-rx2")
+            // kotlinx.coroutines declares 17 of its 20 members this way, and
+            // NOTHING in the file states it literally: the `include` carries
+            // a variable and so does the `project(":$name")`. The regex above
+            // sees none of them, so kotlinx-coroutines-test, -debug and the
+            // whole of reactive/, ui/ and integration/ were absent from
+            // discovery — the remaining gap, and the reason the repo sat
+            // at 29% source coverage after its KMP layout was fixed.
+            //
+            // What CAN be read is the argument: a quoted relative path. So
+            // any single-string call is a candidate member, and the DISK
+            // decides — the path must be a directory holding a Gradle build
+            // file. A string that names a buildable Gradle module IS a
+            // module, whatever function was applied to it; a string that
+            // does not is ignored, which is every other string in the file.
+            val helperRegex = Regex("""\b[A-Za-z_]\w*\s*\(\s*"([^"\s]+)"\s*\)""")
+            for (match in helperRegex.findAll(settingsText)) {
+                val rel = match.groupValues[1]
+                if (rel.startsWith("/") || rel.contains("..") || rel.contains(':')) continue
+                val dir = root.resolve(rel)
+                if (!Files.isDirectory(dir)) continue
+                val buildFile = findBuildFile(dir) ?: continue
+                val normalized = dir.toAbsolutePath().normalize()
+                if (members.any { it.dir.toAbsolutePath().normalize() == normalized }) continue
+                val name = rel.substringAfterLast('/')
+                members.add(Member(dir, ":$name", name, buildFile))
             }
         }
         return members
@@ -104,11 +137,11 @@ object GradleDiscovery {
         if (buildText.isBlank()) {
             // A member with no build file still contributes sources under the
             // standard layout. A member with no build file and NO standard
-            // layout keeps the member directory itself as its root — the
-            // same fallback the with-build-file branch below documents. R178:
-            // dagger's root member (settings present, no root build file,
-            // bazel-style `main/`+`test/` dirs) produced a module with ZERO
-            // source roots here and the whole repository read as no-sources.
+            // layout keeps the member directory itself as its root — the same
+            // fallback the with-build-file branch below documents. Dagger's
+            // root member (settings present, no root build file, bazel-style
+            // `main/`+`test/` dirs) produced a module with ZERO source roots
+            // here and the whole repository read as no-sources.
             val roots = standardRoots(root, member.dir).ifEmpty { listOf(rel(root, member.dir)) }
             return listOf(
                 DiscoveredModule(
@@ -186,7 +219,7 @@ object GradleDiscovery {
                 )
             }
             if (modules.isEmpty()) {
-                // R179: a multiplatform module whose source sets live OUTSIDE
+                // A multiplatform module whose source sets live OUTSIDE
                 // `src/<set>/kotlin` used to vanish here — every set's roots
                 // came back empty and the `continue` above dropped the whole
                 // member, leaving kotlinx.coroutines' 1 039 files at ONE

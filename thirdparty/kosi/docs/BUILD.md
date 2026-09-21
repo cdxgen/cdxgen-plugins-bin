@@ -1,7 +1,7 @@
 # Building and shipping kosi
 
-Phase 0 (P0) numbers and commands, measured on the host platform
-(darwin-aarch64, Apple M4 Pro, 64 GB, macOS 26). Re-measure at every phase
+Numbers and commands, measured on the host platform
+(darwin-aarch64, Apple M4 Pro, 64 GB, macOS 26). Re-measure whenever the toolchain moves
 gate; a change that grows the binary by more than 10% has to say why
 (05-BUILD-DIST.md §3).
 
@@ -11,7 +11,7 @@ JetBrains build a native image of `kotlin-compiler-embeddable` themselves
 (`prepare/compiler-native-image`), which makes feasibility a fact, not a bet.
 kosi copies their recipe with two adjustments recorded below.
 
-Measured P0 numbers:
+Measured numbers:
 
 | Artifact | Size |
 | --- | --- |
@@ -54,10 +54,10 @@ kosi: native-image 25.0.4.1 (pinned) at /Users/you/tools/graalvm-community-25.3.
 ```
 
 **Binary size is toolchain-specific, so record the GraalVM build alongside
-every number.** P1 on the pin: 93,709,760 bytes (89.4 MiB); the same sources
+every number.** On the pinned toolchain: 93,709,760 bytes (89.4 MiB); the same sources
 on CE 25.0.2: 106,000,640 bytes. The plan's
 "most binaries land 120-260 MB uncompressed" budget is beaten by an order of
-magnitude because the P0 closed world is small: the syntax tier touches the
+magnitude because the closed world is small: the syntax tier touches the
 frontend/PSI only, never the compiler *backends*.
 
 Reproduce:
@@ -78,9 +78,9 @@ cmp /tmp/a.json /tmp/b.json
 The two lines before the runs are not decoration. `analyze` writes nothing
 when it fails, so a comparison over reused paths passes loudest exactly when
 the tool is broken — an empty-vs-empty match, or last run's report against
-itself. R53 reached the P3 gate that way: the image could not analyse any
-fixture containing an `object`, and the phase's own native-vs-JVM sweep
-reported every fixture identical. P4 turned the recipe into a script that
+itself. A real defect reached the gate that way: the image could not analyse
+any fixture containing an `object`, and the native-vs-JVM sweep reported
+every fixture identical. The recipe is now a script that
 cannot be run wrong — outputs deleted before every run, exit codes checked,
 sizes asserted, `tool.commit` normalised, and the per-fixture slice/node/edge
 counts printed so the sweep shows what it compared:
@@ -104,14 +104,14 @@ break:
 | the change | what to run |
 |---|---|
 | model packs, `corpus.toml`, docs — DATA only | nothing native. The image cannot be affected: it holds no pack. |
-| new fixtures, or any new Kotlin SOURCE CONSTRUCT | `make native-metadata-check` alone. Drift is the whole signal (R69), and it needs no image. |
+| new fixtures, or any new Kotlin SOURCE CONSTRUCT | `make native-metadata-check` alone. Drift is the whole signal, and it needs no image. |
 | lowering, KIR shape, reflection, resources, `native-image` flags, the CLI entry | the full pass: rebuild, both sweeps, and the metadata check. |
 | a squash-merge that touched none of those | nothing native. |
 
 **`native-vs-jvm.sh` is the expensive one and it is NOT a per-merge gate.**
-Every divergence it has ever caught — R53 (an image that could not analyse
-an `object`), R69 (one that could not analyse a KDoc comment), R66 (one that
-could not start on linux) — was a REFLECTION or RESOURCE failure, and
+Every divergence it has ever caught — an image that could not analyse an
+`object`, one that could not analyse a KDoc comment, one that could not
+start on linux — was a REFLECTION or RESOURCE failure, and
 `native-metadata-check` sees that class of problem from a trace, with no
 image build, for a fraction of the cost. So metadata drift is the routine
 gate; the comparison runs only when the change is in the image's own
@@ -123,20 +123,20 @@ image — but it is a reason to watch reflection metadata, not a reason to
 rebuild an image after editing a JSON file.
 
 Both sweeps run **both** graph-bearing slots (`resolved` and `--roots
-exported`), not `resolved` alone: R53's lesson is that a slot nobody runs is
+exported`), not `resolved` alone: the lesson is that a slot nobody runs is
 a code path nobody proves anything about, and `exported` is precisely the
-slot whose missing reflection entry killed the P3 image. 35 fixtures x 2
-slots = 70 pairs; at P4 all three sweeps read 70 of 70.
+slot whose missing reflection entry killed the image. 35 fixtures x 2
+slots = 70 pairs; all three sweeps read 70 of 70.
 
 The native-vs-JVM comparison is a script and not a paragraph for the same
-reason: it was prose in P3 ("cmp the outputs per fixture"), and it is the
-step R53 walked straight through.
+reason: as prose ("cmp the outputs per fixture") it was the step the
+`object` defect walked straight through.
 
 When comparing a native report against a JVM one, normalise `tool.commit`:
 the image bakes in the commit it was built from, the JVM run reads the one
 its jar was built from, and the two differ whenever either is stale.
 
-### The committed symbol-evidence extract and the pack liveness gate (P19)
+### The committed symbol-evidence extract and the pack liveness gate
 
 Two tests gate the endpoints pack itself, not the engine:
 
@@ -147,7 +147,7 @@ Two tests gate the endpoints pack itself, not the engine:
   pinned artifacts (http4k sources at the pinned SHA, vertx-web 5.1.7,
   ktor 3.5.2, spring 5.3.18, micronaut 4.10.23, the jakarta/aws/azure
   jars), never the jars. The pack-vs-extract check runs on EVERY machine
-  (R109/R112/R113/R114's shape fails anywhere); where the pinned evidence
+  (the shape fails anywhere); where the pinned evidence
   is held, the extract is re-derived and must equal the committed bytes.
   Regenerate after a deliberate pack or evidence-pin change:
 
@@ -158,7 +158,7 @@ Two tests gate the endpoints pack itself, not the engine:
   recorded with reasons; a framework nobody can check says so, never
   KIND-CHECKED.
 
-- `EndpointsPackLivenessTest` (kosi-bench) is the R63 gate the pack never
+- `EndpointsPackLivenessTest` (kosi-bench) is the gate the pack never
   had: it removes every pack entry in turn (identity-based, so whole
   name-classes compose) over one captured front-end analysis per bundled
   fixture and classifies each entry LIVE (some fixture's detection result
@@ -170,11 +170,11 @@ Two tests gate the endpoints pack itself, not the engine:
   the reviewed-in-diff exit, not a CI suppressor. The sweep takes ~15 s
   (the front end runs once per fixture; only detection re-runs per entry).
 
-### The gate-cost policy: corpusChanged, and corpusFull ONCE (P20 §5)
+### The gate-cost policy: corpusChanged, and corpusFull ONCE
 
 `corpusFull` is the most expensive thing anyone runs here (~50 minutes, a
-warmed cache, one machine), and by P20 it had become the routine answer to
-every question. The policy is now, on evidence:
+warmed cache, one machine), and it had become the routine answer to every
+question. The policy is now, on evidence:
 
 - **`corpusChanged` (`scripts/corpus-changed.sh [base-ref]`) is the
   development loop's tier.** The bundled tiers always (they are
@@ -183,8 +183,8 @@ every question. The policy is now, on evidence:
   — the token vocabulary is read FROM `corpus.toml`, so the mapping is
   data-driven. `--only` takes a comma-separated slug list;
   `./gradlew kosiRepoRows -Pkosi.only=...` runs the selected rows.
-- **`corpusFull` runs ONCE per phase**, at the end, on the corpus machine,
-  and its result is what the phase report quotes. Not per commit, not per
+- **`corpusFull` runs ONCE per release**, at the end, on the corpus machine,
+  and its result is what the change notes quotes. Not per commit, not per
   question.
 - **CI stays the fast deterministic subset** it is today (`kosi-test.yml`:
   unit tests, corpusQuick, goldens). Bigger tiers stay local — that is the
@@ -195,17 +195,17 @@ every question. The policy is now, on evidence:
   and inert entries (the two liveness sweeps), and repo-tier movement on
   repos the change's capability tokens do not name (corpusFull, once).
 
-The evidence for the tier boundary (P20 §5, measured over goldens/ and the
+The evidence for the tier boundary (measured over goldens/ and the
 tracker's history): every one of the 17 commits that ever touched goldens
-is a phase squash, and the bundled fixtures' gates caught every movement —
+is a change squash, and the bundled fixtures' gates caught every movement —
 the bundled tier is the population whose digest history is dense. The REPO
 tier has no goldens at all; its recorded numbers (the floors, the
-per-repo ratios) have moved four times in twenty phases (P14's floors, P14
-kampkit, P16 nowinandroid, P12's pack growth), each time through a warm,
+per-repo ratios) have moved four times (floor changes, two repo additions,
+and pack growth), each time through a warm,
 a resolver, or a pack change — which is exactly the population the
 capability matching selects.
 
-### The deep tier: small, hard, and in CI (P24)
+### The deep tier: small, hard, and in CI
 
 The bundled corpus is ~100 single-concern fixtures — one construct, one
 lowering rule, a positive half and a negative half — and it cannot prove
@@ -220,7 +220,7 @@ named. The `deep` tier is the population that can. Its discipline, from
   half of the same shape that must report nothing.
 - **It earns its place by failing something.** A deep fixture that passes
   in every mode on the day it is written adds runtime and proves nothing
-  (R53); it is added with a `known-fail` and a tracker row, or as the
+; it is added with a `known-fail` and a tracker row, or as the
   negative half of one that has one.
 - **Ten fixtures for the whole of part 3, one slot each.** The default
   slot only (`resolved` + `security` + `auto`), one golden pair per
@@ -233,40 +233,40 @@ named. The `deep` tier is the population that can. Its discipline, from
   changes not one byte of the reports. A cap that binds here is a defect,
   not a setting (`09-PRECISION.md` §3).
 
-### What no corpus tier answers: is this code reachable from any input we have (P21)
+### What no corpus tier answers: is this code reachable from any input we have
 
 `corpusChanged` and `corpusFull` both answer one question: **did a
-behaviour move.** Neither answers the question R131 turned up: **is this
-code reachable from any input we have.** R131's cross-block fold — 460
+behaviour move.** Neither answers the second question: **is this code
+reachable from any input we have.** The cross-block fold — 460
 lines of dominator walk with a green unit test — ran GREEN through every
 corpus tier at any cost, because the corpus held no input that reached the
 code: no bundled fixture had ever asked the folder for a local's value, so
 there was nothing for any bench row to move on. No tier, at any price,
 fixes that; a warm cache does not invent inputs.
 
-The gate that answers it is a FIXTURE, and the phase rule is the policy:
+The gate that answers it is a FIXTURE, and the policy is:
 **every capability ships with its fixture that reaches it through
 `Analyzer.analyze`, in the same change** — and every failure reason the
 folder can name stays non-zero in the committed depth report
 (`DepthReportTest.everyFoldFailureBucketIsNonZeroInTheCommittedReport`), so
 a new reason must arrive with an input that reaches it or not ship.
 
-The replay, measured (P21 §4) by restoring each defect one at a time:
+The replay, measured by restoring each defect one at a time:
 
 | defect | corpusChanged | what actually catches it |
 |---|---|---|
-| R129 — no fixture makes a sanitizer load-bearing | GREEN: an absence moves no bench row (measured: the bundled bench is green with `sanitizer-gallery` deleted) | the depth-report golden + the security-pack liveness sweep, both in `./gradlew test`, which runs in every loop |
-| R130 — the name matcher reads golden file names | FLOODS: the tier's vocabulary fills with fixture slugs mirrored by golden names (measured on this phase's own diff: 0 → 6 tokens; on P20's 164 regenerated goldens it selected every repo row and ran 45 minutes) | nothing automated can see a tier degenerate into corpusFull; the fix is the filter and the review of it |
-| R131 — the fold cannot see a local's value | GREEN at `cd71886`, where the defect shipped (measured: corpusQuick 0 fail, androgoat floor green, with the store arm absent and no fixture reaching the code). RED at P21 with the same defect restored — `cross-block-values/resolved` fails 2 wants. The difference is the FIXTURE, not the tier | the fixture (R63), which is the phase rule |
-| R132 — the content matcher diffs the whole tree | same flood as R130 through the other door (measured: 0 → 9 tokens) | same |
+| no fixture makes a sanitizer load-bearing | GREEN: an absence moves no bench row (measured: the bundled bench is green with `sanitizer-gallery` deleted) | the depth-report golden + the security-pack liveness sweep, both in `./gradlew test`, which runs in every loop |
+| the name matcher reads golden file names | FLOODS: the tier's vocabulary fills with fixture slugs mirrored by golden names (measured on a representative diff: 0 → 6 tokens; on the 164 regenerated goldens it selected every repo row and ran 45 minutes) | nothing automated can see a tier degenerate into corpusFull; the fix is the filter and the review of it |
+| the fold cannot see a local's value | GREEN at `cd71886`, where the defect shipped (measured: corpusQuick 0 fail, androgoat floor green, with the store arm absent and no fixture reaching the code). RED with the same defect restored — `cross-block-values/resolved` fails 2 wants. The difference is the FIXTURE, not the tier | the fixture |
+| the content matcher diffs the whole tree | the same flood through the other door (measured: 0 → 9 tokens) | same |
 
 A corollary the replay surfaced: `depth-cap-chain` pins the VALUE outcome
-(the chain stays unresolved) but not the failure REASON — the restored R131
-also produces an unresolved value there, by a different route. Reasons live
+(the chain stays unresolved) but not the failure REASON — the restored fold
+defect also produces an unresolved value there, by a different route. Reasons live
 in the depth-report golden, values in the corpus; the two gates hold
 different halves, and neither substitutes for the other.
 
-### The reachability table past the bundled tier (P21 §3, schema closed P22 §2)
+### The reachability table past the bundled tier
 
 The depth report's third table (complete / partial / symbol-only) is a
 bundled-corpus golden; on the corpus machine it has been run over the three
@@ -275,24 +275,24 @@ androgoat 16 findings (16 complete, 0 partial, 0 symbol-only, ratio
 0.9546), insecureshop 7 (7/0/0, ratio 0.9147), tsp 2 (2/0/0, ratio 1.0) —
 identical at the `resolved` and `exported` slots, so on these apps every
 published finding rides a COMPLETE entrypoint→sink path and the fraction
-that means only "exists" (the exported roots' honest meaning, P20 §4) is
-zero. P22 §2 closed the schema gap that paragraph used to warn about: the
+that means only "exists" (the exported roots' honest meaning) is
+zero. The schema gap that paragraph used to warn about is closed: the
 distinction is now a FIELD on every slice (`pathKind`: complete | partial |
 symbol-only, pinned by `SlicePathKindVocabularyTest`), the constant-false
 `reachableFromRoots` flag and the always-null `rootWitness` are deleted
-(a field that never varies is not a fact, it is a schema lie — R117's
-rule), and the elided-trace fixture drives PARTIAL so no vocabulary value
-is undriven. The historical zero on the repos rests on a defect P22 found
-and fixed (R135): the summaries published their sink effects with the
+(a field that never varies is not a fact, it is a schema lie), and the
+elided-trace fixture drives PARTIAL so no vocabulary value
+is undriven. The historical zero on the repos rests on a defect since
+found and fixed: the summaries published their sink effects with the
 composed site paths stripped, so a composed trace could never outgrow the
 trace cap and PARTIAL was unrepresentable anywhere — the repo numbers
 above are unchanged by the fix (the same findings, now with real traces),
 which is what makes them a measurement instead of an artefact.
 
-### The option matrix (P23 §0)
+### The option matrix
 
-The corpus picks FIXTURES and SLOTS. Until P23 nothing picked option
-COMBINATIONS, and that is where R137 lived: `--dataflow reachable` paired
+The corpus picks FIXTURES and SLOTS. Nothing used to pick option
+COMBINATIONS, and that is where a real defect lived: `--dataflow reachable` paired
 with `--callgraph none` published a `reachableSlices` count claiming every
 slice reachable, on a run that had built no graph to intersect with. It
 survived 522 golden pairs, a 600-row `corpusQuick`, a full corpus and a
@@ -308,13 +308,13 @@ sample — it is EXHAUSTIVE over the enums (a new `DataflowMode` or
 expects come from `AnalyzeOptions.degradations()`, the same predicate the
 CLI refuses from, so a report and a refusal cannot describe different sets.
 
-| pairing | before P23 | now |
+| pairing | previously, | now |
 | --- | --- | --- |
 | `--backend syntax` + any `--dataflow` (THE DEFAULT) | no `dataFlow`, no diagnostic naming it; the only hint spoke about `resolvedCallRatio` | `dataflow-not-run` names it, run proceeds |
 | `--backend syntax` + any `--callgraph` | no `callGraph`, silently | `callgraph-not-run` names it, run proceeds |
-| `--dataflow reachable` + `--callgraph none` | accepted; published every slice as reachable (R137) | CLI REFUSES; the library names `reachable-without-callgraph` and reports 0 |
+| `--dataflow reachable` + `--callgraph none` | accepted; published every slice as reachable | CLI REFUSES; the library names `reachable-without-callgraph` and reports 0 |
 | `--deps` + `--dataflow none` | the tier was lowered and summarised, then discarded | `deps-without-dataflow` names it |
-| `--dataflow crypto` | published every security slice, unfiltered (R139) | publishes only crypto flows, by the predicate the bench already counted them with |
+| `--dataflow crypto` | published every security slice, unfiltered | publishes only crypto flows, by the predicate the bench already counted them with |
 | `--dataflow all` | a synonym of `security` that nothing said was one | asserted to be a declared alias, in one line |
 
 The `all` SLOT is gone with it. It ran the syntax backend, which runs no
@@ -323,11 +323,11 @@ across all 87 fixtures the `all` and `security` goldens differed in exactly
 one section, `options`, and no fixture carried a single `mode=all`
 annotation. 87 golden pairs — a sixth of every corpus run, every golden
 check and both legs of the two-environment proof — pinning the fact that the
-CLI echoes its own flag (R53).
+CLI echoes its own flag.
 
-### Merges: a set, a witness, or a fact (P23 §1)
+### Merges: a set, a witness, or a fact
 
-R138 was a type error wearing a data structure's clothes: eight fields of a
+A past defect was a type error wearing a data structure's clothes: eight fields of a
 `FunctionSummary` are sets of effects and one is a witness path, and the
 deps-tier JOIN unioned all nine. Every merge in the analysis is now
 classified, and the classification is the discipline:
@@ -335,20 +335,20 @@ classified, and the classification is the discipline:
 | merge | kind | rule |
 | --- | --- | --- |
 | `FlowState.addFacts` / `mergeFrom` | SET | union; a fact either side has, the join has |
-| `Transfer.joinInto` (phi, concat, elvis) | SET + per-fact WITNESS | facts union; the blame register is CHOSEN (first operand carrying it), never merged (R54/R62) |
+| `Transfer.joinInto` (phi, concat, elvis) | SET + per-fact WITNESS | facts union; the blame register is CHOSEN (first operand carrying it), never merged |
 | `FunctionSummary.join` (deps tier, by name) | SET ×8 | may-union across the overloads of one name |
-| `FunctionSummary.join`, `sourceReturns` | WITNESS | shortest path, lexicographic tie-break — the joined path IS one of its inputs (R138) |
-| `SummaryAnalysis.toSummary` escape dedup | WITNESS | one shortest-path witness per canonical (R135) |
+| `FunctionSummary.join`, `sourceReturns` | WITNESS | shortest path, lexicographic tie-break — the joined path IS one of its inputs |
+| `SummaryAnalysis.toSummary` escape dedup | WITNESS | one shortest-path witness per canonical |
 | `KirValueFolder` phi / dominator join | FACT | arms that disagree REFUSE; no arm is preferred |
 | `KirValueFolder` workspace return sites | FACT | every return site of every candidate must agree, or refuse |
 | `ConstTable.fromSources` (`const val` names) | FACT | a name holding two values is refused, never guessed |
-| `ConfigResolver.load` (config keys) | FACT | **was a PICK** — first file in sorted-path order won and was published as `resolution=config`. Now refuses: known key, null value (R140) |
+| `ConfigResolver.load` (config keys) | FACT | **was a PICK** — first file in sorted-path order won and was published as `resolution=config`. Now refuses: known key, null value |
 | `BytecodeLowerer.classIndex` | PICK, declared | a shaded class keeps the last jar, mirroring the resolver's own one-artifact-per-coordinate pick |
 
-### The two-environment proof (P18)
+### The two-environment proof
 
 `scripts/two-environment-proof.sh [<commit>]` (default HEAD) is the scripted
-form of the check that found R108: the same commit checked out TWICE (two
+form of the check that found the same commit checked out TWICE (two
 git worktrees, different absolute paths), the same kosi jar, and two Gradle
 cache states — leg A with the machine's caches as the runner left them,
 leg B with `HOME` and `-Duser.home` pointed at an empty directory, so the
@@ -358,7 +358,7 @@ directory; the script diffs the two legs' digest files (naming the sections
 that differ, per file) and each leg against the CHECKED-IN goldens at that
 commit. Any difference exits 1.
 
-Run it per phase and before a release; it takes a few minutes (one fat-jar
+Run it per release and before a release; it takes a few minutes (one fat-jar
 build plus two golden passes). Requirements: a clean working tree (the
 proof compares a commit, not a dirty tree), git, a JDK, and either a warm
 Gradle build cache or network for the one jar build — the analysis itself
@@ -369,13 +369,13 @@ warm-vs-scrubbed contrast.
 
 Its teeth, measured 2026-09-16: against `feat/kosi-part2` (`2a6d232`) the
 proof PASSES — 450 digest files identical across both legs and matching the
-checked-in goldens, i.e. zero environment dependence found; against P16
-(`d317c78`), where the async fixtures were still unpinned, it FAILS exactly
-the way the P17 review's second machine did — the six coroutines fixtures
+checked-in goldens, i.e. zero environment dependence found; against
+`d317c78`, where the async fixtures were still unpinned, it FAILS exactly
+the way the review's second machine did — the six coroutines fixtures
 differ between the legs (`callGraph, diagnostics, stats` sections: the warm
 cache attaches jars the scrubbed leg cannot), and `async-android-scopes`
 additionally disagrees with its own checked-in goldens (`callGraph,
-diagnostics, imports, stats`), which is R104 verbatim. The golden gate's
+diagnostics, imports, stats`) — the original defect, verbatim. The golden gate's
 in-run portability check (§ above) covers the checkout-location axis on
 every `kosi golden` run; this script adds the cache axis and the
 against-the-pin comparison.
@@ -391,11 +391,10 @@ against-the-pin comparison.
 | build-time class-init clashes | `--initialize-at-run-time=...EarlyAccessRegistry`; `--trace-class-initialization` documents any further clashes | minimal list, grows on evidence |
 | reachability drift when the Kotlin pin bumps | `make native-metadata` re-runs the tracing agent over every fixture and deterministically re-merges (`scripts/merge-agent-metadata.py`); `make native-metadata-check` fails CI on drift | wired |
 
-## 3. Reachability metadata provenance (rewritten at P1)
+## 3. Reachability metadata provenance
 
-P1 moved the substrate from the shaded `kotlin-compiler-embeddable` to the
-unrelocated `-for-ide` artifacts plus the unrelocated IntelliJ platform
-(02-ARCHITECTURE.md §1 amendment). The JetBrains seed metadata described the
+The substrate moved from the shaded `kotlin-compiler-embeddable` to the
+unrelocated `-for-ide` artifacts plus the unrelocated IntelliJ platform. The JetBrains seed metadata described the
 SHADED class names (`org.jetbrains.kotlin.com.intellij.*`) and cannot apply;
 the whole surface is now re-derived from our own runs:
 
@@ -405,7 +404,7 @@ the whole surface is now re-derived from our own runs:
   API session's ServiceLoader, reflection and proxy surface is recorded),
   merged by `scripts/merge-agent-metadata.py` (deterministic union; CI diffs
   the checked-in file via `make native-metadata-check`).
-- `native-metadata/proxy-config.json` (P0's hand-maintained relocated
+- `native-metadata/proxy-config.json` (the hand-maintained relocated
   proxies) and the JetBrains seed (`native-metadata/jetbrains/`) are retired;
   proxy groups arrive through the agent's reachability metadata now.
 - The fat jar carries the kotlin-stdlib JAR FILE as a resource
@@ -417,32 +416,30 @@ the whole surface is now re-derived from our own runs:
 
 1. `-Os`, `--gc=serial` — applied. `-H:-IncludeMethodData` not yet needed.
 2. shadowJar minimisation (drop compiler backends, daemon, JLine) — partially
-   applied (`org/jline/**` dropped wholesale); further trimming is phase 3+
+   applied (`org/jline/**` dropped wholesale); further trimming is future
    work measured against the corpus.
-3. UPX-LZMA — **rejected at P0**: `upx --force-macos --lzma` packs 35 MB to
+3. UPX-LZMA — **rejected**: `upx --force-macos --lzma` packs 35 MB to
    12 MB but the packed binary segfaults on macOS; unpacked it is identical
-   output. Per the plan, kosi ships uncompressed rather than risk a
-   platform-specific segfault. Re-evaluate per platform on linux/windows at
-   the release phase.
+   output. kosi ships uncompressed rather than risk a platform-specific
+   segfault. Re-evaluate per platform on linux/windows before a release.
 4. Own npm package / ORAS-only distribution — not needed while the binary is
-   ~45 MB; revisit if phase 3+ (resolved tier, more of FIR) pushes past the
-   budget.
+   ~45 MB; revisit if a wider analysis surface pushes past the budget.
 
-## 5. Fallback (jlink) — not needed at P0
+## 5. Fallback (jlink) — not needed
 
-The jlink runtime image fallback (05-BUILD-DIST.md §5) was not required: the
-primary path builds and runs. If a later phase breaks native-image (for
-example the Analysis API standalone platform wiring in P2 dragging in more of
-intellij-core), the fallback order stands: jlink image first, `kosi-portable.jar`
+The jlink runtime image fallback was not required: the primary path builds
+and runs. If a later change breaks native-image (for example the Analysis
+API standalone platform wiring dragging in more of intellij-core), the
+fallback order stands: jlink image first, `kosi-portable.jar`
 for ppc64/arm32 regardless.
 
-## 6. Platform matrix claim at P0
+## 6. Platform matrix claim
 
 Native-image is claimed for darwin-arm64 (proven here) and, by the same
 recipe, linux-amd64/linux-arm64 and musl static builds on the release
 runners. ppc64 and 32-bit arm remain declared gaps with a documented JVM-jar
 fallback (see `docs/KOSI.md`); riscv64 stays best-effort per the plan.
-Windows follows at the release phase with the MSVC toolchain.
+Windows follows with the MSVC toolchain.
 
 Binary names use the package fragments (`kosi-darwin-arm64`,
 `kosi-linux-amd64`, ...) so `stage-built-plugins.sh` finds them without a
@@ -458,7 +455,7 @@ wherever they apply, never silent.
 CI: `.github/workflows/kosi-test.yml` runs one job on every change — unit
 tests, the fixture-tier corpus ratchet (`corpusQuick`, both modes) and the
 digest goldens, a few minutes end to end. Everything heavier is
-`workflow_dispatch`-only and belongs to the phase gate run locally: the
+`workflow_dispatch`-only and belongs to the gate run locally: the
 darwin-arm64 and linux-amd64 native builds, and `corpusFull`. The rule is
 deliberate — big measurements run on the machine that can hold them, and
 the small deterministic subset guards every push.
@@ -468,18 +465,18 @@ should have been: the pinned-repo matrix does not fit a hosted runner.
 Measured 2026-09-15 on `ubuntu-latest`: the WARM step alone ran 52 minutes
 (http4k's monorepo 42 of them) and the job was killed (exit 143) 56 minutes
 in, during nowinandroid's warm, before a single bench row ran. The gate
-itself has not moved — `corpusFull` is run per phase on the corpus machine,
-with rows, fail/XPASS counts, the vuln finding floors and every repo's
-resolvedCallRatio recorded in that phase's tracker section. A red
-tick nobody can make green is not a gate; the phase report is. The linux-amd64 GraalVM
-tarball sha256 has been pinned since R66 (the job downloaded an unpinned
-tarball because its first successful run never happened):
+itself has not moved — `corpusFull` is run on the corpus machine, with rows,
+fail/XPASS counts, the vuln finding floors and every repo's
+resolvedCallRatio recorded alongside. A red tick nobody can make green is
+not a gate; the recorded run is. The linux-amd64 GraalVM tarball sha256 is
+pinned (the job once downloaded an unpinned tarball because its first
+successful run never happened):
 
 ```
 b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz
 ```
 
-### The linux AWT startup failure (R66, root-caused)
+### The linux AWT startup failure (root-caused)
 
 The linux-amd64 smoke aborted at image startup with
 `NoClassDefFoundError: java/awt/GraphicsEnvironment` raised inside a JDK
@@ -490,7 +487,7 @@ and ran green on darwin. The cause is in the JDK's own natives:
   calls `System.loadLibrary("awt")` UNCONDITIONALLY, before any
   `awt.toolkit` property read. The path that reaches it is the IntelliJ
   platform's mock application scheduling one Swing runnable while the
-  analysis environment is created — the same finding the P1 no-op toolkit
+  analysis environment is created — the same finding the no-op toolkit
   works around.
 - linux `libawt.so` defines a `JNI_OnLoad` that calls
   `FindClass("java/awt/GraphicsEnvironment")` at load; an image ships no
@@ -524,15 +521,15 @@ fails (measured). Darwin needs no flag — its `libawt.dylib` has no
 `JNI_OnLoad`, so nothing there is fatal; `java.awt.headless=true`, set in
 `main`, is the whole of its mechanism. (It was believed to be a no-op
 `Toolkit` selected through `awt.toolkit`; JDK 25 never reads that property
-— see R71.) To reproduce the verification locally:
+— measured.) To reproduce the verification locally:
 `docker run --platform linux/arm64 ubuntu:24.04` + the pinned
 linux-aarch64 GraalVM + `zlib1g-dev`, then the `native-image` command from
 the Makefile's linux rule against the checked-in fat jar and metadata.
 
-### One capability, every spelling (P25 §0)
+### One capability, every spelling
 
-R152 — the function-value channel that worked for `{ s -> ... }` and died
-for `{ ... it ... }` — is not a bug about lambdas. It is what happens when a
+The function-value channel that worked for `{ s -> ... }` and died for
+`{ ... it ... }` is not a bug about lambdas. It is what happens when a
 capability is proven in the spelling its author happened to type. Kotlin
 gives most constructs three to six spellings, and the engine reaches them
 through different lowering paths, so "it works" is a claim about a spelling
@@ -540,19 +537,18 @@ until a fixture says otherwise.
 
 `fixtures/spelling-gallery` is the answer: ONE flow — `readLine()` to
 `Runtime.exec` — written twenty-five ways, with a want per spelling that
-works and a `known-fail=<defect>` per spelling that does not. There is no
+works and a `known-fail` marker per spelling that does not. There is no
 third state. A spelling that is neither wanted nor known-failed is a
 spelling nobody decided about, and the sweep that produced the gallery found
 five dead channels in one afternoon (every callable-reference form, the
-anonymous `fun`, the local `fun` reference) plus six open defects
-(R154-R158, R147).
+anonymous `fun`, the local `fun` reference) plus six further defects.
 
-The rule for future phases: **a phase that adds a capability adds its
-spellings to the gallery.** The cost is one fixture and one slot; the
+The rule: **a change that adds a capability adds its spellings to the
+gallery.** The cost is one fixture and one slot; the
 alternative is finding out from a user's repository which spelling you
 happened not to type.
 
-## The channels must be closed under composition (P27)
+## The channels must be closed under composition
 
 A summary channel records "what this function does to a parameter". There
 are four cells, and for a long time only two existed:
@@ -561,8 +557,8 @@ are four cells, and for a long time only two existed:
 | --- | --- | --- | --- |
 | `p` | return | `paramToReturn` | `fun id(x) = x` |
 | `p` | `return.S` | `paramToReturnFields` | `fun wrap(x) = Box(x)` |
-| `p.P` | return | `paramFieldToReturn` (P27) | `val body get() = raw` |
-| `p.P` | `return.S` | `paramPathToReturnPath` (P27) | `fun map(r) = Cmd(r.name)` |
+| `p.P` | return | `paramFieldToReturn` | `val body get() = raw` |
+| `p.P` | `return.S` | `paramPathToReturnPath` | `fun map(r) = Cmd(r.name)` |
 
 The missing two are not exotic: the third is every ACCESSOR on every Kotlin
 class, and the fourth is every DTO-to-domain MAPPER. Both were being
@@ -581,7 +577,7 @@ mirror cell is empty, ask why.
 The engines disagree, on purpose, about where a value's access path lives:
 the summary engine puts it on the FACT (an entry fact is bare; a `fieldget`
 derives a deeper fact), the reporting engine on the KEY. A third form exists
-only in the reporting engine — a FIELD-BEARING fact (P26 §1.3), which has no
+only in the reporting engine — a FIELD-BEARING fact, which has no
 per-field key at all because no code the engine saw wrote those fields.
 
 Any new read of "register at access path" must handle every form that engine
@@ -592,21 +588,22 @@ rather than calling `factsOf` with a composed key.
 ### A cap that binds is a defect
 
 `joinPath` was the one path builder with no depth cap. It was harmless only
-while nothing recorded its output. The moment P27 published it, a decorator
+while nothing recorded its output. The moment it was published, a decorator
 forwarding to its own interface chased `inner.inner.inner…` forever and
 shipped EMPTY summaries under `origin=recursive-approx`. Capping it at
 `AccessPath.DEFAULT_DEPTH` took `kosi-vulnerable-service/deps` from **2 516
 `composed-path-depth` truncations to zero, with the same nine slices**.
 
-## A fixture that is an application (P27)
+## A fixture that is an application
 
-Before P27 the largest fixture was 432 lines and the deepest was 92, and
+Previously, the largest fixture was 432 lines and the deepest was 92, and
 every one of them exercised ONE capability. `fixtures/layered-app` is the
 first that is an application: one request crosses a Spring MVC entry, a
 Jackson boundary, a bound service seam with an unbound sibling, a
 `by`-delegation decorator, a mapper, a getter, a collection and a Spring
 Data repository interface — eleven frames.
 
-All four P27 defects were found by it and by nothing else. Each appeared
+All four of the defects in this section were found by it and by nothing
+else. Each appeared
 only when two layers stacked, and each single-feature fixture went on
 passing throughout. **A capability proven alone is not proven composed.**

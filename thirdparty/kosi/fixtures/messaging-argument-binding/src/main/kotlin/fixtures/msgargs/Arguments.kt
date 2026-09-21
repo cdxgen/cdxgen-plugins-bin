@@ -1,4 +1,4 @@
-// P27 §2 — spring-messaging's ARGUMENT BINDING rule, one handler per framework-supplied type.
+// — spring-messaging's ARGUMENT BINDING rule, one handler per framework-supplied type.
 //
 // From web/websocket/stomp/handle-annotations.html, verbatim:
 //

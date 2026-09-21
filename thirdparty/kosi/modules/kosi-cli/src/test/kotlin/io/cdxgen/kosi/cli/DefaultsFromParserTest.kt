@@ -73,7 +73,7 @@ class DefaultsFromParserTest {
 
     @Test
     fun resolvedBackendIsAcceptedSinceP1() {
-        // The resolved tier is a real backend since P1; an unknown backend
+        // The resolved tier is a real backend; an unknown backend
         // name is still a usage error.
         assertEquals(ExitCodes.USAGE, Main.run(arrayOf("analyze", "--backend", "nope", "--dir", ".")))
         // And the backend actually runs: accepting RUNTIME here as well would

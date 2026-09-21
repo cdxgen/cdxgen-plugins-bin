@@ -1,4 +1,4 @@
-// P26 §1.4 — Android's cross-component channel.
+// — Android's cross-component channel.
 //
 // Extras OUT of one component and INTO another: the WRITE half is
 // `putExtra` (a pack effect — the taint rides the intent object), the READ

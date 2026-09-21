@@ -1,4 +1,4 @@
-// Ratpack 1.x: the SAME API at the pre-JPMS package. R168's lesson is that a
+// Ratpack 1.x: the SAME API at the pre-JPMS package. The lesson is that a
 // framework named in one spelling is invisible in the other, so the fixture
 // carries both and the liveness sweep can see both.
 package ratpack.http

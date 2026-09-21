@@ -1,7 +1,7 @@
-// P19 §4: the frameworks the pack modelled but no fixture exercised — the
+// the frameworks the pack modelled but no fixture exercised — the
 // liveness sweep's whole-population finding. Each handler here makes its
 // framework's rows LIVE (removing the pack entry changes this fixture's
-// report), which is the only proof a modelled capability exists (R63).
+// report), which is the only proof a modelled capability exists.
 //
 // kosi:want-not diagnostic code=parse-error
 // kosi:want-not diagnostic code=lowering-failed
@@ -12,7 +12,7 @@
 // kosi:want endpoint framework=aws-lambda fn=~LambdaHandler.handleRequest mode=resolved
 // kosi:want endpoint framework=aws-lambda fn=~StreamLambdaHandler.handleRequest mode=resolved
 //
-// P28 §2 (docs: the Context argument is the runtime's, not the event's):
+// (docs: the Context argument is the runtime's, not the event's):
 // under handlerInput=all the event parameter still seeds, and the declared
 // context type does not. Both directions pinned.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~LambdaHandler.handleRequest mode=endpoint
@@ -61,7 +61,7 @@ import org.springframework.stereotype.Controller
 
 class LambdaHandler : RequestHandler<String, String> {
     override fun handleRequest(input: String, context: Context): String {
-        // P28 §2: the EVENT is the payload (`all`), the Context beside it is
+        // The EVENT is the payload (`all`), the Context beside it is
         // the framework's own — the flow pins the first, the want-not below
         // pins the second.
         Runtime.getRuntime().exec(input)
@@ -75,7 +75,7 @@ class StreamLambdaHandler : RequestStreamHandler {
 }
 
 /**
- * P28 §2: only the Context reaches a sink — nothing may flow from it. The
+ * Only the Context reaches a sink — nothing may flow from it. The
  * FIELD read is the pin: under the defect the context seeds FIELD-BEARING
  * and `context.functionName` derives taint, so the want-not fails.
  */

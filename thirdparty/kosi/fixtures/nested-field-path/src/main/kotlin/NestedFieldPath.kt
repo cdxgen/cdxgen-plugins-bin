@@ -1,6 +1,6 @@
 // Access paths DEEPER THAN ONE FIELD, the question no fixture asked until
-// the P5/P6 review (R63). `AccessPath` has carried a list of elements with a
-// depth cap of 5 since P2 and both engines join those elements into the key
+// a later review. `AccessPath` has carried a list of elements with a
+// depth cap of 5 since and both engines join those elements into the key
 // they read and write — but the lowering only ever emitted paths of length
 // one, so `o.inner.a = readLine()` wrote a key hanging off a temporary and
 // the matching read looked at a DIFFERENT temporary. Every nested field flow

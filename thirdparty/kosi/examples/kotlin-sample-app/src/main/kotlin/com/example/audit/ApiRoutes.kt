@@ -1,4 +1,4 @@
-// The sample's inbound route (P17 §3): one endpoint, a real verb and a
+// The sample's inbound route: one endpoint, a real verb and a
 // handler, so the e2e's inbound-route assertions run over a non-empty list
 // and the OpenAPI-naming convergence the cdxgen join exists for is GATED:
 // the kosi row must arrive as `service-users-get`, the name cdxgen's own

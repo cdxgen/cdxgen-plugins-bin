@@ -6,7 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * P20 §2: the fold that stops at the block boundary was the ceiling — a URL
+ * The fold that stops at the block boundary was the ceiling — a URL
  * built in an `if`, a path assigned before a loop, a config value read at
  * the top and used at the bottom all stayed unresolved. The extension walks
  * the DOMINATOR CHAIN with the conservative join: a phi whose arms fold to
@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * defined anywhere OFF the use block's dominator chain never folds
  * cross-block, because its value at the use is path-dependent. Each rule is
  * pinned both ways: with the fold enabled it holds, and with `crossBlock =
- * false` — the pre-P20 block-local scan, the restored-defect leg — the same
+ * false` — the earlier block-local scan, the restored-defect leg — the same
  * fixture stays unresolved.
  */
 class KirValueFolderCrossBlockTest {
@@ -55,7 +55,7 @@ class KirValueFolderCrossBlockTest {
 
     @Test
     fun aDefinitionInADominatorBlockFoldsAcrossTheBoundary() {
-        // b0 defines, falls through to b1, which uses: the pre-P20 scan
+        // b0 defines, falls through to b1, which uses: the earlier scan
         // stopped at the boundary and gave up.
         val fn = function(
             entryBlock("b0", KirLoad("t0", KirConstant.Str("\"v\""))),
@@ -77,7 +77,7 @@ class KirValueFolderCrossBlockTest {
         val folded = f.valueAt(fn, lastBlock(fn), 0, "t0")!!
         assertFalse(
             folded.resolved,
-            "the pre-P20 block-local scan resolves nothing for a cross-block register",
+            "the earlier block-local scan resolves nothing for a cross-block register",
         )
         assertEquals(KirValueFolder.FoldFailure.CROSS_BLOCK, folded.failure)
         assertEquals(1, stats.crossBlock, "the disabled fold still NAMES its refusal — the baseline column counts it")
@@ -164,7 +164,7 @@ class KirValueFolderCrossBlockTest {
             configTable = mapOf("base.url" to "https://example.internal"),
         )
         // The config read lives in the entry block; the use sits a block
-        // later. Pre-P20 the boundary killed it.
+        // later. Pre-the boundary killed it.
         val b0 = fn.body!!.blocks[0]
         assertEquals("base.url", f.valueAt(fn, b0, 2, "t9")!!.value)
         val folded = f.valueAt(fn, lastBlock(fn), 0, "t0")!!

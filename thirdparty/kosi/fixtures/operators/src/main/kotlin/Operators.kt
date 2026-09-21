@@ -1,5 +1,5 @@
 // Negative half first: raw operator symbols are not usable usage names —
-// R18 fixed exactly this, and a regression to emitting `+` instead of the
+// fixed exactly this, and a regression to emitting `+` instead of the
 // named function must fail here (a vacuous positive would not catch it).
 // kosi:want-not usage name=+ kind=operator
 // kosi:want-not usage name=* kind=operator

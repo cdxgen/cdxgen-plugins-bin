@@ -11,9 +11,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P26 §2: the container's BINDING METHODS are dispatch evidence.
+ * the container's BINDING METHODS are dispatch evidence.
  *
- * P25 read the annotated half of the wiring (a stereotype is a construction
+ * read the annotated half of the wiring (a stereotype is a construction
  * site the framework performs). This phase reads the other half — the
  * mapping a module class DECLARES — in the four spellings a real app uses:
  *
@@ -61,11 +61,11 @@ class DiBindingFormsTest {
      * `managedClasses` consumes the map's VALUES — that is how the narrowing
      * above happens, through RTA's instantiated set — and nothing yet reads
      * the KEY. That makes the interface half of every binding an
-     * unwitnessed claim (R63), and an unwitnessed claim is where a wrong
+     * unwitnessed claim, and an unwitnessed claim is where a wrong
      * one hides: a `@Binds` whose return type resolved to the
      * implementation rather than the interface would narrow dispatch
      * correctly and still be reading the wiring backwards. This states what
-     * the reader decided, per spelling, so the day P27 narrows BY the key
+     * the reader decided, per spelling, so the day narrows BY the key
      * the key is already known good.
      */
     @Test
@@ -142,7 +142,7 @@ class DiBindingFormsTest {
             sinks,
             "the container binds ConsoleNotifier, so SmtpNotifier's sink never runs and the " +
                 "fixture's only finding is the original JdbcStore one — a finding on " +
-                "SmtpNotifier.send is the pre-P26 smear",
+                "SmtpNotifier.send is the earlier smear",
         )
     }
 

@@ -4,7 +4,7 @@
 //
 // Positive half: the Java file is discovery evidence (files[], language=java),
 // and the Kotlin side shows the call into it. The resolved tier parses Java
-// PSI through the same symbols (P1), so Greeter and greet exist as
+// PSI through the same symbols, so Greeter and greet exist as
 // declarations there; the syntax tier does not parse Java, which is
 // docs/KOSI.md defect 2, scoped to that backend.
 // kosi:want declaration name=main kind=function

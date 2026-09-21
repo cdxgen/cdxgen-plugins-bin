@@ -118,7 +118,7 @@ data class AnnotationEvidence(
      * types, `roles` -> the role list), flattened out of array arguments.
      * Not serialised: the report's `value` stays the first positional
      * constant; this map is the channel the endpoint detector reads media
-     * types and auth requirements from (P14), where the argument's NAME is
+     * types and auth requirements from, where the argument's NAME is
      * the difference between `@RequestMapping(consumes=[..])` and
      * `@RequestMapping(produces=[..])`.
      */

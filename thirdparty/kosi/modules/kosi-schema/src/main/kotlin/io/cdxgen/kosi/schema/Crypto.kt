@@ -14,7 +14,7 @@ data class CryptoAsset(
     val curve: String?,
     val position: Position?,
     /**
-     * P8: how the transform/name was resolved — `literal`, `folded`,
+     * How the transform/name was resolved — `literal`, `folded`,
      * `config`, `env`, or `unresolved` when only part of the string could
      * be proven. An unresolved asset carries no invented mode or padding.
      */
@@ -23,7 +23,7 @@ data class CryptoAsset(
     val operation: String? = null,
     /**
      * The syntactic FORM the transform was read in — `literal`, `const`,
-     * `template`, `config`, `env` or `unresolved`. The P8 gate counts
+     * `template`, `config`, `env` or `unresolved`. The gate counts
      * mode/padding extraction per form, each with its own denominator;
      * `resolution` folds const and template into `folded`, this does not.
      */

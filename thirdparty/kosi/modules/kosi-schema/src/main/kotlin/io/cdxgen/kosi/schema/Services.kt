@@ -22,13 +22,13 @@ data class ApiEndpoint(
     val reachableSources: List<String>,
     val sliceIds: List<String>,
     /**
-     * P7: how the endpoint was found — `annotation`, `dsl`, `manifest` or
+     * How the endpoint was found — `annotation`, `dsl`, `manifest` or
      * `config`. A reviewer answers "why does kosi think this is an entry
      * point" with this field, so it travels on every endpoint.
      */
     val foundBy: String = "annotation",
     /**
-     * P28 (R178): does the handler EXIST in the analysed code? A manifest
+     * Does the handler EXIST in the analysed code? A manifest
      * endpoint names a class the AndroidManifest declares; when no analysed
      * declaration matches (a library activity, or a run that discovered no
      * sources — dagger published 53 of them beside `no-sources`), the

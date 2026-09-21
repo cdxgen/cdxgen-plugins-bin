@@ -16,7 +16,7 @@ object PeakRss {
      * The CURRENT resident set (not the high-water mark): what a per-slot
      * window samples. The JVM rarely gives memory back, so the maximum of
      * the samples around a slot is an honest floor for that slot's peak —
-     * recorded per row for the P10 per-repo RSS criterion.
+     * recorded per row for the per-repo RSS criterion.
      */
     fun currentBytes(): Long {
         try {

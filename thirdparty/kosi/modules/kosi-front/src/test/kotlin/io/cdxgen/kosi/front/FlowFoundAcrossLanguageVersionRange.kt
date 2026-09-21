@@ -17,9 +17,9 @@ import kotlin.test.assertTrue
  * the test grows itself when the pin bumps — and must report the same flow at
  * each.
  *
- * P4 semantics: the intraprocedural engine is live, so "reports the same
+ * semantics: the intraprocedural engine is live, so "reports the same
  * flow" is enforced as "the fixture's positive flow expectation PASSES at
- * every accepted version, with no violated negative anywhere". Until P4 this
+ * every accepted version, with no violated negative anywhere". Until this
  * asserted XFAIL everywhere (defect 1) and the ratchet forced this rewrite
  * the moment the engine landed. The old-language-version fixture additionally
  * carries the clamp diagnostic (languageVersion = 1.9, below
@@ -37,7 +37,7 @@ class FlowFoundAcrossLanguageVersionRange {
             AnalyzeOptions(
                 backend = Backend.RESOLVED,
                 languageVersion = languageVersion,
-                // P7: the fixture's flow is parameter-shaped (endpoint
+                // The fixture's flow is parameter-shaped (endpoint
                 // sources seed the handler's parameter), so the flag rides
                 // here exactly as it does in the bench's endpoint slot -
                 // and the invariance claim covers the endpoint-rooted flow.

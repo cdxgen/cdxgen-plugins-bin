@@ -15,12 +15,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Negative-first tests for the resolved backend (P1 gate): a deliberately
+ * Negative-first tests for the resolved backend (gate): a deliberately
  * emptied classpath must be LOUD (the diagnostic names what it could not
  * find) and visible in `resolvedCallRatio` — never a plausible-looking small
  * graph (07-REVIEW-PROTOCOL.md failure mode 9). Each test also fails if the
  * diagnostic it pins is removed, which is the "test that fails when the gate
- * is disabled" the P0 review demanded for every new filter.
+ * is disabled" a later review demanded for every new filter.
  */
 class ResolvedBackendTest {
 
@@ -231,7 +231,7 @@ class ResolvedBackendTest {
     @Test
     fun aClasspathFileThatDoesNotExistIsAnError() {
         // Never a silently empty classpath: a flag the report echoes but
-        // never applied is the P0 `--compare` defect.
+        // never applied is the `--compare` defect.
         val root = project(buildFile = null, sources = mapOf("src/main/kotlin/Main.kt" to kotlinSource))
         val failure = assertFailsWith<Analyzer.AnalysisException> {
             Analyzer.analyze(

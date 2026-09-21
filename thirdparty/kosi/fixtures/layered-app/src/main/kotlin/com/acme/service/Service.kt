@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service
 
 /**
  * The service SEAM: an interface, two implementations, one of them
- * container-managed — the dispatch question P25 answered.
+ * container-managed — the dispatch question answered.
  */
 interface OrderService {
     fun place(request: OrderRequest): List<OrderRow>
@@ -17,12 +17,12 @@ interface OrderService {
     val lastTrace: String
 }
 
-/** The mapper layer: fields move between objects (P24's object identity). */
+/** The mapper layer: fields move between objects (the object identity). */
 object OrderMapper {
     fun toCommand(request: OrderRequest): OrderCommand =
         OrderCommand(request.customerName, request.note)
 
-    /** A getter-shaped read — the P27 channel. */
+    /** A getter-shaped read — the channel. */
     fun nameOf(command: OrderCommand): String = command.name
 }
 
@@ -31,7 +31,7 @@ class DefaultOrderService(private val repository: OrderRepository) : OrderServic
 
     private var trace: String = "none"
 
-    /** The GETTER: a field of the receiver becomes the return (P27 §1). */
+    /** The GETTER: a field of the receiver becomes the return. */
     override val lastTrace: String get() = trace
 
     override fun place(request: OrderRequest): List<OrderRow> {
@@ -59,7 +59,7 @@ class LoggingOrderService(private val repository: OrderRepository) : OrderServic
 }
 
 /**
- * The DECORATOR: `by`-delegation around the service seam (P27 §1). Every
+ * The DECORATOR: `by`-delegation around the service seam. Every
  * member of OrderService exists on this class as a generated forwarder, and
  * the request reaching the sink has to cross one.
  */

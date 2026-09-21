@@ -19,7 +19,7 @@ interface AuthenticationHandler : Handler<RoutingContext>
 // Each handler IMPLEMENTS `handle`, because the real ones do: an auth
 // handler runs per request like any other. A stub that leaves the member
 // abstract does not typecheck, and a fixture that does not typecheck cannot
-// claim the framework's shape (P17's own rule, applied to the stub).
+// claim the framework's shape (the own rule, applied to the stub).
 class BasicAuthHandler private constructor() : AuthenticationHandler {
     override fun handle(event: RoutingContext) {}
 

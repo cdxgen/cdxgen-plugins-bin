@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
  * to the analysed directory must resolve against that directory rather than
  * whatever the process's working directory happens to be.
  *
- * P17 review: the golden gate recorded the pin as an ABSOLUTE path, so every
+ * the golden gate recorded the pin as an ABSOLUTE path, so every
  * `classpath_file` fixture digested its own checkout location and the gate
  * could only pass in the directory the goldens were generated in.
  */

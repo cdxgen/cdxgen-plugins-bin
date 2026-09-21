@@ -70,7 +70,7 @@ class BytecodeLowererTest {
     }
 
     /**
-     * R70: the wanted phase is unbounded, so a wanted set LARGER than the
+     * The wanted phase is unbounded, so a wanted set LARGER than the
      * budget once filled `selected` past `maxClasses` and the closure loop's
      * first guard broke before anything was lowered — the tier shipped zero
      * functions behind a cap diagnostic (anki-android: 571 classes, 0

@@ -1,4 +1,4 @@
-// The javax generation of JAX-RS routing: GET and PATCH (P14 added the
+// The javax generation of JAX-RS routing: GET and PATCH (added the
 // PATCH twin — jakarta shipped it, javax did not), the parameter binding
 // annotations, and the media annotations.
 package javax.ws.rs

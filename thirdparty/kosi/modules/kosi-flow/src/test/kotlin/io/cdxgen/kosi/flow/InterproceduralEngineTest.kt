@@ -26,9 +26,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P5/P6 engine rules the fixtures pin end to end, pinned HERE at unit
+ * The engine rules the fixtures pin end to end, pinned HERE at unit
  * level too — including the proofs that the corpus negatives FAIL when the
- * rule they pin is switched off (the P4 discipline: an annotation has teeth
+ * rule they pin is switched off (the discipline: an annotation has teeth
  * only if an engine-level knob can break it).
  */
 class InterproceduralEngineTest {
@@ -349,7 +349,7 @@ class InterproceduralEngineTest {
         assertEquals("test.caller", slice?.sourceFunction)
     }
 
-    // ---- suspend boundaries (P6) ---------------------------------------------------
+    // ---- suspend boundaries ---------------------------------------------------
 
     @Test
     fun aSuspendBoundaryIsTransparentToTaintAndCounted() {
@@ -402,11 +402,11 @@ class InterproceduralEngineTest {
         assertEquals(listOf("p0"), wrap.paramToReturn)
     }
 
-    // ---- P15: the composed-escape bounds ---------------------------------------------
+    // ---- the composed-escape bounds ---------------------------------------------
 
     @Test
     fun composedParamPathsPastTheCapCollapseRatherThanVanish() {
-        // The P15 explosion, reduced: composition joins every callee effect
+        // The explosion, reduced: composition joins every callee effect
         // with every live fact, keyed by the JOINED param path, and a
         // recursive cluster (FragmentManagerImpl) grew one function's escape
         // set to 68M entries that way — every join one segment deeper. The
@@ -455,18 +455,18 @@ class InterproceduralEngineTest {
             "a six-segment composed path is still a key the lowering can form",
         )
 
-        // Six wrappers: seven segments. P27 changed what happens here.
+        // Six wrappers: seven segments. Changed what happens here.
         //
-        // P15 DROPPED this, on the reasoning that a seven-segment literal
+        // DROPPED this, on the reasoning that a seven-segment literal
         // path is a key no lowering can spell, so it could never match. That
         // was true only because the composition built the path with no cap
         // while every real key collapses at AccessPath.DEFAULT_DEPTH — the
         // two notations disagreed, and dropping was how the disagreement was
-        // survived. P27 capped the builder (`capPath`), so the composed path
+        // survived. Capped the builder (`capPath`), so the composed path
         // now collapses to `f5.f4.f3.f2.f1.*` exactly as a real key does,
         // matches exactly as a real key does, and is published.
         //
-        // The bound P15 was defending is still enforced — by the collapse
+        // The bound was defending is still enforced — by the collapse
         // rather than by the drop — and the measurement is on the corpus:
         // `kosi-vulnerable-service/deps` reported the `composed-path-depth`
         // cap firing 2 516 times and now reports it zero times, with the
@@ -478,7 +478,7 @@ class InterproceduralEngineTest {
             w6.paramToSink.isNotEmpty(),
             "past the cap the composed path collapses and still matches; it is not discarded",
         )
-        // The growth P15 killed stays dead: whatever the depth of the chain,
+        // The growth killed stays dead: whatever the depth of the chain,
         // no published path exceeds DEFAULT_DEPTH segments plus the `*`.
         val deepest = pastCap.summaries
             .flatMap { it.accessPaths.values }
@@ -493,7 +493,7 @@ class InterproceduralEngineTest {
     fun anEscapeSetPastItsBudgetDropsTheWholeSummary() {
         // The bound that guarantees the memory ceiling even for path-legal
         // explosions: past maxSummarySinkEffects the summary is dropped
-        // WHOLE (R58's rule — never a partial escape set), counted in
+        // WHOLE (the rule — never a partial escape set), counted in
         // truncations under its own label. Restore the defect (no budget)
         // and the summary publishes with all its effects: this fails.
         fun manySinks() = fn(

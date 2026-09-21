@@ -11,7 +11,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * P10's acceptance test, stated in the plan: "Write the test that sets the
+ * The acceptance test, stated in the plan: "Write the test that sets the
  * budget absurdly low and asserts a valid report with the diagnostic
  * present." Degradation, not panic — a tripped budget must never discard
  * the already-computed evidence report (golem's guardAlgorithm lesson), and

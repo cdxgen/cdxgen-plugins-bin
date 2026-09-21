@@ -1,9 +1,9 @@
 // kosi-front is the ONLY module allowed to import Analysis API, PSI, FIR or
-// IntelliJ platform types (enforced by an import-scanning test). P0 ran the
+// IntelliJ platform types (enforced by an import-scanning test). Ran the
 // syntax tier on kotlin-compiler-embeddable, whose IntelliJ platform is
-// shaded under org.jetbrains.kotlin.com.intellij; P0's recorded deviation 2
+// shaded under org.jetbrains.kotlin.com.intellij; the recorded deviation 2
 // proved the standalone Analysis API session cannot be constructed against a
-// shaded platform at all. P1 amends the dependency allowlist
+// shaded platform at all. Amends the dependency allowlist
 // (02-ARCHITECTURE.md §1) to the working set KSP2 declares for the same
 // Kotlin base: unrelocated `-for-ide` split artifacts, the unrelocated
 // IntelliJ platform, and their third-party libraries. The shaded
@@ -51,12 +51,12 @@ dependencies {
     implementation(project(":kosi-project"))
     implementation(project(":kosi-kir"))
     implementation(project(":kosi-graph"))
-    // P4: the taint engine and the model packs it runs on — both
+    // The taint engine and the model packs it runs on — both
     // compiler-free, so the kosi-front boundary still holds.
     implementation(project(":kosi-flow"))
     implementation(project(":kosi-endpoints"))
     implementation(project(":kosi-crypto"))
-    // P9: the dependency-jar tier (lowering) and the native-interop
+    // The dependency-jar tier (lowering) and the native-interop
     // evidence collector.
     implementation(project(":kosi-bytecode"))
     implementation(project(":kosi-evidence"))
@@ -65,7 +65,7 @@ dependencies {
 
     // Analysis API + unrelocated compiler. Non-transitive on purpose: the
     // -for-ide POMs declare shadowed modules that are published nowhere
-    // (P0 deviation 2); transitive resolution would fail outright.
+    // (deviation 2); transitive resolution would fail outright.
     listOf(
         libs.analysis.api.ide,
         libs.analysis.api.k2.ide,

@@ -51,7 +51,7 @@ internal class DispatchIndex(functions: List<KirFunction>) {
     /**
      * Workspace class fqn -> the flags any of its members recorded. The key
      * is a CLASS FQN, unique in the workspace population (one declaration
-     * per class; overloads are a FUNCTION-name problem — P22 §1's sweep),
+     * per class; overloads are a FUNCTION-name problem — the sweep),
      * so the string key is correct here.
      */
     val classFlags: Map<String, Set<String>> =
@@ -62,7 +62,7 @@ internal class DispatchIndex(functions: List<KirFunction>) {
     val classes: Set<String> get() = supertypeClosure.keys
 
     /**
-     * P25 §2: workspace classes a DEPENDENCY-INJECTION CONTAINER constructs.
+     * Workspace classes a DEPENDENCY-INJECTION CONTAINER constructs.
      *
      * In a Spring, Micronaut, Dagger/Hilt or Jakarta application the
      * implementation behind an interface is never constructed by user code —

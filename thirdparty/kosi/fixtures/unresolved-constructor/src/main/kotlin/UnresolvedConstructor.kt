@@ -1,7 +1,7 @@
 // A call whose callee has NO dispatch target in the workspace must fall to
 // the conservative unknown-call default, and a CONSTRUCTOR is not special.
 //
-// This fixture exists because it stopped being true once. The P9 branch
+// This fixture exists because it stopped being true once. The branch
 // carved constructors out of the summary engine's "no dispatch target" arm,
 // so an unresolved constructor reported "handled" and suppressed the default
 // — which silently dropped the parameter-to-return passthrough below, on

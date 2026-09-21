@@ -1,9 +1,9 @@
-// P23 §1, R140: the config table used to keep the FIRST reader's value in
+// the config table used to keep the FIRST reader's value in
 // sorted-path order when two files disagreed about a key, and publish it as
 // a confident `resolution=config` service. The `const val` tables in this
 // same repo have always REFUSED an ambiguous name rather than guess one —
 // two tables answering "what constant does this name hold", one refusing
-// and one picking by filename (P22's rule).
+// and one picking by filename (the rule).
 //
 // This fixture holds all three cases at once, so the distinction is a
 // corpus fact and not a unit-test one:

@@ -6,7 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the serialization invariants the phase-1+ engines will rely on. Both
+ * Pins the serialization invariants the change-1+ engines will rely on. Both
  * tests were written after fixing real defects: options dropped three fields
  * ("every effective option", 03-SCHEMA.md), and CallGraphEdge wrote
  * candidateCount twice (a duplicate-key crash) whenever it was null.
@@ -18,7 +18,7 @@ class ReportSerializationTest {
         val w = JsonWriter()
         AnalyzeOptions().writeJson(w)
         val json = JsonReader.parse(w.render()).asObject()
-        // A NULL option (the P10 budgets when off) has no effective value to
+        // A NULL option (the budgets when off) has no effective value to
         // echo — its absence IS the echo. Every non-null field must appear.
         val options = AnalyzeOptions()
         val missing = AnalyzeOptions::class.java.declaredFields

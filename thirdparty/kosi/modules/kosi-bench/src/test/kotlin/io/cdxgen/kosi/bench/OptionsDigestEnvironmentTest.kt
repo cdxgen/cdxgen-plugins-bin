@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 /**
- * P18: a gate that compares two environments cannot compare option values
+ * A gate that compares two environments cannot compare option values
  * that name one of them. `classpath` entries and `jdkHome` are absolute by
  * construction when they are set at all; an explicitly absolute
  * `classpathFile` is the same choice. The digest replaces each absolute

@@ -8,7 +8,7 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * P10: the analysis budgets — `--max-analysis-seconds` and `--max-rss-mb` —
+ * The analysis budgets — `--max-analysis-seconds` and `--max-rss-mb` —
  * and the degradation discipline they enforce. The motivating failure is
  * golem's `guardAlgorithm`: a call-graph crash threw away an
  * already-computed evidence report, and a corpus-only gate could not see

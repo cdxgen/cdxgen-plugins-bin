@@ -1,4 +1,4 @@
-// P27 §2 — graphql's ARGUMENT BINDING rule, one handler per framework-supplied type.
+// — graphql's ARGUMENT BINDING rule, one handler per framework-supplied type.
 //
 // From docs.spring.io/spring-graphql/reference/controllers.html, verbatim:
 //

@@ -1,7 +1,7 @@
 // Positive half: every concrete method on the ImplBase subclass is an RPC
 // endpoint with the /<Service>/<Method> path.
 // kosi:want endpoint framework=grpc path=/Greeter/sayHello fn=~GreeterService.sayHello mode=resolved
-// P28 §2: the observer arm — request seeds (want), observer does not
+// the observer arm — request seeds (want), observer does not
 // (want-not), both under handlerInput=all with StreamObserver declared.
 // kosi:want endpoint framework=grpc path=/Greeter/sayHello fn=~ObserverGreeterService.sayHello mode=resolved
 // Exactly ONE flow out of this function (request -> exec): the count is
@@ -30,7 +30,7 @@ class InventoryService : InventoryGrpcKt.InventoryCoroutineImplBase() {
 }
 
 /**
- * P28 §2: the grpc-JAVA shape — the response observer rides beside the
+ * The grpc-JAVA shape — the response observer rides beside the
  * request as the framework's own parameter. Only the REQUEST may seed; the
  * observer reaching a sink is the negative pin.
  */

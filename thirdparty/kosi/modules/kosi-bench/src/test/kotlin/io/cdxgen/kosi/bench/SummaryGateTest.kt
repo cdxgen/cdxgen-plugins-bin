@@ -7,11 +7,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P5/P6 promotion checks — computed summaries with a multi-key origin
+ * The promotion checks — computed summaries with a multi-key origin
  * distribution, the default-origin share, the LIVE dependency-crossing
  * check, and the async tier's own recall — each tested through the path
  * production uses: written to a baseline file, read back with
- * [Baseline.load], then evaluated (the standing R44 rule).
+ * [Baseline.load], then evaluated (the standing rule).
  */
 class SummaryGateTest {
 
@@ -146,7 +146,7 @@ class SummaryGateTest {
         assertTrue(check.detail.contains("no slice's existence depends on propagation"), check.detail)
     }
 
-    // ---- dependency-crossing-flows (LIVE since P5) ------------------------------
+    // ---- dependency-crossing-flows (LIVE) ------------------------------
 
     @Test
     fun dependencyCrossingPassesOnRealCrossingsAndReportsBothKinds() {
@@ -183,7 +183,7 @@ class SummaryGateTest {
         assertTrue(check.detail.contains("baseline measured 3"), check.detail)
     }
 
-    // ---- async-recall (P6) -------------------------------------------------------
+    // ---- async-recall -------------------------------------------------------
 
     @Test
     fun asyncRecallPassesAtTheTargetOnItsOwnDenominator() {

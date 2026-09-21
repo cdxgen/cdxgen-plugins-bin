@@ -7,7 +7,7 @@ import org.jetbrains.kotlin.metadata.jvm.deserialization.JvmProtoBufUtil
 
 /**
  * Reads a class file's `@kotlin.Metadata` annotation and maps JVM method
- * signatures back to their SOURCE names — the demangling half of P9.
+ * signatures back to their SOURCE names — the demangling half of.
  *
  * Why this exists: the workspace KIR names callees by Kotlin callable id
  * (`com.foo.bar` for a top-level function, `com.foo.Bar.name` for a

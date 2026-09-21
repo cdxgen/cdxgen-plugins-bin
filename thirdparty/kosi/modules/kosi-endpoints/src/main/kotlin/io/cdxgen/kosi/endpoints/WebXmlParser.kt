@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * `WEB-INF/web.xml` servlet and filter mappings (P13).
+ * `WEB-INF/web.xml` servlet and filter mappings.
  *
  * A servlet's route does not have to be an annotation. The deployment
  * descriptor has been the JVM's way of mapping URLs to classes since long
@@ -38,7 +38,7 @@ object WebXmlParser {
 
     /**
      * A `<security-constraint>`: the deployment descriptor's own
-     * authentication requirement (P15). The patterns it constrains come
+     * authentication requirement. The patterns it constrains come
      * from its `<web-resource-collection>`s; the roles that may access
      * them from `<auth-constraint><role-name>`. An EMPTY
      * `<auth-constraint/>` is the descriptor's DENY-ALL (no role may

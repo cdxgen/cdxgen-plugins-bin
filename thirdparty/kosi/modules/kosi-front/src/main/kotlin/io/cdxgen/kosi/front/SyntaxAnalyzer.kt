@@ -84,7 +84,7 @@ class SyntaxAnalyzer(
         val declarations = mutableListOf<RawDeclaration>()
         val usages = mutableListOf<RawUsage>()
         val pkg = file.packageFqName.asString()
-        // P29: the walk budget. The measure is iterative (it cannot die of
+        // The walk budget. The measure is iterative (it cannot die of
         // the disease it diagnoses); the recursive visitors below — ours and
         // the platform's own descent, which the default visitBinaryExpression
         // runs for every `+` chain — are safe only under it. A file past the
@@ -474,7 +474,7 @@ class SyntaxAnalyzer(
                         ?.argumentStringTemplateExpression()?.text?.normalized()?.removeSurrounding("\""),
                     // The same named-argument channel the resolved tier
                     // carries: `consumes = [..]` vs `produces = [..]` differ
-                    // only in the argument's name (P14). A positional
+                    // only in the argument's name. A positional
                     // argument lands under `value`, matching the resolved
                     // tier's mapping.
                     namedValues = entry.valueArgumentList?.arguments?.mapNotNull { argument ->
@@ -531,7 +531,7 @@ class SyntaxAnalyzer(
          * elided (`a.b(x).c()` -> `a.b.c`), so usage names are comparable to
          * model-pack patterns regardless of call arguments.
          *
-         * Iterative on the receiver chain (P29: the chain is the axis an
+         * Iterative on the receiver chain (the chain is the axis an
          * unbounded recursive form would overflow on — `a.b.c.d...` nests
          * one level per selector), and the selector side recurses at most
          * one level (a call's callee, or a qualified selector).

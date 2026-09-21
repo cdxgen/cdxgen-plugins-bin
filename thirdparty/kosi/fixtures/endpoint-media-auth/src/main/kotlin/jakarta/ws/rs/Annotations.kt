@@ -1,6 +1,6 @@
 // The jakarta generation of JAX-RS media annotations: the media types sit
 // in the annotation's positional VALUE argument, not in named ones — the
-// second of the two shapes P14 reads.
+// second of the two shapes reads.
 package jakarta.ws.rs
 
 annotation class GET

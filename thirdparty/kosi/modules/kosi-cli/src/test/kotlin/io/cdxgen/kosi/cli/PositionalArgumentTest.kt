@@ -6,7 +6,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * P24 review: `kosi analyze /some/project` analysed the WORKING DIRECTORY.
+ * `kosi analyze /some/project` analysed the WORKING DIRECTORY.
  *
  * The parser collected positional arguments into a list no command ever
  * read, so a path given the way every other CLI accepts one was dropped in

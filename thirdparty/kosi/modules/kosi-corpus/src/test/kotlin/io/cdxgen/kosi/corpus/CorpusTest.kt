@@ -149,7 +149,7 @@ class CorpusManifestTest {
     }
 
     /**
-     * R116's regression pin: `tolerated_resolution_errors` ABSENT must parse
+     * The regression pin: `tolerated_resolution_errors` ABSENT must parse
      * as null (ungated — repo tiers), and an EMPTY list must stay empty (a
      * positive "typechecks clean" declaration). The `list()` helper coerces
      * absent keys to emptyList, which collapsed the two and gated every
@@ -181,7 +181,7 @@ class CorpusManifestTest {
 }
 
 /**
- * P24 §1 (10-DEEP-EVIDENCE.md §2): the deep tier's two annotation forms.
+ * (10-DEEP-EVIDENCE.md §2): the deep tier's two annotation forms.
  * `frames=N` demands named hops; `via=fn:...,fn:...` demands named
  * intermediate frames in order — and a segment that cannot match any
  * function is an ANNOTATION ERROR (evaluated in `Evaluator`), never a

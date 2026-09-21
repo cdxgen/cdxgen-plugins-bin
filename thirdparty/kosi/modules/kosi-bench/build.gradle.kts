@@ -7,12 +7,12 @@ dependencies {
     implementation(project(":kosi-front"))
     implementation(project(":kosi-corpus"))
     implementation(project(":kosi-models"))
-    // P19 §4 liveness gate: the test re-runs Endpoints.analyze per removed
+    // Liveness gate: the test re-runs Endpoints.analyze per removed
     // pack entry, and kosi-endpoints rides kosi-front as an implementation
     // dependency that tests cannot see.
     testImplementation(project(":kosi-endpoints"))
     testImplementation(project(":kosi-kir"))
-    // P20 §0 depth report: EndpointCapture carries the taint engine's
+    // Depth report: EndpointCapture carries the taint engine's
     // DepthStats, whose type rides kosi-front as an implementation
     // dependency that tests cannot see.
     testImplementation(project(":kosi-flow"))

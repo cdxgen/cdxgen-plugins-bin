@@ -1,4 +1,4 @@
-// P25 §1 — the same helper called twice.
+// — the same helper called twice.
 //
 // Summaries are bottom-up and CONTEXT-INSENSITIVE (k=0): one summary per
 // function, joined over every call site. The question this fixture asks, at
@@ -9,7 +9,7 @@
 // A k=0 engine gets this right when the taint state at each call site is
 // what decides, and wrong when the summary itself has to remember which
 // caller it was computed for. The measurement, not the assumption, is what
-// P25 §1 records.
+// records.
 //
 // kosi:want-not diagnostic code=parse-error
 // kosi:want-not flow source=untrusted-input sink=log-injection fn=~entryConstant

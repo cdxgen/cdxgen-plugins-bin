@@ -9,7 +9,7 @@ import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.schema.Position
 
 /**
- * Outbound service and URL detection (P7): client calls the pack names, with
+ * Outbound service and URL detection: client calls the pack names, with
  * the base URL where it can be resolved and the config key (or env key, or
  * raw template) where it cannot. Every value carries its resolution status;
  * a value kosi cannot prove is `unresolved`, never a guess.
@@ -36,14 +36,14 @@ object OutboundDetector {
         module: KirModule,
         folder: KirValueFolder,
         pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin(),
-        /** P26 §1.2: declaration annotations WITH VALUES, for the interface row's path. */
+        /** Declaration annotations WITH VALUES, for the interface row's path. */
         annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>> = emptyMap(),
     ): List<Outbound> {
         val out = mutableListOf<Outbound>()
         val functions = module.functions.sortedWith(
             compareBy({ it.canonicalName }, { it.jvmDescriptor ?: "" }, { it.file }, { it.line }),
         )
-        // P26 §1.2: declarations by canonical name, bodyless included — the
+        // Declarations by canonical name, bodyless included — the
         // annotated interface method has no body, and the CALL to it is the
         // outbound event the library performs by proxy.
         val declarationsByName = module.functions.groupBy { it.canonicalName }
@@ -162,7 +162,7 @@ object OutboundDetector {
             // The code passed the null LITERAL: that is the honest raw
             // rendering — the register's machine name is not evidence of
             // anything. The row keeps endpoint = null (absence), never an
-            // endpoint called "null" (P19 §1).
+            // endpoint called "null".
             folded?.status == KirValueFolder.ValueStatus.NULL -> "null"
             folded?.status == KirValueFolder.ValueStatus.UNRESOLVED && detail != null -> "\${" + detail + "}"
             else -> folded?.value ?: register

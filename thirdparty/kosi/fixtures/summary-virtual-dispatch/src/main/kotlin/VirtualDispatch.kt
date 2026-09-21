@@ -7,7 +7,7 @@
 // that mode difference is pinned at engine level by TaintEngineTest (the
 // corpus slots run the default mode). A dispatch site that only sees the
 // receiver as a FUNCTION PARAMETER cannot narrow context-insensitively and
-// joins both; that limit is shared with the P3 graph and stays named.
+// joins both; that limit is shared with the graph and stays named.
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~execLog known-fail=syntax:1
 // kosi:want-not diagnostic code=parse-error
 //

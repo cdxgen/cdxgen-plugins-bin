@@ -4,13 +4,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * AndroidManifest.xml component extraction (P7). A tolerant scanner for the
+ * AndroidManifest.xml component extraction. A tolerant scanner for the
  * manifest's machine-generated shape — `activity`/`service`/`receiver`/
  * `provider` elements with their attributes and `intent-filter` children —
  * not a general XML parser. What it publishes per component:
  *
- *  - the class name, resolved against the manifest `package` attribute when
- *    the manifest uses the relative `.ui.MainActivity` form;
+ *  - the class name, resolved against the manifest `package` attribute — or,
+ *    since AGP 7 removed it, the module's `namespace` — when the manifest
+ *    uses the relative `.ui.MainActivity` form;
  *  - `exported`: the manifest's own value, or — when absent, the pre-API-31
  *    default — true exactly when an intent filter exists;
  *  - permissions and deep links (VIEW actions with a data scheme/host).
@@ -56,21 +57,59 @@ object AndroidManifestParser {
             // different reports. The report contract's "two machines compare
             // equal byte for byte" was broken for every project with a
             // manifest, and nothing saw it because the `frameworks` tier sat
-            // outside the golden pin (P23 §0's R142); extending the pin
-            // surfaced this on its first run (R143).
+            // outside the golden pin (); extending the pin
+            // surfaced this on its first run.
             val relative = runCatching { root.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize()) }
                 .getOrNull()
                 ?.toString()
                 ?.replace('\\', '/')
                 ?: path.fileName.toString()
-            parseText(text, relative)
+            parseText(text, relative, namespaceFor(root, path))
         }
     }
 
-    internal fun parseText(text: String, file: String): Manifest? {
+    /**
+     * AGP 7 REMOVED `package` from the manifest and moved it to the
+     * module's `namespace`. Every relative `android:name=".Foo"` in such a
+     * manifest resolved against an EMPTY package here, producing the
+     * nonsense class `.Foo` — which matches no declaration, so every
+     * component of every modern Android module published an endpoint with
+     * no handler and `substantiated=false`. Measured on dagger: 25 of its
+     * 27 manifests carry no `package` attribute.
+     *
+     * The namespace lives in the nearest enclosing `build.gradle(.kts)`
+     * between the manifest and the analysed root, in either the Groovy
+     * (`namespace "x"`) or the Kotlin (`namespace = "x"`) spelling.
+     */
+    private fun namespaceFor(root: Path, manifest: Path): String {
+        val rootAbs = root.toAbsolutePath().normalize()
+        var dir = manifest.toAbsolutePath().normalize().parent
+        while (dir != null && dir.startsWith(rootAbs)) {
+            for (name in listOf("build.gradle.kts", "build.gradle")) {
+                val build = dir.resolve(name)
+                if (!Files.isRegularFile(build)) continue
+                val text = try {
+                    Files.readString(build)
+                } catch (_: Exception) {
+                    continue
+                }
+                NAMESPACE.find(text)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
+            }
+            if (dir == rootAbs) break
+            dir = dir.parent
+        }
+        return ""
+    }
+
+    private val NAMESPACE = Regex("""(?<![\w.])namespace\s*(?:=\s*)?["']([A-Za-z_][\w.]*)["']""")
+
+    internal fun parseText(text: String, file: String, fallbackPackage: String = ""): Manifest? {
         // Comments first: a commented-out component is not a component.
         val withoutComments = text.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
-        val packageAttr = Regex("""<manifest[^>]*\bpackage\s*=\s*"([^"]+)"""").find(withoutComments)?.groupValues?.get(1).orEmpty()
+        val packageAttr = Regex("""<manifest[^>]*\bpackage\s*=\s*"([^"]+)"""").find(withoutComments)
+            ?.groupValues?.get(1)
+            ?.takeIf { it.isNotBlank() }
+            ?: fallbackPackage
         val components = mutableListOf<ManifestComponent>()
         // Component elements with optional intent-filter children; scanning
         // element opens in document order and tracking the enclosing element
@@ -127,7 +166,10 @@ object AndroidManifestParser {
 
     private fun resolveClass(name: String?, pkg: String): String = when {
         name == null -> ""
-        name.startsWith(".") -> pkg + name
+        // A relative name with NO package to resolve against is the bare
+        // class, never the leading-dot string `.Foo` — which is a name no
+        // declaration can ever carry.
+        name.startsWith(".") -> if (pkg.isEmpty()) name.removePrefix(".") else pkg + name
         name.contains('.') -> name
         pkg.isNotEmpty() -> "$pkg.$name"
         else -> name

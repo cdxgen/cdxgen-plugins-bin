@@ -1,5 +1,5 @@
 // Negative half first. Each negative names what a specific over-broad
-// implementation would get wrong, per the P0 review standard:
+// implementation would get wrong, per a later review standard:
 // - a resolver that invents declarations for coordinates it could not find
 //   would make the missing library's class look like a fact about the code;
 // - an implementation that reports unresolved calls as parse errors would

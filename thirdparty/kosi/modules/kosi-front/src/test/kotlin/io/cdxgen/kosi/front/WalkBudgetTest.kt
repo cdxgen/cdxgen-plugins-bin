@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P29's gate: what used to kill the run now degrades with a name.
+ * the gate: what used to kill the run now degrades with a name.
  *
  * Three defects are pinned here, each with its restore-proof (rule 8):
  *
@@ -23,9 +23,9 @@ import kotlin.test.assertTrue
  *    the silent-truncation shape the budget exists to prevent).
  *  - **The big analysis stack.** A file just UNDER the budget — 1,900
  *    nesting levels, measured to overflow a default thread stack at
- *    ~1,250 (P28/P29 measurement) — analyses fully. Remove
+ *    ~1,250 (measurement) — analyses fully. Remove
  *    `runOnAnalysisStack` and this test dies with the StackOverflowError
- *    that was P28's exit-3.
+ *    that was the exit-3.
  *  - **The per-file boundary.** The pathological file and a healthy
  *    sibling in one directory: the sibling's declarations are present in
  *    the same report.
@@ -100,7 +100,7 @@ class WalkBudgetTest {
         // 1,900 terms: ~1,903 PSI levels, under the cap, and measured to
         // overflow any default thread stack (1,250 suffices). This is the
         // restore-proof for runOnAnalysisStack: without it the test dies
-        // with P28's exit-3 StackOverflowError.
+        // with the exit-3 StackOverflowError.
         val root = project(mapOf("src/main/kotlin/deep.kt" to deepText(1_900)))
         val report = Analyzer.analyze(root, AnalyzeOptions(backend = Backend.SYNTAX), commit = "test")
         assertTrue(

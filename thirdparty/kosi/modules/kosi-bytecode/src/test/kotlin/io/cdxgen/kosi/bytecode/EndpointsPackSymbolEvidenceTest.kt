@@ -17,11 +17,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * P19 §3: the symbol-kind gate travels. P18's EndpointsPackSymbolKindTest
+ * the symbol-kind gate travels. the EndpointsPackSymbolKindTest
  * checked the pack against whatever framework evidence the LOCAL machine
  * held; on a machine without the warm cache every check skipped and the
  * verdict table still printed, so the gate's real coverage was "whatever
- * the corpus machine holds, and nobody else can run it" (R119's class,
+ * the corpus machine holds, and nobody else can run it" (the class,
  * one level up).
  *
  * The evidence is now COMMITTED — a pinned extract of exactly what the pack
@@ -32,8 +32,8 @@ import kotlin.test.assertTrue
  *  - CHECK A runs EVERYWHERE: every pack symbol in a channel the extract
  *    covers must have a committed fact of the kind its channel assumes
  *    (constructible for constructor channels, static for factories,
- *    declared for DSL members/functions). R109 (a sealed class in a
- *    constructor channel) and R113/R114 (FQNs that do not exist) fail here
+ *    declared for DSL members/functions). (a sealed class in a
+ *    constructor channel) and (FQNs that do not exist) fail here
  *    on any machine.
  *  - CHECK B runs where the pinned evidence is HELD: the extract is
  *    re-derived and must equal the committed bytes, so a pack or artifact
@@ -303,7 +303,7 @@ class EndpointsPackSymbolEvidenceTest {
                         // A package-level Kotlin function: the JVM owner is
                         // some `*Kt` facade of the same package; file names
                         // are not part of the API so the check is
-                        // owner-agnostic (P18's rule, kept).
+                        // owner-agnostic (the rule, kept).
                         val pkg = pattern.substringBeforeLast('.')
                         val fn = pattern.substringAfterLast('.')
                         val allFacades = jars.flatMap { jar -> facades(jar, pkg) }
@@ -343,7 +343,7 @@ class EndpointsPackSymbolEvidenceTest {
         for (fqn in fw("http4k").securityConstructors) {
             val decl = http4kDeclarationModifiers(clone, fqn)
             when {
-                decl == null -> failures += "http4k: $fqn — declares no ${fqn.substringAfterLast('.')} anywhere in the clone (R109's shape)"
+                decl == null -> failures += "http4k: $fqn — declares no ${fqn.substringAfterLast('.')} anywhere in the clone (the shape)"
                 !isConstructible(decl.first, decl.second) -> failures += "http4k: $fqn is ${decl.second} ${decl.first.trim()} — a constructor channel needs a constructible class"
                 else -> types += listOf(fqn, decl.second, true)
             }
@@ -418,11 +418,11 @@ class EndpointsPackSymbolEvidenceTest {
     private fun derive(): Map<String, Derived> {
         val jarCoordinates = mapOf(
             "vertx" to listOf(Coordinate("io.vertx", "vertx-web", "5.1.7")),
-            // P30: ratpack 1.9.0 is the 1.x generation, which is what the
+            // Ratpack 1.9.0 is the 1.x generation, which is what the
             // `ratpack.handling` / `ratpack.http` rows model. The 2.x rows
             // (`ratpack.core.*`, the JPMS rename in 2.0.0-rc-1) are NOT in
             // this artifact and are recorded as unheld rather than inferred
-            // from the 1.x ones — that inference is exactly R168.
+            // from the 1.x ones — that inference is exactly.
             "ratpack" to listOf(Coordinate("io.ratpack", "ratpack-core", "1.9.0")),
             "ktor" to listOf(
                 Coordinate("io.ktor", "ktor-server-core-jvm", "3.5.2"),
@@ -454,7 +454,7 @@ class EndpointsPackSymbolEvidenceTest {
         val covers = mapOf(
             "vertx" to listOf("dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions"),
             "ktor" to listOf("dslFunctions", "authenticationDsl", "contextReaders"),
-            // P30: ratpack's two channels ARE checkable against the held 1.x
+            // Ratpack's two channels ARE checkable against the held 1.x
             // jar — the Handler supertype and the six Request readers. Listing
             // them is the difference between a committed record that verifies
             // the pack and an empty one that verifies nothing.
@@ -485,7 +485,7 @@ class EndpointsPackSymbolEvidenceTest {
             "sparkjava" to "com.sparkjava absent from the warm cache — channels unchecked",
         )
         for ((id, reason) in nonSymbol) {
-            if (pack.frameworks.none { it.id == id }) continue // deleted from the pack (P19 liveness sweep)
+            if (pack.frameworks.none { it.id == id }) continue // deleted from the pack (the liveness sweep)
             val channels = (typeChannels + memberChannels + functionChannels).filter { patterns(id, it).isNotEmpty() }
             out[id] = Derived(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(),
                 channels.flatMap { ch -> patterns(id, ch).map { "$it: $reason" } }, emptyList())
@@ -546,7 +546,7 @@ class EndpointsPackSymbolEvidenceTest {
                         channel in typeChannels -> {
                             val fact = types.firstOrNull { it.fqn == pattern }
                             if (fact == null && gaps.none { it.startsWith("$pattern:") }) {
-                                uncovered += "$key — no committed type fact (R109/R113/R114's shape: a modelled symbol with no evidence)"
+                                uncovered += "$key — no committed type fact (the shape: a modelled symbol with no evidence)"
                             }
                             if (channel == "securityConstructors" && fact != null && !fact.constructible) {
                                 uncovered += "$key — committed fact says the class is not constructible"
@@ -557,7 +557,7 @@ class EndpointsPackSymbolEvidenceTest {
                             val member = pattern.substringAfterLast('.')
                             val fact = members.firstOrNull { it.owner == owner && it.member == member }
                             if (fact == null && gaps.none { it.startsWith("$pattern:") }) {
-                                uncovered += "$key — no committed member fact (R112's shape: a member the framework does not declare)"
+                                uncovered += "$key — no committed member fact (the shape: a member the framework does not declare)"
                             }
                             if (channel == "authHandlerFactories" && fact != null && !fact.static) {
                                 uncovered += "$key — committed fact says the factory is not static"
@@ -654,7 +654,7 @@ class EndpointsPackSymbolEvidenceTest {
         assertEquals(pack.frameworks.size, verdicts.size, "every framework needs a counted verdict")
     }
 
-    // ---- R109's teeth, kept permanent ----------------------------------------
+    // ---- the teeth, kept permanent ----------------------------------------
 
     @Test
     fun theKindCheckRejectsTheSealedParentR109Modelled() {
@@ -666,7 +666,7 @@ class EndpointsPackSymbolEvidenceTest {
         assertTrue(fw.securityConstructors.isNotEmpty())
         assertFalse(
             fw.securityConstructors.any { it.endsWith("OAuthSecurity") && !it.contains("AuthCode") && !it.contains("Implicit") && !it.contains("Credentials") && !it.contains("DeviceCode") },
-            "the sealed OAuthSecurity parent is modelled in a constructor channel (R109 regress)",
+            "the sealed OAuthSecurity parent is modelled in a constructor channel (regress)",
         )
     }
 

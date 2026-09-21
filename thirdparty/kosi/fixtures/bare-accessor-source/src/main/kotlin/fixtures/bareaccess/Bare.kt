@@ -1,14 +1,14 @@
-// P14 §4: the BARE-NAME read of an accessor-backed property — R80's
-// sibling. R80 fixed `a.b` where `b` is an accessor property; the same
+// the BARE-NAME read of an accessor-backed property — 's
+// sibling. fixed `a.b` where `b` is an accessor property; the same
 // property read by BARE NAME (an implicit-receiver member, which is what
 // `parameters` is inside an extension on ApplicationCall) still lowered
 // as `fieldget vthis vthis.parameters`, hiding the callee from every
 // pack. Nothing modelled such a property as a source yet, so this was
 // latent — the fix is correctness, not a findings change.
 //
-// The fix follows R80's rule exactly: resolve the reference, and lower as
+// The fix follows the rule exactly: resolve the reference, and lower as
 // a call ONLY when the property demonstrably has NO backing field. A
-// property WITH a backing field keeps its access path, so P4/P5 field
+// property WITH a backing field keeps its access path, so field
 // sensitivity is untouched — the backing-field half below pins that.
 //
 // kosi:want-not diagnostic code=parse-error
@@ -34,7 +34,7 @@ import java.net.URI
 /**
  * `parameters` here is read by BARE NAME: the implicit receiver of the
  * extension function, an accessor property with no backing field. Before
- * P14 this lowered as a field read whose path was the RECEIVER's own
+ * this lowered as a field read whose path was the RECEIVER's own
  * register, and no pack could see the source at all.
  */
 fun ApplicationCall.queryEcho(): URI = URI.create(parameters["target"].orEmpty())

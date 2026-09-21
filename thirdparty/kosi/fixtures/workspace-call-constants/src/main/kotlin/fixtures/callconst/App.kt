@@ -1,9 +1,9 @@
-// P21 §1: the producer bucket — values defined by a CALL — was the largest
+// the producer bucket — values defined by a CALL — was the largest
 // failure bucket in every depth report this project had taken (producer 9,
 // constant across every measurement). The register is defined by a call the
 // folder could not see through. This fixture is the population that makes
-// the widening observable END TO END, through Analyzer.analyze (the phase
-// rule, written against R131: a capability proven only on hand-built IR is
+// the widening observable END TO END, through Analyzer.analyze (the change
+// rule, written against a capability proven only on hand-built IR is
 // not a capability):
 //
 //  - `fun apiBase() = "https://api.example.com"` — the expression body is a
@@ -17,7 +17,7 @@
 // a consumer reading "literal" would be told a falsehood about the source.
 //
 // The defect restored (the workspace arm removed) publishes the REGISTER's
-// machine name where the host belongs — exactly what R131 looked like from
+// machine name where the host belongs — exactly what looked like from
 // the outside (`name=vhost`); the want-not on `resolution=unresolved` is
 // that shape, pinned.
 //

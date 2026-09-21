@@ -1,8 +1,8 @@
-// P21 §2: the ten sanitizers that had never fired. R129 closed two of
+// the ten sanitizers that had never fired. closed two of
 // twelve by making their mechanism load-bearing; the depth report still
 // read `fired: false` for the other ten, and a sanitizer that cannot be
 // made to fire is a silent false-negative guarantee. This fixture is the
-// R129 shape applied to all ten at once: the sanitized RESULT reaches the
+// shape applied to all ten at once: the sanitized RESULT reaches the
 // sink DIRECTLY, so with the pack entry present the flow is absent and
 // with the entry REMOVED the unknown-call propagation carries the source's
 // taint through the call and the want-not VIOLATES — which is the only
@@ -10,7 +10,7 @@
 // re-proves it per entry, mechanically, on every test run).
 //
 // Every non-JDK class below is a real API, spelled with its real
-// signature (the R102 rule): commons-lang3 3.x StringEscapeUtils,
+// signature (the rule): commons-lang3 3.x StringEscapeUtils,
 // commons-text StringEscapeUtils, the OWASP Java Encoder's Encode,
 // spring-web's HtmlUtils. The stubs carry the shapes only.
 //

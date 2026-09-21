@@ -1,4 +1,4 @@
-// The taint engine (P4): consumes KIR + schema + model-pack types only.
+// The taint engine: consumes KIR + schema + model-pack types only.
 // Compiler types stop at kosi-front; nothing here imports them.
 dependencies {
     implementation(project(":kosi-kir"))

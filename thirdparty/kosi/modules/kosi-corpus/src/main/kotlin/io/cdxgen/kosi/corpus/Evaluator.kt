@@ -39,7 +39,7 @@ object Evaluator {
         val callGraph: CallGraph?,
         val dataFlow: DataFlowEvidence?,
         /**
-         * The P4 flow metrics' raw counts, computed per evaluation so the
+         * The flow metrics' raw counts, computed per evaluation so the
          * bench carries fractions with BOTH counts (06-CORPUS.md §4).
          * [flowPositives]/[flowPositivesMatched] are the non-known-fail flow
          * EXPECTATIONS and how many were satisfied — structural recall over
@@ -60,7 +60,7 @@ object Evaluator {
         /**
          * Structural recall over non-known-fail positive expectations. Flow
          * expectations are excluded until a flow engine produces slices: they
-         * exist only as known-fails at phase 0, so this stays honest rather
+         * exist only as known-fails initially, so this stays honest rather
          * than reporting a fake 0.0.
          */
         fun recall(backend: String): Double {
@@ -111,11 +111,11 @@ object Evaluator {
     fun sliceMatches(slice: FlowSlice, ann: Annotation): Boolean =
         matches(ann.source, slice.sourceCategory) && matches(ann.sink, slice.sinkCategory) &&
             (ann.fn == null || matches(ann.fn, slice.sourceFunction) || matches(ann.fn, slice.sinkFunction)) &&
-            // P20 §1: parameter identity. `#0` and `query` are exactly the
+            // Parameter identity. `#0` and `query` are exactly the
             // strings the slice publishes; a want pins WHICH input.
             (ann.sourceParam == null || slice.sourceParameter == ann.sourceParam) &&
             (ann.sourceTransport == null || slice.sourceTransport == ann.sourceTransport) &&
-            // P24 §1: the deep-tier forms. `frames` demands the finding carry
+            // The deep-tier forms. `frames` demands the finding carry
             // at least N named hops — a source/sink pair without the walk is
             // not the same capability. `via` demands the named functions
             // appear, in order, among the frames' functions.
@@ -133,7 +133,7 @@ object Evaluator {
     }
 
     /**
-     * P24 §1: the annotation-error rule. A `via=` segment that names a
+     * The annotation-error rule. A `via=` segment that names a
      * function the report never saw cannot match any frame — on a WANT that
      * is a fail (fine), but on a WANT-NOT it would pass vacuously, which is
      * exactly what the corpus exists to prevent. The function universe is
@@ -162,7 +162,7 @@ object Evaluator {
     }
 
     private fun evaluateOne(report: KosiReport, ann: Annotation, backend: String): Outcome {
-        // P24 §1: a via= chain over functions the report never saw is an
+        // A via= chain over functions the report never saw is an
         // annotation error, never a satisfied expectation — on the negative
         // half it would otherwise pass vacuously.
         if (ann.kind == Annotation.Kind.FLOW && !viaNamesResolvable(report, ann)) {
@@ -295,7 +295,7 @@ object Evaluator {
      * (`fn=`, matched against the handler symbol) with `~` substring
      * semantics; `method=` narrows to the endpoint's httpMethod list, and
      * `pathparam=`/`queryparam=`/`consumes=`/`produces=`/`authentication=`
-     * each demand one carried value (P14). A NEGATIVE endpoint expectation —
+     * each demand one carried value. A NEGATIVE endpoint expectation —
      * the lookalike half every framework fixture carries — passes only when
      * NO endpoint matches.
      */

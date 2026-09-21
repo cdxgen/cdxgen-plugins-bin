@@ -1,4 +1,4 @@
-// P22 §2: the PARTIAL half of the pathKind vocabulary. The depth report's
+// the PARTIAL half of the pathKind vocabulary. The depth report's
 // reachability table had measured `partial` at ZERO on every bundled
 // fixture and every pinned repo — an elided slice, the class a consumer
 // must be told about (endpoints guaranteed, the middle cut), existed

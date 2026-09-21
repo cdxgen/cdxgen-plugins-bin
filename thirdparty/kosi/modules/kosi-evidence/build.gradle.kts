@@ -1,5 +1,5 @@
 // kosi-evidence: non-flow security evidence collectors (02-ARCHITECTURE.md
-// §8). P9 adds the native-interop seam (JNI / external fun / cinterop).
+// §8). Adds the native-interop seam (JNI / external fun / cinterop).
 dependencies {
     implementation(project(":kosi-schema"))
     implementation(project(":kosi-kir"))

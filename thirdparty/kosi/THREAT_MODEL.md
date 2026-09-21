@@ -22,7 +22,7 @@ Same discipline as rusi's, applied to a Kotlin front end.
 
 1. **Read-only tiers are read-only.** `--backend syntax` (and later
    `resolved`/`+deps`) touch the filesystem only to read. The opt-in
-   `--backend compile` tier (phase 9) executes the target build and will
+   `--backend compile` tier would execute the target build and will
    carry rusi's compiler-backend warning; it is never the default.
 2. **No silent degradation.** A missing classpath, a failed lowering, a hit
    cap, a timeout, an unsupported Kotlin version — each produces a
@@ -40,11 +40,11 @@ Same discipline as rusi's, applied to a Kotlin front end.
    real signal, and report artifacts can be integrity-checked.
 6. **Dependencies are allowlisted.** kotlin-stdlib, the unrelocated
    `-for-ide` Analysis API artifacts plus the IntelliJ platform modules the
-   standalone session needs (the recorded P1 amendment), kotlin-test for
+   standalone session needs, kotlin-test for
    tests. The native image is built with a pinned GraalVM CE 25 toolchain —
-   every CI install is sha-pinned since R66 — and SHA-256 sidecars; no UPX
+   every CI install is sha-pinned — and SHA-256 sidecars; no UPX
    (packed binaries segfault on macOS — docs/BUILD.md §4). The image
-   initialises `java.awt.Toolkit` at build time (R66): a JDK native library's
+   initialises `java.awt.Toolkit` at build time: a JDK native library's
    `JNI_OnLoad` must never run at image startup, where AWT classes are
    absent.
 7. **Committed third-party binaries are pinned and provenance-named.** The
@@ -61,7 +61,7 @@ Same discipline as rusi's, applied to a Kotlin front end.
 ## What kosi will never do
 
 - Execute or evaluate `build.gradle(.kts)`/`pom.xml` logic.
-- Run at image startup any code path that needs AWT (R66: the
+- Run at image startup any code path that needs AWT (the
   `Toolkit` static initializer loads `libawt`, whose linux `JNI_OnLoad`
   requires classes an image does not ship — see docs/BUILD.md).
 - Send any data anywhere (no telemetry, no network in default tiers).
@@ -80,4 +80,5 @@ Same discipline as rusi's, applied to a Kotlin front end.
   allowlisted artifacts alone (unrelocated IntelliJ platform classes are
   missing; KSP2 fat-jars thousands of them). `kosi version` reports this as
   `analysis-api-standalone: unavailable: ...` — a `resolve-capability`
-  diagnostic, not a pretend capability. Closing it is a recorded P2 decision.
+  diagnostic, not a pretend capability. Closing it is a deliberate, recorded
+  decision.

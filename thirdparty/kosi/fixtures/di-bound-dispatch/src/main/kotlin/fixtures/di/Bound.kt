@@ -1,4 +1,4 @@
-// P25 §2 — the target that is only one: DI is dispatch evidence.
+// — the target that is only one: DI is dispatch evidence.
 //
 // The service boundary of every Spring, Micronaut, Hilt or CDI application
 // has this shape: an interface with several implementations, none of them
@@ -20,11 +20,11 @@
 // kosi:want-not flow source=untrusted-input sink=sql-query fn=~LoggingStore
 // kosi:want-not flow source=untrusted-input sink=sql-query fn=~InMemoryStore
 //
-// P26 §2's negative half, the one the fixture still lacked: a container that
+// the negative half, the one the fixture still lacked: a container that
 // binds the NON-sinking implementation. `SmtpNotifier` is the implementation
 // that would sink; the container binds `ConsoleNotifier` (a @Bean method
 // returning its parameter — no construction site anywhere), so the correct
-// output is NO finding at all. Before P26 the parameter binding was
+// output is NO finding at all. Previously, the parameter binding was
 // invisible, nothing was instantiated, and RTA fell back to the whole
 // candidate set — the smear put the finding on the sinking sibling this
 // test's want-not forbids.
@@ -95,7 +95,7 @@ class AuditEntry(private val service: AuditService, private val notifier: Notifi
     }
 }
 
-// P26 §2's negative half: the sinking implementation is never bound. The
+// The negative half: the sinking implementation is never bound. The
 // notifier arrives through constructor injection, exactly as the store does
 // — nothing in this program constructs either implementation, so which one
 // runs is decided ONLY by the container's binding.
@@ -115,7 +115,7 @@ class ConsoleNotifier : Notifier {
 }
 
 // The container binds the CLEAN implementation, by parameter — the binding
-// shape P26 taught DiStereotypes to read.
+// shape taught DiStereotypes to read.
 @org.springframework.context.annotation.Configuration
 class NotifyConfig {
     @org.springframework.context.annotation.Bean

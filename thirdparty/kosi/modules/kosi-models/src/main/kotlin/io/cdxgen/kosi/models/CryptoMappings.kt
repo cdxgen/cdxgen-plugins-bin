@@ -3,10 +3,10 @@ package io.cdxgen.kosi.models
 import io.cdxgen.kosi.schema.JsonReader
 
 /**
- * The crypto mapping table (P8) and its loader. One row per transform,
+ * The crypto mapping table and its loader. One row per transform,
  * algorithm or curve; the collector matches against these and reports only
  * what a row carries. The population rule on the file header is enforced by
- * the P8 gate: a mapping without an exercising fixture fails the build.
+ * the gate: a mapping without an exercising fixture fails the build.
  */
 data class TransformMapping(
     val transform: String,
@@ -40,7 +40,7 @@ data class CryptoMappings(
     val paddingVocabulary: List<String>,
     val pbkdf2MinIterations: Int,
 ) {
-    /** The shipped mapping population the P8 coverage gate divides by. */
+    /** The shipped mapping population the coverage gate divides by. */
     val mappingCount: Int get() = transforms.size + algorithms.size + curves.size
 }
 

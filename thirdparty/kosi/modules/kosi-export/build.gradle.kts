@@ -1,4 +1,4 @@
-// kosi-export renders kosi artifacts to interchange formats. P3 ships the
+// kosi-export renders kosi artifacts to interchange formats. Ships the
 // call-graph exporters (GraphML, GEXF) — hand-rolled, deterministic, same
 // discipline as the JSON writer: sorted, minified, byte-identical across
 // runs. Compiler types stop at kosi-front; this module sees schema types.

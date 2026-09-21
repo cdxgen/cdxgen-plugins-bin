@@ -1,4 +1,4 @@
-// Placeholder module for a later phase (see README.md in this directory).
+// Placeholder module (see README.md in this directory).
 // It stays wired into the build so the layout cannot drift.
 dependencies {
     implementation(project(":kosi-schema"))

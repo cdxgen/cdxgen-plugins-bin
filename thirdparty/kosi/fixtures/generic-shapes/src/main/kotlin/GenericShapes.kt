@@ -1,4 +1,4 @@
-// R69 construct-coverage fixture: GENERIC SHAPES the fixture tree had never
+// construct-coverage fixture: GENERIC SHAPES the fixture tree had never
 // contained. Swept from the grammar, not from memory: declaration-site
 // variance (`out`/`in`), star projections, `where` clauses on one type
 // parameter, annotations ON a type argument, a `fun interface` (the

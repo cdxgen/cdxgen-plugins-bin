@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P9 + P10 gates with TEETH: each check is driven to FAIL on constructed
+ * Gates with TEETH: each check is driven to FAIL on constructed
  * rows before it is driven to PASS, because a gate only ever seen passing
  * is a gate that has not been tested (the plan's standing rule 5).
  */
@@ -58,11 +58,11 @@ class P9P10GateTest {
             peakRssBytes = 0,
         )
 
-    // ---- P9: cross-dependency-bytecode --------------------------------------
+    // ---- cross-dependency-bytecode --------------------------------------
 
     @Test
     fun theCrossDependencyGatePassesWhenTheBarIsMet() {
-        // The bar is 1 since P11's per-repo re-measurement (docs/KOSI.md
+        // The bar is 1 since the per-repo re-measurement (docs/KOSI.md
         // carries the breakdown that lowered it from 5); any qualifying
         // repo must PASS and be named.
         val repos = (1..5).map { row("repo$it") }
@@ -73,7 +73,7 @@ class P9P10GateTest {
         // A PASS must still publish the per-repo measurement. The bar is 1
         // and the corpus' one qualifier is the BUNDLED vulnerable service,
         // so a PASS line that printed only its qualifiers would hide the
-        // pinned repos' zeros — the finding P11 was run to produce.
+        // pinned repos' zeros — the finding was run to produce.
         assertTrue("measured: repo1=" in check.detail, check.detail)
     }
 
@@ -93,7 +93,7 @@ class P9P10GateTest {
         assertEquals(State.NOT_EVALUATED, check.state)
     }
 
-    // ---- P9: deps-delta recording --------------------------------------------
+    // ---- deps-delta recording --------------------------------------------
 
     @Test
     fun theDepsDeltaIsRecordedPerRepoFromTheSameSession() {
@@ -107,7 +107,7 @@ class P9P10GateTest {
         assertTrue("2.50x" in check.detail, "the wall ratio must be recorded: ${check.detail}")
     }
 
-    // ---- P10: per-repo peak RSS ------------------------------------------------
+    // ---- per-repo peak RSS ------------------------------------------------
 
     @Test
     fun perRepoRssPassesWithinBudget() {
@@ -144,7 +144,7 @@ class P9P10GateTest {
         assertEquals(State.NOT_EVALUATED, check.state)
     }
 
-    // ---- the P10 recording fields travel the bench JSON -------------------------
+    // ---- the recording fields travel the bench JSON -------------------------
 
     @Test
     fun benchResultJsonRoundTripsTheNewFields() {

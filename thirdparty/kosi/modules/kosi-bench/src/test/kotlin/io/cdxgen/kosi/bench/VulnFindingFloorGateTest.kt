@@ -5,10 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The P14 findings ratchet. The vuln tiers' deliberately vulnerable apps
+ * The findings ratchet. The vuln tiers' deliberately vulnerable apps
  * are the only repo-tier rows whose FINDINGS are the point, and until this
  * check a change could take any of them to zero with a green build — which
- * is exactly how kosi arrived at P11 reporting zero findings on every real
+ * is exactly how kosi arrived at reporting zero findings on every real
  * repo. Negative cases first: below the floor fails, a missing warm
  * classpath fails, a materially-above-floor reading fails until the floor
  * is raised, and a run with no floors is NOT_EVALUATED, never a pass.
@@ -66,14 +66,14 @@ class VulnFindingFloorGateTest {
 
     @Test
     fun zeroFindingsOnTheAnchorAppIsTheFailureThisGateExistsFor() {
-        // The P11 shape: every real repo at zero findings, build green.
+        // The shape: every real repo at zero findings, build green.
         val c = check(vuln("tsp-vulnerable-app-kotlin-ktor", slices = 0, floor = 2))
         assertEquals(Promotion.State.FAIL, c.state, c.detail)
     }
 
     @Test
     fun aMissingWarmClasspathFailsEvenWhenTheCountHolds() {
-        // R73's shape: the warming never downloaded anything, the floor
+        // The shape: the warming never downloaded anything, the floor
         // measures against an empty classpath, and the count happens to
         // hold. The floor was not measured — that is a failure, not a pass.
         val c = check(vuln("androgoat", slices = 17, floor = 17, classpathMissing = true))

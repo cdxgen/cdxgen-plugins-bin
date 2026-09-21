@@ -99,7 +99,7 @@ internal fun compile(function: KirFunction, firstSiteId: Int = 0): CompiledFunct
 }
 
 // The abstract state, the chain keys and the merge machinery live ONCE, in
-// Transfer.kt (R65): FlowState<F>, ChainKey<F>, Move and FlowTransfer are
+// Transfer.kt: FlowState<F>, ChainKey<F>, Move and FlowTransfer are
 // shared by the reporting engine and the summary analysis.
 
 /** One executable program point: instruction [ins] of block [blockId], flat id [id]. */
@@ -108,14 +108,14 @@ internal data class Site(val id: Int, val blockId: String, val indexInBlock: Int
 
 /**
  * A taint fact: born at the source call [site], carrying [category]. A
- * non-negative [param] marks an ENDPOINT-PARAMETER birth (P20 §1): the
+ * non-negative [param] marks an ENDPOINT-PARAMETER birth: the
  * handler's value-parameter index the taint entered through, so two
  * parameters of one handler are two facts — "which input is untrusted" is
  * a per-parameter fact, not a per-function one. `-1` is every other birth.
  */
 internal data class TaintFact(val site: Int, val category: String, val param: Int = -1, val fieldBearing: Boolean = false) : Comparable<TaintFact> {
     /**
-     * P26 §1.3: this fact sits on a value whose CONTENT came out of a pack
+     * This fact sits on a value whose CONTENT came out of a pack
      * DESERIALIZER (Jackson `readValue`, kotlinx `decodeFromString`, Gson
      * `fromJson`) — the produced object carries the input's taint on its
      * FIELDS, so a field read of it derives the same category. Ordinary
@@ -138,12 +138,12 @@ internal data class TaintFact(val site: Int, val category: String, val param: In
  * taint a pack deserializer moved there.
  */
 /**
- * P27 §1: reads "register at access path" in the REPORTING engine, across an
+ * reads "register at access path" in the REPORTING engine, across an
  * alias class and across BOTH ways a value's taint can be represented here.
  *
  *  - on the KEY, the ordinary case: a field write or a summary channel put
  *    the fact at `(register, path)`;
- *  - on the BARE key when the fact is FIELD-BEARING (P26 §1.3) — a
+ *  - on the BARE key when the fact is FIELD-BEARING — a
  *    deserializer's result carries the input's taint on every field, and
  *    there is no key per field because the fields were never written by
  *    code the engine saw.
@@ -174,8 +174,8 @@ private object TaintFactOps : FactOps<TaintFact> {
 }
 
 /**
- * The taint engine: the P4 intraprocedural, field-sensitive fixpoint plus
- * P5's interprocedural summaries and P6's async propagation over the same
+ * The taint engine: the intraprocedural, field-sensitive fixpoint plus
+ * the interprocedural summaries and the async propagation over the same
  * CFG machinery (02-ARCHITECTURE.md §6). Everything that decides what is a
  * source, a sink, a passthrough, a sanitizer or an effect comes from the
  * [ModelPack]; the engine hard-codes no rule about categories.
@@ -186,7 +186,7 @@ private object TaintFactOps : FactOps<TaintFact> {
  * to its base register, which is the field-INsensitive engine that negative
  * must be able to switch on.
  *
- * Interprocedural contract (P5): the pack is authoritative at every call
+ * Interprocedural contract: the pack is authoritative at every call
  * site; only when NO pack entry matches does a computed callee summary
  * apply, and only when no summary exists does the `--unknown-call` default
  * run. Every boundary move carries its origin (`computed`, `pack`,
@@ -199,7 +199,7 @@ private object TaintFactOps : FactOps<TaintFact> {
  * byte-identical evidence.
  */
 /**
- * P28 §2: the value types an `all` payload can arrive as WITHOUT fields —
+ * the value types an `all` payload can arrive as WITHOUT fields —
  * framework-independent (kotlin/java String and primitives), so no pack can
  * widen or narrow it by omission. An unresolved type is NOT simple: it seeds
  * field-bearing, the triage-over-silence direction.
@@ -207,7 +207,7 @@ private object TaintFactOps : FactOps<TaintFact> {
  * Top-level and `internal` so `AllPayloadSimpleTypesTest` can check every
  * spelling here against the pack's doc-derived `simpleParameterTypes`. It was
  * private, and the copy had drifted: it said `java.lang.Char`, which is not a
- * JVM type, and nothing could disagree with it (R168).
+ * JVM type, and nothing could disagree with it.
  */
 internal val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
     "kotlin.String", "kotlin.Int", "kotlin.Long", "kotlin.Short", "kotlin.Byte",
@@ -240,7 +240,7 @@ object TaintEngine {
         val unknownCallPropagate: Boolean,
         val skipGenerated: Boolean,
         /**
-         * P5: how virtual call sites pick the summaries to join — `cha` joins
+         * How virtual call sites pick the summaries to join — `cha` joins
          * every overriding body, `rta`/`vta`/`auto` keep only targets whose
          * owner class the engine saw constructed (a `KirNew` site anywhere,
          * plus singletons), `static`/`none` apply no join at virtual sites.
@@ -252,44 +252,44 @@ object TaintEngine {
         /** Per-SCC iteration budget for the summary fixpoint. */
         val summaryIterationBudget: Int = 32,
         /**
-         * P5: a summary analysis whose live state (registers x facts) blows
+         * A summary analysis whose live state (registers x facts) blows
          * past this budget is DROPPED, not partially published — callers
          * fall to the labelled unknown default. Real-repo functions can
          * otherwise push the fixpoint into gigabytes and OOM the run.
          */
         val maxSummaryStateEntries: Int = 60000,
         /**
-         * P15: the same honest degradation for the summary's ESCAPE SET.
+         * The same honest degradation for the summary's ESCAPE SET.
          * Composed sink effects multiply through summary application (each
          * application joins every callee effect with every live fact, keyed
          * by the joined access path), and a recursive AndroidX cluster
          * (FragmentManagerImpl) grew ONE function's effect map to 68M
          * entries — ~8 GB — filling any heap the corpus JVM could spare,
-         * which is why `deps_max_classes` was pinned at 50 (P14). Two
+         * which is why `deps_max_classes` was pinned at 50. Two
          * bounds fix it: composed param paths deeper than the deepest path
          * the lowering can put on a fact key are dropped (they can never
          * match one — see SummaryAnalysis.paramPathCap), and the effect map itself is
-         * budgeted like the state (R58): a function whose escapes exceed
+         * budgeted like the state: a function whose escapes exceed
          * this publishes NO summary rather than a partial one, and callers
          * fall to the labelled unknown default.
          */
         val maxSummarySinkEffects: Int = 8192,
         /**
-         * P7 endpoint-rooted taint, when the run asks for it: handler
+         * Endpoint-rooted taint, when the run asks for it: handler
          * canonical name -> the category its parameters carry. Seeds live
          * at the synthetic entry site (-1) so endpoint-rooted slices walk
          * from the handler's own signature.
          */
         val endpointSources: Map<String, String> = emptyMap(),
         /**
-         * P27 §2: framework id -> the parameter types that are the
+         * Framework id -> the parameter types that are the
          * framework's OWN collaborators rather than request data, for the
          * `annotated-or-bound` shape (Spring MVC's implicit command object).
          */
         val endpointContextParameterTypes: Map<String, List<String>> = emptyMap(),
-        /** P27 §2: framework id -> annotations meaning "the framework supplies this". */
+        /** Framework id -> annotations meaning "the framework supplies this". */
         val endpointNonInputAnnotations: Map<String, List<String>> = emptyMap(),
-        /** P27 §2: framework id -> the types it resolves as a scalar query parameter. */
+        /** Framework id -> the types it resolves as a scalar query parameter. */
         val endpointSimpleParameterTypes: Map<String, List<String>> = emptyMap(),
         /**
          * Framework PARAMETER annotations: annotation FQN pattern -> the
@@ -313,11 +313,11 @@ object TaintEngine {
          * Framework id -> how it hands input to a handler: `annotated`,
          * `context` or `all` (see FrameworkModel.handlerInput). A framework
          * missing from this map seeds every parameter, which is the
-         * behaviour every framework had before P13.
+         * behaviour every framework had previously.
          */
         val endpointHandlerInput: Map<String, String> = emptyMap(),
         /**
-         * P9 `--deps`: the dependency tier, already lowered to the SAME KIR
+         * `--deps`: the dependency tier, already lowered to the SAME KIR
          * by kosi-bytecode. Its functions are compiled with site ids
          * continuing after the workspace's, summarised by the SAME
          * [Summarizer] with `origin=bytecode`, and applied at workspace call
@@ -326,25 +326,25 @@ object TaintEngine {
          * to a run without the tier (the invariance the corpus asserts).
          */
         val depsModule: KirModule? = null,
-        /** P9: purls of the jars [depsModule] was lowered from — the cross-dependency marker set. */
+        /** Purls of the jars [depsModule] was lowered from — the cross-dependency marker set. */
         val depsPurls: Set<String> = emptySet(),
-        /** P9: demangled aliases (alias canonical name -> primary canonical names, tried in order). */
+        /** Demangled aliases (alias canonical name -> primary canonical names, tried in order). */
         val depsAliases: Map<String, List<String>> = emptyMap(),
-        /** P9: classes lowered from the jars (the tier's published denominator). */
+        /** Classes lowered from the jars (the tier's published denominator). */
         val depsClassCount: Int = 0,
         /**
-         * P9: body-less dependency records the lowerer EXCLUDED. Supplied by
+         * Body-less dependency records the lowerer EXCLUDED. Supplied by
          * the lowerer rather than recounted here: one number, one producer —
          * the engine cannot see the records at all, because a body-less one
          * is never put in the module it receives.
          */
         val depsBodylessRecords: Int = 0,
         /**
-         * P10: called between analysis steps; returns a diagnostic code when
+         * Called between analysis steps; returns a diagnostic code when
          * the run must DEGRADE now (the report still ships), null to carry on.
          */
         val shouldStop: (() -> String?)? = null,
-        /** P10: worker parallelism for the per-function main analysis (deterministic at any width). */
+        /** Worker parallelism for the per-function main analysis (deterministic at any width). */
         val dataflowWorkers: Int = 1,
     )
 
@@ -360,7 +360,7 @@ object TaintEngine {
         val unknownCallPropagations: Int,
         val truncations: Map<String, Int>,
         /**
-         * P28 (R176): functions SKIPPED BY POLICY, not cut by a cap —
+         * Functions SKIPPED BY POLICY, not cut by a cap —
          * `--dataflow-skip-generated` skipping synthetic bodies. Their
          * summaries still apply, so nothing is lost and the counter was
          * never a truncation: reporting it as one buried the real cap
@@ -371,29 +371,29 @@ object TaintEngine {
          */
         val skips: Map<String, Int> = emptyMap(),
         val diagnostics: List<Diagnostic>,
-        /** P5: the converged summaries (computed ones plus pack-derived ones). */
+        /** The converged summaries (computed ones plus pack-derived ones). */
         val summaries: List<io.cdxgen.kosi.schema.FlowSummary>,
-        /** P5: SCCs processed and how many hit their iteration budget (counter + denominator). */
+        /** SCCs processed and how many hit their iteration budget (counter + denominator). */
         val sccsProcessed: Int,
         val sccIterationCapHits: Int,
-        /** P5: dispatch joins by candidate width, e.g. {"1": 12, "3": 2}. */
+        /** Dispatch joins by candidate width, e.g. {"1": 12, "3": 2}. */
         val dispatchJoins: Map<Int, Int>,
-        /** P6: slices whose trace crosses a suspend boundary. */
+        /** Slices whose trace crosses a suspend boundary. */
         val suspendCrossingSlices: Int,
-        /** P9 `--deps`: body-less records the tier EXCLUDED (never summarised). */
+        /** `--deps`: body-less records the tier EXCLUDED (never summarised). */
         val bodylessRecords: Int = 0,
-        /** P9: classes lowered from the dependency jars. */
+        /** Classes lowered from the dependency jars. */
         val dependencyClasses: Int = 0,
-        /** P9: dependency methods lowered WITH bodies (summaries were computed over these). */
+        /** Dependency methods lowered WITH bodies (summaries were computed over these). */
         val dependencyFunctions: Int = 0,
         /**
-         * P20 §0: the depth scoreboard for one run — the numbers the depth
+         * The depth scoreboard for one run — the numbers the depth
          * report's taint table publishes. Not part of the report schema;
          * the depth gate reads them off the engine's Result.
          */
         val depth: DepthStats = DepthStats(0, 0, 0, 0, emptyList()),
         /**
-         * P22 §0: what this run's workspace summaries say about RETURN
+         * What this run's workspace summaries say about RETURN
          * VALUES — the second answer to "what does this call return" (the
          * const folder's is the first). The depth report's agreement gate
          * reads it; nothing in the report schema carries it.
@@ -402,7 +402,7 @@ object TaintEngine {
     )
 
     /**
-     * P22 §0: per workspace function, whether a summary exists and whether
+     * Per workspace function, whether a summary exists and whether
      * it claims taint can reach the RETURN value (`paramToReturn` or
      * `sourceReturns` non-empty). Keyed by [functionKey]; [opinion] mirrors
      * the folder's resolution — descriptor-narrowed where the site carries
@@ -428,7 +428,7 @@ object TaintEngine {
     }
 
     /**
-     * P20 §0: how much taint depth a run actually had, measured rather
+     * how much taint depth a run actually had, measured rather
      * than assumed:
      *
      *  - [entryFactsSeeded] — endpoint-parameter facts seeded (the entry
@@ -442,7 +442,7 @@ object TaintEngine {
      *    carrying facts: sinks inside the callee this run could not see.
      *  - [sanitizersApplied] — the sanitizer FQNs that actually cleared a
      *    fact somewhere in the run. A sanitizer outside this set never
-     *    fired, which is R63 for the security pack.
+     *    fired, which is for the security pack.
      */
     data class DepthStats(
         val entryFactsSeeded: Int,
@@ -461,12 +461,12 @@ object TaintEngine {
      * What every per-function analysis needs beyond its own CFG: the
      * module-wide site table (site ids are GLOBAL, so one trace can span
      * functions), the resolved callee sets, and the converged summaries.
-     * With `--deps` (P9) the site table also carries the dependency tier's
+     * With `--deps` the site table also carries the dependency tier's
      * sites — one trace can walk into a jar and back — and [deps] exposes
      * the tier's summaries for boundary application.
      */
     /**
-     * P25 §0: a declared function used as a value. [summaryKey] is its key
+     * a declared function used as a value. [summaryKey] is its key
      * in the summary table; [receiverOffset] is 1 when the function's first
      * parameter is its receiver (a bound reference `obj::method` binds it,
      * so the invocation's argument 0 is the callee's parameter 1) and 0
@@ -484,7 +484,7 @@ object TaintEngine {
         val options: Options,
         val deps: DepsTier? = null,
         /**
-         * P25 §0: function values that name a DECLARED function — every
+         * Function values that name a DECLARED function — every
          * `::reference`, bound reference and anonymous `fun`, which the
          * lowering now resolves to the target's canonical name. A lambda's
          * table key is name-with-no-descriptor; a declared function's key
@@ -494,7 +494,7 @@ object TaintEngine {
          * A canonical name shared by several declared overloads is NOT
          * resolved: the reference names one of them and nothing in the KIR
          * says which, and answering with an arbitrary overload is the
-         * mistake P22 §1 fixed for the summary table. Those are counted as
+         * mistake fixed for the summary table. Those are counted as
          * unresolved lambdas, which is what they are.
          */
         val functionValues: Map<String, FunctionValueTarget> = emptyMap(),
@@ -510,10 +510,10 @@ object TaintEngine {
         val packAppliedPassthroughs = sortedSetOf<String>()
         /** source-return births: the caller fact -> the callee's internal source path. */
         val sourceReturnPaths = HashMap<TaintFact, List<Int>>()
-        /** P9: dependency summaries that actually moved taint at a workspace call site. */
+        /** Dependency summaries that actually moved taint at a workspace call site. */
         val bytecodeAppliedFqns = sortedSetOf<String>()
 
-        // ---- P20 §0 depth counters (the scoreboard the phase report leads with) ----
+        // ---- depth counters ----
 
         /** Endpoint-parameter facts actually seeded (the sources-seeded denominator's entry arm). */
         var entryFactsSeeded: Int = 0
@@ -542,7 +542,7 @@ object TaintEngine {
         fun recordSliceDropUnprovable() = synchronized(lock) { slicesDroppedUnprovable += 1 }
         fun recordCapAffectedSinkHits(n: Int) = synchronized(lock) { capAffectedSinkHits += n }
 
-        // Mutations are guarded so the P10 worker parallelism stays
+        // Mutations are guarded so the worker parallelism stays
         // deterministic at any width: outcomes are merged in compiled order
         // regardless of which worker produced them.
         fun recordJoin(width: Int) = synchronized(lock) { joinWidths.merge(width, 1, Int::plus) }
@@ -553,7 +553,7 @@ object TaintEngine {
         fun recordLambdaUnresolved() = synchronized(lock) { lambdaUnresolved += 1 }
         fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
 
-        // ---- P24 §3: the per-site evidence the frames read ------------------
+        // ---- the per-site evidence the frames read ------------------
 
         /** Dispatch evidence per call site: targets considered, applied, narrowed by. */
         data class DispatchInfo(val considered: Int, val applied: List<String>, val narrowedBy: String?)
@@ -565,7 +565,7 @@ object TaintEngine {
         }
 
         /**
-         * P24 §3: sanitizer sites where the flowing categories SURVIVED —
+         * Sanitizer sites where the flowing categories SURVIVED —
          * the `sanitizer-not-applied` role's producer. Category set because
          * a site can see several facts.
          */
@@ -575,14 +575,14 @@ object TaintEngine {
             sanitizerSurvivedBySite[site] = (sanitizerSurvivedBySite[site] ?: emptySet()) + survived
         }
 
-        /** P24 §3: targets considered per virtual hop, pre-narrowing. */
+        /** Targets considered per virtual hop, pre-narrowing. */
         val dispatchWidths = java.util.TreeMap<Int, Int>()
 
         fun recordDispatchWidth(width: Int) = synchronized(lock) { dispatchWidths.merge(width, 1, Int::plus) }
     }
 
     /**
-     * The P9 `--deps` tier: the dependency module's compiled functions (site
+     * The `--deps` tier: the dependency module's compiled functions (site
      * ids continuing after the workspace's), its own call index, and the
      * summaries the SAME summariser computed over them with
      * `origin=bytecode`. A workspace call into the tier resolves by
@@ -606,8 +606,8 @@ object TaintEngine {
          * call descriptors never equal the raw JVM ones the class file
          * carries, so a workspace call site can only ever name the tier by
          * FQN — and a name-keyed reader must not be answered with ONE
-         * overload's effects. Until P22 the tier's `associateBy` kept the
-         * last overload and dropped the rest (R133's shape in the tier);
+         * overload's effects. Until the tier's `associateBy` kept the
+         * last overload and dropped the rest (the shape in the tier);
          * the view is now the CONSERVATIVE JOIN across every overload of
          * the name — a may-analysis union, so an effect any overload has is
          * an effect the name carries. Sorted concatenation keeps the join
@@ -639,7 +639,7 @@ object TaintEngine {
         val truncations = java.util.TreeMap<String, Int>()
         val skips = java.util.TreeMap<String, Int>()
         /**
-         * R176: the skip kinds that are POLICY, not caps — reported in
+         * The skip kinds that are POLICY, not caps — reported in
          * `skips{}`, never in `truncations{}`. Anything added here is a
          * deliberate, lossless exclusion whose summaries still apply.
          */
@@ -652,7 +652,7 @@ object TaintEngine {
         var sinkSites = 0
         var unknownCallPropagations = 0
         var sliceCapReported = false
-        // P10: the budget whose trip degraded this run (a diagnostic code), if any.
+        // The budget whose trip degraded this run (a diagnostic code), if any.
         var stopCode: String? = null
 
         // ---- compile everything once, with GLOBAL site ids ------------------
@@ -671,13 +671,13 @@ object TaintEngine {
             for ((id, site) in cf.siteById) siteIndex[id] = cf to site
         }
 
-        // ---- P5: resolve callees, condense SCCs, compute summaries -----------
+        // ---- resolve callees, condense SCCs, compute summaries -----------
         // allFunctions: the DI facts are SIGNATURE facts, and a binding
         // method (`@Binds`) is abstract — bodyless, invisible to the compiled
-        // list (P26 §2).
+        // list.
         val callIndex = CallIndex(compiled, options.dispatchMode, module.functions)
 
-        // ---- P9: the `--deps` tier, summarised BEFORE the workspace's -------
+        // ---- the `--deps` tier, summarised BEFORE the workspace's -------
         // (dependencies never call back into the workspace, so their
         // summaries need nothing from it — while workspace functions whose
         // bodies pass taint THROUGH a dependency compose the jar's effects
@@ -712,7 +712,7 @@ object TaintEngine {
             for ((kind, count) in depSummary.skipped) {
                 truncations.merge(kind, count, Int::plus)
             }
-            // P16 §2: the composed-path depth cap's exact drops, counted per
+            // The composed-path depth cap's exact drops, counted per
             // run — the degradation was real but invisible before.
             if (depSummary.composedPathDrops > 0) {
                 truncations.merge("composed-path-depth", depSummary.composedPathDrops, Int::plus)
@@ -746,7 +746,7 @@ object TaintEngine {
         }
         if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 
-        // Keyed by FUNCTION (P22 §1): two overloads of one name each carrying
+        // Keyed by FUNCTION: two overloads of one name each carrying
         // lambdas must not answer for each other's lambda bodies.
         val lambdaDefs = compiled.associate { functionKey(it.function) to lambdaDefsOf(it) }
         val captures = compiled.associate { cf ->
@@ -758,7 +758,7 @@ object TaintEngine {
                 }
             }
         }
-        // P24 §4: the access-path `*` collapse, counted where it binds —
+        // The access-path `*` collapse, counted where it binds —
         // every collapsed path in the analysed bodies is a field the
         // engine can no longer tell apart. Zero on the deep tier at the
         // default depth is the depth doctrine's (a); non-zero is a
@@ -779,7 +779,7 @@ object TaintEngine {
             truncations.merge("access-path-collapse", accessPathCollapses, Int::plus)
         }
 
-        // P25 §0: declared functions reachable as VALUES, by canonical name,
+        // Declared functions reachable as VALUES, by canonical name,
         // and only where the name is unambiguous (see FunctionValueTarget).
         val functionValues = buildMap {
             val byCanonical = compiled.groupBy { it.function.canonicalName }
@@ -803,7 +803,7 @@ object TaintEngine {
             deps = depsTier,
             functionValues = functionValues,
         )
-        // P20 §0: the summary-missing set — compiled functions with no
+        // The summary-missing set — compiled functions with no
         // summary in the final table. A body-less function never compiles
         // and owes nothing; a compiled one owes its summary to every caller.
         // Names, not keys: call sites ask by FQN.
@@ -823,7 +823,7 @@ object TaintEngine {
         }
 
         // ---- the per-function main analysis ----------------------------------
-        // P10: the per-function work runs on [options.dataflowWorkers] workers
+        // the per-function work runs on [options.dataflowWorkers] workers
         // and is folded back in COMPILED ORDER, so candidates, node ids and
         // slice ids are identical at any worker width. The budget hook runs
         // per function; a trip keeps everything already analysed, counts what
@@ -842,7 +842,7 @@ object TaintEngine {
             options.shouldStop?.invoke()?.let { code ->
                 return Slot(cf, null, code)
             }
-            // P29: the per-function boundary. The KIR this engine walks was
+            // The per-function boundary. The KIR this engine walks was
             // produced under the front end's walk budget, so a stack
             // overflow here should not happen — and if one ever does it
             // degrades THIS function to a counted truncation named
@@ -856,12 +856,12 @@ object TaintEngine {
             return Slot(cf, outcome, null)
         }
 
-        // P29: functions whose analysis hit StackOverflowError, collected on
+        // Functions whose analysis hit StackOverflowError, collected on
         // this (collector) thread in compiled order.
         val stackOverflowFunctions = mutableListOf<String>()
 
         val slots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {            val width = minOf(options.dataflowWorkers, compiled.size)
-            // P29: the workers carry the same explicit analysis stack as the
+            // The workers carry the same explicit analysis stack as the
             // front end's thread (kosi-front `WalkBudgets.ANALYSIS_STACK_BYTES`;
             // duplicated here because this module deliberately does not see
             // the front end) — default-sized stacks are the defect this
@@ -882,7 +882,7 @@ object TaintEngine {
             val outcome = slot.outcome
             if (outcome == null) {
                 val kind = slot.skippedKind ?: "dataflow-truncated"
-                // R176: policy skips are not truncations. The generated
+                // Policy skips are not truncations. The generated
                 // bodies' summaries still apply; a cap counter that includes
                 // them lies about what bounded the run.
                 if (kind in POLICY_SKIPS) {
@@ -893,7 +893,7 @@ object TaintEngine {
                 if (kind == DiagnosticCodes.ANALYSIS_TIME_BUDGET || kind == DiagnosticCodes.RSS_BUDGET) {
                     stopCode = kind
                 }
-                // P29: a stack-overflow skip is named, not just counted —
+                // A stack-overflow skip is named, not just counted —
                 // the affected function is absent from every slice, and an
                 // operator has to be able to find it.
                 if (kind == "stack-overflow") {
@@ -1011,7 +1011,7 @@ object TaintEngine {
                 ),
             )
         }
-        // R176: policy skips carry their own vocabulary — a diagnostic here
+        // Policy skips carry their own vocabulary — a diagnostic here
         // would re-create the very confusion the split exists to end (a
         // skip is not a truncation), but SILENCE is not the alternative
         // either: the counts are published in stats.skips{} and
@@ -1044,7 +1044,7 @@ object TaintEngine {
 
         // bytecodeAppliedFqns records CANONICAL NAMES (call sites ask by
         // FQN); the tier's table is keyed by functionKey — compare on the
-        // name half (P22 §1).
+        // name half.
         val bytecodeSummaries = depsTier
             ?.table
             ?.entries
@@ -1057,7 +1057,7 @@ object TaintEngine {
             addAll(bytecodeSummaries)
         }.sortedBy { it.functionId }
 
-        // P24 §4: the caps live in the report, not in a diagnostic a
+        // The caps live in the report, not in a diagnostic a
         // consumer must parse — `truncations{}` per cap, empty when none
         // bound (which is the depth doctrine's claim, checkable).
         val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
@@ -1089,7 +1089,7 @@ object TaintEngine {
                 sourceSites = sourceSites,
                 sinkSites = sinkSites,
             ),
-            // P22 §0: the workspace tier's verdicts on "can taint reach the
+            // The workspace tier's verdicts on "can taint reach the
             // return value", per function — the depth report's agreement
             // gate compares the const folder's answers against these.
             returnOpinions = ReturnOpinions(
@@ -1223,7 +1223,7 @@ object TaintEngine {
      * decisions that are genuinely ours — what is counted, which facts a
      * sink hit carries, how callee summaries are applied under the dispatch
      * modes — supplied to [FlowTransfer] as callbacks. The opcode handling
-     * itself is not ours to change (R65).
+     * itself is not ours to change.
      */
     private class ReportingHost(
         val context: EngineContext,
@@ -1236,7 +1236,7 @@ object TaintEngine {
         override val fieldSensitive: Boolean get() = context.options.accessPathDepth > 0
 
         /**
-         * P24 §2: this function's alias classes, from the allocation-site
+         * This function's alias classes, from the allocation-site
          * fixpoint over the same CFG (the final summary table feeding it —
          * the reporting engine runs after the summariser converged).
          */
@@ -1292,7 +1292,7 @@ object TaintEngine {
         }
 
         /**
-         * P26 §1.3: mark the deserializer's result facts FIELD-BEARING —
+         * Mark the deserializer's result facts FIELD-BEARING —
          * every field read of the produced object derives them. The variant
          * facts take over the key, and each inherits the chain entry of the
          * fact it replaced (a replaced identity without an entry dead-ends
@@ -1326,7 +1326,7 @@ object TaintEngine {
         }
 
         /**
-         * P26 §1.1: the callee names a bodyless INTERFACE method whose
+         * The callee names a bodyless INTERFACE method whose
          * declaration matches a pack interfaceSinks row — a Spring Data
          * repository method (derived query or @Query) or a Room DAO query.
          * Every argument is relevant: the method's parameters ARE the
@@ -1375,7 +1375,7 @@ object TaintEngine {
             literalMatchers.firstOrNull { (regex, _) -> regex.matches(name) }?.second
 
         /**
-         * P20 §1: the source is a PARAMETER, not a function. The facts are
+         * The source is a PARAMETER, not a function. The facts are
          * computed once per function (the transfer asks on every block
          * input) and cached — the same list the depth report counts as
          * `entryFactsSeeded`. `#N` indexes the handler's VALUE parameters
@@ -1403,7 +1403,7 @@ object TaintEngine {
                     matched?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it.category, index) }
                 }
 
-                // P27 §2: the framework names SOME transports and binds
+                // The framework names SOME transports and binds
                 // whatever else is not one of its own collaborators. Spring
                 // MVC's command object is this: `processFindForm(owner:
                 // Owner, result: BindingResult, model: Map)` annotates
@@ -1449,7 +1449,7 @@ object TaintEngine {
 
                             isContextType(param.resolvedType, contextTypes) -> null
 
-                            // P27 §2, Spring's own fallback rule: "if it is
+                            // Spring's own fallback rule: "if it is
                             // a simple type it is resolved as a
                             // @RequestParam, otherwise as a @ModelAttribute".
                             // Either way it is request data; the type decides
@@ -1459,7 +1459,7 @@ object TaintEngine {
                             // the request's data sits on its FIELDS —
                             // `owner.lastName`, never `owner` — and a bare
                             // fact derives nothing on a field read. That is
-                            // the shape P26 gave a deserializer's result, for
+                            // the shape gave a deserializer's result, for
                             // the same reason: no code the engine can see
                             // wrote those fields, so there is no per-field
                             // key to find. Without it the seed is real and
@@ -1483,7 +1483,7 @@ object TaintEngine {
                 // it, and every unrelated value reachable through it.
                 "context" -> valueParams.map { null }
 
-                // P28 §2: `all` means the parameter IS the payload — but the
+                // `all` means the parameter IS the payload — but the
                 // docs of the `all` frameworks themselves name collaborators
                 // handed in BESIDE it (AWS Lambda's runtime Context is "the
                 // second argument", gRPC's StreamObserver carries responses
@@ -1492,7 +1492,7 @@ object TaintEngine {
                 // under annotated-or-bound; a type not listed stays data —
                 // the same triage-over-silence direction.
                 //
-                // An OBJECT payload seeds FIELD-BEARING (the P27 §2 rule for
+                // An OBJECT payload seeds FIELD-BEARING (the rule for
                 // Spring's command objects, and for the same measured
                 // reason): a gRPC request message, a Lambda event POJO, an
                 // Android Bundle all carry the request on their FIELDS, and
@@ -1518,7 +1518,7 @@ object TaintEngine {
         }
 
         /**
-         * P27 §2: is this parameter's type one the framework hands the
+         * Is this parameter's type one the framework hands the
          * handler rather than one it binds from the request?
          *
          * A generic type matches on its RAW name (`kotlin.collections.Map`
@@ -1535,7 +1535,7 @@ object TaintEngine {
         }
 
         /**
-         * P27 §2: Spring's `BeanUtils.isSimpleProperty` — a simple value type
+         * Spring's `BeanUtils.isSimpleProperty` — a simple value type
          * or an ARRAY of one. An unresolved type is not simple, so it is
          * treated as a command object: the direction that produces a finding
          * to triage rather than a silence.
@@ -1550,7 +1550,7 @@ object TaintEngine {
 
         private companion object {
             /**
-             * P27 §2: transports that bind a whole OBJECT, whose fields
+             * Transports that bind a whole OBJECT, whose fields
              * therefore carry the request's data. A path or query parameter
              * is a scalar and a field read of it means nothing.
              */
@@ -1583,7 +1583,7 @@ object TaintEngine {
          * `paramToReceiver`/`sourceReturns` move the caller's facts with the
          * summary's origin stamped on every boundary move.
          *
-         * P24 adds the object-identity channels: constructor calls apply the
+         * adds the object-identity channels: constructor calls apply the
          * class's `<init>` summary with the NEW OBJECT as the receiver; calls
          * through a KNOWN function value apply the target body's summary;
          * field-write effects fan out through the argument's alias class;
@@ -1599,14 +1599,14 @@ object TaintEngine {
         ): Boolean {
             val options = context.options
 
-            // P24 §2d: a call through a function value this body DEFINED (or
+            // A call through a function value this body DEFINED (or
             // copied) — the value is an object whose target is known at its
             // allocation site, and the invoke resolves to that target.
             if (ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
                 if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
             }
 
-            // P24 §2b: a constructor applies the class's `<init>` summary —
+            // A constructor applies the class's `<init>` summary —
             // the constructor is a function that writes the object's fields,
             // so `Job(tainted)` taints `job.command` through the same
             // paramFieldWrites channel every member function uses. The NEW
@@ -1625,16 +1625,16 @@ object TaintEngine {
             if (targets.size > 1 && (options.dispatchMode == "vta" || options.dispatchMode == "auto")) {
                 // VTA narrows by the receiver's known construction types before
                 // the summary JOIN — the same positive-evidence-only refinement
-                // the P3 graph applies.
+                // the graph applies.
                 targets = context.callIndex.narrowByReceiverType(compiled.function, ins.receiver, targets)
             }
             // Keyed by FUNCTION, not name: a descriptor-narrowed call site
             // must meet its own overload's summary — the name-keyed lookup
             // answered one overload's question with a namesake's effects,
             // a missed flow one way and a confident wrong one the other
-            // (P22 §1, R133's shape in the summary table).
+            // (the shape in the summary table).
             val applicable = targets.mapNotNull { target -> context.table[functionKey(target)]?.let { target to it } }.toMutableList()
-            // P9 boundary: when no WORKSPACE target has a summary, the `--deps`
+            // Boundary: when no WORKSPACE target has a summary, the `--deps`
             // tier may have one. The per-summary application below is shared
             // verbatim — a dependency summary is applied exactly like a
             // workspace one, with its own origin (`bytecode`) stamped on every
@@ -1644,7 +1644,7 @@ object TaintEngine {
             if (applicable.isEmpty()) {
                 val dep = context.deps?.summaries(ins.callee.fqn)
                 if (dep == null) {
-                    // P20 §0: a call into a function whose summary is
+                    // A call into a function whose summary is
                     // MISSING (a budget skipped it) that carries facts on
                     // its arguments is a sink this run cannot see — its
                     // paramToSink effects died with the summary. Counted,
@@ -1663,9 +1663,9 @@ object TaintEngine {
             val width = applicable.size
             context.recordJoin(width)
             if (width > options.dispatchJoinBudget) context.recordJoinOverrun()
-            // P24 §3: the per-hop dispatch evidence the frames read — what
+            // The per-hop dispatch evidence the frames read — what
             // was CONSIDERED, what was APPLIED, and what narrowed it.
-            // P26 §2: a binding that leaves TWO managed implementations is
+            // A binding that leaves TWO managed implementations is
             // still the binding's decision — `di-binding` names the evidence
             // (the container's wiring), not the count, and it outranks the
             // blander width-based labels at every width.
@@ -1688,7 +1688,7 @@ object TaintEngine {
             for ((target, summary) in applicable.sortedBy { it.first.canonicalName }) {
                 moved = applyOne(summary, ins.receiver, ins.result, site, state, chain, collect) || moved
             }
-            // The applied-summary publication (P9 gate denominator) counts
+            // The applied-summary publication (gate denominator) counts
             // dependency summaries that MOVED something at a workspace call
             // site, never every jar function that happened to be summarised.
             if (depOnly && moved) {
@@ -1710,7 +1710,7 @@ object TaintEngine {
         }
 
         /**
-         * P24 §2d: an invoke whose receiver holds KNOWN lambda objects — the
+         * An invoke whose receiver holds KNOWN lambda objects — the
          * bodies defined in this function. Their summaries apply with the
          * invoke's arguments bound to the bodies' value parameters and the
          * capture registers bound from the KirLambda site.
@@ -1807,14 +1807,14 @@ object TaintEngine {
                     if (facts.isEmpty()) continue
                     state.addFacts(resultKey, facts)
                     moved = true
-                    // P24 §3: the callee-internal witness splices into the
+                    // The callee-internal witness splices into the
                     // boundary move, so the frames name the callee's hops.
                     val via = summary.paramToReturnPaths[param].orEmpty()
                     for (fact in facts) {
                         chain[ChainKey(fact, resultKey)] = Move(site, fromKey, "summary", origin, via)
                     }
                 }
-                // P27 §1 (R171): the argument's FIELD becomes a FIELD of the
+                // The argument's FIELD becomes a FIELD of the
                 // result — the mapper shape, where both sides carry a path.
                 for ((param, moves) in summary.paramPathToReturnPath) {
                     val from = binding(param) ?: continue
@@ -1839,7 +1839,7 @@ object TaintEngine {
                         }
                     }
                 }
-                // P27 §1 (R171): the argument's FIELD becomes the result —
+                // The argument's FIELD becomes the result —
                 // the getter channel. `val body get() = raw` is this shape,
                 // and so is every generated delegation forwarder, which
                 // reads the delegate field and returns what it answers.
@@ -1870,7 +1870,7 @@ object TaintEngine {
                     moved = true
                     chain[ChainKey(fact, resultKey)] = Move(site, null, "source-return", origin)
                 }
-                // P26 §0 (R161): the source-return FIELD channel — same
+                // The source-return FIELD channel — same
                 // birth, but the callee stored it into the returned object's
                 // FIELD, so the caller's result carries it at that access
                 // path. The field read finds it; the ALIAS class fans it
@@ -1885,7 +1885,7 @@ object TaintEngine {
                         chain[ChainKey(fact, key)] = Move(site, null, "source-return-field", origin)
                     }
                 }
-                // P24 §2: the field channel — the callee stored param i's
+                // The field channel — the callee stored param i's
                 // VALUE into the returned object's field, so the argument's
                 // BASE taint reaches the result's FIELD.
                 for ((param, suffixes) in summary.paramToReturnFields) {
@@ -1903,7 +1903,7 @@ object TaintEngine {
                 }
             }
 
-            // P24 §2c: source-born FIELD WRITES — the caller's argument
+            // Source-born FIELD WRITES — the caller's argument
             // carries the write after the call, on every name of the object.
             for ((category, writes) in summary.sourceFieldWrites) {
                 for (write in writes.sortedWith(compareBy({ it.paramIndex }, { it.suffix }))) {
@@ -1932,11 +1932,11 @@ object TaintEngine {
             // Field write effects: parameter i's taint stored into
             // parameter j's object (the receiver case included), field-
             // sensitive through the recorded access-path suffixes.
-            // P24 §2: the write lands on every name of the object the
+            // The write lands on every name of the object the
             // caller named — the alias class of the bound argument.
             for ((from, tos) in summary.paramFieldWrites) {
                 val fromReg = binding(from) ?: continue
-                // P27 §1 (R171): the argument's own tainted SUB-PATHS travel
+                // The argument's own tainted SUB-PATHS travel
                 // with it. `W(R(raw))` stores the argument into `inner`, and
                 // the argument is an object whose taint sits at `.raw` — so
                 // the receiver carries it at `inner.raw`. Reading only the
@@ -1980,7 +1980,7 @@ object TaintEngine {
             for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
                 val fromReg = binding(effect.paramIndex) ?: continue
                 val argKey = TaintKey(fromReg, effect.paramPath)
-                // P27 §1: alias-aware, and aware of FIELD-BEARING facts — a
+                // Alias-aware, and aware of FIELD-BEARING facts — a
                 // DTO straight out of a deserializer carries its taint on
                 // the bare key with no per-field key, so the keyed probe
                 // alone lost every `@RequestBody` that reached a sink
@@ -1998,7 +1998,7 @@ object TaintEngine {
             for (param in summary.invokedParams.sorted()) {
                 val argReg = binding(param) ?: continue
                 // The syntactic def map first (a lambda written at the call),
-                // then P24's alias analysis, which knows the function values
+                // then the alias analysis, which knows the function values
                 // an object's field or a collection element may hold — the
                 // spellings §0's sweep found dead: a function stored in a
                 // field, put in a list, or assigned through another object.
@@ -2015,9 +2015,9 @@ object TaintEngine {
                 for (lambdaCanonical in candidates) {
                 // Lambdas carry no descriptor; the lowering's module-wide
                 // ordinal makes the name unique, so the name-only key is
-                // the function's (P22 §1). A function value that names a
+                // the function's. A function value that names a
                 // DECLARED function — every `::reference` and anonymous
-                // `fun` since P25 §0 — has a descriptor and is found
+                // `fun` since — has a descriptor and is found
                 // through the canonical index instead.
                 val declaredTarget = context.functionValues[lambdaCanonical]
                 val lambdaSummary = context.table[functionKeyByName(lambdaCanonical)]
@@ -2046,7 +2046,7 @@ object TaintEngine {
                         moved = true
                         collect?.interHits?.add(InterSinkHit(site, captureKey, java.util.TreeSet(facts), effect, lambdaOrigin))
                     }
-                    // P24 §2d: a VALUE-parameter effect — the argument the
+                    // A VALUE-parameter effect — the argument the
                     // CALLEE passed at the invocation, recorded as a bind.
                     // The lambda's value parameters follow its captures, so
                     // the bind's argIndex addresses the effect's paramIndex
@@ -2133,12 +2133,12 @@ object TaintEngine {
         val purl: String,
         val nodes: List<NodeInfo>,
         val elided: Boolean,
-        /** P20 §1: the endpoint value-parameter the flow entered through, when it did. */
+        /** The endpoint value-parameter the flow entered through, when it did. */
         val sourceParameter: String? = null,
         val sourceTransport: String? = null,
-        /** P24 §3: the named hops, source to sink. */
+        /** The named hops, source to sink. */
         val frames: List<FlowFrame> = emptyList(),
-        /** P24 §3: the cap that cut the frame list, when it did. */
+        /** The cap that cut the frame list, when it did. */
         val framesCutBy: String? = null,
     )
 
@@ -2148,7 +2148,7 @@ object TaintEngine {
      * Interleaves SUSPEND BOUNDARIES into an assembled trace: a suspend
      * point records no data move of its own, so it never lands on the
      * provenance walk — but "the source and sink are separated by a suspend
-     * boundary" is exactly the P6 report, and a boundary nobody can see is
+     * boundary" is exactly the report, and a boundary nobody can see is
      * a boundary nobody counted. Between two consecutive trace sites of the
      * SAME function, any suspend point at an intervening site id belongs on
      * the trace (site ids are contiguous within a function and ascending in
@@ -2187,7 +2187,7 @@ object TaintEngine {
     )
 
     /**
-     * P24 §3: the frame list of one trace — every hop named with its
+     * The frame list of one trace — every hop named with its
      * function, file, line and role. Roles resolve in a fixed order
      * (source/sink first, then dispatch evidence, then summary boundaries,
      * returns, surviving sanitizers, calls, and moves), so a hop has
@@ -2247,7 +2247,7 @@ object TaintEngine {
     }
 
     /**
-     * P20 §1: the parameter identity of an ENDPOINT-PARAMETER birth — the
+     * The parameter identity of an ENDPOINT-PARAMETER birth — the
      * `#N` index over the handler's VALUE parameters and the transport the
      * parameter's annotation names. Null for every other birth.
      */
@@ -2274,7 +2274,7 @@ object TaintEngine {
         val pack = context.pack
         val siteIndex = context.siteIndex
         // A fact born at the synthetic entry site is an ENDPOINT-PARAMETER
-        // source (P7): the analysed function is the handler and its entry
+        // source: the analysed function is the handler and its entry
         // site is the trace head. A fact born at a STORE is a literal source
         // (the pack's name rule): the store is the birth. Everything else is
         // a pack source call, validated against the pack as always.
@@ -2288,7 +2288,7 @@ object TaintEngine {
             pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
         }
         val literalBirth = !entryFact && sourceSite?.ins is KirStore
-        // P9: a source-return birth from the --deps tier was born at a call
+        // A source-return birth from the --deps tier was born at a call
         // that RETURNED jar-sourced taint — the real source call sits at the
         // head of the recorded upstream path (inside the jar), so the birth
         // site itself need not match the pack. The head is validated below
@@ -2304,7 +2304,7 @@ object TaintEngine {
         if (!entryFact && !literalBirth && sourcePattern == null && !upstreamBirth) return null
         if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
-        // P26 §1.1: a hit whose callee has no pack row may be an
+        // A hit whose callee has no pack row may be an
         // interface-declared sink (the host's interfaceSink arm produced it).
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
             ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
@@ -2349,7 +2349,7 @@ object TaintEngine {
         // that moved a fact without recording provenance — the source site
         // is prepended and the slice is marked elided, so a truncated trace
         // is visible as a truncated trace instead of one that quietly starts
-        // in the middle (R54). P24 §3: a boundary move's viaSites splice the
+        // in the middle. A boundary move's viaSites splice the
         // callee-internal hops in, so the walk names where the VALUE went.
         val walked = moves.reversed()
             .flatMap { it.viaSites + listOf(it.site) }
@@ -2476,8 +2476,8 @@ object TaintEngine {
             ).joinToString("|"),
         )
 
-        // crossModule compares the two ENDS' module paths. crossesDependency
-        // is NOT its twin (the P5/P6 caveat resolved in P9): it is set when
+        // crossModule compares the two ENDS' module paths. CrossesDependency
+        // is NOT its twin (the caveat resolved): it is set when
         // the TRACE enters a real external jar — a dependency purl the --deps
         // tier was lowered from — and stays false for a slice that only
         // crosses workspace modules, whose Gradle purls differ per module.
@@ -2548,7 +2548,7 @@ object TaintEngine {
         val effect = hit.effect
         val sinkRef = siteIndex[effect.sinkSite] ?: return null
         val sinkIns = sinkRef.second.ins as? KirCall ?: return null
-        // P26 §1.1: a hit whose callee has no pack row may be an
+        // A hit whose callee has no pack row may be an
         // interface-declared sink (the host's interfaceSink arm produced it).
         val sinkPattern = pack.sinks.firstOrNull { PatternMatcher.matches(it.pattern, sinkIns.callee.fqn) }
             ?: InterfaceSinks.sinkPatternFor(context.callIndex, pack, sinkIns)
@@ -2556,8 +2556,8 @@ object TaintEngine {
         // The fact must have been born at a REAL source — a pack source call,
         // a call whose callee RETURNED source taint (the source-return birth:
         // the real source lives at the head of the recorded upstream path,
-        // often in another module), an endpoint parameter (P7), or a literal
-        // store the pack's name rule claimed (P8).
+        // often in another module), an endpoint parameter, or a literal
+        // store the pack's name rule claimed.
         val sourceRefs = hit.facts.mapNotNull { fact ->
             val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE &&
                 context.options.endpointSources.containsKey(compiled.function.canonicalName)
@@ -2597,7 +2597,7 @@ object TaintEngine {
         // The effect's own elision travels with the slice: the composed path
         // was capped INSIDE the summary (stabilize keeps the sink end), so
         // the published trace's middle is cut even when this caller-side
-        // walk is complete. Before P22 this flag was read nowhere — the
+        // walk is complete. Previously, this flag was read nowhere — the
         // second half of the composed-path defect (the first half was
         // toSummary publishing path-stripped keys), and the reason an
         // over-cap composed trace could never publish PARTIAL.
@@ -2633,7 +2633,7 @@ object TaintEngine {
             origins.addAll(moves.mapNotNull { it.origin })
             allMovesCollected.addAll(moves)
             val entryFact = fact.site == SummaryAnalysis.ENTRY_SITE
-            // P24 §3: callee-internal hops splice in at every boundary move.
+            // Callee-internal hops splice in at every boundary move.
             val walked = moves.reversed()
                 .flatMap { it.viaSites + listOf(it.site) }
                 .filter { it != SummaryAnalysis.ENTRY_SITE }
@@ -2757,7 +2757,7 @@ object TaintEngine {
             ).joinToString("|"),
         )
 
-        // Same provenance rule as the intraprocedural slice (P9): the flags
+        // Same provenance rule as the intraprocedural slice: the flags
         // are computed from what the trace actually touches — crossModule
         // from the two ends' module paths, crossesDependency from the trace
         // entering a jar the --deps tier was lowered from.
@@ -2858,7 +2858,7 @@ object TaintEngine {
         }
 
         val edgesById = edges.associateBy { it.id }
-        // P22 §2: every published slice names what its trace IS — complete,
+        // Every published slice names what its trace IS — complete,
         // partial (elided), or symbol-only — computed by the same rule the
         // depth report's reachability table reads (the two must not drift).
         val kindById = nodes.associate { it.id to it.kind }
@@ -2905,7 +2905,7 @@ object TaintEngine {
                 // Computed from the two ENDS (module paths and purls of the
                 // source and sink functions) — real comparisons now that a
                 // slice can span a call boundary, not the structural false
-                // the intraprocedural engine had to publish (R55).
+                // the intraprocedural engine had to publish.
                 crossesModule = candidate.crossesModuleFlag,
                 crossesDependency = candidate.crossesDependencyFlag,
                 pathKind = pathKind,
@@ -2969,14 +2969,14 @@ object TaintEngine {
                 // not consulted: this engine has no call graph, so it cannot
                 // know whether any slice is root-reachable. The intersection
                 // lives in the Analyzer, which overwrites this field with the
-                // kept count when it runs. P22 §2's first version keyed the
+                // kept count when it runs. the first version keyed the
                 // count off `mode == "reachable"` and published
                 // `slicesOut.size` — but the mode says only what was ASKED
                 // for, and `--dataflow reachable --callgraph none` asks
                 // without a graph: the intersection never ran and the stat
                 // claimed every slice reachable. On taint-sanitizer that read
-                // 2 where the real intersection keeps 0 (the P22 review's
-                // R137) — R117's rule, broken inside the change that was
+                // 2 where the real intersection keeps 0 (a later review
+                // ) — the rule, broken inside the change that was
                 // applying it: a field that never varies is a schema lie, and
                 // one that varies WRONGLY is a worse one.
                 reachableSlices = 0,
@@ -3021,13 +3021,13 @@ object TaintEngine {
      * nodes — so it is 1.000 by construction and can only catch a defect in
      * the id assignment itself. The ENDPOINT check is independent of it: the
      * node the slice calls its source must actually be a source node and the
-     * node it calls its sink an actual sink node. That is the property R54
-     * broke — 3 of 11 fixture slices carried a trace beginning at a field
-     * write while reporting connectivity 1.000 and 0 integrity violations —
-     * and it is the property that fails if a trace loses an endpoint again.
-     * P5 extends it across the call boundary: a cross-function slice's
-     * endpoints live in DIFFERENT functions, and the walk must still reach
-     * both — a stitched trace that lost its bridge fails here.
+     * node it calls its sink an actual sink node. That is the property broke
+     * — 3 of 11 fixture slices carried a trace beginning at a field write
+     * while reporting connectivity 1.000 and 0 integrity violations — and it
+     * is the property that fails if a trace loses an endpoint again. Extends
+     * it across the call boundary: a cross-function slice's endpoints live
+     * in DIFFERENT functions, and the walk must still reach both — a
+     * stitched trace that lost its bridge fails here.
      */
     private fun invariantsHold(
         slice: FlowSlice,

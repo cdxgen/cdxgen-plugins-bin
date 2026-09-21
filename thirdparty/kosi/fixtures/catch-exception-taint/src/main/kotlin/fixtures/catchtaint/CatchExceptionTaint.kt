@@ -1,4 +1,4 @@
-// P16 §3: P15 gave catch handlers their incoming CFG edges, but the
+// gave catch handlers their incoming CFG edges, but the
 // handler's own PARAMETER still bound to nothing — `catch (e) { sink(e) }`
 // after `throw RuntimeException(userInput)` is a real flow in real Kotlin
 // (wrap-and-rethrow is the idiom InsecureShop itself uses), and the
@@ -25,7 +25,7 @@
 // which is exactly the half a thrown-object-only binding would drop.
 // kosi:want flow source=untrusted-input sink=ssrf fn=~visibleThrowCarries mode=resolved
 //
-// The negative half the phase names: a handler for a throw whose argument
+// The negative half the change names: a handler for a throw whose argument
 // is CLEAN must not report. A visible clean throw SUPPRESSES the unknown
 // seed (the thrown value is known), so neither binding can carry a fact.
 // kosi:want-not flow source=untrusted-input sink=ssrf fn=~cleanThrowStaysClean

@@ -15,7 +15,7 @@ val coords = File(rootProject.projectDir, "coords.txt").readLines()
 // direct-only classpath leaves the transitive tree (appcompat without
 // fragment/core, ktor without kotlinx) unattached — InsecureShop's
 // activities then degrade with MISSING_DEPENDENCY_SUPERCLASS and its
-// finding floor measures zero against a warm-looking classpath (P14).
+// finding floor measures zero against a warm-looking classpath.
 fun ResolvedDependency.walk(seen: MutableSet<String>) {
     val id = "$moduleGroup:$moduleName:$moduleVersion"
     if (seen.add(id)) children.forEach { it.walk(seen) }
@@ -37,7 +37,7 @@ tasks.register("resolveAll") { doLast {
             attribute(libraryElements, "aar")
             attribute(category, "library")
         } else {
-            // P16 §5: an ATTRIBUTE-LESS detached configuration cannot select
+            // an ATTRIBUTE-LESS detached configuration cannot select
             // a variant from multi-variant Gradle Module Metadata — guava
             // (jre/android), robolectric, the compose KMP roots all failed
             // here with VariantSelectionByAttributesException, so their
@@ -54,9 +54,9 @@ tasks.register("resolveAll") { doLast {
         val seen = linkedSetOf<String>()
         dep.resolvedConfiguration.firstLevelModuleDependencies.forEach { it.walk(seen) }
         seen.forEach { println("resolved $it") }
-        // P16 §5: dependency metadata resolution does NOT download artifacts
+        // dependency metadata resolution does NOT download artifacts
         // — walking the module tree left BINARY files undownloaded, so the
-        // cache held .module/.pom (and sometimes a sources jar) with no jar
+        // cache held.module/.pom (and sometimes a sources jar) with no jar
         // or AAR anywhere on disk, and kosi honestly reported the coordinate
         // unlocatable. resolve() forces every artifact of the selected
         // variant to the cache, which is the whole point of warming.

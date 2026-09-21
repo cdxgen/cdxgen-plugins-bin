@@ -7,7 +7,7 @@ import io.cdxgen.kosi.schema.FlowSlice
 import io.cdxgen.kosi.schema.KosiReport
 
 /**
- * P7/P8 report-derived metrics the gates read. Everything here is computed
+ * Report-derived metrics the gates read. Everything here is computed
  * from the REPORT (the artifact production publishes) with denominators
  * carried alongside numerators — an unbroken-down fraction is not a result.
  */
@@ -46,7 +46,7 @@ object EndpointMetrics {
     }
 }
 
-/** P8 crypto metric helpers: mapping coverage keys and crypto-flow classification. */
+/** Crypto metric helpers: mapping coverage keys and crypto-flow classification. */
 object CryptoMetrics {
 
     /**
@@ -68,7 +68,7 @@ object CryptoMetrics {
      * A crypto-flow slice. The predicate itself lives in the schema module
      * (`CryptoFlow`) because the taint engine's `--dataflow crypto` filter
      * reads the same one: this bench counter and that filter answer one
-     * question, so they are one piece of code (P22's rule, P23 §0's R139).
+     * question, so they are one piece of code (the rule, ).
      */
     fun isCryptoFlow(slice: FlowSlice): Boolean = io.cdxgen.kosi.schema.CryptoFlow.isCryptoFlow(slice)
 

@@ -1,9 +1,9 @@
 // The Android scope shapes the pinned repos actually contain:
-// viewModelScope.launch {} and LaunchedEffect. P17: the classpath is PINNED
+// viewModelScope.launch {} and LaunchedEffect. the classpath is PINNED
 // (classpath.txt — the committed coroutines artifact plus the committed
 // androidx stub jar), because the golden digests proved machine-dependent
 // while resolution read the build-file coordinates out of the machine-local
-// Gradle cache (R105). The builder bodies are analysed regardless (the
+// Gradle cache. The builder bodies are analysed regardless (the
 // lowering inlines them by name), so the taint question is answerable
 // either way.
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~cleanViewModel known-fail=syntax:1

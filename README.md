@@ -167,17 +167,19 @@ Rusi can merge custom JSON modeling with the built-in stable data-flow pack thro
 
 ### kosi
 
-Kotlin Source Inspector (kosi) is a Kotlin code analysis engine for evidence collection — the Kotlin sibling of golem (Go) and rusi (Rust). It answers, for a Kotlin project, which sources/modules/source sets exist (Gradle, Maven, Android variants, Kotlin Multiplatform — parsed as text, never executed), which imports, declarations and library calls occur, and what the declared/effective Kotlin language versions are. Phase 0 ships the syntax tier; resolved call-graph, taint, crypto and endpoint evidence land in later phases on the same `kosi/1` report contract.
+Kotlin Source Inspector (kosi) is a Kotlin/JVM code analysis engine for evidence collection — the Kotlin sibling of golem (Go) and rusi (Rust). It answers, for a Kotlin project, which sources/modules/source sets exist (Gradle, Maven, Android variants, Kotlin Multiplatform — parsed as text, never executed), which imports, declarations and library calls occur, which functions call which, which untrusted data reaches dangerous calls, which endpoints the application exposes, and what crypto it uses. Two tiers — syntax and resolved — share one `kosi/1` report contract.
 
 **What it does:**
 
 - **Syntax backend**: PSI-only parsing via kotlin-compiler-embeddable with no classpath and no build execution; emits deterministic, sorted, byte-identical `modules`, `packages`, `files`, `imports`, `declarations`, `usages`, `diagnostics` and `stats`
+- **Resolved backend**: Kotlin and Java PSI with type resolution against a classpath, adding the call graph and reachability (`cha`/`sealed`/`rta`/`vta`), field-sensitive interprocedural taint with coroutine and `Flow` propagation, optional taint through dependency bytecode (`--deps`), inbound endpoints for twenty frameworks plus Android manifest components, outbound services/URLs with config-resolved values, and a crypto/CBOM
+- **Honest gaps**: source coverage, unsubstantiated endpoints, depth caps, budget trips and stack overflows are each a named diagnostic with a count, never a silent zero
 - **Version policy**: the analysable language-version band is read from the bundled compiler at runtime; projects declaring older versions are clamped with a `kotlin-language-version` diagnostic rather than refused
 - **Native image**: a GraalVM-built single binary (see `thirdparty/kosi/docs/BUILD.md`)
 
 On platforms without a kosi binary (ppc64le, 32-bit arm) cdxgen falls back to its own JS-side structural Kotlin analysis and, with a JDK 21+ present, to the `kosi-portable.jar`; the gaps are named in `scripts/plugin-platform-support.sh`, never silent.
 
-**Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64 (windows-amd64, windows-arm64 and darwin-amd64 land with the release phase)
+**Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64 (windows-amd64, windows-arm64 and darwin-amd64 are not yet built)
 
 ### cdxui
 

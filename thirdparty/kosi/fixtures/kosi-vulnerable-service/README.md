@@ -1,8 +1,8 @@
 # kosi-vulnerable-service
 
-The `vuln` tier entry (P11): a deliberately vulnerable Kotlin service whose
+The `vuln` tier entry: a deliberately vulnerable Kotlin service whose
 taint crosses a REAL published dependency, making it the honest repo-tier
-population for the P9 `cross-dependency-bytecode` gate.
+population for the `cross-dependency-bytecode` gate.
 
 - `libs/timber-5.0.1.jar` is the `classes.jar` inside the published Timber
   5.0.1 AAR, committed byte for byte. It is never rebuilt and never fetched.

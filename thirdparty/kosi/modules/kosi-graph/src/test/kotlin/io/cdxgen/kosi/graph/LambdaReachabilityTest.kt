@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * R175: an extracted lambda BODY must be reachable from the function that
+ * An extracted lambda BODY must be reachable from the function that
  * installs it.
  *
  * A lambda does not run where it is written. `setOnClickListener { … }`

@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * P24 §4's gate, in test form (rule 9: the measurement moves into the PASS
+ * the gate, in test form (rule 9: the measurement moves into the PASS
  * line). Over every DEEP-tier fixture, at the DEFAULT configuration:
  *
  *  1. **No cap binds.** The five caps 09-PRECISION.md §3 names — the
@@ -66,7 +66,7 @@ class DeepTierTest {
             dataflowMaxSummarySinkEffects = Int.MAX_VALUE,
             // Named in the doc-comment above and left at its default by the
             // first version of this leg, which made the comment a claim the
-            // code did not check (R117's shape, one level up).
+            // code did not check (the shape, one level up).
             maxPathsPerSymbol = Int.MAX_VALUE,
             depsMaxClasses = Int.MAX_VALUE,
         )
@@ -80,7 +80,7 @@ class DeepTierTest {
             for (cap in listOf("access-path-collapse", "slices", "composed-path-depth", "summary-effect-budget", "summary-state-budget")) {
                 if ((truncations[cap] ?: 0) > 0) binding.add("${entry.slug}: $cap=${truncations[cap]}")
             }
-            // P29: the front end's walk budget and stack-overflow skip are
+            // The front end's walk budget and stack-overflow skip are
             // named caps too — a deep fixture (six or more real layers) that
             // tripped either would be degraded, not analysed.
             for (code in listOf(io.cdxgen.kosi.schema.DiagnosticCodes.PSI_DEPTH_CAP, io.cdxgen.kosi.schema.DiagnosticCodes.STACK_OVERFLOW_SKIPPED)) {
@@ -128,11 +128,11 @@ class DeepTierTest {
     }
 
     /**
-     * P28 (R176): `generated-functions` is a POLICY skip, and the two
+     * `generated-functions` is a POLICY skip, and the two
      * vocabularies cannot leak into each other. The witness is a fixture
      * that actually skips generated bodies (the tracker measured 21 on
      * layered-app, 11 on class-delegation) — an invariant over fixtures
-     * that skip nothing would be vacuous, exactly the R63 shape. Restore
+     * that skip nothing would be vacuous, exactly the shape. Restore
      * the defect (generated-functions merged into `truncations{}`) and the
      * first assertion fails by naming it.
      */
@@ -145,18 +145,18 @@ class DeepTierTest {
         assertEquals(
             null,
             truncations["generated-functions"],
-            "a policy skip reported as a truncation: $truncations (R176)",
+            "a policy skip reported as a truncation: $truncations",
         )
         val skipped = skips["generated-functions"] ?: 0
         assertTrue(
             skipped > 0 || report.stats.policySkips["generated-functions"] ?: 0 > 0,
             "the witness fixture skips no generated body; the invariant is vacuous — pick a fixture that does " +
-                "(tracker measured 21 on layered-app at P27)",
+                "(tracker measured 21 on layered-app)",
         )
         assertEquals(
             skipped,
             report.stats.policySkips["generated-functions"] ?: 0,
-            "dataFlow.stats.skips and stats.policySkips are one fact; two answers is the R137 shape",
+            "dataFlow.stats.skips and stats.policySkips are one fact; two answers is the shape",
         )
     }
 

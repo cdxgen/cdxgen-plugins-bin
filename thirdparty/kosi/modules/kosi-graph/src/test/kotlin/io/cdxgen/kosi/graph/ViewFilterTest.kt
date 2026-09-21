@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
  * bridge, its hop count and its traversed packages are all pinned here,
  * against the filter's real seam: the complete graph as the walk produces it
  * (local nodes plus external ones) with one stdlib middle node carrying an
- * edge to workspace code, the shape dispatch replay (P5) grows into.
+ * edge to workspace code, the shape dispatch replay grows into.
  */
 class ViewFilterTest {
 

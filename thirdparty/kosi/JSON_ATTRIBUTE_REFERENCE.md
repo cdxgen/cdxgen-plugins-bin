@@ -30,13 +30,13 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | `imports` | ImportUsage[] | canonical imports | library usage |
 | `declarations` | Declaration[] | canonical declarations | symbol indexes |
 | `usages` | LibraryUsage[] | calls/references by name | cdxgen-critical |
-| `securitySignals` | SecuritySignal[] | non-flow findings (later phases) | findings UIs |
-| `crypto` | CryptoEvidence | CBOM evidence (P8) | CBOM |
+| `securitySignals` | SecuritySignal[] | non-flow findings (not yet populated) | findings UIs |
+| `crypto` | CryptoEvidence | CBOM evidence | CBOM |
 | `callGraph` | CallGraph? | null until a call-graph mode runs | reachability |
 | `dataFlow` | DataFlowEvidence? | null until taint runs | slices |
-| `apiEndpoints` | ApiEndpoint[] | inbound endpoints (P7) | SaaSBOM |
-| `services` | ServiceRef[] | outbound deps (P7) | services[] |
-| `urls` | UrlEvidence[] | URL/host/JDBC strings (P7) | URL identification |
+| `apiEndpoints` | ApiEndpoint[] | inbound endpoints | SaaSBOM |
+| `services` | ServiceRef[] | outbound deps | services[] |
+| `urls` | UrlEvidence[] | URL/host/JDBC strings | URL identification |
 | `diagnostics` | Diagnostic[] | machine-readable conditions | silence is a bug |
 | `stats` | object | counters | scale judgement |
 
@@ -72,10 +72,10 @@ Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
 `classpathFile` (one jar path per line, `#` comments), `jdkHome`,
-`pretty`, `format`, plus the P9/P10 flags: `deps` (`--deps`: the
+`pretty`, `format`, plus the flags: `deps` (`--deps`: the
 dependency-jar tier — implied by `--dataflow security-deps`),
 `depsMaxClasses` (the tier's class budget, 500), `maxAnalysisSeconds`
-and `maxRssMb` (P10 budgets; `null` = off — an absent key IS off — a
+and `maxRssMb` (budgets; `null` = off — an absent key IS off — a
 tripped budget degrades the run with a named diagnostic and the partial
 report still ships).
 An explicit `--classpath`/`--classpath-file` replaces offline resolution
@@ -85,7 +85,7 @@ Gradle/Maven caches and `build/libs`. `--jdk-home` names the JDK module and
 defaults to the running JVM. Unknown flags are a usage error, never a silent
 degrade.
 
-**Which option values travel (P18).** The report records every effective
+**Which option values travel.** The report records every effective
 option verbatim — reproduction needs the real jar paths and JDK home. The
 DIGEST goldens are the consumer that cannot: `classpath` entries and
 `jdkHome` are absolute by construction when set, and an explicitly absolute
@@ -197,33 +197,33 @@ rather than a negative expectation that passes vacuously.
 | `kotlin-api-version` | warning | declared apiVersion above the language version; clamped |
 | `no-build-files` | info | no Gradle/Maven build files; analysed as a plain source tree |
 | `no-sources` | warning | no Kotlin/Java sources under the discovered roots |
-| `source-coverage-gap` | warning | P28 §4: discovery collected under half of the ≥20 Kotlin/Java files present under the analysed root (`stats.sourceCoverage{}` carries the ratio) — modules outside the Maven/Gradle source-root convention may be missing from every downstream result |
-| `classpath-strategy-conflict` | error | P28 §1: a forced `--classpath-strategy` contradicts the explicit classpath flags (refused before the run) |
-| `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists. P29: also names a file whose text the platform's file-type layer classified as plain text (a file of several MB), so it cannot be parsed as Kotlin |
-| `psi-depth-cap` | warning | P29: a file's syntax nests deeper than the 2,000-level walk budget, so its recursive walks (declarations, usages, KIR lowering) were NOT run; the file stays in `files[]`, everything derived from walking its syntax is absent, and the message names the file and its measured depth (`count` 1 per file). The budget and the measurements behind it are in the P29 report; the dataflow tier also counts a `stack-overflow` truncation in `stats.truncations{}` if the engine itself ever overflows |
-| `stack-overflow-skipped` | error | P29: analysing this file (or, in the dataflow tier, this function) threw `StackOverflowError`; the unit was skipped, the run completed for every other file, and the message names it. Before P29 the same error took the whole report down |
+| `source-coverage-gap` | warning | discovery collected under half of the ≥20 NON-TEST Kotlin/Java files present under the analysed root (`stats.sourceCoverage{}` carries both ratios) — modules outside the Maven/Gradle source-root convention may be missing from every downstream result |
+| `classpath-strategy-conflict` | error | a forced `--classpath-strategy` contradicts the explicit classpath flags (refused before the run) |
+| `unreadable-source` | error | file could not be read; also emitted with a `count` when the resolved tier's session would not open collected files that `files[]` still lists. also names a file whose text the platform's file-type layer classified as plain text (a file of several MB), so it cannot be parsed as Kotlin |
+| `psi-depth-cap` | warning | a file's syntax nests deeper than the 2,000-level walk budget, so its recursive walks (declarations, usages, KIR lowering) were NOT run; the file stays in `files[]`, everything derived from walking its syntax is absent, and the message names the file and its measured depth (`count` 1 per file). The budget and the measurements behind it are in the report; the dataflow tier also counts a `stack-overflow` truncation in `stats.truncations{}` if the engine itself ever overflows |
+| `stack-overflow-skipped` | error | analysing this file (or, in the dataflow tier, this function) threw `StackOverflowError`; the unit was skipped, the run completed for every other file, and the message names it. Previously, the same error took the whole report down |
 | `java-source-not-parsed` | warning | Java sources are in `files[]` but not parsed at the syntax tier; `count` is how many. Never emitted by the resolved tier, which parses Java PSI through the same symbols |
 | `classpath-partial` | warning | the resolved tier could not build a complete classpath: offline resolution names every missing `group:artifact:version` coordinate (`count` is how many), and a missing JDK home is reported the same way |
-| `resolution-errors` | warning | frontend resolution reported ERROR-severity diagnostics in a file; `message` summarises per-checker counts, `count` is the total. P18: only ERROR-severity factories count (warning-severity ones like DEPRECATION used to be included, drowning the signal), and the bundled corpus entries ratchet their fixtures' error classes via corpus.toml `tolerated_resolution_errors` — an undeclared class fails the row (R110: a stub that stopped typechecking passed every want) |
+| `resolution-errors` | warning | frontend resolution reported ERROR-severity diagnostics in a file; `message` summarises per-checker counts, `count` is the total. only ERROR-severity factories count (warning-severity ones like DEPRECATION used to be included, drowning the signal), and the bundled corpus entries ratchet their fixtures' error classes via corpus.toml `tolerated_resolution_errors` — an undeclared class fails the row (a stub that stopped typechecking passed every want) |
 | `symbol-resolution-failed` | warning | symbol operations threw during resolution (`count` is how many); the affected declarations carry text-derived evidence only, so a wholesale resolution breakage cannot look like a clean report |
 | `version-override` | info | an explicit `--language-version`/`--jvm-target` flag overrides a module's declared value; the message names both |
-| `lowering-failed` | warning | the P2 lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
+| `lowering-failed` | warning | the lowering could not perform a construct (`count` is how many functions were affected); the message itemises the failures by construct next to the function count they were computed over, matching `stats.loweringFailures{}` and `stats.functionsLowered` |
 | `callgraph-timeout` | warning | an `auto` callgraph fell back down the chain (vta -> rta -> sealed) after exceeding the deterministic work budget derived from `--callgraph-timeout`; the message names both the algorithm that gave up and the one that produced the graph |
 | `callgraph-unresolved-calls` | warning | call sites that resolved to no callee and emit no edge (`count` is how many) |
 | `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
-| `fixpoint-cap` | warning | the P4 taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
+| `fixpoint-cap` | warning | the taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
-| `summary-iteration-cap` | warning | the P5 summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
+| `summary-iteration-cap` | warning | the summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
 | `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
-| `deps-bodyless` | info | P9 `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
-| `deps-class-not-found` | info | P9: workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
-| `deps-class-limit` | warning | P9/R70: the `--deps-max-classes` budget capped the LOWERED dependency set; `count` is the number of selected classes CUT (named, first few in the message), never a silent zero of the tier — R70 made the budget bound the lowered set, not the selection |
-| `bytecode-unlowered` | warning | P9: constructs the bytecode lowering declined, itemised in the message and merged into `stats.loweringFailures{}` under `bytecode:` keys; every affected method is treated as body-less and excluded, never summarised from a half-body |
-| `analysis-time-budget` | warning | P10: the `--max-analysis-seconds` budget tripped; the run degraded WITHOUT discarding computed evidence (`count` is functions skipped after the trip) |
-| `rss-budget` | warning | P10: the `--max-rss-mb` budget tripped; same degradation contract |
-| `callgraph-failed` | error | P10, golem's guardAlgorithm lesson: the call graph crashed and is ABSENT from the report — named as such while the already-computed evidence still ships; never swallowed into a green result |
-| `compile-backend-gap` | warning | P9: `--backend compile` is a declared gap — kosi cannot execute the analysed build offline for generated sources, so the report is the RESOLVED tier's and no generated declaration appears in it |
+| `deps-bodyless` | info | `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
+| `deps-class-not-found` | info | workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
+| `deps-class-limit` | warning | the `--deps-max-classes` budget capped the LOWERED dependency set; `count` is the number of selected classes CUT (named, first few in the message), never a silent zero of the tier; the budget bounds the LOWERED set, not the selection |
+| `bytecode-unlowered` | warning | constructs the bytecode lowering declined, itemised in the message and merged into `stats.loweringFailures{}` under `bytecode:` keys; every affected method is treated as body-less and excluded, never summarised from a half-body |
+| `analysis-time-budget` | warning | the `--max-analysis-seconds` budget tripped; the run degraded WITHOUT discarding computed evidence (`count` is functions skipped after the trip) |
+| `rss-budget` | warning | the `--max-rss-mb` budget tripped; same degradation contract |
+| `callgraph-failed` | error | the call graph crashed and is ABSENT from the report — named as such while the already-computed evidence still ships; never swallowed into a green result |
+| `compile-backend-gap` | warning | `--backend compile` is a declared gap — kosi cannot execute the analysed build offline for generated sources, so the report is the RESOLVED tier's and no generated declaration appears in it |
 
 ## stats
 
@@ -250,29 +250,34 @@ taint worklist actually ran over (the same denominator rule) —
 `sourceCount`/`sinkCount` are the source/sink SITES the model pack matched in
 analysed code (not pack sizes; resolution regressions shrink them) —
 `sliceCount`, `crossDependencySliceCount`, `crossModuleSliceCount`,
-`reachableSliceCount`, `sccsProcessed` beside `sccIterationCapHits` (the P5
-summary fixpoint's population and its cap count — a cap without its
-population is not a result), `suspendCrossingSliceCount` (P6: slices whose
+`reachableSliceCount`, `sccsProcessed` beside `sccIterationCapHits` (the summary fixpoint's population and its cap count — a cap without its
+population is not a result), `suspendCrossingSliceCount` (slices whose
 source and sink are separated by a suspend boundary),
 `truncations{}`,
-`bodylessRecords` (P9: dependency records with no body — excluded from the
+`bodylessRecords` (dependency records with no body — excluded from the
 tier entirely, the population every dependency denominator excludes),
-`dependencyClasses` / `dependencyFunctions` (P9: classes lowered from jars
+`dependencyClasses` / `dependencyFunctions` (classes lowered from jars
 and methods lowered WITH bodies — the tier's denominators),
 `degraded` (`kotlin-version` when a version mismatch coincides with heavy
 resolution fallout — never read such a report as facts about the code),
-`classpath{}` (P28 §1: the acquisition record — `strategy` names the ONE
+`classpath{}` (the acquisition record — `strategy` names the ONE
 strategy that produced the attached classpath or `none` when nothing
 attached, `entries` counts the attached jars, `missing` the coordinates a
 fired strategy could not locate, and `attempts[]` records every strategy
 the chain tried with whether it fired; the vocabulary is
 `explicit|file|jars|cache|none`, forced with `--classpath-strategy`. A
 classpath-less run and a run that found nothing are the same sparse graph
-and opposite facts — R173/R179), and
-`sourceCoverage{}` (P28 §4: `discovered` against `present` — files[] against
+and opposite facts), and
+`sourceCoverage{}` (`discovered` against `present` — files[] against
 the same extensions under the analysed root under the collector's own
-exclusion policy, with `ratio`. A large gap also fires the
-`source-coverage-gap` diagnostic: less than half of ≥20 present files).
+exclusion policy — plus `testPresent`, how many of those sit under a test
+directory, and two ratios. `ratio` is `discovered/present`, what is on
+disk; `nonTestRatio` divides by the non-test files only, which is what
+DISCOVERY can be judged against, because a source root is a MAIN source
+root and test files are present-but-not-sought. A repository with a large
+test suite would otherwise be indistinguishable from one whose modules were
+dropped, and those are opposite facts. The `source-coverage-gap` diagnostic
+reads `nonTestRatio`: less than half of ≥20 present non-test files).
 
 **Deliberate deviation from the v1 sketch, for the PR:** the
 `analysisMillis{}` and `peakRssBytes` keys are NOT emitted. Embedding a
@@ -292,7 +297,7 @@ the pattern's segments are a suffix of the symbol's segments
 annotations both use it; a build-time test fails the build when a shipped
 pattern can never match any renderer output.
 
-## callGraph — CallGraph (resolved tier, P3)
+## callGraph — CallGraph (resolved tier)
 
 Published when `--backend resolved` runs and `--callgraph` is not `none`;
 `null` otherwise (including every syntax-tier run, which resolves nothing
@@ -336,7 +341,7 @@ definition of the option).
 | --- | --- | --- |
 | `id` | string | `edge-000001...` |
 | `sourceId`, `targetId` | string | caller -> callee; both always present in `nodes[]` |
-| `callType` | string | `static` (dispatch-free: constructors, operators, extensions, top-level, private, final, object/companion/enum members), `receiver-typed` (single resolved dispatch target on an open owner, or a library leaf), `interface-cha` (open-hierarchy candidate set), `sealed-exact` / `sealed-bounded` (closed target set of a sealed hierarchy or enum), `lambda-inlined` (the retained evidence edge of a scope-function inlining), `collapsed` (a path a view filter cut, re-bridged), `framework-registered`, `override`, `higher-order`, `suspend`, `structured-concurrency`, `reflective`, `java-interop`, `external` (the last six are reserved vocabulary; each populating phase updates this line) |
+| `callType` | string | `static` (dispatch-free: constructors, operators, extensions, top-level, private, final, object/companion/enum members), `receiver-typed` (single resolved dispatch target on an open owner, or a library leaf), `interface-cha` (open-hierarchy candidate set), `sealed-exact` / `sealed-bounded` (closed target set of a sealed hierarchy or enum), `lambda-inlined` (the retained evidence edge of a scope-function inlining), `collapsed` (a path a view filter cut, re-bridged), `framework-registered`, `override`, `higher-order`, `suspend`, `structured-concurrency`, `reflective`, `java-interop`, `external` (the last six are reserved vocabulary; this line is updated as each is populated) |
 | `line` | int | the call site's line (0 for synthesized and collapsed edges) |
 | `method` | string? | callee simple name |
 | `candidateCount` | int? | dispatch target count when the site had more than one |
@@ -367,7 +372,7 @@ then stdlib, then dependency; edges classify by target): `localNodes`,
 `stdlibNodes`, `dependencyNodes`, `syntheticNodes`, and the same four for
 edges. The parts sum to the totals — the promotion gate checks that.
 
-### --sarif-out <file> (sidecar, P11)
+### --sarif-out <file> (sidecar)
 
 SARIF 2.1.0 export of `dataFlow.slices[]`: one RULE per slice rule id, one
 RESULT per slice — the sink is the result location, the trace is the
@@ -385,16 +390,16 @@ scope that reaches it): `{"maxPathsPerSymbol":3,"symbols":[{"canonicalName":
 edge id exists in the report and the walk is connected — the same invariant
 the connectivity gate checks, published for consumers.
 
-## dataFlow — DataFlowEvidence (resolved tier, P4 + P5/P6)
+## dataFlow — DataFlowEvidence (resolved tier)
 
 Published when `--backend resolved` runs and `--dataflow` is not `none`
 (default `security`); `null` at the syntax tier, which has no KIR and no flow
-engine (defect 1 in the phase tracker). The engine is field-sensitive taint over each
+engine (defect 1 in the change tracker). The engine is field-sensitive taint over each
 lowered function's CFG, iterated with a worklist to a real fixpoint
-(`kosi-flow`, compiler-free), plus P5's interprocedural summaries: bottom-up
+(`kosi-flow`, compiler-free), plus the interprocedural summaries: bottom-up
 over the call graph's SCC condensation, applied at call sites AFTER the pack
 (in pack, then computed summary, then `--unknown-call` default order) and
-joined per dispatch target under the run's `--callgraph` mode. P6 routes
+joined per dispatch target under the run's `--callgraph` mode. The engine routes
 coroutine builders through the same machinery: `launch`/`async`/
 `withContext`/`runBlocking`/`LaunchedEffect` and the flow operators inline
 their lambda bodies at LOWERING time (the body's taint is the caller's),
@@ -407,7 +412,7 @@ intersects the slices with the call graph's reachability from the declared
 roots and keeps only the survivors (their `pathKind` is unchanged — the
 intersection IS the reachability fact; `stats.reachableSlices` equals
 `sliceCount` there); `--dataflow crypto` and `--dataflow all` run the same
-pack today; `security-deps` behaves as `security` until P9.
+pack today; `security-deps` behaves as `security` unless `--deps` is in effect.
 
 Everything that decides a category is DATA: the shipped model pack
 (`kosi-models/resources/models/security-pack-v0.json`, merged with user packs
@@ -427,21 +432,21 @@ first parameter is index 0.
 | `sourceName`, `sinkName` | string | callee FQNs matched from the pack |
 | `sourceFunction`, `sinkFunction` | string | the function each END lives in — two different functions (and modules) for an interprocedural slice |
 | `sourceCategory`, `sinkCategory` | string | pack categories (independent: `untrusted-input` can reach `log-injection`) |
-| `sourceParameter` | string? | P20 §1: for a slice that entered through an endpoint HANDLER's parameter, the value-parameter it entered through — `#0` is the first non-receiver parameter. `null` for every other birth. Before this field an endpoint-rooted slice could say "this handler is reachable from untrusted input" but never WHICH input |
-| `sourceTransport` | string? | P20 §1: the transport that parameter's annotation names — `path`, `query`, `header`, `cookie`, `form`, `body` (the endpoints pack's `parameterAnnotations[].kind`). `null` when the handler (or framework) names no annotation for it |
+| `sourceParameter` | string? | for a slice that entered through an endpoint HANDLER's parameter, the value-parameter it entered through — `#0` is the first non-receiver parameter. `null` for every other birth. Before this field an endpoint-rooted slice could say "this handler is reachable from untrusted input" but never WHICH input |
+| `sourceTransport` | string? | the transport that parameter's annotation names — `path`, `query`, `header`, `cookie`, `form`, `body` (the endpoints pack's `parameterAnnotations[].kind`). `null` when the handler (or framework) names no annotation for it |
 | `taintKinds` | string[] | the categories travelling on the trace |
 | `nodeIds[]`, `edgeIds[]` | string[] | the trace: `edgeIds` form a connected walk from source to sink (asserted on every slice by `kosi golden` and the promotion gate) |
 | `pathLength` | int | `edgeIds.size` |
 | `elided` | boolean? | true when the walk was cut — the trace cap (`--dataflow-max-trace-nodes`), a summary whose composed path was stabilized (`pathKind` is then `partial`); the endpoints survive and an `elided`-kind edge keeps the walk connected |
-| `pathKind` | string | P22 §2: what the slice's trace IS — `complete` (a full source→sink walk), `partial` (the walk was elided; endpoints guaranteed, the middle cut), `symbol-only` (no provable path; the finding stands on the symbol match alone — measured population zero on the whole corpus today, reserved so the vocabulary is closed). Replaces `reachableFromRoots` (false in every shipped slot, true by construction in the one mode that published it — the mode, not the slice, carried the information) and `rootWitness` (null everywhere). The depth report's reachability table reads this field |
-| `frames[]` | object[] | P24 §3: the trace as named hops — ordered `(function, file, line, role)`, source first, sink last, one per hop the VALUE took (callee-internal hops splice in at every summary boundary, so a six-frame chain names all six). `role` is from the closed vocabulary `FrameRole`: `source`, `move`, `call`, `return`, `dispatch`, `summary`, `sanitizer-not-applied`, `sink`. `dispatch` frames carry the per-hop evidence `dispatchWidth` (targets considered), `dispatchTargets[]` (applied) and `dispatchNarrowedBy`, the closed narrowing vocabulary: `single-impl` (the interface has one implementation), `vta` (the receiver's construction type), `di-binding` (P25 §2: the survivors are all container-managed and something was dropped — an interface with three implementations and ONE Spring/Hilt/CDI binding is not an interface with one implementation, and the two are different evidence), or absent when nothing narrowed. Empty only where `pathKind` is `symbol-only` (no walk, no hops to name). The corpus reads this list for the deep tier's `frames=N` and `via=fn:...` expectations; cdxgen renders it as `callstack` evidence |
-| `framesCutBy` | string? | P24 §3: when the frame list is not the whole walk, the cap that cut it (today `trace-nodes`) — the frame-list form of the PARTIAL contract. `null` on a complete list |
+| `pathKind` | string | what the slice's trace IS — `complete` (a full source→sink walk), `partial` (the walk was elided; endpoints guaranteed, the middle cut), `symbol-only` (no provable path; the finding stands on the symbol match alone — measured population zero on the whole corpus today, reserved so the vocabulary is closed). Replaces `reachableFromRoots` (false in every shipped slot, true by construction in the one mode that published it — the mode, not the slice, carried the information) and `rootWitness` (null everywhere). The depth report's reachability table reads this field |
+| `frames[]` | object[] | the trace as named hops — ordered `(function, file, line, role)`, source first, sink last, one per hop the VALUE took (callee-internal hops splice in at every summary boundary, so a six-frame chain names all six). `role` is from the closed vocabulary `FrameRole`: `source`, `move`, `call`, `return`, `dispatch`, `summary`, `sanitizer-not-applied`, `sink`. `dispatch` frames carry the per-hop evidence `dispatchWidth` (targets considered), `dispatchTargets[]` (applied) and `dispatchNarrowedBy`, the closed narrowing vocabulary: `single-impl` (the interface has one implementation), `vta` (the receiver's construction type), `di-binding` (the survivors are all container-managed and something was dropped — an interface with three implementations and ONE Spring/Hilt/CDI binding is not an interface with one implementation, and the two are different evidence), or absent when nothing narrowed. Empty only where `pathKind` is `symbol-only` (no walk, no hops to name). The corpus reads this list for the deep tier's `frames=N` and `via=fn:...` expectations; cdxgen renders it as `callstack` evidence |
+| `framesCutBy` | string? | when the frame list is not the whole walk, the cap that cut it (today `trace-nodes`) — the frame-list form of the PARTIAL contract. `null` on a complete list |
 | `kind` (nodes) | string | `source`, `sink`, or the propagation role — now including `suspend` (a coroutine boundary the trace crosses) |
 | `sanitizerNodeIds` | string[] | reserved for sanitizer-aware traces |
 | `sinkArgumentIndex` | int | which sink argument was tainted (the pack convention above) |
 | `accessPath` | string | the tainted register (and path suffix) at the sink, `base::field` form |
-| `crossesModule`, `crossesDependency` | boolean | computed from the slice ENDS: the source and sink functions' module paths and purls (P5) — true exactly when those differ |
-| `origins[]` | string[] | sorted distinct summary origins the trace crossed at interprocedural boundaries: `computed`, `pack`, `default`, `recursive-approx` (P5). `pack` on a source birth is provenance, not a boundary; the default-origin gate counts BOUNDARY origins (`default`/`computed`/`recursive-approx`) only |
+| `crossesModule`, `crossesDependency` | boolean | computed from the slice ENDS: the source and sink functions' module paths and purls — true exactly when those differ |
+| `origins[]` | string[] | sorted distinct summary origins the trace crossed at interprocedural boundaries: `computed`, `pack`, `default`, `recursive-approx`. `pack` on a source birth is provenance, not a boundary; the default-origin gate counts BOUNDARY origins (`default`/`computed`/`recursive-approx`) only |
 | `ruleId`, `ruleName`, `description`, `severity`, `confidence`, `riskScore` | | `severity` comes from the matched SINK PACK ENTRY (severity as data), `confidence` is `high` for pack-matched (resolved) sites, `riskScore` derives from severity |
 | `flowKey` | string | SHA-256 over the flow's endpoints and trace — stable across runs for suppression |
 
@@ -462,9 +467,9 @@ The endpoints are guaranteed: `sourceId` always names a node of kind
 `source` and `sinkId` a node of kind `sink`. When the backward walk cannot
 reach the source — the trace cap, a cycle, or a transfer that moved a fact
 without recording provenance — the source is prepended and the slice is
-marked `elided` rather than published as a shorter complete trace (R54).
+marked `elided` rather than published as a shorter complete trace.
 
-### crossesDependency vs crossesModule (P9)
+### crossesDependency vs crossesModule
 
 The two flags answer different questions and are computed from different
 facts. `crossesModule` compares the two slice ENDS' module paths (a
@@ -485,19 +490,19 @@ and catches only an id-assignment defect), `integrityViolations` (slices
 failing any invariant, including the endpoint-kind check that `connectivity`
 cannot see; 0 is the gate, and this is the one with teeth). All counts are
 computed from the emitted slices; nothing here is a constant a gate reads
-back (R55). Since P5:
+back. Also:
 `summariesComputed`/`summariesByOrigin{}` — the summary table's size by
 origin (`computed`, `pack`, `recursive-approx`); `summaryCrossingSlices` —
 slices whose trace crossed at least one summary BOUNDARY;
 `defaultOriginSlices` — those whose boundary origins are ALL `default`
 (blanket propagation carried them); `dispatchJoins{}` — the histogram of
 dispatch-join widths at virtual sites; `suspendCrossingSlices` — slices
-whose trace crosses a suspend boundary (P6). Since P9:
+whose trace crosses a suspend boundary. Also:
 `bytecodeSummaries` — dependency summaries (origin `bytecode`) that a
 workspace call site actually applied with a taint move — the gate's
 producer-named numerator, never a count of every jar function summarised;
 `crossDependencyBytecodeSlices` — slices whose trace enters a jar the tier
-lowered AND whose boundary origins carry `bytecode`. Since P24:
+lowered AND whose boundary origins carry `bytecode`. Also:
 `maxObservedDepth` — the deepest named-hop count any published slice
 carries ("how deep does kosi actually go" as a report field, not a review
 anecdote); `depthHistogram{}` — slice count by frame count, exact buckets;
@@ -510,12 +515,12 @@ gate asserts. Narrowing modes (`reachable`, `crypto`) recompute the depth
 measurements from the surviving slices and leave the run-level
 `dispatchWidthHistogram`/`truncations` alone.
 
-### dataFlow.summaries[] — FlowSummary (P5)
+### dataFlow.summaries[] — FlowSummary
 
 One entry per workspace function the summary fixpoint ran over (origin
 `computed`, or `recursive-approx` when its SCC hit the iteration budget),
 plus one per pack entry that actually moved taint at a call site (origin
-`pack`, shaped by the pack entry itself), plus — P9, `--deps` — one per
+`pack`, shaped by the pack entry itself), plus — under `--deps` — one per
 dependency summary a workspace call site actually applied (origin
 `bytecode`: a fixpoint over a jar's lowered body; the tier's approximation
 state stays visible in `stats.sccIterationCapHits` over `stats.sccsProcessed`).
@@ -527,16 +532,16 @@ function's parameter list (dispatch receiver first when present).
 | `functionId`, `function` | string | the function's canonical name (or the pack entry's pattern for pack-origin summaries) |
 | `parameterNames[]`, `parameterTypes[]` | string[] | the parameter list the `p<i>` ids index |
 | `paramToReturn[]` | string[] | parameters whose taint reaches the return value |
-| `paramToReturnFields[]` | string[] | P24 §2: parameter-object FIELDS reaching the return's same field, as `p<i>.<suffix>` — `fun get(raw: String) = Session(token = raw)` publishes `p1.token`: the callee stored the argument into the returned object's field, and the caller reads it back off the result |
-| `sourceFieldWrites[]` | string[] | P24 §2c: taint born at a source INSIDE the callee and stored into parameter i's object, as `p<i>.<suffix>:<category>` — after the call, the caller's argument carries the write (`fun taint(job: Job) { job.command = readLine() }`) |
-| `invokes[]` | string[] | P24 §2d: what the body passes when it invokes a function-valued parameter — `p<j>(arg<k>)<-p<i>` (my parameter i's taint) or `p<j>(arg<k>)<-source:<category>` (a source born in me). This is the channel that lets a passed lambda's body consume taint that never leaves the callee |
+| `paramToReturnFields[]` | string[] | parameter-object FIELDS reaching the return's same field, as `p<i>.<suffix>` — `fun get(raw: String) = Session(token = raw)` publishes `p1.token`: the callee stored the argument into the returned object's field, and the caller reads it back off the result |
+| `sourceFieldWrites[]` | string[] | taint born at a source INSIDE the callee and stored into parameter i's object, as `p<i>.<suffix>:<category>` — after the call, the caller's argument carries the write (`fun taint(job: Job) { job.command = readLine() }`) |
+| `invokes[]` | string[] | what the body passes when it invokes a function-valued parameter — `p<j>(arg<k>)<-p<i>` (my parameter i's taint) or `p<j>(arg<k>)<-source:<category>` (a source born in me). This is the channel that lets a passed lambda's body consume taint that never leaves the callee |
 | `paramToParam[]` | string[] | write effects `p<i>->p<j>` (parameter i's taint lands on parameter j) |
 | `paramToReceiver[]` | string[] | parameters whose taint is stored into the receiver |
 | `paramToSink{}` | map<string, int[]> | parameter -> argument indexes of the sinks it reaches inside the callee |
 | `sourceReturns[]` | string[] | categories born at a source call inside the body and returned |
 | `sanitizes[]` | string[] | categories a pack sanitizer inside the body clears |
 | `accessPaths{}` | map<string, string> | parameter -> the receiver access-path suffixes its taint is written to (`\|`-separated) |
-| `origin` | string | `computed` (a real fixpoint over the body), `pack` (a pack entry supplied the effect), `bytecode` (P9: a fixpoint over a dependency jar's lowered class file), `recursive-approx` (the workspace SCC hit its iteration budget; last iterate), `default` (the `--unknown-call` fallback at a call site, no body seen) |
+| `origin` | string | `computed` (a real fixpoint over the body), `pack` (a pack entry supplied the effect), `bytecode` (a fixpoint over a dependency jar's lowered class file), `recursive-approx` (the workspace SCC hit its iteration budget; last iterate), `default` (the `--unknown-call` fallback at a call site, no body seen) |
 
 A higher-order note: a lambda VALUE passed to a workspace callee is itself
 summarised (the lowering extracts the body; `KirLambda.captures` name the
@@ -553,7 +558,7 @@ The effective pack: `builtin` names, `user` names, and the five entry counts
 `effectCount`). These are PACK sizes — the matched SITES in code are
 `stats.sourceCount`/`stats.sinkCount`.
 
-## apiEndpoints — ApiEndpoint (resolved tier, P7)
+## apiEndpoints — ApiEndpoint (resolved tier)
 
 Inbound entry points, one object per route/component. `framework` is a
 closed vocabulary (the shipped `endpoints-pack-v0.json` ids: `spring-mvc`,
@@ -570,16 +575,17 @@ endpoint.
 | --- | --- | --- |
 | `id` | string | `ep-NNNNNN`, assigned after sorting |
 | `framework` | string | pack vocabulary, above |
-| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method). **Naming quirk, deliberate (P17):** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`; fixed as cdxgen R101), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
+| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method). **Naming quirk, deliberate:** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`, since fixed), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
 | `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
 | `pathParameters` | string[] | `{id}` template parameters |
-| `handlerSymbol` / `handlerCanonicalName` | string | the KIR canonical name of the handler; EMPTY when the handler could not be resolved (an Android component with no lifecycle method in the workspace) — the resolved-handler gate counts empty as unresolved |
+| `handlerSymbol` / `handlerCanonicalName` | string | the canonical name of the handler; EMPTY when no handler could be named — an Android component that declares no lifecycle override of its own, so the framework's is what runs. The resolved-handler gate counts empty as unresolved. Empty does NOT mean the component went unread: see `substantiated` |
+| `substantiated` | boolean | whether kosi READ the code behind this endpoint. `true` by construction for annotation and DSL endpoints — they exist because a declaration was read. For a manifest component it is true exactly when the component's CLASS is among the analysed declarations, matching `Outer$Inner` and `Outer.Inner` as the one class they are. `false` says "the manifest declares this attack surface and kosi read none of it" — a library component, or a run that discovered none of the sources — and is counted in the `endpoint-unsubstantiated` diagnostic. A published endpoint is never a claim about behaviour that was not read |
 | `exported`, `permissions`, `deepLinkHosts` | Android only | from the manifest; `exported` falls back to the intent-filter rule |
 | `reachableSources` | string[] | the source categories the handler introduces (`untrusted-input` under `--endpoint-sources` when a flow enters here) |
 | `sliceIds` | string[] | endpoint-rooted slices (same flag) |
 | `foundBy` | string | `annotation` \| `dsl` \| `manifest` \| `config` |
 
-## services — ServiceRef and urls — UrlEvidence (resolved tier, P7)
+## services — ServiceRef and urls — UrlEvidence (resolved tier)
 
 Outbound client calls the pack's `outbound[]` shapes match
 (`java.net.URL`, `DriverManager.getConnection`, OkHttp, Retrofit, Ktor
@@ -591,7 +597,7 @@ a `const val` or a string template), `config` (resolved through
 analysed build's environment), or `unresolved` (never a guess). `urls[]`
 carries the same values with their enclosing symbol.
 
-## securitySignals — SecuritySignal (P9)
+## securitySignals — SecuritySignal
 
 | Attribute | Type | Purpose |
 | --- | --- | --- |
@@ -608,7 +614,7 @@ call (the binding site), and `.def` files under the conventional cinterop
 source-set directories (`nativeInterop/cinterop`, `cinterop`). A function
 merely NAMED like a native one is a corpus negative, not a finding.
 
-## crypto — CryptoEvidence (resolved tier, P8)
+## crypto — CryptoEvidence (resolved tier)
 
 `assets[]` name algorithms and transforms with their parsed shape:
 `algorithmFamily`, `primitive`, `mode`, `padding`, `keySizeBits`,
@@ -617,7 +623,7 @@ merely NAMED like a native one is a corpus negative, not a finding.
 `AES` without a mode or padding: the JCA's defaults are the JCA's
 business. `resolution` is the value's provenance (`literal`/`folded`/
 `config`/`env`/`unresolved`) and `form` its syntactic shape
-(`literal`/`const`/`template`/`config`) — the P8 gate counts mode/padding
+(`literal`/`const`/`template`/`config`) — the gate counts mode/padding
 extraction per form. `materials[]` carry secret material BY NAME (kind,
 file, position) — never a value. `findings[]` are the mapping rows' risk
 codes (`ecb-mode`, `weak-digest`, `weak-cipher`, `insecure-tls-version`,
@@ -628,5 +634,5 @@ codes (`ecb-mode`, `weak-digest`, `weak-cipher`, `insecure-tls-version`,
 `crypto-asset` or `insecure-tls`.
 
 `securitySignals` remains part of the v1 envelope (emitted empty) so
-consumers can rely on the shape; its population is later-phase work.
-`dataFlow` is populated as of P4 (above).
+consumers can rely on the shape; its population is future work.
+`dataFlow` is populated today (above).

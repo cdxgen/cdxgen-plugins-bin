@@ -1,4 +1,4 @@
-// P26 §1.1 — persistence as sinks.
+// — persistence as sinks.
 //
 // The repository interface is where a real Kotlin service's value EXITS: a
 // Spring Data repository method (a DERIVED query name or @Query) is executed

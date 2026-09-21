@@ -15,7 +15,7 @@ import java.sql.Statement
  * The shapes are deliberate:
  *  - `Db.runQuery` / `Db.runUpdate` sink their `sql` parameter THROUGH pack
  *    sinks (`Statement.executeQuery`/`executeUpdate`) that live INSIDE the
- *    jar — the cross-dependency flow P9 exists to find;
+ *    jar — the cross-dependency flow exists to find;
  *  - `Db.hashOf` sinks nothing — the clean-method negative;
  *  - `AuditLog.record` is an INTERFACE method and `Provider.provide` an
  *    abstract one — body-less records that must be ignored ENTIRELY, never
