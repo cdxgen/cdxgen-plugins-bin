@@ -46,6 +46,20 @@ data class Stats(
      * analysed something never publishes the cap count without it.
      */
     val functionsAnalysed: Int,
+    /**
+     * Call sites where what runs is a function VALUE and the engine could
+     * not name which function that is — a `FunctionN.invoke`, or a call on an
+     * interface with no implementation the workspace carries, whose receiver
+     * holds no known function.
+     *
+     * The taint stops at such a site. Before this count there was no way to
+     * tell that apart from code with no flow: the report was byte-identical
+     * either way, so "kosi found nothing" meant both "there is nothing" and
+     * "there is something I cannot follow". `callgraph-unresolvedCalls` has
+     * said this about the call graph since P8; this is the taint engine's
+     * equivalent, and the same rule applies — counted, never silently absent.
+     */
+    val unnameableInvokes: Int = 0,
     val sourceCount: Int,
     val sinkCount: Int,
     val sliceCount: Int,
@@ -115,6 +129,7 @@ data class Stats(
         w.num("sliceCount", sliceCount)
         w.num("sinkCount", sinkCount)
         w.num("sourceCount", sourceCount)
+        w.num("unnameableInvokes", unnameableInvokes)
         w.beginObject("truncations")
         for (key in truncations.keys.sorted()) {
             w.num(key, (truncations[key] ?: 0).toLong())

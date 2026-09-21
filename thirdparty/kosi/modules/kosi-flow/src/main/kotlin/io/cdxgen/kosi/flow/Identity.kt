@@ -54,6 +54,20 @@ import io.cdxgen.kosi.kir.KirTypeCheck
  * on types. A false alias can cost a finding's precision, never its
  * existence; a silent false negative is the defect this exists to remove.
  */
+/**
+ * Factories whose arguments BECOME the collection's elements. Kept to the
+ * builders that take their elements directly — a function that computes its
+ * elements is not on this list, because its result is not its arguments.
+ */
+private val COLLECTION_FACTORIES = setOf(
+    "kotlin.collections.listOf",
+    "kotlin.collections.mutableListOf",
+    "kotlin.collections.arrayListOf",
+    "kotlin.collections.setOf",
+    "kotlin.collections.mutableSetOf",
+    "kotlin.arrayOf",
+)
+
 internal class AliasAnalysis(
     private val compiled: CompiledFunction,
     /** The summary table to consult (the reporting engine's final one; the summary engine's current one). */
@@ -317,6 +331,33 @@ internal class AliasAnalysis(
                     }
 
                     else -> {
+                        // A SAM CONVERSION is an identity on the function
+                        // value: `Bridge { s -> .. }` and `Runnable { .. }`
+                        // lower to a static call taking a `FunctionN` and
+                        // returning the interface type, and the object it
+                        // returns runs exactly the lambda it was handed. The
+                        // token has to survive that hop or the later
+                        // `b.cross(..)` is a virtual call on an interface
+                        // with no workspace implementation — which is what
+                        // it was, silently.
+                        val samArg = samConversionArgument(ins)
+                        if (samArg != null) {
+                            val before = points[result]?.size ?: 0
+                            learnAll(result, points[samArg].orEmpty().filter { it.startsWith("lambda:") })
+                            changed = changed || (points[result]?.size ?: 0) != before
+                        }
+                        // A collection FACTORY puts its arguments in the
+                        // collection: `listOf(f)[0]` has to read back the
+                        // `f` it was built from, and there is no `indexset`
+                        // to carry it because the elements never pass
+                        // through one.
+                        if (ins.callee.fqn in COLLECTION_FACTORIES) {
+                            val tokens = sortedSetOf<String>()
+                            for (arg in ins.args) tokens.addAll(points[arg].orEmpty())
+                            val before = heap["$result []"]?.size ?: 0
+                            heapWrite(result, "[]", tokens)
+                            changed = changed || (heap["$result []"]?.size ?: 0) != before
+                        }
                         // A modelled callee that returns a parameter's
                         // object makes the result an alias of that
                         // argument; everything else is a fresh opaque.
@@ -349,6 +390,24 @@ internal class AliasAnalysis(
             else -> {}
         }
         return changed
+    }
+
+    /**
+     * The argument of a SAM conversion at [ins], or null when this is not
+     * one. The KIR says so precisely and without guessing: a STATIC call
+     * whose callee name IS a type, taking one `kotlin.jvm.functions.FunctionN`
+     * and returning that same type. Nothing else in the lowering has that
+     * shape, so the recognition cannot widen to an ordinary factory.
+     */
+    private fun samConversionArgument(ins: KirCall): String? {
+        if (ins.callee.kind != CallKind.STATIC) return null
+        val arg = ins.args.singleOrNull() ?: return null
+        val descriptor = ins.callee.descriptor ?: return null
+        val parameters = descriptor.substringAfter('(', "").substringBefore(')')
+        if (!parameters.startsWith("Lkotlin/jvm/functions/Function")) return null
+        val returned = descriptor.substringAfterLast(')')
+        if (returned != "L${ins.callee.fqn.replace('.', '/')};") return null
+        return arg
     }
 
     /** The caller register bound to the callee's parameter [index] at [ins]. */

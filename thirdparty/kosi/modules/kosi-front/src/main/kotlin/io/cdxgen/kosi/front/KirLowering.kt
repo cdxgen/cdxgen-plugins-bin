@@ -2532,6 +2532,9 @@ object KirLowering {
                 emit(KirFieldGet(reg, base, path))
                 return reg
             }
+            if (selector is KtCallExpression) {
+                qualifiedFunctionValueCall(psi, selector)?.let { return it }
+            }
             val receiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
             return when (selector) {
                 is KtCallExpression -> {
@@ -2613,7 +2616,21 @@ object KirLowering {
 
         private fun call(psi: KtCallExpression): String {
             val name = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
-                ?: return callWithReceiver(psi, receiver = null)
+                ?: run {
+                    // The callee is an EXPRESSION, not a name — `fs[0](raw)`,
+                    // `(pick())(raw)`. When it resolves to `FunctionN.invoke`
+                    // that expression IS the function value, and it has to
+                    // reach the invoke as the receiver: without it the call
+                    // lowered with no receiver at all, so nothing downstream
+                    // could say which function ran.
+                    val callee = psi.calleeExpression
+                    val receiver = if (callee != null && isFunctionTypeInvoke(psi)) {
+                        lowerExpr(callee, Pos.NESTED)
+                    } else {
+                        null
+                    }
+                    return callWithReceiver(psi, receiver)
+                }
             // A receiver-less scope-function call (`with(x) { }`, `run { }`)
             // or a plain call that happens to carry a lambda.
             if (name in SCOPE_FUNCTIONS && psi.hasLambdaArgument()) {
@@ -2646,8 +2663,17 @@ object KirLowering {
             return callWithReceiver(psi, receiver = null)
         }
 
-        private fun callWithReceiver(psi: KtCallExpression, receiver: String?): String {
-            val argRegs = psi.valueArguments.mapNotNull { arg ->
+        private fun callWithReceiver(
+            psi: KtCallExpression,
+            receiver: String?,
+            /**
+             * Registers bound BEFORE the written arguments. Only an extension
+             * lambda's receiver uses this: `b.block()` passes `b` in the
+             * position the lambda body's implicit `this` occupies.
+             */
+            leadingArgs: List<String> = emptyList(),
+        ): String {
+            val argRegs = leadingArgs + psi.valueArguments.mapNotNull { arg ->
                 arg.getArgumentExpression()?.let { lowerExpr(it, Pos.NESTED) }
             }
             val info = resolveCallInfo(psi)
@@ -2846,6 +2872,54 @@ object KirLowering {
         }
 
         /**
+         * True when this call site resolves to `kotlin.FunctionN.invoke` —
+         * that is, when what runs is a function VALUE rather than a declared
+         * function. Resolution answers this; the syntax does not, because
+         * `f(x)`, `h.f(x)`, `fs[0](x)` and `b.block()` are all spelled like
+         * ordinary calls and only one of them was being lowered as an invoke.
+         */
+        private fun isFunctionTypeInvoke(psi: KtCallExpression): Boolean {
+            val fqn = resolveCallInfo(psi)?.symbol?.callableId?.asSingleFqName()?.asString() ?: return false
+            return FUNCTION_INVOKE.matches(fqn)
+        }
+
+        /**
+         * `qualifier.name(args)` where the call resolves to an invoke of a
+         * function VALUE. Two different shapes wear that syntax, and telling
+         * them apart is the whole job:
+         *
+         *  - **the value is the qualifier's member** — `h.f(raw)` for
+         *    `class FunctionHolder(val f: (String) -> Unit)`. The function
+         *    value is `h.f`, so the invoke's receiver must be a READ of that
+         *    field. Lowering it with `h` on the receiver (what happened
+         *    before) hands the invoke the holder instead of the function, and
+         *    the callee becomes unnameable.
+         *  - **the value is in scope and the qualifier is its RECEIVER** —
+         *    `b.block()` inside `fun build(block: Builder.() -> Unit)`. Here
+         *    the function value is `block` and `b` is the extension receiver,
+         *    so the invoke takes `block` as its receiver and `b` as its first
+         *    argument, which is the position [lowerLambdaBody] gives the
+         *    body's implicit `this`.
+         *
+         * [isFunctionValueLocal] is the discriminator: a name that resolves
+         * to a function-typed local or parameter of an ENCLOSING declaration
+         * is the second shape, anything else the first.
+         */
+        private fun qualifiedFunctionValueCall(psi: KtDotQualifiedExpression, selector: KtCallExpression): String? {
+            val calleeRef = selector.calleeExpression as? KtNameReferenceExpression ?: return null
+            if (!isFunctionTypeInvoke(selector)) return null
+            if (isFunctionValueLocal(calleeRef)) {
+                val function = lowerExpr(calleeRef, Pos.NESTED)
+                val extensionReceiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
+                return callWithReceiver(selector, function, leadingArgs = listOf(extensionReceiver))
+            }
+            val (base, path) = fieldAccess(psi.receiverExpression, calleeRef.getReferencedName())
+            val value = t()
+            emit(KirFieldGet(value, base, path))
+            return callWithReceiver(selector, value)
+        }
+
+        /**
          * True when [psi] names a function-valued LOCAL: a parameter or local
          * property whose declared type is a function type, or whose
          * initializer is a lambda. Invoking one by name (`block(x)`) is an
@@ -3041,7 +3115,43 @@ object KirLowering {
                 .filter { it in definedRegisters }
                 .distinct()
             val captureParams = captureRegs.mapIndexed { index, reg -> KirParam("%c$index", "capture$reg", null, receiver = false) }
-            val rename = captureRegs.withIndex().associate { (index, reg) -> reg to "%c$index" }
+            // An EXTENSION lambda's implicit `this`. `build { cmd = raw }` for
+            // `block: Builder.() -> Unit` lowers its body to
+            // `fieldset vthis vthis.cmd = ...`, and `vthis` is free: not
+            // defined in the body and not a register of the enclosing scope,
+            // because the enclosing function has no `this` of its own. That
+            // is precisely the signature of an implicit receiver, so the body
+            // takes it as a parameter and the invoke site binds it. Without
+            // it the write landed on a register nobody owned, and a DSL
+            // block — the idiom Gradle and Android code is made of — moved
+            // nothing to its caller.
+            //
+            // The use has to be one that ESTABLISHES a receiver — a write
+            // through it, or a member call on it. A bare `fieldget vthis
+            // vthis.X` does not: a class-qualified call (`Runtime.getRuntime()`)
+            // lowers its qualifier that way too, and reading that as an
+            // implicit receiver put a phantom parameter on every ordinary
+            // lambda that names a class, shifting the argument binding of
+            // lambdas that were working. An ambiguous read is left alone;
+            // the limit that buys is a read-only extension lambda, which
+            // moves nothing outward anyway.
+            val implicitReceiver = "vthis" !in bodyDefs &&
+                "vthis" !in definedRegisters &&
+                instructions.any { ins ->
+                    when (ins) {
+                        is KirFieldSet -> ins.receiver == "vthis"
+                        is KirIndexSet -> ins.receiver == "vthis"
+                        is KirCall -> ins.receiver == "vthis"
+                        else -> false
+                    }
+                }
+            val receiverParams = if (implicitReceiver) {
+                listOf(KirParam("%r0", "this", null, receiver = false))
+            } else {
+                emptyList()
+            }
+            val rename = captureRegs.withIndex().associate { (index, reg) -> reg to "%c$index" } +
+                if (implicitReceiver) mapOf("vthis" to "%r0") else emptyMap()
             val rewritten = body.blocks.map { block ->
                 block.copy(instructions = block.instructions.map { ins -> ins.mapRegisters({ rename[it] ?: it }, defsToo = false) })
             }
@@ -3054,7 +3164,7 @@ object KirLowering {
                         ?: functionPsi.containingFile?.virtualFile?.path ?: "<memory>",
                     line = psi.line(),
                     column = psi.column(),
-                    params = captureParams + valueParams,
+                    params = captureParams + receiverParams + valueParams,
                     returnType = null,
                     modifiers = emptySet(),
                     visibility = "private",
@@ -3073,6 +3183,9 @@ object KirLowering {
             return canonical to captureRegs
         }
     }
+
+    /** `kotlin.Function0.invoke` .. `kotlin.FunctionN.invoke`: an invoke of a function VALUE. */
+    private val FUNCTION_INVOKE = Regex("""kotlin\.Function\d+\.invoke""")
 
     private val SCOPE_FUNCTIONS = setOf("let", "run", "apply", "also", "with", "use")
 

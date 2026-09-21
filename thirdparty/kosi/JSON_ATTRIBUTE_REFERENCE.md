@@ -221,6 +221,7 @@ rather than a negative expectation that passes vacuously.
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
 | `summary-iteration-cap` | warning | the summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
+| `taint-unnameable-invoke` | info | call sites where what runs is a function VALUE the engine could not name — a `FunctionN.invoke` on a value it could not trace to a body, or a call on an interface the workspace does not implement. Taint STOPS at each one, so an absent flow through them means unexamined, not clean. `count` and `stats.unnameableInvokes` are the same number, counted once per site |
 | `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
 | `deps-bodyless` | info | `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
 | `deps-class-not-found` | info | workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
@@ -255,6 +256,9 @@ computed over (a rate without its denominator is not a result) —
 taint worklist actually ran over (the same denominator rule) —
 `sourceCount`/`sinkCount` are the source/sink SITES the model pack matched in
 analysed code (not pack sizes; resolution regressions shrink them) —
+`unnameableInvokes` — call sites invoking a function VALUE the engine could
+not name, where taint stops; a zero here is what makes a zero `sliceCount`
+mean "nothing found" rather than "nothing followed" —
 `sliceCount`, `crossDependencySliceCount`, `crossModuleSliceCount`,
 `reachableSliceCount`, `sccsProcessed` beside `sccIterationCapHits` (the summary fixpoint's population and its cap count — a cap without its
 population is not a result), `suspendCrossingSliceCount` (slices whose
