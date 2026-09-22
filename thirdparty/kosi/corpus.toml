@@ -1111,6 +1111,20 @@ path = "fixtures/spelling-gallery"
 capabilities = ["higher-order", "dispatch", "sam", "references", "receivers"]
 tolerated_resolution_errors = []
 
+# The gallery's negative twin: shapes that LOOK like the function-value
+# spellings and are not — a member shadowed by a same-named local, a factory
+# named after its return type. Every function-value fixture before this one
+# was written to be FOUND; nothing guarded against resolving an invoke to a
+# body the program never runs. `want-not` for the whole file: a channel that
+# resolves an invoke to a body is only worth having if it declines the
+# bodies that are not the callee (R206, R207).
+[[fixtures]]
+slug = "function-value-lookalikes"
+tier = "fixtures"
+path = "fixtures/function-value-lookalikes"
+capabilities = ["higher-order", "sam", "lookalike-negative"]
+tolerated_resolution_errors = []
+
 # DI as dispatch evidence. The container constructs the bound
 # implementation, so the interface call has ONE target and the edge says
 # `di-binding`; the two unbound siblings must stay clean.

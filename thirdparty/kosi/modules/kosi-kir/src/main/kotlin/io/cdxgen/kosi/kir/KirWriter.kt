@@ -92,6 +92,8 @@ object KirWriter {
 
     private fun writeCall(callee: KirCallee, receiver: String?, args: List<String>): String =
         "${q(callee.fqn)} kind=${callee.kind.name.lowercase()} desc=${qn(callee.descriptor)}" +
+            // Emitted only when true, so every call without one is unchanged.
+            (if (callee.samConstructor) " samctor" else "") +
             writeRecvArgs(receiver, args)
 
     private fun writeRecvArgs(receiver: String?, args: List<String>): String =

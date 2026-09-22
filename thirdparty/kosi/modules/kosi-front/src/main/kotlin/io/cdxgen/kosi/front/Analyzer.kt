@@ -1183,6 +1183,7 @@ object Analyzer {
                     functionsLowered = kir.functionCount,
                     fixpointCapHits = flowResult?.fixpointCapHits ?: 0,
                     functionsAnalysed = flowResult?.functionsAnalysed ?: 0,
+                    unnameableInvokes = flowResult?.unnameableInvokes ?: 0,
                     sourceCount = flowResult?.sourceSites ?: 0,
                     sinkCount = flowResult?.sinkSites ?: 0,
                     sliceCount = dataFlow?.slices?.size ?: 0,

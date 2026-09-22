@@ -28,12 +28,12 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaBoundReference known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~<anonymous> known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaLocalValueReference known-fail=syntax:1
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaConstructorReference known-fail=syntax:1 known-fail=155
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunctionInField known-fail=syntax:1 known-fail=156
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunctionInList known-fail=syntax:1 known-fail=156
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaConstructorReference known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunctionInField known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunctionInList known-fail=syntax:1
 // ---- SAM and object expressions
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunInterface known-fail=syntax:1 known-fail=147
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaJavaSam known-fail=syntax:1 known-fail=147
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunInterface known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaJavaSam known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaObjectExpression known-fail=syntax:1 known-fail=157
 // ---- receivers
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaExtensionFunction known-fail=syntax:1
@@ -123,9 +123,10 @@ fun viaLocalValueReference() {
     f(readLine() ?: "")
 }
 
-// A constructor reference names `<init>`, and the value the new object
-// carries then has to reach a method ON that object — the invoke channel
-// stops at the construction.
+// A constructor reference names `<init>`. The object it builds then has to
+// reach a method ON that object, which means the invoke's RESULT is the
+// `<init>` body's parameter 0 — binding it to nothing threw the new object
+// away and the flow stopped at the construction.
 class Command(val value: String) {
     fun run() {
         Runtime.getRuntime().exec(value)
@@ -137,9 +138,10 @@ fun viaConstructorReference() {
     make(readLine() ?: "").run()
 }
 
-// A function value stored in an object's field or in a collection is
-// invoked through a field read, not through a register the def map or the
-// alias analysis names at the call.
+// A function value stored in an object's field or in a collection. Both are
+// invoked through a READ — `h.f` and `fs[0]` — and the lowering used to drop
+// that read, handing the invoke the holder (or nothing at all) instead of the
+// function. The read is the function value; the invoke takes it as receiver.
 class FunctionHolder(val f: (String) -> Unit)
 
 fun viaFunctionInField() {
@@ -158,7 +160,10 @@ fun interface Bridge {
     fun cross(s: String)
 }
 
-// The SAM instance's synthesized class never reaches the KIR.
+// A SAM conversion is an identity on the function value: the object runs
+// exactly the lambda it was handed, so the token survives the conversion and
+// `b.cross` resolves to the lambda even though `Bridge` has no workspace
+// implementation.
 fun viaFunInterface() {
     val b = Bridge { s -> Runtime.getRuntime().exec(s) }
     b.cross(readLine() ?: "")
@@ -170,9 +175,10 @@ fun viaJavaSam() {
     r.run()
 }
 
-// An anonymous object's members lower as functions, but the object is
-// not indexed as an implementation of its supertype, so the virtual call
-// resolves to nothing.
+// An anonymous object still lowers to a STRING PLACEHOLDER — `load "object
+// <Writer>"` — and the call on it has no callee name at all. Its members lower
+// as functions, but nothing connects the literal to them. Counted since P33 in
+// `stats.unnameableInvokes`, so the miss is visible even while it is open.
 interface Writer {
     fun write(s: String)
 }

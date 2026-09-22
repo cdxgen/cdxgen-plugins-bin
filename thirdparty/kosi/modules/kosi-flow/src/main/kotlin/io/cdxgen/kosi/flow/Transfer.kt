@@ -284,6 +284,9 @@ internal interface TransferHost<F, C> {
      */
     fun lambdaTargets(register: String): List<String> = emptyList()
 
+    /** The abstract objects [register] may hold; empty without an alias analysis. */
+    fun aliasTokens(register: String): Set<String> = emptySet()
+
 
     /** An unknown call moved taint (the reporting engine counts the precision loss). */
     fun onUnknownPropagation(collect: C?)

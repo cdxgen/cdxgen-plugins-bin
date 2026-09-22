@@ -21,6 +21,20 @@ import io.cdxgen.kosi.kir.KirStringConcat
 import io.cdxgen.kosi.kir.KirTypeCheck
 
 /**
+ * Factories whose arguments BECOME the collection's elements. Kept to the
+ * builders that take their elements directly — a function that computes its
+ * elements is not on this list, because its result is not its arguments.
+ */
+private val COLLECTION_FACTORIES = setOf(
+    "kotlin.collections.listOf",
+    "kotlin.collections.mutableListOf",
+    "kotlin.collections.arrayListOf",
+    "kotlin.collections.setOf",
+    "kotlin.collections.mutableSetOf",
+    "kotlin.arrayOf",
+)
+
+/**
  * the object that is the same object.
  *
  * Everything the taint engine tracks is keyed by `(register, access path)` —
@@ -128,6 +142,13 @@ internal class AliasAnalysis(
 
     /** Registers that may name the same object as [register], itself included. */
     fun aliasClass(register: String): Set<String> = aliasClasses[register] ?: setOf(register)
+
+    /**
+     * The abstract objects [register] may hold. Consumers use it to ask where
+     * a value CAME FROM — a `param:` token means the caller supplied it, so
+     * the caller is where it can be named.
+     */
+    fun tokensOf(register: String): Set<String> = points[register].orEmpty()
 
     /** Lambda bodies [register] may hold, when it holds function values. */
     fun lambdaTargets(register: String): List<String> =
@@ -317,6 +338,33 @@ internal class AliasAnalysis(
                     }
 
                     else -> {
+                        // A SAM CONVERSION is an identity on the function
+                        // value: `Bridge { s -> .. }` and `Runnable { .. }`
+                        // lower to a static call taking a `FunctionN` and
+                        // returning the interface type, and the object it
+                        // returns runs exactly the lambda it was handed. The
+                        // token has to survive that hop or the later
+                        // `b.cross(..)` is a virtual call on an interface
+                        // with no workspace implementation — which is what
+                        // it was, silently.
+                        val samArg = samConversionArgument(ins)
+                        if (samArg != null) {
+                            val before = points[result]?.size ?: 0
+                            learnAll(result, points[samArg].orEmpty().filter { it.startsWith("lambda:") })
+                            changed = changed || (points[result]?.size ?: 0) != before
+                        }
+                        // A collection FACTORY puts its arguments in the
+                        // collection: `listOf(f)[0]` has to read back the
+                        // `f` it was built from, and there is no `indexset`
+                        // to carry it because the elements never pass
+                        // through one.
+                        if (ins.callee.fqn in COLLECTION_FACTORIES) {
+                            val tokens = sortedSetOf<String>()
+                            for (arg in ins.args) tokens.addAll(points[arg].orEmpty())
+                            val before = heap["$result []"]?.size ?: 0
+                            heapWrite(result, "[]", tokens)
+                            changed = changed || (heap["$result []"]?.size ?: 0) != before
+                        }
                         // A modelled callee that returns a parameter's
                         // object makes the result an alias of that
                         // argument; everything else is a fresh opaque.
@@ -349,6 +397,28 @@ internal class AliasAnalysis(
             else -> {}
         }
         return changed
+    }
+
+    /**
+     * The argument of a SAM conversion at [ins], or null when this is not one.
+     *
+     * The lowering marks it, because RESOLUTION is the only thing that knows.
+     * An earlier cut recognised the conversion from its KIR shape — a STATIC
+     * call taking one `kotlin.jvm.functions.FunctionN` and returning the
+     * callee's own name — and that shape is shared exactly by an ordinary
+     * factory named after its return type:
+     *
+     *     fun Handler(block: (String) -> Unit): Handler = ...   // IGNORES block
+     *
+     * Kotlin's resolution prefers such a function over the interface's SAM
+     * constructor, so the collision is reachable whenever one exists. Applying
+     * the argument's body at every later call on the result then publishes a
+     * flow through a lambda the program never runs.
+     */
+    private fun samConversionArgument(ins: KirCall): String? {
+        if (!ins.callee.samConstructor) return null
+        if (ins.callee.kind != CallKind.STATIC) return null
+        return ins.args.singleOrNull()
     }
 
     /** The caller register bound to the callee's parameter [index] at [ins]. */

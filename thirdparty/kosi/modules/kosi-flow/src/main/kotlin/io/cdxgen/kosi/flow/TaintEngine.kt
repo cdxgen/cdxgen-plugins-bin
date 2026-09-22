@@ -353,6 +353,8 @@ object TaintEngine {
         /** Functions the worklist actually ran over — the denominator of the cap rate. */
         val functionsAnalysed: Int,
         val fixpointCapHits: Int,
+        /** Call sites invoking a function value the engine could not name. */
+        val unnameableInvokes: Int = 0,
         /** Source/sink SITES the pack matched in analysed code (not pack sizes). */
         val sourceSites: Int,
         val sinkSites: Int,
@@ -504,6 +506,18 @@ object TaintEngine {
             private set
         var lambdaUnresolved: Int = 0
             private set
+
+        /**
+         * Call sites where what runs is a function VALUE the engine could not
+         * name. [lambdaUnresolved] already counted the INTERPROCEDURAL half
+         * (a function-valued parameter the callee invokes); this counts the
+         * DIRECT half — `f(x)` on a value in this frame, and a call on an
+         * interface the workspace does not implement — which was the one
+         * that produced no record at all.
+         */
+        var unnameableInvokes: Int = 0
+            private set
+        private val unnameableSites = HashSet<String>()
         val joinWidths: java.util.TreeMap<Int, Int> = java.util.TreeMap()
         /** Callee FQNs where a pack entry actually moved taint (pack-origin summaries). */
         val packAppliedSources = sortedSetOf<String>()
@@ -551,6 +565,15 @@ object TaintEngine {
         fun recordPackSource(fqn: String) = synchronized(lock) { packAppliedSources.add(fqn) }
         fun recordPackPassthrough(fqn: String) = synchronized(lock) { packAppliedPassthroughs.add(fqn) }
         fun recordLambdaUnresolved() = synchronized(lock) { lambdaUnresolved += 1 }
+
+        /**
+         * One count per SITE, not per visit: the worklist reaches a call site
+         * once per fixpoint round, and a number that grew with the iteration
+         * count would say more about the budget than about the code.
+         */
+        fun recordUnnameableInvoke(function: String, site: Int) = synchronized(lock) {
+            if (unnameableSites.add("$function#$site")) unnameableInvokes += 1
+        }
         fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
 
         // ---- the per-site evidence the frames read ------------------
@@ -977,6 +1000,18 @@ object TaintEngine {
                 ),
             )
         }
+        if (context.unnameableInvokes > 0) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.TAINT_UNNAMEABLE_INVOKE,
+                    severity = Severity.INFO,
+                    message = "${context.unnameableInvokes} call site(s) invoke a function value the engine " +
+                        "could not name; taint stops at each one, so an absent flow through them means " +
+                        "unexamined, not clean",
+                    count = context.unnameableInvokes,
+                ),
+            )
+        }
         if (context.lambdaUnresolved > 0) {
             diagnostics.add(
                 Diagnostic(
@@ -1066,6 +1101,7 @@ object TaintEngine {
             evidence = evidence,
             functionsAnalysed = functionsAnalysed,
             fixpointCapHits = fixpointCapHits,
+            unnameableInvokes = context.unnameableInvokes,
             sourceSites = sourceSites,
             sinkSites = sinkSites,
             unknownCallPropagations = unknownCallPropagations,
@@ -1247,6 +1283,8 @@ object TaintEngine {
         override fun aliasClass(register: String): Set<String> = aliases.aliasClass(register)
 
         override fun lambdaTargets(register: String): List<String> = aliases.lambdaTargets(register)
+
+        override fun aliasTokens(register: String): Set<String> = aliases.tokensOf(register)
 
         /** One summary lookup for a call site (the alias feed; may-union across targets). */
         private fun summaryForCall(ins: KirCall): FunctionSummary? {
@@ -1602,7 +1640,38 @@ object TaintEngine {
             // A call through a function value this body DEFINED (or
             // copied) — the value is an object whose target is known at its
             // allocation site, and the invoke resolves to that target.
-            if (ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+            val invokeReceiver = ins.receiver
+            if (ins.callee.fqn.endsWith(".invoke") && invokeReceiver != null) {
+                if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
+                // NAMED is not the same as APPLIED. `applyLambdaInvoke`
+                // returns false both when it could not name the callee and
+                // when it named it perfectly and simply had no facts to move
+                // in this frame — and the reporting sweep walks every
+                // function, facts or not. Counting the second case made the
+                // number claim "taint stops here" about sites the engine
+                // followed, including `b.block()`, this phase's own feature.
+                if (!namesACallee(invokeReceiver)) {
+                    collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
+                }
+            }
+
+            // A SAM instance's single abstract method. `Bridge { .. }` and
+            // `Runnable { .. }` produce an object that runs a known lambda,
+            // and `b.cross(raw)` / `r.run()` is how it is invoked — a
+            // VIRTUAL call, not an `.invoke`. The receiver carries the
+            // lambda token across the conversion (see AliasAnalysis), so
+            // the callee is nameable here.
+            //
+            // The guard is what keeps this from widening dispatch: it only
+            // runs when the call index found NO target of its own. A call
+            // with a real implementation keeps resolving to that
+            // implementation, so this adds callees where there were none
+            // and never replaces one that was already known.
+            val samReceiver = ins.receiver
+            val noWorkspaceTarget = ins.callee.kind == CallKind.VIRTUAL &&
+                samReceiver != null &&
+                context.callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind).isEmpty()
+            if (noWorkspaceTarget && lambdaTargets(samReceiver!!).isNotEmpty()) {
                 if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
             }
 
@@ -1653,6 +1722,16 @@ object TaintEngine {
                         val carries = ins.args.any { arg -> state.factsOf(TaintKey(arg, "")).isNotEmpty() } ||
                             (ins.receiver?.let { state.factsOf(TaintKey(it, "")).isNotEmpty() } ?: false)
                         if (carries) context.recordSummaryMissing()
+                    }
+                    // Only HERE is a virtual call on an unimplemented
+                    // interface genuinely unnameable: the workspace had no
+                    // target, the receiver held no function value, and the
+                    // dependency tier has no summary either. Recording it
+                    // before this point called a `--deps` run's Timber calls
+                    // unnameable while that same run published flows THROUGH
+                    // them — the number contradicting the report beside it.
+                    if (noWorkspaceTarget && lambdaTargets(samReceiver!!).isEmpty()) {
+                        collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
                     }
                     return false
                 }
@@ -1710,6 +1789,27 @@ object TaintEngine {
         }
 
         /**
+         * True when [register] holds a function value the engine can name —
+         * a lambda written at this call site, or a tracked `lambda:` token.
+         *
+         * This is the question `stats.unnameableInvokes` asks, and it is NOT
+         * "did anything move": a named callee with no live facts is followed
+         * and silent, which is an ordinary clean result, while an unnamed one
+         * is a hole in the analysis. Conflating them made the count claim
+         * sites the engine had followed.
+         */
+        private fun namesACallee(register: String): Boolean =
+            lambdaTargets(register).isNotEmpty() ||
+                context.lambdaDefs[functionKey(compiled.function)]?.containsKey(register) == true ||
+                // A function-valued PARAMETER is named by the CALLER, through
+                // the invoked-parameter channel: `b.block()` inside
+                // `fun build(block: Builder.() -> Unit)` is this phase's own
+                // feature working, not a hole. `lambda-unresolved` already
+                // counts that channel's failures, at the caller, where the
+                // candidate set is actually known.
+                aliasTokens(register).any { it.startsWith("param:") }
+
+        /**
          * An invoke whose receiver holds KNOWN lambda objects — the
          * bodies defined in this function. Their summaries apply with the
          * invoke's arguments bound to the bodies' value parameters and the
@@ -1734,7 +1834,17 @@ object TaintEngine {
                 val declared = context.functionValues[canonical]
                 val byName = context.table[functionKeyByName(canonical)]
                 val lambdaSummary = byName ?: declared?.let { context.table[it.summaryKey] } ?: continue
-                val captured = if (byName == null && declared != null) {
+                val captured = if (canonical.endsWith(".<init>")) {
+                    // A CONSTRUCTOR used as a function value (`::Command`).
+                    // Its parameter 0 is the object being built, and at an
+                    // invoke that object is the call's RESULT — so the
+                    // `<init>` body's `this.value = arg` lands on the object
+                    // the caller goes on to use. Binding it to the empty
+                    // register (what the declared-value path did) threw the
+                    // new object away, and every flow through a factory
+                    // reference stopped at the construction.
+                    listOf(ins.result ?: "")
+                } else if (byName == null && declared != null) {
                     List(declared.receiverOffset) { "" }
                 } else {
                     context.captures[functionKey(compiled.function)]?.get(canonical).orEmpty()

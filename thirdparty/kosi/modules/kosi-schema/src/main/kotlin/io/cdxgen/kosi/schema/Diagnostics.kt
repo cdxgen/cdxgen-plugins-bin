@@ -63,6 +63,15 @@ object DiagnosticCodes {
     /** Call graph: call sites that resolved to no callee and therefore emit no edge. */
     const val CALLGRAPH_UNRESOLVED_CALLS = "callgraph-unresolved-calls"
 
+    /**
+     * Taint: call sites where what runs is a function VALUE the engine could
+     * not name, counted in `stats.unnameableInvokes`. The taint stops at each
+     * one. Without this, a spelling the engine does not follow and code with
+     * no flow produce the same report — and a measured zero and a silence are
+     * not the same number.
+     */
+    const val TAINT_UNNAMEABLE_INVOKE = "taint-unnameable-invoke"
+
     /** Call graph: a declared root scope matched no function. */
     const val CALLGRAPH_ROOT_NOT_FOUND = "callgraph-root-not-found"
 
@@ -231,6 +240,7 @@ object DiagnosticCodes {
         SUMMARY_ITERATION_CAP,
         DISPATCH_JOIN_WIDTH,
         LAMBDA_UNRESOLVED,
+        TAINT_UNNAMEABLE_INVOKE,
         NO_BUILD_FILES,
         NO_SOURCES,
         SOURCE_COVERAGE_GAP,
