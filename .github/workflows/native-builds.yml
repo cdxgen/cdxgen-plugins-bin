@@ -169,6 +169,13 @@ jobs:
         sudo apt-get install -y musl-tools zlib1g-dev
         pushd thirdparty/kosi
         make linux linuxmusl
+        # The fat jar the natives are built from is also the documented
+        # fallback for the platforms with no native (ppc64le, 32-bit arm,
+        # linuxmusl-arm64, darwin-amd64 — see plugin-platform-support.sh).
+        # It is architecture-independent, so it is staged once, here, on the
+        # amd64 runner; nothing else builds it.
+        cp modules/kosi-cli/build/dist/kosi-all.jar build/kosi-portable.jar
+        (cd build && sha256sum kosi-portable.jar > kosi-portable.jar.sha256)
         popd
       if: matrix.os == 'ubuntu-24.04'
     - name: Publish kosi natives to the oras cache (amd64)
@@ -184,6 +191,12 @@ jobs:
           --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
           ./kosi-linuxmusl-amd64:application/octet-stream \
           ./kosi-linuxmusl-amd64.sha256:text/plain
+        # Tagged without the .jar suffix so the cache tag matches the one
+        # publish-helper-oras.sh derives at release time.
+        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable \
+          --artifact-type application/vnd.cdxgen.plugins.helper.v1 \
+          ./kosi-portable.jar:application/java-archive \
+          ./kosi-portable.jar.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Upload linux amd64
       run: |
