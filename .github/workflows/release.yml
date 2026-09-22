@@ -347,6 +347,7 @@ jobs:
 
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/golem 'golem-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/rusi 'rusi-*'
+        bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/kosi 'kosi-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/cdxui 'cdxui-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/cdxrs 'cdxrs-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/trustinspector 'trustinspector-cdxgen-*'
@@ -356,6 +357,7 @@ jobs:
         gh release upload "$GITHUB_REF_NAME" \
           ./plugins/golem/golem-* \
           ./plugins/rusi/rusi-* \
+          ./plugins/kosi/kosi-* \
           ./plugins/cdxui/cdxui-* \
           ./plugins/cdxrs/cdxrs-* \
           ./plugins/trustinspector/trustinspector-cdxgen-* \
