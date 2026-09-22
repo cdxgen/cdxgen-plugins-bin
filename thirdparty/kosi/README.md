@@ -130,6 +130,37 @@ With `--deps`, dependency classes from the resolved classpath are lowered to
 the same KIR from bytecode, their summaries carry `origin=bytecode`, and
 cross-dependency slices are published alongside the application's own.
 
+### Kotlin the language (resolved tier)
+
+Taint analysis is only as good as the desugaring under it, so the lowering
+does the language's own work rather than treating syntax as shape:
+
+- **Named and default arguments.** Arguments are evaluated in source order and
+  PLACED in parameter order, from the resolver's own argument-to-parameter
+  mapping — `run(second = b, third = raw, first = a)` puts `raw` on `third`. A
+  parameter that took its default holds its position. This is not cosmetic:
+  placing by source order both loses flows and fabricates them, depending on
+  which way the positions happen to line up.
+- **Data classes.** `copy` carries the body it desugars to — every field either
+  takes the argument or keeps `this`'s value — so taint inside a data class
+  survives a copy. `componentN` exists for its edges.
+- **Destructuring**, in `for` loops and in lambda parameters alike
+  (`{ (key, value) -> }`), binds its entries through `componentN`.
+- **Anonymous objects** are allocations of a class named by its position, so a
+  call on a literal dispatches to the member it actually runs.
+- **Class delegation** (`by`) synthesises the forwarders the compiler would,
+  carrying the `overrides` edge that makes a call on the interface resolve.
+- **Extension lambdas** receive their receiver by one convention across every
+  invocation channel: an expected type with a receiver means the body takes
+  it, whether or not the body mentions `this`.
+- **Scope functions** (`apply`/`run`/`with`/`let`/`also`) inline their bodies
+  and keep a call edge as evidence.
+
+Each of these was a silent miss before it was a feature, and each has a
+fixture whose expectation fails if it regresses — including negatives, because
+a mis-bound argument reports a flow that does not exist just as readily as it
+hides one.
+
 ### Endpoints and services (resolved tier)
 
 `apiEndpoints[]` covers Spring MVC, WebFlux and Actuator, springdoc, Spring
@@ -183,6 +214,34 @@ Exit codes: `0` success, `1` expectations failed (ratchet/golden/bench),
   with a `kotlin-language-version` diagnostic; newer declarations get
   `kotlin-version`. Reports carry `runtime.kotlinVersion` and
   `runtime.languageVersionRange`.
+
+## What kosi does not do yet
+
+Stated because a silent gap is worse than a named one, and each of these is a
+tracked defect with a fixture or a measurement behind it:
+
+- **Dispatch is file-scoped, not receiver-sensitive.** Constructing any
+  implementation of an interface anywhere in a file narrows every unknown
+  receiver of that interface, in that file, to it. That is a false-NEGATIVE
+  machine in real code and it makes dispatch results sensitive to edits
+  elsewhere in the file.
+- **A function value's body is summarised once**, without its caller's
+  argument types, so a lambda that dispatches on its own parameter joins every
+  implementation of that parameter's type.
+- **A DSL block's write reaches a sink the callee runs later, but not one the
+  CALLER runs after the call** — the second needs the write to land on the
+  caller's own register, which no channel does today.
+- **A delegated member of an object literal** names a class that does not
+  exist: the resolver reports the member as `<anonymous>` and gives no
+  declaration to position it from.
+- **`flowKey` is not stable across kosi versions.** It hashes lowering-internal
+  site numbers, so a lowering change re-keys every finding while the findings
+  themselves are unchanged. Do not use it to correlate two scans made with
+  different kosi builds; correlate on source callee, sink callee and the
+  functions in the trace.
+- **`urls[]` and `securitySignals[]` are published but not consumed by
+  cdxgen's evinse mode** — the outbound occurrence evidence and the
+  native-interop seams are in the report and do not reach the BOM.
 
 ## Development
 

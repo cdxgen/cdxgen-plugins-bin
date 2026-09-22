@@ -21,7 +21,8 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaNamedArgument known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaTwoParameters known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaUnderscoreFirst known-fail=syntax:1
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaDestructured known-fail=syntax:1 known-fail=154
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaDestructured known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaPairField known-fail=syntax:1
 // ---- function values
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaLocalFunReference known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaTopLevelReference known-fail=syntax:1
@@ -34,7 +35,7 @@
 // ---- SAM and object expressions
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaFunInterface known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaJavaSam known-fail=syntax:1
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaObjectExpression known-fail=syntax:1 known-fail=157
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaObjectExpression known-fail=syntax:1
 // ---- receivers
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaExtensionFunction known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaApplyScope known-fail=syntax:1
@@ -88,9 +89,18 @@ fun viaTwoParameters() = feedTwo { s, _ -> Runtime.getRuntime().exec(s) }
 
 fun viaUnderscoreFirst() = feedIntFirst { _, s -> Runtime.getRuntime().exec(s) }
 
-// A destructured lambda parameter binds no register the engine can
-// name, so the component the taint is in is lost at the `(a, b)` binding.
+// A destructured lambda parameter. Two separate defects hid here: the
+// extraction gave the body no parameter at all (the entries bind no name of
+// their own), and a read of an entry resolved as `fieldget vthis vthis.s` —
+// a field of an implicit receiver that does not exist — so even once the
+// components were bound, the value was written to one register and read from
+// another. The sibling below is the control: the same Pair, read as a field.
 fun viaDestructured() = feedPair { (s, _) -> Runtime.getRuntime().exec(s) }
+
+// The same Pair WITHOUT destructuring. It has always worked, and it is here
+// because it is what localised the defect above: two spellings of one
+// capability, one found and one silent, name the gap between them.
+fun viaPairField() = feedPair { p -> Runtime.getRuntime().exec(p.first) }
 
 // ---- function values ----------------------------------------------------
 
@@ -176,10 +186,17 @@ fun viaJavaSam() {
     r.run()
 }
 
-// An anonymous object still lowers to a STRING PLACEHOLDER — `load "object
-// <Writer>"` — and the call on it has no callee name at all. Its members lower
-// as functions, but nothing connects the literal to them. Counted since P33 in
-// `stats.unnameableInvokes`, so the miss is visible even while it is open.
+// An anonymous object. It used to lower to a STRING PLACEHOLDER — `load
+// "object <Writer>"` — with the call on it carrying no callee name at all,
+// so its members existed as functions that nothing could reach. Three things
+// were missing and all three are here: the literal is an ALLOCATION of a
+// class named by its POSITION (`<object@198:13>`, unique per literal where
+// `<anonymous>` collided with every other one in the file), its members carry
+// that same name, and the call names the member off the declaration the
+// symbol points at — an anonymous class has no callableId, which is why the
+// callee was nameless. The name is what makes this dispatch, not the shape:
+// with `AbstractBase.write` in the same file, a nameless virtual call on a
+// `write` could not be told from the other one.
 interface Writer {
     fun write(s: String)
 }

@@ -1130,6 +1130,16 @@ tolerated_resolution_errors = []
 # positive halves are the capture-written idiom and the value-parameter
 # spelling R210 shifted; the want-nots pin the channel's precision (a clean
 # capture and a sibling-field write must both stay silent).
+# Named and reordered arguments, and a skipped default. The call site
+# places arguments by PARAMETER, not by source order; the negative is the
+# false positive that mis-placement produces in the other direction.
+[[fixtures]]
+slug = "named-arguments"
+tier = "fixtures"
+path = "fixtures/named-arguments"
+capabilities = ["named-arguments", "defaults", "lookalike-negative"]
+tolerated_resolution_errors = []
+
 [[fixtures]]
 slug = "dsl-builder-channel"
 tier = "fixtures"

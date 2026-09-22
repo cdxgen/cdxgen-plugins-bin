@@ -206,6 +206,23 @@ object KirLowering {
          * through a lambda the program never invokes.
          */
         val invokeOnExtensionReceiver: Boolean = false,
+        /**
+         * Which PARAMETER each written argument fills, and how many
+         * parameters the callee has. Kotlin lets a call name its arguments
+         * and reorder them freely (`target(second = b, third = raw, first =
+         * a)`), and the lowering used to emit them in SOURCE order — so the
+         * taint in `third` landed on the callee's `second`, every model
+         * pack's argument index pointed at the wrong value, and both a
+         * missed flow and a fabricated one are possible from the same call.
+         * Only the resolver knows the mapping; the syntax carries a name,
+         * not a position, and a defaulted parameter has no argument at all.
+         *
+         * Empty when the resolver could not answer, which the lowering reads
+         * as "source order is the parameter order" — the pre-existing
+         * behaviour, correct for every call written positionally.
+         */
+        val argumentParameterIndex: Map<org.jetbrains.kotlin.psi.KtExpression, Int> = emptyMap(),
+        val valueParameterCount: Int = 0,
     )
 
     /**
@@ -409,6 +426,27 @@ object KirLowering {
                     } catch (_: Exception) {
                         false
                     },
+                    // The resolver's own argument -> parameter mapping. A
+                    // named or reordered argument list is invisible to the
+                    // syntax: `f(b = x, a = y)` and `f(x, y)` are the same
+                    // PSI shape with different meanings.
+                    argumentParameterIndex = try {
+                        val order = (symbol as? KaFunctionSymbol)
+                            ?.valueParameters
+                            ?.withIndex()
+                            ?.associate { (index, parameter) -> parameter.name to index }
+                            .orEmpty()
+                        (call as? org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall<*>)
+                            ?.argumentMapping
+                            ?.mapNotNull { (expression, signature) ->
+                                order[signature.name]?.let { expression to it }
+                            }
+                            ?.toMap()
+                            .orEmpty()
+                    } catch (_: Exception) {
+                        emptyMap()
+                    },
+                    valueParameterCount = (symbol as? KaFunctionSymbol)?.valueParameters?.size ?: 0,
                 )
             } catch (_: Exception) {
                 null
@@ -702,10 +740,11 @@ object KirLowering {
         val pkg = (klass.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
         val chain = containerChain(klass)
         // An object EXPRESSION delegating (`object: Payload by source {}`)
-        // has no name; `<anonymous>` is the convention the rest of the
-        // lowering already uses, and what identifies these forwarders to
-        // dispatch is their `overrides` edge, not their name.
-        val className = klass.name ?: "<anonymous>"
+        // has no name of its own; `classSegment` gives it its POSITIONAL
+        // one, the same name the literal's allocation carries — the
+        // forwarder and the object it belongs to must agree, or a call
+        // narrowed to the allocated type finds no member.
+        val className = classSegment(klass)
         val base = listOf(pkg, chain, className).filter { it.isNotEmpty() }.joinToString(".")
         val enclosing = listOf(chain, className).filter { it.isNotEmpty() }.joinToString(".")
         val file = klass.containingFile?.virtualFile?.path ?: "<memory>"
@@ -999,8 +1038,21 @@ object KirLowering {
      * Data class desugaring: `copy` and `componentN` exist in the KIR as
      * synthetic functions so downstream phases see the copies a data class
      * introduces (the field-sensitivity case) even though no source declares
-     * them. Their bodies are empty by construction — the synthesis is about
-     * the edges, not the code.
+     * them.
+     *
+     * `componentN`'s body stays empty — its edge is the whole point. `copy`
+     * now carries the body it desugars to, because an EMPTY one is not a
+     * neutral placeholder: it is a claim that `copy()` moves nothing, and a
+     * flow through a data class died inside a function with no instructions.
+     *
+     * The body is a chain of diamonds, one per stored property, which is
+     * what `copy` actually does: each field either takes the ARGUMENT the
+     * caller supplied or KEEPS `this`'s value, and only the caller knows
+     * which. Emitting both arms and letting the join merge them is exact for
+     * a may-analysis; emitting them in sequence would not be, because a
+     * field write is a strong update in both engines, so a second write to
+     * the same path would erase the first — and a `copy(token = raw)` that
+     * erased `user` is the same silent loss this row was opened for.
      */
     private fun synthesizeDataClassMembers(
         klass: org.jetbrains.kotlin.psi.KtClass,
@@ -1029,11 +1081,92 @@ object KirLowering {
             syntheticCause = "data-class",
             body = KirBody(listOf(KirBlock("b0", entry = true, instructions = listOf(io.cdxgen.kosi.kir.KirReturn(null))))),
         )
-        val functions = mutableListOf(synthetic("copy"))
-        klass.primaryConstructorParameters.filter { it.hasValOrVar() }.forEachIndexed { index, _ ->
+        val stored = klass.primaryConstructorParameters.filter { it.hasValOrVar() }
+        val functions = mutableListOf(
+            synthetic("copy").copy(
+                params = listOf(io.cdxgen.kosi.kir.KirParam("%0", "this", null, receiver = true)) +
+                    stored.mapIndexed { index, parameter ->
+                        io.cdxgen.kosi.kir.KirParam(
+                            "%${index + 1}",
+                            parameter.name ?: "arg${index + 1}",
+                            parameter.typeReference?.text,
+                            receiver = false,
+                        )
+                    },
+                returnType = base,
+                body = copyBody(base, stored.map { it.name }),
+            ),
+        )
+        stored.forEachIndexed { index, _ ->
             functions.add(synthetic("component${index + 1}"))
         }
         return functions
+    }
+
+    /**
+     * `copy`'s desugaring: allocate, then one diamond per stored property —
+     * the argument arm and the keep-`this`'s-value arm — joining before the
+     * return. See [synthesizeDataClassMembers] for why both arms exist.
+     */
+    private fun copyBody(type: String, fields: List<String?>): KirBody {
+        val blocks = mutableListOf<KirBlock>()
+        val result = "%copy"
+        var next = 0
+        fun temp(): String = "%t${next++}"
+        val entry = mutableListOf<io.cdxgen.kosi.kir.KirIns>(
+            io.cdxgen.kosi.kir.KirNew(result, type, emptyList()),
+        )
+        var current = entry
+        var currentId = "b0"
+        fields.forEachIndexed { index, name ->
+            if (name == null) return@forEachIndexed
+            val take = "b${index}_take"
+            val keep = "b${index}_keep"
+            val join = "b${index}_join"
+            val condition = temp()
+            current.add(io.cdxgen.kosi.kir.KirLoad(condition, KirConstant.Bool(true)))
+            current.add(io.cdxgen.kosi.kir.KirBranch(condition, take, keep))
+            blocks.add(KirBlock(currentId, entry = currentId == "b0", instructions = current))
+            blocks.add(
+                KirBlock(
+                    take,
+                    entry = false,
+                    instructions = listOf(
+                        io.cdxgen.kosi.kir.KirFieldSet(
+                            result,
+                            io.cdxgen.kosi.kir.AccessPath.field(result, name),
+                            "%${index + 1}",
+                        ),
+                        // Explicit jump to the join. Without a terminator
+                        // this block FALLS THROUGH to the next in list
+                        // order, which is the other arm — and the two arms
+                        // in sequence are the strong-update erasure the
+                        // diamond exists to avoid.
+                        io.cdxgen.kosi.kir.KirBranch(condition, join, join),
+                    ),
+                ),
+            )
+            val kept = temp()
+            blocks.add(
+                KirBlock(
+                    keep,
+                    entry = false,
+                    instructions = listOf(
+                        io.cdxgen.kosi.kir.KirFieldGet(kept, "%0", io.cdxgen.kosi.kir.AccessPath.field("%0", name)),
+                        io.cdxgen.kosi.kir.KirFieldSet(
+                            result,
+                            io.cdxgen.kosi.kir.AccessPath.field(result, name),
+                            kept,
+                        ),
+                    ),
+                ),
+            )
+            current = mutableListOf()
+            currentId = join
+        }
+        current.add(io.cdxgen.kosi.kir.KirReturn(result))
+        blocks.add(KirBlock(currentId, entry = currentId == "b0", instructions = current))
+        return KirBody(blocks)
     }
 
     // ---- signatures -----------------------------------------------------------------
@@ -1190,7 +1323,38 @@ object KirLowering {
             .filterIsInstance<org.jetbrains.kotlin.psi.KtClassOrObject>()
             .toList()
             .reversed()
-            .joinToString(".") { it.name ?: "<anonymous>" }
+            .joinToString(".") { classSegment(it) }
+
+    /**
+     * The name a class contributes to a canonical name. An object EXPRESSION
+     * (`object : Writer { ... }`) declares no name, and `<anonymous>` — the
+     * placeholder every earlier phase used — is not one either: two literals
+     * in the same file, and an anonymous `fun` beside them, all collided on
+     * it, so the members of one object could not be told from the members of
+     * another and nothing could name the class a literal creates.
+     *
+     * The literal's POSITION names it. It is unique within a file by
+     * construction, stable across runs, and readable in a KIR dump, which is
+     * where these names are read.
+     */
+    private fun classSegment(klass: org.jetbrains.kotlin.psi.KtClassOrObject): String =
+        klass.name ?: if (klass.parent is org.jetbrains.kotlin.psi.KtObjectLiteralExpression) {
+            "<object@${klass.line()}:${klass.column()}>"
+        } else {
+            "<anonymous>"
+        }
+
+    /**
+     * The fully qualified name of the class an object literal creates —
+     * package, enclosing class chain, then [classSegment]'s positional name.
+     * The literal's SITE and its MEMBERS must agree on it, or a call on the
+     * literal names a class no function belongs to.
+     */
+    private fun objectLiteralType(declaration: org.jetbrains.kotlin.psi.KtObjectDeclaration): String {
+        val pkg = (declaration.containingFile as? org.jetbrains.kotlin.psi.KtFile)?.packageFqName?.asString() ?: ""
+        val chain = containerChain(declaration)
+        return listOf(pkg, chain, classSegment(declaration)).filter { it.isNotEmpty() }.joinToString(".")
+    }
 
     /**
      * The JVM name of a property accessor: `getData` / `setData` after the
@@ -1388,6 +1552,43 @@ object KirLowering {
             for (param in params) {
                 val name = param.name ?: continue
                 emit(KirStore("v$name", param.register))
+            }
+        }
+
+        /**
+         * A DESTRUCTURED lambda parameter — `{ (key, value) -> ... }` — binds
+         * no name of its own, so [bindParameters] had nothing to store and
+         * every read of `key` or `value` in the body became a register
+         * nothing defines: the component carrying the taint was lost at the
+         * destructuring and the flow died, while every other lambda spelling
+         * in the gallery was found.
+         *
+         * The desugaring is the one the `for` loop already uses — `componentN`
+         * calls on the parameter — placed at the top of the body, which is
+         * where the compiler places it.
+         */
+        fun bindDestructuredParameters(psi: KtLambdaExpression, params: List<KirParam>) {
+            for ((index, declared) in psi.valueParameters.withIndex()) {
+                val entries = declared.destructuringDeclaration?.entries ?: continue
+                if (params.getOrNull(index) == null) continue
+                // `bindParameters` has already stored the synthetic name,
+                // so the components read the same local any named parameter
+                // would be read through.
+                val register = "v\$destructured$index"
+                entries.forEachIndexed { position, entry ->
+                    val name = entry.name ?: return@forEachIndexed
+                    val component = t()
+                    emit(
+                        KirCall(
+                            component,
+                            KirCallee("kotlin.component${position + 1}", null, CallKind.EXTENSION),
+                            register,
+                            emptyList(),
+                            line = entry.line(),
+                        ),
+                    )
+                    emit(KirStore("v$name", component))
+                }
             }
         }
 
@@ -1953,12 +2154,19 @@ object KirLowering {
                 "v${psi.name ?: "local$temp"}"
             }
             is KtObjectLiteralExpression -> {
-                // Anonymous object: its members lower as their own functions
-                // (the visitor reaches them); the site names the object.
+                // An anonymous object IS an object. The site used to lower to
+                // `load "object <Writer>"` — a STRING — so nothing typed the
+                // register, no allocation existed for the receiver-type
+                // narrowing to see, and a call on the literal resolved to
+                // nothing at all. Its members lowered fully formed the whole
+                // time (`overrides`, `supertypes`, a real body); what was
+                // missing was the value they belong to.
+                val declaration = psi.objectDeclaration
                 val reg = t()
-                val supertypes = psi.objectDeclaration?.superTypeListEntries
-                    ?.joinToString(",") { it.text ?: "" } ?: ""
-                emit(KirLoad(reg, KirConstant.Str("object <$supertypes>")))
+                if (declaration == null) {
+                    emit(KirLoad(reg, KirConstant.Str("object <>")))
+                }
+                declaration?.let { lowerObjectLiteral(it, reg, psi.line()) }
                 reg
             }
             is KtIsExpression -> {
@@ -2184,6 +2392,21 @@ object KirLowering {
                     // implicit `it`, so a read of it must be a local read.
                     is KtLambdaExpression -> {
                         if (cursor.valueParameters.any { it.name == name }) return true
+                        // A DESTRUCTURED lambda parameter's entries are
+                        // locals too (`{ (key, value) -> }`), bound by the
+                        // component calls the extraction emits. Without this
+                        // arm a read of `key` lowered as `fieldget vthis
+                        // vthis.key` — a field of an implicit receiver that
+                        // does not exist — so the component the taint was in
+                        // was written to one register and read from another,
+                        // and the flow died between two adjacent
+                        // instructions.
+                        if (cursor.valueParameters.any { parameter ->
+                                parameter.destructuringDeclaration?.entries?.any { it.name == name } == true
+                            }
+                        ) {
+                            return true
+                        }
                     }
 
                     is org.jetbrains.kotlin.psi.KtForExpression -> {
@@ -2740,6 +2963,123 @@ object KirLowering {
             return callWithReceiver(psi, receiver = null)
         }
 
+        /**
+         * Written arguments, in the order the CALLEE declares its
+         * parameters. Kotlin's named arguments make source order and
+         * parameter order two different things, and everything downstream —
+         * the summary engine's parameter indexes, the model packs' argument
+         * indexes, `paramToSink` — reads the KIR's argument list as
+         * parameter positions.
+         *
+         * A parameter with no written argument took its DEFAULT: it gets a
+         * placeholder register so the parameters after it keep their
+         * positions. The placeholder carries no facts, which is right for
+         * the constant defaults that dominate real code and an
+         * under-approximation for a default that is an expression — the
+         * callee's own lowering does not evaluate defaults either, so this
+         * adds no claim the rest of the engine would not already make.
+         * Trailing defaults are trimmed rather than padded: nothing reads a
+         * position no argument can occupy.
+         *
+         * A VARARG parameter takes several written arguments; they stay
+         * adjacent in its slot, which is the shape the lowering has always
+         * emitted for a spread.
+         */
+        private fun placeArguments(
+            written: List<Pair<org.jetbrains.kotlin.psi.KtExpression, String>>,
+            info: CallInfo?,
+            /**
+             * Parameters already filled by [callWithReceiver]'s leading
+             * arguments. An extension lambda's invoke is the case: the
+             * receiver IS parameter 0 of `FunctionN.invoke`, supplied from
+             * the qualifier rather than written in the argument list, so the
+             * written arguments start at parameter 1 and padding position 0
+             * would shift every one of them — which is exactly the
+             * one-position shift the receiver convention was fixed to end.
+             */
+            leading: Int = 0,
+        ): List<String> {
+            val order = info?.argumentParameterIndex.orEmpty()
+                .mapValues { (_, index) -> index - leading }
+                .filterValues { it >= 0 }
+            if (order.isEmpty()) return written.map { it.second }
+            // Every written argument must be placeable, or the reordering
+            // would silently DROP one — a lambda passed outside the
+            // parentheses, a spread the mapping does not carry. Source order
+            // is then the honest answer, exactly as before.
+            if (written.any { it.first !in order }) return written.map { it.second }
+            val slots = sortedMapOf<Int, MutableList<String>>()
+            for ((expression, register) in written) {
+                slots.getOrPut(order.getValue(expression)) { mutableListOf() }.add(register)
+            }
+            val last = slots.lastKey()
+            val out = mutableListOf<String>()
+            for (index in 0..last) {
+                val filled = slots[index]
+                if (filled != null) {
+                    out.addAll(filled)
+                } else {
+                    val placeholder = t()
+                    emit(KirLoad(placeholder, KirConstant.Str("default")))
+                    out.add(placeholder)
+                }
+            }
+            return out
+        }
+
+        /**
+         * The callee name with an anonymous class's segment replaced by its
+         * POSITIONAL name. A member of an object literal is named
+         * `pkg.<anonymous>.body` by the resolver, and every literal in a
+         * file gets the same segment — so a call could not be told from a
+         * call on a different literal, and no allocation could carry a type
+         * that matched. The declaration the SYMBOL points at decides, which
+         * is a resolution fact and not a guess about which literal is
+         * nearby.
+         */
+        private fun positional(fqn: String, symbol: KaCallableSymbol): String {
+            val literal = generateSequence(symbol.psi) { it.parent }
+                .filterIsInstance<org.jetbrains.kotlin.psi.KtObjectDeclaration>()
+                .firstOrNull { it.parent is org.jetbrains.kotlin.psi.KtObjectLiteralExpression }
+            if ("<anonymous>" in fqn) {
+                return literal?.let { fqn.replace("<anonymous>", classSegment(it)) } ?: fqn
+            }
+            // A member of an object literal has NO callableId at all — an
+            // anonymous class is not a callable's container as far as the
+            // resolver is concerned — so the call lowered to the literal
+            // `<function>`, with no name for dispatch to match. Every such
+            // call in a file looked alike, and one that happened to share a
+            // member name with an unrelated type was indistinguishable from
+            // it. The declaration the symbol points at names it.
+            if (fqn != "<function>" && fqn != "<property>") return fqn
+            val owner = literal ?: return fqn
+            val name = (symbol.psi as? org.jetbrains.kotlin.psi.KtNamedDeclaration)?.name ?: return fqn
+            return "${objectLiteralType(owner)}.$name"
+        }
+
+        /**
+         * The allocation an object literal is. A DELEGATING literal
+         * (`object : Payload by source {}`) also captures its delegate, and
+         * the forwarders the class synthesis emits read it back as a FIELD
+         * of `this` — so the allocation writes it. Nothing did before, and
+         * the flow stopped at an object whose delegate field was never
+         * assigned.
+         */
+        private fun lowerObjectLiteral(
+            declaration: org.jetbrains.kotlin.psi.KtObjectDeclaration,
+            reg: String,
+            line: Int,
+        ) {
+            val delegates = declaration.superTypeListEntries
+                .filterIsInstance<org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry>()
+                .mapNotNull { entry -> entry.delegateExpression?.let { it to lowerExpr(it, Pos.NESTED) } }
+            emit(KirNew(reg, objectLiteralType(declaration), delegates.map { it.second }, line = line))
+            for ((expression, value) in delegates) {
+                val field = (expression as? KtNameReferenceExpression)?.getReferencedName() ?: continue
+                emit(KirFieldSet(reg, io.cdxgen.kosi.kir.AccessPath.field(reg, field), value))
+            }
+        }
+
         private fun callWithReceiver(
             psi: KtCallExpression,
             receiver: String?,
@@ -2750,10 +3090,16 @@ object KirLowering {
              */
             leadingArgs: List<String> = emptyList(),
         ): String {
-            val argRegs = leadingArgs + psi.valueArguments.mapNotNull { arg ->
-                arg.getArgumentExpression()?.let { lowerExpr(it, Pos.NESTED) }
-            }
             val info = resolveCallInfo(psi)
+            // Arguments are LOWERED in source order — that is the order the
+            // program evaluates them, and a lowering that reordered the
+            // instructions would move a side effect — and then PLACED in
+            // PARAMETER order, which is the order every consumer of the KIR
+            // reads them in.
+            val written = psi.valueArguments.mapNotNull { arg ->
+                arg.getArgumentExpression()?.let { it to lowerExpr(it, Pos.NESTED) }
+            }
+            val argRegs = leadingArgs + placeArguments(written, info, leading = leadingArgs.size)
             val symbol = info?.symbol
             val simpleName = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
             if (symbol == null) {
@@ -2776,7 +3122,7 @@ object KirLowering {
                 }
                 is KaPropertySymbol -> {
                     kind = if (receiver != null) CallKind.VIRTUAL else CallKind.STATIC
-                    fqn = symbol.callableId?.asSingleFqName()?.asString() ?: "<property>"
+                    fqn = positional(symbol.callableId?.asSingleFqName()?.asString() ?: "<property>", symbol)
                 }
                 else -> {
                     kind = when {
@@ -2784,7 +3130,7 @@ object KirLowering {
                         receiver != null -> CallKind.VIRTUAL
                         else -> CallKind.STATIC
                     }
-                    fqn = symbol.callableId?.asSingleFqName()?.asString() ?: "<function>"
+                    fqn = positional(symbol.callableId?.asSingleFqName()?.asString() ?: "<function>", symbol)
                 }
             }
             val reg = t()
@@ -3170,10 +3516,18 @@ object KirLowering {
                 listOf(KirParam("%p0", "it", null, receiver = false))
             } else {
                 psi.valueParameters.mapIndexed { index, param ->
-                    KirParam("%p$index", param.name, param.typeReference?.text, receiver = false)
+                    // A DESTRUCTURED parameter — `{ (a, b) -> }` — has no
+                    // name of its own, and a nameless parameter is not a
+                    // parameter the rest of the engine can bind: it is named
+                    // here so the value arrives, and the entries are then
+                    // bound off it by `bindDestructuredParameters`.
+                    val name = param.name
+                        ?: param.destructuringDeclaration?.let { "\$destructured$index" }
+                    KirParam("%p$index", name, param.typeReference?.text, receiver = false)
                 }
             }
             bodyLower.bindParameters(valueParams)
+            bodyLower.bindDestructuredParameters(psi, valueParams)
             val statements = bodyPsi.statements
             for ((index, statement) in statements.withIndex()) {
                 if (index < statements.lastIndex) {
