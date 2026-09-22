@@ -38,7 +38,8 @@
 // ---- receivers
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaExtensionFunction known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaApplyScope known-fail=syntax:1
-// kosi:want flow source=untrusted-input sink=process-exec fn=~viaExtensionLambda known-fail=syntax:1 known-fail=158
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaExtensionLambda known-fail=syntax:1
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaReceiverIgnored known-fail=syntax:1
 // ---- dispatch shapes
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaInterface known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaAbstractClass known-fail=syntax:1
@@ -224,6 +225,22 @@ private fun build(block: Builder.() -> Unit) {
 fun viaExtensionLambda() {
     val raw = readLine() ?: ""
     build { cmd = raw }
+}
+
+// The same extension-lambda receiver, IGNORED: the block declares a value
+// parameter and never touches `this`. The invoke passes the receiver as its
+// argument 0 regardless, so a body that declined the receiver parameter
+// bound every value argument one position off — the tainted string landed on
+// a parameter the block's own receiver should have occupied, and the flow
+// was silent while the writing spelling above was found. The receiver
+// convention lives on KirLambda; this spelling pins the ignoring half of it.
+private fun withExt(b: Builder, raw: String, block: Builder.(String) -> Unit) {
+    b.block(raw)
+}
+
+fun viaReceiverIgnored() {
+    val raw = readLine() ?: ""
+    withExt(Builder(), raw) { s -> exec(s) }
 }
 
 // ---- dispatch shapes ----------------------------------------------------

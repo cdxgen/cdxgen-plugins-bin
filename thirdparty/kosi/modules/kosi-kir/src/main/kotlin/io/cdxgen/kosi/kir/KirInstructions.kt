@@ -90,6 +90,27 @@ data class KirStringConcat(val result: String, val parts: List<String>) : KirIns
  * A lambda: `function` names the canonical lambda body function the lowering
  * extracted, `captures` the registers frozen into it. Scope functions inline
  * the body instead and keep a call edge for evidence — see [KirCall].
+ *
+ * ## The receiver convention (one rule, every channel)
+ *
+ * An extracted lambda body's parameter list is, in order: its CAPTURES
+ * (`%c0..`, bound from [captures] at the `KirLambda` site), then — when the
+ * lambda's expected type carries an extension receiver — that receiver as
+ * `%r0`, then its VALUE parameters (`%p0..`). At any invoke of the function
+ * value, the extension receiver is the invoke's ARGUMENT 0. The two ends
+ * must agree exactly, or every value parameter is bound one position off and
+ * the argument carrying taint binds to nothing:
+ *
+ *  - the PRODUCER is `qualifiedFunctionValueCall`'s extension-receiver shape
+ *    (`b.block(x)` lowers to `invoke recv=vblock args=(vb, ..)`), which
+ *    always prepends the receiver as argument 0;
+ *  - the CONSUMERS — `applyLambdaInvoke` in both engines and the invoked-bind
+ *    channel — bind parameter `captures.size + i` to `ins.args[i]`, so
+ *    argument 0 lands on `%r0`;
+ *  - `%r0` is therefore emitted whenever the expected type carries a
+ *    receiver, decided by RESOLUTION (`LambdaContext.lambdaHasReceiver`),
+ *    never by whether the body happens to touch `this` — a lambda that
+ *    ignores its receiver still receives it.
  */
 data class KirLambda(val result: String, val function: String, val captures: List<String>) : KirIns
 
