@@ -12,7 +12,7 @@
 // Positive half.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~sinkThroughSecondReference frames=6
 // kosi:want flow source=untrusted-input sink=process-exec fn=~sinkThroughContainerField frames=6
-// kosi:want flow source=untrusted-input sink=process-exec fn=~sinkThroughCopy frames=5 known-fail=146
+// kosi:want flow source=untrusted-input sink=process-exec fn=~sinkThroughCopy frames=5
 package fixtures.deep.alias
 
 data class Session(val token: String, val label: String = "ok")
