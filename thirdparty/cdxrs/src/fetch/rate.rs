@@ -6,6 +6,9 @@
 //! - npm registry: no documented per-IP limit; a CDN in front of a static
 //!   document store.
 //! - PyPI: no documented limit; also CDN-fronted.
+//! - Maven Central: no documented number at all — limits are enforced against
+//!   aggregate traffic with unpublished, falling thresholds, and the penalty is
+//!   an escalating block of up to 30 days rather than a retryable 429.
 //!
 //! A single interval for every host is the wrong shape. The previous version
 //! applied crates.io's 250 ms to *all* hosts, which capped an npm run at 4
@@ -56,9 +59,13 @@ pub struct HostPolicy {
 /// interval ms, authenticated concurrency. A host whose limit does not change
 /// with a credential repeats the same pair.
 const HOST_POLICIES: &[(&str, u64, usize, u64, usize)] = &[
-    // crates.io's published budget is per IP and does not improve with a token,
-    // and cdxgen sends none to it.
-    ("crates.io", 250, 4, 250, 4),
+    // crates.io's crawler policy asks for at most one request per second, made
+    // serially: it is a condition of use rather than a throughput hint, so the
+    // interval is a full second and the concurrency is 1. At a concurrency
+    // above 1 the gate would still average a second apiece but would deliver
+    // them in bursts, which is the thing the policy rules out. The budget is
+    // per IP and does not improve with a token, and cdxgen sends none to it.
+    ("crates.io", 1000, 1, 1000, 1),
     // GitHub: 60 req/h anonymous, 5000 req/h authenticated. 5000/h is ~1.4 req/s
     // sustained, but the limit is an hourly budget rather than a rate, so a
     // batch of a few hundred lookups is well inside it. Hence no interval and a
@@ -68,6 +75,30 @@ const HOST_POLICIES: &[(&str, u64, usize, u64, usize)] = &[
     // GitLab: 2000 req/min authenticated against 500 unauthenticated.
     ("gitlab.com", 250, 4, 0, 8),
     ("pkg.go.dev", 250, 4, 250, 4),
+    // Maven Central publishes no number. It publishes a policy: limits are
+    // enforced against aggregate traffic, the thresholds are unpublished and
+    // moving downward, and the named offenders are "CI/CD platforms, security
+    // scanners, and other services that generate outsized traffic" — cdxgen's
+    // job description. A block escalates to a ban of up to 30 days rather than a
+    // per-request 429, so being slightly too fast costs a month of Maven
+    // resolution, not a retry. That asymmetry sets these rows.
+    //
+    // repo1 is the artifact store, Cloudflare-fronted (`cf-cache-status` on
+    // every response), so a cached POM never reaches Sonatype: 100 ms and 8 in
+    // flight, ~10 req/s, half the CDN default.
+    ("repo1.maven.org", 100, 8, 100, 8),
+    // The search API is a Solr query against the origin, one request per unknown
+    // jar hash and cacheable by nobody: serial, 500 ms, ~2 req/s. cdxgen already
+    // disables jar search for the rest of a run on the first 429 or timeout, so
+    // a slower gate buys more jars identified, not fewer.
+    ("search.maven.org", 500, 1, 500, 1),
+    ("central.sonatype.com", 500, 1, 500, 1),
+    // package.elm-lang.org publishes no limit: no `Crawl-delay` in its
+    // robots.txt, no terms of use, no documented API. What it does have is a
+    // single community-run origin rather than a CDN, so it is held to the same
+    // gentle allowance as the other unpublished host here instead of the CDN
+    // default.
+    ("package.elm-lang.org", 250, 4, 250, 4),
 ];
 
 /// Concurrency allowed to a host with no published limit.
@@ -190,8 +221,13 @@ mod tests {
 
     #[test]
     fn published_limits_cap_concurrency_too() {
-        assert_eq!(policy_for("crates.io", Anonymous).max_concurrency, 4);
+        // crates.io is serial by policy, not merely capped.
+        assert_eq!(policy_for("crates.io", Anonymous).max_concurrency, 1);
         assert_eq!(policy_for("api.github.com", Anonymous).max_concurrency, 4);
+        assert_eq!(
+            policy_for("package.elm-lang.org", Anonymous).max_concurrency,
+            4
+        );
     }
 
     #[test]
@@ -223,6 +259,24 @@ mod tests {
     }
 
     #[test]
+    fn maven_search_is_gated_harder_than_the_maven_artifact_store() {
+        // Two Sonatype services with two costs: repo1 answers from a CDN edge,
+        // the Solr search API answers from the origin. One shared Maven row
+        // would have to pick one of them and be wrong about the other.
+        let repo = policy_for("repo1.maven.org", Anonymous);
+        assert_eq!(repo.min_interval, Duration::from_millis(100));
+        assert_eq!(repo.max_concurrency, 8);
+        for host in ["search.maven.org", "central.sonatype.com"] {
+            let search = policy_for(host, Anonymous);
+            assert_eq!(search.min_interval, Duration::from_millis(500));
+            assert_eq!(search.max_concurrency, 1);
+            // Central's budget is per IP: a token must not raise it.
+            assert_eq!(policy_for(host, Authenticated), search);
+        }
+        assert_eq!(policy_for("repo1.maven.org", Authenticated), repo);
+    }
+
+    #[test]
     fn cdn_hosts_are_not_capped_at_four() {
         assert_eq!(
             policy_for("registry.npmjs.org", Anonymous).max_concurrency,
@@ -238,11 +292,11 @@ mod tests {
     fn published_limits_get_an_interval() {
         assert_eq!(
             min_interval_for("crates.io", Anonymous),
-            Duration::from_millis(250)
+            Duration::from_millis(1000)
         );
         assert_eq!(
             min_interval_for("index.crates.io", Anonymous),
-            Duration::from_millis(250)
+            Duration::from_millis(1000)
         );
         assert_eq!(
             min_interval_for("API.GitHub.com", Anonymous),
@@ -269,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn interval_is_enforced_between_successive_waits() {
-        let limiter = RateLimiter::new("crates.io", Anonymous);
+        let limiter = RateLimiter::new("pkg.go.dev", Anonymous);
         let start = Instant::now();
         limiter.wait().await;
         limiter.wait().await;
