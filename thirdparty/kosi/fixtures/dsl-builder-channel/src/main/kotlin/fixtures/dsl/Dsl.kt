@@ -12,16 +12,21 @@
 // invoked block, read at `cmd`, reaches `go`'s sink — and the caller
 // completes it with the block's write of its capture into that argument.
 //
-// The two want-nots are the precision half of the same channel: a block that
-// writes a CLEAN value moves nothing, and a block that writes the WRONG
+// The three want-nots are the precision half of the same channel: a block
+// that writes a CLEAN value moves nothing, a block that writes the WRONG
 // field (the sink reads `cmd`, the block writes `label`) must not fire
-// through it. If either starts reporting, the channel is over-firing — a
-// false positive of the engine, not a fixture to edit.
+// through it, and a builder that CONSUMES BEFORE IT CONFIGURES must not
+// either — the last one reported until the recording became order-aware, and
+// it is the one that fails first if the reachability guard is removed. If any
+// starts reporting, the channel is over-firing — a false positive of the
+// engine, not a fixture to edit.
 //
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaDsl known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaDslValueParam known-fail=syntax:1
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~viaDslClean
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~viaDslOtherField
+// kosi:want-not flow source=untrusted-input sink=process-exec fn=~viaDslAfterSink
+// kosi:want flow source=untrusted-input sink=process-exec fn=~viaDslDirectSink known-fail=syntax:1 known-fail=213
 // kosi:want-not diagnostic code=parse-error
 package fixtures.dsl
 
@@ -59,6 +64,40 @@ private fun buildWithValue(b: Builder, raw: String, block: Builder.(String) -> U
 fun viaDslValueParam() {
     val raw = readLine() ?: ""
     buildWithValue(Builder(), raw) { s -> cmd = s }
+}
+
+// Negative: ORDER. The builder consumes before it configures, so the block's
+// write can never reach the sink. The channel that carries the idiom above is
+// otherwise flow-insensitive — it matches an invoke of the function value
+// against a sink anywhere in the same body — and reported this shape until
+// the recording asked whether the invoke can REACH the sink in the CFG.
+// Reachability, not site order: a loop that sinks then configures does move
+// taint on the next iteration, and the back edge says so.
+private fun buildLate(block: Builder.() -> Unit) {
+    val b = Builder()
+    b.go()
+    b.block()
+}
+
+fun viaDslAfterSink() {
+    val raw = readLine() ?: ""
+    buildLate { cmd = raw }
+}
+
+// The same idiom with the sink in the BUILDER'S OWN body rather than in a
+// callee it invokes — `exec(b.cmd)` instead of `b.go()`. Open (R213): the
+// channel is recorded while applying a CALLEE's summary, so a builder that
+// sinks directly records nothing. `b` is a local, not a parameter, so the
+// body has no sink effect of its own to hang the argument on.
+private fun buildDirect(block: Builder.() -> Unit) {
+    val b = Builder()
+    b.block()
+    Runtime.getRuntime().exec(b.cmd)
+}
+
+fun viaDslDirectSink() {
+    val raw = readLine() ?: ""
+    buildDirect { cmd = raw }
 }
 
 // Negative: the block writes, but a constant — nothing moves.

@@ -2179,10 +2179,12 @@ internal class SummaryAnalysis(
      * parametric half must be recorded even when the argument carries no
      * taint here, because the taint arrives through the caller's lambda
      * capture, a value this body cannot name. Deterministic: one entry per
-     * (register, param, argIndex), the first invoke site by id as witness.
+     * (register, param, argIndex, invoke site) — EVERY invoke site, not one
+     * witness per key, because [invokeReachesSink] then selects among them
+     * and the lowest id is not always the one that reaches the sink.
      */
     private val invokeArgOrigins: Map<String, List<Triple<Int, Int, Int>>> by lazy {
-        val byKey = HashMap<Triple<String, Int, Int>, Int>()
+        val origins = HashMap<String, MutableList<Triple<Int, Int, Int>>>()
         for (sites in cf.sitesByBlock.values) {
             for (invokeSite in sites) {
                 val ins = invokeSite.ins as? KirCall ?: continue
@@ -2190,15 +2192,41 @@ internal class SummaryAnalysis(
                 val recv = ins.receiver ?: continue
                 val param = paramIndexOf(recv) ?: continue
                 for ((argIndex, arg) in ins.args.withIndex()) {
-                    val key = Triple(arg, param, argIndex)
-                    val existing = byKey[key]
-                    if (existing == null || invokeSite.id < existing) byKey[key] = invokeSite.id
+                    origins.getOrPut(arg) { mutableListOf() }.add(Triple(param, argIndex, invokeSite.id))
                 }
             }
         }
-        byKey.entries
-            .groupBy({ it.key.first }) { Triple(it.key.second, it.key.third, it.value) }
-            .mapValues { (_, origins) -> origins.sortedWith(compareBy({ it.first }, { it.second }, { it.third })) }
+        origins.mapValues { (_, o) -> o.sortedWith(compareBy({ it.first }, { it.second }, { it.third })) }
+    }
+
+    /**
+     * Can the invoke of the function value REACH the site that sinks the
+     * argument? The channel is otherwise flow-INSENSITIVE, and a builder
+     * that consumes before it configures — `b.go(); b.block()` — would
+     * publish a sink the block's write can never reach, a false positive of
+     * the engine. Reachability rather than site order, so a loop body
+     * (`for (..) { b.go(); b.block() }`, where the block DOES write before
+     * the next iteration's sink) still counts: the back edge makes the
+     * invoke reach the sink.
+     */
+    private val blockReach: Map<String, Set<String>> by lazy {
+        cf.blocks.associate { block ->
+            val seen = HashSet<String>()
+            val work = ArrayDeque(cf.successors[block.id].orEmpty())
+            while (work.isNotEmpty()) {
+                val next = work.removeFirst()
+                if (!seen.add(next)) continue
+                work.addAll(cf.successors[next].orEmpty())
+            }
+            block.id to seen
+        }
+    }
+
+    private fun invokeReachesSink(invokeSiteId: Int, sinkSiteId: Int): Boolean {
+        val from = cf.siteById[invokeSiteId] ?: return true
+        val to = cf.siteById[sinkSiteId] ?: return true
+        if (from.blockId == to.blockId && from.indexInBlock <= to.indexInBlock) return true
+        return to.blockId in blockReach[from.blockId].orEmpty()
     }
 
     /** One witness per canonical invoked-arg sink, the invokedBinds discipline. */
@@ -2236,6 +2264,7 @@ internal class SummaryAnalysis(
             if (effect.paramPath.isEmpty()) continue
             val fromReg = binding(effect.paramIndex) ?: continue
             for ((param, argIndex, invokeSite) in invokeArgOrigins[fromReg].orEmpty()) {
+                if (!invokeReachesSink(invokeSite, site)) continue
                 val raw = listOf(invokeSite, site) + effect.path
                 val (path, cut) = stabilize(raw)
                 recordInvokedArgSink(
