@@ -2199,6 +2199,78 @@ object TaintEngine {
                         }
                     }
                 }
+                // The callee's INVOKED-ARG SINKS — the DSL builder's
+                // channel: it reached a sink with an argument it handed to
+                // this function value (`b.block(); b.go()` — `go` sinks the
+                // receiver `b.block()` passed as argument 0). The lambda's
+                // own `paramFieldWrites` completes the parametric half: a
+                // write whose TARGET parameter is that argument position
+                // (the lambda's parameter `captures + argIndex`, the
+                // receiver convention) and whose suffix covers the sunk path
+                // fires the sink with the written value's facts — the
+                // CAPTURE's facts at the register that named them here, or
+                // the bound value's facts when the write's source was a
+                // value parameter (addressed exactly as the sinkEffects
+                // application above addresses it).
+                for (composed in summary.invokedArgSinks.sortedWith(
+                    compareBy({ it.invokedParam }, { it.argIndex }, { it.effect.sinkSite }),
+                )) {
+                    if (composed.invokedParam != param) continue
+                    val sunkPath = composed.effect.paramPath
+                    for ((writeFrom, tos) in lambdaSummary.paramFieldWrites) {
+                        for ((writeTo, suffixes) in tos) {
+                            if (writeTo - lambdaCaptured.size != composed.argIndex) continue
+                            for (suffix in suffixes.sorted()) {
+                                // The sunk path must sit INSIDE the written
+                                // one: `cmd` covers `cmd` and `cmd.inner`,
+                                // never the bare object or a sibling field.
+                                if (sunkPath != suffix && !sunkPath.startsWith("$suffix.")) continue
+                                if (writeFrom < lambdaCaptured.size) {
+                                    val captureReg = lambdaCaptured[writeFrom]
+                                    val captureKey = TaintKey(captureReg, "")
+                                    val facts = state.factsOf(captureKey)
+                                    if (facts.isEmpty()) continue
+                                    moved = true
+                                    collect?.interHits?.add(
+                                        InterSinkHit(site, captureKey, java.util.TreeSet(facts), composed.effect, lambdaOrigin),
+                                    )
+                                } else {
+                                    val writeBindArgIndex = writeFrom - lambdaCaptured.size
+                                    val bind = summary.invokedBinds.firstOrNull {
+                                        it.invokedParam == param && it.argIndex == writeBindArgIndex
+                                    } ?: continue
+                                    when {
+                                        bind.fromParam != null -> {
+                                            val sourceReg = binding(bind.fromParam) ?: continue
+                                            val sourceKey = TaintKey(sourceReg, bind.fromParamPath)
+                                            val facts = state.factsOf(sourceKey)
+                                            if (facts.isEmpty()) continue
+                                            moved = true
+                                            collect?.interHits?.add(
+                                                InterSinkHit(site, sourceKey, java.util.TreeSet(facts), composed.effect, lambdaOrigin),
+                                            )
+                                        }
+
+                                        bind.category != null -> {
+                                            val fact = TaintFact(site, bind.category)
+                                            context.recordSourceReturn(fact, bind.path)
+                                            moved = true
+                                            collect?.interHits?.add(
+                                                InterSinkHit(
+                                                    site,
+                                                    TaintKey(argReg, ""),
+                                                    java.util.TreeSet(setOf(fact)),
+                                                    composed.effect,
+                                                    lambdaOrigin,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 }
             }
             return moved

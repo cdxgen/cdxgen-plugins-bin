@@ -3213,18 +3213,22 @@ object KirLowering {
             // block — the idiom Gradle and Android code is made of — moved
             // nothing to its caller.
             //
-            // RESOLUTION decides, not the body. An earlier cut asked whether
-            // the body writes through a free `vthis`, and that is wrong twice
-            // over: a class-qualified call (`Runtime.getRuntime()`) lowers its
-            // qualifier as a `fieldget` on `vthis`, and — worse — an ORDINARY
-            // lambda nested inside a DSL block sees the OUTER lambda's
-            // receiver as free, so it stole an `%r0` of its own and shifted
-            // every one of its real parameters by one. The expected type is
-            // the only thing that knows, and it also covers the READ-ONLY
-            // extension lambda the body test could never see.
-            val implicitReceiver = context.lambdaHasReceiver(psi) &&
-                "vthis" !in bodyDefs &&
-                instructions.any { "vthis" in it.uses }
+            // RESOLUTION decides ALONE (the receiver convention, documented
+            // on KirLambda): the invoke site ALWAYS passes the extension
+            // receiver as argument 0, so the body ALWAYS takes it as `%r0`
+            // when the expected type carries one. Earlier cuts also asked the
+            // body — first "a free `vthis` that is written to" (wrong twice:
+            // a class-qualified call lowers its qualifier as a `fieldget` on
+            // `vthis`, and an ORDINARY lambda nested inside a DSL block sees
+            // the outer lambda's receiver as free, so it stole an `%r0` of
+            // its own and shifted every one of its real parameters by one),
+            // then merely "the body touches `vthis` at all" — and a lambda
+            // that IGNORES its receiver declined the parameter while the
+            // invoke still passed the argument, binding every value parameter
+            // one position off. The expected type is the only thing that
+            // knows, and a body that never mentions `this` still receives
+            // one.
+            val implicitReceiver = context.lambdaHasReceiver(psi)
             val receiverParams = if (implicitReceiver) {
                 listOf(KirParam("%r0", "this", null, receiver = false))
             } else {

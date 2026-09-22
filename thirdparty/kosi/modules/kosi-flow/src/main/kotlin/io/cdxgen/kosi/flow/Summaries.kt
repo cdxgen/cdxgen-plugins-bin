@@ -152,6 +152,26 @@ internal data class InvokeBind(
 )
 
 /**
+ * A sink the body reaches with an argument it handed to an INVOKED
+ * function-valued parameter — the DSL builder's missing half. `b.block();
+ * b.go()` inside `fun build(block: Builder.() -> Unit)` sinks `go`'s
+ * receiver (`b`, the very register passed as the invoke's argument 0), but
+ * the taint arrives only through the LAMBDA the caller passed: the body's
+ * `cmd = raw` writes the lambda's CAPTURE into its receiver, and neither the
+ * capture nor the lambda is nameable inside `build`. This channel says the
+ * parametric half the callee CAN see — "argument k of my invoked parameter
+ * j, read at [SummarySinkEffect.paramPath], reaches this sink" — and the
+ * caller completes it with the lambda's [FunctionSummary.paramFieldWrites]:
+ * a write whose target parameter is that same argument position and whose
+ * suffix covers the sunk path fires the sink with the capture's facts.
+ */
+internal data class InvokedArgSink(
+    val invokedParam: Int,
+    val argIndex: Int,
+    val effect: SummarySinkEffect,
+)
+
+/**
  * The summary of one function: what taint entering through its parameters
  * does inside it. Parameter facts are tracked WITHOUT categories — a summary
  * says "p0 reaches the sink", and the caller's real categories travel over
@@ -204,6 +224,13 @@ internal class FunctionSummary(
     /** What the body passes when it invokes function-valued parameters. */
     val invokedBinds: List<InvokeBind> = emptyList(),
     /**
+     * Sinks the body reaches with an argument it handed to an invoked
+     * function-valued parameter — the callee's half of the DSL-builder
+     * channel; see [InvokedArgSink]. The caller completes each entry with
+     * the passed lambda's [paramFieldWrites].
+     */
+    val invokedArgSinks: List<InvokedArgSink> = emptyList(),
+    /**
      * Source-born taint stored into a FIELD of the returned object —
      * `fun make() = Wrapped(readLine() ?: "")`. The RETURN mirror of
      * [sourceFieldWrites]'s write half: the constructor synthesis writes
@@ -236,7 +263,7 @@ internal class FunctionSummary(
      * — and a getter is exactly this shape.
      */
     val paramFieldToReturn: Map<Int, Set<String>> = emptyMap(),
-    /** Witness path per field-to-return channel, keyed `param suffix`. */
+    /** Witness path per field-to-return channel, keyed `param\u0000suffix`. */
     val paramFieldToReturnPaths: Map<String, List<Int>> = emptyMap(),
     /**
      * Parameter i's FIELD reaches a FIELD of the return —
@@ -280,6 +307,8 @@ internal class FunctionSummary(
                 other.sourceFieldWrites.mapValues { (_, w) -> w.mapTo(sortedSetOf()) { "${it.paramIndex}\u0000${it.suffix}" } } &&
             invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() ==
                 other.invokedBinds.map { Triple(it.invokedParam, it.argIndex, it.fromParam ?: it.category) }.toSet() &&
+            invokedArgSinks.map { Triple(it.invokedParam, it.argIndex, it.effect.copy(path = emptyList())) }.toSet() ==
+                other.invokedArgSinks.map { Triple(it.invokedParam, it.argIndex, it.effect.copy(path = emptyList())) }.toSet() &&
             sourceReturnFields == other.sourceReturnFields &&
             sourceReturnFieldPaths.keys == other.sourceReturnFieldPaths.keys &&
             paramFieldToReturn == other.paramFieldToReturn &&
@@ -336,6 +365,19 @@ internal class FunctionSummary(
                 .groupBy { Triple(it.invokedParam, it.argIndex, it.fromParam ?: -(it.sourceSite ?: -1)) }
                 .map { (_, binds) -> binds.minWithOrNull(compareBy({ it.path.size }, { it.path.joinToString(",") }))!! }
                 .sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }))
+        },
+        invokedArgSinks = run {
+            (invokedArgSinks + other.invokedArgSinks)
+                .groupBy { Triple(it.invokedParam, it.argIndex, it.effect.copy(path = emptyList())) }
+                .map { (_, sinks) -> sinks.minWithOrNull(compareBy({ it.effect.path.size }, { it.effect.path.joinToString(",") }))!! }
+                .sortedWith(
+                    compareBy(
+                        { it.invokedParam },
+                        { it.argIndex },
+                        { it.effect.sinkSite },
+                        { it.effect.paramPath },
+                    ),
+                )
         },
         sourceReturnFields = mergeSets(sourceReturnFields, other.sourceReturnFields),
         paramFieldToReturn = mergeSets(paramFieldToReturn, other.paramFieldToReturn),
@@ -418,6 +460,12 @@ internal class FunctionSummary(
             invokes = invokedBinds.sortedWith(compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 })).map { bind ->
                 val from = bind.fromParam?.let { pid(it) } ?: "source:${bind.category}"
                 "${pid(bind.invokedParam)}(arg${bind.argIndex})<-$from"
+            },
+            invokedArgSinks = invokedArgSinks.sortedWith(
+                compareBy({ it.invokedParam }, { it.argIndex }, { it.effect.sinkSite }, { it.effect.paramPath }),
+            ).map { sink ->
+                val path = if (sink.effect.paramPath.isEmpty()) "" else ".${sink.effect.paramPath}"
+                "${pid(sink.invokedParam)}(arg${sink.argIndex})$path"
             },
             origin = origin,
         )
@@ -971,7 +1019,7 @@ internal class Summarizer(
         function, paramToReturn, paramToParam, paramFieldWrites, receiverWrites, sinkEffects,
         sourceReturns, sanitizes, invokedParams, origin,
         paramToReturnPaths, paramToReturnFields, paramToReturnFieldPaths, sourceFieldWrites, invokedBinds,
-        sourceReturnFields, emptyMap(), paramFieldToReturn, emptyMap(), paramPathToReturnPath,
+        invokedArgSinks, sourceReturnFields, emptyMap(), paramFieldToReturn, emptyMap(), paramPathToReturnPath,
     )
 
     /**
@@ -1988,7 +2036,10 @@ internal class SummaryAnalysis(
             }
         }
 
-        if (summary.sinkEffects.isNotEmpty()) recordComposedSinkEffects(summary, binding, site, state)
+        if (summary.sinkEffects.isNotEmpty()) {
+            recordComposedSinkEffects(summary, binding, site, state)
+            recordInvokedArgSinks(summary, binding, site)
+        }
         for ((from, tos) in summary.paramToParam) {
             val fromReg = binding(from) ?: continue
             for (to in tos.sorted()) {
@@ -2050,6 +2101,25 @@ internal class SummaryAnalysis(
                 )
             }
         }
+
+        // The same composition for the invoked-arg SINKS: a callee that
+        // reaches a sink with an argument it handed to ITS invoked
+        // parameter becomes, in me, a sink reached with the argument I hand
+        // to the same function value when MY caller supplies it — the
+        // argument position carries through unchanged, because the object
+        // the callee sunk is the one it received at its own invoke.
+        for (sink in summary.invokedArgSinks) {
+            val invokedReg = binding(sink.invokedParam) ?: continue
+            val myInvokedParam = paramIndexOf(invokedReg) ?: continue
+            invokedParams.add(myInvokedParam)
+            recordInvokedArgSink(
+                InvokedArgSink(
+                    invokedParam = myInvokedParam,
+                    argIndex = sink.argIndex,
+                    effect = sink.effect.copy(path = listOf(site) + sink.effect.path),
+                ),
+            )
+        }
     }
 
     private fun recordBind(bind: InvokeBind) {
@@ -2100,6 +2170,112 @@ internal class SummaryAnalysis(
         return paramAliases.entries
             .firstOrNull { cf.function.params.getOrNull(it.value)?.receiver == true }?.key
             ?: receiverParam.register
+    }
+
+    /**
+     * Arguments this body hands to invokes of its FUNCTION-VALUED
+     * parameters: register -> (invoked param, argument index, invoke site).
+     * A static pre-pass over the body, not a flow fact — the DSL channel's
+     * parametric half must be recorded even when the argument carries no
+     * taint here, because the taint arrives through the caller's lambda
+     * capture, a value this body cannot name. Deterministic: one entry per
+     * (register, param, argIndex, invoke site) — EVERY invoke site, not one
+     * witness per key, because [invokeReachesSink] then selects among them
+     * and the lowest id is not always the one that reaches the sink.
+     */
+    private val invokeArgOrigins: Map<String, List<Triple<Int, Int, Int>>> by lazy {
+        val origins = HashMap<String, MutableList<Triple<Int, Int, Int>>>()
+        for (sites in cf.sitesByBlock.values) {
+            for (invokeSite in sites) {
+                val ins = invokeSite.ins as? KirCall ?: continue
+                if (!ins.callee.fqn.endsWith(".invoke")) continue
+                val recv = ins.receiver ?: continue
+                val param = paramIndexOf(recv) ?: continue
+                for ((argIndex, arg) in ins.args.withIndex()) {
+                    origins.getOrPut(arg) { mutableListOf() }.add(Triple(param, argIndex, invokeSite.id))
+                }
+            }
+        }
+        origins.mapValues { (_, o) -> o.sortedWith(compareBy({ it.first }, { it.second }, { it.third })) }
+    }
+
+    /**
+     * Can the invoke of the function value REACH the site that sinks the
+     * argument? The channel is otherwise flow-INSENSITIVE, and a builder
+     * that consumes before it configures — `b.go(); b.block()` — would
+     * publish a sink the block's write can never reach, a false positive of
+     * the engine. Reachability rather than site order, so a loop body
+     * (`for (..) { b.go(); b.block() }`, where the block DOES write before
+     * the next iteration's sink) still counts: the back edge makes the
+     * invoke reach the sink.
+     */
+    private val blockReach: Map<String, Set<String>> by lazy {
+        cf.blocks.associate { block ->
+            val seen = HashSet<String>()
+            val work = ArrayDeque(cf.successors[block.id].orEmpty())
+            while (work.isNotEmpty()) {
+                val next = work.removeFirst()
+                if (!seen.add(next)) continue
+                work.addAll(cf.successors[next].orEmpty())
+            }
+            block.id to seen
+        }
+    }
+
+    private fun invokeReachesSink(invokeSiteId: Int, sinkSiteId: Int): Boolean {
+        val from = cf.siteById[invokeSiteId] ?: return true
+        val to = cf.siteById[sinkSiteId] ?: return true
+        if (from.blockId == to.blockId && from.indexInBlock <= to.indexInBlock) return true
+        return to.blockId in blockReach[from.blockId].orEmpty()
+    }
+
+    /** One witness per canonical invoked-arg sink, the invokedBinds discipline. */
+    private val invokedArgSinks = LinkedHashMap<Triple<Int, Int, SummarySinkEffect>, InvokedArgSink>()
+
+    private fun recordInvokedArgSink(sink: InvokedArgSink) {
+        if (invokedArgSinks.size >= options.maxSummarySinkEffects) {
+            stateOverBudget = true
+            overBudgetLabel = "summary-effect-budget"
+            return
+        }
+        val canonical = Triple(sink.invokedParam, sink.argIndex, sink.effect.copy(path = emptyList()))
+        val existing = invokedArgSinks[canonical]
+        if (existing == null || sink.effect.path.size < existing.effect.path.size) {
+            invokedArgSinks[canonical] = sink
+        }
+    }
+
+    /**
+     * The DSL builder's parametric half: a callee summary's sink effect
+     * whose from-register is an argument this body passed to an invoked
+     * function-valued parameter. `b.block(); b.go()` — `go`'s receiver IS
+     * the invoke's argument 0 — records "argument 0 of the lambda, read at
+     * this path, reaches that sink", and the caller completes it with the
+     * lambda's own `paramFieldWrites` (a write into that argument position
+     * at a covering suffix, from a capture carrying facts).
+     */
+    private fun recordInvokedArgSinks(summary: FunctionSummary, binding: (Int) -> String?, site: Int) {
+        for (effect in summary.sinkEffects.sortedWith(compareBy({ it.paramIndex }, { it.sinkSite }))) {
+            // A bare paramPath reads the argument's WHOLE object; a lambda
+            // body writes through a FIELD (a fieldset on its receiver or a
+            // captured object), which a bare read never sees
+            // field-sensitively — no caller-side match is possible, so none
+            // is recorded.
+            if (effect.paramPath.isEmpty()) continue
+            val fromReg = binding(effect.paramIndex) ?: continue
+            for ((param, argIndex, invokeSite) in invokeArgOrigins[fromReg].orEmpty()) {
+                if (!invokeReachesSink(invokeSite, site)) continue
+                val raw = listOf(invokeSite, site) + effect.path
+                val (path, cut) = stabilize(raw)
+                recordInvokedArgSink(
+                    InvokedArgSink(
+                        invokedParam = param,
+                        argIndex = argIndex,
+                        effect = effect.copy(path = path, elided = effect.elided || cut),
+                    ),
+                )
+            }
+        }
     }
 
     /**
@@ -2175,6 +2351,9 @@ internal class SummaryAnalysis(
         }.filterValues { it.isNotEmpty() },
         invokedBinds = invokedBinds.values.sortedWith(
             compareBy({ it.invokedParam }, { it.argIndex }, { it.fromParam ?: -1 }, { it.sourceSite ?: -1 }),
+        ),
+        invokedArgSinks = invokedArgSinks.values.sortedWith(
+            compareBy({ it.invokedParam }, { it.argIndex }, { it.effect.sinkSite }, { it.effect.paramPath }),
         ),
         sourceReturnFields = sourceReturnFields.mapValues { (_, v) -> v.toSet() }.filterValues { it.isNotEmpty() },
         sourceReturnFieldPaths = sourceReturnFieldPaths.mapValues { (_, paths) ->

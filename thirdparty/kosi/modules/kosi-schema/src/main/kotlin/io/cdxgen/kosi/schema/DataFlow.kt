@@ -330,6 +330,16 @@ data class FlowSummary(
      */
     val invokes: List<String> = emptyList(),
     /**
+     * Sinks the body reaches with an argument it handed to an INVOKED
+     * function-valued parameter, as `p<j>(arg<k>).<path>` strings — the DSL
+     * builder's channel: `b.block(); b.go()` inside the callee sinks a field
+     * (`path`) of the object it passed as argument k of the lambda it
+     * invoked, so a lambda that writes its capture into that argument's
+     * field reaches that sink. The write itself is the caller's lambda's
+     * `paramFieldWrites`; this half says where the written value goes.
+     */
+    val invokedArgSinks: List<String> = emptyList(),
+    /**
      * Source-born taint reaching the RETURN's FIELD, as
      * `<suffix>:<category>` strings — `fun make() = Wrapped(readLine() ?:
      * "")` returns an object whose field carries a source born inside it.
@@ -357,6 +367,9 @@ data class FlowSummary(
         w.endObject()
         w.str("function", function)
         w.str("functionId", functionId)
+        w.beginArray("invokedArgSinks")
+        for (v in invokedArgSinks.sorted()) w.str(v)
+        w.endArray()
         w.beginArray("invokes")
         for (v in invokes.sorted()) w.str(v)
         w.endArray()

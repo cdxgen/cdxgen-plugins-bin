@@ -1125,6 +1125,18 @@ path = "fixtures/function-value-lookalikes"
 capabilities = ["higher-order", "sam", "lookalike-negative"]
 tolerated_resolution_errors = []
 
+# The DSL builder channel: an extension lambda writes through its receiver
+# and the sink fires later in the very function that ran the block. The
+# positive halves are the capture-written idiom and the value-parameter
+# spelling R210 shifted; the want-nots pin the channel's precision (a clean
+# capture and a sibling-field write must both stay silent).
+[[fixtures]]
+slug = "dsl-builder-channel"
+tier = "fixtures"
+path = "fixtures/dsl-builder-channel"
+capabilities = ["higher-order", "receivers", "dsl", "lookalike-negative"]
+tolerated_resolution_errors = []
+
 # DI as dispatch evidence. The container constructs the bound
 # implementation, so the interface call has ONE target and the edge says
 # `di-binding`; the two unbound siblings must stay clean.
