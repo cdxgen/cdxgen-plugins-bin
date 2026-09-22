@@ -177,6 +177,35 @@ object KirLowering {
         val isStatic: Boolean = false,
         /** Resolved type arguments in declaration order (`get<Article>()`). */
         val typeArguments: List<String> = emptyList(),
+        /**
+         * True when the resolved symbol is a classifier's SYNTHESIZED SAM
+         * constructor — `Runnable { .. }`, `Bridge { .. }` — as opposed to an
+         * ordinary function that merely happens to be named after the type it
+         * returns.
+         *
+         * Nothing downstream can re-derive this. A SAM conversion and
+         * `fun Handler(block: (String) -> Unit): Handler` compile to the same
+         * KIR shape — STATIC, one `kotlin.jvm.functions.FunctionN` parameter,
+         * returning the callee's own name — and P33's first cut recognised the
+         * conversion from that shape in `AliasAnalysis`, so a factory that
+         * IGNORES its function argument had the argument's body applied at
+         * every later call on the result. That is a false flow, and only
+         * resolution can tell the two apart.
+         */
+        val isSamConstructor: Boolean = false,
+        /**
+         * True when this call is an implicit `invoke` of a function value that
+         * resolved against an EXTENSION receiver — `b.block()` inside
+         * `fun build(block: Builder.() -> Unit)`, where `block` is the
+         * function and `b` is its receiver.
+         *
+         * False for `h.f(raw)`, where the qualifier is the object whose MEMBER
+         * holds the function. The two are the same syntax, and the pure-PSI
+         * name walk that used to separate them picked the wrong one whenever a
+         * function-typed local shadowed a member's name — publishing a flow
+         * through a lambda the program never invokes.
+         */
+        val invokeOnExtensionReceiver: Boolean = false,
     )
 
     /**
@@ -367,6 +396,19 @@ object KirLowering {
                         (type as? org.jetbrains.kotlin.analysis.api.types.KaClassType)
                             ?.classId?.asSingleFqName()?.asString()
                     },
+                    isSamConstructor =
+                        symbol is org.jetbrains.kotlin.analysis.api.symbols.KaSamConstructorSymbol,
+                    // The extension receiver of an implicit `invoke` is the
+                    // function value's RECEIVER, not the object holding it.
+                    // Asking the resolver is the whole point: the syntax
+                    // `x.name(args)` cannot distinguish the two cases.
+                    invokeOnExtensionReceiver = try {
+                        (call as? org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall<*>)
+                            ?.partiallyAppliedSymbol
+                            ?.extensionReceiver != null
+                    } catch (_: Exception) {
+                        false
+                    },
                 )
             } catch (_: Exception) {
                 null
@@ -553,7 +595,28 @@ object KirLowering {
                 null
             }
 
-            val lambdaContext = LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference)
+            /**
+             * True when this lambda's EXPECTED type is an extension function
+             * type — `Builder.() -> Unit` — so its body's free `this` is a
+             * receiver the caller supplies.
+             *
+             * Resolved here for the same reason [resolveReference] is: the
+             * lowering may not re-enter `analyze`. An earlier cut inferred it
+             * from the body instead ("a free `vthis` that is written to"),
+             * and that inference is wrong for a NESTED lambda: an ordinary
+             * lambda inside a DSL block sees the OUTER lambda's receiver as
+             * free and stole a receiver parameter of its own, shifting every
+             * one of its real parameters by one.
+             */
+            fun lambdaHasReceiver(psi: KtLambdaExpression): Boolean = try {
+                val expected = psi.expectedType
+                (expected as? org.jetbrains.kotlin.analysis.api.types.KaFunctionType)?.hasReceiver == true
+            } catch (_: Exception) {
+                false
+            }
+
+            val lambdaContext =
+                LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference, ::lambdaHasReceiver)
             for (file in files) {
                 // The walk budget and the per-file boundary, exactly as
                 // in ResolvedAnalyzer — the same PSI trees are walked here,
@@ -988,6 +1051,8 @@ object KirLowering {
         val resolveProperty: (KtNameReferenceExpression) -> CallInfo?,
         /** The canonical name a `::reference` names; null when it does not resolve. */
         val resolveReference: (org.jetbrains.kotlin.psi.KtCallableReferenceExpression) -> String? = { null },
+        /** True when the lambda's EXPECTED type carries an extension receiver. */
+        val lambdaHasReceiver: (KtLambdaExpression) -> Boolean = { false },
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -2656,9 +2721,21 @@ object KirLowering {
             // summary engine's invoked-parameter facts both see which local
             // was invoked — without it, an invocation site loses the one
             // fact higher-order analysis needs.
+            // Resolution first — it knows whether what runs is a function
+            // VALUE. [isFunctionValueLocal] stays as the fallback for a site
+            // that did not resolve, where a name walk is all there is.
             val calleeRef = psi.calleeExpression as? KtNameReferenceExpression
-            if (calleeRef != null && isFunctionValueLocal(calleeRef)) {
-                return callWithReceiver(psi, lowerExpr(calleeRef, Pos.NESTED))
+            if (calleeRef != null) {
+                // Either witness suffices, and they cover different gaps:
+                // resolution knows an invoke through a typed value, the name
+                // walk still catches a local whose invoke resolution reports
+                // as the REFERENT (`val f = ::exec; f(x)` resolves to `exec`,
+                // not to `Function1.invoke`). Unlike the qualified case there
+                // is no qualifier to mistake the local for, so the walk
+                // cannot pick a wrong receiver here.
+                val info = resolveCallInfo(psi)
+                val isValueInvoke = (info != null && isFunctionTypeInvoke(info)) || isFunctionValueLocal(calleeRef)
+                if (isValueInvoke) return callWithReceiver(psi, lowerExpr(calleeRef, Pos.NESTED))
             }
             return callWithReceiver(psi, receiver = null)
         }
@@ -2714,7 +2791,7 @@ object KirLowering {
             emit(
                 KirCall(
                     reg,
-                    KirCallee(fqn, info.descriptor, kind),
+                    KirCallee(fqn, info.descriptor, kind, samConstructor = info.isSamConstructor),
                     receiver,
                     argRegs,
                     line = psi.line(),
@@ -2878,8 +2955,11 @@ object KirLowering {
          * `f(x)`, `h.f(x)`, `fs[0](x)` and `b.block()` are all spelled like
          * ordinary calls and only one of them was being lowered as an invoke.
          */
-        private fun isFunctionTypeInvoke(psi: KtCallExpression): Boolean {
-            val fqn = resolveCallInfo(psi)?.symbol?.callableId?.asSingleFqName()?.asString() ?: return false
+        private fun isFunctionTypeInvoke(psi: KtCallExpression): Boolean =
+            isFunctionTypeInvoke(resolveCallInfo(psi) ?: return false)
+
+        private fun isFunctionTypeInvoke(info: CallInfo): Boolean {
+            val fqn = info.symbol.callableId?.asSingleFqName()?.asString() ?: return false
             return FUNCTION_INVOKE.matches(fqn)
         }
 
@@ -2901,14 +2981,21 @@ object KirLowering {
          *    argument, which is the position [lowerLambdaBody] gives the
          *    body's implicit `this`.
          *
-         * [isFunctionValueLocal] is the discriminator: a name that resolves
-         * to a function-typed local or parameter of an ENCLOSING declaration
-         * is the second shape, anything else the first.
+         * RESOLUTION is the discriminator, not the syntax and not a name walk:
+         * an implicit `invoke` that resolved against an EXTENSION receiver is
+         * the second shape, anything else the first. An earlier cut asked
+         * [isFunctionValueLocal] — a pure-PSI walk that matches by NAME — and
+         * it second-guessed the resolver: with a function-typed local `f` in
+         * scope, `h.f(raw)` bound the LOCAL's body to the holder and published
+         * a process-exec flow through a lambda the program never invokes.
+         * `onClick`, `handler` and `callback` are exactly the names that
+         * collide this way in real UI code.
          */
         private fun qualifiedFunctionValueCall(psi: KtDotQualifiedExpression, selector: KtCallExpression): String? {
             val calleeRef = selector.calleeExpression as? KtNameReferenceExpression ?: return null
-            if (!isFunctionTypeInvoke(selector)) return null
-            if (isFunctionValueLocal(calleeRef)) {
+            val info = resolveCallInfo(selector) ?: return null
+            if (!isFunctionTypeInvoke(info)) return null
+            if (info.invokeOnExtensionReceiver) {
                 val function = lowerExpr(calleeRef, Pos.NESTED)
                 val extensionReceiver = lowerExpr(psi.receiverExpression, Pos.NESTED)
                 return callWithReceiver(selector, function, leadingArgs = listOf(extensionReceiver))
@@ -3126,25 +3213,18 @@ object KirLowering {
             // block — the idiom Gradle and Android code is made of — moved
             // nothing to its caller.
             //
-            // The use has to be one that ESTABLISHES a receiver — a write
-            // through it, or a member call on it. A bare `fieldget vthis
-            // vthis.X` does not: a class-qualified call (`Runtime.getRuntime()`)
-            // lowers its qualifier that way too, and reading that as an
-            // implicit receiver put a phantom parameter on every ordinary
-            // lambda that names a class, shifting the argument binding of
-            // lambdas that were working. An ambiguous read is left alone;
-            // the limit that buys is a read-only extension lambda, which
-            // moves nothing outward anyway.
-            val implicitReceiver = "vthis" !in bodyDefs &&
-                "vthis" !in definedRegisters &&
-                instructions.any { ins ->
-                    when (ins) {
-                        is KirFieldSet -> ins.receiver == "vthis"
-                        is KirIndexSet -> ins.receiver == "vthis"
-                        is KirCall -> ins.receiver == "vthis"
-                        else -> false
-                    }
-                }
+            // RESOLUTION decides, not the body. An earlier cut asked whether
+            // the body writes through a free `vthis`, and that is wrong twice
+            // over: a class-qualified call (`Runtime.getRuntime()`) lowers its
+            // qualifier as a `fieldget` on `vthis`, and — worse — an ORDINARY
+            // lambda nested inside a DSL block sees the OUTER lambda's
+            // receiver as free, so it stole an `%r0` of its own and shifted
+            // every one of its real parameters by one. The expected type is
+            // the only thing that knows, and it also covers the READ-ONLY
+            // extension lambda the body test could never see.
+            val implicitReceiver = context.lambdaHasReceiver(psi) &&
+                "vthis" !in bodyDefs &&
+                instructions.any { "vthis" in it.uses }
             val receiverParams = if (implicitReceiver) {
                 listOf(KirParam("%r0", "this", null, receiver = false))
             } else {

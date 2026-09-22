@@ -221,7 +221,7 @@ rather than a negative expectation that passes vacuously.
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
 | `summary-iteration-cap` | warning | the summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
-| `taint-unnameable-invoke` | info | call sites where what runs is a function VALUE the engine could not name — a `FunctionN.invoke` on a value it could not trace to a body, or a call on an interface the workspace does not implement. Taint STOPS at each one, so an absent flow through them means unexamined, not clean. `count` and `stats.unnameableInvokes` are the same number, counted once per site |
+| `taint-unnameable-invoke` | info | call sites where what runs is a function VALUE the engine could not name — a `FunctionN.invoke` whose receiver holds no traceable body, or a call on an interface neither the workspace nor the `--deps` tier resolves. Taint STOPS at each one, so an absent flow through them means unexamined, not clean. A site the engine DOES name is never counted, even when it moved nothing: a named callee with no live facts is an ordinary clean result, and a function-valued PARAMETER is named by the caller (its failures are `lambda-unresolved`). `count` and `stats.unnameableInvokes` are the same number, counted once per site |
 | `lambda-unresolved` | info | a lambda value (callable reference, local function) could not be resolved to an extracted body, so no summary was applied through it (`count` is how many) |
 | `deps-bodyless` | info | `--deps`: body-less dependency records (abstract, interface, native, stripped) were counted and EXCLUDED from the tier — an empty body is indistinguishable from a no-op, so none was ever summarised as "no flow" |
 | `deps-class-not-found` | info | workspace calls name classes absent from every classpath jar; their summaries cannot be computed (`count` is how many calls, first ten named) |
@@ -258,7 +258,12 @@ taint worklist actually ran over (the same denominator rule) —
 analysed code (not pack sizes; resolution regressions shrink them) —
 `unnameableInvokes` — call sites invoking a function VALUE the engine could
 not name, where taint stops; a zero here is what makes a zero `sliceCount`
-mean "nothing found" rather than "nothing followed" —
+mean "nothing found" rather than "nothing followed". It counts only sites
+nothing named: not a named callee that moved no facts, not a
+function-valued parameter the caller resolves, and not a call the `--deps`
+tier answered — so the number does not contradict the flows published beside
+it. It is environment-sensitive in one direction: JDK attachment changes how
+many `java.*` receivers resolve, so treat repo-level totals as +/- environment —
 `sliceCount`, `crossDependencySliceCount`, `crossModuleSliceCount`,
 `reachableSliceCount`, `sccsProcessed` beside `sccIterationCapHits` (the summary fixpoint's population and its cap count — a cap without its
 population is not a result), `suspendCrossingSliceCount` (slices whose

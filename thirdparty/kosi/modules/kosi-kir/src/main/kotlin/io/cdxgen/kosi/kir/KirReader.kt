@@ -205,9 +205,10 @@ object KirReader {
             val fqn = unq(rest2.substringBefore(" kind="))
             val kind = rest2.substringAfter(" kind=").substringBefore(" desc=").let { kindByName(it) }
             val desc = unqn(
-                rest2.substringAfter(" desc=").substringBefore(" recv=")
+                rest2.substringAfter(" desc=").substringBefore(" samctor").substringBefore(" recv=")
                     .substringBefore(" args=").substringBefore(" typeargs="),
             )
+            val samCtor = " samctor" in rest2
             val recv = if (" recv=" in rest2) {
                 rest2.substringAfter(" recv=").substringBefore(" args=").substringBefore(" typeargs=")
             } else {
@@ -223,7 +224,7 @@ object KirReader {
             } else {
                 emptyList()
             }
-            KirCall(reg, KirCallee(fqn, desc, kind), recv, args, line, typeArgs)
+            KirCall(reg, KirCallee(fqn, desc, kind, samCtor), recv, args, line, typeArgs)
         }
         "dynamic" -> {
             val (rest2, line) = splitLine(rest)

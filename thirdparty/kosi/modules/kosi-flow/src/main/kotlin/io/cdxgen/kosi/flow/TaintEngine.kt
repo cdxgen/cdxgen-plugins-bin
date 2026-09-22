@@ -1284,6 +1284,8 @@ object TaintEngine {
 
         override fun lambdaTargets(register: String): List<String> = aliases.lambdaTargets(register)
 
+        override fun aliasTokens(register: String): Set<String> = aliases.tokensOf(register)
+
         /** One summary lookup for a call site (the alias feed; may-union across targets). */
         private fun summaryForCall(ins: KirCall): FunctionSummary? {
             if (ins.callee.kind == CallKind.CONSTRUCTOR) {
@@ -1638,11 +1640,19 @@ object TaintEngine {
             // A call through a function value this body DEFINED (or
             // copied) — the value is an object whose target is known at its
             // allocation site, and the invoke resolves to that target.
-            if (ins.callee.fqn.endsWith(".invoke") && ins.receiver != null) {
+            val invokeReceiver = ins.receiver
+            if (ins.callee.fqn.endsWith(".invoke") && invokeReceiver != null) {
                 if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
-                // Nothing named the callee, so the taint stops here. Say so:
-                // this is the site the report used to omit entirely.
-                collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
+                // NAMED is not the same as APPLIED. `applyLambdaInvoke`
+                // returns false both when it could not name the callee and
+                // when it named it perfectly and simply had no facts to move
+                // in this frame — and the reporting sweep walks every
+                // function, facts or not. Counting the second case made the
+                // number claim "taint stops here" about sites the engine
+                // followed, including `b.block()`, this phase's own feature.
+                if (!namesACallee(invokeReceiver)) {
+                    collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
+                }
             }
 
             // A SAM instance's single abstract method. `Bridge { .. }` and
@@ -1658,20 +1668,11 @@ object TaintEngine {
             // implementation, so this adds callees where there were none
             // and never replaces one that was already known.
             val samReceiver = ins.receiver
-            if (ins.callee.kind == CallKind.VIRTUAL &&
+            val noWorkspaceTarget = ins.callee.kind == CallKind.VIRTUAL &&
                 samReceiver != null &&
-                context.callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind).isEmpty() &&
                 context.callIndex.targets(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind).isEmpty()
-            ) {
-                if (lambdaTargets(samReceiver).isNotEmpty()) {
-                    if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
-                } else {
-                    // A virtual call the workspace has no implementation for
-                    // and whose receiver holds no known function value —
-                    // `object : Writer { }`, a SAM the lowering did not
-                    // reach. Same silence, same count.
-                    collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
-                }
+            if (noWorkspaceTarget && lambdaTargets(samReceiver!!).isNotEmpty()) {
+                if (applyLambdaInvoke(ins, site, state, chain, collect)) return true
             }
 
             // A constructor applies the class's `<init>` summary —
@@ -1721,6 +1722,16 @@ object TaintEngine {
                         val carries = ins.args.any { arg -> state.factsOf(TaintKey(arg, "")).isNotEmpty() } ||
                             (ins.receiver?.let { state.factsOf(TaintKey(it, "")).isNotEmpty() } ?: false)
                         if (carries) context.recordSummaryMissing()
+                    }
+                    // Only HERE is a virtual call on an unimplemented
+                    // interface genuinely unnameable: the workspace had no
+                    // target, the receiver held no function value, and the
+                    // dependency tier has no summary either. Recording it
+                    // before this point called a `--deps` run's Timber calls
+                    // unnameable while that same run published flows THROUGH
+                    // them — the number contradicting the report beside it.
+                    if (noWorkspaceTarget && lambdaTargets(samReceiver!!).isEmpty()) {
+                        collect?.let { context.recordUnnameableInvoke(compiled.function.canonicalName, site) }
                     }
                     return false
                 }
@@ -1776,6 +1787,27 @@ object TaintEngine {
             }
             return joined
         }
+
+        /**
+         * True when [register] holds a function value the engine can name —
+         * a lambda written at this call site, or a tracked `lambda:` token.
+         *
+         * This is the question `stats.unnameableInvokes` asks, and it is NOT
+         * "did anything move": a named callee with no live facts is followed
+         * and silent, which is an ordinary clean result, while an unnamed one
+         * is a hole in the analysis. Conflating them made the count claim
+         * sites the engine had followed.
+         */
+        private fun namesACallee(register: String): Boolean =
+            lambdaTargets(register).isNotEmpty() ||
+                context.lambdaDefs[functionKey(compiled.function)]?.containsKey(register) == true ||
+                // A function-valued PARAMETER is named by the CALLER, through
+                // the invoked-parameter channel: `b.block()` inside
+                // `fun build(block: Builder.() -> Unit)` is this phase's own
+                // feature working, not a hole. `lambda-unresolved` already
+                // counts that channel's failures, at the caller, where the
+                // candidate set is actually known.
+                aliasTokens(register).any { it.startsWith("param:") }
 
         /**
          * An invoke whose receiver holds KNOWN lambda objects — the

@@ -71,4 +71,15 @@ data class KirCallee(
     val fqn: String,
     val descriptor: String?,
     val kind: CallKind,
+    /**
+     * True when the callee is a classifier's SYNTHESIZED SAM constructor —
+     * `Runnable { .. }`, `Bridge { .. }` — rather than an ordinary function.
+     *
+     * It is a RESOLUTION fact and cannot be re-derived from this record: a
+     * SAM conversion and `fun Handler(block: (String) -> Unit): Handler`
+     * produce the same fqn, kind and descriptor. The flow engine resolves an
+     * invoke on a SAM instance to the lambda it was built from, and doing
+     * that on a factory which IGNORES its function argument is a false flow.
+     */
+    val samConstructor: Boolean = false,
 )
