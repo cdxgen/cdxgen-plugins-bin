@@ -61,6 +61,10 @@ publish_artifacts() {
     binary_name="$(basename "$binary_path")"
     sha_path="${binary_path}.sha256"
     tag="${binary_name%.exe}"
+    # The portable jar fallback is tagged by tool name alone, the same way the
+    # native-builds cache tags it; an OCI tag may hold a dot, but two spellings
+    # of one artifact is how a puller ends up with neither.
+    tag="${tag%.jar}"
 
     if [[ ! -f "$sha_path" ]]; then
       echo "Missing SHA-256 sidecar for $binary_path" >&2

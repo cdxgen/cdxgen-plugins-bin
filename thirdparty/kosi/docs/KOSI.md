@@ -344,6 +344,13 @@ linuxmusl-arm64 — consumers with a JDK 21+ get `kosi-portable.jar`, and
 consumers without one get cdxgen's own JS-side Kotlin analysis. Every gap is
 named in `scripts/plugin-platform-support.sh`; none is silent.
 
+The jar is `make fat-jar`'s output (`modules/kosi-cli/build/dist/kosi-all.jar`)
+staged as `kosi-portable.jar`. It is built once on the amd64 runner in
+`native-builds.yml`, cached at
+`ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable`, and attached to each
+GitHub release; it is deliberately absent from the per-platform npm packages,
+whose staging matches a platform fragment this name does not carry.
+
 ## Reproducing a run
 
 `options` in the report records every effective option, and `runtime` records

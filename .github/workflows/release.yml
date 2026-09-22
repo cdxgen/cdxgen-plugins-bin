@@ -291,6 +291,11 @@ jobs:
         for platform in linux-amd64 linux-arm64 linuxmusl-amd64 darwin-arm64; do
           oras pull "ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-$platform" -o thirdparty/kosi/build
         done
+        # The architecture-independent jar fallback for the platforms with no
+        # native. It is staged into plugins/kosi and published to ghcr and the
+        # GitHub release, but never into an npm flavour package: the flavour
+        # staging matches on a platform fragment, which this name has not.
+        oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable -o thirdparty/kosi/build
         ls -l thirdparty/kosi/build/
     - name: Release
       run: |

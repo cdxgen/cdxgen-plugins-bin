@@ -179,6 +179,12 @@ Kotlin Source Inspector (kosi) is a Kotlin/JVM code analysis engine for evidence
 
 On platforms without a kosi binary (ppc64le, 32-bit arm) cdxgen falls back to its own JS-side structural Kotlin analysis and, with a JDK 21+ present, to the `kosi-portable.jar`; the gaps are named in `scripts/plugin-platform-support.sh`, never silent.
 
+`kosi-portable.jar` is architecture-independent and is not shipped inside the per-platform npm packages. Each release publishes it as a GitHub release asset alongside the natives and as `ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable`; run it with `java -jar kosi-portable.jar` (JDK 21+), or pull it with:
+
+```shell
+oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable
+```
+
 **Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, darwin-arm64 (windows-amd64, windows-arm64 and darwin-amd64 are not yet built)
 
 ### cdxui
