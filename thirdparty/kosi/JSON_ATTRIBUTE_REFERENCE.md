@@ -30,7 +30,7 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | `imports` | ImportUsage[] | canonical imports | library usage |
 | `declarations` | Declaration[] | canonical declarations | symbol indexes |
 | `usages` | LibraryUsage[] | calls/references by name | cdxgen-critical |
-| `securitySignals` | SecuritySignal[] | non-flow findings (not yet populated) | findings UIs |
+| `securitySignals` | SecuritySignal[] | non-flow findings; `native-interop` populates today | findings UIs |
 | `crypto` | CryptoEvidence | CBOM evidence | CBOM |
 | `callGraph` | CallGraph? | null until a call-graph mode runs | reachability |
 | `dataFlow` | DataFlowEvidence? | null until taint runs | slices |
@@ -166,6 +166,25 @@ never refuses to run and never pretends the declared version was honoured.
 | `supertypes` | string[] | resolved tier: canonical names of direct supertypes of class-like declarations, `kotlin.Any` elided (empty otherwise) |
 | `position` | Position | 1-based line/column |
 | `generated` | boolean? | null at the syntax tier |
+
+### Canonical names a consumer will meet
+
+A canonical name is a join key, so every kind of declaration must have one
+that is unique and stable. Two constructions have no source name of their
+own and get a SYNTHESISED segment, which consumers see in `declarations[]`,
+in `callGraph` nodes and in `dataFlow` frame functions:
+
+| Shape | Segment | Example |
+| --- | --- | --- |
+| a lambda extracted into its own body | `<enclosing>$lambda<n>` | `app.Handler.serve$lambda0` |
+| an anonymous object (`object : Writer { }`) | `<object@<line>:<column>>` | `app.<object@198:13>.write` |
+
+The object segment carries a POSITION because a file may hold any number of
+literals and they all used to be called `<anonymous>` — indistinguishable from
+each other and from an anonymous `fun`. Consequently the segment is stable
+across runs on unchanged source and CHANGES when the literal moves in its
+file. Match these names by prefix or by the declaration they belong to, never
+by equality across two versions of a file.
 
 ## usages — LibraryUsage (cdxgen-critical)
 
@@ -654,6 +673,10 @@ codes (`ecb-mode`, `weak-digest`, `weak-cipher`, `insecure-tls-version`,
 (the pack's `literalSources[]` name rule) and whose sink is
 `crypto-asset` or `insecure-tls`.
 
-`securitySignals` remains part of the v1 envelope (emitted empty) so
-consumers can rely on the shape; its population is future work.
-`dataFlow` is populated today (above).
+`securitySignals` is POPULATED — `native-interop` emits on a JNI seam, a
+resolved `loadLibrary` binding site and a cinterop `.def` file, three rows on
+the `native-interop` fixture. Two earlier readings of this document said the
+field was reserved and empty, which was true when the envelope was defined
+and has not been since; a consumer that skipped it on that advice skipped real
+findings. The vocabulary is closed (02-ARCHITECTURE.md §8), so a new code is a
+schema event and not a surprise.
