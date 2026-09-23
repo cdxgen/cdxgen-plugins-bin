@@ -162,6 +162,24 @@ data class FrameworkModel(
      */
     val pathArguments: List<String> = emptyList(),
     /**
+     * JVM internal names of the PREDICATE type a DSL's same-named overloads
+     * return (Spring's router `GET("/x")` / `path("/v2")` build a
+     * RequestPredicate and register nothing); such a call is no route.
+     */
+    val dslPredicateTypes: List<String> = emptyList(),
+    /**
+     * An annotation that carries a handler METHOD's own path apart from its
+     * verb annotation — JAX-RS `@GET @Path("/{id}")`. Joined after the
+     * class prefix.
+     */
+    val methodPathAnnotations: List<String> = emptyList(),
+    /**
+     * The config keys that set the DEPLOYMENT base path this framework's
+     * routes are served under, as ordered groups: keys within a group are
+     * alternatives, groups compose (see `Endpoints.deploymentBasePath`).
+     */
+    val basePathKeys: List<List<String>> = emptyList(),
+    /**
      * What carries this framework's endpoints when it is not HTTP:
      * `messaging` (Kafka/JMS/STOMP listeners, schedulers), `grpc`,
      * `android`, `function` (a cloud function's event trigger). Empty is
@@ -269,6 +287,11 @@ data class FrameworkModel(
     val repositoryPagingCrudBelowMajor: Int = 0,
     /** `group:artifact` whose major version decides [repositoryPagingCrudBelowMajor]. */
     val repositoryGenerationArtifact: String? = null,
+    /**
+     * Artifact names whose presence in a module's build makes its
+     * repositories HTTP resources (Spring Data REST's starter/webmvc).
+     */
+    val repositoryDependencyMarkers: List<String> = emptyList(),
     /**
      * Class markers whose handlers — and every repository resource — are
      * served under the Spring Data REST BASE PATH:
@@ -486,8 +509,7 @@ const val HANDLER_INPUT_ALL: String = "all"
 data class ParameterAnnotation(
     val pattern: String,
     val category: String,
-    val kind: String,    /** Serves every HTTP method (`service`, `doFilter`); see [MappingAnnotation.anyMethod]. */
-    val anyMethod: Boolean = false,
+    val kind: String,
 )
 
 /**
@@ -582,6 +604,11 @@ object EndpointModels {
                 simpleParameterTypes = f.arr("simpleParameterTypes")?.strings() ?: emptyList(),
                 classMappingAnnotations = f.arr("classMappingAnnotations")?.strings() ?: emptyList(),
                 pathArguments = f.arr("pathArguments")?.strings() ?: emptyList(),
+                dslPredicateTypes = f.arr("dslPredicateTypes")?.strings() ?: emptyList(),
+                methodPathAnnotations = f.arr("methodPathAnnotations")?.strings() ?: emptyList(),
+                basePathKeys = f.arr("basePathKeys")?.items?.map { group ->
+                    (group as? io.cdxgen.kosi.schema.JsonArr)?.items?.mapNotNull { (it as? io.cdxgen.kosi.schema.JsonStr)?.value }.orEmpty()
+                } ?: emptyList(),
                 transport = f.str("transport") ?: "",
                 servedAtKeys = f.arr("servedAtKeys")?.strings() ?: emptyList(),
                 servedAtDefault = f.str("servedAtDefault"),
@@ -615,6 +642,7 @@ object EndpointModels {
                 repositoryPagingMethods = f.arr("repositoryPagingMethods")?.strings() ?: emptyList(),
                 repositoryPagingCrudBelowMajor = f.long("repositoryPagingCrudBelowMajor")?.toInt() ?: 0,
                 repositoryGenerationArtifact = f.str("repositoryGenerationArtifact"),
+                repositoryDependencyMarkers = f.arr("repositoryDependencyMarkers")?.strings() ?: emptyList(),
                 dataRestBasePathMarkers = f.arr("dataRestBasePathMarkers")?.strings() ?: emptyList(),
                 dataRestBasePathKeys = f.arr("dataRestBasePathKeys")?.strings() ?: emptyList(),
                 dataRestBasePathSetters = f.arr("dataRestBasePathSetters")?.strings() ?: emptyList(),

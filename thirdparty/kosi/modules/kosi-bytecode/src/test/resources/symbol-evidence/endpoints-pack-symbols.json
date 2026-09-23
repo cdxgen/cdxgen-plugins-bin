@@ -606,7 +606,8 @@
    ],
    "covers": [
     "supertypeMarkers",
-    "contextReaders"
+    "contextReaders",
+    "dslFunctions"
    ],
    "types": [
     {
@@ -616,6 +617,46 @@
     }
    ],
    "members": [
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "delete",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "get",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "options",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "patch",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "path",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "post",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "prefix",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "put",
+     "static": false
+    },
     {
      "owner": "ratpack.http.Request",
      "member": "getBody",
@@ -649,6 +690,14 @@
    ],
    "functions": [],
    "gaps": [
+    "ratpack.core.handling.Chain.delete: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.get: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.options: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.patch: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.path: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.post: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.prefix: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.put: owner ratpack.core.handling.Chain not in any held ratpack-core",
     "ratpack.core.handling.Handler: no held jar covers its package family",
     "ratpack.core.http.Request.getBody: owner ratpack.core.http.Request not in any held ratpack-core",
     "ratpack.core.http.Request.getBodyStream: owner ratpack.core.http.Request not in any held ratpack-core",
@@ -782,7 +831,11 @@
    "sources": [
     "org.springframework:spring-webmvc:5.3.18",
     "org.springframework:spring-web:5.3.18",
-    "org.springframework:spring-context:5.3.18"
+    "org.springframework:spring-context:5.3.18",
+    "org.springframework.data:spring-data-rest-webmvc:3.6.4",
+    "org.springframework.data:spring-data-rest-core:3.6.4",
+    "org.springframework.data:spring-data-commons:3.2.5",
+    "org.springframework.data:spring-data-jpa:3.2.5"
    ],
    "covers": [
     "mappingAnnotations",
@@ -796,9 +849,70 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "dataRestBasePathSetters"
    ],
    "types": [
+    {
+     "fqn": "org.springframework.data.jpa.repository.JpaRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.CrudRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.ListCrudRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.PagingAndSortingRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.PagingAndSortingRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.core.annotation.RepositoryRestResource",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.core.annotation.RestResource",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.BasePathAwareController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.BasePathAwareController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.RepositoryRestController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.RepositoryRestController",
+     "kind": "annotation",
+     "constructible": false
+    },
     {
      "fqn": "org.springframework.stereotype.Controller",
      "kind": "annotation",
@@ -945,16 +1059,17 @@
      "constructible": false
     }
    ],
-   "members": [],
+   "members": [
+    {
+     "owner": "org.springframework.data.rest.core.config.RepositoryRestConfiguration",
+     "member": "setBasePath",
+     "static": false
+    }
+   ],
    "functions": [],
    "gaps": [
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
     "javax.annotation.security.RolesAllowed: no held jar covers its package family",
-    "org.springframework.data.jpa.repository.JpaRepository: no held jar covers its package family",
-    "org.springframework.data.repository.CrudRepository: no held jar covers its package family",
-    "org.springframework.data.repository.ListCrudRepository: no held jar covers its package family",
-    "org.springframework.data.repository.PagingAndSortingRepository: no held jar covers its package family",
-    "org.springframework.data.rest.core.annotation.RepositoryRestResource: no held jar covers its package family",
     "org.springframework.security.access.annotation.Secured: no held jar covers its package family",
     "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"
    ]

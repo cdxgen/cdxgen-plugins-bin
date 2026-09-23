@@ -10,6 +10,8 @@ interface Context {
     fun render(o: Any?)
 }
 
-interface Handler {
+// A Java SAM interface in ratpack-core: a Kotlin lambda converts to it, which
+// only a `fun interface` stub reproduces.
+fun interface Handler {
     fun handle(context: Context)
 }

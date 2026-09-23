@@ -100,6 +100,15 @@
     {
       "_p27_comment": ", from docs.spring.io/spring-graphql/reference/controllers.html rather than from memory. Verbatim: \"By default, if the method parameter name is available, for example with the -parameters compiler flag in Java 8+ or with debugging info from the compiler, it is used to look up the argument.\" An unannotated parameter is matched to a GraphQL argument by NAME, so it is client-supplied. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "_served_comment": "docs.spring.io/spring-boot/reference/web/spring-graphql.html: \"The GraphQL HTTP endpoint is at HTTP POST /graphql by default\", customised with spring.graphql.http.path (Boot 2.7: spring.graphql.path). Before this every GraphQL handler published pathTemplate \"\".",
+      "basePathKeys": [
+        [
+          "server.servlet.context-path",
+          "spring.webflux.base-path"
+        ],
+        [
+          "spring.mvc.servlet.path"
+        ]
+      ],
       "classMarkers": [
         "org.springframework.stereotype.Controller"
       ],
@@ -401,6 +410,11 @@
         "io.ktor.server.auth.authenticate",
         "io.ktor.auth.authenticate"
       ],
+      "basePathKeys": [
+        [
+          "ktor.deployment.rootPath"
+        ]
+      ],
       "contextReaders": [
         {
           "indexed": true,
@@ -655,6 +669,11 @@
           "scheme": "@RolesAllowed"
         }
       ],
+      "basePathKeys": [
+        [
+          "micronaut.server.context-path"
+        ]
+      ],
       "classMarkers": [
         "io.micronaut.http.annotation.Controller"
       ],
@@ -793,6 +812,8 @@
       ]
     },
     {
+      "_base_path_comment": "quarkus.io/guides/rest: quarkus.http.root-path, then quarkus.rest.path or @ApplicationPath (the property takes precedence), then class and method @Path.",
+      "_method_path_comment": "jakarta-restful-ws-spec-3.1: \"The method is only invoked for request URIs that match a URI template created by concatenating the URI template of the resource class with the URI template of the method.\" Before this every method-level @Path was dropped and each resource method published at its class path.",
       "_p27_comment": ", from Jakarta RESTful Web Services 3.1 specification, §3.3.2.1 rather than from memory. Verbatim: \"The value of a parameter not annotated with @FormParam or any of the annotations listed in Fields and Bean Properties, called the entity parameter, is mapped from the request entity body. Resource methods MUST have at most one entity parameter.\" The unannotated parameter IS the request body, so it is never a scalar: simpleParameterTypes stays empty. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "applicationPathAnnotations": [
         "javax.ws.rs.ApplicationPath",
@@ -815,6 +836,17 @@
           "pattern": "javax.annotation.security.DenyAll",
           "scheme": "@DenyAll"
         }
+      ],
+      "basePathKeys": [
+        [
+          "quarkus.http.root-path"
+        ],
+        [
+          "quarkus.rest.path",
+          "quarkus.resteasy-reactive.path",
+          "quarkus.resteasy.path",
+          "@applicationPath"
+        ]
       ],
       "classMarkers": [
         "jakarta.ws.rs.Path",
@@ -858,6 +890,18 @@
         },
         {
           "methods": [
+            "HEAD"
+          ],
+          "pattern": "jakarta.ws.rs.HEAD"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "jakarta.ws.rs.OPTIONS"
+        },
+        {
+          "methods": [
             "PATCH"
           ],
           "pattern": "jakarta.ws.rs.PATCH"
@@ -885,6 +929,18 @@
             "GET"
           ],
           "pattern": "javax.ws.rs.GET"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "javax.ws.rs.HEAD"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "javax.ws.rs.OPTIONS"
         },
         {
           "methods": [
@@ -922,6 +978,10 @@
           "kind": "produces",
           "pattern": "javax.ws.rs.Produces"
         }
+      ],
+      "methodPathAnnotations": [
+        "jakarta.ws.rs.Path",
+        "javax.ws.rs.Path"
       ],
       "nonInputAnnotations": [
         "io.dropwizard.auth.Auth",
@@ -1185,6 +1245,11 @@
     },
     {
       "_p15_comment": "media has no declaration site for servlets - the content type is a response header the handler sets. Authentication IS declared, in the deployment descriptor's <security-constraint>, which the web.xml parser reads and attaches per url-pattern; it is not an annotation., sourced: jakarta.servlet-api 6.0.0's own classes - setContentType lives on ServletResponse (the RESPONSE half); ServletRequest exposes only getContentType (reading the request body's type). No route-level media declaration exists in the servlet model; the empty stands with evidence.",
+      "basePathKeys": [
+        [
+          "server.servlet.context-path"
+        ]
+      ],
       "classMappingAnnotations": [
         "jakarta.servlet.annotation.WebFilter",
         "jakarta.servlet.annotation.WebServlet",
@@ -1365,6 +1430,15 @@
       "kind": "dsl"
     },
     {
+      "basePathKeys": [
+        [
+          "server.servlet.context-path",
+          "spring.webflux.base-path"
+        ],
+        [
+          "spring.mvc.servlet.path"
+        ]
+      ],
       "dependencyMarkers": [
         "spring-boot-starter-actuator",
         "spring-boot-actuator"
@@ -1507,6 +1581,8 @@
       "transport": "messaging"
     },
     {
+      "_base_path_comment": "Deployment base paths are PER FRAMEWORK and COMPOSE: Spring Boot serves server.servlet.context-path (reactive: spring.webflux.base-path) + spring.mvc.servlet.path (the DispatcherServlet path) + the mapping. Before this one repo-wide first-match list applied a Micronaut context-path to gRPC and Azure routes, never composed the servlet path, and read \"server.base-path\", which no framework documents.",
+      "_dsl_comment": "WebMvc.fn's router { } (org.springframework.web.servlet.function.RouterFunctionDsl, spring-webmvc 5.3.18 bytecode): the same builder surface on the servlet stack.",
       "_issue92_comment": "atom-tools#92: Spring declares value/path as String[] aliases, so against the real jars every route arrives as an array constant and a detector reading only the first SCALAR constant published pathTemplate \"\" for every handler; the stub-annotation fixtures declared value: String and could not see it. @RequestMapping's method = [..] was never read, so the verbose style published httpMethod [].",
       "_p27_comment": ", from web/webmvc/mvc-controller/ann-methods/arguments.html and web/webflux/controller/ann-methods/arguments.html rather than from memory. Verbatim: \"If a method argument is not matched to any of the earlier values in this table and it is a simple type (as determined by BeanUtils#isSimpleProperty), it is resolved as a @RequestParam. Otherwise, it is resolved as a @ModelAttribute.\" This entry covers ANNOTATED controllers of both Spring MVC and Spring WebFlux — WebFlux's annotated model publishes the identical fallback rule, and kosi's spring-webflux entry is the FUNCTIONAL router DSL, where ServerRequest genuinely is a context. So WebFlux's own supplied types are listed here too. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "_sdr_comment": "Spring Data REST, from docs.spring.io/spring-data/rest/reference/repository-resources.html and the 3.6.4 bytecode: @RepositoryRestController is meta-annotated @BasePathAwareController and both are @Component, NOT @Controller, so neither matched classMarkers; their handlers and every repository resource sit under spring.data.rest.base-path (or a folded RepositoryRestConfiguration.setBasePath argument, applied after the properties). getBasePath() returns URI while setBasePath takes String, so Kotlin synthesizes no basePath property and the call is the only code spelling. RepositoryRestResource was listed under repositorySupertypes, where an annotation can never match; it is the resource annotation (path, exported). DELETE is backed by delete(T), the method SDR prefers.",
@@ -1527,6 +1603,15 @@
           "pattern": "jakarta.annotation.security.RolesAllowed",
           "scheme": "@RolesAllowed"
         }
+      ],
+      "basePathKeys": [
+        [
+          "server.servlet.context-path",
+          "spring.webflux.base-path"
+        ],
+        [
+          "spring.mvc.servlet.path"
+        ]
       ],
       "classMarkers": [
         "org.springframework.web.bind.annotation.RestController",
@@ -1582,6 +1667,69 @@
       ],
       "dataRestBasePathSetters": [
         "org.springframework.data.rest.core.config.RepositoryRestConfiguration.setBasePath"
+      ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.PUT"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.PATCH"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.DELETE"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.HEAD"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.OPTIONS"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.path"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.invoke"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingPath": true,
+          "pattern": "org.springframework.web.servlet.function.RouterFunctionDsl.nest"
+        }
+      ],
+      "dslPredicateTypes": [
+        "org/springframework/web/servlet/function/RequestPredicate"
       ],
       "handlerInput": "annotated-or-bound",
       "id": "spring-mvc",
@@ -1765,6 +1913,10 @@
         "saveAllAndFlush",
         "saveAndFlush"
       ],
+      "repositoryDependencyMarkers": [
+        "spring-boot-starter-data-rest",
+        "spring-data-rest-webmvc"
+      ],
       "repositoryGenerationArtifact": "org.springframework.data:spring-data-commons",
       "repositoryMethodAnnotations": [
         "org.springframework.data.rest.core.annotation.RestResource"
@@ -1886,6 +2038,7 @@
       ]
     },
     {
+      "_dsl_comment": "From the spring-webflux 5.3.18 bytecode: routes are VERB(pattern, handler), VERB(pattern, predicate, handler) and VERB(handler) for all seven verbs; path(pattern, handler) and invoke(pattern, handler) (the \"/x\" { } form) serve ANY method; nest(pattern|predicate, block) nests (\"/api\".nest { }). The pack had only GET/POST/PUT/DELETE on RouterFunctionDsl and modelled path as NESTING, which it is not; coRouter { } builds a separate CoRouterFunctionDsl, so every coroutine router, the idiomatic Kotlin form, was missed.",
       "authenticationAnnotations": [
         {
           "pattern": "org.springframework.security.access.prepost.PreAuthorize",
@@ -1903,6 +2056,15 @@
           "pattern": "jakarta.annotation.security.RolesAllowed",
           "scheme": "@RolesAllowed"
         }
+      ],
+      "basePathKeys": [
+        [
+          "server.servlet.context-path",
+          "spring.webflux.base-path"
+        ],
+        [
+          "spring.mvc.servlet.path"
+        ]
       ],
       "contextReaders": [
         {
@@ -1941,16 +2103,105 @@
         },
         {
           "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.PATCH"
+        },
+        {
+          "methods": [
             "DELETE"
           ],
           "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.DELETE"
         },
         {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.HEAD"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.OPTIONS"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.invoke"
+        },
+        {
           "methods": [],
           "nesting": true,
           "nestingPath": true,
-          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
+          "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.nest"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.GET"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.POST"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.PUT"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.PATCH"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.DELETE"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.HEAD"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.OPTIONS"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.path"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.invoke"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingPath": true,
+          "pattern": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl.nest"
         }
+      ],
+      "dslPredicateTypes": [
+        "org/springframework/web/reactive/function/server/RequestPredicate"
       ],
       "handlerInput": "context",
       "id": "spring-webflux",
@@ -2020,6 +2271,15 @@
     },
     {
       "_p19_comment": "liveness sweep: the springfox-swagger coordinate marker removed — springfox is a different, archived project; the springdoc rows are what the fixtures exercise.",
+      "basePathKeys": [
+        [
+          "server.servlet.context-path",
+          "spring.webflux.base-path"
+        ],
+        [
+          "spring.mvc.servlet.path"
+        ]
+      ],
       "dependencyMarkers": [
         "springdoc-openapi"
       ],

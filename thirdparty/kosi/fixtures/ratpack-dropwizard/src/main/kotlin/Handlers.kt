@@ -53,11 +53,11 @@
 // chain that mounts it does. Instance form and lambda form both link, the
 // mounted class takes the chain's path and verb, and a handler nobody
 // mounts says so instead of publishing the fabricated `/Handler/handle`.
-// kosi:want endpoint framework=ratpack path=/search method=GET fn=~QueryParamSink.handle pathunresolved=none mode=resolved
+// kosi:want endpoint framework=ratpack path=/search method=GET fn=~.QueryParamSink.handle pathunresolved=none mode=resolved
 // kosi:want endpoint framework=ratpack path=/api/any anymethod=true mode=resolved
 // kosi:want endpoint framework=ratpack fn=~HeaderSink.handle pathunresolved=~declares mode=resolved
 // kosi:want-not endpoint framework=ratpack path=/Handler/handle
-// kosi:want-not endpoint framework=ratpack fn=~QueryParamSink.handle pathunresolved=~declares
+// kosi:want-not endpoint framework=ratpack fn=~.QueryParamSink.handle pathunresolved=~declares
 package fixtures.ratpackdropwizard
 
 import io.dropwizard.auth.Auth

@@ -137,6 +137,12 @@ object DiagnosticCodes {
      * routes every generation serves were published.
      */
     const val REPOSITORY_CRUD_UNKNOWN = "repository-crud-unknown"
+    /**
+     * Annotations the classpath could not resolve, read at the FQN their
+     * file's explicit import names (Kotlin's own resolution rule). The
+     * endpoints they produce are real; the run was classpath-degraded.
+     */
+    const val ANNOTATION_IMPORT_RESOLVED = "annotation-import-resolved"
 
     /**
      * Discovery collected a small share of the source files
@@ -256,6 +262,7 @@ object DiagnosticCodes {
         ENDPOINT_UNSUBSTANTIATED,
         ENDPOINT_PATH_UNRESOLVED,
         REPOSITORY_CRUD_UNKNOWN,
+        ANNOTATION_IMPORT_RESOLVED,
         UNREADABLE_SOURCE,
         DEPS_BODYLESS,
         DEPS_CLASS_NOT_FOUND,

@@ -25,3 +25,19 @@ class PlanApi {
 class PlanCalculator {
     fun getPricing(): String = "calculation only"
 }
+
+// RFC 6570 URI templates (docs.micronaut.io 5.1 "URI Templates"): an
+// optional variable `{/id}`, optional query parameters `{?max,offset}`. The
+// query expansion is not path: published verbatim it made an invalid
+// OpenAPI path (`/plans/list{?max,offset}`).
+// kosi:want endpoint framework=micronaut path=/templates/list method=GET queryparam=max mode=resolved
+// kosi:want endpoint framework=micronaut path=/templates/{id} method=GET fn=~TemplateApi.maybe mode=resolved
+// kosi:want-not endpoint framework=micronaut path=~{?
+@io.micronaut.http.annotation.Controller("/templates")
+class TemplateApi {
+    @io.micronaut.http.annotation.Get("/list{?max,offset}")
+    fun list(max: Int?, offset: Int?): String = "l"
+
+    @io.micronaut.http.annotation.Get("{/id}")
+    fun maybe(id: String?): String = "m"
+}

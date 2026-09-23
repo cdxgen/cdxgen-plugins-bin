@@ -683,6 +683,31 @@ capabilities = ["endpoints", "framework-semantics", "servlet", "class-declared-r
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "inherited-and-method-paths"
+tier = "fixtures"
+path = "fixtures/inherited-and-method-paths"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "unresolved-framework-imports"
+tier = "fixtures"
+path = "fixtures/unresolved-framework-imports"
+capabilities = ["endpoints", "framework-semantics", "classpath-degraded"]
+# No framework jar and no stub, on purpose: every framework reference is
+# unresolved, as in a default offline run.
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "deployment-base-paths"
+tier = "fixtures"
+path = "fixtures/deployment-base-paths"
+capabilities = ["endpoints", "context-path", "config-resolution", "framework-semantics", "gradle-multi-module"]
+# Every module declares its own `Api`/`Res` in its own package; none
+# redeclare, but the stub module and the fixture root share no sources.
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "spring-mapping-shapes"
 tier = "fixtures"
 path = "fixtures/spring-mapping-shapes"

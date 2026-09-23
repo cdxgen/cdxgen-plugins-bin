@@ -127,8 +127,9 @@ object Endpoints {
         val manifestCandidates = manifestEndpoints(module, manifests, pack, analysedDeclarations)
         val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root), pack, root)
         val crudUnknown = mutableListOf<String>()
+        val modules = ModuleConfigs(root, configTable)
         val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable) +
-            repositoryEndpoints(module, pack, annotationValues, typeDeclarations, dependencyCoordinates, crudUnknown)
+            repositoryEndpoints(module, pack, annotationValues, typeDeclarations, dependencyCoordinates, crudUnknown, modules)
 
         // The DEPLOYMENT base path. A handler's annotation or DSL call names
         // a path relative to the application; what a client actually calls
@@ -141,36 +142,28 @@ object Endpoints {
         // digital-restaurant sets `spring.data.rest.base-path: /api/query`
         // in its query modules only; read repo-wide, it was either applied
         // to every command module's handlers or refused as ambiguous.
-        val modules = ModuleConfigs(root, configTable)
         val dataRestBases = DataRestBases(module, pack, folder, modules)
-        // A base path declared in CODE, per framework: JAX-RS puts it on an
-        // `Application` subclass rather than in configuration, so a config
-        // lookup alone reports every Quarkus route without its prefix.
-        val annotationBasePaths: Map<String, String> = buildMap {
-            for (framework in pack.frameworks) {
-                if (framework.applicationPathAnnotations.isEmpty()) continue
-                val declared = annotationValues.values.asSequence()
-                    .flatten()
-                    .firstOrNull { ann ->
-                        framework.applicationPathAnnotations.any {
-                            EndpointDetector.matches(ann.fqn, it)
-                        }
-                    }
-                    ?.value?.trim()?.removeSurrounding("\"").orEmpty()
-                if (declared.isNotEmpty() && declared != "/") put(framework.id, declared)
-            }
+        // A base path declared in CODE: JAX-RS puts it on an `Application`
+        // subclass. Per MODULE, like the config keys — one module's
+        // `@ApplicationPath` is not its sibling's.
+        fun applicationPathFor(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? {
+            if (framework.applicationPathAnnotations.isEmpty()) return null
+            val module = modules.moduleRootOf(file)
+            return annotationValues.values.asSequence().flatten()
+                .filter { ann -> framework.applicationPathAnnotations.any { EndpointDetector.matches(ann.fqn, it) } }
+                .filter { ann -> modules.moduleRootOf(ann.file) == module }
+                .map { it.value?.trim()?.removeSurrounding("\"").orEmpty() }
+                .firstOrNull { it.isNotEmpty() && it != "/" }
         }
         val all = (candidates + manifestCandidates + webXmlCandidates + implicitCandidates)
             .map { candidate -> if (candidate.dataRestBase) dataRestBases.compose(candidate) else candidate }
             .map { candidate -> servingFacts(candidate, pack, module, annotationValues, modules) }
             .map { candidate ->
-                val prefix = annotationBasePaths[candidate.framework]?.takeIf { it.isNotEmpty() }
-                    ?: basePathFrom(modules.tableFor(candidate.position?.filename))
-                if (prefix.isEmpty() || candidate.framework == "android") {
-                    candidate
-                } else {
-                    candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
-                }
+                val framework = pack.frameworks.firstOrNull { it.id == candidate.framework }
+                if (framework == null || candidate.transport != null) return@map candidate
+                val file = candidate.position?.filename
+                val prefix = deploymentBasePath(framework, modules.tableFor(file)) { applicationPathFor(framework, file) }
+                if (prefix.isEmpty()) candidate else candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
             }
             .map { candidate -> withTransportParameters(candidate, module, pack, folder, annotationValues) }
             .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, annotationValues) }
@@ -291,7 +284,7 @@ object Endpoints {
         // The template's own variables stay authoritative for the path: a
         // route declares `{id}` whether or not the handler ever reads it.
         val path = (candidate.pathParameters + read.path + declaredByAnnotation.path).distinct().sorted()
-        val query = (read.query + declaredByAnnotation.query).distinct().sorted()
+        val query = (candidate.queryParameters + read.query + declaredByAnnotation.query).distinct().sorted()
         return candidate.copy(pathParameters = path, queryParameters = query)
     }
 
@@ -564,7 +557,7 @@ object Endpoints {
             val path = when {
                 configured == null -> default
                 configured.value == null -> default.also {
-                    out = out.copy(pathUnresolved = "${configured.key}: config files in this module disagree")
+                    out = out.copy(pathUnresolved = "${configured.key}: no value a default run serves (set only by a non-default profile, or config files of one precedence disagree)")
                 }
                 else -> configured.value.trim()
             }
@@ -648,6 +641,33 @@ object Endpoints {
             }
         }
 
+        private val buildTexts = HashMap<Path, String?>()
+
+        /**
+         * Whether the build scripts from [file]'s module up to the analysed
+         * root declare any of [markers] (artifact-name substrings). With no
+         * build script anywhere on that chain, the resolved classpath
+         * [coordinates] decide.
+         */
+        fun declaresDependency(file: String?, markers: List<String>, coordinates: Set<String>): Boolean {
+            var dir: Path? = moduleRootOf(file)
+            var sawBuildScript = false
+            while (dir != null && dir.startsWith(absoluteRoot)) {
+                val text = buildTexts.getOrPut(dir) {
+                    BUILD_SCRIPTS.map { dir!!.resolve(it) }.filter { java.nio.file.Files.isRegularFile(it) }
+                        .takeIf { it.isNotEmpty() }
+                        ?.joinToString("\n") { runCatching { java.nio.file.Files.readString(it) }.getOrDefault("") }
+                }
+                if (text != null) {
+                    sawBuildScript = true
+                    if (markers.any { text.contains(it) }) return true
+                }
+                if (dir == absoluteRoot) break
+                dir = dir.parent
+            }
+            return !sawBuildScript && coordinates.any { c -> markers.any { c.contains(it) } }
+        }
+
         fun tableFor(file: String?): ConfigResolver.ConfigTable {
             val module = moduleRootOf(file)
             if (module == absoluteRoot) return rootTable
@@ -720,7 +740,7 @@ object Endpoints {
                 val table = modules.tableFor(file)
                 for (key in keys) {
                     val entry = table[key] ?: continue
-                    val value = entry.value?.trim() ?: return@getOrPut "" to "$key: config files in this module disagree"
+                    val value = entry.value?.trim() ?: return@getOrPut "" to "$key: no value a default run serves (set only by a non-default profile, or config files of one precedence disagree)"
                     return@getOrPut value to null
                 }
                 "" to null
@@ -751,6 +771,7 @@ object Endpoints {
         typeDeclarations: List<TypeDeclaration>,
         dependencyCoordinates: Set<String>,
         crudUnknown: MutableList<String>,
+        modules: ModuleConfigs,
     ): List<EndpointDetector.Candidate> {
         val out = mutableListOf<EndpointDetector.Candidate>()
         // spring-data-commons 3.0 split PagingAndSortingRepository off
@@ -792,6 +813,16 @@ object Endpoints {
             }
             for ((key, supertypes) in repositories) {
                 val (repository, file) = key
+                // Spring Data REST exports a repository only where its
+                // starter is on the module's classpath: a data-jdbc or
+                // data-jpa module's CrudRepository serves no HTTP route.
+                // Publishing one there made 37 spurious endpoints in the
+                // corpus. The module's (or an enclosing) build script is the
+                // evidence, read as text; classpath coordinates stand in only
+                // for a tree with no build script at all.
+                if (framework.repositoryDependencyMarkers.isNotEmpty() &&
+                    !modules.declaresDependency(file, framework.repositoryDependencyMarkers, dependencyCoordinates)
+                ) continue
                 // The framework's own repository types (an in-source stub, a
                 // decompiled dependency) are the supertypes, not resources.
                 if (framework.repositorySupertypes.any { EndpointDetector.matches(repository, it) }) continue
@@ -1102,26 +1133,35 @@ object Endpoints {
         return links
     }
     /**
-     * The configured context path, by framework, first match wins in a fixed
-     * order. Each key is the one that framework documents; a project that
-     * sets none reports application-relative paths, as before.
+     * The DEPLOYMENT base path a framework's routes are served under, from
+     * its own [io.cdxgen.kosi.models.FrameworkModel.basePathKeys]: each group
+     * is a set of alternatives (first key set wins), and the groups COMPOSE
+     * in order — Spring MVC serves `server.servlet.context-path` +
+     * `spring.mvc.servlet.path` + the mapping; Quarkus `quarkus.http.root-path`
+     * + (`quarkus.rest.path` or `@ApplicationPath`) + the resource path. A
+     * key belongs to ITS framework: a Micronaut context path is not a gRPC
+     * or Azure prefix, which one repo-wide first-match list made it.
+     * [APPLICATION_PATH_TOKEN] in a group stands for the framework's
+     * `applicationPathAnnotations` value, consulted after the group's keys
+     * (the property takes precedence over the annotation).
      */
-    private val BASE_PATH_KEYS = listOf(
-        "server.servlet.context-path",
-        "spring.webflux.base-path",
-        "micronaut.server.context-path",
-        "quarkus.http.root-path",
-        "ktor.deployment.rootPath",
-        "server.base-path",
-    )
-
-    internal fun basePathFrom(configTable: ConfigResolver.ConfigTable): String {
-        for (key in BASE_PATH_KEYS) {
-            val value = configTable[key]?.value?.trim().orEmpty()
-            if (value.isNotEmpty() && value != "/") return value
+    internal fun deploymentBasePath(
+        framework: io.cdxgen.kosi.models.FrameworkModel,
+        table: ConfigResolver.ConfigTable,
+        applicationPath: () -> String? = { null },
+    ): String {
+        var base = ""
+        for (group in framework.basePathKeys) {
+            val value = group.firstNotNullOfOrNull { key ->
+                if (key == APPLICATION_PATH_TOKEN) applicationPath()
+                else table[key]?.value?.trim()?.takeIf { it.isNotEmpty() && it != "/" }
+            }
+            if (value != null) base = joinPaths(base, value)
         }
-        return ""
+        return base
     }
+
+    const val APPLICATION_PATH_TOKEN = "@applicationPath"
 
     /** `/api` + `/users` -> `/api/users`, with no doubled or missing slash. */
     internal fun joinPaths(base: String, path: String): String {

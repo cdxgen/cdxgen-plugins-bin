@@ -106,6 +106,12 @@ class EndpointsPackLivenessTest {
             "dataRestBasePathKeys" -> drop({ it.dataRestBasePathKeys }, { x, l -> x.copy(dataRestBasePathKeys = l) })
             "dataRestBasePathSetters" -> drop({ it.dataRestBasePathSetters }, { x, l -> x.copy(dataRestBasePathSetters = l) })
             "pathArguments" -> drop({ it.pathArguments }, { x, l -> x.copy(pathArguments = l) })
+            "methodPathAnnotations" -> drop({ it.methodPathAnnotations }, { x, l -> x.copy(methodPathAnnotations = l) })
+            "dslPredicateTypes" -> drop({ it.dslPredicateTypes }, { x, l -> x.copy(dslPredicateTypes = l) })
+            "repositoryDependencyMarkers" -> drop({ it.repositoryDependencyMarkers }, { x, l -> x.copy(repositoryDependencyMarkers = l) })
+            // Groups of alternatives: one KEY is the removable entry.
+            "basePathKeys" -> if (elem is String) f.copy(basePathKeys = f.basePathKeys.map { group -> group.filter { it != elem } })
+            else drop({ it.basePathKeys }, { x, l -> x.copy(basePathKeys = l) })
             "servedAtKeys" -> drop({ it.servedAtKeys }, { x, l -> x.copy(servedAtKeys = l) })
             "servedAtMethods" -> drop({ it.servedAtMethods }, { x, l -> x.copy(servedAtMethods = l) })
             "functionHttpTriggers" -> drop({ it.functionHttpTriggers }, { x, l -> x.copy(functionHttpTriggers = l) })
@@ -186,6 +192,10 @@ class EndpointsPackLivenessTest {
         fw.dataRestBasePathKeys.forEach { entry("dataRestBasePathKeys", it, it, it) }
         fw.dataRestBasePathSetters.forEach { entry("dataRestBasePathSetters", it, it.substringAfterLast('.'), it) }
         fw.pathArguments.forEach { entry("pathArguments", it, it, it) }
+        fw.methodPathAnnotations.forEach { entry("methodPathAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.dslPredicateTypes.forEach { entry("dslPredicateTypes", it, it.substringAfterLast('/'), it) }
+        fw.repositoryDependencyMarkers.forEach { entry("repositoryDependencyMarkers", it, it, it) }
+        fw.basePathKeys.flatten().forEach { entry("basePathKeys", it, it, it) }
         fw.servedAtKeys.forEach { entry("servedAtKeys", it, it, it) }
         fw.servedAtMethods.forEach { entry("servedAtMethods", it, it, it) }
         fw.functionHttpTriggers.forEach { entry("functionHttpTriggers", it, it.substringAfterLast('.'), it) }

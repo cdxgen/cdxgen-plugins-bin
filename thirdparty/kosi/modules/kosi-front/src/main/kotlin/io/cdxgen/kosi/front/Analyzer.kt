@@ -723,6 +723,7 @@ object Analyzer {
                             position = decl.position,
                             source = source,
                             parameterAnnotations = decl.parameterAnnotations,
+                            unresolvedSupertypes = decl.unresolvedSupertypes,
                         ),
                     )
                 }
@@ -740,6 +741,7 @@ object Analyzer {
                     ""
                 })
             }
+            val importResolvedAnnotations = java.util.concurrent.atomic.AtomicInteger()
             val declarationAnnotationValues = declarationAnnotations(
                 drafts,
                 kirModule,
@@ -752,6 +754,15 @@ object Analyzer {
                     }
                     acc
                 },
+                // Explicit imports per file: the compiler's own rule for a
+                // short annotation name when the classpath lacks its jar.
+                importsByFile = facts.associate { f ->
+                    f.relativePath to f.imports.filter { !it.star }.associate { (it.alias ?: it.name.substringAfterLast('.')) to it.name }
+                },
+                starImportsByFile = facts.associate { f ->
+                    f.relativePath to (f.packageName to f.imports.filter { it.star }.map { it.name.removeSuffix(".*") })
+                },
+                importResolved = importResolvedAnnotations,
             )
             val resolvedDependencyCoordinates = buildSet {
                 for (jar in resolution.jars) {
@@ -782,7 +793,11 @@ object Analyzer {
                 sourceTexts = sourceTexts,
                 annotationValues = declarationAnnotationValues,
                 dependencyCoordinates = resolvedDependencyCoordinates,
-                typeDeclarations = typeDeclarationsOf(drafts),
+                typeDeclarations = typeDeclarationsOf(
+                    drafts,
+                    facts.associate { f -> f.relativePath to f.imports.filter { !it.star }.associate { (it.alias ?: it.name.substringAfterLast('.')) to it.name } },
+                    facts.associate { f -> f.relativePath to (f.packageName to f.imports.filter { it.star }.map { it.name.removeSuffix(".*") }) },
+                ),
             )
             val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
                 module = kirModule,
@@ -1057,6 +1072,21 @@ object Analyzer {
                 null
             }
 
+            val importResolvedCount = importResolvedAnnotations.get()
+            val importResolvedDiagnostic = if (importResolvedCount > 0) {
+                Diagnostic(
+                    code = DiagnosticCodes.ANNOTATION_IMPORT_RESOLVED,
+                    severity = Severity.WARNING,
+                    message = "$importResolvedCount annotation use(s) did not resolve against the classpath and were read at " +
+                        "the FQN their file explicitly imports; the classpath lacks the framework's jars — pass the " +
+                        "project's resolved classpath for full resolution",
+                    position = Position(".", 1, 1),
+                    count = importResolvedCount,
+                )
+            } else {
+                null
+            }
+
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
@@ -1204,7 +1234,7 @@ object Analyzer {
                     listOfNotNull(
                         coverageDiagnostic,
                         unsubstantiatedDiagnostic,
-                        pathUnresolvedDiagnostic, crudUnknownDiagnostic,
+                        pathUnresolvedDiagnostic, crudUnknownDiagnostic, importResolvedDiagnostic,
                         jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
                     ) + kirSkippedDiagnostics +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
@@ -1309,6 +1339,10 @@ object Analyzer {
         drafts: List<DeclarationDraft>,
         kirModule: io.cdxgen.kosi.kir.KirModule,
         resolvedFqnsByShort: Map<String, Set<String>> = emptyMap(),
+        importsByFile: Map<String, Map<String, String>> = emptyMap(),
+        importResolved: java.util.concurrent.atomic.AtomicInteger? = null,
+        /** File -> (its package, its star-imported packages). */
+        starImportsByFile: Map<String, Pair<String, List<String>>> = emptyMap(),
     ): Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>> {
         val fqnsByShort = HashMap<String, MutableSet<String>>()
         for ((short, fqns) in resolvedFqnsByShort) {
@@ -1319,6 +1353,44 @@ object Analyzer {
                 fqnsByShort.getOrPut(annotation.substringAfterLast('.')) { mutableSetOf() }.add(annotation)
             }
         }
+        // A short name NOTHING resolved: the declaring file's explicit
+        // import names its FQN — Kotlin resolves an explicitly imported
+        // name before any other scope, so this is the compiler's rule, not
+        // a name-only guess. Without it, a run whose classpath lacked
+        // spring-web (the offline cache scan brings no transitive jars)
+        // found ZERO endpoints on every Spring, Quarkus and Micronaut repo
+        // of the corpus. Counted, and published as a diagnostic.
+        //
+        // A STAR import (`import org.springframework.web.bind.annotation.*`)
+        // is weaker evidence — Kotlin gives it lower priority, and several
+        // star packages could each hold the name — so it resolves only when
+        // (1) the file's own package declares no such name, (2) the FQN is
+        // one the endpoints pack MODELS (a symbol known to exist there, and
+        // pinned by the symbol-evidence gate), and (3) exactly ONE of the
+        // file's star packages yields such an FQN.
+        val declaredCanonicals = drafts.mapTo(HashSet()) { it.canonicalName }
+        fun fqnsOf(short: String, file: String): Set<String> {
+            // The file's explicit import FIRST: it is what the name means in
+            // THIS file. The short-name map is repo-wide, so a same-named
+            // annotation resolved in another package claimed every file's
+            // unresolved use of the name.
+            importsByFile[file]?.get(short)?.let { fqn ->
+                if (fqnsByShort[short]?.contains(fqn) != true) importResolved?.incrementAndGet()
+                return setOf(fqn)
+            }
+            fqnsByShort[short]?.takeIf { it.isNotEmpty() }?.let { return it }
+            starImportsByFile[file]?.let { (pkg, stars) ->
+                val local = if (pkg.isEmpty()) short else "$pkg.$short"
+                if (local !in declaredCanonicals) {
+                    val candidates = stars.map { "$it.$short" }.filter { it in PACK_SYMBOLS }
+                    if (candidates.size == 1) {
+                        importResolved?.incrementAndGet()
+                        return setOf(candidates.single())
+                    }
+                }
+            }
+            return setOf(short)
+        }
         val out = LinkedHashMap<String, MutableList<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>()
         // A parameter's annotations under `<function>#<parameter>`: the
         // value of `@PathVariable("idProduct")` is the URL variable's name.
@@ -1326,7 +1398,7 @@ object Analyzer {
             for ((parameter, annotations) in draft.parameterAnnotations) {
                 val entries = out.getOrPut(draft.canonicalName + "#" + parameter) { mutableListOf() }
                 for (annotation in annotations) {
-                    for (fqn in fqnsByShort[annotation.name].orEmpty().ifEmpty { setOf(annotation.name) }.sorted()) {
+                    for (fqn in fqnsOf(annotation.name, draft.position.filename).sorted()) {
                         entries.add(
                             io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
                                 fqn = fqn,
@@ -1344,7 +1416,7 @@ object Analyzer {
             if (draft.annotations.isEmpty()) continue
             val entries = out.getOrPut(draft.canonicalName) { mutableListOf() }
             for (annotation in draft.annotations) {
-                val fqns = fqnsByShort[annotation.name].orEmpty().ifEmpty { setOf(annotation.name) }
+                val fqns = fqnsOf(annotation.name, draft.position.filename)
                 for (fqn in fqns.sorted()) {
                     entries.add(
                         io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
@@ -1361,10 +1433,43 @@ object Analyzer {
         return out
     }
 
+    /**
+     * Every class FQN the endpoints pack names, the only symbols a star
+     * import may resolve an unresolved annotation to (see
+     * `declarationAnnotations`).
+     */
+    private val PACK_SYMBOLS: Set<String> by lazy {
+        val text = io.cdxgen.kosi.models.EndpointModels::class.java
+            .getResourceAsStream(io.cdxgen.kosi.models.EndpointModels.ENDPOINTS_PACK_RESOURCE)
+            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+        Regex(""""((?:[a-z_][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9_]*)"""").findAll(text).mapTo(HashSet()) { it.groupValues[1] }
+    }
+
     /** The types a run read, with supertypes: a member-less repository interface is visible only here. */
-    private fun typeDeclarationsOf(drafts: List<DeclarationDraft>): List<io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration> =
-        drafts.filter { it.supertypes.isNotEmpty() }
-            .map { io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(it.canonicalName, it.position.filename, it.supertypes) }
+    private fun typeDeclarationsOf(
+        drafts: List<DeclarationDraft>,
+        imports: Map<String, Map<String, String>> = emptyMap(),
+        stars: Map<String, Pair<String, List<String>>> = emptyMap(),
+    ): List<io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration> {
+        val declared = drafts.mapTo(HashSet()) { it.canonicalName }
+        return drafts.mapNotNull { draft ->
+            val file = draft.position.filename
+            // An UNRESOLVED supertype through the file's imports, by the
+            // rule the annotations use: explicit import first; a star import
+            // only to a pack-modelled FQN from exactly one star package. A
+            // repository whose Spring Data jar is not on the classpath is
+            // otherwise invisible.
+            val recovered = draft.unresolvedSupertypes.mapNotNull { short ->
+                imports[file]?.get(short) ?: stars[file]?.let { (pkg, starPkgs) ->
+                    if ((if (pkg.isEmpty()) short else "$pkg.$short") in declared) null
+                    else starPkgs.map { "$it.$short" }.filter { it in PACK_SYMBOLS }.singleOrNull()
+                }
+            }
+            val supertypes = (draft.supertypes + recovered).distinct()
+            if (supertypes.isEmpty()) null
+            else io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(draft.canonicalName, file, supertypes)
+        }
+    }
 
     /** The config table's key -> value view the crypto collector folds against. */
     private fun configValuesForCrypto(root: java.nio.file.Path): Map<String, String> {
@@ -1454,6 +1559,7 @@ object Analyzer {
         val position: Position,
         val source: SourceCollector.CollectedFile?,
         val parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
+        val unresolvedSupertypes: List<String> = emptyList(),
     )
 
     /**

@@ -92,6 +92,9 @@ object EndpointDetector {
          * set by [detect].
          */
         internal var nestingNames: Set<String> = setOf("route", "path")
+
+        /** Abstract members an implementation inherited its mapping from; see [detect]. */
+        internal val inheritedMappings: MutableSet<String> = mutableSetOf()
     }
 
     data class LambdaLink(
@@ -199,6 +202,10 @@ object EndpointDetector {
         }
         // A handler class a mount call linked to a route is that route's
         // handler; its route-less supertype candidate is not a second endpoint.
+        // An abstract member an implementation inherited from is published
+        // THERE; the KIR does not always record the reverse override edge.
+        val bodyless = functions.filter { it.body == null }.mapTo(HashSet()) { it.canonicalName }
+        byKey.values.removeAll { it.handlerSymbol in input.inheritedMappings && it.handlerSymbol in bodyless }
         val mounted = mountedHandlers(byKey.values)
         byKey.values.removeAll { it.pathUnresolved != null && it.pathTemplate.isEmpty() && it.handlerSymbol in mounted }
         return byKey.values.sortedWith(
@@ -215,10 +222,37 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         if (fn.syntheticCause != null) return
-        val annotations = declaredIn(input.annotationValues[fn.canonicalName].orEmpty(), fn.file)
-        val ownerAnnotations = fn.ownerAnnotations
+        fun isMapping(ann: DeclAnnotation) = pack.frameworks.any { f ->
+            f.kind == "annotation" && f.mappingAnnotations.any { matches(ann.fqn, it.pattern) }
+        }
+        // An abstract member that an analysed class implements is the
+        // implementation's endpoint, published there with the inherited
+        // mapping below — never a second, bodyless one.
+        if (fn.body == null && fn.overriddenBy.isNotEmpty()) return
+        val own = declaredIn(input.annotationValues[fn.canonicalName].orEmpty(), fn.file)
+        // INHERITED mappings: a member with no mapping of its own takes the
+        // one on the member it overrides — JAX-RS ("inherited by a
+        // corresponding sub-class or implementation class method provided
+        // that the method ... do not have any JAX-RS annotations of their
+        // own") and Spring's interface controllers (the OpenAPI-generator
+        // `interface UsersApi` shape) alike. The class prefix and marker come
+        // from the overridden member's owner when the implementation's class
+        // declares none.
+        val inheritedFrom = if (own.none(::isMapping)) {
+            fn.overrides.firstOrNull { o -> input.annotationValues[o].orEmpty().any(::isMapping) }
+        } else {
+            null
+        }
+        if (inheritedFrom != null) input.inheritedMappings.add(inheritedFrom)
+        val annotations = if (inheritedFrom != null) input.annotationValues[inheritedFrom].orEmpty() else own
         val ownerCanonical = fn.canonicalName.substringBeforeLast('.')
-        val ownerDeclAnnotations = declaredIn(input.annotationValues[ownerCanonical].orEmpty(), fn.file)
+        val ownDeclAnnotations = declaredIn(input.annotationValues[ownerCanonical].orEmpty(), fn.file)
+        val inheritedOwner = inheritedFrom?.substringBeforeLast('.')
+        val inheritedOwnerAnnotations = inheritedOwner?.let { input.annotationValues[it].orEmpty() }.orEmpty()
+        // The KIR carries RESOLVED owner annotations only; the declaration
+        // table also carries import-resolved ones (see Analyzer).
+        val ownerAnnotations = (fn.ownerAnnotations + ownDeclAnnotations.map { it.fqn } + inheritedOwnerAnnotations.map { it.fqn }).distinct()
+        val ownerDeclAnnotations = ownDeclAnnotations + inheritedOwnerAnnotations
 
         // Class-declared routes with convention-named handlers: the servlet
         // shape, where `@WebServlet("/run")` sits on the class and `doGet`
@@ -275,7 +309,15 @@ object EndpointDetector {
                 // One endpoint per (prefix, path) pair: Spring serves the
                 // cross product of a class-level and a method-level array.
                 for (prefix in prefixes) {
-                    for (rawPath in pathsOf(matched, framework.pathArguments)) {
+                    // JAX-RS spells a method's own path on a SEPARATE
+                    // annotation (`@GET @Path("/{id}")`): the verb carries
+                    // none, and "the URI template of the resource class"
+                    // concatenates with "the URI template of the method".
+                    val methodPath = framework.methodPathAnnotations.takeIf { it.isNotEmpty() }?.let { patterns ->
+                        annotations.firstOrNull { ann -> patterns.any { matches(ann.fqn, it) } }
+                    }
+                    val rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments) } ?: pathsOf(matched, framework.pathArguments)
+                    for (rawPath in rawPaths) {
                         // Spring, JAX-RS and Micronaut all prepend the missing
                         // slash: `@GetMapping("vets.json")` serves `/vets.json`.
                         val path = joinPaths(prefix, rawPath).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
@@ -293,6 +335,7 @@ object EndpointDetector {
                                 deepLinkHosts = null,
                                 dataRestBase = dataRestBase,
                                 anyMethod = methods.isEmpty() && mapping.anyMethod,
+                                queryParameters = uriTemplateQueryParameters(path),
                             ),
                         )
                     }
@@ -452,11 +495,19 @@ object EndpointDetector {
         input: Input,
         add: (Candidate) -> Unit,
     ) {
-        val callArgs = when (ins) {
+        // An overload that BUILDS a predicate (`GET("/x")`, `path("/v2")` in
+        // the router DSL, returning RequestPredicate) registers no route.
+        val descriptor = (ins as? KirCall)?.callee?.descriptor
+        if (descriptor != null && framework?.dslPredicateTypes?.any { descriptor.endsWith(")L$it;") } == true) return
+        val baseArgs = when (ins) {
             is KirCall -> ins.args
             is KirDynamicCall -> ins.args
             else -> emptyList()
         }
+        // `"/status" { }` — `String.invoke(handler)`: the route's path is
+        // the extension RECEIVER, which leads the argument list here.
+        val invokeReceiver = (ins as? KirCall)?.takeIf { callName(it) == "invoke" }?.receiver
+        val callArgs = if (invokeReceiver != null) listOf(invokeReceiver) + baseArgs else baseArgs
         // The full prefix is the lambda-link chain (outermost) composed with
         // the MOUNT prefix a mounted router publishes under.
         val prefix = joinPaths(prefixChain(fn.canonicalName, input), mountedPrefix(fn, (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver, framework, input))
@@ -1073,8 +1124,31 @@ object EndpointDetector {
                         is KirDynamicCall -> call.args
                         else -> emptyList()
                     }
-                    val folded = callArgs.firstOrNull()?.let { input.folder.valueAt(parent, block, index, it) }
-                    folded?.value?.trim('/')?.takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
+                    // `"/api".nest { }` carries the path as the call's
+                    // RECEIVER (an extension receiver); `route("/api") { }`
+                    // as its first argument.
+                    val receiver = (call as? KirCall)?.receiver
+                    val first = receiver?.takeIf { r -> input.folder.valueAt(parent, block, index, r)?.value != null }
+                        ?: receiver?.takeIf { r ->
+                            block.instructions.take(index).any { (it as? KirCall)?.result == r && callName(it) == "path" }
+                        }
+                        ?: callArgs.firstOrNull()
+                    val folded = first?.let { input.folder.valueAt(parent, block, index, it) }
+                    // `path("/api").nest { }`: the nesting argument is a
+                    // PREDICATE, and its path is the argument of the `path`
+                    // call that produced it. Any other predicate (`accept(..)`,
+                    // `method(..)`) adds no segment.
+                    val viaPredicate = if (folded?.value == null && first != null) {
+                        block.instructions.take(index).lastOrNull { producer ->
+                            (producer as? KirCall)?.result == first && callName(producer) == "path" && producer.args.size == 1
+                        }?.let { producer ->
+                            val at = block.instructions.indexOf(producer)
+                            input.folder.valueAt(parent, block, at, (producer as KirCall).args.single())?.value
+                        }
+                    } else {
+                        null
+                    }
+                    (folded?.value ?: viaPredicate)?.trim('/')?.takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
                 }
             }
             current = link.parentFunction
@@ -1312,17 +1386,18 @@ object EndpointDetector {
         val query = sortedSetOf<String>()
         for (param in fn.params) {
             if (param.receiver) continue
-            val model = param.annotations.firstNotNullOfOrNull { annotation ->
-                framework.parameterAnnotations.firstOrNull { matches(annotation, it.pattern) }
-            } ?: continue
-            val kind = model.kind
             // A parameter the KIR could not name contributes nothing: an
             // unnamed entry in this list is worse than a shorter list.
             val own = param.name?.takeIf { it.isNotEmpty() } ?: continue
+            val declaredAnnotations = valuesOf(own)
+            val model = (param.annotations + declaredAnnotations.map { it.fqn }).firstNotNullOfOrNull { annotation ->
+                framework.parameterAnnotations.firstOrNull { matches(annotation, it.pattern) }
+            } ?: continue
+            val kind = model.kind
             // The ANNOTATION's name wins: `@PathVariable("idProduct") id`
             // binds the URL variable `idProduct`, and `id` is only the Kotlin
             // name (Spring's value/name aliases; JAX-RS's value).
-            val declared = valuesOf(own).firstOrNull { matches(it.fqn, model.pattern) }
+            val declared = declaredAnnotations.firstOrNull { matches(it.fqn, model.pattern) }
             val name = declared?.let { ann ->
                 sequenceOf("value", "name").firstNotNullOfOrNull { key ->
                     ann.namedValues[key]?.firstOrNull()?.takeIf { it.isNotEmpty() }
@@ -1353,9 +1428,33 @@ object EndpointDetector {
      * ignored: it constrains values, and `pathParameters` names the
      * variable either way.
      */
+    /**
+     * RFC 6570 URI-template forms Micronaut routes use
+     * (docs.micronaut.io 5.1 "URI Templates"): `/books{/id}` "An optional URI
+     * variable", `/books{?max,offset}` "Optional query parameters",
+     * `{/path:.*}{.ext}` a path plus extension, `/books/{+path}` reserved
+     * (multi-segment) matching, `{#frag}` a fragment. Rewritten to the
+     * `{name}` normal form; the query and fragment expansions are NOT path
+     * and are removed from it (their names are [uriTemplateQueryParameters]).
+     */
+    private fun rewriteUriTemplate(path: String): String =
+        path.replace(Regex("""\{[?&][^}]*}"""), "")
+            .replace(Regex("""\{#[^}]*}"""), "")
+            .replace(Regex("""\{/([^}:]+)(?::[^}]*)?}"""), "/{$1}")
+            .replace(Regex("""\{\.([^}:]+)(?::[^}]*)?}"""), ".{$1}")
+            .replace(Regex("""\{\+([^}:]+)(?::[^}]*)?}"""), "{$1}")
+
+    /** The query names an RFC 6570 `{?a,b}` / `{&c}` expansion declares. */
+    internal fun uriTemplateQueryParameters(path: String): List<String> =
+        Regex("""\{[?&]([^}]*)}""").findAll(path)
+            .flatMap { it.groupValues[1].split(',').asSequence() }
+            .map { it.trim().removeSuffix("*").substringBefore(':') }
+            .filter { it.isNotEmpty() }
+            .distinct().sorted().toList()
+
     internal fun normalizePath(path: String): String {
         if (path.isEmpty()) return path
-        val segments = path.split('/').map { segment ->
+        val segments = rewriteUriTemplate(path).split('/').map { segment ->
             when {
                 // Vert.x / Spark / Javalin v3: `:id`
                 segment.startsWith(":") && segment.length > 1 -> "{" + segment.removePrefix(":") + "}"
@@ -1373,7 +1472,9 @@ object EndpointDetector {
                 else -> segment
             }
         }
-        return segments.joinToString("/")
+        // `/templates` + `{/id}` composes a doubled separator; a URL path
+        // never means an empty segment here.
+        return segments.joinToString("/").replace(Regex("/{2,}"), "/")
     }
 }
 

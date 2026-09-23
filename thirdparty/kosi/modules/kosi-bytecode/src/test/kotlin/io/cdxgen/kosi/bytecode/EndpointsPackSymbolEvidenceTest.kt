@@ -192,10 +192,15 @@ class EndpointsPackSymbolEvidenceTest {
         "mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations",
         "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations",
         "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations",
+        "dataRestBasePathMarkers", "repositoryResourceAnnotations", "repositoryMethodAnnotations",
+        "repositoryPagingSupertypes", "functionHttpTriggers",
     )
 
     /** Channels whose entries are member calls on an owner class. */
-    private val memberChannels = listOf("dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions")
+    private val memberChannels = listOf(
+        "dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions",
+        "dataRestBasePathSetters",
+    )
 
     /** Channels whose entries are top-level functions (packages, no owner class). */
     private val functionChannels = listOf("contractDsl", "routeMetaDsl", "bindFunctions", "authenticationDsl")
@@ -217,6 +222,12 @@ class EndpointsPackSymbolEvidenceTest {
             "repositorySupertypes" -> f.repositorySupertypes
             "securityConstructors" -> f.securityConstructors
             "resourceAnnotations" -> f.resourceAnnotations
+            "dataRestBasePathMarkers" -> f.dataRestBasePathMarkers
+            "repositoryResourceAnnotations" -> f.repositoryResourceAnnotations
+            "repositoryMethodAnnotations" -> f.repositoryMethodAnnotations
+            "repositoryPagingSupertypes" -> f.repositoryPagingSupertypes
+            "functionHttpTriggers" -> f.functionHttpTriggers
+            "dataRestBasePathSetters" -> f.dataRestBasePathSetters
             "dslFunctions" -> f.dslFunctions.map { it.pattern }
             "mediaDsl" -> f.mediaDsl.map { it.pattern }
             "handlerDsl" -> f.handlerDsl
@@ -433,6 +444,15 @@ class EndpointsPackSymbolEvidenceTest {
                 Coordinate("org.springframework", "spring-webmvc", "5.3.18"),
                 Coordinate("org.springframework", "spring-web", "5.3.18"),
                 Coordinate("org.springframework", "spring-context", "5.3.18"),
+                // Spring Data REST's controllers, resource annotations and
+                // RepositoryRestConfiguration (Boot 2.6 / Spring 5.3), and the
+                // repository supertypes from the 3.x line, the only one that
+                // declares every one the pack names (ListCrudRepository is
+                // 3.x) — JpaRepository lives in spring-data-jpa.
+                Coordinate("org.springframework.data", "spring-data-rest-webmvc", "3.6.4"),
+                Coordinate("org.springframework.data", "spring-data-rest-core", "3.6.4"),
+                Coordinate("org.springframework.data", "spring-data-commons", "3.2.5"),
+                Coordinate("org.springframework.data", "spring-data-jpa", "3.2.5"),
             ),
             "spring-webflux" to listOf(
                 Coordinate("org.springframework", "spring-webflux", "5.3.18"),
@@ -458,9 +478,12 @@ class EndpointsPackSymbolEvidenceTest {
             // jar — the Handler supertype and the six Request readers. Listing
             // them is the difference between a committed record that verifies
             // the pack and an empty one that verifies nothing.
-            "ratpack" to listOf("supertypeMarkers", "contextReaders"),
-            "spring-mvc" to typeChannels,
-            "spring-webflux" to typeChannels,
+            "ratpack" to listOf("supertypeMarkers", "contextReaders", "dslFunctions"),
+            // setBasePath is a MEMBER of RepositoryRestConfiguration.
+            "spring-mvc" to typeChannels + "dataRestBasePathSetters" + "dslFunctions",
+            // The functional router DSL rows are MEMBERS of the three DSL
+            // classes; the stub that modelled `path` as nesting was fiction.
+            "spring-webflux" to typeChannels + "dslFunctions",
             "spring-messaging" to typeChannels,
             "graphql" to typeChannels,
             "micronaut" to typeChannels,
@@ -599,6 +622,20 @@ class EndpointsPackSymbolEvidenceTest {
                 return
             }
         }
+        // Regeneration switch (see the class doc): writes ONLY what the held
+        // evidence derived, and refuses when any pack symbol FAILED — a
+        // contradiction is a defect, not evidence. It runs BEFORE the drift
+        // comparison: drift is exactly what a deliberate pack change
+        // produces, and a switch that ran only once drift was already gone
+        // could never regenerate anything.
+        if (System.getenv("KOSI_UPDATE_SYMBOL_EVIDENCE") == "1") {
+            assertTrue(derived.values.none { it.failures.isNotEmpty() },
+                "refusing to regenerate evidence the held artifacts CONTRADICT:\n" + derived.values.flatMap { it.failures }.joinToString("\n"))
+            Files.createDirectories(extractFile.parent)
+            Files.writeString(extractFile, derivedToJson(derived))
+            println("symbol-evidence: REGENERATED ${extractFile}")
+            return
+        }
         val failures = mutableListOf<String>()
         for ((id, d) in derived) {
             if (!d.held) continue
@@ -619,14 +656,6 @@ class EndpointsPackSymbolEvidenceTest {
             assertTrue(d.failures.isEmpty(), "$id: the held evidence CONTRADICTS the pack:\n${d.failures.joinToString("\n")}")
         }
         assertTrue(failures.isEmpty(), "committed symbol evidence has drifted:\n${failures.joinToString("\n")}")
-        // Regeneration switch (see the class doc): writes ONLY what the held
-        // evidence derived, and refuses when any pack symbol FAILED — a
-        // contradiction is a defect, not evidence.
-        if (System.getenv("KOSI_UPDATE_SYMBOL_EVIDENCE") == "1") {
-            Files.createDirectories(extractFile.parent)
-            Files.writeString(extractFile, derivedToJson(derived))
-            println("symbol-evidence: REGENERATED ${extractFile}")
-        }
     }
 
     // ---- the verdict table, counted ------------------------------------------
