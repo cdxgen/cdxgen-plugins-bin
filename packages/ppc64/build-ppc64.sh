@@ -3,9 +3,10 @@
 set -e
 
 rm -rf plugins/trivy
-rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+rm -rf plugins/trustinspector plugins/golem plugins/kosi
 
-for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
+# rusi, cdxui and cdxrs have no ppc64le build (scripts/plugin-platform-support.sh).
+for plug in trivy trustinspector golem kosi
 do
     mkdir -p plugins/$plug
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "ppc64"

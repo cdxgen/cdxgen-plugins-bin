@@ -52,7 +52,7 @@ bootstrap-darwin:
 	rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
 	rustup target add --toolchain stable $(darwin_triples)
 
-linux: $(build_dir)/$(appname)-linux-amd64 $(build_dir)/$(appname)-linux-arm64 $(build_dir)/$(appname)-linux-arm $(build_dir)/$(appname)-linux-ppc64le $(build_dir)/$(appname)-linux-riscv64
+linux: $(build_dir)/$(appname)-linux-amd64 $(build_dir)/$(appname)-linux-arm64 $(build_dir)/$(appname)-linux-arm $(build_dir)/$(appname)-linux-riscv64
 
 linuxmusl: $(build_dir)/$(appname)-linuxmusl-amd64 $(build_dir)/$(appname)-linuxmusl-arm64
 
@@ -127,9 +127,6 @@ $(build_dir)/$(appname)-linux-arm64: | $(build_dir)
 
 $(build_dir)/$(appname)-linux-arm: | $(build_dir)
 	$(call zigbuild_binary,armv7-unknown-linux-gnueabihf,$(appname)-linux-arm,linux-arm,)
-
-$(build_dir)/$(appname)-linux-ppc64le: | $(build_dir)
-	$(call zigbuild_binary,powerpc64le-unknown-linux-gnu,$(appname)-linux-ppc64le,linux-ppc64le,)
 
 $(build_dir)/$(appname)-linux-riscv64: | $(build_dir)
 	$(call zigbuild_binary,riscv64gc-unknown-linux-gnu,$(appname)-linux-riscv64,linux-riscv64,)
