@@ -420,6 +420,18 @@
             "HEAD"
           ],
           "pattern": "io.javalin.apibuilder.ApiBuilder.head"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.javalin.Javalin.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.javalin.Javalin.options"
         }
       ],
       "handlerInput": "context",
@@ -700,6 +712,7 @@
     },
     {
       "_p27_comment": ", from docs.micronaut.io HTTP guide, Simple Request Binding rather than from memory. Verbatim: \"If there is a @Body and request allows the body, bind the body to it. If the request can have a body and no @Body is defined then try to parse the body (either JSON or form data) and bind the method arguments from the body.\" Resolution order is URI variables, then query parameters, then the body — all of them request data. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
+      "_verbs_comment": "docs.micronaut.io 5.1 HTTP: @Head, @Options, @Trace and @CustomHttpMethod (non-standard verbs such as WebDAV's LOCK/REPORT) beside @Get..@Delete.",
       "authenticationAnnotations": [
         {
           "pattern": "io.micronaut.security.annotation.Secured",
@@ -765,6 +778,30 @@
             "PATCH"
           ],
           "pattern": "io.micronaut.http.annotation.Patch"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.micronaut.http.annotation.Head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.micronaut.http.annotation.Options"
+        },
+        {
+          "methods": [
+            "TRACE"
+          ],
+          "pattern": "io.micronaut.http.annotation.Trace"
+        },
+        {
+          "customVerbs": true,
+          "methodArgument": "method",
+          "methods": [],
+          "pattern": "io.micronaut.http.annotation.CustomHttpMethod"
         }
       ],
       "mediaAnnotations": [
@@ -1400,6 +1437,12 @@
           "anyMethod": true,
           "methods": [],
           "name": "doFilter"
+        },
+        {
+          "methods": [
+            "TRACE"
+          ],
+          "name": "doTrace"
         }
       ],
       "id": "servlet",
@@ -1472,6 +1515,36 @@
           "nesting": true,
           "nestingPath": true,
           "pattern": "spark.Spark.path"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "spark.Spark.patch"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "spark.Spark.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "spark.Spark.options"
+        },
+        {
+          "methods": [
+            "TRACE"
+          ],
+          "pattern": "spark.Spark.trace"
+        },
+        {
+          "methods": [
+            "CONNECT"
+          ],
+          "pattern": "spark.Spark.connect"
         }
       ],
       "handlerInput": "context",
@@ -1479,6 +1552,7 @@
       "kind": "dsl"
     },
     {
+      "_exposure_comment": "docs.spring.io/spring-boot/reference/actuator/endpoints.html: by default \"only the /health endpoint is exposed over HTTP\"; exposure.include/exclude select the rest (\"*\" = all, exclude wins); path-mapping.<id> renames. Before this every modelled route was published whenever the starter was present, /env and /heapdump included, and the /loggers POST sat on the collection instead of /loggers/{name}.",
       "basePathKeys": [
         [
           "server.servlet.context-path",
@@ -1498,61 +1572,162 @@
       "implicitBasePathKeys": [
         "management.endpoints.web.base-path"
       ],
+      "implicitExposureDefault": [
+        "health"
+      ],
+      "implicitExposureExcludeKey": "management.endpoints.web.exposure.exclude",
+      "implicitExposureIncludeKey": "management.endpoints.web.exposure.include",
+      "implicitPathMappingPrefix": "management.endpoints.web.path-mapping.",
       "implicitRoutes": [
         {
+          "id": "_links",
           "methods": [
             "GET"
           ],
           "path": ""
         },
         {
+          "id": "health",
           "methods": [
             "GET"
           ],
           "path": "/health"
         },
         {
+          "id": "health",
+          "methods": [
+            "GET"
+          ],
+          "path": "/health/{*path}"
+        },
+        {
+          "id": "info",
           "methods": [
             "GET"
           ],
           "path": "/info"
         },
         {
+          "id": "beans",
           "methods": [
             "GET"
           ],
-          "path": "/metrics"
+          "path": "/beans"
         },
         {
+          "id": "caches",
+          "methods": [
+            "GET",
+            "DELETE"
+          ],
+          "path": "/caches"
+        },
+        {
+          "id": "conditions",
+          "methods": [
+            "GET"
+          ],
+          "path": "/conditions"
+        },
+        {
+          "id": "configprops",
+          "methods": [
+            "GET"
+          ],
+          "path": "/configprops"
+        },
+        {
+          "id": "env",
           "methods": [
             "GET"
           ],
           "path": "/env"
         },
         {
+          "id": "env",
           "methods": [
-            "GET",
-            "POST"
+            "GET"
+          ],
+          "path": "/env/{toMatch}"
+        },
+        {
+          "id": "loggers",
+          "methods": [
+            "GET"
           ],
           "path": "/loggers"
         },
         {
+          "id": "loggers",
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "path": "/loggers/{name}"
+        },
+        {
+          "id": "metrics",
+          "methods": [
+            "GET"
+          ],
+          "path": "/metrics"
+        },
+        {
+          "id": "metrics",
+          "methods": [
+            "GET"
+          ],
+          "path": "/metrics/{requiredMetricName}"
+        },
+        {
+          "id": "threaddump",
           "methods": [
             "GET"
           ],
           "path": "/threaddump"
         },
         {
+          "id": "heapdump",
           "methods": [
             "GET"
           ],
           "path": "/heapdump"
         },
         {
+          "id": "mappings",
           "methods": [
             "GET"
           ],
           "path": "/mappings"
+        },
+        {
+          "id": "scheduledtasks",
+          "methods": [
+            "GET"
+          ],
+          "path": "/scheduledtasks"
+        },
+        {
+          "id": "prometheus",
+          "methods": [
+            "GET"
+          ],
+          "path": "/prometheus"
+        },
+        {
+          "id": "startup",
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "path": "/startup"
+        },
+        {
+          "id": "shutdown",
+          "methods": [
+            "POST"
+          ],
+          "path": "/shutdown"
         }
       ],
       "kind": "annotation"
@@ -2324,6 +2499,7 @@
     },
     {
       "_p19_comment": "liveness sweep: the springfox-swagger coordinate marker removed — springfox is a different, archived project; the springdoc rows are what the fixtures exercise.",
+      "_paths_comment": "springdoc.org/properties.html: springdoc.api-docs.path (default /v3/api-docs), springdoc.swagger-ui.path (default /swagger-ui.html), and the .enabled flags. They were hard-coded.",
       "basePathKeys": [
         [
           "server.servlet.context-path",
@@ -2340,24 +2516,32 @@
       "id": "springdoc",
       "implicitRoutes": [
         {
+          "enabledKey": "springdoc.api-docs.enabled",
           "methods": [
             "GET"
           ],
-          "path": "/v3/api-docs"
+          "path": "/v3/api-docs",
+          "pathKey": "springdoc.api-docs.path"
         },
         {
+          "enabledKey": "springdoc.api-docs.enabled",
           "methods": [
             "GET"
           ],
-          "path": "/v3/api-docs.yaml"
+          "path": "/v3/api-docs.yaml",
+          "pathKey": "springdoc.api-docs.path",
+          "pathSuffix": ".yaml"
         },
         {
+          "enabledKey": "springdoc.swagger-ui.enabled",
           "methods": [
             "GET"
           ],
-          "path": "/swagger-ui.html"
+          "path": "/swagger-ui.html",
+          "pathKey": "springdoc.swagger-ui.path"
         },
         {
+          "enabledKey": "springdoc.swagger-ui.enabled",
           "methods": [
             "GET"
           ],
@@ -2370,6 +2554,7 @@
       "_p15_comment": "media sits on the ROUTE OBJECT between the route call and the handler (router.get(\"/x\").produces(\"application/json\").handler { .. }) and is read from the chained calls.",
       "_p17_comment": ", closing the honest-empty: Vert.x auth IS attributable to one route, because the requirement is attached THROUGH the same chained handler call the media ride - `route.handler(BasicAuthHandler.create(auth))`. Sourced from io.vertx:vertx-web:5.1.7 (the artifact in the corpus warm cache), class files read from the jar: io/vertx/ext/web/Route.class declares `handler(Handler<RoutingContext>)` returning Route (so the chain continues past an auth attach); io/vertx/ext/web/handler/AuthenticationHandler.class `extends Handler<RoutingContext>` - an auth handler IS a handler, no overload involved; the factories are interface statics on each handler class (BasicAuthHandler.create(AuthenticationProvider[, realm]), JWTAuthHandler.create(JWTAuth[, issuer]), DigestAuthHandler.create(Vertx, HtdigestAuth[, timeout]), OAuth2AuthHandler.create(Vertx, OAuth2Auth[, redirectUri]), OtpAuthHandler.create(TotpAuth|HotpAuth), RedirectAuthHandler.create(AuthenticationProvider[, loginRedirectURL]), WebAuthn4JHandler.create(WebAuthn4J)). symbol-kind check (against the same 5.1.7 jar): the nesting entry was io.vertx.ext.web.Router.mountSubRouter - an API Vert.x 5 REMOVED (Router declares no mount* member; the 5.x spelling is Route.subRouter(Router), javap on io/vertx/ext/web/Route.class). The old entry named a symbol the cited evidence does not contain and was inert besides (no fixture exercises it and the prefix walk keys on route/path lambda links); it is replaced by the 5.x spelling. Vert.x sub-router PREFIX composition remains unmodelled for either spelling - a named gap, not a wrong answer. ChainAuthHandler.all()/any() and AuthorizationHandler.create() are deliberately not modelled: the former builds a composite with no single scheme to name, the latter is authorization (what may you do), not authentication (who are you). The claim that the KIR cannot attribute the value was wrong for THIS shape: the factory call's own callee names the scheme.",
       "_p19_comment": "the sub-router mount moved here from dslFunctions (it was swapped there from Router.mountSubRouter). Vert.x 5's own spelling (Route.subRouter(Router), javap on io/vertx/ext/web/Route.class in io.vertx:vertx-web:5.1.7): the ROUTE the mount is called on carries the path prefix, and every route declared on the MOUNTED router (the call's first argument) publishes under it, with the mount route's trailing `*` stripped. The entry is exercised by fixtures/vertx-subrouter; the prefix walk keys on the mounted router's register, not on lambda links. Same-function mounts only — a sub-router built in another function is a named gap.",
+      "_verbs_comment": "vertx.io Router apidocs: every verb with and without a path, route(HttpMethod, path), and the *WithRegex forms; only get/post/put/delete/route were modelled.",
       "authHandlerFactories": [
         "io.vertx.ext.web.handler.BasicAuthHandler.create",
         "io.vertx.ext.web.handler.DigestAuthHandler.create",
@@ -2449,6 +2634,91 @@
           "methods": [],
           "nesting": false,
           "pattern": "io.vertx.ext.web.Router.route"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.vertx.ext.web.Router.patch"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.vertx.ext.web.Router.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.vertx.ext.web.Router.options"
+        },
+        {
+          "methods": [
+            "TRACE"
+          ],
+          "pattern": "io.vertx.ext.web.Router.trace"
+        },
+        {
+          "methods": [
+            "CONNECT"
+          ],
+          "pattern": "io.vertx.ext.web.Router.connect"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.getWithRegex"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.postWithRegex"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.putWithRegex"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.deleteWithRegex"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.patchWithRegex"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.headWithRegex"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.optionsWithRegex"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pathIsRegex": true,
+          "pattern": "io.vertx.ext.web.Router.routeWithRegex"
         }
       ],
       "handlerDsl": [

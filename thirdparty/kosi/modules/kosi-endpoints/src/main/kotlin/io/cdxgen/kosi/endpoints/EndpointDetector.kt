@@ -245,7 +245,7 @@ object EndpointDetector {
         val bodyless = functions.filter { it.body == null }.mapTo(HashSet()) { it.canonicalName }
         byKey.values.removeAll { it.handlerSymbol in input.inheritedMappings && it.handlerSymbol in bodyless }
         val mounted = mountedHandlers(byKey.values)
-        byKey.values.removeAll { it.pathUnresolved != null && it.pathTemplate.isEmpty() && it.handlerSymbol in mounted }
+        byKey.values.removeAll { it.foundBy != "dsl" && it.pathUnresolved != null && it.pathTemplate.isEmpty() && it.handlerSymbol in mounted }
         return byKey.values.sortedWith(
             compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }, { it.position?.filename.orEmpty() }),
         )
@@ -419,7 +419,7 @@ object EndpointDetector {
         val argument = mapping.methodArgument ?: return mapping.methods
         val declared = annotation.namedValues[argument].orEmpty()
             .map { it.substringAfterLast('.').uppercase() }
-            .filter { it in HTTP_METHODS }
+            .filter { it in HTTP_METHODS || (mapping.customVerbs && it.matches(Regex("[A-Z][A-Z0-9_-]*"))) }
             .distinct()
         return declared.ifEmpty { mapping.methods }
     }
@@ -551,15 +551,49 @@ object EndpointDetector {
         // `"/status" { }` — `String.invoke(handler)`: the route's path is
         // the extension RECEIVER, which leads the argument list here.
         val invokeReceiver = (ins as? KirCall)?.takeIf { callName(it) == "invoke" }?.receiver
-        val callArgs = if (invokeReceiver != null) listOf(invokeReceiver) + baseArgs else baseArgs
+        var callArgs = if (invokeReceiver != null) listOf(invokeReceiver) + baseArgs else baseArgs
+        // `router.route(HttpMethod.POST, "/x")`: a LEADING HttpMethod value is
+        // the verb and the path follows it.
+        var leadingMethod: String? = null
+        if (callArgs.size >= 2) {
+            val first = fn.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
+                ?.filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>()?.firstOrNull { it.result == callArgs[0] }
+            val name = (first?.path?.elements?.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name?.uppercase()
+            val owner = first?.let { fg ->
+                fn.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
+                    ?.filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>()?.firstOrNull { it.result == fg.receiver }
+            }
+            val ownerName = (owner?.path?.elements?.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name
+            if (name != null && name in HTTP_METHODS && (ownerName == "HttpMethod" || ownerName == null)) {
+                leadingMethod = name
+                callArgs = callArgs.drop(1)
+            }
+        }
+        // A REGEX route (`getWithRegex("^/api/.*")`) names no URL template:
+        // it is kept, with the regex, rather than published as a path.
+        val regexRow = framework?.dslFunctions?.firstOrNull { row ->
+            row.pathIsRegex && ((ins as? KirCall)?.let { matches(it.callee.fqn, row.pattern) } ?: (callName(ins) == row.pattern.substringAfterLast('.')))
+        }
+        if (regexRow != null) {
+            val regex = callArgs.firstOrNull()?.let { input.folder.valueAt(fn, block, index, it)?.value } ?: "<unfolded>"
+            add(
+                Candidate(
+                    framework = framework.id, httpMethods = regexRow.methods, pathTemplate = "", pathParameters = emptyList(),
+                    handlerSymbol = fn.canonicalName, foundBy = "dsl", position = Position(fn.file, fn.line, fn.line),
+                    exported = null, permissions = null, deepLinkHosts = null,
+                    pathUnresolved = "regex route: matches the regex $regex, which no URL template expresses",
+                ),
+            )
+            return
+        }
         // A method-less terminal (Ktor `handle { }`) takes its verb from the
         // nearest enclosing SELECTOR — `method(HttpMethod.Put) { }`,
         // `route(path, HttpMethod.Post) { }`. A selector whose value the
         // program picks at run time (a loop over methods) resolves nothing:
         // the route is then neither a claimed verb nor "any method".
-        var effectiveMethods = methods
-        var routeAdd = add
-        if (methods.isEmpty() && framework != null) {
+        var effectiveMethods = if (leadingMethod != null) listOf(leadingMethod) else methods
+        var routeAdd: (Candidate) -> Unit = if (leadingMethod != null) { c -> add(c.copy(httpMethods = listOf(leadingMethod), anyMethod = false)) } else add
+        if (effectiveMethods.isEmpty() && framework != null) {
             when (val selected = enclosingMethodSelector(fn, framework, input)) {
                 null -> Unit
                 SELECTOR_UNRESOLVED -> routeAdd = { c -> add(c.copy(anyMethod = false, methodSelectorUnresolved = true)) }
@@ -1413,6 +1447,9 @@ object EndpointDetector {
         }
         val method = fn.canonicalName.substringAfterLast('.')
         if (method == "<init>") return
+        // Only an OVERRIDE of the generated base is an RPC: a helper or a
+        // `close()` on the service class is not in the service descriptor.
+        if (fn.overrides.isEmpty() && "override" !in fn.modifiers) return
         add(
             Candidate(
                 framework = grpc.id,
@@ -1650,7 +1687,8 @@ object EndpointDetector {
                     // Spring `{id:[0-9]+}` / JAX-RS `{id: \\d+}`: the name is
                     // everything before the first colon. Ktor's `{id?}`
                     // marks the variable optional; the name is the same.
-                    "{" + inner.substringBefore(':').removeSuffix("?").trim() + "}"
+                    // Spring's capture-all `{*path}` names the variable too.
+                    "{" + inner.substringBefore(':').removeSuffix("?").removePrefix("*").trim() + "}"
                 }
 
                 else -> segment

@@ -750,6 +750,27 @@ capabilities = ["endpoints", "framework-semantics"]
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "actuator-exposure-default"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-default"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "actuator-exposure-configured"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-configured"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "verb-coverage"
+tier = "fixtures"
+path = "fixtures/verb-coverage"
+capabilities = ["endpoints", "framework-semantics", "servlet"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "spring-mapping-shapes"
 tier = "fixtures"
 path = "fixtures/spring-mapping-shapes"

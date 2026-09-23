@@ -146,6 +146,7 @@ object Endpoints {
         // in its query modules only; read repo-wide, it was either applied
         // to every command module's handlers or refused as ambiguous.
         val dataRestBases = DataRestBases(module, pack, folder, modules)
+        val protos = ProtoServices(root)
         // A base path declared in CODE: JAX-RS puts it on an `Application`
         // subclass. Per MODULE, like the config keys — one module's
         // `@ApplicationPath` is not its sibling's.
@@ -161,6 +162,7 @@ object Endpoints {
         val all = (candidates + manifestCandidates + webXmlCandidates + implicitCandidates)
             .map { candidate -> if (candidate.dataRestBase) dataRestBases.compose(candidate) else candidate }
             .map { candidate -> servingFacts(candidate, pack, module, annotationValues, modules) }
+            .map { candidate -> if (candidate.transport == "grpc") protos.rpcPath(candidate) else candidate }
             .map { candidate ->
                 val framework = pack.frameworks.firstOrNull { it.id == candidate.framework }
                 if (framework == null || candidate.transport != null) return@map candidate
@@ -517,12 +519,38 @@ object Endpoints {
                 val base = framework.implicitBasePathKeys
                     .firstNotNullOfOrNull { key -> configTable[key]?.value?.trim()?.takeIf { it.isNotEmpty() } }
                     ?: framework.implicitBasePathDefault
+                // EXPOSURE: Spring Boot exposes "only the health endpoint"
+                // over HTTP unless `exposure.include` names more (`*` = all);
+                // `exclude` wins. Every Actuator route used to be published
+                // on every app with the starter — /env, /heapdump included.
+                fun ids(key: String?): Set<String>? = key?.let { k ->
+                    configTable[k]?.value?.split(',')?.map { it.trim().removeSurrounding("\"") }?.filter { it.isNotEmpty() }?.toSet()
+                }
+                val include = ids(framework.implicitExposureIncludeKey) ?: framework.implicitExposureDefault.toSet()
+                val exclude = ids(framework.implicitExposureExcludeKey).orEmpty()
+                fun exposed(id: String) = ("*" in include || id in include) && id !in exclude && "*" !in exclude
+                val anyExposed = framework.implicitRoutes.any { r -> r.id.let { it != null && it != DISCOVERY_ID && exposed(it) } }
                 for (route in framework.implicitRoutes) {
+                    val id = route.id
+                    val enabledKey = route.enabledKey
+                    val pathKey = route.pathKey
+                    if (id == DISCOVERY_ID) { if (!anyExposed) continue }
+                    else if (id != null && !exposed(id)) continue
+                    if (enabledKey != null && configTable[enabledKey]?.value?.trim() == "false") continue
+                    // Per-endpoint path mapping (`path-mapping.health=healthz`)
+                    // renames that endpoint's first segment.
+                    val mapped = id?.let { framework.implicitPathMappingPrefix?.let { p -> configTable[p + id]?.value?.trim() } }
+                    val routePath = when {
+                        pathKey != null -> (configTable[pathKey]?.value?.trim()?.takeIf { it.isNotEmpty() } ?: route.path.removeSuffix(route.pathSuffix)) + route.pathSuffix
+                        mapped != null -> "/" + mapped.trim('/') + route.path.removePrefix("/$id")
+                        else -> route.path
+                    }
+                    val absolute = pathKey != null
                     out.add(
                         EndpointDetector.Candidate(
                             framework = framework.id,
                             httpMethods = route.methods,
-                            pathTemplate = EndpointDetector.normalizePath(joinPaths(base, route.path)),
+                            pathTemplate = EndpointDetector.normalizePath(if (absolute) routePath else joinPaths(base, routePath)),
                             pathParameters = emptyList(),
                             handlerSymbol = "",
                             foundBy = "implicit",
@@ -616,6 +644,67 @@ object Endpoints {
             (node as? io.cdxgen.kosi.schema.JsonStr)?.value ?: framework.functionRoutePrefixDefault
         } catch (_: Exception) {
             framework.functionRoutePrefixDefault
+        }
+    }
+
+    /**
+     * gRPC's wire path is `/{Service-Name}/{method name}` (grpc
+     * PROTOCOL-HTTP2.md), and Service-Name INCLUDES the proto package:
+     * `/helloworld.Greeter/SayHello`. Only the `.proto` states the package
+     * and the method's exact name (the Kotlin stub lower-cases its first
+     * letter), so the project's `.proto` files are read — as text, like
+     * every build input. A service no `.proto` declares keeps a best-effort
+     * path and says so in `pathUnresolved`.
+     */
+    internal class ProtoServices(root: Path) {
+        private class Service(val pkg: String, val rpcs: List<String>)
+
+        private val services: Map<String, List<Service>> = run {
+            val out = HashMap<String, MutableList<Service>>()
+            val files = runCatching {
+                java.nio.file.Files.walk(root).use { s ->
+                    s.filter { it.toString().endsWith(".proto") && java.nio.file.Files.isRegularFile(it) }.sorted().toList()
+                }
+            }.getOrDefault(emptyList())
+            for (file in files) {
+                val text = runCatching { java.nio.file.Files.readString(file) }.getOrDefault("")
+                    .replace(Regex("""//[^\n]*"""), "").replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
+                val pkg = Regex("""\bpackage\s+([\w.]+)\s*;""").find(text)?.groupValues?.get(1).orEmpty()
+                for (m in Regex("""\bservice\s+(\w+)\s*\{""").findAll(text)) {
+                    val body = text.substring(m.range.last + 1).let { rest ->
+                        var depth = 1; var k = 0
+                        while (k < rest.length && depth > 0) { if (rest[k] == '{') depth++ else if (rest[k] == '}') depth--; k++ }
+                        rest.substring(0, k)
+                    }
+                    val rpcs = Regex("""\brpc\s+(\w+)\s*\(""").findAll(body).map { it.groupValues[1] }.toList()
+                    out.getOrPut(m.groupValues[1]) { mutableListOf() }.add(Service(pkg, rpcs))
+                }
+            }
+            out
+        }
+
+        fun rpcPath(candidate: EndpointDetector.Candidate): EndpointDetector.Candidate {
+            val parts = candidate.pathTemplate.trim('/').split('/')
+            if (parts.size != 2) return candidate
+            val (service, method) = parts
+            val declared = services[service].orEmpty()
+            val match = declared.singleOrNull()
+            val rpc = match?.rpcs?.firstOrNull { it.equals(method, ignoreCase = true) }
+            return when {
+                match != null && rpc != null -> {
+                    val name = if (match.pkg.isEmpty()) service else "${match.pkg}.$service"
+                    candidate.copy(pathTemplate = "/$name/$rpc")
+                }
+                declared.size > 1 -> candidate.copy(
+                    pathTemplate = "/$service/" + method.replaceFirstChar { it.uppercaseChar() },
+                    pathUnresolved = "${declared.size} .proto files declare a service named $service; its package is ambiguous",
+                )
+                else -> candidate.copy(
+                    pathTemplate = "/$service/" + method.replaceFirstChar { it.uppercaseChar() },
+                    pathUnresolved = "no .proto in the tree declares service $service with this rpc; the package prefix and the " +
+                        "method's exact name are not proven",
+                )
+            }
         }
     }
 
@@ -1172,6 +1261,9 @@ object Endpoints {
     }
 
     const val APPLICATION_PATH_TOKEN = "@applicationPath"
+
+    /** The implicit route that lists the exposed endpoints (Actuator's `/actuator`): served when any is exposed. */
+    const val DISCOVERY_ID = "_links"
 
     /** `/api` + `/users` -> `/api/users`, with no doubled or missing slash. */
     internal fun joinPaths(base: String, path: String): String {

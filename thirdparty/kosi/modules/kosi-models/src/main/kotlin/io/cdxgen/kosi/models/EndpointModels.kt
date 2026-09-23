@@ -41,6 +41,10 @@ data class MappingAnnotation(
      * `route(path, HttpMethod.Post) { }` = 1, when that overload is used).
      */
     val nestingMethodArgument: Int = -1,
+    /** The path argument is a REGEX (Vert.x `getWithRegex`), not a URL template. */
+    val pathIsRegex: Boolean = false,
+    /** [methodArgument] may name a non-standard verb (Micronaut `@CustomHttpMethod(method = "LOCK")`). */
+    val customVerbs: Boolean = false,
 )
 
 /** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
@@ -250,6 +254,17 @@ data class FrameworkModel(
      * base and the base is substituted, not prepended.
      */
     val implicitBasePathDefault: String = "",
+    /**
+     * Endpoint EXPOSURE for implicit routes carrying an [ImplicitRoute.id]:
+     * the include/exclude keys (comma lists, `*` = all, exclude wins) and
+     * the IDs exposed when neither is set — Spring Boot exposes "only the
+     * health endpoint" over HTTP by default.
+     */
+    val implicitExposureIncludeKey: String? = null,
+    val implicitExposureExcludeKey: String? = null,
+    val implicitExposureDefault: List<String> = emptyList(),
+    /** `management.endpoints.web.path-mapping.` + id renames that endpoint's segment. */
+    val implicitPathMappingPrefix: String? = null,
     /**
      * Supertypes that make a declaration an implicitly-routed RESOURCE:
      * Spring Data REST exposes every `CrudRepository` as a collection
@@ -500,7 +515,17 @@ const val TRANSPORT_QUERY: String = "query"
 const val TRANSPORT_MERGED: String = "merged"
 
 /** One route that exists because a dependency is on the classpath. */
-data class ImplicitRoute(val path: String, val methods: List<String>)
+data class ImplicitRoute(
+    val path: String,
+    val methods: List<String>,
+    /** The endpoint ID exposure is decided by (Actuator's `health`, `env`); null = always, when the tree is present. */
+    val id: String? = null,
+    /** A config key whose value REPLACES [path] (`springdoc.api-docs.path`), then [pathSuffix] is appended. */
+    val pathKey: String? = null,
+    val pathSuffix: String = "",
+    /** A config key that disables the route when `false` (`springdoc.swagger-ui.enabled`). */
+    val enabledKey: String? = null,
+)
 
 /** One convention-named handler: the method name and what it serves. */
 data class HandlerMethodName(val name: String, val methods: List<String>, val anyMethod: Boolean = false)
@@ -591,6 +616,8 @@ object EndpointModels {
                     anyMethod = m.bool("anyMethod") ?: false,
                     nestingPath = m.bool("nestingPath") ?: false,
                     nestingMethodArgument = m.long("nestingMethodArgument")?.toInt() ?: -1,
+                    pathIsRegex = m.bool("pathIsRegex") ?: false,
+                    customVerbs = m.bool("customVerbs") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(
@@ -636,10 +663,18 @@ object EndpointModels {
                     ImplicitRoute(
                         path = require(r.str("path"), "frameworks[].implicitRoutes[].path"),
                         methods = r.arr("methods")?.strings() ?: emptyList(),
+                        id = r.str("id"),
+                        pathKey = r.str("pathKey"),
+                        pathSuffix = r.str("pathSuffix") ?: "",
+                        enabledKey = r.str("enabledKey"),
                     )
                 } ?: emptyList(),
                 implicitBasePathKeys = f.arr("implicitBasePathKeys")?.strings() ?: emptyList(),
                 implicitBasePathDefault = f.str("implicitBasePathDefault") ?: "",
+                implicitExposureIncludeKey = f.str("implicitExposureIncludeKey"),
+                implicitExposureExcludeKey = f.str("implicitExposureExcludeKey"),
+                implicitExposureDefault = f.arr("implicitExposureDefault")?.strings() ?: emptyList(),
+                implicitPathMappingPrefix = f.str("implicitPathMappingPrefix"),
                 repositorySupertypes = f.arr("repositorySupertypes")?.strings() ?: emptyList(),
                 repositoryRoutes = f.arr("repositoryRoutes")?.objects()?.map { r ->
                     RepositoryRoute(
