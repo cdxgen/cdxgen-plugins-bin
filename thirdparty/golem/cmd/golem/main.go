@@ -49,12 +49,13 @@ func (e *expectationsError) Unwrap() error { return e.err }
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		switch {
-		case errors.Is(err, flag.ErrHelp):
+		if errors.Is(err, flag.ErrHelp) {
 			// The usage text already went to stderr; that is help, not a
 			// failure.
 			os.Exit(exitOK)
+		}
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		switch {
 		case isUsage(err):
 			os.Exit(exitUsage)
 		case isExpectations(err):

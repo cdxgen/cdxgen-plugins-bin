@@ -43,7 +43,7 @@ A custom wrapper around [Trivy](https://github.com/aquasecurity/trivy) optimized
 - `TRIVY_CDXGEN_INCLUDE_OS_COMMANDS` (default: true) - emits InstalledCommand and InstalledCommandPath properties for OS packages
 - `TRIVY_CDXGEN_INCLUDE_OS_FILES` (default: true) - emits one InstalledFile property per file installed by each OS package
 
-**Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, darwin-amd64, ppc64
+**Supported platforms:** linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, darwin-amd64
 
 ### osquery
 
@@ -177,7 +177,7 @@ Kotlin Source Inspector (kosi) is a Kotlin/JVM code analysis engine for evidence
 - **Version policy**: the analysable language-version band is read from the bundled compiler at runtime; projects declaring older versions are clamped with a `kotlin-language-version` diagnostic rather than refused
 - **Native image**: a GraalVM-built single binary (see `thirdparty/kosi/docs/BUILD.md`)
 
-On platforms without a kosi binary (ppc64le, 32-bit arm) cdxgen falls back to its own JS-side structural Kotlin analysis and, with a JDK 21+ present, to the `kosi-portable.jar`; the gaps are named in `scripts/plugin-platform-support.sh`, never silent.
+On platforms without a kosi binary (32-bit arm) cdxgen falls back to its own JS-side structural Kotlin analysis and, with a JDK 21+ present, to the `kosi-portable.jar`; the gaps are named in `scripts/plugin-platform-support.sh`, never silent.
 
 `kosi-portable.jar` is architecture-independent and is not shipped inside the per-platform npm packages. Each release publishes it as a GitHub release asset alongside the natives and as `ghcr.io/cdxgen/cdxgen-plugins-bin:kosi-portable`; run it with `java -jar kosi-portable.jar` (JDK 21+), or pull it with:
 
@@ -233,7 +233,7 @@ when that major changes.
 See [thirdparty/cdxrs/README.md](thirdparty/cdxrs/README.md) for the command
 surface, the protocol and exit codes.
 
-**Supported platforms:** linux-amd64, linux-arm64, linux-arm, linux-ppc64le, linux-riscv64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
+**Supported platforms:** linux-amd64, linux-arm64, linux-arm, linux-riscv64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
 
 ## Installation
 

@@ -139,6 +139,10 @@ func main() {
 		printUsage()
 		os.Exit(exitUsage)
 	}
+	if errors.Is(err, flag.ErrHelp) {
+		printUsage()
+		os.Exit(exitOK)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		var ue *usageError
@@ -166,8 +170,7 @@ func runRootfs(args []string) error {
 	flags.SetOutput(io.Discard)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			printUsage()
-			os.Exit(exitOK)
+			return err
 		}
 		return &usageError{err: err}
 	}
@@ -187,8 +190,7 @@ func runPaths(args []string) error {
 	stdin := flags.Bool("stdin", false, "read newline-delimited paths from stdin")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			printUsage()
-			os.Exit(exitOK)
+			return err
 		}
 		return &usageError{err: err}
 	}
@@ -221,8 +223,7 @@ func runHost(args []string) error {
 	flags.SetOutput(io.Discard)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			printUsage()
-			os.Exit(exitOK)
+			return err
 		}
 		return &usageError{err: err}
 	}
@@ -238,24 +239,15 @@ func runHost(args []string) error {
 	return writeJSON(output{HostFindings: findings})
 }
 
-func writeJSON(value any) error {
+// writeJSON stamps the schema, tool and version envelope onto the report
+// without moving the payload keys, so existing consumers keep working.
+func writeJSON(out output) error {
+	out.Schema = trustInspectorSchemaVersion
+	out.Tool = "trustinspector-cdxgen"
+	out.ToolVersion = version
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
-	return enc.Encode(envelope(value))
-}
-
-// envelope stamps the schema, tool and version onto every report without
-// moving the payload keys, so existing consumers keep working.
-func envelope(value any) output {
-	switch v := value.(type) {
-	case output:
-		v.Schema = trustInspectorSchemaVersion
-		v.Tool = "trustinspector-cdxgen"
-		v.ToolVersion = version
-		return v
-	default:
-		return output{}
-	}
+	return enc.Encode(out)
 }
 
 func readLines(r io.Reader) ([]string, error) {
