@@ -662,6 +662,14 @@ capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "conf
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "data-rest-unresolved"
+tier = "fixtures"
+path = "fixtures/data-rest-unresolved"
+# spring-data-rest-webmvc is deliberately absent: the annotation resolves by import only.
+capabilities = ["endpoints", "framework-semantics", "config-resolution", "spring-data-rest", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
 slug = "spring-data-commons-3"
 tier = "fixtures"
 path = "fixtures/spring-data-commons-3"
@@ -775,6 +783,21 @@ slug = "composed-mappings"
 tier = "fixtures"
 path = "fixtures/composed-mappings"
 capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-extras"
+tier = "fixtures"
+path = "fixtures/dsl-extras"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "actuator-exposure-all"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-all"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
 tolerated_resolution_errors = []
 
 [[fixtures]]

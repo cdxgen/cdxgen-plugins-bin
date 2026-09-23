@@ -295,6 +295,7 @@
       ]
     },
     {
+      "_more_comment": "javalin.io docs: app.ws/app.sse (GET upgrades), ApiBuilder.crud(\"users/{user-id}\", h) maps GET/POST on the collection and GET/PATCH/DELETE on the item, addHttpHandler(HandlerType.X, path, h).",
       "_p15_comment": "the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty., sourced: at javalin-parent-6.7.0 (JavalinDefaultRoutingApi.kt:128-194) every route builder is (path, handler[, vararg roles]) - no content-type parameter exists on any of them; the only contentType in the routing API scopes ERROR handlers (error(status, contentType, handler),:44-96). The empty stands with evidence.",
       "contextReaders": [
         {
@@ -432,6 +433,40 @@
             "OPTIONS"
           ],
           "pattern": "io.javalin.Javalin.options"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.javalin.Javalin.ws"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.javalin.Javalin.sse"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.ws"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.sse"
+        },
+        {
+          "crud": true,
+          "methods": [],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.crud"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "io.javalin.Javalin.addHttpHandler"
         }
       ],
       "handlerInput": "context",
@@ -440,6 +475,7 @@
       "roleArgumentStart": 2
     },
     {
+      "_more_comment": "ktor.io: sse(path) { } (io.ktor.server.sse) is a GET route; Resources get/post/put/delete/patch/head/options<T>; selectors (header/param/host) add no path segment and need no row: the prefix walk composes only path-bearing nesting; route(Regex(..)) is kept with its regex.",
       "_p18_comment": ", re-examining the honest empty ('media annotations do not exist for a bare DSL route', the Endpoints.kt comment): ktor HAS per-route media builders - RoutingBuilderKt (ktor-server-core-jvm 3.5.2, the artifact in the corpus warm cache) declares static `accept(ContentType...)` (matches the request's Accept header - the produces side) and `contentType(ContentType...)` (matches the request body's type - the consumes side). A capability nobody had looked for; not modelled yet because the argument is an external constant (io.ktor.http.ContentType.Application.Json etc.) whose STRING the value folder cannot derive - modelling needs a pack-side constant table sourced from ktor's own ContentType declarations, named as follow-up. Verified against the held jar's class file; same API present at 1.6.7 per ktor's compatibility history.",
       "_p19_dedup": "liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed.",
       "_selector_comment": "ktor.io server-routing: route(path, method) { handle { } } and method(HttpMethod.X) { handle { } } carry the verb on a SELECTOR; a route with no method \"matches any HTTP method\". Routes \"grouped into extension functions\" (fun Route.x()) take the prefix of each call site. Measured missing on ktorio/ktor-samples httpbin (25 routes). In 3.x handle is an abstract MEMBER of the Route interface (ktor-server-core-jvm 3.5.2 bytecode), not an extension.",
@@ -701,6 +737,48 @@
           "anyMethod": true,
           "methods": [],
           "pattern": "io.ktor.routing.Route.handle"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.ktor.server.resources.put"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.ktor.server.resources.delete"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.ktor.server.resources.patch"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.ktor.server.resources.head"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "io.ktor.server.resources.options"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.ktor.server.sse.sse"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "io.ktor.server.websocket.webSocketRaw"
         }
       ],
       "handlerInput": "context",
@@ -2807,7 +2885,8 @@
         }
       ],
       "mountFunctions": [
-        "io.vertx.ext.web.Route.subRouter"
+        "io.vertx.ext.web.Route.subRouter",
+        "io.vertx.ext.web.Router.mountSubRouter"
       ]
     }
   ],

@@ -149,7 +149,10 @@
    "types": [],
    "members": [],
    "functions": [],
-   "gaps": []
+   "gaps": [
+    "Grpc: supertype suffix/substring markers (ImplBase, CoroutineImplBase, Grpc, GrpcKt), not FQNs; grpc-stub held but carries no modelled FQN",
+    "GrpcKt: supertype suffix/substring markers (ImplBase, CoroutineImplBase, Grpc, GrpcKt), not FQNs; grpc-stub held but carries no modelled FQN"
+   ]
   },
   {
    "id": "http4k",
@@ -232,6 +235,18 @@
     "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.put: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.patch: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.delete: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.head: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.head: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.options: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.ws: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.sse: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.ws: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.sse: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.crud: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.addHttpHandler: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache — channels unchecked",
@@ -372,9 +387,16 @@
     "io.ktor.routing.post: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.put: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.route: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.delete: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.resources.get: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.head: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.options: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.patch: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.resources.post: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.put: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.sse.sse: package io.ktor.server.sse has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.websocket.webSocket: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.websocket.webSocketRaw: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.websocket.webSocket: package io.ktor.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)"
    ]
   },
@@ -480,7 +502,11 @@
     "io.micronaut.security.Secured: no held jar covers its package family",
     "io.micronaut.security.annotation.Secured: no held jar covers its package family",
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
-    "javax.annotation.security.RolesAllowed: no held jar covers its package family"
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family",
+    "io.micronaut.http.annotation.CustomHttpMethod: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Head: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Options: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Trace: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred"
    ]
   },
   {
@@ -630,6 +656,36 @@
     "javax.ws.rs.PathParam: no held jar covers its package family",
     "javax.ws.rs.Produces: no held jar covers its package family",
     "javax.ws.rs.QueryParam: no held jar covers its package family"
+   ]
+  },
+  {
+   "id": "quarkus-reactive-routes",
+   "sources": [],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
+   ],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "io.quarkus.vertx.web.Route: no held jar for io.quarkus:quarkus-reactive-routes:3.15.1",
+    "io.quarkus.vertx.web.RouteBase: no held jar for io.quarkus:quarkus-reactive-routes:3.15.1"
    ]
   },
   {
@@ -808,6 +864,11 @@
     "spark.Spark.put: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Spark.delete: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Spark.path: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.patch: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.head: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.options: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.trace: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.connect: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.params: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.queryParams: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.headers: com.sparkjava absent from the warm cache — channels unchecked",
@@ -878,7 +939,8 @@
     "org.springframework.data:spring-data-rest-webmvc:3.6.4",
     "org.springframework.data:spring-data-rest-core:3.6.4",
     "org.springframework.data:spring-data-commons:3.2.5",
-    "org.springframework.data:spring-data-jpa:3.2.5"
+    "org.springframework.data:spring-data-jpa:3.2.5",
+    "org.springframework:spring-web:7.0.9"
    ],
    "covers": [
     "mappingAnnotations",
@@ -1104,6 +1166,41 @@
     },
     {
      "fqn": "org.springframework.web.bind.annotation.RestController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.DeleteExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.GetExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.HttpExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.HttpExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PatchExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PostExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PutExchange",
      "kind": "annotation",
      "constructible": false
     }
@@ -1497,7 +1594,21 @@
     "io.vertx.core.http.HttpServerRequest.getCookie: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getFormAttribute: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getHeader: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
-    "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web"
+    "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
+    "io.vertx.ext.web.Router.connect: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.deleteWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.getWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.head: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.headWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.mountSubRouter: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.options: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.optionsWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.patch: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.patchWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.postWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.putWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.routeWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.trace: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred"
    ]
   }
  ]

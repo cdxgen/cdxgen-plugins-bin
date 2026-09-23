@@ -11,6 +11,12 @@
 // kosi:want endpoint framework=vertx path=/v/connect method=CONNECT mode=resolved
 // kosi:want endpoint framework=vertx path=/v/routed method=POST mode=resolved
 // kosi:want endpoint framework=vertx pathunresolved=~regex method=GET mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=POST mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=PUT mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=DELETE mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=PATCH mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=HEAD mode=resolved
+// kosi:want endpoint framework=vertx pathunresolved=~regex method=OPTIONS mode=resolved
 // kosi:want endpoint framework=sparkjava path=/s/patch method=PATCH mode=resolved
 // kosi:want endpoint framework=sparkjava path=/s/head method=HEAD mode=resolved
 // kosi:want endpoint framework=sparkjava path=/s/options method=OPTIONS mode=resolved
@@ -47,6 +53,13 @@ fun vertx(router: Router) {
     router.connect("/v/connect").handler { }
     router.route(HttpMethod.POST, "/v/routed").handler { }
     router.getWithRegex("^/v/files/.*").handler { }
+    router.postWithRegex("^/v/p/.*").handler { }
+    router.putWithRegex("^/v/u/.*").handler { }
+    router.deleteWithRegex("^/v/d/.*").handler { }
+    router.patchWithRegex("^/v/pa/.*").handler { }
+    router.headWithRegex("^/v/h/.*").handler { }
+    router.optionsWithRegex("^/v/o/.*").handler { }
+    router.routeWithRegex("^/v/any/.*").handler { }
 }
 
 fun spark() {

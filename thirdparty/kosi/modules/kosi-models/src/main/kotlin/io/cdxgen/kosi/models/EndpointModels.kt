@@ -47,6 +47,8 @@ data class MappingAnnotation(
     val customVerbs: Boolean = false,
     /** With no path argument, the path is the handler's method name (Quarkus @Route). */
     val pathFromMethodName: Boolean = false,
+    /** Javalin `crud(path, handler)`: the collection's GET/POST and the item's GET/PATCH/DELETE. */
+    val crud: Boolean = false,
 )
 
 /** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
@@ -626,6 +628,7 @@ object EndpointModels {
                     pathIsRegex = m.bool("pathIsRegex") ?: false,
                     customVerbs = m.bool("customVerbs") ?: false,
                     pathFromMethodName = m.bool("pathFromMethodName") ?: false,
+                    crud = m.bool("crud") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(

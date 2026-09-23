@@ -593,7 +593,7 @@ object EndpointDetector {
                     ?.filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>()?.firstOrNull { it.result == fg.receiver }
             }
             val ownerName = (owner?.path?.elements?.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name
-            if (name != null && name in HTTP_METHODS && (ownerName == "HttpMethod" || ownerName == null)) {
+            if (name != null && name in HTTP_METHODS && (ownerName in setOf("HttpMethod", "HandlerType") || ownerName == null)) {
                 leadingMethod = name
                 callArgs = callArgs.drop(1)
             }
@@ -667,7 +667,43 @@ object EndpointDetector {
             }
         }
 
+        if (callArgs.isEmpty()) {
+            // Vert.x `router.route().path("/x").method(HttpMethod.POST)
+            // .handler { }`: the path and verb ride CHAINED calls on the route.
+            val chained = chainedPathAndMethods(fn, block, index, ins, input)
+            if (chained != null) {
+                publish(add, framework, chained.second.ifEmpty { methods }, joinPaths(prefix, chained.first), fn.canonicalName, fn, "dsl")
+            }
+            return
+        }
         val pathReg = callArgs.firstOrNull() ?: return
+        // A REGEX route written as `route(Regex("/files/.+"))` (Ktor 2.3+).
+        val regexCtor = block.instructions.take(index).lastOrNull { p ->
+            p is KirCall && p.result == pathReg && p.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR && p.callee.fqn == "kotlin.text.Regex"
+        } as? KirCall
+        if (regexCtor != null) {
+            val regex = regexCtor.args.firstOrNull()?.let { input.folder.valueAt(fn, block, index, it)?.value } ?: "<unfolded>"
+            add(
+                Candidate(
+                    framework = framework?.id ?: UNATTRIBUTED_FRAMEWORK, httpMethods = methods, pathTemplate = "", pathParameters = emptyList(),
+                    handlerSymbol = fn.canonicalName, foundBy = "dsl", position = Position(fn.file, fn.line, fn.line),
+                    exported = null, permissions = null, deepLinkHosts = null,
+                    pathUnresolved = "regex route under ${prefix.ifEmpty { "/" }}: matches the regex $regex, which no URL template expresses",
+                ),
+            )
+            return
+        }
+        // Javalin `crud("users/{user-id}", handler)`: FIVE routes — the
+        // collection's GET/POST and the item's GET/PATCH/DELETE.
+        val crudRow = framework?.dslFunctions?.firstOrNull { row -> row.crud && (ins as? KirCall)?.let { matches(it.callee.fqn, row.pattern) } == true }
+        if (crudRow != null) {
+            val item = input.folder.valueAt(fn, block, index, pathReg)?.value?.let { joinPaths(prefix, it) } ?: return
+            val collection = item.substringBeforeLast('/').ifEmpty { "/" }
+            val handler = handlerOfRegs(fn, callArgs, input, framework) ?: ""
+            publish(add, framework, listOf("GET", "POST"), collection, handler, fn, "dsl")
+            publish(add, framework, listOf("GET", "PATCH", "DELETE"), item, handler, fn, "dsl")
+            return
+        }
 
         // `get(UserController::getAllUserIds, Role.ANYONE)` — Javalin's
         // ApiBuilder spells a path-less route with the HANDLER first: the
@@ -1205,6 +1241,9 @@ object EndpointDetector {
 
     private const val SELECTOR_UNRESOLVED = "\u0000unresolved"
 
+    /** Marks a prefix segment that is a REGEX, not a path (see [prefixChain]). */
+    private const val REGEX_SCOPE = "\u0000regex:"
+
     /**
      * The verb the nearest enclosing METHOD SELECTOR names: a nesting row
      * with a [MappingAnnotation.nestingMethodArgument] whose creation call
@@ -1234,6 +1273,28 @@ object EndpointDetector {
         return null
     }
 
+    /** The path and verbs set on a route object by chained `path(..)`/`method(..)` calls. */
+    private fun chainedPathAndMethods(fn: KirFunction, block: KirBlock, index: Int, ins: KirIns, input: Input): Pair<String, List<String>>? {
+        var current = (ins as? KirCall)?.result ?: return null
+        var path: String? = null
+        val verbs = mutableListOf<String>()
+        for (next in block.instructions.drop(index + 1)) {
+            val call = next as? KirCall ?: continue
+            if (call.receiver != current) continue
+            when (callName(call)) {
+                "path" -> path = call.args.singleOrNull()?.let { input.folder.valueAt(fn, block, block.instructions.indexOf(call), it)?.value } ?: path
+                "method" -> call.args.singleOrNull()?.let { reg ->
+                    val read = block.instructions.filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>().firstOrNull { it.result == reg }
+                    (read?.path?.elements?.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name?.uppercase()
+                        ?.takeIf { it in HTTP_METHODS }?.let { verbs.add(it) }
+                }
+                else -> Unit
+            }
+            current = call.result ?: break
+        }
+        return path?.let { it to verbs }
+    }
+
     /** Handler classes a DSL mount call links to a route; their unmounted supertype candidate is superseded. */
     internal fun mountedHandlers(candidates: Collection<Candidate>): Set<String> =
         candidates.filter { it.foundBy == "dsl" }.mapTo(HashSet()) { it.handlerSymbol }
@@ -1254,6 +1315,18 @@ object EndpointDetector {
         // `chain.get("search", ..)` and Ktor's `get("hello")` are `/search`
         // and `/hello`.
         val path = if (path.isNotEmpty() && !path.startsWith("/")) "/$path" else path
+        if (REGEX_SCOPE in path) {
+            val regex = path.substringAfter(REGEX_SCOPE).substringBefore('/')
+            add(
+                Candidate(
+                    framework = framework?.id ?: UNATTRIBUTED_FRAMEWORK, httpMethods = methods, pathTemplate = "",
+                    pathParameters = emptyList(), handlerSymbol = handler, foundBy = foundBy,
+                    position = Position(at.file, at.line, at.line), exported = null, permissions = null, deepLinkHosts = null,
+                    pathUnresolved = "route under a regex scope: matches the regex $regex, which no URL template expresses",
+                ),
+            )
+            return
+        }
         add(
             Candidate(
                 // Null framework = the route SHAPE matched but no framework
@@ -1320,6 +1393,14 @@ object EndpointDetector {
                 if (ins !is KirCall) continue
                 val fqn = ins.callee.fqn.split('.').filterNot { it == "Companion" }.joinToString(".")
                 if (framework.mountFunctions.none { matches(fqn, it) }) continue
+                // Vert.x 4's `router.mountSubRouter("/api", sub)`: the prefix and
+                // the mounted router are both ARGUMENTS.
+                if (ins.args.size == 2) {
+                    val sub = ins.args[1]
+                    if (routeReceiver != sub && storeSources[routeReceiver] != sub) continue
+                    val folded = input.folder.valueAt(fn, block, at, ins.args[0])?.value ?: continue
+                    return folded.trimEnd('*').trimEnd('/')
+                }
                 val mounted = ins.args.firstOrNull() ?: continue
                 val receiverIsMounted = routeReceiver == mounted || storeSources[routeReceiver] == mounted
                 if (!receiverIsMounted) continue
@@ -1411,7 +1492,21 @@ object EndpointDetector {
                     } else {
                         null
                     }
-                    (folded?.value ?: viaPredicate)?.trim('/')?.takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
+                    // A REGEX scope (`route(Regex("/files/.+")) { }`): no
+                    // template expresses it; the routes inside say so.
+                    val regexScope = if (folded?.value == null && first != null) {
+                        block.instructions.take(index).lastOrNull { p ->
+                            p is KirCall && p.result == first && p.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR &&
+                                p.callee.fqn == "kotlin.text.Regex"
+                        }?.let { ctor ->
+                            val at = block.instructions.indexOf(ctor)
+                            (ctor as KirCall).args.firstOrNull()?.let { input.folder.valueAt(parent, block, at, it)?.value } ?: "<unfolded>"
+                        }
+                    } else {
+                        null
+                    }
+                    if (regexScope != null) segments.add(0, REGEX_SCOPE + regexScope)
+                    else (folded?.value ?: viaPredicate)?.trim('/')?.takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
                 }
             }
             current = link.parentFunction

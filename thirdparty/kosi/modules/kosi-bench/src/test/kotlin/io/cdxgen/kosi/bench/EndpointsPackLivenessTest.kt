@@ -135,6 +135,7 @@ class EndpointsPackLivenessTest {
             "handlerDsl" -> drop({ it.handlerDsl }, { x, l -> x.copy(handlerDsl = l) })
             "mountFunctions" -> drop({ it.mountFunctions }, { x, l -> x.copy(mountFunctions = l) })
             "implicitRoutes" -> drop({ it.implicitRoutes }, { x, l -> x.copy(implicitRoutes = l) })
+            "implicitExposureDefault" -> drop({ it.implicitExposureDefault }, { x, l -> x.copy(implicitExposureDefault = l) })
             // The three channels that state a framework's ARGUMENT
             // BINDING rule (Spring's "any other argument" fallback).
             "contextParameterTypes" -> drop({ it.contextParameterTypes }, { x, l -> x.copy(contextParameterTypes = l) })
@@ -225,6 +226,7 @@ class EndpointsPackLivenessTest {
         fw.handlerDsl.forEach { entry("handlerDsl", it, it.substringAfterLast('.'), it) }
         fw.mountFunctions.forEach { entry("mountFunctions", it, it.substringAfterLast('.'), it) }
         fw.implicitRoutes.forEach { entry("implicitRoutes", it, it.path, it.path) }
+        fw.implicitExposureDefault.forEach { entry("implicitExposureDefault", it, it, it) }
     }
 
     private fun packRemovables(pack: EndpointsPack): List<Removable> =

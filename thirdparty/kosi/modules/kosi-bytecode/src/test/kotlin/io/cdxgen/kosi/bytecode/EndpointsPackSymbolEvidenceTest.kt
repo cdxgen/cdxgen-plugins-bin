@@ -63,9 +63,21 @@ class EndpointsPackSymbolEvidenceTest {
         Path.of(System.getProperty("user.home"), ".gradle", "caches", "modules-2", "files-2.1")
             .takeIf { Files.isDirectory(it) }
 
-    private fun jars(group: String, artifact: String): List<Path> {
-        val base = modules2()?.resolve(group)?.resolve(artifact) ?: return emptyList()
-        if (!Files.isDirectory(base)) return emptyList()
+    // Maven local holds some artifacts the Gradle cache does not (spring-web
+    // 7.x, the only held line with the HTTP-interface annotations). Same
+    // <version>/ layout one level down, so the two are walked alike.
+    private fun mavenLocal(group: String, artifact: String): Path? =
+        Path.of(System.getProperty("user.home"), ".m2", "repository")
+            .resolve(group.replace('.', '/')).resolve(artifact)
+            .takeIf { Files.isDirectory(it) }
+
+    private fun jars(group: String, artifact: String): List<Path> =
+        listOfNotNull(modules2()?.resolve(group)?.resolve(artifact), mavenLocal(group, artifact))
+            .filter { Files.isDirectory(it) }
+            .flatMap { versionJars(it) }
+            .distinctBy { it.fileName.toString() }
+
+    private fun versionJars(base: Path): List<Path> {
         return Files.list(base).use { dirs ->
             dirs.filter { Files.isDirectory(it) }.toList()
         }.sortedByDescending { it.fileName.toString() }.flatMap { versionDir ->
@@ -453,6 +465,10 @@ class EndpointsPackSymbolEvidenceTest {
                 Coordinate("org.springframework.data", "spring-data-rest-core", "3.6.4"),
                 Coordinate("org.springframework.data", "spring-data-commons", "3.2.5"),
                 Coordinate("org.springframework.data", "spring-data-jpa", "3.2.5"),
+                // The server-side HTTP-interface annotations (@HttpExchange,
+                // @GetExchange...) are spring-web 6.1+; 5.3 has none of them.
+                // Listed after 5.3.18 so every other fact still comes from it.
+                Coordinate("org.springframework", "spring-web", "7.0.9"),
             ),
             "spring-webflux" to listOf(
                 Coordinate("org.springframework", "spring-webflux", "5.3.18"),
@@ -463,6 +479,8 @@ class EndpointsPackSymbolEvidenceTest {
             "graphql" to listOf(Coordinate("org.springframework", "spring-context", "5.3.18")),
             "micronaut" to listOf(Coordinate("io.micronaut", "micronaut-http", "4.10.23")),
             "quarkus" to listOf(Coordinate("jakarta.ws.rs", "jakarta.ws.rs-api", "4.0.0")),
+            // Not held on the evidence machine: recorded as gaps, never inferred.
+            "quarkus-reactive-routes" to listOf(Coordinate("io.quarkus", "quarkus-reactive-routes", "3.15.1")),
             "servlet" to listOf(
                 Coordinate("jakarta.servlet", "jakarta.servlet-api", "4.0.4"),
                 // javax generations: the pack models both; the javax
@@ -488,6 +506,7 @@ class EndpointsPackSymbolEvidenceTest {
             "graphql" to typeChannels,
             "micronaut" to typeChannels,
             "quarkus" to typeChannels,
+            "quarkus-reactive-routes" to typeChannels,
             "servlet" to typeChannels,
             "aws-lambda" to typeChannels,
             "azure-functions" to typeChannels,
