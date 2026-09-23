@@ -66,8 +66,16 @@ build/linux_arm64: $(sources)
 # supplies the musl environment the artifact is named for — the amd64
 # container cross-compiles GOARCH=$* natively instead of emulating a foreign
 # --platform, which turned an arm64 musl build into hours under qemu.
+# The container runs as the invoking user so the volume-mounted outputs stay
+# owned by that user on the host: as container root they arrive root-owned and
+# the caller's chmod/upx on them fails with EPERM (build.sh stages build/*
+# with `chmod +x`). HOME and GOPATH move to /tmp because the image's /root
+# and /go are not writable by an unprivileged uid, and go refuses to build
+# without a writable cache.
 build/linuxmusl_%: $(sources)
 	$(docker_cmd) run --rm \
+		--user "$(shell id -u):$(shell id -g)" \
+		-e HOME=/tmp -e GOPATH=/tmp/go \
 		-v "$(PWD)":/src \
 		-w /src \
 		golang:1.26-alpine \
