@@ -570,6 +570,7 @@ jobs:
         - windows-arm64
         - darwin-arm64
         - darwin-amd64
+        - ppc64
     steps:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0

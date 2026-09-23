@@ -56,7 +56,7 @@ docker rm -f tc
 
 ## Platforms
 
-linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, and darwin-amd64.
+linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, darwin-amd64, and ppc64.
 
 ## What it will not do
 

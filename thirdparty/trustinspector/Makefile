@@ -24,7 +24,7 @@ lint:
 clean:
 	rm -rf build/
 
-linux: build/linux_amd64 build/linux_arm64 build/linux_arm build/linux_riscv64 build/linuxmusl_amd64 build/linuxmusl_arm64
+linux: build/linux_amd64 build/linux_arm64 build/linux_arm build/linux_ppc64le build/linux_riscv64 build/linuxmusl_amd64 build/linuxmusl_arm64
 
 linuxmusl: build/linuxmusl_amd64 build/linuxmusl_arm64
 
@@ -48,6 +48,9 @@ build/linuxmusl_arm64: $(sources)
 	$(call build,linux,arm64,linuxmusl-arm64,)
 	$(call sha,linuxmusl-arm64,)
 
+build/linux_ppc64le: $(sources)
+	$(call build,linux,ppc64le,linux-ppc64le,)
+	$(call sha,linux-ppc64le,)
 
 build/linux_riscv64: $(sources)
 	$(call build,linux,riscv64,linux-riscv64,)

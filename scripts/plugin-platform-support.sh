@@ -9,9 +9,10 @@
 # 05-BUILD-DIST.md §2). GraalVM does not build for every architecture this
 # repository packages, and native-image cannot cross-compile, so the gaps are
 # declared here rather than hidden:
-#   - linux-arm (32-bit): not a Native Image platform. Consumers get
-#     cdxgen's own JS-side structural Kotlin analysis and, with a JDK 21+
-#     present, the kosi-portable.jar fallback (thirdparty/kosi/docs/KOSI.md).
+#   - ppc64le / linux-arm (32-bit): not Native Image platforms at all.
+#     Consumers get cdxgen's own JS-side structural Kotlin analysis and,
+#     with a JDK 21+ present, the kosi-portable.jar fallback
+#     (thirdparty/kosi/docs/KOSI.md).
 #   - linux-riscv64: best-effort LLVM-backend cross-build per the plan; no
 #     artifact at this phase.
 #   - linuxmusl-arm64: GraalVM does not support musl static images on
@@ -23,7 +24,8 @@
 #   - windows-amd64 / windows-arm64: build jobs land with the release phase
 #     (MSVC toolchain; docs/BUILD.md §6).
 #
-# Keys are the binary filename fragments.
+# Keys are the binary filename fragments (after scripts/check-plugin-coverage.sh
+# maps the ppc64 package directory to ppc64le).
 
 # Usage: plugin_platform_exemption <plugin> <platform-fragment>
 # Prints the reason and returns 0 when the plugin is exempt on that platform;
@@ -34,6 +36,11 @@ plugin_platform_exemption() {
     return 1
   fi
   case "$platform" in
+    # the packages/ppc64 directory names its fragment ppc64; same platform.
+    ppc64|ppc64le)
+      echo "not a GraalVM Native Image platform; JVM-jar fallback documented in docs/KOSI.md"
+      return 0
+      ;;
     linux-arm)
       echo "not a GraalVM Native Image platform (32-bit); JVM-jar fallback documented in docs/KOSI.md"
       return 0

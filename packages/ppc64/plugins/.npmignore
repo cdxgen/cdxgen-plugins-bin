@@ -1,0 +1,2 @@
+trivy/sbom-*-postbuild.cdx.json
+sourcekitten/sbom-*-postbuild.cdx.json

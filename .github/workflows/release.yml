@@ -351,6 +351,10 @@ jobs:
         npm publish --provenance --access=public
         popd
 
+        pushd packages/ppc64
+        npm publish --provenance --access=public
+        popd
+
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/golem 'golem-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/rusi 'rusi-*'
         bash ./scripts/publish-helper-oras.sh ghcr.io/cdxgen/cdxgen-plugins-bin ./plugins/kosi 'kosi-*'
