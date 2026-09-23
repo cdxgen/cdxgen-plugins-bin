@@ -299,6 +299,12 @@ data class FrameworkModel(
      */
     val repositoryDependencyMarkers: List<String> = emptyList(),
     /**
+     * The bare repository MARKER supertypes (`Repository<T, ID>`): a
+     * repository extending only one serves exactly the CRUD methods it
+     * DECLARES (Spring Data "selectively exposing CRUD methods").
+     */
+    val repositoryMarkerSupertypes: List<String> = emptyList(),
+    /**
      * Class markers whose handlers — and every repository resource — are
      * served under the Spring Data REST BASE PATH:
      * `@BasePathAwareController` and `@RepositoryRestController` (which is
@@ -650,6 +656,7 @@ object EndpointModels {
                 repositoryPagingCrudBelowMajor = f.long("repositoryPagingCrudBelowMajor")?.toInt() ?: 0,
                 repositoryGenerationArtifact = f.str("repositoryGenerationArtifact"),
                 repositoryDependencyMarkers = f.arr("repositoryDependencyMarkers")?.strings() ?: emptyList(),
+                repositoryMarkerSupertypes = f.arr("repositoryMarkerSupertypes")?.strings() ?: emptyList(),
                 dataRestBasePathMarkers = f.arr("dataRestBasePathMarkers")?.strings() ?: emptyList(),
                 dataRestBasePathKeys = f.arr("dataRestBasePathKeys")?.strings() ?: emptyList(),
                 dataRestBasePathSetters = f.arr("dataRestBasePathSetters")?.strings() ?: emptyList(),

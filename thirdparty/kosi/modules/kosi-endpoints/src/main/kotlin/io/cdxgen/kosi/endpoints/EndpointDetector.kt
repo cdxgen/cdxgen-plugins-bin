@@ -104,6 +104,9 @@ object EndpointDetector {
          */
         internal var nestingNames: Set<String> = setOf("route", "path")
 
+        /** The nesting rows' FQN patterns: a RESOLVED creation call matches by type identity. */
+        internal var nestingPatterns: List<String> = emptyList()
+
         /** Abstract members an implementation inherited its mapping from; see [detect]. */
         internal val inheritedMappings: MutableSet<String> = mutableSetOf()
 
@@ -199,6 +202,9 @@ object EndpointDetector {
         input.nestingNames = pack.frameworks.flatMap { f ->
             f.dslFunctions.filter { it.nesting && it.nestingPath }.map { it.pattern.substringAfterLast('.') }
         }.toSet()
+        input.nestingPatterns = pack.frameworks.flatMap { f ->
+            f.dslFunctions.filter { it.nesting && it.nestingPath }.map { it.pattern }
+        }
         val byKey = linkedMapOf<String, Candidate>()
         fun add(candidate: Candidate) {
             // The file is part of identity: one canonical handler declared in
@@ -1285,7 +1291,13 @@ object EndpointDetector {
             hops++
             val link = input.lambdaLinks[current] ?: break
             val call = link.creationCall
-            if (EndpointDetector.callName(call) in input.nestingNames) {
+            // A RESOLVED nesting call matches its row by FQN; only an
+            // unresolved one falls back to the name.
+            val nests = when (call) {
+                is KirCall -> input.nestingPatterns.any { matches(call.callee.fqn, it) }
+                else -> EndpointDetector.callName(call) in input.nestingNames
+            }
+            if (nests) {
                 val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction }
                 val block = parent?.body?.blocks?.firstOrNull { it.instructions.any { it === call } }
                 if (parent != null && block != null) {

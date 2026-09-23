@@ -856,13 +856,20 @@ object Endpoints {
                 // brings them all; a paging-only one brings them only in the
                 // generations whose paging type still extended the CRUD one.
                 val paging = framework.repositoryPagingSupertypes
+                val markers = framework.repositoryMarkerSupertypes
+                fun isMarker(st: String) = markers.any { EndpointDetector.matches(st, it) }
                 val crudSupertype = supertypes.any { st ->
                     framework.repositorySupertypes.any { EndpointDetector.matches(st, it) } &&
-                        paging.none { EndpointDetector.matches(st, it) }
+                        paging.none { EndpointDetector.matches(st, it) } && !isMarker(st)
                 }
+                val pagingSupertype = supertypes.any { st -> paging.any { EndpointDetector.matches(st, it) } }
                 val all = framework.repositoryRoutes.flatMap { it.backedBy }.toSet()
                 val available: Set<String> = when {
                     crudSupertype -> all
+                    // The bare MARKER (`Repository<T, ID>`, Spring Data's
+                    // "selectively exposing CRUD methods"): only what the
+                    // interface itself declares exists.
+                    !pagingSupertype -> emptySet()
                     commonsMajor != null && commonsMajor < framework.repositoryPagingCrudBelowMajor -> all
                     else -> {
                         if (commonsMajor == null) crudUnknown.add(repository)

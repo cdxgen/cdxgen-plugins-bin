@@ -8,6 +8,6 @@ interface Context {
     fun render(o: Any?)
 }
 
-interface Handler {
+fun interface Handler {
     fun handle(context: Context)
 }

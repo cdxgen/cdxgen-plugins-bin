@@ -18,6 +18,9 @@
 // kosi:want endpoint framework=quarkus path=/re/q/x method=GET mode=resolved
 // kosi:want endpoint framework=quarkus path=/root/prop/q/x method=GET mode=resolved
 // kosi:want endpoint framework=servlet path=/sv/s method=GET mode=resolved
+// kosi:want endpoint framework=spring-webflux path=/ctx/fn method=GET mode=resolved
+// kosi:want endpoint framework=spring-webflux path=/disp/fn method=GET mode=resolved
+// kosi:want endpoint framework=spring-webflux path=/rx/fn method=GET mode=resolved
 //
 // Negative half: a Micronaut @Get outside a @Controller is no route;
 // @ApplicationPath loses to quarkus.rest.path; no GraphQL module serves the

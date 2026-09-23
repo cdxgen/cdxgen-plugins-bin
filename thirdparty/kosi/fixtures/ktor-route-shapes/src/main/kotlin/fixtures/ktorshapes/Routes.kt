@@ -24,7 +24,6 @@ import io.ktor.http.HttpMethod
 import io.ktor.server.application.Application
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
-import io.ktor.server.routing.handle
 import io.ktor.server.routing.method
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing

@@ -715,6 +715,41 @@ capabilities = ["endpoints", "ktor", "framework-semantics"]
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "spring-webmvc-fn"
+tier = "fixtures"
+path = "fixtures/spring-webmvc-fn"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "implicit-base-servlet"
+tier = "fixtures"
+path = "fixtures/implicit-base-servlet"
+capabilities = ["endpoints", "context-path", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "implicit-base-reactive"
+tier = "fixtures"
+path = "fixtures/implicit-base-reactive"
+capabilities = ["endpoints", "context-path", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "ktor1-selectors"
+tier = "fixtures"
+path = "fixtures/ktor1-selectors"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "javalin-apibuilder"
+tier = "fixtures"
+path = "fixtures/javalin-apibuilder"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "spring-mapping-shapes"
 tier = "fixtures"
 path = "fixtures/spring-mapping-shapes"

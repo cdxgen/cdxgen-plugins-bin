@@ -564,7 +564,7 @@ class EndpointsPackSymbolEvidenceTest {
             val gaps = entry.gaps
             for (channel in entry.covers) {
                 for (pattern in patterns(fw.id, channel)) {
-                    val key = "$fw.id/$channel/$pattern"
+                    val key = "${fw.id}/$channel/$pattern"
                     when {
                         channel in typeChannels -> {
                             val fact = types.firstOrNull { it.fqn == pattern }

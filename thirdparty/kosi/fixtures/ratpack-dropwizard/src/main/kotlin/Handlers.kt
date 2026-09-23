@@ -56,6 +56,19 @@
 // kosi:want endpoint framework=ratpack path=/search method=GET fn=~.QueryParamSink.handle pathunresolved=none mode=resolved
 // kosi:want endpoint framework=ratpack path=/api/any anymethod=true mode=resolved
 // kosi:want endpoint framework=ratpack fn=~HeaderSink.handle pathunresolved=~declares mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/put method=PUT mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/patch method=PATCH mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/delete method=DELETE mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/options method=OPTIONS mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/post method=POST mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/get method=GET mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/post method=POST mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/put method=PUT mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/patch method=PATCH mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/delete method=DELETE mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/options method=OPTIONS mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/any anymethod=true mode=resolved
+// kosi:want endpoint framework=ratpack path=/old/nested method=GET mode=resolved
 // kosi:want-not endpoint framework=ratpack path=/Handler/handle
 // kosi:want-not endpoint framework=ratpack fn=~.QueryParamSink.handle pathunresolved=~declares
 package fixtures.ratpackdropwizard
@@ -212,4 +225,24 @@ fun routes(chain: Chain) {
     chain.prefix("api") { api ->
         api.path("any") { context -> context.render("any") }
     }
+}
+
+/** Every verb of the 2.x chain, and the 1.x chain at its own package. */
+fun verbs(chain: Chain) {
+    chain.post("v/post") { context -> context.render("p") }
+    chain.put("v/put") { context -> context.render("u") }
+    chain.patch("v/patch") { context -> context.render("a") }
+    chain.delete("v/delete") { context -> context.render("d") }
+    chain.options("v/options") { context -> context.render("o") }
+}
+
+fun legacy(chain: ratpack.handling.Chain) {
+    chain.get("legacy/get") { context -> context.render("g") }
+    chain.post("legacy/post") { context -> context.render("p") }
+    chain.put("legacy/put") { context -> context.render("u") }
+    chain.patch("legacy/patch") { context -> context.render("a") }
+    chain.delete("legacy/delete") { context -> context.render("d") }
+    chain.options("legacy/options") { context -> context.render("o") }
+    chain.path("legacy/any") { context -> context.render("x") }
+    chain.prefix("old") { nested -> nested.get("nested") { context -> context.render("n") } }
 }

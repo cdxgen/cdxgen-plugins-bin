@@ -10,6 +10,10 @@ fun interface Action<T> {
 interface Chain {
     fun get(path: String, handler: Handler): Chain
     fun post(path: String, handler: Handler): Chain
+    fun put(path: String, handler: Handler): Chain
+    fun patch(path: String, handler: Handler): Chain
+    fun delete(path: String, handler: Handler): Chain
+    fun options(path: String, handler: Handler): Chain
     fun path(path: String, handler: Handler): Chain
     fun prefix(prefix: String, action: Action<Chain>): Chain
 }

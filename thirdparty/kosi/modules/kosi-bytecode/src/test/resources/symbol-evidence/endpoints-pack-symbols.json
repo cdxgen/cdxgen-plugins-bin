@@ -118,7 +118,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -273,6 +278,11 @@
      "static": false
     },
     {
+     "owner": "io.ktor.server.routing.Route",
+     "member": "handle",
+     "static": false
+    },
+    {
      "owner": "io.ktor.server.routing.RoutingCall",
      "member": "pathParameters",
      "static": false
@@ -317,6 +327,10 @@
     },
     {
      "package": "io.ktor.server.routing",
+     "function": "method"
+    },
+    {
+     "package": "io.ktor.server.routing",
      "function": "options"
     },
     {
@@ -347,10 +361,12 @@
     "io.ktor.request.receive: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.request.receiveParameters: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.request.receiveText: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.Route.handle: owner io.ktor.routing.Route not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
     "io.ktor.routing.accept: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.delete: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.get: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.head: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.method: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.options: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.patch: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.post: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
@@ -484,7 +500,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -523,12 +544,22 @@
      "constructible": false
     },
     {
+     "fqn": "jakarta.ws.rs.HEAD",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
      "fqn": "jakarta.ws.rs.HeaderParam",
      "kind": "annotation",
      "constructible": false
     },
     {
      "fqn": "jakarta.ws.rs.MatrixParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.OPTIONS",
      "kind": "annotation",
      "constructible": false
     },
@@ -587,8 +618,10 @@
     "javax.ws.rs.DELETE: no held jar covers its package family",
     "javax.ws.rs.FormParam: no held jar covers its package family",
     "javax.ws.rs.GET: no held jar covers its package family",
+    "javax.ws.rs.HEAD: no held jar covers its package family",
     "javax.ws.rs.HeaderParam: no held jar covers its package family",
     "javax.ws.rs.MatrixParam: no held jar covers its package family",
+    "javax.ws.rs.OPTIONS: no held jar covers its package family",
     "javax.ws.rs.PATCH: no held jar covers its package family",
     "javax.ws.rs.POST: no held jar covers its package family",
     "javax.ws.rs.PUT: no held jar covers its package family",
@@ -724,7 +757,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -803,7 +841,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -855,7 +898,8 @@
     "repositoryMethodAnnotations",
     "repositoryPagingSupertypes",
     "functionHttpTriggers",
-    "dataRestBasePathSetters"
+    "dataRestBasePathSetters",
+    "dslFunctions"
    ],
    "types": [
     {
@@ -880,6 +924,11 @@
     },
     {
      "fqn": "org.springframework.data.repository.PagingAndSortingRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.Repository",
      "kind": "interface",
      "constructible": false
     },
@@ -1064,6 +1113,56 @@
      "owner": "org.springframework.data.rest.core.config.RepositoryRestConfiguration",
      "member": "setBasePath",
      "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "path",
+     "static": false
     }
    ],
    "functions": [],
@@ -1093,7 +1192,13 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "dslFunctions"
    ],
    "types": [
     {
@@ -1157,7 +1262,108 @@
      "constructible": false
     }
    ],
-   "members": [],
+   "members": [
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "path",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "path",
+     "static": false
+    }
+   ],
    "functions": [],
    "gaps": [
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",

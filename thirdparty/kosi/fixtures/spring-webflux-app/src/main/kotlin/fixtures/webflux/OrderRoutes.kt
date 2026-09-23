@@ -10,6 +10,15 @@
 // kosi:want endpoint framework=spring-webflux path=/status fn=~orderRoutes mode=resolved anymethod=true
 // kosi:want endpoint framework=spring-webflux path=/co/items fn=~itemRoutes mode=resolved method=GET
 // kosi:want endpoint framework=spring-webflux path=/co/json/items fn=~itemRoutes mode=resolved method=PUT
+// kosi:want endpoint framework=spring-webflux path=/orders fn=~orderRoutes mode=resolved method=HEAD
+// kosi:want endpoint framework=spring-webflux path=/orders fn=~orderRoutes mode=resolved method=OPTIONS
+// kosi:want endpoint framework=spring-webflux path=/co/items fn=~itemRoutes mode=resolved method=POST
+// kosi:want endpoint framework=spring-webflux path=/co/items/{id} fn=~itemRoutes mode=resolved method=PATCH
+// kosi:want endpoint framework=spring-webflux path=/co/items/{id} fn=~itemRoutes mode=resolved method=DELETE
+// kosi:want endpoint framework=spring-webflux path=/co/items fn=~itemRoutes mode=resolved method=HEAD
+// kosi:want endpoint framework=spring-webflux path=/co/items fn=~itemRoutes mode=resolved method=OPTIONS
+// kosi:want endpoint framework=spring-webflux path=/co/items/health fn=~itemRoutes mode=resolved anymethod=true
+// kosi:want endpoint framework=spring-webflux path=/co/items/status fn=~itemRoutes mode=resolved anymethod=true
 //
 // Negative half: a predicate is not a path segment, and nothing in a
 // comment is a route.
@@ -19,7 +28,6 @@
 package fixtures.webflux
 
 import org.springframework.web.reactive.function.server.MediaType
-import org.springframework.web.reactive.function.server.RequestPredicate
 import org.springframework.web.reactive.function.server.ServerRequest
 import org.springframework.web.reactive.function.server.ServerResponse
 import org.springframework.web.reactive.function.server.coRouter
@@ -34,9 +42,11 @@ fun orderRoutes(): Unit = router {
         }
     }
     path("/v2").nest {
-        DELETE("/orders/{id}", RequestPredicate()) { _: ServerRequest -> ServerResponse() }
+        DELETE("/orders/{id}") { _: ServerRequest -> ServerResponse() }
     }
     path("/health") { _: ServerRequest -> ServerResponse() }
+    HEAD("/orders") { _: ServerRequest -> ServerResponse() }
+    OPTIONS("/orders") { _: ServerRequest -> ServerResponse() }
     "/status" { _: ServerRequest -> ServerResponse() }
 }
 
@@ -48,6 +58,13 @@ fun itemRoutes(): Unit = coRouter {
                 PUT("/items") { _: ServerRequest -> ServerResponse() }
             }
         }
+        POST("/items") { _: ServerRequest -> ServerResponse() }
+        PATCH("/items/{id}") { _: ServerRequest -> ServerResponse() }
+        DELETE("/items/{id}") { _: ServerRequest -> ServerResponse() }
+        HEAD("/items") { _: ServerRequest -> ServerResponse() }
+        OPTIONS("/items") { _: ServerRequest -> ServerResponse() }
+        path("/items/health") { _: ServerRequest -> ServerResponse() }
+        "/items/status" { _: ServerRequest -> ServerResponse() }
     }
 }
 

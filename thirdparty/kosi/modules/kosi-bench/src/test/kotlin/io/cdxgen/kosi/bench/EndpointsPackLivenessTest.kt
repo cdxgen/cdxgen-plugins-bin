@@ -109,6 +109,7 @@ class EndpointsPackLivenessTest {
             "methodPathAnnotations" -> drop({ it.methodPathAnnotations }, { x, l -> x.copy(methodPathAnnotations = l) })
             "dslPredicateTypes" -> drop({ it.dslPredicateTypes }, { x, l -> x.copy(dslPredicateTypes = l) })
             "repositoryDependencyMarkers" -> drop({ it.repositoryDependencyMarkers }, { x, l -> x.copy(repositoryDependencyMarkers = l) })
+            "repositoryMarkerSupertypes" -> drop({ it.repositoryMarkerSupertypes }, { x, l -> x.copy(repositoryMarkerSupertypes = l) })
             // Groups of alternatives: one KEY is the removable entry.
             "basePathKeys" -> if (elem is String) f.copy(basePathKeys = f.basePathKeys.map { group -> group.filter { it != elem } })
             else drop({ it.basePathKeys }, { x, l -> x.copy(basePathKeys = l) })
@@ -195,6 +196,7 @@ class EndpointsPackLivenessTest {
         fw.methodPathAnnotations.forEach { entry("methodPathAnnotations", it, it.substringAfterLast('.'), it) }
         fw.dslPredicateTypes.forEach { entry("dslPredicateTypes", it, it.substringAfterLast('/'), it) }
         fw.repositoryDependencyMarkers.forEach { entry("repositoryDependencyMarkers", it, it, it) }
+        fw.repositoryMarkerSupertypes.forEach { entry("repositoryMarkerSupertypes", it, it.substringAfterLast('.'), it) }
         fw.basePathKeys.flatten().forEach { entry("basePathKeys", it, it, it) }
         fw.servedAtKeys.forEach { entry("servedAtKeys", it, it, it) }
         fw.servedAtMethods.forEach { entry("servedAtMethods", it, it, it) }
@@ -842,6 +844,9 @@ class EndpointsPackLivenessTest {
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.Part]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.PathVariable]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.QueryValue]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
+        "quarkus.mappingAnnotations[javax.ws.rs.HEAD]" to "javax spelling recorded beside its jakarta twin; the exercised HEAD row lives in inherited-and-method-paths",
+        "quarkus.mappingAnnotations[javax.ws.rs.OPTIONS]" to "javax spelling recorded beside its jakarta twin; the exercised OPTIONS row lives in inherited-and-method-paths",
+        "quarkus.methodPathAnnotations[javax.ws.rs.Path]" to "javax spelling recorded beside its jakarta twin; the exercised method-level @Path lives in inherited-and-method-paths",
         "quarkus.applicationPathAnnotations[jakarta.ws.rs.ApplicationPath]" to "jakarta spelling recorded beside its javax twin; the exercised JAX-RS rows live in endpoint-media-auth/framework-generations",
         "quarkus.authenticationAnnotations[jakarta.annotation.security.DenyAll]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "quarkus.authenticationAnnotations[javax.annotation.security.DenyAll]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",

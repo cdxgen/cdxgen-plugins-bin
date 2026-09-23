@@ -430,7 +430,7 @@
     {
       "_p18_comment": ", re-examining the honest empty ('media annotations do not exist for a bare DSL route', the Endpoints.kt comment): ktor HAS per-route media builders - RoutingBuilderKt (ktor-server-core-jvm 3.5.2, the artifact in the corpus warm cache) declares static `accept(ContentType...)` (matches the request's Accept header - the produces side) and `contentType(ContentType...)` (matches the request body's type - the consumes side). A capability nobody had looked for; not modelled yet because the argument is an external constant (io.ktor.http.ContentType.Application.Json etc.) whose STRING the value folder cannot derive - modelling needs a pack-side constant table sourced from ktor's own ContentType declarations, named as follow-up. Verified against the held jar's class file; same API present at 1.6.7 per ktor's compatibility history.",
       "_p19_dedup": "liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed.",
-      "_selector_comment": "ktor.io server-routing: route(path, method) { handle { } } and method(HttpMethod.X) { handle { } } carry the verb on a SELECTOR; a route with no method \"matches any HTTP method\". Routes \"grouped into extension functions\" (fun Route.x()) take the prefix of each call site. Measured missing on ktorio/ktor-samples httpbin (25 routes).",
+      "_selector_comment": "ktor.io server-routing: route(path, method) { handle { } } and method(HttpMethod.X) { handle { } } carry the verb on a SELECTOR; a route with no method \"matches any HTTP method\". Routes \"grouped into extension functions\" (fun Route.x()) take the prefix of each call site. Measured missing on ktorio/ktor-samples httpbin (25 routes). In 3.x handle is an abstract MEMBER of the Route interface (ktor-server-core-jvm 3.5.2 bytecode), not an extension.",
       "authenticationDsl": [
         "io.ktor.server.auth.authenticate",
         "io.ktor.auth.authenticate"
@@ -683,7 +683,7 @@
         {
           "anyMethod": true,
           "methods": [],
-          "pattern": "io.ktor.server.routing.handle"
+          "pattern": "io.ktor.server.routing.Route.handle"
         },
         {
           "anyMethod": true,
@@ -1967,6 +1967,9 @@
         "spring-data-rest-webmvc"
       ],
       "repositoryGenerationArtifact": "org.springframework.data:spring-data-commons",
+      "repositoryMarkerSupertypes": [
+        "org.springframework.data.repository.Repository"
+      ],
       "repositoryMethodAnnotations": [
         "org.springframework.data.rest.core.annotation.RestResource"
       ],
@@ -2042,7 +2045,8 @@
         "org.springframework.data.repository.CrudRepository",
         "org.springframework.data.repository.PagingAndSortingRepository",
         "org.springframework.data.repository.ListCrudRepository",
-        "org.springframework.data.jpa.repository.JpaRepository"
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "org.springframework.data.repository.Repository"
       ],
       "simpleParameterTypes": [
         "kotlin.Boolean",
