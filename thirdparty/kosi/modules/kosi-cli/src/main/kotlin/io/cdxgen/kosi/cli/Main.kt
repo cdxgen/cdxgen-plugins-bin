@@ -328,7 +328,16 @@ object Main {
         val reRead = KirReader.read(dump)
         val second = KirWriter.write(reRead)
         if (second != dump) {
-            throw Analyzer.AnalysisException("kir dump round-trip mismatch: the dumper and reader disagree")
+            // Name the FIRST line that differs: without it the gate says only
+            // that something disagreed, and every investigation starts by
+            // re-deriving the dump by hand.
+            val a = dump.lines()
+            val b = second.lines()
+            val at = a.indices.firstOrNull { it >= b.size || a[it] != b[it] } ?: b.size
+            throw Analyzer.AnalysisException(
+                "kir dump round-trip mismatch: the dumper and reader disagree at line ${at + 1}:\n" +
+                    "  dumped: ${a.getOrNull(at)?.take(300)}\n  reread: ${b.getOrNull(at)?.take(300)}",
+            )
         }
         val findings = KirValidator.validate(reRead)
         if (findings.isNotEmpty()) {

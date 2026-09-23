@@ -35,6 +35,12 @@ data class MappingAnnotation(
      * `accept("application/json")` selects by media type).
      */
     val nestingPath: Boolean = false,
+    /**
+     * A [nesting] SELECTOR's argument index that names the HTTP method its
+     * descendants serve (Ktor `method(HttpMethod.Put) { }` = 0,
+     * `route(path, HttpMethod.Post) { }` = 1, when that overload is used).
+     */
+    val nestingMethodArgument: Int = -1,
 )
 
 /** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
@@ -578,6 +584,7 @@ object EndpointModels {
                     methodArgument = m.str("methodArgument"),
                     anyMethod = m.bool("anyMethod") ?: false,
                     nestingPath = m.bool("nestingPath") ?: false,
+                    nestingMethodArgument = m.long("nestingMethodArgument")?.toInt() ?: -1,
                 )
             } ?: emptyList()
             FrameworkModel(

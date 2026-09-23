@@ -100,6 +100,8 @@ object Analyzer {
         val dependencyCoordinates: Set<String>,
         /** The types the run read with their supertypes, for repository resources. */
         val typeDeclarations: List<io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration> = emptyList(),
+        /** File -> two-segment roots of the packages it imports. */
+        val importRootsByFile: Map<String, Set<String>> = emptyMap(),
         /**
          * The endpoint pass's OWN result — including the value
          * folder's fold statistics, the config-resolution counts and the
@@ -793,6 +795,9 @@ object Analyzer {
                 sourceTexts = sourceTexts,
                 annotationValues = declarationAnnotationValues,
                 dependencyCoordinates = resolvedDependencyCoordinates,
+                importRootsByFile = facts.associate { f ->
+                    f.relativePath to f.imports.mapNotNull { imp -> imp.name.split('.').take(2).takeIf { it.size == 2 }?.joinToString(".") }.toSet()
+                },
                 typeDeclarations = typeDeclarationsOf(
                     drafts,
                     facts.associate { f -> f.relativePath to f.imports.filter { !it.star }.associate { (it.alias ?: it.name.substringAfterLast('.')) to it.name } },
@@ -823,6 +828,7 @@ object Analyzer {
                 analysedDeclarations = drafts.mapTo(HashSet()) { it.canonicalName },
                 foldStats = capture.foldStats,
                 typeDeclarations = capture.typeDeclarations,
+                importRootsByFile = capture.importRootsByFile,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(

@@ -69,7 +69,8 @@ object KirWriter {
             lhs(ins.result) + "call " + writeCall(ins.callee, ins.receiver, ins.args) +
                 writeTypeArgs(ins.typeArguments) + lineSuffix(ins.line)
         is KirDynamicCall ->
-            lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args) + lineSuffix(ins.line)
+            lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args) +
+                writeTypeArgs(ins.typeArguments) + lineSuffix(ins.line)
         is KirNew -> "${ins.result} = new ${qn(ins.type)}${writeArgs(ins.args)}${lineSuffix(ins.line)}"
         is KirPhi ->
             "${ins.result} = phi [" + ins.inputs.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}=${it.value}" } + "]"
@@ -77,7 +78,12 @@ object KirWriter {
         is KirReturn -> ins.value?.let { "return $it" } ?: "return"
         is KirThrow -> "throw ${ins.exception}"
         is KirSuspendPoint -> "suspend ${ins.result}"
-        is KirStringConcat -> "${ins.result} = concat ${writeArgs(ins.parts)}"
+        // A concat part is a register OR literal template text, and literal
+        // text can hold the list's own separator (`"data:...;base64,$b"`):
+        // literal parts are always quoted so the list reads back.
+        is KirStringConcat -> "${ins.result} = concat args=(" + ins.parts.joinToString(",") { part ->
+            if (isRegisterToken(part)) part else forceQuote(part)
+        } + ")"
         is KirLambda -> "${ins.result} = lambda ${q(ins.function)}${writeArgs(ins.captures)}"
         is KirElvis -> "${ins.result} = elvis ${ins.value} fallback=${ins.fallback}"
         is KirCast ->
@@ -127,6 +133,21 @@ object KirWriter {
     fun qn(text: String?): String = text?.let { q(it) } ?: "null"
 
     /** JSON-style quoting for any free-form name. */
+    /** The register spelling the reader recognises (`%n`, `tN`, `v...`). */
+    fun isRegisterToken(token: String): Boolean =
+        token.startsWith("%") || (token.startsWith("t") && token.length > 1 && token.drop(1).all { it.isDigit() }) ||
+            token.startsWith("v")
+
+    private fun forceQuote(text: String): String {
+        val escaped = text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+        return "\"$escaped\""
+    }
+
     fun q(text: String?): String {
         if (text != null && text.isNotEmpty() && !text.any { it.isWhitespace() || it == '"' || it == '#' }) {
             return text

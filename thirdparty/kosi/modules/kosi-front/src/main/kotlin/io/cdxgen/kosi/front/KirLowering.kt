@@ -3111,7 +3111,12 @@ object KirLowering {
             val simpleName = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
             if (symbol == null) {
                 val reg = t()
-                emit(KirDynamicCall(reg, simpleName, receiver, argRegs, line = psi.line()))
+                emit(
+                    KirDynamicCall(
+                        reg, simpleName, receiver, argRegs, line = psi.line(),
+                        typeArguments = psi.typeArguments.mapNotNull { it.typeReference?.text?.substringBefore('<')?.trim() },
+                    ),
+                )
                 hookEmitSink(receiver, simpleName, argRegs)
                 return reg
             }

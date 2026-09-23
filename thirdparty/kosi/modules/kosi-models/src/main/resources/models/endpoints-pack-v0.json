@@ -396,6 +396,30 @@
           "nesting": true,
           "nestingPath": true,
           "pattern": "io.javalin.apibuilder.ApiBuilder.path"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.put"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.patch"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.delete"
+        },
+        {
+          "methods": [
+            "HEAD"
+          ],
+          "pattern": "io.javalin.apibuilder.ApiBuilder.head"
         }
       ],
       "handlerInput": "context",
@@ -406,6 +430,7 @@
     {
       "_p18_comment": ", re-examining the honest empty ('media annotations do not exist for a bare DSL route', the Endpoints.kt comment): ktor HAS per-route media builders - RoutingBuilderKt (ktor-server-core-jvm 3.5.2, the artifact in the corpus warm cache) declares static `accept(ContentType...)` (matches the request's Accept header - the produces side) and `contentType(ContentType...)` (matches the request body's type - the consumes side). A capability nobody had looked for; not modelled yet because the argument is an external constant (io.ktor.http.ContentType.Application.Json etc.) whose STRING the value folder cannot derive - modelling needs a pack-side constant table sourced from ktor's own ContentType declarations, named as follow-up. Verified against the held jar's class file; same API present at 1.6.7 per ktor's compatibility history.",
       "_p19_dedup": "liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed.",
+      "_selector_comment": "ktor.io server-routing: route(path, method) { handle { } } and method(HttpMethod.X) { handle { } } carry the verb on a SELECTOR; a route with no method \"matches any HTTP method\". Routes \"grouped into extension functions\" (fun Route.x()) take the prefix of each call site. Measured missing on ktorio/ktor-samples httpbin (25 routes).",
       "authenticationDsl": [
         "io.ktor.server.auth.authenticate",
         "io.ktor.auth.authenticate"
@@ -562,6 +587,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingMethodArgument": 1,
           "nestingPath": true,
           "pattern": "io.ktor.routing.route"
         },
@@ -624,6 +650,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingMethodArgument": 1,
           "nestingPath": true,
           "pattern": "io.ktor.server.routing.route"
         },
@@ -640,6 +667,28 @@
           ],
           "nesting": false,
           "pattern": "io.ktor.websocket.webSocket"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingMethodArgument": 0,
+          "pattern": "io.ktor.server.routing.method"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingMethodArgument": 0,
+          "pattern": "io.ktor.routing.method"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "io.ktor.server.routing.handle"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "io.ktor.routing.Route.handle"
         }
       ],
       "handlerInput": "context",

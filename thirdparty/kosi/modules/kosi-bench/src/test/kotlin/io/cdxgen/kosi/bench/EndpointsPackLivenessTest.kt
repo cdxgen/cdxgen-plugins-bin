@@ -237,6 +237,7 @@ class EndpointsPackLivenessTest {
         Endpoints.Attribution(emptyMap(), emptyMap()), includeManifests = true,
         dependencyCoordinates = capture.dependencyCoordinates, pack = pack,
         typeDeclarations = capture.typeDeclarations,
+        importRootsByFile = capture.importRootsByFile,
     )
 
     @Test

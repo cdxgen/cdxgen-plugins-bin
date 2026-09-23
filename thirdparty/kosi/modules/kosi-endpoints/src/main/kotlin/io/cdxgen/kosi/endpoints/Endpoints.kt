@@ -90,6 +90,8 @@ object Endpoints {
          * with no members owns no function, so the KIR alone never sees it.
          */
         typeDeclarations: List<TypeDeclaration> = emptyList(),
+        /** File (root-relative) -> two-segment roots of the packages it imports. */
+        importRootsByFile: Map<String, Set<String>> = emptyMap(),
     ): Result {
         val configTable = ConfigResolver.load(root)
         // `value` is null for a key the config files DISAGREE about: known
@@ -120,6 +122,7 @@ object Endpoints {
                 annotationValues = annotationValues,
                 folder = folder,
                 lambdaLinks = lambdaLinks,
+                importRootsByFile = importRootsByFile,
             ),
             pack,
         )
