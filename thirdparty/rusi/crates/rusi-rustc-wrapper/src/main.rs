@@ -25,8 +25,8 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{
-    ClosureKind, CoroutineDesugaring, CoroutineKind, Expr, ExprKind, ForeignItemKind, ImplItemKind,
-    ItemKind, PatKind, TraitItemKind, UnsafeSource, UseKind,
+    BodyId, ClosureKind, CoroutineDesugaring, CoroutineKind, Expr, ExprKind, ForeignItemKind,
+    ImplItemKind, ItemKind, PatKind, TraitItemKind, UnsafeSource, UseKind,
 };
 use rustc_interface::interface;
 use rustc_middle::hir::nested_filter::OnlyBodies;
@@ -37,6 +37,63 @@ use rustc_middle::mir::{
 use rustc_middle::mono::MonoItem;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
+
+// rustc_private shims. The wrapper builds against both the pinned stable
+// toolchain and current nightly, so these paper over API changes between them
+// without per-version cfgs.
+
+/// `const { .. }` blocks. rustc 1.98 gives them `DefKind::InlineConst`; newer
+/// compilers fold them into `DefKind::AnonConst`, which also covers array
+/// lengths and enum discriminants. `is_typeck_child` picks out exactly the
+/// inline consts on both, once closures and coroutine bodies are excluded.
+fn is_inline_const(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
+    !matches!(
+        tcx.def_kind(def_id),
+        DefKind::Closure | DefKind::SyntheticCoroutineBody
+    ) && tcx.is_typeck_child(def_id)
+}
+
+/// MIR for a body owner. `optimized_mir` panics for const contexts ("do not
+/// use `optimized_mir` for constants"), which includes inline consts; those
+/// only have the CTFE body.
+fn owner_mir(tcx: TyCtxt<'_>, def_id: DefId) -> &rustc_middle::mir::Body<'_> {
+    if is_inline_const(tcx, def_id) {
+        tcx.mir_for_ctfe(def_id)
+    } else {
+        tcx.optimized_mir(def_id)
+    }
+}
+
+/// Self type of an impl, as a type name. `instantiate_identity` returns an
+/// `Unnormalized` wrapper, whose `Debug` output is `Unnormalized { value: T,
+/// .. }` rather than the type; unwrap it before formatting.
+fn impl_self_ty_name(tcx: TyCtxt<'_>, impl_def_id: DefId) -> String {
+    format!(
+        "{:?}",
+        tcx.type_of(impl_def_id)
+            .instantiate_identity()
+            .skip_normalization()
+    )
+}
+
+/// Generic args of a `TyKind::FnDef`. rustc 1.98 stores them bare; newer
+/// compilers wrap them in a `Binder`. Args with escaping bound vars cannot be
+/// resolved to an instance, so those yield `None`.
+trait FnDefArgs<'tcx> {
+    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>>;
+}
+
+impl<'tcx> FnDefArgs<'tcx> for ty::GenericArgsRef<'tcx> {
+    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>> {
+        Some(self)
+    }
+}
+
+impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, ty::GenericArgsRef<'tcx>> {
+    fn fn_def_args(self) -> Option<ty::GenericArgsRef<'tcx>> {
+        self.no_bound_vars()
+    }
+}
 
 const MAX_DATAFLOW_FIXPOINT_ITERS: usize = 64;
 const MAX_DATAFLOW_CANDIDATE_TARGETS: usize = 32;
@@ -75,6 +132,13 @@ impl WrapperCallbacks {
 impl Callbacks for WrapperCallbacks {
     fn config(&mut self, config: &mut interface::Config) {
         config.opts.unstable_opts.mir_opt_level = Some(0);
+        // Under `cargo check`, dependencies are built metadata-only: no
+        // exported symbols and no MIR for non-generic items. The mono
+        // collector behind `collect_mono_devirtualization` then treats every
+        // upstream callee as needing local instantiation and aborts with
+        // "missing optimized MIR". The wrapper runs for dependencies too, so
+        // encoding their MIR keeps the collector supplied.
+        config.opts.unstable_opts.always_encode_mir = true;
     }
 
     fn after_analysis<'tcx>(
@@ -364,9 +428,9 @@ impl EmbeddedCollector {
                 } else {
                     "associated-function"
                 };
-                let receiver = assoc.impl_container(tcx).map(|impl_def_id| {
-                    format!("{:?}", tcx.type_of(impl_def_id).instantiate_identity())
-                });
+                let receiver = assoc
+                    .impl_container(tcx)
+                    .map(|impl_def_id| impl_self_ty_name(tcx, impl_def_id));
                 let declaration = self.push_decl(tcx, item.owner_id.def_id, kind, receiver)?;
                 self.function_decls
                     .insert(item.owner_id.def_id, declaration.clone());
@@ -431,12 +495,9 @@ impl EmbeddedCollector {
             let owner = *owner;
             if !matches!(
                 tcx.def_kind(owner),
-                DefKind::Fn
-                    | DefKind::AssocFn
-                    | DefKind::Closure
-                    | DefKind::SyntheticCoroutineBody
-                    | DefKind::InlineConst
-            ) {
+                DefKind::Fn | DefKind::AssocFn | DefKind::Closure | DefKind::SyntheticCoroutineBody
+            ) && !is_inline_const(tcx, owner.to_def_id())
+            {
                 continue;
             }
             let declaration = self.ensure_function_decl(tcx, owner)?;
@@ -447,7 +508,7 @@ impl EmbeddedCollector {
                     declaration.file_path, declaration.qualified_name
                 ),
             );
-            let body = tcx.optimized_mir(owner.to_def_id());
+            let body = owner_mir(tcx, owner.to_def_id());
             let callsites = self
                 .callsites
                 .iter()
@@ -515,6 +576,9 @@ impl EmbeddedCollector {
                         EarlyBinder::bind(tcx, generic_ty),
                     );
                     let ty::TyKind::FnDef(callee_def, callee_args) = concrete_ty.kind() else {
+                        continue;
+                    };
+                    let Some(callee_args) = callee_args.fn_def_args() else {
                         continue;
                     };
                     // Only trait-method calls are devirtualization candidates;
@@ -593,7 +657,25 @@ impl EmbeddedCollector {
 
     fn local_resolution_index(&self) -> HashMap<String, ResolvedCall> {
         let mut index = HashMap::new();
-        for (owner, declaration) in &self.function_decls {
+        // A bare name such as `persist` can belong to a trait item and to each
+        // of its impls. Resolving it to whichever the hash map yields first
+        // produced a different "exact" target per run; an ambiguous bare name
+        // must not resolve at all. Qualified names stay unique keys.
+        let mut ambiguous = HashSet::new();
+        let mut bare_owner = HashMap::<&str, &str>::new();
+        for declaration in self.function_decls.values() {
+            match bare_owner.insert(&declaration.name, &declaration.qualified_name) {
+                Some(previous) if previous != declaration.qualified_name => {
+                    ambiguous.insert(declaration.name.clone());
+                }
+                _ => {}
+            }
+        }
+        let mut declarations = self.function_decls.iter().collect::<Vec<_>>();
+        declarations.sort_by(|(_, left), (_, right)| {
+            (&left.qualified_name, &left.id).cmp(&(&right.qualified_name, &right.id))
+        });
+        for (owner, declaration) in declarations {
             let Some(function_id) = self.function_ids.get(owner) else {
                 continue;
             };
@@ -616,9 +698,14 @@ impl EmbeddedCollector {
                 async_boundary: false,
                 task_boundary: false,
             };
-            for key in [declaration.name.clone(), declaration.qualified_name.clone()] {
-                index.entry(key).or_insert_with(|| resolved.clone());
+            if !ambiguous.contains(&declaration.name) {
+                index
+                    .entry(declaration.name.clone())
+                    .or_insert_with(|| resolved.clone());
             }
+            index
+                .entry(declaration.qualified_name.clone())
+                .or_insert_with(|| resolved.clone());
         }
         index
     }
@@ -632,15 +719,16 @@ impl EmbeddedCollector {
             let owner = *owner;
             if !matches!(
                 tcx.def_kind(owner),
-                DefKind::Closure | DefKind::SyntheticCoroutineBody | DefKind::InlineConst
-            ) {
+                DefKind::Closure | DefKind::SyntheticCoroutineBody
+            ) && !is_inline_const(tcx, owner.to_def_id())
+            {
                 continue;
             }
             let declaration = self.ensure_function_decl(tcx, owner)?;
             let Some(function_id) = self.function_ids.get(&owner).cloned() else {
                 continue;
             };
-            let body = tcx.optimized_mir(owner.to_def_id());
+            let body = owner_mir(tcx, owner.to_def_id());
             let target_names = vec![declaration.qualified_name.clone()];
             let semantic_tags = vec!["closure".to_string(), "callable".to_string()];
             index.entry(body.arg_count).or_default().push(ResolvedCall {
@@ -673,7 +761,7 @@ impl EmbeddedCollector {
         let receiver = tcx
             .opt_associated_item(owner.to_def_id())
             .and_then(|assoc| assoc.impl_container(tcx))
-            .map(|impl_def_id| format!("{:?}", tcx.type_of(impl_def_id).instantiate_identity()));
+            .map(|impl_def_id| impl_self_ty_name(tcx, impl_def_id));
         let decl = self.push_decl(tcx, owner, &kind, receiver)?;
         self.function_decls.insert(owner, decl.clone());
         self.function_ids.insert(owner, decl.id.clone());
@@ -856,6 +944,20 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 
     fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
         self.tcx
+    }
+
+    fn visit_nested_body(&mut self, id: BodyId) {
+        // Closures and inline consts share the caller's typeck results, but an
+        // anon const such as the `w() * 2` in `[0u8; w() * 2]` is typechecked
+        // on its own; reading it through `self.typeck` ICEs with "no type for
+        // node". Such bodies are visited as body owners in their own right.
+        let owner = self.tcx.hir_body_owner_def_id(id).to_def_id();
+        if self.tcx.typeck_root_def_id(owner)
+            != self.tcx.typeck_root_def_id(self.caller.to_def_id())
+        {
+            return;
+        }
+        self.visit_body(self.tcx.hir_body(id));
     }
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
@@ -2181,14 +2283,31 @@ fn build_call_graph(
                 });
         }
     }
-    let nodes = nodes.into_values().collect::<Vec<_>>();
+    let mut nodes = nodes.into_values().collect::<Vec<_>>();
     // Edges name their endpoints by node id, so reconciliation needs the node
     // table to reason about what a target actually is.
     let target_names: HashMap<String, String> = nodes
         .iter()
         .map(|node| (node.id.clone(), node.qualified_name.clone()))
         .collect();
-    let edges = reconcile_edges(edges.into_values().collect::<Vec<_>>(), &target_names);
+    // Callsite and devirtualization tables upstream are hash maps, so edges
+    // arrive in a run-dependent order. Sorting by id makes both the output and
+    // reconciliation's tie-breaking between equally ranked duplicates stable.
+    let mut edges = edges.into_values().collect::<Vec<_>>();
+    edges.sort_by(|left, right| left.id.cmp(&right.id));
+    // Reconciliation keeps a replacing edge in the slot of the one it
+    // displaced, so re-sort for a stable output order.
+    let mut edges = reconcile_edges(edges, &target_names);
+    edges.sort_by(|left, right| left.id.cmp(&right.id));
+    // External nodes exist only as edge targets. Reconciliation can drop the
+    // last edge to one (an abstract `Trait::method` superseded by concrete
+    // impl edges), which would otherwise leave an orphan node behind in the
+    // runs where that stale edge happened to be emitted.
+    let referenced: HashSet<&str> = edges
+        .iter()
+        .flat_map(|edge| [edge.source_id.as_str(), edge.target_id.as_str()])
+        .collect();
+    nodes.retain(|node| node.local || referenced.contains(node.id.as_str()));
     CallGraph {
         mode: "embedded-hir-mir".to_string(),
         stats: GraphStats {
@@ -6554,10 +6673,7 @@ fn enumerate_dyn_candidates(
     let receiver_hint = normalize_type_name(receiver_ty.to_string());
     if let Some(impls) = tcx.all_local_trait_impls(()).get(&trait_def_id) {
         for impl_def in impls {
-            let impl_ty = normalize_type_name(format!(
-                "{:?}",
-                tcx.type_of(impl_def.to_def_id()).instantiate_identity()
-            ));
+            let impl_ty = normalize_type_name(impl_self_ty_name(tcx, impl_def.to_def_id()));
             if !receiver_hint.is_empty()
                 && !receiver_hint.contains("dyn")
                 && !receiver_matches_hint(&impl_ty, &receiver_hint)
@@ -6888,9 +7004,8 @@ fn function_kind(tcx: TyCtxt<'_>, owner: LocalDefId) -> String {
                 "method".to_string()
             }
         }
-        DefKind::Closure | DefKind::SyntheticCoroutineBody | DefKind::InlineConst => {
-            "closure".to_string()
-        }
+        DefKind::Closure | DefKind::SyntheticCoroutineBody => "closure".to_string(),
+        _ if is_inline_const(tcx, owner.to_def_id()) => "closure".to_string(),
         _ => "function".to_string(),
     }
 }

@@ -2615,6 +2615,106 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn driver_survives_const_contexts_in_compiler_backend() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("const-context-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+
+        // A stub fallback is acceptable where the nested build cannot run, but
+        // never one caused by the wrapper itself crashing inside rustc.
+        for diagnostic in &envelope.payload.diagnostics {
+            assert!(
+                !diagnostic.message.contains("internal compiler error")
+                    && !diagnostic.message.contains("panicked at"),
+                "compiler wrapper crashed: {}",
+                diagnostic.message
+            );
+        }
+        if envelope.backend_kind == BACKEND_KIND_EMBEDDED {
+            let graph = envelope.payload.call_graph.expect("MIR callgraph emitted");
+            assert!(
+                graph
+                    .edges
+                    .iter()
+                    .any(|edge| graph.source_name(edge).ends_with("main")
+                        && graph.target_name(edge).ends_with("run_command"))
+            );
+            // The inline const is a MIR body of its own, modeled like a closure.
+            assert!(
+                envelope
+                    .payload
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.kind == "closure")
+            );
+        } else {
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+        }
+    }
+
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_backend_call_graph_is_deterministic_for_dyn_dispatch() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("dyn-dispatch-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        // The phantom `Store::persist` node and the hash-order bare-name guess
+        // showed up in roughly a third of runs, so a handful catches a
+        // regression reliably.
+        let mut graphs = Vec::new();
+        for _ in 0..4 {
+            let envelope = run_driver(&options).expect("driver run succeeds");
+            if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+                assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+                return;
+            }
+            let graph = envelope.payload.call_graph.expect("MIR callgraph emitted");
+            let referenced: std::collections::HashSet<&str> = graph
+                .edges
+                .iter()
+                .flat_map(|edge| [edge.source_id.as_str(), edge.target_id.as_str()])
+                .collect();
+            for node in &graph.nodes {
+                assert!(
+                    node.local || referenced.contains(node.id.as_str()),
+                    "orphan external node {}",
+                    node.qualified_name
+                );
+            }
+            for declaration in &envelope.payload.declarations {
+                assert!(
+                    !declaration
+                        .receiver
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains("Unnormalized"),
+                    "receiver leaks rustc's Unnormalized wrapper: {:?}",
+                    declaration.receiver
+                );
+            }
+            graphs.push(serde_json::to_string(&graph).expect("serialize call graph"));
+        }
+        assert!(
+            graphs.windows(2).all(|pair| pair[0] == pair[1]),
+            "call graph differs between runs"
+        );
+    }
+
+    #[test]
     fn driver_collects_native_interop_evidence() {
         let _guard = test_guard();
         let options = DriverOptions {

@@ -110,7 +110,7 @@ rustup component add rustc-dev rust-src --toolchain stable
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
 
-Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently the pinned stable (1.98) through nightly 1.100. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` rather than per-version `cfg`s. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
 
 When embedded compiler collection is available, Rusi builds its local `rusi-rustc-wrapper` with the resolved toolchain and then runs the target repository with:
 
