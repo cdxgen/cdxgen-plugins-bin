@@ -673,18 +673,150 @@ fn cargo_check_target_args(include_tests: bool) -> &'static [&'static str] {
     }
 }
 
-fn rusi_workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+/// Sources needed to build `rusi-rustc-wrapper` outside the rusi checkout.
+///
+/// A released `rusi` binary runs on machines that have no rusi source tree, so
+/// `CARGO_MANIFEST_DIR` (baked in at compile time, e.g. the CI runner path)
+/// cannot be relied on. The wrapper must be compiled against the user's own
+/// toolchain, so it is shipped as source and materialized on demand.
+const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
+    ("Cargo.lock", include_str!("../../../Cargo.lock")),
+    (
+        "crates/rusi-rustc-wrapper/Cargo.toml",
+        include_str!("../../rusi-rustc-wrapper/Cargo.toml"),
+    ),
+    (
+        "crates/rusi-rustc-wrapper/src/main.rs",
+        include_str!("../../rusi-rustc-wrapper/src/main.rs"),
+    ),
+    (
+        "crates/rusi-schema/Cargo.toml",
+        include_str!("../../rusi-schema/Cargo.toml"),
+    ),
+    (
+        "crates/rusi-schema/src/lib.rs",
+        include_str!("../../rusi-schema/src/lib.rs"),
+    ),
+];
+
+/// Workspace manifest for the materialized wrapper sources. Mirrors the
+/// `[workspace.package]` and dependency versions of the real workspace that the
+/// member manifests inherit from.
+const EMBEDDED_WRAPPER_WORKSPACE_MANIFEST: &str = concat!(
+    "[workspace]\n",
+    "members = [\"crates/rusi-schema\", \"crates/rusi-rustc-wrapper\"]\n",
+    "resolver = \"2\"\n\n",
+    "[workspace.package]\n",
+    "version = \"",
+    env!("CARGO_PKG_VERSION"),
+    "\"\n",
+    "edition = \"2024\"\n",
+    "license = \"MIT\"\n\n",
+    "[workspace.dependencies]\n",
+    "anyhow = \"1\"\n",
+    "indexmap = { version = \"2\", features = [\"serde\"] }\n",
+    "serde = { version = \"1\", features = [\"derive\"] }\n",
+    "serde_json = \"1\"\n",
+    "sha2 = \"0.11\"\n",
+);
+
+fn has_wrapper_sources(root: &Path) -> bool {
+    root.join("Cargo.toml").is_file()
+        && root.join("crates/rusi-rustc-wrapper/src/main.rs").is_file()
+}
+
+/// Resolves the workspace used to build the embedded wrapper, in order:
+/// `RUSI_WRAPPER_SOURCE`, the compile-time checkout (development builds), then
+/// the sources embedded in this binary, written to the rusi cache directory.
+fn rusi_workspace_root(debug: bool) -> Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("RUSI_WRAPPER_SOURCE").filter(|v| !v.is_empty()) {
+        let dir = PathBuf::from(dir);
+        if has_wrapper_sources(&dir) {
+            return Ok(dir);
+        }
+        return Err(anyhow::anyhow!(
+            "RUSI_WRAPPER_SOURCE={} does not contain the rusi-rustc-wrapper sources",
+            dir.display()
+        ));
+    }
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    if has_wrapper_sources(&checkout) {
+        return Ok(checkout.canonicalize().unwrap_or(checkout));
+    }
+    let root = embedded_wrapper_cache_dir()?;
+    materialize_embedded_wrapper(&root)?;
+    debug_log(
+        debug,
+        format_args!("pass=embedded-wrapper-source root={}", root.display()),
+    );
+    Ok(root)
+}
+
+fn rusi_cache_base() -> PathBuf {
+    let from_env = |key: &str| {
+        std::env::var_os(key)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    if let Some(dir) = from_env("RUSI_CACHE_DIR") {
+        return dir;
+    }
+    if let Some(dir) = from_env("XDG_CACHE_HOME") {
+        return dir.join("rusi");
+    }
+    #[cfg(windows)]
+    let home = from_env("LOCALAPPDATA");
+    #[cfg(not(windows))]
+    let home = from_env("HOME").map(|home| home.join(".cache"));
+    home.map(|dir| dir.join("rusi"))
+        .unwrap_or_else(|| std::env::temp_dir().join("rusi"))
+}
+
+/// Cache directory keyed by version and a content hash, so a rebuilt binary
+/// with changed wrapper sources never reuses a stale tree.
+fn embedded_wrapper_cache_dir() -> Result<PathBuf> {
+    // FNV-1a: stable across Rust releases, unlike `DefaultHasher`.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    feed(EMBEDDED_WRAPPER_WORKSPACE_MANIFEST.as_bytes());
+    for (path, contents) in EMBEDDED_WRAPPER_FILES {
+        feed(path.as_bytes());
+        feed(contents.as_bytes());
+    }
+    Ok(rusi_cache_base().join(format!(
+        "wrapper-src-{}-{hash:016x}",
+        env!("CARGO_PKG_VERSION")
+    )))
+}
+
+fn materialize_embedded_wrapper(root: &Path) -> Result<()> {
+    let files = std::iter::once(("Cargo.toml", EMBEDDED_WRAPPER_WORKSPACE_MANIFEST))
+        .chain(EMBEDDED_WRAPPER_FILES.iter().copied());
+    for (relative, contents) in files {
+        let path = root.join(relative);
+        if fs::read_to_string(&path).is_ok_and(|existing| existing == contents) {
+            continue;
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(&path, contents)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn ensure_embedded_wrapper_built(
     capabilities: &DriverCapabilities,
     debug: bool,
 ) -> Result<PathBuf> {
-    let workspace_root = rusi_workspace_root();
+    let workspace_root = rusi_workspace_root(debug)?;
     let manifest_path = workspace_root.join("Cargo.toml");
     // Build into a dedicated target directory rather than the workspace's own
     // `target/`. This build is nested inside whatever cargo invocation is
@@ -2212,6 +2344,28 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn embedded_wrapper_sources_materialize_into_a_loadable_workspace() {
+        let root = temp_dir("embedded-wrapper");
+        super::materialize_embedded_wrapper(&root).expect("materialize");
+        assert!(super::has_wrapper_sources(&root));
+        // Idempotent: a second pass over an up-to-date tree must succeed.
+        super::materialize_embedded_wrapper(&root).expect("rematerialize");
+        let metadata = cargo_metadata::MetadataCommand::new()
+            .manifest_path(root.join("Cargo.toml"))
+            .no_deps()
+            .exec()
+            .expect("materialized workspace loads");
+        let mut names: Vec<_> = metadata
+            .workspace_packages()
+            .iter()
+            .map(|package| package.name.to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["rusi-rustc-wrapper", "rusi-schema"]);
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

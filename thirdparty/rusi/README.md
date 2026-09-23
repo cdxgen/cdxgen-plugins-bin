@@ -118,6 +118,8 @@ When embedded compiler collection is available, Rusi builds its local `rusi-rust
 cargo +<resolved-toolchain> check
 ```
 
+The wrapper sources are embedded in the `rusi` binary, so a released binary does not need a rusi checkout. On first use they are written to `$RUSI_CACHE_DIR` (default `$XDG_CACHE_HOME/rusi`, `~/.cache/rusi`, or `%LOCALAPPDATA%\rusi` on Windows) and the wrapper is built there. Set `RUSI_WRAPPER_SOURCE` to a rusi workspace to build from a different source tree instead.
+
 under a Rusi `RUSTC_WRAPPER`. This is where most compiler-mode time is spent on real repositories. Test targets are skipped by default. Add `--tests` to opt into test/example/bench target analysis, which makes compiler mode run:
 
 ```bash
