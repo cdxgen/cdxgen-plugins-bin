@@ -171,6 +171,16 @@ including `namespace`-based packages and deep links). Each endpoint carries its
 path template, HTTP methods, path/query parameters, media types, declared
 authentication, and the handler it resolves to.
 
+Paths carry the deployment base path each framework reads from its own config
+keys, per module, the way a default Spring Boot run resolves them. Routes that
+exist with no handler in the source are published with `foundBy: implicit`:
+Spring Data REST repository resources, Actuator endpoints (honouring exposure
+include and exclude) and springdoc. A route serving every method carries
+`anyMethod`. A path kosi knows is incomplete carries `pathUnresolved`, and a
+non-HTTP entry point carries `transport`. With no jars on the classpath,
+annotations resolve through their file's imports, and the run says so in an
+`annotation-import-resolved` diagnostic.
+
 An endpoint kosi could not read is never passed off as one it did: a manifest
 component whose class is not among the analysed declarations stays published —
 the manifest is real — but carries `substantiated=false` and is counted in an

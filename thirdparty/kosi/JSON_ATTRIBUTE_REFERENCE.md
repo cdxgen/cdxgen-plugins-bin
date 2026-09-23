@@ -601,14 +601,38 @@ The effective pack: `builtin` names, `user` names, and the five entry counts
 ## apiEndpoints — ApiEndpoint (resolved tier)
 
 Inbound entry points, one object per route/component. `framework` is a
-closed vocabulary (the shipped `endpoints-pack-v0.json` ids: `spring-mvc`,
-`spring-webflux`, `ktor`, `micronaut`, `quarkus`, `http4k`, `grpc`,
-`android`); `foundBy` names HOW the endpoint was found — `annotation`
-(a mapping annotation at its resolved fqn), `dsl` (a routing call, the
-handler resolved to the extracted lambda body), or `manifest` (an Android
-component). The framework match is on RESOLVED type identity: an
-annotation the front end could not resolve is never treated as the
-framework's, which is what keeps a homonym annotation from becoming an
+closed vocabulary — the shipped `endpoints-pack-v0.json` ids: `android`,
+`android-provider`, `aws-lambda`, `azure-functions`, `graphql`, `grpc`,
+`http4k`, `javalin`, `ktor`, `micronaut`, `quarkus`,
+`quarkus-reactive-routes`, `ratpack`, `servlet`, `sparkjava`,
+`spring-actuator`, `spring-messaging`, `spring-mvc`, `spring-webflux`,
+`springdoc`, `vertx`, plus the pseudo-framework `unattributed`. That value is a
+routing call whose shape matched a DSL (`get("/x") { }`) but whose
+framework no import or resolved receiver proves; it is never guessed onto
+a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the endpoint was found:
+
+- `annotation`: a mapping annotation at its resolved FQN, including a
+  composed or meta-annotated one and a server-side `@HttpExchange`
+  inherited from an interface.
+- `dsl`: a routing call, with the handler resolved to the extracted lambda
+  body.
+- `manifest`: an Android component.
+- `descriptor`: a `web.xml` servlet mapping.
+- `implicit`: a route that has no handler in the source. These are served
+  because of a dependency plus config:
+  - Spring Data REST repository resources;
+  - Actuator endpoints, filtered by
+    `management.endpoints.web.exposure.include`/`exclude`, under
+    `management.endpoints.web.base-path` and renamed by `path-mapping.<id>`;
+  - springdoc's `/v3/api-docs` and Swagger UI.
+
+The framework match is on type identity. An annotation the classpath
+resolves is matched at its resolved FQN. One the classpath cannot resolve
+is read at the FQN its file's explicit import names, which is Kotlin's own
+resolution rule. A star import counts only when exactly one star package
+holds a pack-modelled FQN of that name. Such a run carries the
+`annotation-import-resolved` diagnostic. A same-named annotation from
+another package never matches, so a homonym still never becomes an
 endpoint.
 
 | Attribute | Type | Notes |
@@ -616,14 +640,17 @@ endpoint.
 | `id` | string | `ep-NNNNNN`, assigned after sorting |
 | `framework` | string | pack vocabulary, above |
 | `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method); a mapping whose pack row names a `methodArgument` takes the site's own list (`@RequestMapping(method = [RequestMethod.POST])` → `["POST"]`). **Naming quirk, deliberate:** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`, since fixed), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
-| `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); read from the framework's `pathArguments` in order (Spring: `value`, then `path`), and a mapping naming several paths publishes one endpoint per (class prefix, path) pair. The class prefix is the one declared in the handler's OWN file: a canonical name repeated across app modules is not one class; Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
+| `pathTemplate` | string | the deployment base path first: per framework and per module, from that framework's own keys. Examples: `server.servlet.context-path`, `spring.mvc.servlet.path`, `spring.webflux.base-path`, `spring.data.rest.base-path`, `quarkus.http.root-path`, `micronaut.server.context-path`. Config is read the way a default Spring Boot run serves it. The base `application.*` and `application-default.*` files count. A key set only in another profile's file is profile-dependent, so it is unprovable and yields `pathUnresolved`. Two files of equal rank that disagree make the key unknown, and kosi never picks whichever file sorted first. Test resources are ignored. Then the class-level prefixes composed (`/admin` + `/users`); read from the framework's `pathArguments` in order (Spring: `value`, then `path`), and a mapping naming several paths publishes one endpoint per (class prefix, path) pair. The class prefix is the one declared in the handler's OWN file: a canonical name repeated across app modules is not one class; Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
 | `pathParameters` | string[] | `{id}` template parameters |
 | `handlerSymbol` / `handlerCanonicalName` | string | the canonical name of the handler; EMPTY when no handler could be named — an Android component that declares no lifecycle override of its own, so the framework's is what runs. The resolved-handler gate counts empty as unresolved. Empty does NOT mean the component went unread: see `substantiated` |
 | `substantiated` | boolean | whether kosi READ the code behind this endpoint. `true` by construction for annotation and DSL endpoints — they exist because a declaration was read. For a manifest component it is true exactly when the component's CLASS is among the analysed declarations, matching `Outer$Inner` and `Outer.Inner` as the one class they are. `false` says "the manifest declares this attack surface and kosi read none of it" — a library component, or a run that discovered none of the sources — and is counted in the `endpoint-unsubstantiated` diagnostic. A published endpoint is never a claim about behaviour that was not read |
 | `exported`, `permissions`, `deepLinkHosts` | Android only | from the manifest; `exported` falls back to the intent-filter rule |
 | `reachableSources` | string[] | the source categories the handler introduces (`untrusted-input` under `--endpoint-sources` when a flow enters here) |
 | `sliceIds` | string[] | endpoint-rooted slices (same flag) |
-| `foundBy` | string | `annotation` \| `dsl` \| `manifest` \| `config` |
+| `foundBy` | string | `annotation` \| `dsl` \| `dsl-unattributed` \| `manifest` \| `descriptor` \| `implicit` (above) |
+| `anyMethod` | boolean? | present (`true`) only when the framework serves EVERY HTTP method at this route: `@RequestMapping` or `@HttpExchange` without `method`, a servlet, Vert.x `route()` or `routeWithRegex()`. `httpMethod` is then empty by design. An empty `httpMethod` WITHOUT this flag means kosi could not resolve the method |
+| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
+| `transport` | string? | present only for an endpoint NOT served over HTTP: `messaging`, `grpc`, `android`, `function`. Absent means HTTP |
 
 ## services — ServiceRef and urls — UrlEvidence (resolved tier)
 
