@@ -7,11 +7,18 @@
 # same Kotlin base version (google/ksp, kotlin-analysis-api): the unrelocated
 # `-for-ide` split artifacts at `kotlin`, the IntelliJ platform modules at
 # `intellijPlatform` — the version Kotlin itself pins in
-# versions.intellijSdk for this release (verified against tag v2.4.0) — and
+# versions.intellijSdk for this release (verified against tag v2.4.0; the
+# 2.4.20 release carries the same 251.27812.49, but moving to it is an
+# Analysis API migration, not a version bump — see the note below) — and
 # the third-party libraries those modules' POMs resolve. 02-ARCHITECTURE.md
 # §1 records the amendment; nothing outside this list may be added without
 # amending that doc first.
 [versions]
+# Held at 2.4.0: Kotlin 2.4.20 removes KtModuleProviderBuilder and drops
+# mapToJvmType from the standalone surface (it became
+# mapToJvmTypeDescriptor), so adopting it is a source migration touching
+# AnalysisEnvironment.kt, KirLowering.kt, ResolvedAnalyzer.kt plus a golden
+# regeneration. Tracked separately; do not bump the number alone.
 kotlin = "2.4.0"
 intellijPlatform = "251.27812.49"
 guava = "33.2.0-jre"

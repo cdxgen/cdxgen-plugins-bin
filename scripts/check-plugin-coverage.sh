@@ -13,11 +13,11 @@
 #
 # Only *built* plugins are checked. `dosai` and `osquery` are downloaded from
 # upstream projects that do not publish for every architecture, so their
-# absence on riscv64, ppc64le and arm is expected and not a build failure.
+# absence on riscv64 and arm is expected and not a build failure.
 #
 # `kosi` is checked like every other built plugin, with per-platform
-# exemptions that are NAMED, never silent: where kosi cannot exist (ppc64le,
-# 32-bit arm) or is not built yet (riscv64, windows, darwin-amd64), the
+# exemptions that are NAMED, never silent: where kosi cannot exist (32-bit
+# arm) or is not built yet (riscv64, windows, darwin-amd64), the
 # exemption table prints its reason and the platform is skipped. On every
 # other platform a missing kosi binary fails this check exactly like a
 # missing golem or rusi binary. The table is shared with
@@ -33,10 +33,7 @@ readonly BUILT_PLUGINS=(trivy trustinspector golem rusi kosi cdxui cdxrs)
 
 # Package directory name -> the filename fragment its binaries carry.
 platform_fragment() {
-  case "$1" in
-    ppc64) echo "ppc64le" ;;
-    *) echo "$1" ;;
-  esac
+  echo "$1"
 }
 
 main() {

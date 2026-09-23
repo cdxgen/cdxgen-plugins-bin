@@ -42,11 +42,15 @@ jobs:
           persist-credentials: false
       - name: Install stable toolchain
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
           rustup default stable
           rustc --version
       - name: cargo test
         run: cargo test
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: cargo fmt
+        run: cargo fmt --check
 
   # Compiler-backend integration tests. These require a nightly toolchain with
   # the rustc-dev and rust-src components (the embedded backend links rustc

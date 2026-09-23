@@ -13,6 +13,10 @@ $osqueryArchiveSha256 = "7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a
 $dosaiVersion = "4.0.0"
 $dosaiArchive = "Dosai.exe"
 $dosaiArchiveSha256 = "8d4ed9585068cf2df6975e75fa981c39ea35a597e6b79572137dfa0dab28d31d"
+# The version the Go tools stamp via -X main.version; the Makefiles read the
+# same file, so a Windows binary and a Make-built binary of one commit always
+# agree.
+$pluginVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
 
 function Assert-Sha256 {
   param(
@@ -45,10 +49,10 @@ cd thirdparty\trivy
 # Mirror the Makefile's GOPIN: trivy v0.74.0 targets encoding/json/v2 as Go
 # 1.26 exposed it under GOEXPERIMENT=jsonv2. Go 1.27 stabilised the package
 # with a changed API (json.SkipFunc is gone), so pin the toolchain here too.
-$env:GOTOOLCHAIN = "go1.26.5"
+$env:GOTOOLCHAIN = "go1.26.8"
 $env:GOEXPERIMENT = "jsonv2"
 $env:CGO_ENABLED = "0"
-go build -ldflags "-s -w" -o build\trivy-windows-amd64.exe
+go build -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
 Remove-Item build -Recurse -Force
@@ -62,7 +66,7 @@ Remove-Item Env:GOEXPERIMENT -ErrorAction SilentlyContinue
 cd thirdparty\golem
 $env:CGO_ENABLED = "0"
 go test ./...
-go build -trimpath -ldflags "-s -w" -o build\golem-windows-amd64.exe .\cmd\golem
+go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$pluginVersion -extldflags=-Wl,-z,now,-z,relro" -o build\golem-windows-amd64.exe .\cmd\golem
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\golem-windows-amd64.exe
 copy build\* ..\..\plugins\golem\
 Remove-Item build -Recurse -Force
@@ -70,7 +74,7 @@ cd ..\..
 
 cd thirdparty\trustinspector
 $env:CGO_ENABLED = "0"
-go build -ldflags "-s -w" -o build\trustinspector-cdxgen-windows-amd64.exe
+go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$pluginVersion -extldflags=-Wl,-z,now,-z,relro" -o build\trustinspector-cdxgen-windows-amd64.exe
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trustinspector-cdxgen-windows-amd64.exe
 copy build\* ..\..\plugins\trustinspector\
 Remove-Item build -Recurse -Force
@@ -80,12 +84,25 @@ New-Item -ItemType Directory -Path plugins\rusi -Force
 cd thirdparty\rusi
 cargo build -p rusi-cli --release --locked
 copy target\release\rusi.exe ..\..\plugins\rusi\rusi-windows-amd64.exe
+& "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma ..\..\plugins\rusi\rusi-windows-amd64.exe
 cd ..\..
 
 New-Item -ItemType Directory -Path plugins\cdxui -Force
 cd thirdparty\cdxui
 cargo build --release --locked
 copy target\release\cdxui.exe ..\..\plugins\cdxui\cdxui-windows-amd64.exe
+& "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma ..\..\plugins\cdxui\cdxui-windows-amd64.exe
+cd ..\..
+
+# kosi is NOT built here on purpose: Windows is a declared kosi exemption
+# (scripts/plugin-platform-support.sh) until a Windows runner job wires the
+# MSVC-toolchain native-image build; the kosi-portable.jar fallback covers
+# Windows consumers in the meantime.
+New-Item -ItemType Directory -Path plugins\cdxrs -Force
+cd thirdparty\cdxrs
+cargo build --release --locked
+copy target\release\cdxrs.exe ..\..\plugins\cdxrs\cdxrs-windows-amd64.exe
+& "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma ..\..\plugins\cdxrs\cdxrs-windows-amd64.exe
 cd ..\..
 
 node .\scripts\generate-metadata.js .\plugins

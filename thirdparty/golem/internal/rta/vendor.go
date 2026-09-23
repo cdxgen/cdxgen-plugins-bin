@@ -14,6 +14,10 @@
 // SSA. static and rta's fingerprint gained guards against generic
 // methods in CL 788520 (golang/go#77549) and vta already nil-checked;
 // the two rta call sites fixed here were missed (golang/go#80973).
+// x/tools v0.50.0 added the generic-method skip at the exported
+// reflection site, but the nil can still be produced (and upstream
+// still has no guard where it is consumed), so the two consumer guards
+// remain vendored.
 //
 // The delta from upstream is insert-only, and vendor_test.go keeps it
 // that way: two early returns marked "#80973" — in addReachable, which
@@ -35,4 +39,4 @@ package rta
 // copied from. vendor_test.go requires it to match go.mod: bumping
 // x/tools without re-vendoring would leave golem running an older RTA
 // than the rest of x/tools it is compiled against.
-const upstreamVersion = "v0.49.0"
+const upstreamVersion = "v0.50.0"

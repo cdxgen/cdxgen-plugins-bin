@@ -27,9 +27,7 @@ pub fn run(
     let findings = validate::validate_bom(&bom);
 
     // Serialize and write findings document
-    let serialized = serde_json::to_string_pretty(&findings)
-        .map_err(|e| CdxrsError::Other(format!("failed to serialize findings: {e}")))?;
-    let output = format!("{serialized}\n");
+    let output = crate::bom::write::serialize_doc(&findings)?;
     io_mod::write_output(output_path, output.as_bytes())?;
 
     // Signal exit code 3 when the BOM has error findings. The findings

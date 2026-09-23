@@ -1,0 +1,100 @@
+name: go tools test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "thirdparty/trivy/**"
+      - "thirdparty/golem/**"
+      - "thirdparty/trustinspector/**"
+      - ".github/workflows/go-test.yml"
+  pull_request:
+    paths:
+      - "thirdparty/trivy/**"
+      - "thirdparty/golem/**"
+      - "thirdparty/trustinspector/**"
+      - ".github/workflows/go-test.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    working-directory: thirdparty
+
+jobs:
+  # The three Go tools never had a CI job of their own: their unit tests only
+  # ran if a developer remembered to run them locally, and go vet nowhere.
+  # This mirrors the per-tool gates the Rust crates have (cdxrs-test.yml and
+  # friends). The trivy wrapper pins its toolchain exactly like its Makefile —
+  # go.mod states the same 1.26.8, and the GOEXPERIMENT is the compile-time
+  # key trivy v0.74.0 needs on the 1.26 line.
+  trivy_test:
+    name: trivy-cdxgen test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: thirdparty/trivy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: '^1.27.0'
+      - name: go test
+        run: |
+          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go test ./...
+      - name: go vet
+        run: |
+          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go vet ./...
+
+  golem_test:
+    name: golem test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: thirdparty/golem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: '^1.27.0'
+      - name: go test
+        run: go test ./...
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt check
+        run: |
+          files="$(gofmt -l . | grep -v testdata/ || true)"
+          if [ -n "$files" ]; then echo "gofmt needed on: $files"; exit 1; fi
+
+  trustinspector_test:
+    name: trustinspector-cdxgen test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: thirdparty/trustinspector
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: '^1.27.0'
+      - name: go test
+        run: go test ./...
+      - name: go vet
+        run: go vet ./...

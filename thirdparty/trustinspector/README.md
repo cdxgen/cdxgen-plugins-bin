@@ -51,6 +51,19 @@ trustinspector-cdxgen host
 
 Inspect host trust posture such as Gatekeeper (macOS) or WDAC active policies (Windows). This provides a high-level view of the host's trust configuration.
 
+### version
+
+```bash
+trustinspector-cdxgen version
+trustinspector-cdxgen --version
+```
+
+Print the tool version. The released binaries stamp the package version at build time; a source build without the stamp reports `dev`.
+
+### Exit codes
+
+`0` success, `2` usage error (unknown command, unparseable flag, missing argument), `3` runtime error. `1` is reserved for expectations failures, which trustinspector has no gate of, following the suite convention kosi documents.
+
 ## JSON Output Shape
 
 Each invocation returns a single JSON object. Only the field relevant to the selected command is populated.
@@ -70,6 +83,9 @@ All properties follow a consistent `{name, value}` format:
 
 ```json
 {
+  "schema": "trustinspector/report-1",
+  "tool": "trustinspector-cdxgen",
+  "toolVersion": "4.0.1",
   "materials": [
     {
       "kind": "public-key",
@@ -156,7 +172,7 @@ On macOS the `properties` array instead contains keys such as `cdx:darwin:codesi
 
 ## Stability Notes
 
-- The top-level object keys are stable: `materials`, `inspections`, `hostFindings`
+- The top-level object keys are stable: the envelope keys `schema` (report shape, currently `trustinspector/report-1`), `tool` and `toolVersion`, plus the payload keys `materials`, `inspections`, `hostFindings`
 - `properties` is always an array of `{name, value}` objects when present
 - Unknown future properties may be added, so downstream consumers should ignore keys they do not recognize
 

@@ -56,11 +56,14 @@ func DataFlowGraph(df *model.DataFlowEvidence, format DataFlowGraphFormat) strin
 	}
 }
 
-func Write(w io.Writer, report *model.Report, format Format) error {
+func Write(w io.Writer, report *model.Report, format Format, pretty bool) error {
 	switch format {
 	case FormatJSON:
 		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
+		if pretty {
+			enc.SetIndent("", "  ")
+		}
 		return enc.Encode(report)
 	case FormatGraphML:
 		_, err := io.WriteString(w, GraphML(report.CallGraph))

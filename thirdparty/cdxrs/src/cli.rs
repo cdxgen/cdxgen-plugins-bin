@@ -14,8 +14,12 @@ pub struct Cli {
     pub input: String,
 
     /// Output file path ("-" or omitted for stdout).
-    #[arg(long, short = 'o', global = true)]
+    #[arg(long, short = 'o', visible_alias = "out", global = true)]
     pub output: Option<String>,
+
+    /// Emit compact (minified) JSON instead of the default 2-space pretty format.
+    #[arg(long, global = true)]
+    pub compact: bool,
 
     /// Maximum input size in bytes (default: 2 GB).
     #[arg(long, global = true)]

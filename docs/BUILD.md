@@ -46,7 +46,7 @@ build/<helper>-<platform-tuple>
 build/<helper>-<platform-tuple>.sha256
 ```
 
-The platform tuple matches the directory names under `packages/`: `linux-amd64`, `linux-arm64`, `linuxmusl-amd64`, `linuxmusl-arm64`, `linux-riscv64`, `linux-arm`, `linux-ppc64le`, `darwin-arm64`, `darwin-amd64`, `windows-amd64`, `windows-arm64`. Not every helper supports every tuple; the coverage script is the source of truth for which binaries each platform package must contain.
+The platform tuple matches the directory names under `packages/`: `linux-amd64`, `linux-arm64`, `linuxmusl-amd64`, `linuxmusl-arm64`, `linux-riscv64`, `linux-arm`, `darwin-arm64`, `darwin-amd64`, `windows-amd64`, `windows-arm64`. Not every helper supports every tuple; the coverage script is the source of truth for which binaries each platform package must contain.
 
 Some helpers also produce a CycloneDX SBOM of themselves:
 

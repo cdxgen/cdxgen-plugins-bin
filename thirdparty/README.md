@@ -11,6 +11,9 @@ This folder contains source code and build scripts for the third-party tools use
 | trustinspector-cdxgen | Custom                                                | Trust anchor and code-signing inspection    | cdxgen team   |
 | golem                 | Custom                                                | Go source semantic analysis and data-flow   | cdxgen team   |
 | rusi                  | Custom                                                | Rust source semantic analysis and data-flow | cdxgen team   |
+| cdxrs                 | Custom                                                | Rust BOM validation and registry fetch      | cdxgen team   |
+| cdxui                 | Custom                                                | Interactive terminal BOM explorer           | cdxgen team   |
+| kosi                  | Custom                                                | Kotlin source semantic analysis             | cdxgen team   |
 
 ## trivy
 
@@ -33,3 +36,15 @@ Golem (Go Library Evidence Mapper) is a cdxgen-maintained static analyzer for Go
 ## rusi
 
 Rusi (Rust Source Inspector) is a cdxgen-maintained Rust source analysis helper that emits semantic source evidence, call graph output, and optional compiler-assisted data-flow findings. It operates in two modes: a stable mode using the `syn` parser, and a compiler mode using an embedded rustc wrapper for MIR/HIR-derived evidence. See [./rusi/README.md](./rusi/README.md).
+
+## cdxrs
+
+`cdxrs` is a cdxgen-maintained Rust-native CycloneDX BOM tooling binary: BOM summary statistics, schema-version listing, schema and semantic validation, and parallel registry URL fetching with an on-disk cache. Its output is byte-identical to the JavaScript path it replaces, which lets cdxgen fall back silently when the binary is absent. See [./cdxrs/README.md](./cdxrs/README.md).
+
+## cdxui
+
+`cdxui` is a cdxgen-maintained interactive terminal UI for exploring CycloneDX BOMs, with an optional `--generate` mode that spawns cdxgen and loads the resulting BOM. See [./cdxui/README.md](./cdxui/README.md).
+
+## kosi
+
+Kosi (Kotlin Source Inspector) is a cdxgen-maintained Kotlin source analysis helper: inventory, call graph and reachability, taint slices, endpoints and services, and crypto evidence, from one deterministic JSON report. It is the Kotlin sibling of golem and rusi. See [./kosi/README.md](./kosi/README.md) and the operator's guide at [./kosi/docs/KOSI.md](./kosi/docs/KOSI.md).

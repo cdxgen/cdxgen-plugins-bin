@@ -1,19 +1,30 @@
 PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := trustinspector-cdxgen
 sources := main.go
+version ?= $(shell node -p "require('../../package.json').version")
+ldflags := -s -w -X main.version=$(version)
 
 generate_sbom = cdxgen -t go -o build/sbom-trustinspector-postbuild.cdx.json
-build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w" -o build/$(appname)-$(3)$(4)
+build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(3)$(4)
 sha = cd build && sha256sum $(appname)-$(1)$(2) > $(appname)-$(1)$(2).sha256
 
-.PHONY: all windows darwin linux linuxmusl sbom clean
+.PHONY: all windows darwin linux linuxmusl sbom clean test fmt lint
 
 all: windows linux darwin sbom
+
+test:
+	go test ./...
+
+fmt:
+	gofmt -w .
+
+lint:
+	go vet ./...
 
 clean:
 	rm -rf build/
 
-linux: build/linux_amd64 build/linux_arm64 build/linux_arm build/linux_ppc64le build/linux_riscv64 build/linuxmusl_amd64 build/linuxmusl_arm64
+linux: build/linux_amd64 build/linux_arm64 build/linux_arm build/linux_riscv64 build/linuxmusl_amd64 build/linuxmusl_arm64
 
 linuxmusl: build/linuxmusl_amd64 build/linuxmusl_arm64
 
@@ -37,9 +48,6 @@ build/linuxmusl_arm64: $(sources)
 	$(call build,linux,arm64,linuxmusl-arm64,)
 	$(call sha,linuxmusl-arm64,)
 
-build/linux_ppc64le: $(sources)
-	$(call build,linux,ppc64le,linux-ppc64le,)
-	$(call sha,linux-ppc64le,)
 
 build/linux_riscv64: $(sources)
 	$(call build,linux,riscv64,linux-riscv64,)

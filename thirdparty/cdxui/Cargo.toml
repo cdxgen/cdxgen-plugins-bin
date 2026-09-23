@@ -23,3 +23,13 @@ strip-ansi-escapes = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Shared release profile across the Rust tools (cdxrs, cdxui, rusi): thin
+# LTO, abort on panic, size-optimized, stripped. Kept in lockstep so the
+# shipped binaries behave and compress the same way.
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

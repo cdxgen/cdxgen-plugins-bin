@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +29,10 @@ func runGolden(args []string, stdout io.Writer, stderr io.Writer) error {
 	only := flags.String("only", "", "comma-separated fixture names")
 	update := flags.Bool("update", false, "write digests instead of comparing them")
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 
 	type generated struct {
@@ -82,7 +86,7 @@ func runGolden(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	if len(mismatches) > 0 {
 		fmt.Fprintf(stdout, "golden mismatches:\n  %s\n", strings.Join(mismatches, "\n  "))
-		return fmt.Errorf("%d golden digest(s) differ", len(mismatches))
+		return &expectationsError{err: fmt.Errorf("%d golden digest(s) differ", len(mismatches))}
 	}
 	return nil
 }

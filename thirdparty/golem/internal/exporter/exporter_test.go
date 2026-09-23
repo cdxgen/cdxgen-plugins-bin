@@ -23,7 +23,7 @@ func TestGraphExportsEscapeXML(t *testing.T) {
 func TestWriteJSONIsMinifiedByDefault(t *testing.T) {
 	var out bytes.Buffer
 	report := &model.Report{SchemaVersion: "test", Tool: model.ToolInfo{Name: "golem", Version: "test"}, Runtime: model.RuntimeInfo{}, Options: model.AnalysisOptions{}, Stats: model.Stats{}}
-	if err := Write(&out, report, FormatJSON); err != nil {
+	if err := Write(&out, report, FormatJSON, false); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -32,5 +32,16 @@ func TestWriteJSONIsMinifiedByDefault(t *testing.T) {
 	}
 	if !strings.HasPrefix(text, "{\"") {
 		t.Fatalf("expected compact json output, got %q", text)
+	}
+}
+
+func TestWriteJSONPrettyIndents(t *testing.T) {
+	var out bytes.Buffer
+	report := &model.Report{SchemaVersion: "test", Tool: model.ToolInfo{Name: "golem", Version: "test"}, Runtime: model.RuntimeInfo{}, Options: model.AnalysisOptions{}, Stats: model.Stats{}}
+	if err := Write(&out, report, FormatJSON, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "\n  \"") {
+		t.Fatalf("expected indented json output with --pretty, got %q", out.String())
 	}
 }

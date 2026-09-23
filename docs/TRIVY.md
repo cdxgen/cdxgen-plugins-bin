@@ -40,7 +40,7 @@ Build a local binary and scan an unpacked rootfs:
 
 ```bash
 cd thirdparty/trivy
-GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ./build/trivy-cdxgen-local rootfs --output result.cdx.json /path/to/rootfs
 ```
 
@@ -56,7 +56,7 @@ docker rm -f tc
 
 ## Platforms
 
-linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, darwin-amd64, and ppc64.
+linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux-arm, windows-arm64, darwin-arm64, and darwin-amd64.
 
 ## What it will not do
 

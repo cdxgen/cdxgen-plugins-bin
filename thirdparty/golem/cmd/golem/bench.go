@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,7 +31,10 @@ func runBench(args []string, stdout io.Writer, stderr io.Writer) error {
 	compareTo := flags.String("compare", "", "results file from the incumbent engine; prints a promotion verdict for this run")
 	failUnlessPromotable := flags.Bool("fail-unless-promotable", false, "with --compare, exit non-zero unless the candidate meets every promotion criterion; use --tier full to include real-repository flow-count and wall-clock evidence")
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 
 	options := bench.Options{
@@ -112,9 +116,9 @@ func runBench(args []string, stdout io.Writer, stderr io.Writer) error {
 	if *failUnlessPromotable {
 		switch {
 		case promotion == nil:
-			return fmt.Errorf("--fail-unless-promotable needs --compare")
+			return usagef("--fail-unless-promotable needs --compare")
 		case !promotion.Promote:
-			return fmt.Errorf("candidate engine does not meet the promotion criteria")
+			return &expectationsError{err: fmt.Errorf("candidate engine does not meet the promotion criteria")}
 		}
 	}
 	if !*failOnRegression {
@@ -122,11 +126,11 @@ func runBench(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	switch {
 	case len(blocking) > 0:
-		return fmt.Errorf("%d blocking regression(s)", len(blocking))
+		return &expectationsError{err: fmt.Errorf("%d blocking regression(s)", len(blocking))}
 	case summary.UnexpectedFailures > 0:
-		return fmt.Errorf("%d unexpected annotation failure(s)", summary.UnexpectedFailures)
+		return &expectationsError{err: fmt.Errorf("%d unexpected annotation failure(s)", summary.UnexpectedFailures)}
 	case summary.IntegrityViolations > 0:
-		return fmt.Errorf("%d report integrity violation(s)", summary.IntegrityViolations)
+		return &expectationsError{err: fmt.Errorf("%d report integrity violation(s)", summary.IntegrityViolations)}
 	}
 	return nil
 }

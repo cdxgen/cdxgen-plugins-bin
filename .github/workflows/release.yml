@@ -23,7 +23,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -88,7 +88,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -153,7 +153,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -227,7 +227,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         registry-url: https://registry.npmjs.org/
         scope: '@cdxgen'
         package-manager-cache: false
@@ -236,6 +236,11 @@ jobs:
         go-version: '^1.27.0'
         cache: false
     - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
+      with:
+        # Pinned to what the action already defaulted to (6.1.0): the action's
+        # default moves with its releases, and SourceKitten must not silently
+        # start building under a different toolchain.
+        swift-version: '6.1.0'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
     - name: Set up Docker Buildx
@@ -343,10 +348,6 @@ jobs:
         popd
 
         pushd packages/darwin-amd64
-        npm publish --provenance --access=public
-        popd
-
-        pushd packages/ppc64
         npm publish --provenance --access=public
         popd
 
