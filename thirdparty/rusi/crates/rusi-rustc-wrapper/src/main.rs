@@ -310,6 +310,7 @@ impl EmbeddedCollector {
         let call_graph = build_call_graph(
             &self.functions,
             &self.hir_calls,
+            &self.declarations,
             &mut call_graph_diagnostics,
         );
         let mut flow_diagnostics = Vec::new();
@@ -1997,6 +1998,7 @@ struct ConcreteState {
 fn build_call_graph(
     functions: &[MirFunction],
     hir_calls: &[HirCallRecord],
+    declarations: &[Declaration],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CallGraph {
     let mut nodes = IndexMap::<String, CallGraphNode>::new();
@@ -2147,6 +2149,36 @@ fn build_call_graph(
                         });
                 }
             }
+        }
+    }
+    // HIR calls can come from body owners that have no MIR function here, such
+    // as the anon const behind `[0u8; width() * 2]`. Give those callers a node
+    // from their declaration so every edge's source exists.
+    let declarations_by_id = declarations
+        .iter()
+        .map(|declaration| (declaration.id.as_str(), declaration))
+        .collect::<HashMap<_, _>>();
+    for call in hir_calls {
+        if !nodes.contains_key(&call.source_id)
+            && let Some(declaration) = declarations_by_id.get(call.source_id.as_str())
+        {
+            nodes.insert(
+                call.source_id.clone(),
+                CallGraphNode {
+                    id: declaration.id.clone(),
+                    name: declaration.name.clone(),
+                    qualified_name: declaration.qualified_name.clone(),
+                    canonical_name: rusi_schema::canonical_name(&declaration.qualified_name),
+                    kind: declaration.kind.clone(),
+                    package_path: declaration.package_path.clone(),
+                    purl: String::new(),
+                    file_path: declaration.file_path.clone(),
+                    local: true,
+                    external: false,
+                    receiver: None,
+                    position: declaration.position.clone(),
+                },
+            );
         }
     }
     for call in hir_calls {
@@ -2347,9 +2379,17 @@ fn reconcile_edges(
         let key = (edge.source_id.clone(), edge.target_id.clone());
         match collapsed.get_mut(&key) {
             Some(existing) => {
-                if call_type_resolution_rank(&edge.call_type)
-                    > call_type_resolution_rank(&existing.call_type)
-                {
+                // On a rank tie prefer the HIR edge: it carries the callsite's
+                // own line and column, where a MIR edge carries the caller's.
+                let is_hir = |edge: &CallGraphEdge| {
+                    edge.properties.get("sourceLevel").map(String::as_str) == Some("true")
+                };
+                let incoming = (call_type_resolution_rank(&edge.call_type), is_hir(&edge));
+                let current = (
+                    call_type_resolution_rank(&existing.call_type),
+                    is_hir(existing),
+                );
+                if incoming > current {
                     *existing = edge;
                 }
             }

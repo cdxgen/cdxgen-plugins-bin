@@ -725,9 +725,23 @@ fn has_wrapper_sources(root: &Path) -> bool {
         && root.join("crates/rusi-rustc-wrapper/src/main.rs").is_file()
 }
 
+/// True when the crate sources under `root` are exactly the ones embedded in
+/// this binary. `Cargo.lock` is left out: cargo trims the embedded whole-
+/// workspace lockfile to the two crates on the first build, and rewriting it
+/// on every run would race concurrent builds of the same tree.
+fn embedded_sources_match(root: &Path) -> bool {
+    EMBEDDED_WRAPPER_FILES
+        .iter()
+        .filter(|(relative, _)| *relative != "Cargo.lock")
+        .all(|(relative, contents)| {
+            fs::read_to_string(root.join(relative)).is_ok_and(|existing| existing == *contents)
+        })
+}
+
 /// Resolves the workspace used to build the embedded wrapper, in order:
-/// `RUSI_WRAPPER_SOURCE`, the compile-time checkout (development builds), then
-/// the sources embedded in this binary, written to the rusi cache directory.
+/// `RUSI_WRAPPER_SOURCE`, the compile-time checkout when it still holds the
+/// sources this binary was built from (development builds), then the sources
+/// embedded in this binary, written to the rusi cache directory.
 fn rusi_workspace_root(debug: bool) -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("RUSI_WRAPPER_SOURCE").filter(|v| !v.is_empty()) {
         let dir = PathBuf::from(dir);
@@ -739,8 +753,10 @@ fn rusi_workspace_root(debug: bool) -> Result<PathBuf> {
             dir.display()
         ));
     }
+    // A checkout edited after this binary was built would otherwise yield a
+    // wrapper that disagrees with the driver's protocol expectations.
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    if has_wrapper_sources(&checkout) {
+    if has_wrapper_sources(&checkout) && embedded_sources_match(&checkout) {
         return Ok(checkout.canonicalize().unwrap_or(checkout));
     }
     let root = embedded_wrapper_cache_dir()?;
@@ -752,24 +768,32 @@ fn rusi_workspace_root(debug: bool) -> Result<PathBuf> {
     Ok(root)
 }
 
-fn rusi_cache_base() -> PathBuf {
+/// Per-user cache directory. There is deliberately no fallback to the system
+/// temp dir: the tree built there is compiled and executed, and a predictable
+/// path under a world-writable directory lets another local user plant a
+/// `build.rs`, a `.cargo/config.toml` or a symlink ahead of us.
+fn rusi_cache_base() -> Result<PathBuf> {
     let from_env = |key: &str| {
         std::env::var_os(key)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
     if let Some(dir) = from_env("RUSI_CACHE_DIR") {
-        return dir;
+        return Ok(dir);
     }
     if let Some(dir) = from_env("XDG_CACHE_HOME") {
-        return dir.join("rusi");
+        return Ok(dir.join("rusi"));
     }
     #[cfg(windows)]
     let home = from_env("LOCALAPPDATA");
     #[cfg(not(windows))]
     let home = from_env("HOME").map(|home| home.join(".cache"));
-    home.map(|dir| dir.join("rusi"))
-        .unwrap_or_else(|| std::env::temp_dir().join("rusi"))
+    home.map(|dir| dir.join("rusi")).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no per-user cache directory for the embedded compiler wrapper; set RUSI_CACHE_DIR, \
+             XDG_CACHE_HOME or HOME, or point RUSI_WRAPPER_SOURCE at a rusi checkout"
+        )
+    })
 }
 
 /// Cache directory keyed by version and a content hash, so a rebuilt binary
@@ -788,28 +812,100 @@ fn embedded_wrapper_cache_dir() -> Result<PathBuf> {
         feed(path.as_bytes());
         feed(contents.as_bytes());
     }
-    Ok(rusi_cache_base().join(format!(
+    Ok(rusi_cache_base()?.join(format!(
         "wrapper-src-{}-{hash:016x}",
         env!("CARGO_PKG_VERSION")
     )))
 }
 
+fn materialized_tree_is_current(root: &Path) -> bool {
+    embedded_sources_match(root)
+        && root.join("Cargo.lock").is_file()
+        && fs::read_to_string(root.join("Cargo.toml"))
+            .is_ok_and(|existing| existing == EMBEDDED_WRAPPER_WORKSPACE_MANIFEST)
+}
+
+/// Writes the embedded sources to `root`. A current tree is reused untouched,
+/// so concurrent runs never rewrite files under each other's builds. Anything
+/// else is replaced wholesale: the tree is written to a private staging
+/// directory beside `root` and renamed into place, which keeps stray files
+/// (such as a planted `build.rs`) out and makes a half-written tree
+/// unobservable.
 fn materialize_embedded_wrapper(root: &Path) -> Result<()> {
-    let files = std::iter::once(("Cargo.toml", EMBEDDED_WRAPPER_WORKSPACE_MANIFEST))
-        .chain(EMBEDDED_WRAPPER_FILES.iter().copied());
-    for (relative, contents) in files {
-        let path = root.join(relative);
-        if fs::read_to_string(&path).is_ok_and(|existing| existing == contents) {
-            continue;
-        }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        fs::write(&path, contents)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+    if materialized_tree_is_current(root) {
+        return Ok(());
     }
-    Ok(())
+    let parent = root
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cache path {} has no parent", root.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let staging = parent.join(format!(
+        ".{}.staging-{}-{nonce}",
+        root.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id()
+    ));
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder
+        .create(&staging)
+        .with_context(|| format!("failed to create {}", staging.display()))?;
+    let written = (|| -> Result<()> {
+        let files = std::iter::once(("Cargo.toml", EMBEDDED_WRAPPER_WORKSPACE_MANIFEST))
+            .chain(EMBEDDED_WRAPPER_FILES.iter().copied());
+        for (relative, contents) in files {
+            let path = staging.join(relative);
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir)
+                    .with_context(|| format!("failed to create {}", dir.display()))?;
+            }
+            fs::write(&path, contents)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = written {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    // Several rusi processes can get here at once. A stale tree is moved aside
+    // with an atomic rename rather than deleted in place, so no process ever
+    // sees a half-deleted `root`, and whoever installs a current tree first
+    // wins; the others find it current on the next pass and discard theirs.
+    let mut last_error = None;
+    for attempt in 0..8 {
+        if materialized_tree_is_current(root) {
+            let _ = fs::remove_dir_all(&staging);
+            return Ok(());
+        }
+        // `symlink_metadata` so a symlink planted at `root` is moved aside
+        // itself rather than followed.
+        if fs::symlink_metadata(root).is_ok() {
+            let trash = parent.join(format!(
+                ".{}.stale-{}-{nonce}-{attempt}",
+                root.file_name().unwrap_or_default().to_string_lossy(),
+                std::process::id()
+            ));
+            if fs::rename(root, &trash).is_ok() {
+                let _ = fs::remove_dir_all(&trash);
+                let _ = fs::remove_file(&trash);
+            }
+        }
+        match fs::rename(&staging, root) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let _ = fs::remove_dir_all(&staging);
+    if materialized_tree_is_current(root) {
+        return Ok(());
+    }
+    Err(last_error.expect("rename attempted"))
+        .with_context(|| format!("failed to move wrapper sources to {}", root.display()))
 }
 
 fn ensure_embedded_wrapper_built(
@@ -2369,6 +2465,84 @@ mod tests {
     }
 
     #[test]
+    fn materialized_wrapper_tree_is_reused_and_replaced_only_when_stale() {
+        let base = temp_dir("embedded-wrapper-refresh");
+        let root = base.join("wrapper-src");
+        super::materialize_embedded_wrapper(&root).expect("materialize");
+
+        // Cargo trims the lockfile on the first build; that must not count as
+        // stale, or concurrent runs would rewrite it under each other.
+        let lock = root.join("Cargo.lock");
+        fs::write(&lock, "# trimmed by cargo\n").expect("trim lockfile");
+        super::materialize_embedded_wrapper(&root).expect("reuse");
+        assert_eq!(
+            fs::read_to_string(&lock).expect("read lockfile"),
+            "# trimmed by cargo\n"
+        );
+
+        // A modified source or a stray file replaces the whole tree.
+        let main_rs = root.join("crates/rusi-rustc-wrapper/src/main.rs");
+        fs::write(&main_rs, "fn main() {}\n").expect("tamper");
+        fs::write(
+            root.join("crates/rusi-rustc-wrapper/build.rs"),
+            "fn main() {}\n",
+        )
+        .expect("plant build script");
+        super::materialize_embedded_wrapper(&root).expect("replace");
+        assert!(super::embedded_sources_match(&root));
+        assert!(!root.join("crates/rusi-rustc-wrapper/build.rs").exists());
+        let leftovers: Vec<_> = fs::read_dir(&base)
+            .expect("list cache base")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.contains("staging"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "staging dirs left behind: {leftovers:?}"
+        );
+        fs::remove_dir_all(&base).ok();
+    }
+
+    /// The generated workspace manifest hand-copies versions and features from
+    /// the real one. CI builds from the checkout, so drift would only surface
+    /// in released binaries; compare the resolved requirements instead.
+    #[test]
+    fn embedded_wrapper_manifest_matches_the_real_workspace() {
+        let root = temp_dir("embedded-wrapper-manifest");
+        super::materialize_embedded_wrapper(&root).expect("materialize");
+        let dependencies = |manifest: PathBuf| {
+            let metadata = cargo_metadata::MetadataCommand::new()
+                .manifest_path(manifest)
+                .no_deps()
+                .exec()
+                .expect("workspace loads");
+            let mut entries = Vec::new();
+            for package in metadata.packages {
+                let name = package.name.to_string();
+                if name != "rusi-rustc-wrapper" && name != "rusi-schema" {
+                    continue;
+                }
+                entries.push(format!("{name} edition={}", package.edition));
+                for dependency in package.dependencies {
+                    let mut features = dependency.features.clone();
+                    features.sort();
+                    entries.push(format!(
+                        "{name} -> {} {} {:?} default={}",
+                        dependency.name, dependency.req, features, dependency.uses_default_features
+                    ));
+                }
+            }
+            entries.sort();
+            entries
+        };
+        let real = dependencies(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"));
+        let embedded = dependencies(root.join("Cargo.toml"));
+        assert_eq!(embedded, real);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn cargo_check_skips_test_targets_by_default() {
         assert!(cargo_check_target_args(false).is_empty());
         assert_eq!(cargo_check_target_args(true), &["--all-targets"]);
@@ -2647,6 +2821,18 @@ mod tests {
                     .any(|edge| graph.source_name(edge).ends_with("main")
                         && graph.target_name(edge).ends_with("run_command"))
             );
+            // The array-length const is a caller with no MIR function of its
+            // own; its edge must still start at a node.
+            let node_ids: std::collections::HashSet<&str> =
+                graph.nodes.iter().map(|node| node.id.as_str()).collect();
+            for edge in &graph.edges {
+                assert!(
+                    node_ids.contains(edge.source_id.as_str())
+                        && node_ids.contains(edge.target_id.as_str()),
+                    "edge {} has a dangling endpoint",
+                    edge.id
+                );
+            }
             // The inline const is a MIR body of its own, modeled like a closure.
             assert!(
                 envelope
