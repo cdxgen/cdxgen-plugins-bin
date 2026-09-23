@@ -20,7 +20,7 @@ trustinspector-cdxgen host                    # host trust posture
 
 ## Output structure
 
-A single JSON object with three optional top-level keys, depending on mode:
+A single JSON object with an identifying envelope and three optional payload keys, depending on mode. `schema` names the report shape (`trustinspector/report-1`, bumped whenever the shape changes), and `tool`/`toolVersion` identify the binary that produced it; the payload keys stay at the top level so existing consumers keep parsing unchanged.
 
 | Key            | Contents                                                                                                              |
 | -------------- | --------------------------------------------------------------------------------------------------------------------- |

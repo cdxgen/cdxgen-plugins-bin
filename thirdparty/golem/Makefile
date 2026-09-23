@@ -4,15 +4,24 @@ version ?= $(shell node -p "require('../../package.json').version")
 sources := $(shell find cmd internal -type f -name '*.go')
 ldflags := -s -w -X main.version=$(version)
 
-build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -trimpath -ldflags "$(ldflags)" -o build/$(appname)-$(3)$(4) ./cmd/golem
+build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(3)$(4) ./cmd/golem
 sha = cd build && sha256sum $(appname)-$(1)$(2) > $(appname)-$(1)$(2).sha256
 generate_sbom = cdxgen -t go -o build/sbom-golem-postbuild.cdx.json
 
-.PHONY: all windows darwin linux linuxmusl test sbom clean
+.PHONY: all windows darwin linux linuxmusl test fmt fmt-check lint sbom clean
 all: test windows linux darwin sbom
 
 test:
 	go test ./...
+
+fmt:
+	gofmt -w .
+
+fmt-check:
+	@files=$$(gofmt -l . | grep -v testdata/ || true); test -z "$$files" || { echo "gofmt needed on: $$files"; exit 1; }
+
+lint:
+	go vet ./...
 
 clean:
 	rm -rf build/

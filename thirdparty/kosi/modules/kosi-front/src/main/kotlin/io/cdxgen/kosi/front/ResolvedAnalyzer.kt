@@ -25,8 +25,8 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.symbol
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.javaInterop.mapToJvmTypeDescriptor
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtClassOrObject
@@ -38,6 +38,7 @@ import org.jetbrains.kotlin.psi.KtObjectDeclaration
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
 import org.jetbrains.kotlin.psi.KtTypeAlias
+import org.jetbrains.org.objectweb.asm.Type
 
 /**
  * The resolved tier: symbol-resolved declarations, imports and usages over the
@@ -346,18 +347,18 @@ object ResolvedAnalyzer {
                             val descriptor = when (callable) {
                                 is KaConstructorSymbol ->
                                     JvmSignatures.voidMethodDescriptor(
-                                        callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
+                                        callable.valueParameters.map { Type.getType(it.returnType.mapToJvmTypeDescriptor()) },
                                     )
 
                                 is KaPropertySymbol -> null // no single JVM member; accessors carry it
 
                                 is KaFunctionSymbol -> {
                                     val params = buildList {
-                                        callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
-                                        callable.valueParameters.forEach { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                                        callable.receiverParameter?.let { add(Type.getType(it.returnType.mapToJvmTypeDescriptor())) }
+                                        callable.valueParameters.forEach { add(Type.getType(it.returnType.mapToJvmTypeDescriptor())) }
                                     }
                                     JvmSignatures.methodDescriptor(
-                                        callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
+                                        Type.getType(callable.returnType.mapToJvmTypeDescriptor()),
                                         params,
                                     )
                                 }
@@ -548,18 +549,18 @@ object ResolvedAnalyzer {
                         val descriptor = when (callable) {
                             is KaConstructorSymbol ->
                                 JvmSignatures.voidMethodDescriptor(
-                                    callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
+                                    callable.valueParameters.map { Type.getType(it.returnType.mapToJvmTypeDescriptor()) },
                                 )
 
                             is KaPropertySymbol -> null
 
                             is KaFunctionSymbol -> {
                                 val params = buildList {
-                                    callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
-                                    callable.valueParameters.forEach { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                                    callable.receiverParameter?.let { add(Type.getType(it.returnType.mapToJvmTypeDescriptor())) }
+                                    callable.valueParameters.forEach { add(Type.getType(it.returnType.mapToJvmTypeDescriptor())) }
                                 }
                                 JvmSignatures.methodDescriptor(
-                                    callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
+                                    Type.getType(callable.returnType.mapToJvmTypeDescriptor()),
                                     params,
                                 )
                             }

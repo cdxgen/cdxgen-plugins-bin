@@ -41,9 +41,9 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.symbol
+import org.jetbrains.kotlin.analysis.api.javaInterop.mapToJvmTypeDescriptor
 import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtBreakExpression
@@ -73,6 +73,7 @@ import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
 import org.jetbrains.kotlin.psi.KtTryExpression
 import org.jetbrains.kotlin.psi.KtWhenExpression
 import org.jetbrains.kotlin.psi.KtWhileExpression
+import org.jetbrains.org.objectweb.asm.Type
 
 /**
  * PSI + one resolution pass -> [KirModule] (02-ARCHITECTURE.md §4). Lives in
@@ -311,13 +312,13 @@ object KirLowering {
             fun descriptorOf(symbol: KaCallableSymbol): String? =
                 (symbol as? KaFunctionSymbol)?.let {
                     JvmSignatures.methodDescriptor(
-                        it.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT),
+                        Type.getType(it.returnType.mapToJvmTypeDescriptor()),
                         buildList {
                             it.receiverParameter?.let { r ->
-                                add(r.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                                add(Type.getType(r.returnType.mapToJvmTypeDescriptor()))
                             }
                             it.valueParameters.forEach { p ->
-                                add(p.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                                add(Type.getType(p.returnType.mapToJvmTypeDescriptor()))
                             }
                         },
                     )
@@ -392,13 +393,13 @@ object KirLowering {
                 val symbol = call.symbol as? KaCallableSymbol ?: return null
                 val descriptor = (symbol as? KaFunctionSymbol)?.let {
                     JvmSignatures.methodDescriptor(
-                        it.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT),
+                        Type.getType(it.returnType.mapToJvmTypeDescriptor()),
                         buildList {
                             it.receiverParameter?.let { r ->
-                                add(r.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                                add(Type.getType(r.returnType.mapToJvmTypeDescriptor()))
                             }
                             it.valueParameters.forEach { p ->
-                                add(p.returnType.mapToJvmType(org.jetbrains.kotlin.load.kotlin.TypeMappingMode.DEFAULT))
+                                add(Type.getType(p.returnType.mapToJvmTypeDescriptor()))
                             }
                         },
                     )
@@ -543,18 +544,18 @@ object KirLowering {
                 val descriptor = when (callable) {
                     is org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol ->
                         JvmSignatures.voidMethodDescriptor(
-                            callable.valueParameters.map { it.returnType.mapToJvmType(TypeMappingMode.DEFAULT) },
+                            callable.valueParameters.map { Type.getType(it.returnType.mapToJvmTypeDescriptor()) },
                         )
 
                     is KaFunctionSymbol -> {
                         val params = buildList {
-                            callable.receiverParameter?.let { add(it.returnType.mapToJvmType(TypeMappingMode.DEFAULT)) }
+                            callable.receiverParameter?.let { add(Type.getType(it.returnType.mapToJvmTypeDescriptor())) }
                             callable.valueParameters.forEach { p ->
-                                add(p.returnType.mapToJvmType(TypeMappingMode.DEFAULT))
+                                add(Type.getType(p.returnType.mapToJvmTypeDescriptor()))
                             }
                         }
                         JvmSignatures.methodDescriptor(
-                            callable.returnType.mapToJvmType(TypeMappingMode.DEFAULT),
+                            Type.getType(callable.returnType.mapToJvmTypeDescriptor()),
                             params,
                         )
                     }

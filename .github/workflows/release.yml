@@ -23,7 +23,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -88,7 +88,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -153,7 +153,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         package-manager-cache: false
     - name: Install Zig
       run: |
@@ -227,7 +227,7 @@ jobs:
     - name: Use Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
-        node-version: 25.x
+        node-version: 24.x
         registry-url: https://registry.npmjs.org/
         scope: '@cdxgen'
         package-manager-cache: false
@@ -236,10 +236,15 @@ jobs:
         go-version: '^1.27.0'
         cache: false
     - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
+      with:
+        # Pinned to what the action already defaulted to (6.1.0): the action's
+        # default moves with its releases, and SourceKitten must not silently
+        # start building under a different toolchain.
+        swift-version: '6.1.0'
     - name: Set up QEMU
-      uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+      uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
     - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
     - run: oras version
     - name: Authenticate to GHCR

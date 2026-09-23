@@ -233,7 +233,7 @@ when that major changes.
 See [thirdparty/cdxrs/README.md](thirdparty/cdxrs/README.md) for the command
 surface, the protocol and exit codes.
 
-**Supported platforms:** linux-amd64, linux-arm64, linux-arm, linux-ppc64le, linux-riscv64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
+**Supported platforms:** linux-amd64, linux-arm64, linux-arm, linux-riscv64, linuxmusl-amd64, linuxmusl-arm64, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64
 
 ## Installation
 

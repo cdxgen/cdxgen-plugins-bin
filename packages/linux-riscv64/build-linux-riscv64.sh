@@ -5,7 +5,9 @@ set -e
 rm -rf plugins/trivy
 rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
+# kosi is exempt on riscv64 (no artifact at this phase, best-effort LLVM
+# backend; scripts/plugin-platform-support.sh), so it is not staged here.
+for plug in trivy trustinspector golem rusi cdxui cdxrs
 do
     mkdir -p plugins/$plug
     bash ../../scripts/stage-built-plugins.sh "../../plugins/$plug" "plugins/$plug" "linux-riscv64"

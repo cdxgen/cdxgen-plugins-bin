@@ -11,6 +11,7 @@ use cdxrs::{CDXRS_VERSION, SUPPORTED_SPEC_VERSIONS, log};
 
 fn main() {
     let cli = Cli::parse();
+    cdxrs::bom::write::set_compact(cli.compact);
 
     let result = match &cli.command {
         Some(Command::Info) => cdxrs::cmd::info::run(&cli.input, &cli.output, cli.max_input_bytes),

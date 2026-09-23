@@ -14,13 +14,66 @@ import (
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/exporter"
 )
 
-var version = "3.0.0"
+// version is injected at build time (-X main.version=...); "dev" marks a
+// binary built without the injection, so a shipped artifact can never pass a
+// hardcoded release string off as its own.
+var version = "dev"
+
+// Exit codes follow the suite convention kosi documents: 0 success,
+// 1 expectations failed, 2 usage error, 3 runtime error.
+const (
+	exitOK                 = 0
+	exitExpectationsFailed = 1
+	exitUsage              = 2
+	exitRuntime            = 3
+)
+
+// usageError marks a mistake in how golem was invoked: an unparseable flag,
+// an unknown mode, a required combination that is missing.
+type usageError struct{ err error }
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
+func usagef(format string, args ...any) error {
+	return &usageError{err: fmt.Errorf(format, args...)}
+}
+
+// expectationsError marks a gate the input corpus failed: bench regressions,
+// golden digest mismatches. The analysis itself ran; its OUTPUT is what
+// failed.
+type expectationsError struct{ err error }
+
+func (e *expectationsError) Error() string { return e.err.Error() }
+func (e *expectationsError) Unwrap() error { return e.err }
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			// The usage text already went to stderr; that is help, not a
+			// failure.
+			os.Exit(exitOK)
+		}
 		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		switch {
+		case isUsage(err):
+			os.Exit(exitUsage)
+		case isExpectations(err):
+			os.Exit(exitExpectationsFailed)
+		default:
+			os.Exit(exitRuntime)
+		}
 	}
+}
+
+func isUsage(err error) bool {
+	var ue *usageError
+	return errors.As(err, &ue)
+}
+
+func isExpectations(err error) bool {
+	var ee *expectationsError
+	return errors.As(err, &ee)
 }
 
 func run(args []string, stdout io.Writer, stderr io.Writer) error {
@@ -47,6 +100,9 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	patterns := flags.String("patterns", "./...", "comma-separated go/packages patterns")
 	formatValue := flags.String("format", "json", "output format: json, graphml, or gexf")
 	outFile := flags.String("out", "", "output file path; defaults to stdout")
+	// --output is the suite alias for --out; whichever appears last wins.
+	flags.StringVar(outFile, "output", "", "output file path (alias for --out); defaults to stdout")
+	pretty := flags.Bool("pretty", false, "indent JSON output; default is compact")
 	callgraph := flags.String("callgraph", "none", "call graph mode: none, static, cha, rta, vta, or auto")
 	callgraphTimeout := flags.Duration("callgraph-timeout", 0, "call-graph construction timeout; 0 disables")
 	rootsFlag := flags.String("roots", "", "comma-separated root set specifiers: main, init, exported, tests, handlers, all, symbol:<regex>")
@@ -79,39 +135,42 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	includeStdlib := flags.Bool("include-stdlib", false, "include standard library usages and call graph nodes")
 	includeLocal := flags.Bool("include-local", true, "include current module usages and call graph nodes")
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 	format, err := exporter.ParseFormat(*formatValue)
 	if err != nil {
-		return err
+		return &usageError{err: err}
 	}
 	mode := strings.ToLower(strings.TrimSpace(*callgraph))
 	if mode == "" {
 		mode = "none"
 	}
 	if mode != "none" && mode != "static" && mode != "cha" && mode != "rta" && mode != "vta" && mode != "auto" {
-		return fmt.Errorf("unsupported callgraph mode %q: expected none, static, cha, rta, vta, or auto", *callgraph)
+		return usagef("unsupported callgraph mode %q: expected none, static, cha, rta, vta, or auto", *callgraph)
 	}
 	dfMode := strings.ToLower(strings.TrimSpace(*dataflow))
 	if dfMode == "" {
 		dfMode = "none"
 	}
 	if dfMode != "none" && dfMode != "security" && dfMode != "crypto" && dfMode != "all" {
-		return fmt.Errorf("unsupported dataflow mode %q: expected none, security, crypto, or all", *dataflow)
+		return usagef("unsupported dataflow mode %q: expected none, security, crypto, or all", *dataflow)
 	}
 	dfCallgraphMode := strings.ToLower(strings.TrimSpace(*dataflowCallgraph))
 	if dfCallgraphMode == "" {
 		dfCallgraphMode = "static"
 	}
 	if dfCallgraphMode != "none" && dfCallgraphMode != "static" && dfCallgraphMode != "cha" && dfCallgraphMode != "rta" && dfCallgraphMode != "vta" {
-		return fmt.Errorf("unsupported dataflow-callgraph mode %q: expected none, static, cha, rta, or vta", *dataflowCallgraph)
+		return usagef("unsupported dataflow-callgraph mode %q: expected none, static, cha, rta, or vta", *dataflowCallgraph)
 	}
 	if format != exporter.FormatJSON && mode == "none" {
-		return errors.New("graphml and gexf exports require --callgraph static, cha, rta, or vta")
+		return usagef("graphml and gexf exports require --callgraph static, cha, rta, or vta")
 	}
 	memoryLimitBytes, err := analyzer.ParseByteSize(*memoryLimit)
 	if err != nil {
-		return err
+		return &usageError{err: err}
 	}
 	// Resolve dependency-detail with include-all-flows override.
 	detail := *dependencyDetail
@@ -119,11 +178,11 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		detail = "full"
 	}
 	if detail != "drop" && detail != "collapse" && detail != "full" {
-		return fmt.Errorf("unsupported dependency-detail %q: expected drop, collapse, or full", detail)
+		return usagef("unsupported dependency-detail %q: expected drop, collapse, or full", detail)
 	}
 	te := strings.ToLower(strings.TrimSpace(*taintEngine))
 	if te != "legacy" && te != "seam" {
-		return fmt.Errorf("unsupported taint-engine %q: expected legacy or seam", *taintEngine)
+		return usagef("unsupported taint-engine %q: expected legacy or seam", *taintEngine)
 	}
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
@@ -142,7 +201,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	if *dataflowGraphOut != "" {
 		if report.DataFlow == nil {
-			return errors.New("--dataflow-graph-out requires --dataflow security, crypto, or all")
+			return usagef("--dataflow-graph-out requires --dataflow security, crypto, or all")
 		}
 		graphFormat, err := exporter.ParseDataFlowGraphFormat(*dataflowGraphFormat)
 		if err != nil {
@@ -162,7 +221,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		defer func() { _ = file.Close() }()
 		writer = file
 	}
-	return exporter.Write(writer, report, format)
+	return exporter.Write(writer, report, format, *pretty)
 }
 
 func splitCSV(value string) []string {
@@ -188,12 +247,17 @@ Commands:
   bench     Measure the annotated corpus and pinned upstream fixtures
   golden    Generate or verify report digests for the golden fixtures
 
+Exit codes: 0 success; 1 expectations failed (bench/golden gates);
+  2 usage error; 3 runtime error.
+
 analyze Options:
   --dir <path>             Go module/workspace directory to analyze (default: .)
   --no-recurse             Disable recursive child go.mod discovery when root has no go.mod/go.work
   --patterns <patterns>    Comma-separated go/packages patterns (default: ./...)
   --format <format>        json, graphml, or gexf (default: json)
   --out <file>             Output file path (default: stdout)
+  --output <file>          Alias for --out
+  --pretty                 Indent JSON output (default: compact)
   --callgraph <mode>       none, static, cha, rta, or vta (default: none)
   --dataflow <mode>        none, security, crypto, or all (default: none)
   --include-all-flows      Keep external-only flows/call stacks rooted in module cache paths

@@ -40,7 +40,7 @@ Build a local binary and scan an unpacked rootfs:
 
 ```bash
 cd thirdparty/trivy
-GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ./build/trivy-cdxgen-local rootfs --output result.cdx.json /path/to/rootfs
 ```
 

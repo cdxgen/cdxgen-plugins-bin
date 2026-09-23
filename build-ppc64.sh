@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
 
 rm -rf plugins/trivy
-rm -rf plugins/osquery plugins/rusi
-mkdir -p plugins/osquery plugins/rusi
+rm -rf plugins/osquery
+mkdir -p plugins/osquery
 
-for plug in trivy rusi
+# The Rust tools (rusi, cdxrs, cdxui) have no ppc64le build; see
+# scripts/plugin-platform-support.sh.
+for plug in trivy
 do
     mkdir -p plugins/$plug
     pushd thirdparty/$plug
-    if [[ "$plug" == "rusi" ]]; then
-        if find build -maxdepth 1 -type f -name 'rusi-linux-ppc64le' ! -name '*.sha256' -print -quit >/dev/null 2>&1; then
-            make sbom
-        else
-            make build/rusi-linux-ppc64le sbom
-        fi
-    else
-        make build/linux_ppc64le sbom
-    fi
+    make build/linux_ppc64le sbom
     chmod +x build/*
     cp -rf build/* ../../plugins/$plug/
     rm -rf build

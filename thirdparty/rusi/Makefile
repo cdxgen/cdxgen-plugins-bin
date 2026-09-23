@@ -17,7 +17,6 @@ linux_triples := \
 	x86_64-unknown-linux-gnu \
 	aarch64-unknown-linux-gnu \
 	armv7-unknown-linux-gnueabihf \
-	powerpc64le-unknown-linux-gnu \
 	riscv64gc-unknown-linux-gnu
 linuxmusl_triples := \
 	x86_64-unknown-linux-musl \
@@ -29,7 +28,7 @@ darwin_triples := \
 	x86_64-apple-darwin \
 	aarch64-apple-darwin
 
-.PHONY: all all-supported bootstrap-linux bootstrap-darwin linux linuxmusl windows darwin sbom size clean
+.PHONY: all all-supported bootstrap-linux bootstrap-darwin linux linuxmusl windows darwin sbom size clean test fmt fmt-check lint
 
 all: all-supported sbom
 
@@ -53,7 +52,7 @@ bootstrap-darwin:
 	rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
 	rustup target add --toolchain stable $(darwin_triples)
 
-linux: $(build_dir)/$(appname)-linux-amd64 $(build_dir)/$(appname)-linux-arm64 $(build_dir)/$(appname)-linux-arm $(build_dir)/$(appname)-linux-ppc64le $(build_dir)/$(appname)-linux-riscv64
+linux: $(build_dir)/$(appname)-linux-amd64 $(build_dir)/$(appname)-linux-arm64 $(build_dir)/$(appname)-linux-arm $(build_dir)/$(appname)-linux-riscv64
 
 linuxmusl: $(build_dir)/$(appname)-linuxmusl-amd64 $(build_dir)/$(appname)-linuxmusl-arm64
 
@@ -129,9 +128,6 @@ $(build_dir)/$(appname)-linux-arm64: | $(build_dir)
 $(build_dir)/$(appname)-linux-arm: | $(build_dir)
 	$(call zigbuild_binary,armv7-unknown-linux-gnueabihf,$(appname)-linux-arm,linux-arm,)
 
-$(build_dir)/$(appname)-linux-ppc64le: | $(build_dir)
-	$(call zigbuild_binary,powerpc64le-unknown-linux-gnu,$(appname)-linux-ppc64le,linux-ppc64le,)
-
 $(build_dir)/$(appname)-linux-riscv64: | $(build_dir)
 	$(call zigbuild_binary,riscv64gc-unknown-linux-gnu,$(appname)-linux-riscv64,linux-riscv64,)
 
@@ -152,6 +148,18 @@ $(build_dir)/$(appname)-darwin-amd64: | $(build_dir)
 
 $(build_dir)/$(appname)-darwin-arm64: | $(build_dir)
 	$(call darwin_build_binary,aarch64-apple-darwin,$(appname)-darwin-arm64,darwin-arm64)
+
+test:
+	$(cargo_stable) test --locked
+
+fmt:
+	$(cargo_stable) fmt --all
+
+fmt-check:
+	$(cargo_stable) fmt --all --check
+
+lint:
+	$(cargo_stable) clippy --locked --all-targets -- -D warnings
 
 sbom: | $(build_dir)
 	@if ! command -v cdxgen >/dev/null 2>&1; then \

@@ -1,14 +1,25 @@
 PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 appname := trustinspector-cdxgen
 sources := main.go
+version ?= $(shell node -p "require('../../package.json').version")
+ldflags := -s -w -X main.version=$(version)
 
 generate_sbom = cdxgen -t go -o build/sbom-trustinspector-postbuild.cdx.json
-build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -ldflags "-s -w" -o build/$(appname)-$(3)$(4)
+build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(3)$(4)
 sha = cd build && sha256sum $(appname)-$(1)$(2) > $(appname)-$(1)$(2).sha256
 
-.PHONY: all windows darwin linux linuxmusl sbom clean
+.PHONY: all windows darwin linux linuxmusl sbom clean test fmt lint
 
 all: windows linux darwin sbom
+
+test:
+	go test ./...
+
+fmt:
+	gofmt -w .
+
+lint:
+	go vet ./...
 
 clean:
 	rm -rf build/

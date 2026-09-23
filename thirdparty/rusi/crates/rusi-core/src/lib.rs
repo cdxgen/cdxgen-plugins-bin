@@ -28,8 +28,8 @@ use syn::{
 };
 
 mod api_discovery;
-mod endpoint_auth;
 mod cfg;
+mod endpoint_auth;
 mod import_resolution;
 mod modeling;
 mod module_tree;

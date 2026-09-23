@@ -42,7 +42,7 @@ jobs:
         working-directory: thirdparty/trivy
         run: |
           mkdir -p build
-          GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
       - name: Export image rootfs
         env:
           IMAGE_NAME: ${{ matrix.image_name }}

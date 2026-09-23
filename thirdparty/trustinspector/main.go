@@ -22,8 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/openpgp/packet"
+	// The maintained ProtonMail fork of x/crypto/openpgp: x/crypto's copy is
+	// frozen and its OpenPGP implementation carries an unfixed advisory
+	// (GO-2026-5932) with no fixed version to move to.
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 type property struct {
@@ -70,18 +73,57 @@ type hostFinding struct {
 }
 
 type output struct {
+	// Envelope: schema, tool and toolVersion identify the report shape and
+	// the binary that produced it. The payload keys below stay at the top
+	// level so existing consumers keep parsing unchanged.
+	Schema       string           `json:"schema"`
+	Tool         string           `json:"tool"`
+	ToolVersion  string           `json:"toolVersion"`
 	Materials    []trustMaterial  `json:"materials,omitempty"`
 	Inspections  []pathInspection `json:"inspections,omitempty"`
 	HostFindings []hostFinding    `json:"hostFindings,omitempty"`
 }
 
+// trustInspectorSchemaVersion is bumped whenever the output shape changes.
+const trustInspectorSchemaVersion = "trustinspector/report-1"
+
+// version is injected at build time (-X main.version=...); "dev" marks a
+// binary built without the injection.
+var version = "dev"
+
+// Exit codes follow the suite convention kosi documents: 0 success,
+// 2 usage error, 3 runtime error. 1 is reserved for expectations failures,
+// which trustinspector has no gate of.
+const (
+	exitOK      = 0
+	exitUsage   = 2
+	exitRuntime = 3
+)
+
 var windowsPowerShellJSONRunner = runWindowsPowerShellJSON
 var commandRunner = runCommand
 
+// usageError marks a mistake in how the tool was invoked: an unparseable
+// flag or a missing argument.
+type usageError struct{ err error }
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version":
+			fmt.Printf("trustinspector-cdxgen %s\n", version)
+			os.Exit(exitOK)
+		case "help", "--help", "-h":
+			printUsage()
+			os.Exit(exitOK)
+		}
+	}
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		os.Exit(exitUsage)
 	}
 
 	var err error
@@ -93,12 +135,21 @@ func main() {
 	case "host":
 		err = runHost(os.Args[2:])
 	default:
+		fmt.Fprintf(os.Stderr, "trustinspector-cdxgen: unknown command %q\n", os.Args[1])
 		printUsage()
-		os.Exit(1)
+		os.Exit(exitUsage)
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		printUsage()
+		os.Exit(exitOK)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		var ue *usageError
+		if errors.As(err, &ue) {
+			os.Exit(exitUsage)
+		}
+		os.Exit(exitRuntime)
 	}
 }
 
@@ -108,17 +159,23 @@ func printUsage() {
 Commands:
   rootfs <dir>   inspect trust material in an unpacked root filesystem
   paths [paths]  inspect selected binaries/apps on the current platform
-  host           inspect host trust posture on the current platform`)
+  host           inspect host trust posture on the current platform
+  version        print the tool version
+
+Exit codes: 0 success; 2 usage error; 3 runtime error.`)
 }
 
 func runRootfs(args []string) error {
 	flags := flag.NewFlagSet("rootfs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 	if flags.NArg() != 1 {
-		return errors.New("rootfs requires exactly one target directory")
+		return &usageError{err: errors.New("rootfs requires exactly one target directory")}
 	}
 	materials, err := scanRootfsTrustMaterials(flags.Arg(0))
 	if err != nil {
@@ -132,7 +189,10 @@ func runPaths(args []string) error {
 	flags.SetOutput(io.Discard)
 	stdin := flags.Bool("stdin", false, "read newline-delimited paths from stdin")
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 	paths := uniqueSortedStrings(flags.Args())
 	if *stdin {
@@ -162,7 +222,10 @@ func runHost(args []string) error {
 	flags := flag.NewFlagSet("host", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	if err := flags.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err}
 	}
 	var findings []hostFinding
 	switch runtime.GOOS {
@@ -176,10 +239,15 @@ func runHost(args []string) error {
 	return writeJSON(output{HostFindings: findings})
 }
 
-func writeJSON(value any) error {
+// writeJSON stamps the schema, tool and version envelope onto the report
+// without moving the payload keys, so existing consumers keep working.
+func writeJSON(out output) error {
+	out.Schema = trustInspectorSchemaVersion
+	out.Tool = "trustinspector-cdxgen"
+	out.ToolVersion = version
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
-	return enc.Encode(value)
+	return enc.Encode(out)
 }
 
 func readLines(r io.Reader) ([]string, error) {

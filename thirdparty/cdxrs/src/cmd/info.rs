@@ -41,8 +41,7 @@ pub fn run(
     let bom = read::parse_value(&data)?;
     let result = compute_info(&bom);
 
-    let serialized = serde_json::to_string_pretty(&result)?;
-    let output = format!("{serialized}\n");
+    let output = crate::bom::write::serialize_doc(&result)?;
     io_mod::write_output(output_path, output.as_bytes())?;
     Ok(())
 }

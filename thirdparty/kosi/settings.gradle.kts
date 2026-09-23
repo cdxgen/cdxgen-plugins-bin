@@ -31,7 +31,7 @@ dependencyResolutionManagement {
         // (com.jetbrains.intellij.platform:*) the standalone session needs.
         // This is the repository JetBrains documents for platform artifacts;
         // the version is pinned in gradle/libs.versions.toml to the build
-        // Kotlin itself declares (versions.intellijSdk at tag v2.4.0).
+        // Kotlin itself declares (versions.intellijSdk at tag v2.4.20).
         maven("https://www.jetbrains.com/intellij-repository/releases")
     }
 }

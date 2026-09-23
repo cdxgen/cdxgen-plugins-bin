@@ -40,7 +40,7 @@ struct AnalysisArgs {
     toolchain: String,
     #[arg(long, default_value = "json")]
     format: String,
-    #[arg(long)]
+    #[arg(long, short = 'o', visible_alias = "output")]
     out: Option<PathBuf>,
     #[arg(long)]
     callgraph_out: Option<PathBuf>,
@@ -99,7 +99,10 @@ struct AnalysisArgs {
 fn main() {
     if let Err(error) = run() {
         eprintln!("{error:#}");
-        std::process::exit(1);
+        // Exit codes follow the suite convention kosi documents: 0 success,
+        // 2 usage error (clap's own), 3 runtime error. 1 is reserved for
+        // expectations failures, which rusi has no gate of.
+        std::process::exit(3);
     }
 }
 

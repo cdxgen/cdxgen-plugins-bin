@@ -129,7 +129,7 @@ define build_native
 	$(graal_env) native-image -jar $(fat_jar) \
 	  -Os --gc=serial \
 	  -H:ConfigurationFileDirectories=native-metadata/kosi,native-metadata/kosi-psi \
-	  -H:IncludeResources='^kosi-libs/.*|^kosi-ext/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$|^messages/.*\.properties$$' \
+	  -H:IncludeResources='^kosi-libs/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$|^messages/.*\.properties$$' \
 	  -H:+UnlockExperimentalVMOptions \
 	  -H:+AddAllCharsets \
 	  $(KOSI_AWT_FLAG) \

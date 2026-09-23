@@ -51,7 +51,7 @@ object Main {
     fun run(args: Array<String>): Int {
         return try {
             when (args.firstOrNull()) {
-                null, "help", "--help" -> {
+                null, "help", "--help", "-h" -> {
                     printUsage()
                     ExitCodes.OK
                 }
@@ -59,7 +59,7 @@ object Main {
                 "kir" -> kir(args.drop(1))
                 "bench" -> bench(args.drop(1))
                 "golden" -> golden(args.drop(1))
-                "version" -> version(args.drop(1))
+                "version", "--version" -> version(args.drop(1))
                 else -> {
                     System.err.println("kosi: unknown command '${args[0]}' (try: analyze, kir, bench, golden, version)")
                     ExitCodes.USAGE
@@ -82,7 +82,7 @@ object Main {
     // Flag vocabularies. Every accepted flag is listed here: an unknown flag
     // is a usage error (exit 2), never a silently dropped option.
     private val ANALYZE_VALUE_FLAGS = setOf(
-        "dir", "out", "backend", "dataflow", "callgraph", "roots", "root", "dependency-detail",
+        "dir", "out", "output", "backend", "dataflow", "callgraph", "roots", "root", "dependency-detail",
         "dataflow-max-slices", "dataflow-workers", "dataflow-max-function-instructions",
         "dataflow-max-trace-nodes", "dataflow-max-trace-edges", "access-path-depth",
         "callgraph-timeout", "max-paths-per-symbol", "unknown-call", "language-version",
@@ -100,6 +100,9 @@ object Main {
     private val GOLDEN_VALUE_FLAGS = setOf("only", "goldens", "repo-root")
     private val GOLDEN_BOOLEAN_FLAGS = setOf("help", "update-goldens")
     private val VERSION_BOOLEAN_FLAGS = setOf("help", "pretty")
+
+    /** `--output` is the suite alias for `--out`; whichever was given wins. */
+    private fun ParsedArgs.outPath(): String? = value("out") ?: value("output")
 
     private fun analyze(args: List<String>): Int {
         val parsed = ParsedArgs.parse(
@@ -130,7 +133,7 @@ object Main {
         options.degradations().firstOrNull { it.usageError }?.let {
             throw UsageException(it.message)
         }
-        val out = parsed.value("out")
+        val out = parsed.outPath()
         val report = Analyzer.analyze(dir.toAbsolutePath(), options, commit)
         val reachableSymbols = parsed.value("reachable-symbols")
         when (val format = parsed.value("format", "json")) {
@@ -319,7 +322,7 @@ object Main {
         }
         parsed.requireNoPositionals("kir dump", "--dir <path>")
         val dir = parsed.value("dir") ?: throw UsageException("kir dump requires --dir <path>")
-        val outPath = parsed.value("out")
+        val outPath = parsed.outPath()
         val root = Path.of(dir)
         if (!Files.isDirectory(root)) throw UsageException("--dir $dir does not exist or is not a directory")
         val options = optionsFrom(parsed).copy(backend = Backend.RESOLVED)
@@ -721,6 +724,7 @@ object Main {
                            [--compare] [--fail-unless-promotable] [--only <slug>]
               kosi golden  [--update-goldens] [--only <slug>]
               kosi version
+              kosi --version
 
             Exit codes: 0 success; 1 expectations failed; 2 usage error; 3 runtime error.
             """.trimIndent(),
@@ -732,7 +736,7 @@ object Main {
             """
             kosi analyze options (defaults live in AnalyzeOptions, not in the parser):
               --dir <path>                    project root to analyse (default: .)
-              --out <file>                    write report to file (default: stdout)
+              --out <file>                    write report to file (default: stdout; --output is an alias)
               --dataflow <mode>               none|security|crypto|reachable|security-deps|all
               --callgraph <mode>              none|static|cha|sealed|rta|vta|auto
               --roots <scope>                 repeatable: main, exported, handlers, tests, android, all, symbol:<regex>

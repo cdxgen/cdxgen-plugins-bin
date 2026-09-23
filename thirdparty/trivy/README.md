@@ -77,7 +77,7 @@ No `distro_name` qualifier is emitted: Alpaquita has no `VERSION_CODENAME`, so t
 Build a local test binary from this directory:
 
 ```bash
-GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ```
 
 ### Generate a CycloneDX SBOM from an Unpacked Root Filesystem
@@ -144,7 +144,7 @@ The wrapper builds with Go 1.26 and the `jsonv2` experiment enabled — a
 pinned toolchain, not a floor:
 
 ```bash
-GOTOOLCHAIN=go1.26.5 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
 ```
 
 The `jsonv2` experiment is required for the JSON marshaling of enriched

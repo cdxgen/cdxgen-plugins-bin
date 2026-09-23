@@ -131,11 +131,11 @@ type interfaceTypeInfo struct {
 // addReachable marks a function as potentially callable at run-time,
 // and ensures that it gets processed.
 func (r *rta) addReachable(f *ssa.Function, addrTaken bool) {
+	// #80973: a nil function has no SSA body to visit; putting it
+	// on the worklist segfaults visitFunc. Callers pass nil when
+	// MethodValue/LookupMethod decline to lower a method (a Go
+	// 1.27 generic method) to SSA.
 	if f == nil {
-		// #80973: a nil function has no SSA body to visit; putting it
-		// on the worklist segfaults visitFunc. Callers pass nil when
-		// MethodValue/LookupMethod decline to lower a method (a Go
-		// 1.27 generic method) to SSA.
 		return
 	}
 	reachable := r.result.Reachable
@@ -445,17 +445,17 @@ func (r *rta) addRuntimeType(T types.Type) {
 
 			// Exported methods are always potentially callable via reflection.
 			for sel := range methodSetOf(T).Methods() {
-				if sel.Obj().Exported() {
-					// #80973: this is the call that crashed. MethodValue
-					// answers nil for a method with no SSA form — a Go
-					// 1.27 generic method, declaring its own type
-					// parameters, cannot be lowered — and the nil went
-					// onto the worklist for visitFunc to dereference.
-					// addReachable drops it now; the method has no body
-					// to analyze, as the static call graph (CL 788520)
-					// and vta already assume.
-					r.addReachable(r.prog.MethodValue(sel), true)
+				obj := sel.Obj()
+				if !obj.Exported() {
+					continue
 				}
+				if obj.Type().(*types.Signature).TypeParams() != nil {
+					// Skip generic methods: they have no single ssa.Function,
+					// so MethodValue returns nil, and reflection cannot call
+					// them without instantiating them first.
+					continue
+				}
+				r.addReachable(r.prog.MethodValue(sel), true)
 			}
 
 			// Add callgraph edge for each existing dynamic

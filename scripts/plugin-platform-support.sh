@@ -32,9 +32,19 @@
 # returns 1 (printing nothing) when it is not.
 plugin_platform_exemption() {
   local plugin="$1" platform="$2"
-  if [[ "$plugin" != "kosi" ]]; then
-    return 1
-  fi
+  case "$plugin" in
+    rusi|cdxui|cdxrs)
+      case "$platform" in
+        ppc64|ppc64le)
+          echo "no ppc64le Rust build: the prebuild jobs do not install the powerpc64le target"
+          return 0
+          ;;
+      esac
+      return 1
+      ;;
+    kosi) ;;
+    *) return 1 ;;
+  esac
   case "$platform" in
     # the packages/ppc64 directory names its fragment ppc64; same platform.
     ppc64|ppc64le)

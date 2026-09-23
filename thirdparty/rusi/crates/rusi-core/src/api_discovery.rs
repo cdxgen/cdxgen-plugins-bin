@@ -447,9 +447,7 @@ fn collect_layer_names(expr: &Expr, out: &mut Vec<String>) {
             // receiver is walked; the method name itself can also be the
             // middleware (`.bearer_auth(..)`).
             collect_layer_names(&method.receiver, out);
-            if let Some(decl) =
-                crate::endpoint_auth::auth_declaration(&method.method.to_string())
-            {
+            if let Some(decl) = crate::endpoint_auth::auth_declaration(&method.method.to_string()) {
                 out.push(decl);
             }
             for arg in &method.args {
@@ -641,9 +639,9 @@ fn extract_actix_service_expr(
                         path: full_path,
                         handler: String::new(),
                         position: position.clone(),
-                    auth: Vec::new(),
-                    auth_source: None,
-                });
+                        auth: Vec::new(),
+                        auth_source: None,
+                    });
                     // The actual method/handler come from `.route(...)`
                     // chained onto this resource — handled in the
                     // MethodCall branch below; emit a placeholder above
@@ -682,9 +680,9 @@ fn extract_actix_service_expr(
                             path: join_prefix(prefix, resource_path),
                             handler,
                             position: position.clone(),
-                    auth: Vec::new(),
-                    auth_source: None,
-                });
+                            auth: Vec::new(),
+                            auth_source: None,
+                        });
                     }
                 }
                 "service" => {
@@ -776,9 +774,9 @@ fn extract_actix_route_call(
             path,
             handler,
             position,
-                    auth: Vec::new(),
-                    auth_source: None,
-                });
+            auth: Vec::new(),
+            auth_source: None,
+        });
     }
 }
 
@@ -852,9 +850,9 @@ fn attribute_macro_route_fragments(attrs: &[Attribute], file_path: &str) -> Vec<
             path: path_literal,
             handler: String::new(), // handler == enclosing function (set by record)
             position,
-                    auth: Vec::new(),
-                    auth_source: None,
-                });
+            auth: Vec::new(),
+            auth_source: None,
+        });
     }
     out
 }

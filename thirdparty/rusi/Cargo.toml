@@ -1,9 +1,11 @@
 [workspace]
 members = ["crates/rusi-schema", "crates/rusi-core", "crates/rusi-driver", "crates/rusi-cli", "crates/rusi-rustc-wrapper"]
-# The rustc-wrapper links rustc internals via `#![feature(rustc_private)]`, which
-# only builds on a nightly toolchain with the rustc-dev component. It is kept out
-# of the default set so plain `cargo build`/`cargo test` work on stable; the
-# driver builds it explicitly with the resolved nightly toolchain at runtime.
+# The rustc-wrapper links rustc internals via `#![feature(rustc_private)]`,
+# unlocked by RUSTC_BOOTSTRAP on the pinned stable channel that carries the
+# rustc-dev and rust-src components (see evaluate_backend_support in
+# crates/rusi-driver). It is kept out of the default set so plain `cargo
+# build`/`cargo test` stay light; the driver builds it explicitly with the
+# resolved toolchain at runtime.
 default-members = [
     "crates/rusi-schema",
     "crates/rusi-core",
@@ -22,6 +24,7 @@ resolver = "2"
 [workspace.package]
 version = "4.0.1"
 edition = "2024"
+rust-version = "1.98"
 license = "MIT"
 
 [workspace.dependencies]
@@ -37,9 +40,13 @@ serde_json = "1"
 sha2 = "0.11"
 syn = { version = "3", features = ["full", "visit", "extra-traits"] }
 
+# Shared release profile across the Rust tools (cdxrs, cdxui, rusi): thin
+# LTO, abort on panic, size-optimized, stripped. Kept in lockstep so the
+# shipped binaries behave and compress the same way.
 [profile.release]
 codegen-units = 1
 debug = false
 lto = "thin"
 opt-level = "z"
+panic = "abort"
 strip = "symbols"

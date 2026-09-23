@@ -6,7 +6,7 @@ rm -rf plugins/trivy
 rm -rf plugins/osquery
 rm -rf plugins/dosai
 rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
-mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxrs
+mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai linux-arm plugins/dosai/dosai-linux-arm
 sha256sum plugins/dosai/dosai-linux-arm > plugins/dosai/dosai-linux-arm.sha256

@@ -6,6 +6,7 @@
 - **Tool guides**
 - [golem, Go evidence mapper](GOLEM.md)
 - [rusi, Rust source inspector](RUSI.md)
+- [kosi, Kotlin source inspector](KOSI.md)
 - [cdxrs, BOM validation and fetch](CDXRS.md)
 - [cdxui, terminal BOM explorer](CDXUI.md)
 - [trustinspector, trust posture](TRUSTINSPECTOR.md)

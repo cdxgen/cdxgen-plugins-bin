@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/openpgp/packet"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 func TestParseCodeSignOutput(t *testing.T) {
