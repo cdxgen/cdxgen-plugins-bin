@@ -361,6 +361,10 @@
       "codeBasePathProperties": [
         "contextPath"
       ],
+      "codeBasePathSites": [
+        "io.javalin.Javalin.create",
+        "io.javalin.Javalin.Companion.create"
+      ],
       "contextReaders": [
         {
           "kind": "path",
@@ -556,6 +560,10 @@
       ],
       "codeBasePathProperties": [
         "rootPath"
+      ],
+      "codeBasePathSites": [
+        "io.ktor.server.engine.applicationEngineEnvironment",
+        "io.ktor.server.engine.serverConfig"
       ],
       "contextReaders": [
         {

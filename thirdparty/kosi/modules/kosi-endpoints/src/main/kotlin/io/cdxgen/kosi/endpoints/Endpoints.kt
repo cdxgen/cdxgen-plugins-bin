@@ -130,7 +130,9 @@ object Endpoints {
         )
         val manifests = if (includeManifests) AndroidManifestParser.parse(root) else emptyList()
         val manifestCandidates = manifestEndpoints(module, manifests, pack, analysedDeclarations)
-        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root) + registrationMappings(module, pack, folder), pack, root)
+        val unreadRegistrations = mutableListOf<EndpointDetector.Candidate>()
+        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root) + registrationMappings(module, pack, folder, unreadRegistrations), pack, root) +
+            unreadRegistrations
         val crudUnknown = mutableListOf<String>()
         val modules = ModuleConfigs(root, configTable)
         val handled = candidates.mapTo(HashSet()) { it.framework }
@@ -178,7 +180,11 @@ object Endpoints {
                     codeBasePath = { codeBases.base(framework, file) },
                 )
                 val conflict = codeBases.conflict(framework, file)?.takeIf { CODE_BASE_PATH_TOKEN in framework.basePathKeys.flatten() }
-                val based = if (prefix.isEmpty()) candidate else candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
+                // An EMPTY template is a route whose path kosi could not name
+                // (regex, unfolded, unresolved); prefixing it would invent
+                // the base path itself as a served route.
+                val based = if (prefix.isEmpty() || candidate.pathTemplate.isEmpty()) candidate
+                else candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
                 if (conflict != null && based.pathUnresolved == null) based.copy(pathUnresolved = conflict) else based
             }
             .map { candidate -> withTransportParameters(candidate, module, pack, folder, annotationValues) }
@@ -1104,7 +1110,16 @@ object Endpoints {
                     } ?: continue
                     val args = (ins as? KirCall)?.args ?: (ins as KirDynamicCall).args
                     val result = (ins as? KirCall)?.result ?: (ins as KirDynamicCall).result
-                    val paths = args.drop(row.pathArgumentStart).mapNotNull { folder.valueAt(fn, block, index, it)?.value }
+                    val pathArgs = args.drop(row.pathArgumentStart)
+                    val paths = pathArgs.mapNotNull { folder.valueAt(fn, block, index, it)?.value }
+                    if (paths.size < pathArgs.size || pathArgs.isEmpty()) {
+                        out += EndpointDetector.Candidate(
+                            framework = framework.id, httpMethods = listOf("GET"), pathTemplate = "", pathParameters = emptyList(),
+                            handlerSymbol = fn.canonicalName, foundBy = "dsl", position = Position(fn.file, fn.line, fn.line),
+                            exported = null, permissions = null, deepLinkHosts = null,
+                            pathUnresolved = "${row.pattern.substringAfterLast('.')} registers a WebSocket handshake at a path that does not fold to a constant",
+                        )
+                    }
                     if (paths.isEmpty()) continue
                     val handlerClass = row.handlerArgument.takeIf { it >= 0 }?.let { args.getOrNull(it) }?.let { reg ->
                         (all.firstOrNull { (_, _, d) -> d is KirCall && d.result == reg }?.third as? KirCall)
@@ -1158,7 +1173,13 @@ object Endpoints {
      * variable of an interface type, or a pattern that does not fold, is
      * not guessed at, and no endpoint is published for it.
      */
-    private fun registrationMappings(module: KirModule, pack: EndpointsPack, folder: KirValueFolder): List<WebXmlParser.ServletMapping> {
+    private fun registrationMappings(
+        module: KirModule,
+        pack: EndpointsPack,
+        folder: KirValueFolder,
+        unread: MutableList<EndpointDetector.Candidate>,
+    ): List<WebXmlParser.ServletMapping> {
+        val servletFramework = pack.frameworks.firstOrNull { it.registrationBeans.isNotEmpty() }?.id ?: "servlet"
         val rows = pack.frameworks.flatMap { it.registrationBeans }
         if (rows.isEmpty()) return emptyList()
         val out = mutableListOf<WebXmlParser.ServletMapping>()
@@ -1180,8 +1201,17 @@ object Endpoints {
                 val servletClass = ctor.args.firstOrNull()?.let { a ->
                     (all.firstOrNull { (_, _, d) -> d is KirCall && d.result == a }?.third as? KirCall)
                         ?.takeIf { it.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR }?.callee?.fqn
-                } ?: continue
+                }
+                fun unreadRegistration(reason: String) {
+                    unread += EndpointDetector.Candidate(
+                        framework = servletFramework, httpMethods = emptyList(), pathTemplate = "", pathParameters = emptyList(),
+                        handlerSymbol = servletClass ?: fn.canonicalName, foundBy = "dsl",
+                        position = Position(fn.file, fn.line, fn.line), exported = null, permissions = null, deepLinkHosts = null,
+                        pathUnresolved = reason,
+                    )
+                }
                 val patterns = ctor.args.drop(1).flatMap { strings(fn, block, index, it) }.toMutableList()
+                var unfolded = ctor.args.drop(1).count { strings(fn, block, index, it).isEmpty() && folder.valueAt(fn, block, index, it)?.value == null && !isBooleanLoad(all, it) }
                 val aliases = mutableSetOf<String>().apply { ctor.result?.let(::add) }
                 all.forEach { (_, _, s) -> if (s is KirStore && s.value in aliases) aliases.add(s.target) }
                 for ((b, i, call) in all) {
@@ -1222,7 +1252,15 @@ object Endpoints {
                         }
                     }
                 }
-                if (patterns.isEmpty()) continue
+                if (servletClass == null) {
+                    unreadRegistration("${row.pattern.substringAfterLast('.')} registers a ${row.kind} kosi cannot name (not a constructor call)")
+                    continue
+                }
+                if (unfolded > 0) unreadRegistration("${row.pattern.substringAfterLast('.')} maps $servletClass at a url pattern that does not fold to a constant")
+                if (patterns.isEmpty()) {
+                    if (unfolded == 0) unreadRegistration("${row.pattern.substringAfterLast('.')} maps $servletClass at no url pattern kosi could read")
+                    continue
+                }
                 out += WebXmlParser.ServletMapping(
                     file = fn.file,
                     className = servletClass,
@@ -1234,6 +1272,9 @@ object Endpoints {
         }
         return out
     }
+
+    private fun isBooleanLoad(all: List<Triple<io.cdxgen.kosi.kir.KirBlock, Int, io.cdxgen.kosi.kir.KirIns>>, reg: String): Boolean =
+        all.any { (_, _, ins) -> ins is io.cdxgen.kosi.kir.KirLoad && ins.result == reg && ins.constant is io.cdxgen.kosi.kir.KirConstant.Bool }
 
     private fun webXmlEndpoints(
         module: KirModule,
@@ -1490,39 +1531,63 @@ object Endpoints {
         private val modules: ModuleConfigs,
         private val importRootsByFile: Map<String, Set<String>>,
     ) {
-        private val cache = HashMap<Pair<String, Path?>, Set<String>>()
+        /** What one module's code says: folded values, unfolded writes, app-creation sites. */
+        private data class Scan(val values: Set<String>, val writes: Int, val unfolded: Int, val sites: Int)
 
-        private fun values(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): Set<String> {
-            if (framework.codeBasePathProperties.isEmpty()) return emptySet()
+        private val cache = HashMap<Pair<String, Path?>, Scan>()
+
+        private fun scan(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): Scan {
+            if (framework.codeBasePathProperties.isEmpty()) return Scan(emptySet(), 0, 0, 0)
             val moduleRoot = modules.moduleRootOf(file)
             return cache.getOrPut(framework.id to moduleRoot) {
                 val roots = with(EndpointDetector) { framework.dslPackages() }
                 val out = sortedSetOf<String>()
+                var writes = 0
+                var unfolded = 0
+                var sites = 0
                 for (fn in module.functions) {
                     if (modules.moduleRootOf(fn.file) != moduleRoot) continue
                     val imports = importRootsByFile.entries.firstOrNull { (k, _) -> sameFile(k, fn.file) }?.value.orEmpty()
                     if (roots.none { it in imports }) continue
                     for (block in fn.body?.blocks.orEmpty()) {
                         for ((index, ins) in block.instructions.withIndex()) {
+                            val site = when (ins) {
+                                is KirCall -> ins.callee.fqn in framework.codeBasePathSites
+                                is KirDynamicCall -> framework.codeBasePathSites.any { it.substringAfterLast('.') == ins.name }
+                                else -> false
+                            }
+                            if (site) sites++
                             val set = ins as? io.cdxgen.kosi.kir.KirFieldSet ?: continue
                             val name = (set.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name ?: continue
                             if (name !in framework.codeBasePathProperties) continue
-                            folder.valueAt(fn, block, index, set.value)?.value?.trim()
-                                ?.takeIf { it.isNotEmpty() && it != "/" }?.let { out += it }
+                            writes++
+                            val value = folder.valueAt(fn, block, index, set.value)?.value?.trim()
+                            if (value == null) unfolded++ else if (value.isNotEmpty() && value != "/") out += value
                         }
                     }
                 }
-                out
+                Scan(out, writes, unfolded, sites)
             }
         }
 
-        fun base(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? = values(framework, file).singleOrNull()
+        /** The module's base path, only when every app the module creates is proven to use it. */
+        fun base(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? =
+            scan(framework, file).takeIf { conflict(framework, file) == null }?.values?.singleOrNull()
 
-        /** Why the base is unproven, when one module writes two values. */
+        /**
+         * Why the base is unproven: two values in one module, a write whose
+         * value does not fold, or more apps created than base-path writes
+         * (one app's context path is not its sibling's).
+         */
         fun conflict(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? {
-            val found = values(framework, file)
-            if (found.size < 2) return null
-            return "${framework.codeBasePathProperties.joinToString("/")} is set to ${found.joinToString(" and ")} in one module; which app serves this route is not decided"
+            val s = scan(framework, file)
+            val property = framework.codeBasePathProperties.joinToString("/")
+            return when {
+                s.values.size > 1 -> "$property is set to ${s.values.joinToString(" and ")} in one module; which app serves this route is not decided"
+                s.unfolded > 0 -> "$property is set in code to a value that does not fold to a constant"
+                s.writes > 0 && s.sites > s.writes -> "$property is set for ${s.writes} of the ${s.sites} apps this module creates; which app serves this route is not decided"
+                else -> null
+            }
         }
     }
 

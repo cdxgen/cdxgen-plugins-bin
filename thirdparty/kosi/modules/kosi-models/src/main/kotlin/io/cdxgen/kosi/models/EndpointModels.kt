@@ -312,6 +312,12 @@ data class FrameworkModel(
      */
     val codeBasePathProperties: List<String> = emptyList(),
     /**
+     * The calls that create one APP whose base path [codeBasePathProperties]
+     * sets (Javalin `create`, Ktor's environment builders). More sites than
+     * writes in a module leaves the base unproven.
+     */
+    val codeBasePathSites: List<String> = emptyList(),
+    /**
      * Endpoint EXPOSURE for implicit routes carrying an [ImplicitRoute.id]:
      * the include/exclude keys (comma lists, `*` = all, exclude wins) and
      * the IDs exposed when neither is set — Spring Boot exposes "only the
@@ -750,6 +756,7 @@ object EndpointModels {
                 implicitBasePathDefault = f.str("implicitBasePathDefault") ?: "",
                 implicitWhenHandled = f.bool("implicitWhenHandled") ?: false,
                 codeBasePathProperties = f.arr("codeBasePathProperties")?.strings() ?: emptyList(),
+                codeBasePathSites = f.arr("codeBasePathSites")?.strings() ?: emptyList(),
                 implicitExposureIncludeKey = f.str("implicitExposureIncludeKey"),
                 implicitExposureExcludeKey = f.str("implicitExposureExcludeKey"),
                 implicitExposureDefault = f.arr("implicitExposureDefault")?.strings() ?: emptyList(),

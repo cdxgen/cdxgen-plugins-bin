@@ -10,3 +10,11 @@ class ApplicationEngineEnvironmentBuilder {
 }
 
 fun applicationEngineEnvironment(builder: ApplicationEngineEnvironmentBuilder.() -> Unit): Any = Any()
+
+// ktor-server-core 3.x: the server configuration builder, rootPath the same.
+class ServerConfigBuilder {
+    var rootPath: String = ""
+    fun module(body: Application.() -> Unit) {}
+}
+
+fun serverConfig(builder: ServerConfigBuilder.() -> Unit): Any = Any()

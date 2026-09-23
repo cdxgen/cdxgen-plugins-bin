@@ -19,6 +19,11 @@
 // kosi:want-not endpoint framework=servlet fn=~IdleServlet
 // kosi:want-not endpoint framework=servlet path=/admin/purge fn=~ReportServlet
 // kosi:want-not endpoint framework=servlet path=/reports/* fn=~AdminServlet
+//
+// A servlet kosi cannot name, or a pattern read at run time, is kept as an
+// unresolved registration, never dropped.
+// kosi:want endpoint framework=servlet pathunresolved=~cannot fn=~ServletConfig.injected mode=resolved
+// kosi:want endpoint framework=servlet pathunresolved=~fold fn=~ReportServlet mode=resolved
 package fixtures.servletreg
 
 import jakarta.servlet.Filter
@@ -67,6 +72,12 @@ class ServletConfig {
     @Bean
     fun adminApply(): ServletRegistrationBean<AdminServlet> =
         ServletRegistrationBean(AdminServlet()).apply { addUrlMappings("/admin/apply") }
+
+    @Bean
+    fun injected(servlet: AdminServlet): ServletRegistrationBean<AdminServlet> = ServletRegistrationBean(servlet, "/injected")
+
+    @Bean
+    fun fromEnv(): ServletRegistrationBean<ReportServlet> = ServletRegistrationBean(ReportServlet(), System.getenv("PATTERN") ?: "/x")
 
     @Bean
     fun audit(): FilterRegistrationBean<AuditFilter> {

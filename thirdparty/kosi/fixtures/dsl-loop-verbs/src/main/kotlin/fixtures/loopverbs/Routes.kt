@@ -21,6 +21,11 @@
 // kosi:want-not endpoint framework=ktor path=/delete method=PATCH
 // kosi:want-not endpoint framework=ktor path=/chosen method=GET
 // kosi:want-not endpoint framework=ktor path=/
+//
+// A mutable list something adds to, and a reassigned loop variable, are
+// not literal: the verb stays unresolved rather than half right.
+// kosi:want endpoint framework=ktor path=/grown anymethod=false mode=resolved
+// kosi:want-not endpoint framework=ktor path=/grown method=GET
 package fixtures.loopverbs
 
 import io.ktor.http.HttpMethod
@@ -76,11 +81,24 @@ fun Route.runtime(chosen: List<HttpMethod>) {
     }
 }
 
+fun Route.grown() {
+    val verbs = mutableListOf(HttpMethod.Get)
+    verbs.add(HttpMethod.Post)
+    route("/grown") {
+        for (m in verbs) {
+            method(m) {
+                handle { }
+            }
+        }
+    }
+}
+
 fun Application.module() {
     routing {
         statuses()
         unsafe()
         pairs()
         runtime(listOf(HttpMethod.Get))
+        grown()
     }
 }

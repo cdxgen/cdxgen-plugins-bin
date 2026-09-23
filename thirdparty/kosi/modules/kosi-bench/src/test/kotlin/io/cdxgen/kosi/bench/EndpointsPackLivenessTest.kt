@@ -139,6 +139,7 @@ class EndpointsPackLivenessTest {
             "registrationBeans" -> drop({ it.registrationBeans }, { x, l -> x.copy(registrationBeans = l) })
             "handshakeRegistrations" -> drop({ it.handshakeRegistrations }, { x, l -> x.copy(handshakeRegistrations = l) })
             "codeBasePathProperties" -> drop({ it.codeBasePathProperties }, { x, l -> x.copy(codeBasePathProperties = l) })
+            "codeBasePathSites" -> drop({ it.codeBasePathSites }, { x, l -> x.copy(codeBasePathSites = l) })
             // The three channels that state a framework's ARGUMENT
             // BINDING rule (Spring's "any other argument" fallback).
             "contextParameterTypes" -> drop({ it.contextParameterTypes }, { x, l -> x.copy(contextParameterTypes = l) })
@@ -233,6 +234,7 @@ class EndpointsPackLivenessTest {
         fw.registrationBeans.forEach { entry("registrationBeans", it, it.pattern.substringAfterLast('.'), it.pattern) }
         fw.handshakeRegistrations.forEach { entry("handshakeRegistrations", it, it.pattern.substringAfterLast('.'), it.pattern) }
         fw.codeBasePathProperties.forEach { entry("codeBasePathProperties", it, it, it) }
+        fw.codeBasePathSites.forEach { entry("codeBasePathSites", it, it.substringAfterLast('.'), it) }
     }
 
     private fun packRemovables(pack: EndpointsPack): List<Removable> =
@@ -350,6 +352,8 @@ class EndpointsPackLivenessTest {
      * becomes LIVE and the reason is dead text the next sweep prints.
      */
     private fun inertAllowance(): Map<String, String> = mapOf(
+        "javalin.codeBasePathSites[io.javalin.Javalin.create]" to
+            "Javalin is Java: `create` is a STATIC on io.javalin.Javalin in the real jar, which a Kotlin source stub cannot declare (it can only spell io.javalin.Javalin.Companion.create, the live sibling row). fixtures/code-base-paths exercises the companion spelling; this row is the one real bytecode resolves to.",
         "graphql.contextParameterTypes[graphql.schema.DataFetchingEnvironment]" to
             "consumed by the FLOW ENGINE's parameter seeding, not by endpoint detection, so this sweep — which diffs Endpoints.Result — structurally cannot see it. The gate that does is fixtures/graphql-argument-binding, whose want-nots are one per entry: drop this entry and its handler reports a finding. Transcribed from the framework's own documentation, not from memory.",
         "graphql.contextParameterTypes[graphql.GraphQLContext]" to

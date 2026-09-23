@@ -355,16 +355,21 @@ object EndpointDetector {
                 // A SUB-RESOURCE class carries no marker: a locator method
                 // returns it, and its routes are served under the locator.
                 val located = if (framework.subResourceLocators) subResourcePrefixes(framework, input)[ownerCanonical] else null
-                if (framework.classMarkers.isNotEmpty() && located == null) {
-                    val hasMarker = ownerAnnotations.any { owner ->
-                        framework.classMarkers.any { matches(owner, it) }
-                    }
-                    if (!hasMarker) continue
+                val hasMarker = framework.classMarkers.isEmpty() || ownerAnnotations.any { owner ->
+                    framework.classMarkers.any { matches(owner, it) }
                 }
-                val prefixes = located ?: ownerDeclAnnotations
+                if (!hasMarker && located == null) continue
+                val own = ownerDeclAnnotations
                     .firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
                     ?.let { pathsOf(it, framework.pathArguments) }
                     ?: listOf("")
+                // A root resource that a locator ALSO returns is served at
+                // both: its own @Path and every locator path.
+                val prefixes = when {
+                    located == null -> own
+                    hasMarker && framework.classMarkers.isNotEmpty() -> (own + located).distinct()
+                    else -> located
+                }
                 val methods = methodsOf(matched, mapping)
                 val dataRestBase = ownerAnnotations.any { owner ->
                     framework.dataRestBasePathMarkers.any { matches(owner, it) }
@@ -532,7 +537,7 @@ object EndpointDetector {
                 // (ktor-samples httpbin /range, no Ktor jar). A receiverless
                 // stdlib call whose last argument is a lambda and whose name
                 // is a route builder is that unresolved call, and is read as one.
-                val ins = if (raw is KirCall && raw.receiver == null && raw.callee.fqn.startsWith("kotlin.") &&
+                val ins = if (raw is KirCall && raw.receiver == null && raw.callee.fqn in STDLIB_ROUTE_HOMONYMS &&
                     raw.callee.fqn.substringAfterLast('.') in dslNames &&
                     raw.args.lastOrNull()?.let { a -> block.instructions.any { it is KirLambda && it.result == a } } == true
                 ) {
@@ -1223,7 +1228,8 @@ object EndpointDetector {
         val def = http4kInstructions(fn).firstOrNull { resultOf(it) == register } ?: return false
         if (callName(def) in HTTP4K_TABLE_BUILDERS) return true
         val target = when (def) {
-            is KirCall -> input.module.functions.firstOrNull { it.canonicalName == def.callee.fqn && it.params.isEmpty() }
+            // Any arity: `adminRoutes(db)` builds a table as surely as `adminRoutes()`.
+            is KirCall -> input.module.functions.firstOrNull { it.canonicalName == def.callee.fqn }
             is io.cdxgen.kosi.kir.KirFieldGet -> (def.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name
                 ?.let { name -> input.module.functions.firstOrNull { it.canonicalName == "${fn.canonicalName.substringBeforeLast('.', "")}.$name" && it.params.isEmpty() } }
             else -> null
@@ -1251,7 +1257,9 @@ object EndpointDetector {
                     val receiver = (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver ?: continue
                     val block = fn.body?.blocks?.firstOrNull { b -> b.instructions.any { it === ins } } ?: continue
                     val at = block.instructions.indexOfFirst { it === ins }
-                    val segment = input.folder.valueAt(fn, block, at, receiver)?.value ?: continue
+                    // A mount whose path does not fold still mounts: its routes
+                    // are under a prefix kosi cannot name, never at the root.
+                    val segment = input.folder.valueAt(fn, block, at, receiver)?.value ?: UNFOLDED_SCOPE
                     http4kPrefixes(fn, result, input, depth + 1).forEach { outer -> out += joinPaths(outer, segment) }
                 }
                 in HTTP4K_TABLE_BUILDERS -> out += http4kPrefixes(fn, result, input, depth + 1)
@@ -1261,7 +1269,7 @@ object EndpointDetector {
         // The table leaves this function: returned (a helper or a top-level
         // `val` initializer), or built inside a `contract { }` lambda.
         val returned = http4kInstructions(fn).filterIsInstance<io.cdxgen.kosi.kir.KirReturn>().any { it.value == register }
-        if (returned && fn.params.isEmpty()) {
+        if (returned) {
             val short = fn.canonicalName.substringAfterLast('.')
             for (caller in input.module.functions) {
                 for (ins in http4kInstructions(caller)) {
@@ -1462,6 +1470,9 @@ object EndpointDetector {
     private const val LOOP_SCOPE = "\u0000loop:"
     private const val LOOP_SEPARATOR = '\u0001'
     private const val LOOP_SLASH = '\u0002'
+
+    /** The stdlib operators an unresolved route builder was observed binding to (see [detectDsl]). */
+    private val STDLIB_ROUTE_HOMONYMS = setOf("kotlin.collections.get", "kotlin.collections.set")
 
     /** http4k calls that build a ROUTE TABLE (routing.kt `routes`, contract.kt `contract`). */
     private val HTTP4K_TABLE_BUILDERS = setOf("routes", "contract")

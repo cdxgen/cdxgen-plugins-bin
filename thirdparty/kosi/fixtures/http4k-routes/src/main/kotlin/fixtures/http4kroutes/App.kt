@@ -18,6 +18,13 @@
 // kosi:want-not endpoint framework=http4k path=/users
 // kosi:want-not endpoint framework=http4k path=/items
 // kosi:want-not endpoint framework=http4k path=/stats
+//
+// A helper that takes parameters still builds a table, and a mount whose
+// prefix does not fold keeps its routes unresolved, never at the root.
+// kosi:want endpoint framework=http4k path=/tenant/report method=GET mode=resolved
+// kosi:want-not endpoint framework=http4k path=/tenant
+// kosi:want endpoint framework=http4k pathunresolved=~fold fn=~app$lambda mode=resolved
+// kosi:want-not endpoint framework=http4k path=/hidden
 package fixtures.http4kroutes
 
 import org.http4k.core.Method
@@ -32,7 +39,13 @@ fun adminRoutes(): RoutingHttpHandler = routes(
     "/stats" bind Method.GET to { _: Request -> Response("s") },
 )
 
+fun tenantRoutes(name: String): RoutingHttpHandler = routes(
+    "/report" bind Method.GET to { _: Request -> Response(name) },
+)
+
 val app: RoutingHttpHandler = routes(
+    "/tenant" bind tenantRoutes("t"),
+    System.getenv("BASE").orEmpty() bind routes("/hidden" bind Method.GET to { _: Request -> Response("") }),
     "/ping" bind Method.GET to { _: Request -> Response("pong") },
     "/api" bind routes(
         "/users" bind Method.GET to { _: Request -> Response("[]") },

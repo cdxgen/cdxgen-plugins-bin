@@ -18,6 +18,10 @@
 // kosi:want-not endpoint framework=quarkus path=/orders
 // kosi:want-not endpoint framework=quarkus path=/
 // kosi:want-not endpoint framework=quarkus fn=~Orphan.lonely
+//
+// A root resource that a locator also returns is served at both.
+// kosi:want endpoint framework=quarkus path=/invoices method=GET fn=~InvoiceResource.all mode=resolved
+// kosi:want endpoint framework=quarkus path=/customers/{id}/invoices method=GET fn=~InvoiceResource.all mode=resolved
 package fixtures.subres
 
 import jakarta.ws.rs.DELETE
@@ -44,6 +48,9 @@ class CustomerSub(private val id: String) {
 
     @Path("orders")
     fun orders(): OrderSub = OrderSub()
+
+    @Path("invoices")
+    fun invoices(): InvoiceResource = InvoiceResource()
 }
 
 class OrderSub {
@@ -53,6 +60,12 @@ class OrderSub {
     @POST
     @Path("{orderId}/cancel")
     fun cancel(@PathParam("orderId") orderId: String): String = orderId
+}
+
+@Path("/invoices")
+class InvoiceResource {
+    @GET
+    fun all(): String = "[]"
 }
 
 // Never located by anything: its methods are not served anywhere.

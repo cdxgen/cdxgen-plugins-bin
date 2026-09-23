@@ -80,7 +80,11 @@ internal object LoopElements {
             val captured = lambda.captures.getOrNull(k) ?: return null
             return resolve(parent, captured, kind, input, depth + 1)
         }
-        val value = instructions(fn).filterIsInstance<KirStore>().firstOrNull { it.target == register }?.value ?: register
+        // Exactly one store: a reassigned `var` (or a slot two loops share)
+        // has no single loop to bind to.
+        val stores = instructions(fn).filterIsInstance<KirStore>().filter { it.target == register }.toList()
+        if (stores.size > 1) return null
+        val value = stores.singleOrNull()?.value ?: register
         val producer = call(definer(fn, value)) ?: return null
         val (nextCall, component) = when (producer.name) {
             "next" -> producer to 0
@@ -106,22 +110,44 @@ internal object LoopElements {
     /** The element registers of a literal collection, and the function they live in. */
     private fun elementsOf(fn: KirFunction, register: String, input: EndpointDetector.Input): Pair<KirFunction, List<String>>? {
         when (val def = definer(fn, register)) {
-            is KirCall, is KirDynamicCall -> call(def)?.takeIf { isBuilder(it) }?.let { return fn to it.args }
+            is KirCall, is KirDynamicCall -> call(def)?.takeIf { isBuilder(it) && !mutated(fn, register, it) }?.let { return fn to it.args }
             is KirFieldGet -> {
                 // A top-level `val` read: its initializer lowers to a
                 // function of the same name in the declaring package. The
                 // one that returns a literal collection is the one read.
                 val name = (def.path.elements.lastOrNull() as? AccessPath.Element.Field)?.name ?: return null
-                val pkg = fn.canonicalName.substringBeforeLast('.', "")
-                val candidates = input.module.functions.filter { it.canonicalName.substringAfterLast('.') == name && it.params.isEmpty() }
-                val initializer = candidates.firstOrNull { it.canonicalName == "$pkg.$name" } ?: candidates.singleOrNull() ?: return null
+                // The reader's own PACKAGE (a member function's canonical name
+                // carries its class too): a same-named val elsewhere is not it.
+                val scopes = generateSequence(fn.canonicalName.substringBefore('$')) { s -> s.substringBeforeLast('.', "").takeIf { it.isNotEmpty() } }.drop(1)
+                val initializer = scopes.firstNotNullOfOrNull { scope ->
+                    input.module.functions.firstOrNull { it.canonicalName == "$scope.$name" && it.params.isEmpty() }
+                } ?: return null
                 val returned = instructions(initializer).filterIsInstance<KirReturn>().mapNotNull { it.value }.singleOrNull() ?: return null
                 val built = call(definer(initializer, returned)) ?: return null
-                if (isBuilder(built)) return initializer to built.args
+                // A mutable val any function mutates is not its initializer.
+                val mutatedAnywhere = MUTABLE_BUILDERS.contains(built.name) && input.module.functions.any { f ->
+                    instructions(f).any { ins ->
+                        val c = call(ins)
+                        c != null && c.name in MUTATORS && c.receiver != null &&
+                            (definer(f, c.receiver) as? KirFieldGet)?.path?.elements?.lastOrNull()?.let { (it as? AccessPath.Element.Field)?.name } == name
+                    }
+                }
+                if (isBuilder(built) && !mutatedAnywhere) return initializer to built.args
             }
             else -> Unit
         }
         return null
+    }
+
+    private val MUTABLE_BUILDERS = setOf("mutableListOf", "mutableSetOf", "arrayListOf", "linkedSetOf", "hashSetOf")
+    private val MUTATORS = setOf("add", "addAll", "plusAssign", "remove", "removeAll", "clear", "set", "retainAll")
+
+    /** Whether a mutable collection built into [register] is mutated in [fn] before or after the loop. */
+    private fun mutated(fn: KirFunction, register: String, built: Call): Boolean {
+        if (built.name !in MUTABLE_BUILDERS) return false
+        val aliases = mutableSetOf(register)
+        instructions(fn).forEach { if (it is KirStore && it.value in aliases) aliases.add(it.target) }
+        return instructions(fn).any { ins -> call(ins)?.let { it.name in MUTATORS && it.receiver in aliases } == true }
     }
 
     /** `a to b`: component1 is the receiver, component2 the argument. */

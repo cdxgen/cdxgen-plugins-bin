@@ -14,6 +14,8 @@
 // kosi:want-not endpoint framework=spring-mvc path=/stomp-plain/info
 // kosi:want-not endpoint framework=spring-mvc path=/echo/info
 // kosi:want-not endpoint framework=spring-mvc path=/echo method=POST
+// A handshake path read at run time is kept, unresolved.
+// kosi:want endpoint framework=spring-mvc pathunresolved=~fold fn=~registerStompEndpoints mode=resolved
 package fixtures.wshandshake
 
 import org.springframework.web.socket.TextMessage
@@ -32,6 +34,7 @@ class StompConfig : WebSocketMessageBrokerConfigurer {
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
         registry.addEndpoint("/portfolio").setAllowedOrigins("*").withSockJS()
         registry.addEndpoint("/stomp-plain")
+        registry.addEndpoint(System.getenv("WS_PATH") ?: "/ws")
     }
 }
 
