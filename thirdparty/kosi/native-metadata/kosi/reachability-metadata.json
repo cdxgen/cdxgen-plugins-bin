@@ -34,6 +34,20 @@
           "parameterTypes": []
         }
       ],
+      "type": "com.github.benmanes.caffeine.cache.FSA"
+    },
+    {
+      "fields": [
+        {
+          "name": "accessTime"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
       "type": "com.github.benmanes.caffeine.cache.PDA"
     },
     {
@@ -81,6 +95,23 @@
         }
       ],
       "type": "com.github.benmanes.caffeine.cache.BLCHeader$DrainStatusRef"
+    },
+    {
+      "fields": [
+        {
+          "name": "key"
+        },
+        {
+          "name": "value"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "com.github.benmanes.caffeine.cache.FS"
     },
     {
       "fields": [
@@ -366,6 +397,32 @@
         {
           "name": "<init>",
           "parameterTypes": [
+            "com.github.benmanes.caffeine.cache.Caffeine",
+            "com.github.benmanes.caffeine.cache.CacheLoader",
+            "boolean"
+          ]
+        }
+      ],
+      "type": "com.github.benmanes.caffeine.cache.WS"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.github.benmanes.caffeine.cache.Caffeine",
+            "com.github.benmanes.caffeine.cache.CacheLoader",
+            "boolean"
+          ]
+        }
+      ],
+      "type": "com.github.benmanes.caffeine.cache.WSA"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
             "com.intellij.lang.ASTNode"
           ]
         },
@@ -457,11 +514,11 @@
         {
           "name": "<init>",
           "parameterTypes": [
-            "org.jetbrains.kotlin.psi.stubs.KotlinConstructorStub"
+            "org.jetbrains.kotlin.psi.stubs.KotlinConstantExpressionStub"
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtPrimaryConstructor"
+      "type": "org.jetbrains.kotlin.psi.KtConstantExpression"
     },
     {
       "methods": [
@@ -474,11 +531,11 @@
         {
           "name": "<init>",
           "parameterTypes": [
-            "org.jetbrains.kotlin.psi.stubs.KotlinFunctionStub"
+            "org.jetbrains.kotlin.psi.stubs.KotlinConstructorStub"
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtNamedFunction"
+      "type": "org.jetbrains.kotlin.psi.KtPrimaryConstructor"
     },
     {
       "methods": [
@@ -564,23 +621,6 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtNameReferenceExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        },
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "org.jetbrains.kotlin.psi.stubs.KotlinObjectStub"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtObjectDeclaration"
     },
     {
       "methods": [
@@ -1157,73 +1197,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtArrayAccessExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtBinaryExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtBinaryExpressionWithTypeRHS"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtBlockStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtBreakExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtCallableReferenceExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtCatchClause"
     },
     {
       "methods": [
@@ -1245,73 +1219,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtConstantExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtContainerNode"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtContainerNodeForControlStructureBody"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtContinueExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtDoWhileExpression"
     },
     {
       "methods": [
@@ -1333,72 +1241,6 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtFinallySection"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtForExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtFunctionLiteral"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtIfExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtLabelReferenceExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtLabeledExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtLambdaArgument"
     },
     {
@@ -1410,194 +1252,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtObjectLiteralExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtOperationReferenceExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtParenthesizedExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtPostfixExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtPrefixExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtPropertyDelegate"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtReturnExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtSafeQualifiedExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtSuperExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtThisExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtThrowExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtTryExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtWhenConditionIsPattern"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtWhenConditionWithExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtWhenEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtWhenExpression"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtWhileExpression"
     },
     {
       "methods": [
@@ -1762,7 +1417,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.projectStructure.LLFirBuiltinsSessionFactory"
+      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.cache.LLFirSessionCache"
     },
     {
       "methods": [
@@ -1773,7 +1428,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSessionCache"
+      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.factory.LLFirBuiltinsSessionFactory"
     },
     {
       "methods": [
@@ -1796,6 +1451,40 @@
         }
       ],
       "type": "sun.security.provider.NativePRNG"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinFunctionStub"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtNamedFunction"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinObjectStub"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtObjectDeclaration"
     },
     {
       "methods": [
@@ -1966,6 +1655,60 @@
           "parameterTypes": []
         }
       ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.konan.KotlinKlibMetadataDecompiler"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.K2KotlinBuiltInDecompilationInterceptor"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.KotlinBuiltInDecompiler"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.KotlinClassFileDecompiler"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.stub.file.ClsKotlinBinaryClassCache"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.decompiler.stub.file.DummyFileAttributeService"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.file.structure.LLFirInBlockModificationTracker"
     },
     {
@@ -2077,6 +1820,17 @@
         }
       ],
       "type": "jdk.internal.jimage.BasicImageReader"
+    },
+    {
+      "methods": [
+        {
+          "name": "setStubTree",
+          "parameterTypes": [
+            "com.intellij.psi.stubs.PsiFileStub"
+          ]
+        }
+      ],
+      "type": "com.intellij.psi.impl.source.PsiFileImpl"
     },
     {
       "methods": [
@@ -2337,7 +2091,7 @@
       "type": "org.jetbrains.kotlin.KtPsiSourceElement"
     },
     {
-      "type": "org.jetbrains.kotlin.analysis.api.fir.KaFirDefaultImportsProvider"
+      "type": "org.jetbrains.kotlin.analysis.api.fir.imports.KaFirDefaultImportsProvider"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.api.fir.modification.KaFirSourceModificationService"
@@ -2347,9 +2101,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.analysis.api.fir.references.KotlinFirKDocResolutionStrategyProviderService"
-    },
-    {
-      "type": "org.jetbrains.kotlin.analysis.api.fir.references.ReadWriteAccessCheckerFirImpl"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.api.fir.statistics.KaFirStatisticsService"
@@ -2418,6 +2169,9 @@
       "type": "org.jetbrains.kotlin.analysis.api.standalone.base.projectStructure.PluginStructureProvider$PluginDesignation"
     },
     {
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.ReadWriteAccessCheckerBaseImpl"
+    },
+    {
       "type": "org.jetbrains.kotlin.analysis.api.symbols.AdditionalKDocResolutionProvider"
     },
     {
@@ -2434,9 +2188,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.BuiltinsVirtualFileProviderCliImpl"
-    },
-    {
-      "type": "org.jetbrains.kotlin.analysis.decompiler.psi.K2KotlinBuiltInDecompilationInterceptor"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.decompiler.psi.K2KotlinBuiltInStubVersionOffsetProvider"
@@ -2463,13 +2214,13 @@
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSessionConfigurator"
     },
     {
-      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSessionInvalidationEventPublisher"
-    },
-    {
-      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSessionInvalidationService"
-    },
-    {
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.LLFirSessionValidityModificationTracker"
+    },
+    {
+      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.cache.LLFirSessionInvalidationEventPublisher"
+    },
+    {
+      "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.sessions.cache.LLFirSessionInvalidationService"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.low.level.api.fir.statistics.LLStatisticsService"
@@ -2514,13 +2265,7 @@
       "type": "org.jetbrains.kotlin.load.java.structure.impl.source.JavaElementSourceFactory"
     },
     {
-      "type": "org.jetbrains.kotlin.plugin.references.SimpleNameReferenceExtension"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KotlinReferenceProvidersService"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtAnnotatedExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtAnnotation"
@@ -2574,12 +2319,6 @@
       "type": "org.jetbrains.kotlin.psi.KtConstructorCalleeExpression[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtConstructorDelegationCall"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtConstructorDelegationReferenceExpression"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtContextReceiver"
     },
     {
@@ -2605,6 +2344,9 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtDelegatedSuperTypeEntry[]"
+    },
+    {
+      "type": "org.jetbrains.kotlin.psi.KtDestructuringDeclaration[]"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtDotQualifiedExpression[]"
@@ -2662,9 +2404,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtIntersectionType[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtIsExpression"
     },
     {
       "type": "org.jetbrains.kotlin.psi.KtLambdaArgument[]"
@@ -2781,13 +2520,7 @@
       "type": "org.jetbrains.kotlin.psi.KtValueArgument[]"
     },
     {
-      "type": "org.jetbrains.kotlin.psi.KtWhenConditionInRange"
-    },
-    {
       "type": "org.jetbrains.kotlin.psi.KtWhenCondition[]"
-    },
-    {
-      "type": "org.jetbrains.kotlin.psi.KtWhenEntryGuard"
     },
     {
       "type": "org.jetbrains.kotlin.psi.stubs.elements.KtFileElementType"
@@ -2918,16 +2651,10 @@
       "glob": "kosi-commit.txt"
     },
     {
-      "glob": "kosi-version.txt"
-    },
-    {
-      "glob": "kosi-ext/META-INF/extensions/compiler-cli-root.xml"
-    },
-    {
-      "glob": "kosi-ext/META-INF/extensions/compiler.xml"
-    },
-    {
       "glob": "kosi-libs/kotlin-stdlib.jar"
+    },
+    {
+      "glob": "kosi-version.txt"
     },
     {
       "glob": "kotlin/annotation/annotation.kotlin_builtins"

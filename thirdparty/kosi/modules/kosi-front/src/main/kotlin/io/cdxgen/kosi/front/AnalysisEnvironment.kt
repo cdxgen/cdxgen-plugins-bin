@@ -7,16 +7,15 @@ import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor
 import org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession
 import org.jetbrains.kotlin.analysis.api.standalone.buildStandaloneAnalysisAPISession
-import org.jetbrains.kotlin.analysis.project.structure.builder.KtModuleProviderBuilder
+import org.jetbrains.kotlin.analysis.project.structure.builder.KaModuleContainerBuilder
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtLibraryModule
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSdkModule
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSourceModule
 import com.intellij.psi.PsiFile
-import org.jetbrains.kotlin.K1Deprecation
-import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
+import org.jetbrains.kotlin.CoreEnvironmentDeprecation
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.config.ApiVersion
-import org.jetbrains.kotlin.config.CommonConfigurationKeys
+import org.jetbrains.kotlin.cli.create
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.config.LanguageVersion
@@ -110,36 +109,28 @@ class AnalysisEnvironment private constructor(
             create { builder -> ModuleProviderFactory.populate(builder, plan) }
 
         /**
-         * The K1 application environment is created ONCE per process, with a
-         * configuration WE control. This matters in a native image: the stock
-         * session builder creates a fresh CompilerConfiguration, and the K1
-         * bootstrap (registerApplicationExtensionPointsAndExtensionsFrom)
-         * then resolves extension points through a jar-location lookup of
-         * `CompilerSystemProperties.class` — `PathManager.urlToFile` cannot
-         * extract a file path from an image `resource:` URL, so the builder
-         * can never construct. `getOrCreateApplicationEnvironment` caches its
-         * result in a static: seeding it here with INTELLIJ_PLUGIN_ROOT
-         * pointing at the materialized `kosi-ext/META-INF/extensions`
-         * descriptors (the configuration key the 2.4.0 code checks first)
-         * means every later session builder reuses the warmed environment and
-         * never reaches the lookup. On the JVM the same seeding is harmless —
-         * the lookup works there and would find the real jar.
+         * The application environment is created ONCE per process, with a
+         * configuration WE control, and `getOrCreateApplicationEnvironment`
+         * caches it in a static that every later session builder reuses.
+         * Up to 2.4.0 this seed also pointed INTELLIJ_PLUGIN_ROOT at
+         * materialized extension descriptors, because the K1 bootstrap
+         * located them through a jar-location lookup that cannot work in a
+         * native image. 2.4.20 registers its extension points in code
+         * (KotlinCoreEnvironment.createApplicationEnvironment) and removed
+         * both the lookup and the key, so only the `idea.home.path` seeding
+         * remains.
          */
-        @OptIn(K1Deprecation::class)
+        @OptIn(CoreEnvironmentDeprecation::class)
         private val applicationEnvironmentSeed: Any by lazy {
-            @OptIn(CompilerConfiguration.Internals::class, K1Deprecation::class)
-            val configuration = CompilerConfiguration()
-            configuration.put(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY, MessageCollector.NONE)
-            // Always set: the seeded environment never falls back to the
-            // jar-location lookup, on any substrate.
-            configuration.put(CLIConfigurationKeys.INTELLIJ_PLUGIN_ROOT, materializedExtensionRoot())
+            seedIdeaHomePath()
+            val configuration = CompilerConfiguration.create(messageCollector = MessageCollector.NONE)
             KotlinCoreEnvironment.getOrCreateApplicationEnvironmentForProduction(
                 Disposer.newDisposable("kosi application environment seed"),
                 configuration,
             )
         }
 
-        private fun create(configure: (KtModuleProviderBuilder) -> Int): AnalysisEnvironment {
+        private fun create(configure: (KaModuleContainerBuilder) -> Int): AnalysisEnvironment {
             applicationEnvironmentSeed // warm/cached K1 application environment
             val disposable = Disposer.newDisposable()
             var dropped = 0
@@ -176,45 +167,18 @@ class AnalysisEnvironment private constructor(
         }
 
         /**
-         * The compiler's extension descriptors ship as resources (checked in
-         * under `kosi-ext/`); they are materialized into a temp directory and
-         * the directory CONTAINING META-INF is returned, so the extension
-         * points register from real files — no jar-location lookup, which is
-         * what breaks inside a native image (`PathManager.urlToFile` cannot
-         * extract a path from an image `resource:` URL). Also seeds
-         * `idea.home.path` for the platform's PathManager, whose own
+         * Seeds `idea.home.path` for the platform's PathManager, whose own
          * installation-home derivation fails for a single fat jar or an
-         * image.
+         * image. The mock application schedules one runnable through Swing;
+         * what keeps the image off the AWT natives is `java.awt.headless`,
+         * set in `main` and baked at build time for linux.
          */
-        private fun materializedExtensionRoot(): String {
-            // The mock application schedules one runnable through Swing. A
-            // no-op Toolkit used to be selected here through the
-            // `awt.toolkit` property; JDK 25 does not read that property at
-            // all, so the selection never happened (see `main`). What keeps
-            // the image off the AWT natives is `java.awt.headless`, set in
-            // `main` and baked at build time for linux.
-            val descriptors = listOf(
-                "META-INF/extensions/compiler-cli-root.xml",
-                "META-INF/extensions/compiler.xml",
-            )
-            for (name in descriptors) {
-                if (javaClass.classLoader.getResourceAsStream("kosi-ext/$name") == null) {
-                    error("kosi-ext/$name missing from the distribution")
-                }
-            }
-            val root = Files.createTempDirectory("kosi-extensions")
-            for (name in descriptors) {
-                val target = root.resolve("kosi-ext/$name")
-                Files.createDirectories(target.parent)
-                javaClass.classLoader.getResourceAsStream("kosi-ext/$name")!!.use { input ->
-                    Files.copy(input, target)
-                }
-            }
-            val extensionRoot = root.resolve("kosi-ext").toString()
+        private fun seedIdeaHomePath() {
             if (System.getProperty("idea.home.path") == null) {
-                System.setProperty("idea.home.path", extensionRoot)
+                val home = Files.createTempDirectory("kosi-home")
+                home.toFile().deleteOnExit()
+                System.setProperty("idea.home.path", home.toString())
             }
-            return extensionRoot
         }
     }
 }
@@ -266,7 +230,7 @@ internal object ModuleProviderFactory {
     const val WORKSPACE_MODULE_NAME = "workspace"
 
     /** Returns the number of source files the VFS would not open. */
-    fun populate(builder: KtModuleProviderBuilder, plan: ResolvedPlan): Int {
+    fun populate(builder: KaModuleContainerBuilder, plan: ResolvedPlan): Int {
         builder.platform = JvmPlatforms.defaultJvmPlatform
 
         val sdk = plan.jdkHome?.let { jdkHome ->

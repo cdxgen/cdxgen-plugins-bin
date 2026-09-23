@@ -28,9 +28,6 @@
   ],
   "resources": [
     {
-      "pattern": "^kosi-ext/META-INF/extensions/.*\\.xml$"
-    },
-    {
       "pattern": "^META-INF/services/.*"
     }
   ]
