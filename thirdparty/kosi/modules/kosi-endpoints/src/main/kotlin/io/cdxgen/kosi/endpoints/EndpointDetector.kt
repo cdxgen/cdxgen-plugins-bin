@@ -282,14 +282,25 @@ object EndpointDetector {
             null
         }
         if (inheritedFrom != null) input.inheritedMappings.add(inheritedFrom)
-        val annotations = if (inheritedFrom != null) input.annotationValues[inheritedFrom].orEmpty() else own
+        val direct = if (inheritedFrom != null) input.annotationValues[inheritedFrom].orEmpty() else own
+        // COMPOSED annotations: a source-declared annotation meta-annotated
+        // with a mapping (`@PostJson("/x")` on `@RequestMapping(method = [POST])
+        // annotation class PostJson`) IS that mapping, with the use site's
+        // path. Spring: "composed annotations meta-annotated with
+        // @RequestMapping"; JAX-RS: a designator "annotated with the
+        // @HttpMethod annotation".
+        val annotations = direct + direct.flatMap { use -> metaAnnotationsOf(use, input, pack) }
         val ownerCanonical = fn.canonicalName.substringBeforeLast('.')
         val ownDeclAnnotations = declaredIn(input.annotationValues[ownerCanonical].orEmpty(), fn.file)
         val inheritedOwner = inheritedFrom?.substringBeforeLast('.')
         val inheritedOwnerAnnotations = inheritedOwner?.let { input.annotationValues[it].orEmpty() }.orEmpty()
         // The KIR carries RESOLVED owner annotations only; the declaration
         // table also carries import-resolved ones (see Analyzer).
-        val ownerAnnotations = (fn.ownerAnnotations + ownDeclAnnotations.map { it.fqn } + inheritedOwnerAnnotations.map { it.fqn }).distinct()
+        val ownerAnnotations = (
+            fn.ownerAnnotations + ownDeclAnnotations.map { it.fqn } + inheritedOwnerAnnotations.map { it.fqn } +
+                // A custom stereotype (`@ApiController` meta-annotated with @RestController).
+                (ownDeclAnnotations + inheritedOwnerAnnotations).flatMap { use -> input.annotationValues[use.fqn].orEmpty().map { it.fqn } }
+            ).distinct()
         val ownerDeclAnnotations = ownDeclAnnotations + inheritedOwnerAnnotations
 
         // Class-declared routes with convention-named handlers: the servlet
@@ -325,7 +336,15 @@ object EndpointDetector {
 
         for (framework in pack.frameworks) {
             if (framework.kind != "annotation") continue
-            for (mapping in framework.mappingAnnotations) {
+            val designated = framework.verbMetaAnnotations.takeIf { it.isNotEmpty() }?.let { metas ->
+                annotations.mapNotNull { use ->
+                    val verb = input.annotationValues[use.fqn].orEmpty()
+                        .firstOrNull { d -> metas.any { matches(d.fqn, it) } }
+                        ?.let { d -> d.namedValues["value"]?.firstOrNull() ?: d.value }
+                    verb?.let { MappingAnnotation(pattern = use.fqn, methods = listOf(it.uppercase())) }
+                }
+            }.orEmpty()
+            for (mapping in framework.mappingAnnotations + designated) {
                 val matched = annotations.firstOrNull { matches(it.fqn, mapping.pattern) } ?: continue
                 // A marker-bearing framework requires the marker on the
                 // enclosing class: the mapping annotation alone is not a
@@ -354,7 +373,16 @@ object EndpointDetector {
                     val methodPath = framework.methodPathAnnotations.takeIf { it.isNotEmpty() }?.let { patterns ->
                         annotations.firstOrNull { ann -> patterns.any { matches(ann.fqn, it) } }
                     }
-                    val rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments) } ?: pathsOf(matched, framework.pathArguments)
+                    var rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments) } ?: pathsOf(matched, framework.pathArguments)
+                    // Quarkus @Route with neither path nor regex "match[es] a
+                    // path derived from the method name".
+                    var derivedPath: String? = null
+                    if (mapping.pathFromMethodName && rawPaths == listOf("") && matched.namedValues["regex"] == null) {
+                        val name = fn.canonicalName.substringAfterLast('.')
+                        val dashed = name.replace(Regex("([a-z0-9])([A-Z])"), "$1-$2").lowercase()
+                        rawPaths = listOf("/$dashed")
+                        if (dashed != name) derivedPath = "derived from the method name $name; the docs state the rule only for one-word names"
+                    }
                     for (rawPath in rawPaths) {
                         // Spring, JAX-RS and Micronaut all prepend the missing
                         // slash: `@GetMapping("vets.json")` serves `/vets.json`.
@@ -374,6 +402,7 @@ object EndpointDetector {
                                 dataRestBase = dataRestBase,
                                 anyMethod = methods.isEmpty() && mapping.anyMethod,
                                 queryParameters = uriTemplateQueryParameters(path),
+                                pathUnresolved = derivedPath,
                             ),
                         )
                     }
@@ -1146,6 +1175,23 @@ object EndpointDetector {
         if (!mapping.anyMethod) add else { candidate ->
             add(if (candidate.httpMethods.isEmpty() && !candidate.methodSelectorUnresolved) candidate.copy(anyMethod = true) else candidate)
         }
+
+    /**
+     * The mapping annotations a USE of a source-declared annotation implies:
+     * the annotations on that annotation's own declaration which the pack
+     * models as mappings, carrying the use site's path arguments (the
+     * composed annotation's `value` aliases the meta mapping's path).
+     */
+    private fun metaAnnotationsOf(use: DeclAnnotation, input: Input, pack: EndpointsPack): List<DeclAnnotation> {
+        val meta = input.annotationValues[use.fqn].orEmpty()
+        if (meta.isEmpty()) return emptyList()
+        val mappingPatterns = pack.frameworks.flatMap { f -> f.mappingAnnotations.map { it.pattern } }
+        return meta.filter { m -> mappingPatterns.any { matches(m.fqn, it) } }.map { m ->
+            val pathArgs = use.namedValues.filterKeys { it == "value" || it == "path" || it == "uri" }
+            if (pathArgs.isEmpty()) m.copy(line = use.line, file = use.file)
+            else m.copy(namedValues = m.namedValues + pathArgs, value = use.value ?: m.value, line = use.line, file = use.file)
+        }
+    }
 
     /** A typed route's SHORT type name to the `@Resource` class it names, when exactly one analysed class matches. */
     private fun resourceTypeNamed(short: String, framework: FrameworkModel?, input: Input): String? {

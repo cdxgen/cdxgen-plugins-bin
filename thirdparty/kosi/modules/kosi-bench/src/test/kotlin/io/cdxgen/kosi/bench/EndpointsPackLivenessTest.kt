@@ -108,6 +108,7 @@ class EndpointsPackLivenessTest {
             "pathArguments" -> drop({ it.pathArguments }, { x, l -> x.copy(pathArguments = l) })
             "methodPathAnnotations" -> drop({ it.methodPathAnnotations }, { x, l -> x.copy(methodPathAnnotations = l) })
             "dslPredicateTypes" -> drop({ it.dslPredicateTypes }, { x, l -> x.copy(dslPredicateTypes = l) })
+            "verbMetaAnnotations" -> drop({ it.verbMetaAnnotations }, { x, l -> x.copy(verbMetaAnnotations = l) })
             "repositoryDependencyMarkers" -> drop({ it.repositoryDependencyMarkers }, { x, l -> x.copy(repositoryDependencyMarkers = l) })
             "repositoryMarkerSupertypes" -> drop({ it.repositoryMarkerSupertypes }, { x, l -> x.copy(repositoryMarkerSupertypes = l) })
             // Groups of alternatives: one KEY is the removable entry.
@@ -195,6 +196,7 @@ class EndpointsPackLivenessTest {
         fw.pathArguments.forEach { entry("pathArguments", it, it, it) }
         fw.methodPathAnnotations.forEach { entry("methodPathAnnotations", it, it.substringAfterLast('.'), it) }
         fw.dslPredicateTypes.forEach { entry("dslPredicateTypes", it, it.substringAfterLast('/'), it) }
+        fw.verbMetaAnnotations.forEach { entry("verbMetaAnnotations", it, it.substringAfterLast('.'), it) }
         fw.repositoryDependencyMarkers.forEach { entry("repositoryDependencyMarkers", it, it, it) }
         fw.repositoryMarkerSupertypes.forEach { entry("repositoryMarkerSupertypes", it, it.substringAfterLast('.'), it) }
         fw.basePathKeys.flatten().forEach { entry("basePathKeys", it, it, it) }
@@ -844,6 +846,7 @@ class EndpointsPackLivenessTest {
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.Part]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.PathVariable]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.QueryValue]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
+        "quarkus.verbMetaAnnotations[javax.ws.rs.HttpMethod]" to "javax spelling recorded beside its jakarta twin; the exercised designator lives in composed-mappings",
         "quarkus.mappingAnnotations[javax.ws.rs.HEAD]" to "javax spelling recorded beside its jakarta twin; the exercised HEAD row lives in inherited-and-method-paths",
         "quarkus.mappingAnnotations[javax.ws.rs.OPTIONS]" to "javax spelling recorded beside its jakarta twin; the exercised OPTIONS row lives in inherited-and-method-paths",
         "quarkus.methodPathAnnotations[javax.ws.rs.Path]" to "javax spelling recorded beside its jakarta twin; the exercised method-level @Path lives in inherited-and-method-paths",

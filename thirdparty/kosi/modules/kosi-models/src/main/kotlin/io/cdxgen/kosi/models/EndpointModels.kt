@@ -45,6 +45,8 @@ data class MappingAnnotation(
     val pathIsRegex: Boolean = false,
     /** [methodArgument] may name a non-standard verb (Micronaut `@CustomHttpMethod(method = "LOCK")`). */
     val customVerbs: Boolean = false,
+    /** With no path argument, the path is the handler's method name (Quarkus @Route). */
+    val pathFromMethodName: Boolean = false,
 )
 
 /** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
@@ -183,6 +185,11 @@ data class FrameworkModel(
      * class prefix.
      */
     val methodPathAnnotations: List<String> = emptyList(),
+    /**
+     * Meta-annotations that make a source annotation a VERB designator
+     * (JAX-RS `@HttpMethod("PROPFIND") annotation class PROPFIND`).
+     */
+    val verbMetaAnnotations: List<String> = emptyList(),
     /**
      * The config keys that set the DEPLOYMENT base path this framework's
      * routes are served under, as ordered groups: keys within a group are
@@ -618,6 +625,7 @@ object EndpointModels {
                     nestingMethodArgument = m.long("nestingMethodArgument")?.toInt() ?: -1,
                     pathIsRegex = m.bool("pathIsRegex") ?: false,
                     customVerbs = m.bool("customVerbs") ?: false,
+                    pathFromMethodName = m.bool("pathFromMethodName") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(
@@ -646,6 +654,7 @@ object EndpointModels {
                 pathArguments = f.arr("pathArguments")?.strings() ?: emptyList(),
                 dslPredicateTypes = f.arr("dslPredicateTypes")?.strings() ?: emptyList(),
                 methodPathAnnotations = f.arr("methodPathAnnotations")?.strings() ?: emptyList(),
+                verbMetaAnnotations = f.arr("verbMetaAnnotations")?.strings() ?: emptyList(),
                 basePathKeys = f.arr("basePathKeys")?.items?.map { group ->
                     (group as? io.cdxgen.kosi.schema.JsonArr)?.items?.mapNotNull { (it as? io.cdxgen.kosi.schema.JsonStr)?.value }.orEmpty()
                 } ?: emptyList(),

@@ -1152,7 +1152,37 @@
         "jakarta.ws.rs.Path",
         "javax.ws.rs.Path"
       ],
-      "simpleParameterTypes": []
+      "simpleParameterTypes": [],
+      "verbMetaAnnotations": [
+        "jakarta.ws.rs.HttpMethod",
+        "javax.ws.rs.HttpMethod"
+      ]
+    },
+    {
+      "_comment": "quarkus.io/guides/reactive-routes: @Route(path, regex, methods); with neither path nor regex it matches \"a path derived from the method name\"; @RouteBase(path) is \"a prefix for any route method declared on the class\". Not modelled before.",
+      "basePathKeys": [
+        [
+          "quarkus.http.root-path"
+        ]
+      ],
+      "handlerInput": "all",
+      "id": "quarkus-reactive-routes",
+      "kind": "annotation",
+      "mappingAnnotations": [
+        {
+          "anyMethod": true,
+          "methodArgument": "methods",
+          "methods": [],
+          "pathFromMethodName": true,
+          "pattern": "io.quarkus.vertx.web.Route"
+        }
+      ],
+      "pathArguments": [
+        "path"
+      ],
+      "pathPrefixAnnotations": [
+        "io.quarkus.vertx.web.RouteBase"
+      ]
     },
     {
       "_chain_comment": "Ratpack routes are MOUNTED on a Chain (ratpack.io/manual/current/api/ratpack/core/handling/Chain.html): get/post/put/patch/delete/options(path, handler) serve one method, path(path, handler) serves any, prefix(path, action) nests. A Handler class names no route itself; before this, every Handler published the fabricated /Handler/handle.",
@@ -1807,6 +1837,7 @@
     {
       "_base_path_comment": "Deployment base paths are PER FRAMEWORK and COMPOSE: Spring Boot serves server.servlet.context-path (reactive: spring.webflux.base-path) + spring.mvc.servlet.path (the DispatcherServlet path) + the mapping. Before this one repo-wide first-match list applied a Micronaut context-path to gRPC and Azure routes, never composed the servlet path, and read \"server.base-path\", which no framework documents.",
       "_dsl_comment": "WebMvc.fn's router { } (org.springframework.web.servlet.function.RouterFunctionDsl, spring-webmvc 5.3.18 bytecode): the same builder surface on the servlet stack.",
+      "_exchange_comment": "docs.spring.io ann-requestmapping: \"@HttpExchange and @GetExchange are supported as alternatives to @RequestMapping on server-side controllers\"; a class-level @HttpExchange is the base path. A client-only interface carries no controller marker and publishes nothing.",
       "_issue92_comment": "atom-tools#92: Spring declares value/path as String[] aliases, so against the real jars every route arrives as an array constant and a detector reading only the first SCALAR constant published pathTemplate \"\" for every handler; the stub-annotation fixtures declared value: String and could not see it. @RequestMapping's method = [..] was never read, so the verbose style published httpMethod [].",
       "_p27_comment": ", from web/webmvc/mvc-controller/ann-methods/arguments.html and web/webflux/controller/ann-methods/arguments.html rather than from memory. Verbatim: \"If a method argument is not matched to any of the earlier values in this table and it is a simple type (as determined by BeanUtils#isSimpleProperty), it is resolved as a @RequestParam. Otherwise, it is resolved as a @ModelAttribute.\" This entry covers ANNOTATED controllers of both Spring MVC and Spring WebFlux — WebFlux's annotated model publishes the identical fallback rule, and kosi's spring-webflux entry is the FUNCTIONAL router DSL, where ServerRequest genuinely is a context. So WebFlux's own supplied types are listed here too. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "_sdr_comment": "Spring Data REST, from docs.spring.io/spring-data/rest/reference/repository-resources.html and the 3.6.4 bytecode: @RepositoryRestController is meta-annotated @BasePathAwareController and both are @Component, NOT @Controller, so neither matched classMarkers; their handlers and every repository resource sit under spring.data.rest.base-path (or a folded RepositoryRestConfiguration.setBasePath argument, applied after the properties). getBasePath() returns URI while setBasePath takes String, so Kotlin synthesizes no basePath property and the call is the only code spelling. RepositoryRestResource was listed under repositorySupertypes, where an annotation can never match; it is the resource annotation (path, exported). DELETE is backed by delete(T), the method SDR prefers.",
@@ -1994,6 +2025,42 @@
           "methodArgument": "method",
           "methods": [],
           "pattern": "org.springframework.web.bind.annotation.RequestMapping"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "org.springframework.web.service.annotation.GetExchange"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "org.springframework.web.service.annotation.PostExchange"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "org.springframework.web.service.annotation.PutExchange"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "org.springframework.web.service.annotation.PatchExchange"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "org.springframework.web.service.annotation.DeleteExchange"
+        },
+        {
+          "anyMethod": true,
+          "methodArgument": "method",
+          "methods": [],
+          "pattern": "org.springframework.web.service.annotation.HttpExchange"
         }
       ],
       "mediaAnnotations": [
@@ -2110,10 +2177,12 @@
       ],
       "pathArguments": [
         "value",
-        "path"
+        "path",
+        "url"
       ],
       "pathPrefixAnnotations": [
-        "org.springframework.web.bind.annotation.RequestMapping"
+        "org.springframework.web.bind.annotation.RequestMapping",
+        "org.springframework.web.service.annotation.HttpExchange"
       ],
       "repositoryCrudMethods": [
         "count",
