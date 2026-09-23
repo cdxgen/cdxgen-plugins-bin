@@ -526,7 +526,16 @@ jobs:
           [[ -f "packages/$kosi_platform/plugins/kosi/kosi-$kosi_platform.sha256" ]]
         done
         bash ./scripts/root-package-publish.test.sh
-        npm publish --dry-run
+        # npm rejects a dry-run publish of a version the registry already has,
+        # which fails every PR between a release and the next version bump.
+        # Validate the tarball with npm pack in that window instead.
+        pkg_spec="$(node -p "const p = require('./package.json'); p.name + '@' + p.version")"
+        if npm view "$pkg_spec" version >/dev/null 2>&1; then
+          echo "$pkg_spec is already published; checking the tarball with npm pack --dry-run"
+          npm pack --dry-run
+        else
+          npm publish --dry-run
+        fi
       env:
         NODE_OPTIONS: --max_old_space_size=4096        
     - name: Upload packaged plugins
@@ -590,7 +599,16 @@ jobs:
         fi
 
         pushd "$package_dir"
-        npm publish --dry-run
+        # npm rejects a dry-run publish of a version the registry already has,
+        # which fails every PR between a release and the next version bump.
+        # Validate the tarball with npm pack in that window instead.
+        pkg_spec="$(node -p "const p = require('./package.json'); p.name + '@' + p.version")"
+        if npm view "$pkg_spec" version >/dev/null 2>&1; then
+          echo "$pkg_spec is already published; checking the tarball with npm pack --dry-run"
+          npm pack --dry-run
+        else
+          npm publish --dry-run
+        fi
         popd
   winpkg:
     runs-on: windows-latest
