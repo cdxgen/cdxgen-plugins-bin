@@ -110,13 +110,15 @@ rustup component add rustc-dev rust-src --toolchain stable
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
 
-Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently the pinned stable (1.98) through nightly 1.100. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` rather than per-version `cfg`s. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
 
 When embedded compiler collection is available, Rusi builds its local `rusi-rustc-wrapper` with the resolved toolchain and then runs the target repository with:
 
 ```bash
 cargo +<resolved-toolchain> check
 ```
+
+The wrapper sources are embedded in the `rusi` binary, so a released binary does not need a rusi checkout. On first use they are written to `$RUSI_CACHE_DIR` (default `$XDG_CACHE_HOME/rusi`, `~/.cache/rusi`, or `%LOCALAPPDATA%\rusi` on Windows) and the wrapper is built there. There is no fallback to the system temp directory, because the tree is compiled and run; with none of those variables set the compiler backend reports a `backend-error` and the stable analysis is used. Set `RUSI_WRAPPER_SOURCE` to a rusi workspace to build from a different source tree instead.
 
 under a Rusi `RUSTC_WRAPPER`. This is where most compiler-mode time is spent on real repositories. Test targets are skipped by default. Add `--tests` to opt into test/example/bench target analysis, which makes compiler mode run:
 
