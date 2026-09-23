@@ -71,11 +71,11 @@ build/linuxmusl_%: $(sources)
 		-v "$(PWD)":/src \
 		-w /src \
 		golang:1.26-alpine \
+		sh -c 'GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
 
 build/linux_ppc64le: $(sources)
 	$(call build,linux,ppc64le,)
 	$(call sha,linux,ppc64le,)
-		sh -c 'GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
 
 build/linux_riscv64: $(sources)
 	$(call build,linux,riscv64,)
