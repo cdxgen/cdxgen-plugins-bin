@@ -14,6 +14,36 @@ data class MappingAnnotation(
     val methods: List<String>,
     /** A nesting route-shaper (`route("/x") { .. }`) contributes its path to descendants and publishes no endpoint itself. */
     val nesting: Boolean = false,
+    /**
+     * The annotation argument that NARROWS [methods] on the site:
+     * `@RequestMapping(method = [RequestMethod.POST])` serves POST although
+     * the annotation's own [methods] is empty. Null when the annotation's
+     * methods are fixed by its name (`@GetMapping`).
+     */
+    val methodArgument: String? = null,
+    /**
+     * The framework serves EVERY HTTP method here when the site narrows
+     * none: `@RequestMapping` without `method`, Vert.x `router.route(..)`,
+     * Ratpack `chain.path(..)`. Distinct from an empty [methods] kosi
+     * could not resolve.
+     */
+    val anyMethod: Boolean = false,
+    /**
+     * A [nesting] shaper whose first argument is a PATH segment its
+     * descendants sit under (Ktor `route`, Javalin `path`, Ratpack
+     * `prefix`); false for a shaper that selects by something else (Ktor
+     * `accept("application/json")` selects by media type).
+     */
+    val nestingPath: Boolean = false,
+)
+
+/** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
+data class RepositoryRoute(
+    /** Relative to the resource: `""` is the collection, `/{id}` the item. */
+    val path: String,
+    val method: String,
+    /** Repository methods that back the route; hidden when every one is unexported. */
+    val backedBy: List<String>,
 )
 
 /** One framework's detection data. [kind] is `annotation`, `dsl`, `supertype` or `manifest`. */
@@ -121,6 +151,43 @@ data class FrameworkModel(
      * servlet modelled that way detects no endpoint at all.
      */
     val classMappingAnnotations: List<String> = emptyList(),
+    /**
+     * The annotation arguments a route PATH may be written under, in
+     * precedence order. Spring declares `value` and `path` as `String[]`
+     * aliases, so `@GetMapping("/x")`, `@GetMapping(value = ["/x"])` and
+     * `@GetMapping(path = ["/x"])` are the same route; one array may name
+     * several paths, each its own endpoint. Applies to [mappingAnnotations],
+     * [pathPrefixAnnotations] and [classMappingAnnotations] alike. Empty
+     * means `value` alone, the annotation convention.
+     */
+    val pathArguments: List<String> = emptyList(),
+    /**
+     * What carries this framework's endpoints when it is not HTTP:
+     * `messaging` (Kafka/JMS/STOMP listeners, schedulers), `grpc`,
+     * `android`, `function` (a cloud function's event trigger). Empty is
+     * HTTP. A consumer building an HTTP API description reads this to keep
+     * non-HTTP handlers out of `paths` without dropping them.
+     */
+    val transport: String = "",
+    /**
+     * Frameworks whose every handler is served at ONE path: Spring for
+     * GraphQL answers every query and mutation at `POST /graphql`
+     * (`spring.graphql.http.path`; Boot 2.7's `spring.graphql.path`).
+     */
+    val servedAtKeys: List<String> = emptyList(),
+    val servedAtDefault: String? = null,
+    val servedAtMethods: List<String> = emptyList(),
+    /**
+     * Cloud-function HTTP triggers (Azure's `@HttpTrigger`): a function
+     * with a parameter carrying one is HTTP, served at
+     * `/<routePrefix>/<route or function name>` with the trigger's
+     * `methods` (all when none); a function without one is event-triggered
+     * and not HTTP. [functionRoutePrefixDefault] is the host's default
+     * prefix, overridden by `host.json` at [functionRoutePrefixHostKey].
+     */
+    val functionHttpTriggers: List<String> = emptyList(),
+    val functionRoutePrefixDefault: String = "",
+    val functionRoutePrefixHostKey: String = "",
     /** Handler method name -> the HTTP methods it serves (`doGet` -> GET). */
     val handlerMethodNames: List<HandlerMethodName> = emptyList(),
     /**
@@ -165,8 +232,59 @@ data class FrameworkModel(
      * endpoint, named after the entity, with no handler in source.
      */
     val repositorySupertypes: List<String> = emptyList(),
-    /** HTTP methods a repository collection serves. */
-    val repositoryMethods: List<String> = emptyList(),
+    /**
+     * The routes a repository resource serves and the repository method
+     * backing each (Spring Data REST reference, "Repository resources"):
+     * the collection serves GET/HEAD via `findAll` and POST via `save`; the
+     * item `/{id}` serves GET/HEAD via `findById`, PUT/PATCH via `save` and
+     * DELETE via `delete`. A route whose backing method the repository
+     * declares with `exported = false` is not served. Replaces a flat verb
+     * list that published PUT and DELETE on the COLLECTION and no item route.
+     */
+    val repositoryRoutes: List<RepositoryRoute> = emptyList(),
+    /**
+     * Annotations on a repository TYPE that rename or hide its resource
+     * (`@RepositoryRestResource(path = "orders", exported = false)`).
+     */
+    val repositoryResourceAnnotations: List<String> = emptyList(),
+    /**
+     * Annotations on a repository METHOD that hide the routes it backs or
+     * rename its search resource (`@RestResource(exported = false)`).
+     */
+    val repositoryMethodAnnotations: List<String> = emptyList(),
+    /**
+     * Methods a repository declares that are CRUD plumbing, never search
+     * resources: every other abstract member the repository declares is a
+     * query method, served at `/{collection}/search/{name}`.
+     */
+    val repositoryCrudMethods: List<String> = emptyList(),
+    /**
+     * Repository supertypes that carry the CRUD methods only in older
+     * generations: spring-data-commons 3.0 split `PagingAndSortingRepository`
+     * off `CrudRepository`, leaving it [repositoryPagingMethods] alone. Below spring-data-commons major
+     * [repositoryPagingCrudBelowMajor] they still bring the full CRUD set.
+     */
+    val repositoryPagingSupertypes: List<String> = emptyList(),
+    val repositoryPagingMethods: List<String> = emptyList(),
+    val repositoryPagingCrudBelowMajor: Int = 0,
+    /** `group:artifact` whose major version decides [repositoryPagingCrudBelowMajor]. */
+    val repositoryGenerationArtifact: String? = null,
+    /**
+     * Class markers whose handlers — and every repository resource — are
+     * served under the Spring Data REST BASE PATH:
+     * `@BasePathAwareController` and `@RepositoryRestController` (which is
+     * meta-annotated with it). Neither is a `@Controller`, which is why the
+     * base-path-aware handlers were invisible to [classMarkers] matching.
+     */
+    val dataRestBasePathMarkers: List<String> = emptyList(),
+    /** Config keys that set that base path (`spring.data.rest.base-path`). */
+    val dataRestBasePathKeys: List<String> = emptyList(),
+    /**
+     * Calls that set it in code (`RepositoryRestConfiguration.setBasePath`),
+     * which Spring applies after the properties — a folded call argument
+     * wins over the key.
+     */
+    val dataRestBasePathSetters: List<String> = emptyList(),
     /**
      * How a `context` handler reads its input, and WHICH TRANSPORT each
      * reader names.
@@ -350,7 +468,7 @@ const val TRANSPORT_MERGED: String = "merged"
 data class ImplicitRoute(val path: String, val methods: List<String>)
 
 /** One convention-named handler: the method name and what it serves. */
-data class HandlerMethodName(val name: String, val methods: List<String>)
+data class HandlerMethodName(val name: String, val methods: List<String>, val anyMethod: Boolean = false)
 
 /** Handler-input shapes; see [FrameworkModel.handlerInput]. */
 const val HANDLER_INPUT_ANNOTATED: String = "annotated"
@@ -368,7 +486,8 @@ const val HANDLER_INPUT_ALL: String = "all"
 data class ParameterAnnotation(
     val pattern: String,
     val category: String,
-    val kind: String,
+    val kind: String,    /** Serves every HTTP method (`service`, `doFilter`); see [MappingAnnotation.anyMethod]. */
+    val anyMethod: Boolean = false,
 )
 
 /**
@@ -434,6 +553,9 @@ object EndpointModels {
                     pattern = require(m.str("pattern"), "frameworks[].${key}[].pattern"),
                     methods = m.arr("methods")?.strings() ?: emptyList(),
                     nesting = m.bool("nesting") ?: false,
+                    methodArgument = m.str("methodArgument"),
+                    anyMethod = m.bool("anyMethod") ?: false,
+                    nestingPath = m.bool("nestingPath") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(
@@ -459,6 +581,14 @@ object EndpointModels {
                 nonInputAnnotations = f.arr("nonInputAnnotations")?.strings() ?: emptyList(),
                 simpleParameterTypes = f.arr("simpleParameterTypes")?.strings() ?: emptyList(),
                 classMappingAnnotations = f.arr("classMappingAnnotations")?.strings() ?: emptyList(),
+                pathArguments = f.arr("pathArguments")?.strings() ?: emptyList(),
+                transport = f.str("transport") ?: "",
+                servedAtKeys = f.arr("servedAtKeys")?.strings() ?: emptyList(),
+                servedAtDefault = f.str("servedAtDefault"),
+                servedAtMethods = f.arr("servedAtMethods")?.strings() ?: emptyList(),
+                functionHttpTriggers = f.arr("functionHttpTriggers")?.strings() ?: emptyList(),
+                functionRoutePrefixDefault = f.str("functionRoutePrefixDefault") ?: "",
+                functionRoutePrefixHostKey = f.str("functionRoutePrefixHostKey") ?: "",
                 resourceAnnotations = f.arr("resourceAnnotations")?.strings() ?: emptyList(),
                 applicationPathAnnotations = f.arr("applicationPathAnnotations")?.strings() ?: emptyList(),
                 dependencyMarkers = f.arr("dependencyMarkers")?.strings() ?: emptyList(),
@@ -471,7 +601,23 @@ object EndpointModels {
                 implicitBasePathKeys = f.arr("implicitBasePathKeys")?.strings() ?: emptyList(),
                 implicitBasePathDefault = f.str("implicitBasePathDefault") ?: "",
                 repositorySupertypes = f.arr("repositorySupertypes")?.strings() ?: emptyList(),
-                repositoryMethods = f.arr("repositoryMethods")?.strings() ?: emptyList(),
+                repositoryRoutes = f.arr("repositoryRoutes")?.objects()?.map { r ->
+                    RepositoryRoute(
+                        path = r.str("path") ?: "",
+                        method = require(r.str("method"), "frameworks[].repositoryRoutes[].method"),
+                        backedBy = r.arr("backedBy")?.strings() ?: emptyList(),
+                    )
+                } ?: emptyList(),
+                repositoryResourceAnnotations = f.arr("repositoryResourceAnnotations")?.strings() ?: emptyList(),
+                repositoryMethodAnnotations = f.arr("repositoryMethodAnnotations")?.strings() ?: emptyList(),
+                repositoryCrudMethods = f.arr("repositoryCrudMethods")?.strings() ?: emptyList(),
+                repositoryPagingSupertypes = f.arr("repositoryPagingSupertypes")?.strings() ?: emptyList(),
+                repositoryPagingMethods = f.arr("repositoryPagingMethods")?.strings() ?: emptyList(),
+                repositoryPagingCrudBelowMajor = f.long("repositoryPagingCrudBelowMajor")?.toInt() ?: 0,
+                repositoryGenerationArtifact = f.str("repositoryGenerationArtifact"),
+                dataRestBasePathMarkers = f.arr("dataRestBasePathMarkers")?.strings() ?: emptyList(),
+                dataRestBasePathKeys = f.arr("dataRestBasePathKeys")?.strings() ?: emptyList(),
+                dataRestBasePathSetters = f.arr("dataRestBasePathSetters")?.strings() ?: emptyList(),
                 contextReaders = f.arr("contextReaders")?.objects()?.map { c ->
                     ContextReader(
                         pattern = require(c.str("pattern"), "frameworks[].contextReaders[].pattern"),
@@ -511,6 +657,7 @@ object EndpointModels {
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),
                         methods = h.arr("methods")?.strings() ?: emptyList(),
+                        anyMethod = h.bool("anyMethod") ?: false,
                     )
                 } ?: emptyList(),
             )

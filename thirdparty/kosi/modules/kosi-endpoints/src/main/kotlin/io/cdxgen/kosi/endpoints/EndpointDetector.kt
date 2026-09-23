@@ -17,6 +17,7 @@ import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirValueFolder
 import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.models.FrameworkModel
+import io.cdxgen.kosi.models.MappingAnnotation
 import io.cdxgen.kosi.schema.Position
 
 /**
@@ -52,7 +53,30 @@ object EndpointDetector {
         val value: String?,
         val line: Int,
         val namedValues: Map<String, List<String>> = emptyMap(),
+        /**
+         * The file the annotated declaration lives in. A canonical name is
+         * NOT unique across a multi-module build — digital-restaurant has
+         * thirteen `com.drestaurant.web.CommandController`s, one per app —
+         * and without the file their `@RequestMapping` prefixes pool under
+         * one key and a handler takes another module's route.
+         */
+        val file: String? = null,
     )
+
+    /**
+     * [annotations] declared in [file]: the same-named declaration in another
+     * module is another declaration. The KIR carries the absolute
+     * virtual-file path and the declaration drafts the root-relative one, so
+     * the two agree when one ends with the other on a segment boundary.
+     */
+    internal fun declaredIn(annotations: List<DeclAnnotation>, file: String?): List<DeclAnnotation> =
+        if (file == null) annotations else annotations.filter { it.file == null || sameFile(it.file, file) }
+
+    private fun sameFile(a: String, b: String): Boolean {
+        val x = a.replace('\\', '/')
+        val y = b.replace('\\', '/')
+        return x == y || x.endsWith("/" + y.trimStart('/')) || y.endsWith("/" + x.trimStart('/'))
+    }
 
     class Input(
         val module: KirModule,
@@ -61,7 +85,14 @@ object EndpointDetector {
         val folder: KirValueFolder,
         /** Extracted-lambda links: lambda canonical -> (parent function, creating call). */
         val lambdaLinks: Map<String, LambdaLink>,
-    )
+    ) {
+        /**
+         * Call names that open a NESTED route scope, from the pack's
+         * `nesting` rows (Ktor `route`, Javalin `path`, Ratpack `prefix`);
+         * set by [detect].
+         */
+        internal var nestingNames: Set<String> = setOf("route", "path")
+    }
 
     data class LambdaLink(
         val parentFunction: String,
@@ -112,12 +143,36 @@ object EndpointDetector {
          * to answer it.
          */
         val substantiated: Boolean? = null,
+        /**
+         * Served under the Spring Data REST base path: a handler of a
+         * `@BasePathAwareController`/`@RepositoryRestController`, or a
+         * repository resource. The base is resolved per module and composed
+         * after detection.
+         */
+        val dataRestBase: Boolean = false,
+        /**
+         * Why [pathTemplate] is known to be INCOMPLETE — a base path the
+         * deployment sets but kosi could not prove (two config files in one
+         * module disagree, or a setter argument did not fold). The template
+         * is then relative to that unproven base, and says so.
+         */
+        val pathUnresolved: String? = null,
+        /** Serves every HTTP method; [httpMethods] is then empty by design, not unresolved. */
+        val anyMethod: Boolean = false,
+        /** Not HTTP: the framework's [io.cdxgen.kosi.models.FrameworkModel.transport], or `function` for an event-triggered cloud function. */
+        val transport: String? = null,
     )
 
     fun detect(input: Input, pack: EndpointsPack = io.cdxgen.kosi.models.EndpointModels.loadBuiltin()): List<Candidate> {
+        input.nestingNames = pack.frameworks.flatMap { f ->
+            f.dslFunctions.filter { it.nesting && it.nestingPath }.map { it.pattern.substringAfterLast('.') }
+        }.toSet()
         val byKey = linkedMapOf<String, Candidate>()
         fun add(candidate: Candidate) {
-            val key = candidate.framework + "\u0000" + candidate.handlerSymbol + "\u0000" + candidate.pathTemplate
+            // The file is part of identity: one canonical handler declared in
+            // two app modules serving the same route is two endpoints.
+            val key = candidate.framework + "\u0000" + candidate.handlerSymbol + "\u0000" + candidate.pathTemplate +
+                "\u0000" + candidate.position?.filename.orEmpty()
             if (key !in byKey) byKey[key] = candidate
         }
         val functions = input.module.functions.sortedWith(
@@ -142,8 +197,12 @@ object EndpointDetector {
             detectGrpc(fn, pack, ::add)
             detectDsl(fn, input, pack, resolvedPackages, ::add)
         }
+        // A handler class a mount call linked to a route is that route's
+        // handler; its route-less supertype candidate is not a second endpoint.
+        val mounted = mountedHandlers(byKey.values)
+        byKey.values.removeAll { it.pathUnresolved != null && it.pathTemplate.isEmpty() && it.handlerSymbol in mounted }
         return byKey.values.sortedWith(
-            compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }),
+            compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }, { it.position?.filename.orEmpty() }),
         )
     }
 
@@ -156,10 +215,10 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         if (fn.syntheticCause != null) return
-        val annotations = input.annotationValues[fn.canonicalName].orEmpty()
+        val annotations = declaredIn(input.annotationValues[fn.canonicalName].orEmpty(), fn.file)
         val ownerAnnotations = fn.ownerAnnotations
         val ownerCanonical = fn.canonicalName.substringBeforeLast('.')
-        val ownerDeclAnnotations = input.annotationValues[ownerCanonical].orEmpty()
+        val ownerDeclAnnotations = declaredIn(input.annotationValues[ownerCanonical].orEmpty(), fn.file)
 
         // Class-declared routes with convention-named handlers: the servlet
         // shape, where `@WebServlet("/run")` sits on the class and `doGet`
@@ -172,21 +231,23 @@ object EndpointDetector {
             val classMapping = ownerDeclAnnotations.firstOrNull { ann ->
                 framework.classMappingAnnotations.any { matches(ann.fqn, it) }
             } ?: continue
-            val path = classMapping.value?.trim()?.removeSurrounding("\"").orEmpty()
-            add(
-                Candidate(
-                    framework = framework.id,
-                    httpMethods = handler.methods,
-                    pathTemplate = normalizePath(path),
-                    pathParameters = pathParametersOf(path),
-                    handlerSymbol = fn.canonicalName,
-                    foundBy = "annotation",
-                    position = Position(fn.file, fn.line, fn.line),
-                    exported = true,
-                    permissions = emptyList(),
-                    deepLinkHosts = emptyList(),
-                ),
-            )
+            for (path in pathsOf(classMapping, framework.pathArguments)) {
+                add(
+                    Candidate(
+                        framework = framework.id,
+                        httpMethods = handler.methods,
+                        anyMethod = handler.methods.isEmpty() && handler.anyMethod,
+                        pathTemplate = normalizePath(path),
+                        pathParameters = pathParametersOf(path),
+                        handlerSymbol = fn.canonicalName,
+                        foundBy = "annotation",
+                        position = Position(fn.file, fn.line, fn.line),
+                        exported = true,
+                        permissions = emptyList(),
+                        deepLinkHosts = emptyList(),
+                    ),
+                )
+            }
         }
         if (annotations.isEmpty()) return
 
@@ -203,28 +264,83 @@ object EndpointDetector {
                     }
                     if (!hasMarker) continue
                 }
-                val prefix = ownerDeclAnnotations
+                val prefixes = ownerDeclAnnotations
                     .firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
-                    ?.value?.trim()?.removeSurrounding("\"").orEmpty()
-                val rawPath = matched.value?.trim()?.removeSurrounding("\"").orEmpty()
-                val path = joinPaths(prefix, rawPath)
-                add(
-                    Candidate(
-                        framework = framework.id,
-                        httpMethods = mapping.methods,
-                        pathTemplate = normalizePath(path),
-                        pathParameters = pathParametersOf(path),
-                        handlerSymbol = fn.canonicalName,
-                        foundBy = "annotation",
-                        position = Position(fn.file, fn.line, fn.line),
-                        exported = null,
-                        permissions = null,
-                        deepLinkHosts = null,
-                    ),
-                )
+                    ?.let { pathsOf(it, framework.pathArguments) }
+                    ?: listOf("")
+                val methods = methodsOf(matched, mapping)
+                val dataRestBase = ownerAnnotations.any { owner ->
+                    framework.dataRestBasePathMarkers.any { matches(owner, it) }
+                }
+                // One endpoint per (prefix, path) pair: Spring serves the
+                // cross product of a class-level and a method-level array.
+                for (prefix in prefixes) {
+                    for (rawPath in pathsOf(matched, framework.pathArguments)) {
+                        // Spring, JAX-RS and Micronaut all prepend the missing
+                        // slash: `@GetMapping("vets.json")` serves `/vets.json`.
+                        val path = joinPaths(prefix, rawPath).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
+                        add(
+                            Candidate(
+                                framework = framework.id,
+                                httpMethods = methods,
+                                pathTemplate = normalizePath(path),
+                                pathParameters = pathParametersOf(path),
+                                handlerSymbol = fn.canonicalName,
+                                foundBy = "annotation",
+                                position = Position(fn.file, fn.line, fn.line),
+                                exported = null,
+                                permissions = null,
+                                deepLinkHosts = null,
+                                dataRestBase = dataRestBase,
+                                anyMethod = methods.isEmpty() && mapping.anyMethod,
+                            ),
+                        )
+                    }
+                }
                 return
             }
         }
+    }
+
+    /**
+     * The route paths one mapping annotation declares. The first of
+     * [arguments] that carries constants wins, every element of it a path:
+     * `value`/`path` are `String[]` on the real Spring annotations, so the
+     * front end publishes them ONLY through [DeclAnnotation.namedValues] —
+     * [DeclAnnotation.value] holds a first SCALAR constant and is null for
+     * every real `@GetMapping`. An annotation whose arguments carry constants
+     * but no path argument (`@GetMapping(produces = [..])`) declares the
+     * empty path; [DeclAnnotation.value] is consulted only when no argument
+     * folded to a constant at all (an interpolated template the syntax tier
+     * keeps as text), which is what it meant before.
+     */
+    internal fun pathsOf(annotation: DeclAnnotation, arguments: List<String>): List<String> {
+        for (argument in arguments.ifEmpty { DEFAULT_PATH_ARGUMENTS }) {
+            val declared = annotation.namedValues[argument].orEmpty()
+            if (declared.isNotEmpty()) return declared.map { it.trim().removeSurrounding("\"") }.distinct()
+        }
+        if (annotation.namedValues.isNotEmpty()) return listOf("")
+        return listOf(annotation.value?.trim()?.removeSurrounding("\"").orEmpty())
+    }
+
+    private val DEFAULT_PATH_ARGUMENTS = listOf("value")
+
+    private val HTTP_METHODS = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")
+
+    /**
+     * The HTTP methods a mapping site serves: the site's own
+     * [MappingAnnotation.methodArgument] (`method = [RequestMethod.POST]`,
+     * arriving as `POST` or a qualified `RequestMethod.POST`) when it names
+     * any, else the annotation's fixed [MappingAnnotation.methods]. A value
+     * that is not an HTTP method is dropped, never guessed at.
+     */
+    internal fun methodsOf(annotation: DeclAnnotation, mapping: MappingAnnotation): List<String> {
+        val argument = mapping.methodArgument ?: return mapping.methods
+        val declared = annotation.namedValues[argument].orEmpty()
+            .map { it.substringAfterLast('.').uppercase() }
+            .filter { it in HTTP_METHODS }
+            .distinct()
+        return declared.ifEmpty { mapping.methods }
     }
 
     // ---- dsl kind (Ktor routing, WebFlux router, http4k bind) ---------------
@@ -258,7 +374,7 @@ object EndpointDetector {
                         val mapping = framework.dslFunctions.firstOrNull { matches(ins.callee.fqn, it.pattern) }
                         if (mapping != null) {
                             if (mapping.nesting) continue
-                            detectRouteCall(fn, block, index, ins, framework, mapping.methods, input, add)
+                            detectRouteCall(fn, block, index, ins, framework, mapping.methods, input, anyMethodAdd(mapping, add))
                         } else {
                             detectBindCall(fn, block, index, ins, framework, input, add)
                         }
@@ -289,18 +405,33 @@ object EndpointDetector {
                                 hasRouteShape(fn, ins, input)
                         }
                         if (byName.isEmpty()) continue
+                        // A framework the module demonstrably uses spells this
+                        // name as a NESTING builder (Ktor's `route("/x") { }`):
+                        // the call is that prefix, never a route of another
+                        // framework that happens to share the name.
+                        val nestingHere = pack.frameworks.any { f ->
+                            f.dslFunctions.any { it.nesting && it.pattern.substringAfterLast('.') == ins.name } &&
+                                f.dslPackages().any { it in resolvedPackages }
+                        }
+                        if (nestingHere && byName.none { f -> f.dslPackages().any { it in resolvedPackages } }) continue
                         val evidenced = byName.firstOrNull { f -> f.dslPackages().any { it in resolvedPackages } }
                         if (evidenced != null) {
                             val mapping = evidenced.dslFunctions.firstOrNull {
                                 it.pattern.substringAfterLast('.') == ins.name && !it.nesting
                             } ?: continue
-                            detectRouteCall(fn, block, index, ins, evidenced, mapping.methods, input, add)
+                            detectRouteCall(fn, block, index, ins, evidenced, mapping.methods, input, anyMethodAdd(mapping, add))
                         } else {
                             // No framework's package is demonstrably present:
                             // publish the ROUTE (the path and handler are
-                            // real) with no framework claim and no verb list
-                            // — a verb would name a framework's builder.
-                            detectRouteCall(fn, block, index, ins, null, emptyList(), input, add)
+                            // real) with no framework claim. The verb is
+                            // published only when EVERY candidate builder of
+                            // this name agrees on it (`get` is GET in Ktor,
+                            // Javalin, Spark and Vert.x alike): then it names
+                            // no framework. Any disagreement keeps none.
+                            val consensus = byName.map { f ->
+                                f.dslFunctions.first { it.pattern.substringAfterLast('.') == ins.name && !it.nesting }.methods
+                            }.distinct().singleOrNull().orEmpty()
+                            detectRouteCall(fn, block, index, ins, null, consensus, input, add)
                         }
                     }
 
@@ -788,8 +919,37 @@ object EndpointDetector {
         if (args.size < 2) return null
         val start = framework?.roleArgumentStart ?: -1
         val handlerReg = if (start in 1..args.lastIndex) args[start - 1] else args.last()
-        return LambdaResolver.resolve(fn, handlerReg, input)
+        return LambdaResolver.resolve(fn, handlerReg, input) ?: constructedHandlerOf(fn, handlerReg, input, framework)
     }
+
+    /**
+     * A handler passed as an INSTANCE — Ratpack's `chain.get("x", MyHandler())`
+     * — rather than a lambda: the register's producer is a constructor call,
+     * and the handler is that class's method the framework dispatches to
+     * ([FrameworkModel.handlerMethodNames]).
+     */
+    private fun constructedHandlerOf(fn: KirFunction, register: String, input: Input, framework: FrameworkModel?): String? {
+        val names = framework?.handlerMethodNames?.map { it.name }.orEmpty()
+        if (names.isEmpty()) return null
+        val producer = fn.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
+            ?.filterIsInstance<KirCall>()
+            ?.firstOrNull {
+                it.result == register &&
+                    (it.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR || it.callee.fqn.endsWith(".<init>"))
+            } ?: return null
+        val type = producer.callee.fqn.removeSuffix(".<init>")
+        return names.asSequence().map { "$type.$it" }.firstOrNull { name ->
+            input.module.functions.any { it.canonicalName == name }
+        }
+    }
+
+    /** Marks a route whose DSL call serves every method (and bound none) as [Candidate.anyMethod]. */
+    private fun anyMethodAdd(mapping: MappingAnnotation, add: (Candidate) -> Unit): (Candidate) -> Unit =
+        if (!mapping.anyMethod) add else { candidate -> add(if (candidate.httpMethods.isEmpty()) candidate.copy(anyMethod = true) else candidate) }
+
+    /** Handler classes a DSL mount call links to a route; their unmounted supertype candidate is superseded. */
+    internal fun mountedHandlers(candidates: Collection<Candidate>): Set<String> =
+        candidates.filter { it.foundBy == "dsl" }.mapTo(HashSet()) { it.handlerSymbol }
 
     private fun publish(
         add: (Candidate) -> Unit,
@@ -803,6 +963,10 @@ object EndpointDetector {
         produces: List<String> = emptyList(),
         authentication: List<String> = emptyList(),
     ) {
+        // A relative DSL path is served from the root of its scope: Ratpack's
+        // `chain.get("search", ..)` and Ktor's `get("hello")` are `/search`
+        // and `/hello`.
+        val path = if (path.isNotEmpty() && !path.startsWith("/")) "/$path" else path
         add(
             Candidate(
                 // Null framework = the route SHAPE matched but no framework
@@ -899,7 +1063,7 @@ object EndpointDetector {
             hops++
             val link = input.lambdaLinks[current] ?: break
             val call = link.creationCall
-            if (EndpointDetector.callName(call) in setOf("route", "path")) {
+            if (EndpointDetector.callName(call) in input.nestingNames) {
                 val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction }
                 val block = parent?.body?.blocks?.firstOrNull { it.instructions.any { it === call } }
                 if (parent != null && block != null) {
@@ -947,6 +1111,33 @@ object EndpointDetector {
             }
         }
         val (grpc, base) = matched ?: return
+        if (grpc.supertypeSuffixes.isEmpty()) {
+            // Not an RPC base: a Ratpack Handler or a Lambda RequestHandler
+            // names NO route on the class. The route is wherever a chain
+            // call mounts it, or in the deployment (API Gateway, a function
+            // URL) — never `/<Supertype>/<method>`, which this published and
+            // which matches no traffic. A DSL mount found elsewhere
+            // supersedes this candidate; an unmounted one says so.
+            val method = fn.canonicalName.substringAfterLast('.')
+            if (method == "<init>") return
+            add(
+                Candidate(
+                    framework = grpc.id,
+                    httpMethods = emptyList(),
+                    pathTemplate = "",
+                    pathParameters = emptyList(),
+                    handlerSymbol = fn.canonicalName,
+                    foundBy = "annotation",
+                    position = Position(fn.file, fn.line, fn.line),
+                    exported = null,
+                    permissions = null,
+                    deepLinkHosts = null,
+                    pathUnresolved = "the ${base.substringAfterLast('.')} implementation declares no route; " +
+                        "it is bound where the application mounts it, which kosi did not link",
+                ),
+            )
+            return
+        }
         // The RPC path is `/<Service>/<Method>`; the service names out of
         // the generated base's simple name minus its suffix
         // (`GreeterImplBase` -> `Greeter`, the proto service's name).
@@ -1110,18 +1301,33 @@ object EndpointDetector {
      * what every one of these frameworks defaults to when the annotation
      * names none.
      */
-    internal fun annotatedParameters(fn: KirFunction, framework: FrameworkModel): TransportParameters {
+    internal fun annotatedParameters(
+        fn: KirFunction,
+        framework: FrameworkModel,
+        /** The parameter's annotations WITH values, by parameter name. */
+        valuesOf: (String) -> List<DeclAnnotation> = { emptyList() },
+    ): TransportParameters {
         if (framework.parameterAnnotations.isEmpty()) return TransportParameters.EMPTY
         val path = sortedSetOf<String>()
         val query = sortedSetOf<String>()
         for (param in fn.params) {
             if (param.receiver) continue
-            val kind = param.annotations.firstNotNullOfOrNull { annotation ->
-                framework.parameterAnnotations.firstOrNull { matches(annotation, it.pattern) }?.kind
+            val model = param.annotations.firstNotNullOfOrNull { annotation ->
+                framework.parameterAnnotations.firstOrNull { matches(annotation, it.pattern) }
             } ?: continue
+            val kind = model.kind
             // A parameter the KIR could not name contributes nothing: an
             // unnamed entry in this list is worse than a shorter list.
-            val name = param.name?.takeIf { it.isNotEmpty() } ?: continue
+            val own = param.name?.takeIf { it.isNotEmpty() } ?: continue
+            // The ANNOTATION's name wins: `@PathVariable("idProduct") id`
+            // binds the URL variable `idProduct`, and `id` is only the Kotlin
+            // name (Spring's value/name aliases; JAX-RS's value).
+            val declared = valuesOf(own).firstOrNull { matches(it.fqn, model.pattern) }
+            val name = declared?.let { ann ->
+                sequenceOf("value", "name").firstNotNullOfOrNull { key ->
+                    ann.namedValues[key]?.firstOrNull()?.takeIf { it.isNotEmpty() }
+                }
+            } ?: own
             when (kind) {
                 TRANSPORT_PATH -> path.add(name)
                 TRANSPORT_QUERY -> query.add(name)
@@ -1131,7 +1337,7 @@ object EndpointDetector {
         return TransportParameters(path.toList(), query.toList())
     }
 
-    private fun pathParametersOf(path: String): List<String> =
+    internal fun pathParametersOf(path: String): List<String> =
         Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim() }.sorted().toList()
 
     /**

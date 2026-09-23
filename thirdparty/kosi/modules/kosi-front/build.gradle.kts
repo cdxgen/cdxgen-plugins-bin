@@ -38,11 +38,22 @@ val kosiStdlibJar = configurations.create("kosiStdlib") {
 dependencies {
     add("kosiStdlib", "org.jetbrains.kotlin:kotlin-stdlib:2.4.0") { isTransitive = false }
 }
+val kosiVersion: String = rootProject.file("../../package.json").takeIf { it.isFile }
+    ?.let { (groovy.json.JsonSlurper().parse(it) as Map<*, *>)["version"] as? String }
+    ?: "unknown"
+
 tasks.processResources {
     dependsOn(kosiStdlibJar)
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     from(kosiStdlibJar) {
         rename { "kosi-libs/kotlin-stdlib.jar" }
+    }
+    // kosi ships inside cdxgen-plugins-bin and carries ITS version, read from
+    // the repository's package.json the way golem's Makefile does — a
+    // hard-coded constant stayed at 0.2.0 through the 4.0.0 release.
+    inputs.property("kosiVersion", kosiVersion)
+    filesMatching("kosi-version.txt") {
+        expand("version" to kosiVersion)
     }
 }
 

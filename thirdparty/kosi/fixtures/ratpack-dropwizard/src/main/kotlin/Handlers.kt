@@ -49,12 +49,22 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~search mode=endpoint
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~whoami
 // (checked in every slot: the @Auth principal is never request data)
+// Mounting (atom-tools#92 follow-up): a Handler class names no route; the
+// chain that mounts it does. Instance form and lambda form both link, the
+// mounted class takes the chain's path and verb, and a handler nobody
+// mounts says so instead of publishing the fabricated `/Handler/handle`.
+// kosi:want endpoint framework=ratpack path=/search method=GET fn=~QueryParamSink.handle pathunresolved=none mode=resolved
+// kosi:want endpoint framework=ratpack path=/api/any anymethod=true mode=resolved
+// kosi:want endpoint framework=ratpack fn=~HeaderSink.handle pathunresolved=~declares mode=resolved
+// kosi:want-not endpoint framework=ratpack path=/Handler/handle
+// kosi:want-not endpoint framework=ratpack fn=~QueryParamSink.handle pathunresolved=~declares
 package fixtures.ratpackdropwizard
 
 import io.dropwizard.auth.Auth
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.QueryParam
+import ratpack.core.handling.Chain
 import ratpack.core.handling.Context
 import ratpack.core.handling.Handler
 import ratpack.handling.Context as LegacyContext
@@ -193,5 +203,13 @@ class UserResource {
     fun whoami(@Auth principal: Principal): String {
         run(principal.name)
         return principal.name
+    }
+}
+
+/** The application's chain: where handlers get their routes. */
+fun routes(chain: Chain) {
+    chain.get("search", QueryParamSink())
+    chain.prefix("api") { api ->
+        api.path("any") { context -> context.render("any") }
     }
 }

@@ -1,0 +1,4 @@
+# The spring-data-commons generation decides whether a
+# PagingAndSortingRepository brings CRUD (below 3.0 it does). Bound to a
+# committed marker jar so the coordinate is present on every machine.
+org.springframework.data:spring-data-commons:2.6.4=libs/spring-data-commons-2.6.4.jar

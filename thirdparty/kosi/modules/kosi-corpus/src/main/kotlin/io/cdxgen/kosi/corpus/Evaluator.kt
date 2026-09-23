@@ -309,7 +309,14 @@ object Evaluator {
                 (ann.queryParam == null || endpoint.queryParameters.any { matches(ann.queryParam, it) }) &&
                 (ann.consumes == null || endpoint.consumes.any { matches(ann.consumes, it) }) &&
                 (ann.produces == null || endpoint.produces.any { matches(ann.produces, it) }) &&
-                (ann.authentication == null || endpoint.authentication.any { matches(ann.authentication, it) })
+                (ann.authentication == null || endpoint.authentication.any { matches(ann.authentication, it) }) &&
+                (
+                    ann.pathUnresolved == null ||
+                        (if (ann.pathUnresolved == "none") endpoint.pathUnresolved == null
+                        else endpoint.pathUnresolved?.let { matches(ann.pathUnresolved, it) } == true)
+                    ) &&
+                (ann.transport == null || (if (ann.transport == "http") endpoint.transport == null else matches(ann.transport, endpoint.transport))) &&
+                (ann.anyMethod == null || endpoint.anyMethod == (ann.anyMethod == "true"))
         }
         val expected = ann.count ?: 1
         return matched.size >= expected

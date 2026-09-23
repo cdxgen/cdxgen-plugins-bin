@@ -100,6 +100,9 @@ object AnnotationParser {
             var consumes: String? = null
             var produces: String? = null
             var authentication: String? = null
+            var pathUnresolved: String? = null
+            var transport: String? = null
+            var anyMethod: String? = null
             var path: String? = null
             var method: String? = null
             var cipherMode: String? = null
@@ -157,6 +160,9 @@ object AnnotationParser {
                     "consumes" -> consumes = rawValue
                     "produces" -> produces = rawValue
                     "authentication" -> authentication = rawValue
+                    "pathunresolved" -> pathUnresolved = rawValue
+                    "transport" -> transport = rawValue
+                    "anymethod" -> anyMethod = rawValue
                     "ciphermode" -> cipherMode = rawValue
                     "padding" -> padding = rawValue
                     "form" -> form = rawValue
@@ -249,6 +255,9 @@ object AnnotationParser {
                 consumes = consumes,
                 produces = produces,
                 authentication = authentication,
+                pathUnresolved = pathUnresolved,
+                transport = transport,
+                anyMethod = anyMethod,
                 cipherMode = cipherMode,
                 padding = padding,
                 form = form,

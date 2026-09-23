@@ -76,6 +76,7 @@ object ResolvedAnalyzer {
         val jvmOwner: String?,
         val jvmDescriptor: String?,
         val position: Position,
+        val parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
     )
 
     data class ResolvedFileFacts(
@@ -405,6 +406,8 @@ object ResolvedAnalyzer {
                             jvmOwner = symbol?.let { jvmOf[it]?.first },
                             jvmDescriptor = symbol?.let { jvmOf[it]?.second },
                             position = positionAt(lines, relativePath, declaration.textOffset),
+                            parameterAnnotations = (declaration as? org.jetbrains.kotlin.psi.KtNamedFunction)
+                                ?.let { SyntaxAnalyzer.parameterAnnotationsOf(it) } ?: emptyMap(),
                         ),
                     )
                 }
@@ -723,6 +726,10 @@ object ResolvedAnalyzer {
                 listOfNotNull(value.value?.toString())
             is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ArrayValue ->
                 value.values.flatMap { constantValuesOf(it) ?: emptyList() }
+            // `method = [RequestMethod.POST]`: an enum entry is a constant
+            // too, published under its entry name.
+            is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.EnumEntryValue ->
+                listOfNotNull(value.callableId?.callableName?.asString())
             else -> null
         }
         return constants?.map { it.removeSurrounding("\"") }?.ifEmpty { null }

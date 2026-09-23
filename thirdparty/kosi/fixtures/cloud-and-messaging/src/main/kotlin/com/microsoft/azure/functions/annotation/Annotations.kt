@@ -5,7 +5,11 @@ package com.microsoft.azure.functions.annotation
 
 annotation class FunctionName(val value: String)
 
-annotation class HttpTrigger(val name: String = "", val route: String = "")
+annotation class HttpTrigger(
+    val name: String = "",
+    val route: String = "",
+    val methods: Array<com.microsoft.azure.functions.HttpMethod> = [],
+)
 
 annotation class QueueTrigger(val name: String = "", val queueName: String = "")
 

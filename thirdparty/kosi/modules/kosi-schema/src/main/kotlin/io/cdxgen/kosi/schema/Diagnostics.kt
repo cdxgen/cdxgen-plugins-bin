@@ -128,6 +128,15 @@ object DiagnosticCodes {
     const val NO_SOURCES = "no-sources"
     /** Manifest endpoints whose handler class is not among the analysed declarations. */
     const val ENDPOINT_UNSUBSTANTIATED = "endpoint-unsubstantiated"
+    /** Endpoints whose deployment base path could not be proven; each carries `pathUnresolved`. */
+    const val ENDPOINT_PATH_UNRESOLVED = "endpoint-path-unresolved"
+    /**
+     * Spring Data repositories whose CRUD routes depend on the
+     * spring-data-commons generation (3.x split PagingAndSortingRepository
+     * off CrudRepository) when the resolved classpath names none: only the
+     * routes every generation serves were published.
+     */
+    const val REPOSITORY_CRUD_UNKNOWN = "repository-crud-unknown"
 
     /**
      * Discovery collected a small share of the source files
@@ -245,6 +254,8 @@ object DiagnosticCodes {
         NO_SOURCES,
         SOURCE_COVERAGE_GAP,
         ENDPOINT_UNSUBSTANTIATED,
+        ENDPOINT_PATH_UNRESOLVED,
+        REPOSITORY_CRUD_UNKNOWN,
         UNREADABLE_SOURCE,
         DEPS_BODYLESS,
         DEPS_CLASS_NOT_FOUND,

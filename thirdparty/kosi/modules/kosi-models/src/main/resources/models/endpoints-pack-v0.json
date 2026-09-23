@@ -36,7 +36,8 @@
         "service",
         "receiver",
         "provider"
-      ]
+      ],
+      "transport": "android"
     },
     {
       "handlerInput": "all",
@@ -44,7 +45,8 @@
       "kind": "supertype",
       "supertypeMarkers": [
         "android.content.ContentProvider"
-      ]
+      ],
+      "transport": "android"
     },
     {
       "contextParameterTypes": [
@@ -57,9 +59,16 @@
         "com.amazonaws.services.lambda.runtime.RequestHandler",
         "com.amazonaws.services.lambda.runtime.RequestStreamHandler"
       ],
-      "supertypeSuffixes": []
+      "supertypeSuffixes": [],
+      "transport": "function"
     },
     {
+      "_http_comment": "learn.microsoft.com azure-functions/functions-bindings-http-webhook-trigger: \"By default, all function routes are prefixed with api\" (host.json extensions.http.routePrefix); a function with no route is served at its name; methods \"If not specified, the function responds to all HTTP methods\". A function with no HttpTrigger parameter (QueueTrigger, TimerTrigger) is not HTTP; before this /queued was published as an HTTP route and /hello without its /api prefix.",
+      "functionHttpTriggers": [
+        "com.microsoft.azure.functions.annotation.HttpTrigger"
+      ],
+      "functionRoutePrefixDefault": "api",
+      "functionRoutePrefixHostKey": "extensions.http.routePrefix",
       "handlerInput": "annotated",
       "id": "azure-functions",
       "kind": "annotation",
@@ -90,6 +99,7 @@
     },
     {
       "_p27_comment": ", from docs.spring.io/spring-graphql/reference/controllers.html rather than from memory. Verbatim: \"By default, if the method parameter name is available, for example with the -parameters compiler flag in Java 8+ or with debugging info from the compiler, it is used to look up the argument.\" An unannotated parameter is matched to a GraphQL argument by NAME, so it is client-supplied. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
+      "_served_comment": "docs.spring.io/spring-boot/reference/web/spring-graphql.html: \"The GraphQL HTTP endpoint is at HTTP POST /graphql by default\", customised with spring.graphql.http.path (Boot 2.7: spring.graphql.path). Before this every GraphQL handler published pathTemplate \"\".",
       "classMarkers": [
         "org.springframework.stereotype.Controller"
       ],
@@ -140,6 +150,14 @@
           "kind": "body",
           "pattern": "org.springframework.graphql.data.method.annotation.Argument"
         }
+      ],
+      "servedAtDefault": "/graphql",
+      "servedAtKeys": [
+        "spring.graphql.http.path",
+        "spring.graphql.path"
+      ],
+      "servedAtMethods": [
+        "POST"
       ],
       "simpleParameterTypes": [
         "kotlin.Boolean",
@@ -198,7 +216,8 @@
       "supertypeSuffixes": [
         "CoroutineImplBase",
         "ImplBase"
-      ]
+      ],
+      "transport": "grpc"
     },
     {
       "_p15_comment": ", corrected later: http4k's CORE DSL (`\"/path\" bind METHOD to handler`) has no media/auth declaration site - the handler is a plain function, content types live in lenses and responses. That half was and remains the truth. The claim that contract meta {} is 'OpenAPI documentation, not routing' was WRONG for the security field: see _p17_comment.",
@@ -366,6 +385,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingPath": true,
           "pattern": "io.javalin.apibuilder.ApiBuilder.path"
         }
       ],
@@ -528,6 +548,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingPath": true,
           "pattern": "io.ktor.routing.route"
         },
         {
@@ -589,6 +610,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingPath": true,
           "pattern": "io.ktor.server.routing.route"
         },
         {
@@ -719,6 +741,11 @@
           "kind": "form",
           "pattern": "io.micronaut.http.annotation.Part"
         }
+      ],
+      "pathArguments": [
+        "value",
+        "uri",
+        "uris"
       ],
       "pathPrefixAnnotations": [
         "io.micronaut.http.annotation.Controller"
@@ -982,6 +1009,7 @@
       "simpleParameterTypes": []
     },
     {
+      "_chain_comment": "Ratpack routes are MOUNTED on a Chain (ratpack.io/manual/current/api/ratpack/core/handling/Chain.html): get/post/put/patch/delete/options(path, handler) serve one method, path(path, handler) serves any, prefix(path, action) nests. A Handler class names no route itself; before this, every Handler published the fabricated /Handler/handle.",
       "_p30_comment": "ratpack.io/manual/current/handlers.html — `void handle(Context context)`, \"a handler is just a function that acts on a handling context\". The sole parameter is the framework's own collaborator, so nothing is BOUND from the request: request data is read through context.getRequest(), which the contextReaders name. Both package generations ship — 1.x ratpack.handling/ratpack.http, 2.x ratpack.core.* after the JPMS rename in 2.0.0-rc-1 — because a framework named in one spelling is invisible in the other.",
       "contextParameterTypes": [
         "ratpack.handling.Context",
@@ -1045,7 +1073,109 @@
           "pattern": "ratpack.core.http.Request.getBodyStream"
         }
       ],
+      "dslFunctions": [
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "ratpack.core.handling.Chain.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "ratpack.core.handling.Chain.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "ratpack.core.handling.Chain.put"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "ratpack.core.handling.Chain.patch"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "ratpack.core.handling.Chain.delete"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "ratpack.core.handling.Chain.options"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "ratpack.core.handling.Chain.path"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingPath": true,
+          "pattern": "ratpack.core.handling.Chain.prefix"
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "pattern": "ratpack.handling.Chain.get"
+        },
+        {
+          "methods": [
+            "POST"
+          ],
+          "pattern": "ratpack.handling.Chain.post"
+        },
+        {
+          "methods": [
+            "PUT"
+          ],
+          "pattern": "ratpack.handling.Chain.put"
+        },
+        {
+          "methods": [
+            "PATCH"
+          ],
+          "pattern": "ratpack.handling.Chain.patch"
+        },
+        {
+          "methods": [
+            "DELETE"
+          ],
+          "pattern": "ratpack.handling.Chain.delete"
+        },
+        {
+          "methods": [
+            "OPTIONS"
+          ],
+          "pattern": "ratpack.handling.Chain.options"
+        },
+        {
+          "anyMethod": true,
+          "methods": [],
+          "pattern": "ratpack.handling.Chain.path"
+        },
+        {
+          "methods": [],
+          "nesting": true,
+          "nestingPath": true,
+          "pattern": "ratpack.handling.Chain.prefix"
+        }
+      ],
       "handlerInput": "context",
+      "handlerMethodNames": [
+        {
+          "methods": [],
+          "name": "handle"
+        }
+      ],
       "id": "ratpack",
       "kind": "supertype",
       "supertypeMarkers": [
@@ -1148,10 +1278,12 @@
           "name": "doOptions"
         },
         {
+          "anyMethod": true,
           "methods": [],
           "name": "service"
         },
         {
+          "anyMethod": true,
           "methods": [],
           "name": "doFilter"
         }
@@ -1159,6 +1291,10 @@
       "id": "servlet",
       "kind": "annotation",
       "mappingAnnotations": [],
+      "pathArguments": [
+        "value",
+        "urlPatterns"
+      ],
       "pathPrefixAnnotations": []
     },
     {
@@ -1220,6 +1356,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingPath": true,
           "pattern": "spark.Spark.path"
         }
       ],
@@ -1366,10 +1503,13 @@
           "pattern": "org.springframework.messaging.handler.annotation.Header"
         }
       ],
-      "simpleParameterTypes": []
+      "simpleParameterTypes": [],
+      "transport": "messaging"
     },
     {
+      "_issue92_comment": "atom-tools#92: Spring declares value/path as String[] aliases, so against the real jars every route arrives as an array constant and a detector reading only the first SCALAR constant published pathTemplate \"\" for every handler; the stub-annotation fixtures declared value: String and could not see it. @RequestMapping's method = [..] was never read, so the verbose style published httpMethod [].",
       "_p27_comment": ", from web/webmvc/mvc-controller/ann-methods/arguments.html and web/webflux/controller/ann-methods/arguments.html rather than from memory. Verbatim: \"If a method argument is not matched to any of the earlier values in this table and it is a simple type (as determined by BeanUtils#isSimpleProperty), it is resolved as a @RequestParam. Otherwise, it is resolved as a @ModelAttribute.\" This entry covers ANNOTATED controllers of both Spring MVC and Spring WebFlux — WebFlux's annotated model publishes the identical fallback rule, and kosi's spring-webflux entry is the FUNCTIONAL router DSL, where ServerRequest genuinely is a context. So WebFlux's own supplied types are listed here too. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
+      "_sdr_comment": "Spring Data REST, from docs.spring.io/spring-data/rest/reference/repository-resources.html and the 3.6.4 bytecode: @RepositoryRestController is meta-annotated @BasePathAwareController and both are @Component, NOT @Controller, so neither matched classMarkers; their handlers and every repository resource sit under spring.data.rest.base-path (or a folded RepositoryRestConfiguration.setBasePath argument, applied after the properties). getBasePath() returns URI while setBasePath takes String, so Kotlin synthesizes no basePath property and the call is the only code spelling. RepositoryRestResource was listed under repositorySupertypes, where an annotation can never match; it is the resource annotation (path, exported). DELETE is backed by delete(T), the method SDR prefers.",
       "authenticationAnnotations": [
         {
           "pattern": "org.springframework.security.access.prepost.PreAuthorize",
@@ -1390,7 +1530,9 @@
       ],
       "classMarkers": [
         "org.springframework.web.bind.annotation.RestController",
-        "org.springframework.stereotype.Controller"
+        "org.springframework.stereotype.Controller",
+        "org.springframework.data.rest.webmvc.BasePathAwareController",
+        "org.springframework.data.rest.webmvc.RepositoryRestController"
       ],
       "contextParameterTypes": [
         "org.springframework.web.context.request.WebRequest",
@@ -1431,6 +1573,16 @@
         "org.springframework.http.server.reactive.ServerHttpResponse",
         "org.springframework.web.server.WebSession"
       ],
+      "dataRestBasePathKeys": [
+        "spring.data.rest.base-path"
+      ],
+      "dataRestBasePathMarkers": [
+        "org.springframework.data.rest.webmvc.BasePathAwareController",
+        "org.springframework.data.rest.webmvc.RepositoryRestController"
+      ],
+      "dataRestBasePathSetters": [
+        "org.springframework.data.rest.core.config.RepositoryRestConfiguration.setBasePath"
+      ],
       "handlerInput": "annotated-or-bound",
       "id": "spring-mvc",
       "kind": "annotation",
@@ -1466,6 +1618,8 @@
           "pattern": "org.springframework.web.bind.annotation.PatchMapping"
         },
         {
+          "anyMethod": true,
+          "methodArgument": "method",
           "methods": [],
           "pattern": "org.springframework.web.bind.annotation.RequestMapping"
         }
@@ -1582,22 +1736,112 @@
           "pattern": "org.springframework.web.bind.annotation.ModelAttribute"
         }
       ],
+      "pathArguments": [
+        "value",
+        "path"
+      ],
       "pathPrefixAnnotations": [
         "org.springframework.web.bind.annotation.RequestMapping"
       ],
-      "repositoryMethods": [
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE"
+      "repositoryCrudMethods": [
+        "count",
+        "delete",
+        "deleteAll",
+        "deleteAllById",
+        "deleteAllByIdInBatch",
+        "deleteAllInBatch",
+        "deleteById",
+        "deleteInBatch",
+        "existsById",
+        "findAll",
+        "findAllById",
+        "findById",
+        "flush",
+        "getById",
+        "getOne",
+        "getReferenceById",
+        "save",
+        "saveAll",
+        "saveAllAndFlush",
+        "saveAndFlush"
+      ],
+      "repositoryGenerationArtifact": "org.springframework.data:spring-data-commons",
+      "repositoryMethodAnnotations": [
+        "org.springframework.data.rest.core.annotation.RestResource"
+      ],
+      "repositoryPagingCrudBelowMajor": 3,
+      "repositoryPagingMethods": [
+        "findAll"
+      ],
+      "repositoryPagingSupertypes": [
+        "org.springframework.data.repository.PagingAndSortingRepository"
+      ],
+      "repositoryResourceAnnotations": [
+        "org.springframework.data.rest.core.annotation.RepositoryRestResource"
+      ],
+      "repositoryRoutes": [
+        {
+          "backedBy": [
+            "findAll"
+          ],
+          "method": "GET",
+          "path": ""
+        },
+        {
+          "backedBy": [
+            "findAll"
+          ],
+          "method": "HEAD",
+          "path": ""
+        },
+        {
+          "backedBy": [
+            "save"
+          ],
+          "method": "POST",
+          "path": ""
+        },
+        {
+          "backedBy": [
+            "findById"
+          ],
+          "method": "GET",
+          "path": "/{id}"
+        },
+        {
+          "backedBy": [
+            "findById"
+          ],
+          "method": "HEAD",
+          "path": "/{id}"
+        },
+        {
+          "backedBy": [
+            "save"
+          ],
+          "method": "PUT",
+          "path": "/{id}"
+        },
+        {
+          "backedBy": [
+            "save"
+          ],
+          "method": "PATCH",
+          "path": "/{id}"
+        },
+        {
+          "backedBy": [
+            "delete"
+          ],
+          "method": "DELETE",
+          "path": "/{id}"
+        }
       ],
       "repositorySupertypes": [
         "org.springframework.data.repository.CrudRepository",
         "org.springframework.data.repository.PagingAndSortingRepository",
         "org.springframework.data.repository.ListCrudRepository",
-        "org.springframework.data.jpa.repository.JpaRepository",
-        "org.springframework.data.rest.core.annotation.RepositoryRestResource"
+        "org.springframework.data.jpa.repository.JpaRepository"
       ],
       "simpleParameterTypes": [
         "kotlin.Boolean",
@@ -1704,6 +1948,7 @@
         {
           "methods": [],
           "nesting": true,
+          "nestingPath": true,
           "pattern": "org.springframework.web.reactive.function.server.RouterFunctionDsl.path"
         }
       ],
@@ -1887,6 +2132,7 @@
           "pattern": "io.vertx.ext.web.Router.delete"
         },
         {
+          "anyMethod": true,
           "methods": [],
           "nesting": false,
           "pattern": "io.vertx.ext.web.Router.route"

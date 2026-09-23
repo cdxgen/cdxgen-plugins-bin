@@ -655,6 +655,44 @@ capabilities = ["endpoints", "context-path", "framework-semantics", "config-reso
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "spring-data-rest"
+tier = "fixtures"
+path = "fixtures/spring-data-rest"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "config-resolution", "context-path"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-data-commons-3"
+tier = "fixtures"
+path = "fixtures/spring-data-commons-3"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-data-commons-unknown"
+tier = "fixtures"
+path = "fixtures/spring-data-commons-unknown"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "path-argument-aliases"
+tier = "fixtures"
+path = "fixtures/path-argument-aliases"
+capabilities = ["endpoints", "framework-semantics", "servlet", "class-declared-routes"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-mapping-shapes"
+tier = "fixtures"
+path = "fixtures/spring-mapping-shapes"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module"]
+# Two app modules declaring the same canonical classes is the shape under
+# test (digital-restaurant has thirteen); one analysis session sees them
+# as redeclarations.
+tolerated_resolution_errors = ["CLASSIFIER_REDECLARATION"]
+
+[[fixtures]]
 slug = "handler-input-semantics"
 tier = "fixtures"
 path = "fixtures/handler-input-semantics"

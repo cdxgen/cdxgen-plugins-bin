@@ -44,7 +44,20 @@ object Analyzer {
 
     const val TOOL_DESCRIPTION = "kosi — Kotlin Source Inspector (static analysis for cdxgen)"
 
-    const val TOOL_VERSION = "0.2.0"
+    /**
+     * The cdxgen-plugins-bin release this kosi ships in, injected into a
+     * resource at build time from the repository's package.json.
+     */
+    val TOOL_VERSION: String by lazy {
+        try {
+            Analyzer::class.java.getResourceAsStream("/kosi-version.txt")
+                ?.bufferedReader()?.use { it.readText().trim() }
+                ?.takeIf { it.isNotEmpty() && !it.startsWith("\${'$'}") }
+                ?: "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
+    }
 
     class AnalysisException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
@@ -85,6 +98,8 @@ object Analyzer {
         val sourceTexts: Map<String, String>,
         val annotationValues: Map<String, List<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>,
         val dependencyCoordinates: Set<String>,
+        /** The types the run read with their supertypes, for repository resources. */
+        val typeDeclarations: List<io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration> = emptyList(),
         /**
          * The endpoint pass's OWN result — including the value
          * folder's fold statistics, the config-resolution counts and the
@@ -161,6 +176,7 @@ object Analyzer {
                     jvmDescriptor = null,
                     position = raw.position,
                     source = source,
+                    parameterAnnotations = raw.parameterAnnotations,
                 )
             },
             usages = syntax.usages,
@@ -706,6 +722,7 @@ object Analyzer {
                             jvmDescriptor = decl.jvmDescriptor,
                             position = decl.position,
                             source = source,
+                            parameterAnnotations = decl.parameterAnnotations,
                         ),
                     )
                 }
@@ -747,6 +764,10 @@ object Analyzer {
                     // filename to fall back on; implicit-routes-
                     // unresolved pins exactly that shape.
                     jar.coordinate?.let { add(it.group + ":" + it.artifact) }
+                    // With its version when the pin names one: a route set
+                    // can depend on the generation (spring-data-commons 3
+                    // split PagingAndSortingRepository off CrudRepository).
+                    jar.coordinate?.takeIf { it.version != null }?.let { add(it.group + ":" + it.artifact + ":" + it.version) }
                     add(jar.jar.fileName.toString())
                 }
             }
@@ -761,6 +782,7 @@ object Analyzer {
                 sourceTexts = sourceTexts,
                 annotationValues = declarationAnnotationValues,
                 dependencyCoordinates = resolvedDependencyCoordinates,
+                typeDeclarations = typeDeclarationsOf(drafts),
             )
             val endpoints = io.cdxgen.kosi.endpoints.Endpoints.analyze(
                 module = kirModule,
@@ -785,6 +807,7 @@ object Analyzer {
                 // module answered "did not look" about classes it had read.
                 analysedDeclarations = drafts.mapTo(HashSet()) { it.canonicalName },
                 foldStats = capture.foldStats,
+                typeDeclarations = capture.typeDeclarations,
             )
             val crypto = io.cdxgen.kosi.crypto.CryptoCollector.collect(
                 io.cdxgen.kosi.crypto.CryptoCollector.Input(
@@ -1006,6 +1029,34 @@ object Analyzer {
                 null
             }
 
+            val pathUnresolvedEndpoints = apiEndpoints.count { it.pathUnresolved != null }
+            val pathUnresolvedDiagnostic = if (pathUnresolvedEndpoints > 0) {
+                Diagnostic(
+                    code = DiagnosticCodes.ENDPOINT_PATH_UNRESOLVED,
+                    severity = Severity.WARNING,
+                    message = "$pathUnresolvedEndpoints endpoint(s) sit under a base path the deployment sets but kosi " +
+                        "could not prove; their pathTemplate is relative to it and each names why in pathUnresolved",
+                    position = Position(".", 1, 1),
+                    count = pathUnresolvedEndpoints,
+                )
+            } else {
+                null
+            }
+            val crudUnknown = endpoints.repositoriesCrudUnknown
+            val crudUnknownDiagnostic = if (crudUnknown.isNotEmpty()) {
+                Diagnostic(
+                    code = DiagnosticCodes.REPOSITORY_CRUD_UNKNOWN,
+                    severity = Severity.WARNING,
+                    message = "${crudUnknown.size} repository resource(s) extend PagingAndSortingRepository alone and the " +
+                        "resolved classpath names no spring-data-commons version; its CRUD methods exist only before 3.x, " +
+                        "so only the collection's findAll routes were published: ${crudUnknown.take(5).joinToString()}",
+                    position = Position(".", 1, 1),
+                    count = crudUnknown.size,
+                )
+            } else {
+                null
+            }
+
             val totalCalls = callsTotal
             val ratio = if (totalCalls == 0) 0.0 else callsResolved.toDouble() / totalCalls
 
@@ -1153,6 +1204,7 @@ object Analyzer {
                     listOfNotNull(
                         coverageDiagnostic,
                         unsubstantiatedDiagnostic,
+                        pathUnresolvedDiagnostic, crudUnknownDiagnostic,
                         jdkDiagnostic, symbolFailureDiagnostic, droppedDiagnostic, kirDiagnostic, compileGapDiagnostic, callgraphDiagnostic, budgetDiagnostic,
                     ) + kirSkippedDiagnostics +
                     diagnostics + depsDiagnostics + (flowResult?.diagnostics ?: emptyList()),
@@ -1263,11 +1315,31 @@ object Analyzer {
             fqnsByShort.getOrPut(short) { mutableSetOf() }.addAll(fqns)
         }
         for (fn in kirModule.functions) {
-            for (annotation in fn.annotations + fn.ownerAnnotations) {
+            for (annotation in fn.annotations + fn.ownerAnnotations + fn.params.flatMap { it.annotations }) {
                 fqnsByShort.getOrPut(annotation.substringAfterLast('.')) { mutableSetOf() }.add(annotation)
             }
         }
         val out = LinkedHashMap<String, MutableList<io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation>>()
+        // A parameter's annotations under `<function>#<parameter>`: the
+        // value of `@PathVariable("idProduct")` is the URL variable's name.
+        for (draft in drafts) {
+            for ((parameter, annotations) in draft.parameterAnnotations) {
+                val entries = out.getOrPut(draft.canonicalName + "#" + parameter) { mutableListOf() }
+                for (annotation in annotations) {
+                    for (fqn in fqnsByShort[annotation.name].orEmpty().ifEmpty { setOf(annotation.name) }.sorted()) {
+                        entries.add(
+                            io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
+                                fqn = fqn,
+                                value = annotation.value,
+                                line = draft.position.line,
+                                namedValues = annotation.namedValues,
+                                file = draft.position.filename,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
         for (draft in drafts) {
             if (draft.annotations.isEmpty()) continue
             val entries = out.getOrPut(draft.canonicalName) { mutableListOf() }
@@ -1280,6 +1352,7 @@ object Analyzer {
                             value = annotation.value?.removeSurrounding("\"")?.removeSurrounding("'"),
                             line = annotation.position.line,
                             namedValues = annotation.namedValues,
+                            file = draft.position.filename,
                         ),
                     )
                 }
@@ -1287,6 +1360,11 @@ object Analyzer {
         }
         return out
     }
+
+    /** The types a run read, with supertypes: a member-less repository interface is visible only here. */
+    private fun typeDeclarationsOf(drafts: List<DeclarationDraft>): List<io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration> =
+        drafts.filter { it.supertypes.isNotEmpty() }
+            .map { io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(it.canonicalName, it.position.filename, it.supertypes) }
 
     /** The config table's key -> value view the crypto collector folds against. */
     private fun configValuesForCrypto(root: java.nio.file.Path): Map<String, String> {
@@ -1375,6 +1453,7 @@ object Analyzer {
         val jvmDescriptor: String?,
         val position: Position,
         val source: SourceCollector.CollectedFile?,
+        val parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
     )
 
     /**

@@ -2918,6 +2918,9 @@
       "glob": "kosi-commit.txt"
     },
     {
+      "glob": "kosi-version.txt"
+    },
+    {
       "glob": "kosi-ext/META-INF/extensions/compiler-cli-root.xml"
     },
     {

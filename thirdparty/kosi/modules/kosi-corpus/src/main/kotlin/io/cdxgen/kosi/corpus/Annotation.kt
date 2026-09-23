@@ -74,6 +74,16 @@ data class Annotation(
     val consumes: String?,
     val produces: String?,
     val authentication: String?,
+    /**
+     * `pathunresolved=<text>` demands the endpoint carry a `pathUnresolved`
+     * reason matching it (`~` substring); `pathunresolved=none` demands it
+     * carry none — a base path kosi PROVED.
+     */
+    val pathUnresolved: String? = null,
+    /** `transport=<t>` demands the endpoint's non-HTTP transport; `transport=http` demands none. */
+    val transport: String? = null,
+    /** `anymethod=true|false` demands the endpoint does (not) serve every HTTP method. */
+    val anyMethod: String? = null,
     val cipherMode: String?,
     val padding: String?,
     val form: String?,
@@ -156,8 +166,8 @@ data class Annotation(
             )
         }
         // The media/auth keys only mean something on an endpoint expectation.
-        if (kind != Kind.ENDPOINT && (consumes != null || produces != null || authentication != null)) {
-            errors.add("consumes=/produces=/authentication= are only valid on endpoint expectations")
+        if (kind != Kind.ENDPOINT && (consumes != null || produces != null || authentication != null || pathUnresolved != null || transport != null || anyMethod != null)) {
+            errors.add("consumes=/produces=/authentication=/pathunresolved= are only valid on endpoint expectations")
         }
         if (kind == Kind.CRYPTO && name == null) errors.add("crypto requires name=")
         if (kind == Kind.SERVICE && protocol == null && name == null && path == null) {

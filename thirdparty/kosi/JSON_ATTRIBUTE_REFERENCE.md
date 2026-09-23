@@ -45,7 +45,7 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | Attribute | Type | Value |
 | --- | --- | --- |
 | `name` | string | `kosi` |
-| `version` | string | tool version (e.g. `0.1.0`) |
+| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.0`); `unknown` for a build outside that tree |
 | `description` | string | human description |
 | `commit` | string | git commit injected at build time (`unknown` fallback) |
 
@@ -615,8 +615,8 @@ endpoint.
 | --- | --- | --- |
 | `id` | string | `ep-NNNNNN`, assigned after sorting |
 | `framework` | string | pack vocabulary, above |
-| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method). **Naming quirk, deliberate:** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`, since fixed), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
-| `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
+| `httpMethod` | string[] | empty for RPC and for methods left open (`@RequestMapping` without a method); a mapping whose pack row names a `methodArgument` takes the site's own list (`@RequestMapping(method = [RequestMethod.POST])` → `["POST"]`). **Naming quirk, deliberate:** the JSON key is SINGULAR (`httpMethod`) while it holds an ARRAY — the internal schema field is `httpMethods`. This mismatch already cost cdxgen every verb (its collector read the plural key and got `undefined`, since fixed), and the singular key is now load-bearing for the cdxgen join and its OpenAPI naming convergence, so it stays. Consumers must read `httpMethod` and expect a list. |
+| `pathTemplate` | string | class-level prefixes composed (`/admin` + `/users`); read from the framework's `pathArguments` in order (Spring: `value`, then `path`), and a mapping naming several paths publishes one endpoint per (class prefix, path) pair. The class prefix is the one declared in the handler's OWN file: a canonical name repeated across app modules is not one class; Android uses the action or component name; gRPC uses `/<Service>/<Method>` |
 | `pathParameters` | string[] | `{id}` template parameters |
 | `handlerSymbol` / `handlerCanonicalName` | string | the canonical name of the handler; EMPTY when no handler could be named — an Android component that declares no lifecycle override of its own, so the framework's is what runs. The resolved-handler gate counts empty as unresolved. Empty does NOT mean the component went unread: see `substantiated` |
 | `substantiated` | boolean | whether kosi READ the code behind this endpoint. `true` by construction for annotation and DSL endpoints — they exist because a declaration was read. For a manifest component it is true exactly when the component's CLASS is among the analysed declarations, matching `Outer$Inner` and `Outer.Inner` as the one class they are. `false` says "the manifest declares this attack surface and kosi read none of it" — a library component, or a run that discovered none of the sources — and is counted in the `endpoint-unsubstantiated` diagnostic. A published endpoint is never a claim about behaviour that was not read |

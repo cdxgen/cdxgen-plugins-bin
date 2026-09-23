@@ -96,7 +96,19 @@ class EndpointsPackLivenessTest {
             "securityConstructors" -> drop({ it.securityConstructors }, { x, l -> x.copy(securityConstructors = l) })
             "handlerMethodNames" -> drop({ it.handlerMethodNames }, { x, l -> x.copy(handlerMethodNames = l) })
             "authHandlerFactories" -> drop({ it.authHandlerFactories }, { x, l -> x.copy(authHandlerFactories = l) })
-            "repositoryMethods" -> drop({ it.repositoryMethods }, { x, l -> x.copy(repositoryMethods = l) })
+            "repositoryRoutes" -> drop({ it.repositoryRoutes }, { x, l -> x.copy(repositoryRoutes = l) })
+            "repositoryResourceAnnotations" -> drop({ it.repositoryResourceAnnotations }, { x, l -> x.copy(repositoryResourceAnnotations = l) })
+            "repositoryMethodAnnotations" -> drop({ it.repositoryMethodAnnotations }, { x, l -> x.copy(repositoryMethodAnnotations = l) })
+            "repositoryCrudMethods" -> drop({ it.repositoryCrudMethods }, { x, l -> x.copy(repositoryCrudMethods = l) })
+            "repositoryPagingSupertypes" -> drop({ it.repositoryPagingSupertypes }, { x, l -> x.copy(repositoryPagingSupertypes = l) })
+            "repositoryPagingMethods" -> drop({ it.repositoryPagingMethods }, { x, l -> x.copy(repositoryPagingMethods = l) })
+            "dataRestBasePathMarkers" -> drop({ it.dataRestBasePathMarkers }, { x, l -> x.copy(dataRestBasePathMarkers = l) })
+            "dataRestBasePathKeys" -> drop({ it.dataRestBasePathKeys }, { x, l -> x.copy(dataRestBasePathKeys = l) })
+            "dataRestBasePathSetters" -> drop({ it.dataRestBasePathSetters }, { x, l -> x.copy(dataRestBasePathSetters = l) })
+            "pathArguments" -> drop({ it.pathArguments }, { x, l -> x.copy(pathArguments = l) })
+            "servedAtKeys" -> drop({ it.servedAtKeys }, { x, l -> x.copy(servedAtKeys = l) })
+            "servedAtMethods" -> drop({ it.servedAtMethods }, { x, l -> x.copy(servedAtMethods = l) })
+            "functionHttpTriggers" -> drop({ it.functionHttpTriggers }, { x, l -> x.copy(functionHttpTriggers = l) })
             "repositorySupertypes" -> drop({ it.repositorySupertypes }, { x, l -> x.copy(repositorySupertypes = l) })
             "manifestComponents" -> drop({ it.manifestComponents }, { x, l -> x.copy(manifestComponents = l) })
             "supertypeMarkers" -> drop({ it.supertypeMarkers }, { x, l -> x.copy(supertypeMarkers = l) })
@@ -164,7 +176,19 @@ class EndpointsPackLivenessTest {
         fw.securityConstructors.forEach { entry("securityConstructors", it, it.substringAfterLast('.'), it) }
         fw.handlerMethodNames.forEach { entry("handlerMethodNames", it, it.name, it.name) }
         fw.authHandlerFactories.forEach { entry("authHandlerFactories", it, it.substringAfterLast('.'), it) }
-        fw.repositoryMethods.forEach { entry("repositoryMethods", it, it, it) }
+        fw.repositoryRoutes.forEach { entry("repositoryRoutes", it, it.backedBy.firstOrNull() ?: it.method, "${it.method} ${it.path}") }
+        fw.repositoryResourceAnnotations.forEach { entry("repositoryResourceAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.repositoryMethodAnnotations.forEach { entry("repositoryMethodAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.repositoryCrudMethods.forEach { entry("repositoryCrudMethods", it, it, it) }
+        fw.repositoryPagingSupertypes.forEach { entry("repositoryPagingSupertypes", it, it.substringAfterLast('.'), it) }
+        fw.repositoryPagingMethods.forEach { entry("repositoryPagingMethods", it, it, it) }
+        fw.dataRestBasePathMarkers.forEach { entry("dataRestBasePathMarkers", it, it.substringAfterLast('.'), it) }
+        fw.dataRestBasePathKeys.forEach { entry("dataRestBasePathKeys", it, it, it) }
+        fw.dataRestBasePathSetters.forEach { entry("dataRestBasePathSetters", it, it.substringAfterLast('.'), it) }
+        fw.pathArguments.forEach { entry("pathArguments", it, it, it) }
+        fw.servedAtKeys.forEach { entry("servedAtKeys", it, it, it) }
+        fw.servedAtMethods.forEach { entry("servedAtMethods", it, it, it) }
+        fw.functionHttpTriggers.forEach { entry("functionHttpTriggers", it, it.substringAfterLast('.'), it) }
         // The argument-binding rule's three channels.
         fw.contextParameterTypes.forEach { entry("contextParameterTypes", it, it.substringAfterLast('.'), it) }
         fw.nonInputAnnotations.forEach { entry("nonInputAnnotations", it, it.substringAfterLast('.'), it) }
@@ -202,6 +226,7 @@ class EndpointsPackLivenessTest {
         capture.module, root, capture.sourceTexts, capture.annotationValues,
         Endpoints.Attribution(emptyMap(), emptyMap()), includeManifests = true,
         dependencyCoordinates = capture.dependencyCoordinates, pack = pack,
+        typeDeclarations = capture.typeDeclarations,
     )
 
     @Test
@@ -889,7 +914,6 @@ class EndpointsPackLivenessTest {
         "spring-mvc.repositorySupertypes[org.springframework.data.jpa.repository.JpaRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-mvc.repositorySupertypes[org.springframework.data.repository.ListCrudRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-mvc.repositorySupertypes[org.springframework.data.repository.PagingAndSortingRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
-        "spring-mvc.repositorySupertypes[org.springframework.data.rest.core.annotation.RepositoryRestResource]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-webflux.authenticationAnnotations[jakarta.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-webflux.authenticationAnnotations[javax.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-webflux.authenticationAnnotations[org.springframework.security.access.annotation.Secured]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",

@@ -2452,6 +2452,9 @@
    "glob": "kosi-commit.txt"
   },
   {
+   "glob": "kosi-version.txt"
+  },
+  {
    "glob": "org/jetbrains/kotlin/cli/common/CompilerSystemProperties.class"
   },
   {
