@@ -63,9 +63,21 @@ class EndpointsPackSymbolEvidenceTest {
         Path.of(System.getProperty("user.home"), ".gradle", "caches", "modules-2", "files-2.1")
             .takeIf { Files.isDirectory(it) }
 
-    private fun jars(group: String, artifact: String): List<Path> {
-        val base = modules2()?.resolve(group)?.resolve(artifact) ?: return emptyList()
-        if (!Files.isDirectory(base)) return emptyList()
+    // Maven local holds some artifacts the Gradle cache does not (spring-web
+    // 7.x, the only held line with the HTTP-interface annotations). Same
+    // <version>/ layout one level down, so the two are walked alike.
+    private fun mavenLocal(group: String, artifact: String): Path? =
+        Path.of(System.getProperty("user.home"), ".m2", "repository")
+            .resolve(group.replace('.', '/')).resolve(artifact)
+            .takeIf { Files.isDirectory(it) }
+
+    private fun jars(group: String, artifact: String): List<Path> =
+        listOfNotNull(modules2()?.resolve(group)?.resolve(artifact), mavenLocal(group, artifact))
+            .filter { Files.isDirectory(it) }
+            .flatMap { versionJars(it) }
+            .distinctBy { it.fileName.toString() }
+
+    private fun versionJars(base: Path): List<Path> {
         return Files.list(base).use { dirs ->
             dirs.filter { Files.isDirectory(it) }.toList()
         }.sortedByDescending { it.fileName.toString() }.flatMap { versionDir ->
@@ -192,10 +204,15 @@ class EndpointsPackSymbolEvidenceTest {
         "mappingAnnotations", "mediaAnnotations", "authenticationAnnotations", "parameterAnnotations",
         "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations",
         "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations",
+        "dataRestBasePathMarkers", "repositoryResourceAnnotations", "repositoryMethodAnnotations",
+        "repositoryPagingSupertypes", "functionHttpTriggers", "registrationBeans",
     )
 
     /** Channels whose entries are member calls on an owner class. */
-    private val memberChannels = listOf("dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions")
+    private val memberChannels = listOf(
+        "dslFunctions", "mediaDsl", "handlerDsl", "authHandlerFactories", "contextReaders", "mountFunctions",
+        "dataRestBasePathSetters",
+    )
 
     /** Channels whose entries are top-level functions (packages, no owner class). */
     private val functionChannels = listOf("contractDsl", "routeMetaDsl", "bindFunctions", "authenticationDsl")
@@ -217,6 +234,16 @@ class EndpointsPackSymbolEvidenceTest {
             "repositorySupertypes" -> f.repositorySupertypes
             "securityConstructors" -> f.securityConstructors
             "resourceAnnotations" -> f.resourceAnnotations
+            "dataRestBasePathMarkers" -> f.dataRestBasePathMarkers
+            "repositoryResourceAnnotations" -> f.repositoryResourceAnnotations
+            "repositoryMethodAnnotations" -> f.repositoryMethodAnnotations
+            "repositoryPagingSupertypes" -> f.repositoryPagingSupertypes
+            "functionHttpTriggers" -> f.functionHttpTriggers
+            // The bean CLASSES; their url-mapping members are inherited
+            // (AbstractFilterRegistrationBean), which an owner's own method
+            // table cannot witness — javap-verified in the pack comment.
+            "registrationBeans" -> f.registrationBeans.map { it.pattern }
+            "dataRestBasePathSetters" -> f.dataRestBasePathSetters
             "dslFunctions" -> f.dslFunctions.map { it.pattern }
             "mediaDsl" -> f.mediaDsl.map { it.pattern }
             "handlerDsl" -> f.handlerDsl
@@ -433,6 +460,19 @@ class EndpointsPackSymbolEvidenceTest {
                 Coordinate("org.springframework", "spring-webmvc", "5.3.18"),
                 Coordinate("org.springframework", "spring-web", "5.3.18"),
                 Coordinate("org.springframework", "spring-context", "5.3.18"),
+                // Spring Data REST's controllers, resource annotations and
+                // RepositoryRestConfiguration (Boot 2.6 / Spring 5.3), and the
+                // repository supertypes from the 3.x line, the only one that
+                // declares every one the pack names (ListCrudRepository is
+                // 3.x) — JpaRepository lives in spring-data-jpa.
+                Coordinate("org.springframework.data", "spring-data-rest-webmvc", "3.6.4"),
+                Coordinate("org.springframework.data", "spring-data-rest-core", "3.6.4"),
+                Coordinate("org.springframework.data", "spring-data-commons", "3.2.5"),
+                Coordinate("org.springframework.data", "spring-data-jpa", "3.2.5"),
+                // The server-side HTTP-interface annotations (@HttpExchange,
+                // @GetExchange...) are spring-web 6.1+; 5.3 has none of them.
+                // Listed after 5.3.18 so every other fact still comes from it.
+                Coordinate("org.springframework", "spring-web", "7.0.9"),
             ),
             "spring-webflux" to listOf(
                 Coordinate("org.springframework", "spring-webflux", "5.3.18"),
@@ -443,8 +483,12 @@ class EndpointsPackSymbolEvidenceTest {
             "graphql" to listOf(Coordinate("org.springframework", "spring-context", "5.3.18")),
             "micronaut" to listOf(Coordinate("io.micronaut", "micronaut-http", "4.10.23")),
             "quarkus" to listOf(Coordinate("jakarta.ws.rs", "jakarta.ws.rs-api", "4.0.0")),
+            // Not held on the evidence machine: recorded as gaps, never inferred.
+            "quarkus-reactive-routes" to listOf(Coordinate("io.quarkus", "quarkus-reactive-routes", "3.15.1")),
             "servlet" to listOf(
                 Coordinate("jakarta.servlet", "jakarta.servlet-api", "4.0.4"),
+                // ServletRegistrationBean / FilterRegistrationBean.
+                Coordinate("org.springframework.boot", "spring-boot", "2.6.6"),
                 // javax generations: the pack models both; the javax
                 // artifact is not held, so those rows stay recorded gaps.
             ),
@@ -458,13 +502,17 @@ class EndpointsPackSymbolEvidenceTest {
             // jar — the Handler supertype and the six Request readers. Listing
             // them is the difference between a committed record that verifies
             // the pack and an empty one that verifies nothing.
-            "ratpack" to listOf("supertypeMarkers", "contextReaders"),
-            "spring-mvc" to typeChannels,
-            "spring-webflux" to typeChannels,
+            "ratpack" to listOf("supertypeMarkers", "contextReaders", "dslFunctions"),
+            // setBasePath is a MEMBER of RepositoryRestConfiguration.
+            "spring-mvc" to typeChannels + "dataRestBasePathSetters" + "dslFunctions",
+            // The functional router DSL rows are MEMBERS of the three DSL
+            // classes; the stub that modelled `path` as nesting was fiction.
+            "spring-webflux" to typeChannels + "dslFunctions",
             "spring-messaging" to typeChannels,
             "graphql" to typeChannels,
             "micronaut" to typeChannels,
             "quarkus" to typeChannels,
+            "quarkus-reactive-routes" to typeChannels,
             "servlet" to typeChannels,
             "aws-lambda" to typeChannels,
             "azure-functions" to typeChannels,
@@ -541,7 +589,7 @@ class EndpointsPackSymbolEvidenceTest {
             val gaps = entry.gaps
             for (channel in entry.covers) {
                 for (pattern in patterns(fw.id, channel)) {
-                    val key = "$fw.id/$channel/$pattern"
+                    val key = "${fw.id}/$channel/$pattern"
                     when {
                         channel in typeChannels -> {
                             val fact = types.firstOrNull { it.fqn == pattern }
@@ -599,6 +647,20 @@ class EndpointsPackSymbolEvidenceTest {
                 return
             }
         }
+        // Regeneration switch (see the class doc): writes ONLY what the held
+        // evidence derived, and refuses when any pack symbol FAILED — a
+        // contradiction is a defect, not evidence. It runs BEFORE the drift
+        // comparison: drift is exactly what a deliberate pack change
+        // produces, and a switch that ran only once drift was already gone
+        // could never regenerate anything.
+        if (System.getenv("KOSI_UPDATE_SYMBOL_EVIDENCE") == "1") {
+            assertTrue(derived.values.none { it.failures.isNotEmpty() },
+                "refusing to regenerate evidence the held artifacts CONTRADICT:\n" + derived.values.flatMap { it.failures }.joinToString("\n"))
+            Files.createDirectories(extractFile.parent)
+            Files.writeString(extractFile, derivedToJson(derived))
+            println("symbol-evidence: REGENERATED ${extractFile}")
+            return
+        }
         val failures = mutableListOf<String>()
         for ((id, d) in derived) {
             if (!d.held) continue
@@ -619,14 +681,6 @@ class EndpointsPackSymbolEvidenceTest {
             assertTrue(d.failures.isEmpty(), "$id: the held evidence CONTRADICTS the pack:\n${d.failures.joinToString("\n")}")
         }
         assertTrue(failures.isEmpty(), "committed symbol evidence has drifted:\n${failures.joinToString("\n")}")
-        // Regeneration switch (see the class doc): writes ONLY what the held
-        // evidence derived, and refuses when any pack symbol FAILED — a
-        // contradiction is a defect, not evidence.
-        if (System.getenv("KOSI_UPDATE_SYMBOL_EVIDENCE") == "1") {
-            Files.createDirectories(extractFile.parent)
-            Files.writeString(extractFile, derivedToJson(derived))
-            println("symbol-evidence: REGENERATED ${extractFile}")
-        }
     }
 
     // ---- the verdict table, counted ------------------------------------------

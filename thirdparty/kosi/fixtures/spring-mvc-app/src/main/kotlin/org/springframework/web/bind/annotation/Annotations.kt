@@ -6,8 +6,8 @@
 package org.springframework.web.bind.annotation
 
 annotation class RestController
-annotation class GetMapping(val value: String = "")
-annotation class PostMapping(val value: String = "")
-annotation class PutMapping(val value: String = "")
-annotation class DeleteMapping(val value: String = "")
-annotation class RequestMapping(val value: String = "")
+annotation class GetMapping(vararg val value: String)
+annotation class PostMapping(vararg val value: String)
+annotation class PutMapping(vararg val value: String)
+annotation class DeleteMapping(vararg val value: String)
+annotation class RequestMapping(vararg val value: String)

@@ -6,4 +6,4 @@ package org.springframework.web.bind.annotation
 
 annotation class RestController(val value: String = "")
 
-annotation class GetMapping(val value: String = "")
+annotation class GetMapping(vararg val value: String)

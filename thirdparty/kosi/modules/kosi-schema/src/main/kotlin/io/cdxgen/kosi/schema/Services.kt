@@ -36,9 +36,30 @@ data class ApiEndpoint(
      * behaviour: `substantiated=false` says "did not look", never "found".
      */
     val substantiated: Boolean = true,
+    /**
+     * Present only when [pathTemplate] is known to be INCOMPLETE: the
+     * deployment sets a base path kosi could not prove (config files in one
+     * module disagree, a setter argument did not fold). The value names
+     * why. Absent means the template is the full served path as far as the
+     * analysed sources and config say.
+     */
+    val pathUnresolved: String? = null,
+    /**
+     * Present (true) only when the framework serves EVERY HTTP method at
+     * this route — `@RequestMapping` without `method`, a servlet filter,
+     * Vert.x `route()`. [httpMethods] is then empty by design; an empty list
+     * WITHOUT this flag is a method kosi could not resolve.
+     */
+    val anyMethod: Boolean = false,
+    /**
+     * Present only for an endpoint NOT served over HTTP: `messaging`,
+     * `grpc`, `android`, `function`. Absent means HTTP.
+     */
+    val transport: String? = null,
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
+        if (anyMethod) w.bool("anyMethod", true)
         w.beginArray("authentication")
         for (a in authentication.sorted()) w.str(a)
         w.endArray()
@@ -63,7 +84,9 @@ data class ApiEndpoint(
         for (p in pathParameters.sorted()) w.str(p)
         w.endArray()
         w.str("pathTemplate", pathTemplate)
+        if (pathUnresolved != null) w.str("pathUnresolved", pathUnresolved)
         w.str("purl", purl)
+        if (transport != null) w.str("transport", transport)
         position?.writeJson(w, "position")
         w.beginArray("permissions")
         for (p in (permissions ?: emptyList()).sorted()) w.str(p)

@@ -67,6 +67,8 @@ class SyntaxAnalyzer(
         val modifiers: List<String>,
         val annotations: List<AnnotationEvidence>,
         val position: Position,
+        /** A function's parameter name -> the annotations ON that parameter, with values. */
+        val parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
     )
 
     data class RawUsage(
@@ -160,6 +162,7 @@ class SyntaxAnalyzer(
             visibility: String = "public",
             modifiers: List<String> = emptyList(),
             annotations: List<AnnotationEvidence> = emptyList(),
+            parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
         ) {
             val fqName = joinCanonical(pkg, containers, name)
             declarations.add(
@@ -175,6 +178,7 @@ class SyntaxAnalyzer(
                     modifiers = modifiers,
                     annotations = annotations,
                     position = pos(element),
+                    parameterAnnotations = parameterAnnotations,
                 ),
             )
         }
@@ -249,6 +253,7 @@ class SyntaxAnalyzer(
                 visibility = visibilityOf(function) ?: "public",
                 modifiers = modifiersOf(function),
                 annotations = annotationsOf(function),
+                parameterAnnotations = parameterAnnotationsOf(function),
             )
             super.visitNamedFunction(function)
         }
@@ -504,6 +509,10 @@ class SyntaxAnalyzer(
                             (element.entries[0] as org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry).text else null)
                             ?.removeSurrounding("\"")
                     is org.jetbrains.kotlin.psi.KtNameReferenceExpression -> element.getReferencedName()
+                    // `RequestMethod.POST`: the qualified enum entry, kept
+                    // whole so a reader decides what the qualifier means.
+                    is org.jetbrains.kotlin.psi.KtDotQualifiedExpression ->
+                        element.text.takeIf { text -> text.all { it.isLetterOrDigit() || it == '.' || it == '_' } }
                     else -> null
                 }
             }
@@ -526,6 +535,57 @@ class SyntaxAnalyzer(
     }
 
     companion object {
+        /**
+         * The annotations on each of [function]'s value parameters, with their
+         * literal values: `@PathVariable("idProduct") id: String` names the
+         * URL variable `idProduct`, and the Kotlin name `id` is not a path
+         * parameter at all. Literal strings and collections of them only —
+         * nothing is guessed from a non-literal.
+         */
+        fun parameterAnnotationsOf(function: org.jetbrains.kotlin.psi.KtNamedFunction): Map<String, List<AnnotationEvidence>> =
+            function.valueParameters.mapNotNull { parameter ->
+                val name = parameter.name ?: return@mapNotNull null
+                val entries = parameter.annotationEntries.map { annotationEvidenceOf(it) }
+                if (entries.isEmpty()) null else name to entries
+            }.toMap()
+
+        /**
+         * One annotation entry as PSI states it: its SHORT name and its
+         * literal arguments (strings, collections of them, enum entries as
+         * written). The resolved tier uses this for an entry it could not
+         * type — the analysis API names such an annotation `<error>` and
+         * drops its arguments, and the declaring file's import is then the
+         * only route to its FQN.
+         */
+        fun annotationEvidenceOf(entry: org.jetbrains.kotlin.psi.KtAnnotationEntry, position: Position = Position("", 0, 0)): AnnotationEvidence {
+            val named = entry.valueArgumentList?.arguments?.mapNotNull { argument ->
+                val key = argument.getArgumentName()?.asName?.asString() ?: "value"
+                val expression = argument.getArgumentExpression() ?: return@mapNotNull null
+                val elements = (expression as? org.jetbrains.kotlin.psi.KtCollectionLiteralExpression)?.getInnerExpressions()
+                    ?: listOf(expression)
+                val values = elements.mapNotNull { element ->
+                    when (element) {
+                        is org.jetbrains.kotlin.psi.KtStringTemplateExpression -> {
+                            val only = element.entries.singleOrNull() as? org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry
+                            only?.text ?: if (element.entries.isEmpty()) "" else null
+                        }
+                        // An enum entry (`HttpMethod.GET`), kept as written.
+                        is org.jetbrains.kotlin.psi.KtDotQualifiedExpression, is org.jetbrains.kotlin.psi.KtNameReferenceExpression ->
+                            element.text.takeIf { text -> text.all { it.isLetterOrDigit() || it == '.' || it == '_' } }
+                        is org.jetbrains.kotlin.psi.KtConstantExpression -> element.text
+                        else -> null
+                    }
+                }
+                if (values.isEmpty()) null else key to values
+            }?.toMap() ?: emptyMap()
+            return AnnotationEvidence(
+                name = entry.shortName?.asString() ?: entry.text,
+                value = named["value"]?.firstOrNull(),
+                namedValues = named,
+                position = position,
+            )
+        }
+
         /**
          * Renders a qualified expression as a dotted name with argument lists
          * elided (`a.b(x).c()` -> `a.b.c`), so usage names are comparable to

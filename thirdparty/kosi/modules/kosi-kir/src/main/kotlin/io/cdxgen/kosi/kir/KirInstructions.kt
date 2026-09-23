@@ -59,6 +59,12 @@ data class KirDynamicCall(
     val receiver: String?,
     val args: List<String>,
     val line: Int = KIR_NO_LINE,
+    /**
+     * The type arguments as WRITTEN (short names): an unresolved call keeps
+     * no resolved ones, and Ktor's typed route `get<ViewKweet> { }` names its
+     * path only on the type.
+     */
+    val typeArguments: List<String> = emptyList(),
 ) : KirIns
 
 /** An object creation with constructor arguments. */

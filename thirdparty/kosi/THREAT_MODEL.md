@@ -72,6 +72,27 @@ Same discipline as rusi's, applied to a Kotlin front end.
 
 ## Known limits (stated, not hidden)
 
+- **Import-based resolution is a spoofing surface, by design bounded.**
+  An annotation or supertype the classpath cannot resolve is read at the
+  FQN its file's explicit `import` names. A star import counts only when
+  exactly one star package holds a pack-modelled FQN of that name. This is
+  how endpoints survive a run with no jars. It also means a hostile source
+  tree can declare `import org.springframework.web.bind.annotation.GetMapping`
+  with no Spring on the classpath and get a route published. The effect is
+  limited to ADDING attack surface to the report: it never hides an
+  endpoint, never executes anything, and never changes what a resolved
+  symbol means. A class the classpath does resolve always wins over the
+  import. Every such run carries the `annotation-import-resolved` diagnostic
+  with a count, so the report says the endpoints rest on imports and not
+  types.
+- **Implicit routes rest on declared dependencies and config, read as
+  text.** Spring Data REST resources, Actuator endpoints and springdoc
+  paths are published from a dependency coordinate in a build file or
+  `classpath.txt`, plus `application.*` keys. They are published with
+  `foundBy: implicit`. A key kosi cannot prove, for example one set only in
+  a non-default profile, yields `pathUnresolved` and is never a guessed
+  value.
+
 - The syntax tier resolves nothing: `resolvedCallRatio` is 0.0 by
   construction and says so (`syntax-backend-no-resolution`).
 - Java sources are discovery evidence at the syntax tier; Java PSI parsing

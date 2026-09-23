@@ -76,6 +76,12 @@ object ResolvedAnalyzer {
         val jvmOwner: String?,
         val jvmDescriptor: String?,
         val position: Position,
+        val parameterAnnotations: Map<String, List<AnnotationEvidence>> = emptyMap(),
+        /**
+         * Supertype SHORT names as PSI writes them, for the entries
+         * resolution could not type (no jar for them on the classpath).
+         */
+        val unresolvedSupertypes: List<String> = emptyList(),
     )
 
     data class ResolvedFileFacts(
@@ -388,7 +394,8 @@ object ResolvedAnalyzer {
                             // facts.
                             modifiers = (psiModifiers(declaration) + (symbol?.let { modifiersOf[it] } ?: emptyList()))
                                 .distinct(),
-                            annotations = (symbol?.let { annotationsOf[it] } ?: emptyList()).map { evidence ->
+                            annotations = run {
+                                val typed = ((symbol?.let { annotationsOf[it] } ?: emptyList()).map { evidence ->
                                 val entry = declaration.annotationEntries.firstOrNull { candidate ->
                                     candidate.shortName?.asString() == evidence.name
                                 }
@@ -399,12 +406,30 @@ object ResolvedAnalyzer {
                                         entry?.textOffset ?: declaration.textOffset,
                                     ),
                                 )
+                            }).filter { it.name != "<error>" }
+                                // Entries the resolver could not type (no jar
+                                // on the classpath): PSI's short name and
+                                // literal arguments, resolved later through
+                                // the file's explicit import.
+                                val typedNames = typed.mapTo(HashSet()) { it.name }
+                                typed + declaration.annotationEntries
+                                    .filter { entry -> entry.shortName?.asString()?.let { it !in typedNames } == true }
+                                    .map { entry -> SyntaxAnalyzer.annotationEvidenceOf(entry, positionAt(lines, relativePath, entry.textOffset)) }
                             },
                             overrides = symbol?.let { overridesOf[it] } ?: emptyList(),
                             supertypes = symbol?.let { supertypesOf[it] } ?: emptyList(),
+                            unresolvedSupertypes = (declaration as? org.jetbrains.kotlin.psi.KtClassOrObject)?.let { klass ->
+                                val typed = (symbol?.let { supertypesOf[it] } ?: emptyList()).mapTo(HashSet()) { it.substringAfterLast('.') }
+                                klass.superTypeListEntries.mapNotNull { entry ->
+                                    entry.typeReference?.text?.substringBefore('<')?.substringAfterLast('.')?.trim()
+                                        ?.takeIf { it.isNotEmpty() && it !in typed }
+                                }
+                            } ?: emptyList(),
                             jvmOwner = symbol?.let { jvmOf[it]?.first },
                             jvmDescriptor = symbol?.let { jvmOf[it]?.second },
                             position = positionAt(lines, relativePath, declaration.textOffset),
+                            parameterAnnotations = (declaration as? org.jetbrains.kotlin.psi.KtNamedFunction)
+                                ?.let { SyntaxAnalyzer.parameterAnnotationsOf(it) } ?: emptyMap(),
                         ),
                     )
                 }
@@ -723,6 +748,10 @@ object ResolvedAnalyzer {
                 listOfNotNull(value.value?.toString())
             is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ArrayValue ->
                 value.values.flatMap { constantValuesOf(it) ?: emptyList() }
+            // `method = [RequestMethod.POST]`: an enum entry is a constant
+            // too, published under its entry name.
+            is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.EnumEntryValue ->
+                listOfNotNull(value.callableId?.callableName?.asString())
             else -> null
         }
         return constants?.map { it.removeSurrounding("\"") }?.ifEmpty { null }

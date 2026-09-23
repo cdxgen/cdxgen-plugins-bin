@@ -56,14 +56,30 @@ object ConfigResolver {
     fun load(root: Path): ConfigTable {
         if (!Files.isDirectory(root)) return ConfigTable.EMPTY
         val values = LinkedHashMap<String, ConfigValue>()
+        val tierOf = HashMap<String, Int>()
         // Deterministic discovery: sorted relative paths, properties before
         // yaml. We report rather than decide — which is why a key two files
-        // DISAGREE about resolves to nothing (see [ConfigTable]) instead of
-        // to whichever file sorted first.
-        fun offer(key: String, value: String, source: Source) {
+        // of the SAME precedence disagree about resolves to nothing (see
+        // [ConfigTable]) instead of to whichever file sorted first.
+        //
+        // PRECEDENCE, the way Spring Boot resolves a default run: the base
+        // `application.*` files (and `application-default.*`, the profile
+        // that is active when none is named) are what is served; a key only
+        // OTHER profile files set is profile-dependent — known, unprovable,
+        // so its value is null; any other `*.properties` (gradle.properties,
+        // a message bundle, a library's own) ranks last. A profile file
+        // disagreeing with the base file used to make the key ambiguous and
+        // ERASE a resolved context path; test resources were merged with
+        // main ones.
+        fun offer(key: String, value: String?, source: Source, tier: Int) {
+            val existingTier = tierOf[key]
             val existing = values[key]
             when {
-                existing == null -> values[key] = ConfigValue(key, value, source)
+                existing == null || existingTier == null || tier < existingTier -> {
+                    values[key] = ConfigValue(key, value, source)
+                    tierOf[key] = tier
+                }
+                tier > existingTier -> Unit
                 // Already ambiguous, or the same value again: nothing to
                 // decide either way.
                 existing.value == null || existing.value == value -> Unit
@@ -74,10 +90,10 @@ object ConfigResolver {
         }
         val files = Files.walk(root).use { stream ->
             stream.filter { Files.isRegularFile(it) }
+                .filter { p -> !isTestResource(root.relativize(p)) }
                 .filter { p ->
                     val name = p.fileName.toString()
-                    name == "application.yml" || name == "application.yaml" ||
-                        name == "application.properties" || name.endsWith(".properties") ||
+                    SPRING_CONFIG.matches(name) || name.endsWith(".properties") ||
                         name == "application.conf" ||
                         name == "BuildConfig.java" || name == "BuildConfig.kt"
                 }
@@ -86,21 +102,49 @@ object ConfigResolver {
         }
         for (file in files) {
             val name = file.fileName.toString()
-            when {
-                name == "BuildConfig.java" || name == "BuildConfig.kt" ->
-                    readBuildConfig(file).forEach { (k, v) -> offer(k, v, Source.BUILDCONFIG) }
-
-                name.endsWith(".properties") ->
-                    readProperties(file).forEach { (k, v) -> offer(k, v, Source.PROPERTIES) }
-
-                name == "application.conf" ->
-                    readHocon(file).forEach { (k, v) -> offer(k, v, Source.HOCON) }
-
-                else ->
-                    readYaml(file).forEach { (k, v) -> offer(k, v, Source.YAML) }
+            val spring = SPRING_CONFIG.matchEntire(name)
+            val profile = spring?.groupValues?.get(1).orEmpty()
+            // Spring Boot: a profile-specific file overrides the plain one,
+            // `default` is the profile a run without one activates, and
+            // `.properties` wins over YAML in the same location.
+            val yaml = !name.endsWith(".properties")
+            val tier = when {
+                name == "BuildConfig.java" || name == "BuildConfig.kt" || name == "application.conf" -> TIER_BASE
+                spring == null -> TIER_OTHER
+                profile == "default" -> if (yaml) TIER_DEFAULT_PROFILE + 1 else TIER_DEFAULT_PROFILE
+                profile.isEmpty() -> if (yaml) TIER_BASE + 1 else TIER_BASE
+                else -> TIER_PROFILE
             }
+            val entries: Map<String, String> = when {
+                name == "BuildConfig.java" || name == "BuildConfig.kt" -> readBuildConfig(file)
+                name.endsWith(".properties") -> readProperties(file)
+                name == "application.conf" -> readHocon(file)
+                else -> readYaml(file)
+            }
+            val source = when {
+                name.startsWith("BuildConfig") -> Source.BUILDCONFIG
+                name.endsWith(".properties") -> Source.PROPERTIES
+                name == "application.conf" -> Source.HOCON
+                else -> Source.YAML
+            }
+            // A profile file's value is not what a default run serves.
+            entries.forEach { (k, v) -> offer(k, if (tier == TIER_PROFILE) null else v, source, tier) }
         }
         return ConfigTable(values)
+    }
+
+    /** `application.properties`, `application-prod.yml`, `bootstrap.yaml`: group 1 is the profile, if any. */
+    private val SPRING_CONFIG = Regex("""(?:application|bootstrap)(?:-([A-Za-z0-9_.]+))?\.(?:properties|ya?ml)""")
+    private const val TIER_DEFAULT_PROFILE = 0
+    private const val TIER_BASE = 2
+    private const val TIER_PROFILE = 4
+    private const val TIER_OTHER = 5
+
+    /** Test resources configure the test run, not the deployment. */
+    private fun isTestResource(relative: Path): Boolean {
+        val parts = relative.map { it.toString() }
+        val src = parts.indexOf("src")
+        return src >= 0 && src + 1 < parts.size && parts[src + 1].let { it == "test" || it.endsWith("Test") || it.startsWith("test") }
     }
 
     private fun readProperties(file: Path): Map<String, String> = try {

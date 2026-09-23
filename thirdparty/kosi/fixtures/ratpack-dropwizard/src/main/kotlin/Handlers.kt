@@ -49,12 +49,35 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~search mode=endpoint
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~whoami
 // (checked in every slot: the @Auth principal is never request data)
+// Mounting (atom-tools#92 follow-up): a Handler class names no route; the
+// chain that mounts it does. Instance form and lambda form both link, the
+// mounted class takes the chain's path and verb, and a handler nobody
+// mounts says so instead of publishing the fabricated `/Handler/handle`.
+// kosi:want endpoint framework=ratpack path=/search method=GET fn=~.QueryParamSink.handle pathunresolved=none mode=resolved
+// kosi:want endpoint framework=ratpack path=/api/any anymethod=true mode=resolved
+// kosi:want endpoint framework=ratpack fn=~HeaderSink.handle pathunresolved=~declares mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/put method=PUT mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/patch method=PATCH mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/delete method=DELETE mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/options method=OPTIONS mode=resolved
+// kosi:want endpoint framework=ratpack path=/v/post method=POST mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/get method=GET mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/post method=POST mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/put method=PUT mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/patch method=PATCH mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/delete method=DELETE mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/options method=OPTIONS mode=resolved
+// kosi:want endpoint framework=ratpack path=/legacy/any anymethod=true mode=resolved
+// kosi:want endpoint framework=ratpack path=/old/nested method=GET mode=resolved
+// kosi:want-not endpoint framework=ratpack path=/Handler/handle
+// kosi:want-not endpoint framework=ratpack fn=~.QueryParamSink.handle pathunresolved=~declares
 package fixtures.ratpackdropwizard
 
 import io.dropwizard.auth.Auth
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.QueryParam
+import ratpack.core.handling.Chain
 import ratpack.core.handling.Context
 import ratpack.core.handling.Handler
 import ratpack.handling.Context as LegacyContext
@@ -194,4 +217,32 @@ class UserResource {
         run(principal.name)
         return principal.name
     }
+}
+
+/** The application's chain: where handlers get their routes. */
+fun routes(chain: Chain) {
+    chain.get("search", QueryParamSink())
+    chain.prefix("api") { api ->
+        api.path("any") { context -> context.render("any") }
+    }
+}
+
+/** Every verb of the 2.x chain, and the 1.x chain at its own package. */
+fun verbs(chain: Chain) {
+    chain.post("v/post") { context -> context.render("p") }
+    chain.put("v/put") { context -> context.render("u") }
+    chain.patch("v/patch") { context -> context.render("a") }
+    chain.delete("v/delete") { context -> context.render("d") }
+    chain.options("v/options") { context -> context.render("o") }
+}
+
+fun legacy(chain: ratpack.handling.Chain) {
+    chain.get("legacy/get") { context -> context.render("g") }
+    chain.post("legacy/post") { context -> context.render("p") }
+    chain.put("legacy/put") { context -> context.render("u") }
+    chain.patch("legacy/patch") { context -> context.render("a") }
+    chain.delete("legacy/delete") { context -> context.render("d") }
+    chain.options("legacy/options") { context -> context.render("o") }
+    chain.path("legacy/any") { context -> context.render("x") }
+    chain.prefix("old") { nested -> nested.get("nested") { context -> context.render("n") } }
 }

@@ -199,10 +199,24 @@ parameters, constructor references, function values in a field or a
 collection, SAM conversions, anonymous object expressions and extension
 lambdas are the six that do not, each with a tracker defect.
 
-**Endpoints, services, URLs.** Inbound routes per framework (Spring MVC and
-WebFlux, Ktor, Micronaut, Quarkus/JAX-RS, http4k, gRPC, Android manifest
-components) land in `apiEndpoints[]` with path template, methods, declared
-authentication and media types; outbound calls and URL/host/JDBC strings land
+**Endpoints, services, URLs.** Inbound routes per framework land in
+`apiEndpoints[]` with path template (deployment base path included), methods,
+declared authentication and media types. The frameworks are:
+- Spring MVC and WebFlux, including Spring Data REST, Actuator and springdoc;
+- Ktor, Micronaut, Quarkus/JAX-RS (with sub-resource locators) and Quarkus
+  Reactive Routes;
+- http4k (with `routes(..)` mounts), Javalin, Ratpack, Vert.x, SparkJava and
+  Servlet (`web.xml` and `ServletRegistrationBean`);
+- WebSocket and STOMP handshakes, with SockJS;
+- gRPC, GraphQL (Spring GraphQL and Netflix DGS), AWS Lambda and Azure
+  Functions;
+- Android manifest components.
+
+See JSON_ATTRIBUTE_REFERENCE.md for `foundBy`, `anyMethod`, `pathUnresolved`
+and `transport`. `atom-tools convert -t kotlin` turns the report into a valid
+OpenAPI 3.1 document.
+
+Beyond endpoints, outbound calls and URL/host/JDBC strings land
 in `services[]` and `urls[]` with config-resolved values where the value is
 declared. `--endpoint-sources` makes endpoint handler parameters taint
 sources, which is how a route becomes the root of a slice.

@@ -1,0 +1,2 @@
+# spring-data-commons 3: PagingAndSortingRepository no longer brings CRUD.
+org.springframework.data:spring-data-commons:3.2.0=libs/spring-data-commons-3.2.0.jar

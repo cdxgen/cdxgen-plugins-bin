@@ -655,6 +655,236 @@ capabilities = ["endpoints", "context-path", "framework-semantics", "config-reso
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "spring-data-rest"
+tier = "fixtures"
+path = "fixtures/spring-data-rest"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "config-resolution", "context-path"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "data-rest-unresolved"
+tier = "fixtures"
+path = "fixtures/data-rest-unresolved"
+# spring-data-rest-webmvc is deliberately absent: the annotation resolves by import only.
+capabilities = ["endpoints", "framework-semantics", "config-resolution", "spring-data-rest", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "spring-data-commons-3"
+tier = "fixtures"
+path = "fixtures/spring-data-commons-3"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-data-commons-unknown"
+tier = "fixtures"
+path = "fixtures/spring-data-commons-unknown"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "path-argument-aliases"
+tier = "fixtures"
+path = "fixtures/path-argument-aliases"
+capabilities = ["endpoints", "framework-semantics", "servlet", "class-declared-routes"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "inherited-and-method-paths"
+tier = "fixtures"
+path = "fixtures/inherited-and-method-paths"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "unresolved-framework-imports"
+tier = "fixtures"
+path = "fixtures/unresolved-framework-imports"
+capabilities = ["endpoints", "framework-semantics", "classpath-degraded"]
+# No framework jar and no stub, on purpose: every framework reference is
+# unresolved, as in a default offline run.
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "deployment-base-paths"
+tier = "fixtures"
+path = "fixtures/deployment-base-paths"
+capabilities = ["endpoints", "context-path", "config-resolution", "framework-semantics", "gradle-multi-module"]
+# Every module declares its own `Api`/`Res` in its own package; none
+# redeclare, but the stub module and the fixture root share no sources.
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "ktor-route-shapes"
+tier = "fixtures"
+path = "fixtures/ktor-route-shapes"
+capabilities = ["endpoints", "ktor", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-webmvc-fn"
+tier = "fixtures"
+path = "fixtures/spring-webmvc-fn"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "implicit-base-servlet"
+tier = "fixtures"
+path = "fixtures/implicit-base-servlet"
+capabilities = ["endpoints", "context-path", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "implicit-base-reactive"
+tier = "fixtures"
+path = "fixtures/implicit-base-reactive"
+capabilities = ["endpoints", "context-path", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "ktor1-selectors"
+tier = "fixtures"
+path = "fixtures/ktor1-selectors"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "javalin-apibuilder"
+tier = "fixtures"
+path = "fixtures/javalin-apibuilder"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "actuator-exposure-default"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-default"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "actuator-exposure-configured"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-configured"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "verb-coverage"
+tier = "fixtures"
+path = "fixtures/verb-coverage"
+capabilities = ["endpoints", "framework-semantics", "servlet"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "composed-mappings"
+tier = "fixtures"
+path = "fixtures/composed-mappings"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-loop-verbs"
+tier = "fixtures"
+path = "fixtures/dsl-loop-verbs"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-loop-verbs-unresolved"
+tier = "fixtures"
+path = "fixtures/dsl-loop-verbs-unresolved"
+# io.ktor is deliberately absent: every Ktor symbol resolves by import only.
+# The rest follow from HttpMethod not typing: listOf/to/for cannot infer,
+# and a destructured Pair of unknown types is ambiguous.
+capabilities = ["endpoints", "framework-semantics", "ktor", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "COMPONENT_FUNCTION_AMBIGUITY", "INAPPLICABLE_CANDIDATE"]
+
+[[fixtures]]
+slug = "http4k-routes"
+tier = "fixtures"
+path = "fixtures/http4k-routes"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "jaxrs-subresources"
+tier = "fixtures"
+path = "fixtures/jaxrs-subresources"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "servlet-registration"
+tier = "fixtures"
+path = "fixtures/servlet-registration"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "websocket-handshakes"
+tier = "fixtures"
+path = "fixtures/websocket-handshakes"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "graphql-surfaces"
+tier = "fixtures"
+path = "fixtures/graphql-surfaces"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "code-base-paths"
+tier = "fixtures"
+path = "fixtures/code-base-paths"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "context-path", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "optional-segments"
+tier = "fixtures"
+path = "fixtures/optional-segments"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "graphql-graphiql-marker"
+tier = "fixtures"
+path = "fixtures/graphql-graphiql-marker"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "implicit-routes", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-extras"
+tier = "fixtures"
+path = "fixtures/dsl-extras"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "actuator-exposure-all"
+tier = "fixtures"
+path = "fixtures/actuator-exposure-all"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "config-resolution", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-mapping-shapes"
+tier = "fixtures"
+path = "fixtures/spring-mapping-shapes"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module"]
+# Two app modules declaring the same canonical classes is the shape under
+# test (digital-restaurant has thirteen); one analysis session sees them
+# as redeclarations.
+tolerated_resolution_errors = ["CLASSIFIER_REDECLARATION"]
+
+[[fixtures]]
 slug = "handler-input-semantics"
 tier = "fixtures"
 path = "fixtures/handler-input-semantics"

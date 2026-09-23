@@ -2911,8 +2911,15 @@ object KirLowering {
                     // reach the invoke as the receiver: without it the call
                     // lowered with no receiver at all, so nothing downstream
                     // could say which function ran.
+                    //
+                    // The same holds for any OTHER `invoke` operator the
+                    // expression resolves to — the router DSL's
+                    // `"/status" { }` is `String.invoke(handler)`, whose
+                    // extension receiver is the string: dropping it lost the
+                    // route's path. The callee is evaluated at run time
+                    // either way, so lowering it is the program's order.
                     val callee = psi.calleeExpression
-                    val receiver = if (callee != null && isFunctionTypeInvoke(psi)) {
+                    val receiver = if (callee != null && (isFunctionTypeInvoke(psi) || callee !is KtLambdaExpression)) {
                         lowerExpr(callee, Pos.NESTED)
                     } else {
                         null
@@ -3104,7 +3111,12 @@ object KirLowering {
             val simpleName = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
             if (symbol == null) {
                 val reg = t()
-                emit(KirDynamicCall(reg, simpleName, receiver, argRegs, line = psi.line()))
+                emit(
+                    KirDynamicCall(
+                        reg, simpleName, receiver, argRegs, line = psi.line(),
+                        typeArguments = psi.typeArguments.mapNotNull { it.typeReference?.text?.substringBefore('<')?.trim() },
+                    ),
+                )
                 hookEmitSink(receiver, simpleName, argRegs)
                 return reg
             }

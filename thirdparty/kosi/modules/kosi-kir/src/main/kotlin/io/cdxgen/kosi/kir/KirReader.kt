@@ -148,17 +148,31 @@ object KirReader {
         }
         // `dynamic` is the one opcode that may appear without a result.
         if (firstToken == "dynamic") {
-            val rest = text.substringAfter(' ', missingDelimiterValue = "")
-            val name = unq(rest.substringBefore(" recv=").substringBefore(" args="))
-            val recv = if (" recv=" in rest) rest.substringAfter(" recv=").substringBefore(" args=") else null
-            val args = if (" args=" in rest) {
-                rest.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
-            } else {
-                emptyList()
-            }
-            return KirDynamicCall(null, name, recv, args)
+            // The result-less spelling carries the writer's ` line=N` suffix
+            // too; parsing it without splitLine read `(a) line=12` as the
+            // argument list, and `kir dump` failed its round-trip on every
+            // tree with a statement-position unresolved call (httpbin).
+            return parseDynamic(null, text.substringAfter(' ', missingDelimiterValue = ""))
         }
         return null
+    }
+
+    private fun parseDynamic(result: String?, text: String): KirDynamicCall {
+        val (rest, line) = splitLine(text)
+        val body = rest.substringBefore(" typeargs=")
+        val name = unq(body.substringBefore(" recv=").substringBefore(" args="))
+        val recv = if (" recv=" in body) body.substringAfter(" recv=").substringBefore(" args=") else null
+        val args = if (" args=" in body) {
+            body.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+        val typeArgs = if (" typeargs=" in rest) {
+            rest.substringAfter(" typeargs=(").substringBefore(")").split(',').filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+        return KirDynamicCall(result, name, recv, args, line, typeArgs)
     }
 
     private val NO_RESULT_OPS = setOf("store", "fieldset", "indexset", "branch", "return", "throw", "suspend")
@@ -226,17 +240,7 @@ object KirReader {
             }
             KirCall(reg, KirCallee(fqn, desc, kind, samCtor), recv, args, line, typeArgs)
         }
-        "dynamic" -> {
-            val (rest2, line) = splitLine(rest)
-            val name = unq(rest2.substringBefore(" recv=").substringBefore(" args="))
-            val recv = if (" recv=" in rest2) rest2.substringAfter(" recv=").substringBefore(" args=") else null
-            val args = if (" args=" in rest2) {
-                rest2.substringAfter(" args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() }
-            } else {
-                emptyList()
-            }
-            KirDynamicCall(reg, name, recv, args, line)
-        }
+        "dynamic" -> parseDynamic(reg, rest)
         "new" -> {
             val (rest2, line) = splitLine(rest)
             val type = unq(rest2.substringBefore(" args="))
@@ -254,10 +258,7 @@ object KirReader {
                 }
             KirPhi(reg, inputs)
         }
-        "concat" -> KirStringConcat(
-            reg,
-            rest.substringAfter("args=(").removeSuffix(")").split(',').filter { it.isNotEmpty() },
-        )
+        "concat" -> KirStringConcat(reg, splitQuotedArgs(rest.substringAfter("args=(").removeSuffix(")")))
         "lambda" -> {
             val fn = unq(rest.substringBefore(" args="))
             val captures = if (" args=" in rest) {
@@ -361,6 +362,26 @@ object KirReader {
 
     /** The writer's `null` literal for nullable fields. */
     private fun unqn(text: String): String? = if (text == "null") null else unq(text)
+
+    /** A comma list whose items may be JSON-quoted (and then hold commas). */
+    private fun splitQuotedArgs(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '"') {
+                var j = i + 1
+                while (j < text.length && !(text[j] == '"' && text[j - 1] != '\\')) j++
+                out.add(unq(text.substring(i, j + 1)))
+                i = j + 1
+            } else {
+                val j = text.indexOf(',', i).let { if (it < 0) text.length else it }
+                text.substring(i, j).takeIf { it.isNotEmpty() }?.let { out.add(it) }
+                i = j
+            }
+            if (i < text.length && text[i] == ',') i++
+        }
+        return out
+    }
 
     /** First token of [text]; a JSON-quoted token may span spaces. Returns token + remainder. */
     private fun quotedToken(text: String): Pair<String, String> {

@@ -17,8 +17,22 @@
 // context type does not. Both directions pinned.
 // kosi:want flow source=untrusted-input sink=process-exec fn=~LambdaHandler.handleRequest mode=endpoint
 // kosi:want-not flow source=~ sink=~ fn=~ContextOnlyHandler.handleRequest mode=endpoint
-// kosi:want endpoint framework=azure-functions path=hello mode=resolved
-// kosi:want endpoint framework=azure-functions path=queued mode=resolved
+// Azure: an @HttpTrigger function is served under the host's `api` route
+// prefix at its route (its function name when none), for its trigger's
+// methods (every method when none); a queue-triggered function is not HTTP.
+// kosi:want endpoint framework=azure-functions path=/api/hello anymethod=true mode=resolved
+// kosi:want endpoint framework=azure-functions path=/api/orders/{id} method=GET anymethod=false mode=resolved
+// kosi:want endpoint framework=azure-functions fn=~Functions.queued transport=function mode=resolved
+// kosi:want-not endpoint framework=azure-functions path=/queued
+// kosi:want-not endpoint framework=azure-functions path=/api/queued
+// kosi:want-not endpoint framework=azure-functions path=/hello
+// A Lambda handler declares no route: never `/<Supertype>/<method>`.
+// kosi:want endpoint framework=aws-lambda fn=~LambdaHandler.handleRequest transport=function pathunresolved=~declares mode=resolved
+// kosi:want-not endpoint framework=aws-lambda path=/RequestHandler/handleRequest
+// Spring for GraphQL serves every operation at POST /graphql.
+// kosi:want endpoint framework=graphql path=/graphql method=POST fn=~GraphApi.book mode=resolved
+// Messaging listeners are not HTTP.
+// kosi:want endpoint framework=spring-messaging fn=~Listeners.onKafka transport=messaging mode=resolved
 // kosi:want endpoint framework=graphql fn=~GraphApi.book mode=resolved
 // kosi:want endpoint framework=graphql fn=~GraphApi.addBook mode=resolved
 // kosi:want endpoint framework=graphql fn=~GraphApi.updates mode=resolved
@@ -38,6 +52,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler
 import com.amazonaws.services.lambda.runtime.RequestStreamHandler
 import com.microsoft.azure.functions.annotation.BindingName
 import com.microsoft.azure.functions.annotation.FunctionName
+import com.microsoft.azure.functions.HttpMethod
 import com.microsoft.azure.functions.annotation.HttpTrigger
 import com.microsoft.azure.functions.annotation.QueueTrigger
 import io.awspring.cloud.sqs.annotation.SqsListener
@@ -89,6 +104,9 @@ class ContextOnlyHandler : RequestHandler<String, String> {
 class Functions {
     @FunctionName("hello")
     fun hello(@HttpTrigger(name = "req") req: String): String = req
+
+    @FunctionName("orderById")
+    fun orderById(@HttpTrigger(name = "req", route = "orders/{id}", methods = [HttpMethod.GET]) req: String): String = req
 
     @FunctionName("queued")
     fun queued(@QueueTrigger(name = "msg") msg: String, @BindingName("id") id: String): String = msg

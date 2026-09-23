@@ -4,7 +4,7 @@
 package org.springframework.web.bind.annotation
 
 @Target(AnnotationTarget.CLASS) annotation class RestController
-@Target(AnnotationTarget.FUNCTION) annotation class GetMapping(val value: String = "")
+@Target(AnnotationTarget.FUNCTION) annotation class GetMapping(vararg val value: String)
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class RequestParam(val value: String = "")
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class PathVariable(val value: String = "")
 @Target(AnnotationTarget.VALUE_PARAMETER) annotation class RequestBody

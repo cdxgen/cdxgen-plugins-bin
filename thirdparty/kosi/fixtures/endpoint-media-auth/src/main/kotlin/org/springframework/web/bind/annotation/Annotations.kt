@@ -7,9 +7,9 @@ package org.springframework.web.bind.annotation
 @Target(AnnotationTarget.CLASS) annotation class RestController
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 annotation class RequestMapping(
-    val value: String = "",
+    vararg val value: String,
     val consumes: Array<String> = [],
     val produces: Array<String> = [],
 )
 @Target(AnnotationTarget.FUNCTION)
-annotation class GetMapping(val value: String = "", val produces: Array<String> = [])
+annotation class GetMapping(vararg val value: String, val produces: Array<String> = [])

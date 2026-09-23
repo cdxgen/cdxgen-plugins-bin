@@ -1,0 +1,4 @@
+# The Spring Boot GraphQL starter, bound to a committed presence-only marker
+# jar (no classes): GraphiQL is served because the starter is there and the
+# key enables it, with no GraphQL controller anywhere in this source.
+org.springframework.boot:spring-boot-starter-graphql:3.2.0=libs/spring-boot-starter-graphql-3.2.0.jar

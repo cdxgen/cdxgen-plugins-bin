@@ -118,7 +118,13 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "registrationBeans"
    ],
    "types": [
     {
@@ -130,7 +136,13 @@
    "members": [],
    "functions": [],
    "gaps": [
+    "com.netflix.graphql.dgs.DgsComponent: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsData: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsMutation: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsQuery: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsSubscription: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.Argument: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.BatchMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.MutationMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.QueryMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.SchemaMapping: no held jar covers its package family",
@@ -144,7 +156,10 @@
    "types": [],
    "members": [],
    "functions": [],
-   "gaps": []
+   "gaps": [
+    "Grpc: supertype suffix/substring markers (ImplBase, CoroutineImplBase, Grpc, GrpcKt), not FQNs; grpc-stub held but carries no modelled FQN",
+    "GrpcKt: supertype suffix/substring markers (ImplBase, CoroutineImplBase, Grpc, GrpcKt), not FQNs; grpc-stub held but carries no modelled FQN"
+   ]
   },
   {
    "id": "http4k",
@@ -227,6 +242,18 @@
     "io.javalin.apibuilder.ApiBuilder.get: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.apibuilder.ApiBuilder.post: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.apibuilder.ApiBuilder.path: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.put: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.patch: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.delete: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.head: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.head: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.options: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.ws: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.sse: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.ws: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.sse: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.apibuilder.ApiBuilder.crud: io.javalin absent from the warm cache — channels unchecked",
+    "io.javalin.Javalin.addHttpHandler: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.pathParam: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.queryParam: io.javalin absent from the warm cache — channels unchecked",
     "io.javalin.http.Context.queryParams: io.javalin absent from the warm cache — channels unchecked",
@@ -270,6 +297,11 @@
     {
      "owner": "io.ktor.server.request.ApplicationRequest",
      "member": "queryParameters",
+     "static": false
+    },
+    {
+     "owner": "io.ktor.server.routing.Route",
+     "member": "handle",
      "static": false
     },
     {
@@ -317,6 +349,10 @@
     },
     {
      "package": "io.ktor.server.routing",
+     "function": "method"
+    },
+    {
+     "package": "io.ktor.server.routing",
      "function": "options"
     },
     {
@@ -347,18 +383,27 @@
     "io.ktor.request.receive: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.request.receiveParameters: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.request.receiveText: package io.ktor.request has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.Route.handle: owner io.ktor.routing.Route not in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm",
     "io.ktor.routing.accept: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.delete: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.get: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.head: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.routing.method: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.options: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.patch: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.post: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.put: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.routing.route: package io.ktor.routing has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.delete: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.resources.get: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.head: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.options: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.patch: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.resources.post: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.resources.put: package io.ktor.server.resources has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.sse.sse: package io.ktor.server.sse has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.server.websocket.webSocket: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
+    "io.ktor.server.websocket.webSocketRaw: package io.ktor.server.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)",
     "io.ktor.websocket.webSocket: package io.ktor.websocket has no facade in any held ktor-server-core-jvm,ktor-server-auth-jvm,ktor-http-jvm (artifact absent)"
    ]
   },
@@ -464,7 +509,11 @@
     "io.micronaut.security.Secured: no held jar covers its package family",
     "io.micronaut.security.annotation.Secured: no held jar covers its package family",
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
-    "javax.annotation.security.RolesAllowed: no held jar covers its package family"
+    "javax.annotation.security.RolesAllowed: no held jar covers its package family",
+    "io.micronaut.http.annotation.CustomHttpMethod: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Head: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Options: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.micronaut.http.annotation.Trace: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred"
    ]
   },
   {
@@ -484,7 +533,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -523,12 +577,22 @@
      "constructible": false
     },
     {
+     "fqn": "jakarta.ws.rs.HEAD",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
      "fqn": "jakarta.ws.rs.HeaderParam",
      "kind": "annotation",
      "constructible": false
     },
     {
      "fqn": "jakarta.ws.rs.MatrixParam",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "jakarta.ws.rs.OPTIONS",
      "kind": "annotation",
      "constructible": false
     },
@@ -587,8 +651,10 @@
     "javax.ws.rs.DELETE: no held jar covers its package family",
     "javax.ws.rs.FormParam: no held jar covers its package family",
     "javax.ws.rs.GET: no held jar covers its package family",
+    "javax.ws.rs.HEAD: no held jar covers its package family",
     "javax.ws.rs.HeaderParam: no held jar covers its package family",
     "javax.ws.rs.MatrixParam: no held jar covers its package family",
+    "javax.ws.rs.OPTIONS: no held jar covers its package family",
     "javax.ws.rs.PATCH: no held jar covers its package family",
     "javax.ws.rs.POST: no held jar covers its package family",
     "javax.ws.rs.PUT: no held jar covers its package family",
@@ -600,13 +666,44 @@
    ]
   },
   {
+   "id": "quarkus-reactive-routes",
+   "sources": [],
+   "covers": [
+    "mappingAnnotations",
+    "mediaAnnotations",
+    "authenticationAnnotations",
+    "parameterAnnotations",
+    "classMarkers",
+    "classMappingAnnotations",
+    "pathPrefixAnnotations",
+    "applicationPathAnnotations",
+    "supertypeMarkers",
+    "repositorySupertypes",
+    "securityConstructors",
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
+   ],
+   "types": [],
+   "members": [],
+   "functions": [],
+   "gaps": [
+    "io.quarkus.vertx.web.Route: no held jar for io.quarkus:quarkus-reactive-routes:3.15.1",
+    "io.quarkus.vertx.web.RouteBase: no held jar for io.quarkus:quarkus-reactive-routes:3.15.1"
+   ]
+  },
+  {
    "id": "ratpack",
    "sources": [
     "io.ratpack:ratpack-core:1.9.0"
    ],
    "covers": [
     "supertypeMarkers",
-    "contextReaders"
+    "contextReaders",
+    "dslFunctions"
    ],
    "types": [
     {
@@ -616,6 +713,46 @@
     }
    ],
    "members": [
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "delete",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "get",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "options",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "patch",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "path",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "post",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "prefix",
+     "static": false
+    },
+    {
+     "owner": "ratpack.handling.Chain",
+     "member": "put",
+     "static": false
+    },
     {
      "owner": "ratpack.http.Request",
      "member": "getBody",
@@ -649,6 +786,14 @@
    ],
    "functions": [],
    "gaps": [
+    "ratpack.core.handling.Chain.delete: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.get: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.options: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.patch: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.path: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.post: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.prefix: owner ratpack.core.handling.Chain not in any held ratpack-core",
+    "ratpack.core.handling.Chain.put: owner ratpack.core.handling.Chain not in any held ratpack-core",
     "ratpack.core.handling.Handler: no held jar covers its package family",
     "ratpack.core.http.Request.getBody: owner ratpack.core.http.Request not in any held ratpack-core",
     "ratpack.core.http.Request.getBodyStream: owner ratpack.core.http.Request not in any held ratpack-core",
@@ -661,7 +806,8 @@
   {
    "id": "servlet",
    "sources": [
-    "jakarta.servlet:jakarta.servlet-api:4.0.4"
+    "jakarta.servlet:jakarta.servlet-api:4.0.4",
+    "org.springframework.boot:spring-boot:2.6.6"
    ],
    "covers": [
     "mappingAnnotations",
@@ -675,7 +821,13 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "registrationBeans"
    ],
    "types": [
     {
@@ -697,6 +849,16 @@
      "fqn": "javax.servlet.annotation.WebServlet",
      "kind": "annotation",
      "constructible": false
+    },
+    {
+     "fqn": "org.springframework.boot.web.servlet.FilterRegistrationBean",
+     "kind": "class",
+     "constructible": true
+    },
+    {
+     "fqn": "org.springframework.boot.web.servlet.ServletRegistrationBean",
+     "kind": "class",
+     "constructible": true
     }
    ],
    "members": [],
@@ -721,6 +883,11 @@
     "spark.Spark.put: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Spark.delete: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Spark.path: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.patch: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.head: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.options: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.trace: com.sparkjava absent from the warm cache — channels unchecked",
+    "spark.Spark.connect: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.params: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.queryParams: com.sparkjava absent from the warm cache — channels unchecked",
     "spark.Request.headers: com.sparkjava absent from the warm cache — channels unchecked",
@@ -754,7 +921,12 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers"
    ],
    "types": [
     {
@@ -782,7 +954,12 @@
    "sources": [
     "org.springframework:spring-webmvc:5.3.18",
     "org.springframework:spring-web:5.3.18",
-    "org.springframework:spring-context:5.3.18"
+    "org.springframework:spring-context:5.3.18",
+    "org.springframework.data:spring-data-rest-webmvc:3.6.4",
+    "org.springframework.data:spring-data-rest-core:3.6.4",
+    "org.springframework.data:spring-data-commons:3.2.5",
+    "org.springframework.data:spring-data-jpa:3.2.5",
+    "org.springframework:spring-web:7.0.9"
    ],
    "covers": [
     "mappingAnnotations",
@@ -796,9 +973,76 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "dataRestBasePathSetters",
+    "dslFunctions"
    ],
    "types": [
+    {
+     "fqn": "org.springframework.data.jpa.repository.JpaRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.CrudRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.ListCrudRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.PagingAndSortingRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.PagingAndSortingRepository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.repository.Repository",
+     "kind": "interface",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.core.annotation.RepositoryRestResource",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.core.annotation.RestResource",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.BasePathAwareController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.BasePathAwareController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.RepositoryRestController",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.data.rest.webmvc.RepositoryRestController",
+     "kind": "annotation",
+     "constructible": false
+    },
     {
      "fqn": "org.springframework.stereotype.Controller",
      "kind": "annotation",
@@ -943,18 +1187,104 @@
      "fqn": "org.springframework.web.bind.annotation.RestController",
      "kind": "annotation",
      "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.DeleteExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.GetExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.HttpExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.HttpExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PatchExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PostExchange",
+     "kind": "annotation",
+     "constructible": false
+    },
+    {
+     "fqn": "org.springframework.web.service.annotation.PutExchange",
+     "kind": "annotation",
+     "constructible": false
     }
    ],
-   "members": [],
+   "members": [
+    {
+     "owner": "org.springframework.data.rest.core.config.RepositoryRestConfiguration",
+     "member": "setBasePath",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.servlet.function.RouterFunctionDsl",
+     "member": "path",
+     "static": false
+    }
+   ],
    "functions": [],
    "gaps": [
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
     "javax.annotation.security.RolesAllowed: no held jar covers its package family",
-    "org.springframework.data.jpa.repository.JpaRepository: no held jar covers its package family",
-    "org.springframework.data.repository.CrudRepository: no held jar covers its package family",
-    "org.springframework.data.repository.ListCrudRepository: no held jar covers its package family",
-    "org.springframework.data.repository.PagingAndSortingRepository: no held jar covers its package family",
-    "org.springframework.data.rest.core.annotation.RepositoryRestResource: no held jar covers its package family",
     "org.springframework.security.access.annotation.Secured: no held jar covers its package family",
     "org.springframework.security.access.prepost.PreAuthorize: no held jar covers its package family"
    ]
@@ -978,7 +1308,13 @@
     "supertypeMarkers",
     "repositorySupertypes",
     "securityConstructors",
-    "resourceAnnotations"
+    "resourceAnnotations",
+    "dataRestBasePathMarkers",
+    "repositoryResourceAnnotations",
+    "repositoryMethodAnnotations",
+    "repositoryPagingSupertypes",
+    "functionHttpTriggers",
+    "dslFunctions"
    ],
    "types": [
     {
@@ -1042,7 +1378,108 @@
      "constructible": false
     }
    ],
-   "members": [],
+   "members": [
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.CoRouterFunctionDsl",
+     "member": "path",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "DELETE",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "GET",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "HEAD",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "OPTIONS",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "PATCH",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "POST",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "PUT",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "invoke",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "nest",
+     "static": false
+    },
+    {
+     "owner": "org.springframework.web.reactive.function.server.RouterFunctionDsl",
+     "member": "path",
+     "static": false
+    }
+   ],
    "functions": [],
    "gaps": [
     "jakarta.annotation.security.RolesAllowed: no held jar covers its package family",
@@ -1176,7 +1613,21 @@
     "io.vertx.core.http.HttpServerRequest.getCookie: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getFormAttribute: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
     "io.vertx.core.http.HttpServerRequest.getHeader: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
-    "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web"
+    "io.vertx.core.http.HttpServerRequest.getParam: owner io.vertx.core.http.HttpServerRequest not in any held vertx-web",
+    "io.vertx.ext.web.Router.connect: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.deleteWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.getWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.head: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.headWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.mountSubRouter: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.options: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.optionsWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.patch: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.patchWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.postWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.putWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.routeWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
+    "io.vertx.ext.web.Router.trace: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred"
    ]
   }
  ]

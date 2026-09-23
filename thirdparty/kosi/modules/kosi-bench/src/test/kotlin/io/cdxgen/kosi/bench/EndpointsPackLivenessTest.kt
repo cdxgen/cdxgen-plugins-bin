@@ -96,7 +96,27 @@ class EndpointsPackLivenessTest {
             "securityConstructors" -> drop({ it.securityConstructors }, { x, l -> x.copy(securityConstructors = l) })
             "handlerMethodNames" -> drop({ it.handlerMethodNames }, { x, l -> x.copy(handlerMethodNames = l) })
             "authHandlerFactories" -> drop({ it.authHandlerFactories }, { x, l -> x.copy(authHandlerFactories = l) })
-            "repositoryMethods" -> drop({ it.repositoryMethods }, { x, l -> x.copy(repositoryMethods = l) })
+            "repositoryRoutes" -> drop({ it.repositoryRoutes }, { x, l -> x.copy(repositoryRoutes = l) })
+            "repositoryResourceAnnotations" -> drop({ it.repositoryResourceAnnotations }, { x, l -> x.copy(repositoryResourceAnnotations = l) })
+            "repositoryMethodAnnotations" -> drop({ it.repositoryMethodAnnotations }, { x, l -> x.copy(repositoryMethodAnnotations = l) })
+            "repositoryCrudMethods" -> drop({ it.repositoryCrudMethods }, { x, l -> x.copy(repositoryCrudMethods = l) })
+            "repositoryPagingSupertypes" -> drop({ it.repositoryPagingSupertypes }, { x, l -> x.copy(repositoryPagingSupertypes = l) })
+            "repositoryPagingMethods" -> drop({ it.repositoryPagingMethods }, { x, l -> x.copy(repositoryPagingMethods = l) })
+            "dataRestBasePathMarkers" -> drop({ it.dataRestBasePathMarkers }, { x, l -> x.copy(dataRestBasePathMarkers = l) })
+            "dataRestBasePathKeys" -> drop({ it.dataRestBasePathKeys }, { x, l -> x.copy(dataRestBasePathKeys = l) })
+            "dataRestBasePathSetters" -> drop({ it.dataRestBasePathSetters }, { x, l -> x.copy(dataRestBasePathSetters = l) })
+            "pathArguments" -> drop({ it.pathArguments }, { x, l -> x.copy(pathArguments = l) })
+            "methodPathAnnotations" -> drop({ it.methodPathAnnotations }, { x, l -> x.copy(methodPathAnnotations = l) })
+            "dslPredicateTypes" -> drop({ it.dslPredicateTypes }, { x, l -> x.copy(dslPredicateTypes = l) })
+            "verbMetaAnnotations" -> drop({ it.verbMetaAnnotations }, { x, l -> x.copy(verbMetaAnnotations = l) })
+            "repositoryDependencyMarkers" -> drop({ it.repositoryDependencyMarkers }, { x, l -> x.copy(repositoryDependencyMarkers = l) })
+            "repositoryMarkerSupertypes" -> drop({ it.repositoryMarkerSupertypes }, { x, l -> x.copy(repositoryMarkerSupertypes = l) })
+            // Groups of alternatives: one KEY is the removable entry.
+            "basePathKeys" -> if (elem is String) f.copy(basePathKeys = f.basePathKeys.map { group -> group.filter { it != elem } })
+            else drop({ it.basePathKeys }, { x, l -> x.copy(basePathKeys = l) })
+            "servedAtKeys" -> drop({ it.servedAtKeys }, { x, l -> x.copy(servedAtKeys = l) })
+            "servedAtMethods" -> drop({ it.servedAtMethods }, { x, l -> x.copy(servedAtMethods = l) })
+            "functionHttpTriggers" -> drop({ it.functionHttpTriggers }, { x, l -> x.copy(functionHttpTriggers = l) })
             "repositorySupertypes" -> drop({ it.repositorySupertypes }, { x, l -> x.copy(repositorySupertypes = l) })
             "manifestComponents" -> drop({ it.manifestComponents }, { x, l -> x.copy(manifestComponents = l) })
             "supertypeMarkers" -> drop({ it.supertypeMarkers }, { x, l -> x.copy(supertypeMarkers = l) })
@@ -115,6 +135,11 @@ class EndpointsPackLivenessTest {
             "handlerDsl" -> drop({ it.handlerDsl }, { x, l -> x.copy(handlerDsl = l) })
             "mountFunctions" -> drop({ it.mountFunctions }, { x, l -> x.copy(mountFunctions = l) })
             "implicitRoutes" -> drop({ it.implicitRoutes }, { x, l -> x.copy(implicitRoutes = l) })
+            "implicitExposureDefault" -> drop({ it.implicitExposureDefault }, { x, l -> x.copy(implicitExposureDefault = l) })
+            "registrationBeans" -> drop({ it.registrationBeans }, { x, l -> x.copy(registrationBeans = l) })
+            "handshakeRegistrations" -> drop({ it.handshakeRegistrations }, { x, l -> x.copy(handshakeRegistrations = l) })
+            "codeBasePathProperties" -> drop({ it.codeBasePathProperties }, { x, l -> x.copy(codeBasePathProperties = l) })
+            "codeBasePathSites" -> drop({ it.codeBasePathSites }, { x, l -> x.copy(codeBasePathSites = l) })
             // The three channels that state a framework's ARGUMENT
             // BINDING rule (Spring's "any other argument" fallback).
             "contextParameterTypes" -> drop({ it.contextParameterTypes }, { x, l -> x.copy(contextParameterTypes = l) })
@@ -164,7 +189,25 @@ class EndpointsPackLivenessTest {
         fw.securityConstructors.forEach { entry("securityConstructors", it, it.substringAfterLast('.'), it) }
         fw.handlerMethodNames.forEach { entry("handlerMethodNames", it, it.name, it.name) }
         fw.authHandlerFactories.forEach { entry("authHandlerFactories", it, it.substringAfterLast('.'), it) }
-        fw.repositoryMethods.forEach { entry("repositoryMethods", it, it, it) }
+        fw.repositoryRoutes.forEach { entry("repositoryRoutes", it, it.backedBy.firstOrNull() ?: it.method, "${it.method} ${it.path}") }
+        fw.repositoryResourceAnnotations.forEach { entry("repositoryResourceAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.repositoryMethodAnnotations.forEach { entry("repositoryMethodAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.repositoryCrudMethods.forEach { entry("repositoryCrudMethods", it, it, it) }
+        fw.repositoryPagingSupertypes.forEach { entry("repositoryPagingSupertypes", it, it.substringAfterLast('.'), it) }
+        fw.repositoryPagingMethods.forEach { entry("repositoryPagingMethods", it, it, it) }
+        fw.dataRestBasePathMarkers.forEach { entry("dataRestBasePathMarkers", it, it.substringAfterLast('.'), it) }
+        fw.dataRestBasePathKeys.forEach { entry("dataRestBasePathKeys", it, it, it) }
+        fw.dataRestBasePathSetters.forEach { entry("dataRestBasePathSetters", it, it.substringAfterLast('.'), it) }
+        fw.pathArguments.forEach { entry("pathArguments", it, it, it) }
+        fw.methodPathAnnotations.forEach { entry("methodPathAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.dslPredicateTypes.forEach { entry("dslPredicateTypes", it, it.substringAfterLast('/'), it) }
+        fw.verbMetaAnnotations.forEach { entry("verbMetaAnnotations", it, it.substringAfterLast('.'), it) }
+        fw.repositoryDependencyMarkers.forEach { entry("repositoryDependencyMarkers", it, it, it) }
+        fw.repositoryMarkerSupertypes.forEach { entry("repositoryMarkerSupertypes", it, it.substringAfterLast('.'), it) }
+        fw.basePathKeys.flatten().forEach { entry("basePathKeys", it, it, it) }
+        fw.servedAtKeys.forEach { entry("servedAtKeys", it, it, it) }
+        fw.servedAtMethods.forEach { entry("servedAtMethods", it, it, it) }
+        fw.functionHttpTriggers.forEach { entry("functionHttpTriggers", it, it.substringAfterLast('.'), it) }
         // The argument-binding rule's three channels.
         fw.contextParameterTypes.forEach { entry("contextParameterTypes", it, it.substringAfterLast('.'), it) }
         fw.nonInputAnnotations.forEach { entry("nonInputAnnotations", it, it.substringAfterLast('.'), it) }
@@ -187,6 +230,11 @@ class EndpointsPackLivenessTest {
         fw.handlerDsl.forEach { entry("handlerDsl", it, it.substringAfterLast('.'), it) }
         fw.mountFunctions.forEach { entry("mountFunctions", it, it.substringAfterLast('.'), it) }
         fw.implicitRoutes.forEach { entry("implicitRoutes", it, it.path, it.path) }
+        fw.implicitExposureDefault.forEach { entry("implicitExposureDefault", it, it, it) }
+        fw.registrationBeans.forEach { entry("registrationBeans", it, it.pattern.substringAfterLast('.'), it.pattern) }
+        fw.handshakeRegistrations.forEach { entry("handshakeRegistrations", it, it.pattern.substringAfterLast('.'), it.pattern) }
+        fw.codeBasePathProperties.forEach { entry("codeBasePathProperties", it, it, it) }
+        fw.codeBasePathSites.forEach { entry("codeBasePathSites", it, it.substringAfterLast('.'), it) }
     }
 
     private fun packRemovables(pack: EndpointsPack): List<Removable> =
@@ -202,6 +250,8 @@ class EndpointsPackLivenessTest {
         capture.module, root, capture.sourceTexts, capture.annotationValues,
         Endpoints.Attribution(emptyMap(), emptyMap()), includeManifests = true,
         dependencyCoordinates = capture.dependencyCoordinates, pack = pack,
+        typeDeclarations = capture.typeDeclarations,
+        importRootsByFile = capture.importRootsByFile,
     )
 
     @Test
@@ -302,6 +352,8 @@ class EndpointsPackLivenessTest {
      * becomes LIVE and the reason is dead text the next sweep prints.
      */
     private fun inertAllowance(): Map<String, String> = mapOf(
+        "javalin.codeBasePathSites[io.javalin.Javalin.create]" to
+            "Javalin is Java: `create` is a STATIC on io.javalin.Javalin in the real jar, which a Kotlin source stub cannot declare (it can only spell io.javalin.Javalin.Companion.create, the live sibling row). fixtures/code-base-paths exercises the companion spelling; this row is the one real bytecode resolves to.",
         "graphql.contextParameterTypes[graphql.schema.DataFetchingEnvironment]" to
             "consumed by the FLOW ENGINE's parameter seeding, not by endpoint detection, so this sweep — which diffs Endpoints.Result — structurally cannot see it. The gate that does is fixtures/graphql-argument-binding, whose want-nots are one per entry: drop this entry and its handler reports a finding. Transcribed from the framework's own documentation, not from memory.",
         "graphql.contextParameterTypes[graphql.GraphQLContext]" to
@@ -806,6 +858,10 @@ class EndpointsPackLivenessTest {
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.Part]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.PathVariable]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
         "micronaut.parameterAnnotations[io.micronaut.http.annotation.QueryValue]" to "parameter-annotation spelling beside the rows endpoint-parameter-semantics exercises; the body/header kinds publish nothing into the endpoints/services/urls arrays this sweep compares",
+        "quarkus.verbMetaAnnotations[javax.ws.rs.HttpMethod]" to "javax spelling recorded beside its jakarta twin; the exercised designator lives in composed-mappings",
+        "quarkus.mappingAnnotations[javax.ws.rs.HEAD]" to "javax spelling recorded beside its jakarta twin; the exercised HEAD row lives in inherited-and-method-paths",
+        "quarkus.mappingAnnotations[javax.ws.rs.OPTIONS]" to "javax spelling recorded beside its jakarta twin; the exercised OPTIONS row lives in inherited-and-method-paths",
+        "quarkus.methodPathAnnotations[javax.ws.rs.Path]" to "javax spelling recorded beside its jakarta twin; the exercised method-level @Path lives in inherited-and-method-paths",
         "quarkus.applicationPathAnnotations[jakarta.ws.rs.ApplicationPath]" to "jakarta spelling recorded beside its javax twin; the exercised JAX-RS rows live in endpoint-media-auth/framework-generations",
         "quarkus.authenticationAnnotations[jakarta.annotation.security.DenyAll]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "quarkus.authenticationAnnotations[javax.annotation.security.DenyAll]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
@@ -889,7 +945,6 @@ class EndpointsPackLivenessTest {
         "spring-mvc.repositorySupertypes[org.springframework.data.jpa.repository.JpaRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-mvc.repositorySupertypes[org.springframework.data.repository.ListCrudRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-mvc.repositorySupertypes[org.springframework.data.repository.PagingAndSortingRepository]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
-        "spring-mvc.repositorySupertypes[org.springframework.data.rest.core.annotation.RepositoryRestResource]" to "spring-data supertype beside the exercised repository shape in implicit-routes",
         "spring-webflux.authenticationAnnotations[jakarta.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-webflux.authenticationAnnotations[javax.annotation.security.RolesAllowed]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",
         "spring-webflux.authenticationAnnotations[org.springframework.security.access.annotation.Secured]" to "auth-annotation spelling beside the exercised sibling(s) of its framework",

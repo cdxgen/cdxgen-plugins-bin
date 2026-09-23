@@ -14,6 +14,77 @@ data class MappingAnnotation(
     val methods: List<String>,
     /** A nesting route-shaper (`route("/x") { .. }`) contributes its path to descendants and publishes no endpoint itself. */
     val nesting: Boolean = false,
+    /**
+     * The annotation argument that NARROWS [methods] on the site:
+     * `@RequestMapping(method = [RequestMethod.POST])` serves POST although
+     * the annotation's own [methods] is empty. Null when the annotation's
+     * methods are fixed by its name (`@GetMapping`).
+     */
+    val methodArgument: String? = null,
+    /**
+     * The framework serves EVERY HTTP method here when the site narrows
+     * none: `@RequestMapping` without `method`, Vert.x `router.route(..)`,
+     * Ratpack `chain.path(..)`. Distinct from an empty [methods] kosi
+     * could not resolve.
+     */
+    val anyMethod: Boolean = false,
+    /**
+     * A [nesting] shaper whose first argument is a PATH segment its
+     * descendants sit under (Ktor `route`, Javalin `path`, Ratpack
+     * `prefix`); false for a shaper that selects by something else (Ktor
+     * `accept("application/json")` selects by media type).
+     */
+    val nestingPath: Boolean = false,
+    /**
+     * A [nesting] SELECTOR's argument index that names the HTTP method its
+     * descendants serve (Ktor `method(HttpMethod.Put) { }` = 0,
+     * `route(path, HttpMethod.Post) { }` = 1, when that overload is used).
+     */
+    val nestingMethodArgument: Int = -1,
+    /** The path argument is a REGEX (Vert.x `getWithRegex`), not a URL template. */
+    val pathIsRegex: Boolean = false,
+    /** [methodArgument] may name a non-standard verb (Micronaut `@CustomHttpMethod(method = "LOCK")`). */
+    val customVerbs: Boolean = false,
+    /** With no path argument, the path is the handler's method name (Quarkus @Route). */
+    val pathFromMethodName: Boolean = false,
+    /** Javalin `crud(path, handler)`: the collection's GET/POST and the item's GET/PATCH/DELETE. */
+    val crud: Boolean = false,
+)
+
+/** One route a repository resource serves; see [FrameworkModel.repositoryRoutes]. */
+data class RepositoryRoute(
+    /** Relative to the resource: `""` is the collection, `/{id}` the item. */
+    val path: String,
+    val method: String,
+    /** Repository methods that back the route; hidden when every one is unexported. */
+    val backedBy: List<String>,
+)
+
+/**
+ * A servlet or filter registered IN CODE (Spring Boot's
+ * `ServletRegistrationBean(servlet, "/x")`, `FilterRegistrationBean`):
+ * [pattern] is the bean's constructor, [mappingMethods] the members that
+ * add or set its url patterns, and [kind] `servlet` or `filter`.
+ */
+data class RegistrationBean(
+    val pattern: String,
+    val kind: String,
+    val mappingMethods: List<String>,
+)
+
+/**
+ * A WebSocket HANDSHAKE registered on a registry in code: Spring's
+ * `StompEndpointRegistry.addEndpoint("/ws")`,
+ * `WebSocketHandlerRegistry.addHandler(handler, "/echo")`. The handshake is
+ * an HTTP GET (Upgrade). Path arguments start at [pathArgumentStart];
+ * [handlerArgument] is the handler instance, or -1. A registration that
+ * chains [sockJs] also serves the SockJS protocol's HTTP transports.
+ */
+data class HandshakeRegistration(
+    val pattern: String,
+    val pathArgumentStart: Int,
+    val handlerArgument: Int = -1,
+    val sockJs: String? = null,
 )
 
 /** One framework's detection data. [kind] is `annotation`, `dsl`, `supertype` or `manifest`. */
@@ -121,6 +192,72 @@ data class FrameworkModel(
      * servlet modelled that way detects no endpoint at all.
      */
     val classMappingAnnotations: List<String> = emptyList(),
+    /**
+     * The annotation arguments a route PATH may be written under, in
+     * precedence order. Spring declares `value` and `path` as `String[]`
+     * aliases, so `@GetMapping("/x")`, `@GetMapping(value = ["/x"])` and
+     * `@GetMapping(path = ["/x"])` are the same route; one array may name
+     * several paths, each its own endpoint. Applies to [mappingAnnotations],
+     * [pathPrefixAnnotations] and [classMappingAnnotations] alike. Empty
+     * means `value` alone, the annotation convention.
+     */
+    val pathArguments: List<String> = emptyList(),
+    /**
+     * JVM internal names of the PREDICATE type a DSL's same-named overloads
+     * return (Spring's router `GET("/x")` / `path("/v2")` build a
+     * RequestPredicate and register nothing); such a call is no route.
+     */
+    val dslPredicateTypes: List<String> = emptyList(),
+    /**
+     * An annotation that carries a handler METHOD's own path apart from its
+     * verb annotation — JAX-RS `@GET @Path("/{id}")`. Joined after the
+     * class prefix.
+     */
+    val methodPathAnnotations: List<String> = emptyList(),
+    /**
+     * Meta-annotations that make a source annotation a VERB designator
+     * (JAX-RS `@HttpMethod("PROPFIND") annotation class PROPFIND`).
+     */
+    val verbMetaAnnotations: List<String> = emptyList(),
+    /**
+     * The config keys that set the DEPLOYMENT base path this framework's
+     * routes are served under, as ordered groups: keys within a group are
+     * alternatives, groups compose (see `Endpoints.deploymentBasePath`).
+     */
+    val basePathKeys: List<List<String>> = emptyList(),
+    /**
+     * What carries this framework's endpoints when it is not HTTP:
+     * `messaging` (Kafka/JMS/STOMP listeners, schedulers), `grpc`,
+     * `android`, `function` (a cloud function's event trigger). Empty is
+     * HTTP. A consumer building an HTTP API description reads this to keep
+     * non-HTTP handlers out of `paths` without dropping them.
+     */
+    val transport: String = "",
+    /**
+     * Frameworks whose every handler is served at ONE path: Spring for
+     * GraphQL answers every query and mutation at `POST /graphql`
+     * (`spring.graphql.http.path`; Boot 2.7's `spring.graphql.path`).
+     */
+    val servedAtKeys: List<String> = emptyList(),
+    val servedAtDefault: String? = null,
+    /**
+     * A config key naming a SECOND path every handler is also served at,
+     * over a WebSocket upgrade (GET), and only when the key is set: Spring
+     * GraphQL's `spring.graphql.websocket.path` has no default.
+     */
+    val servedAlsoAtKey: String? = null,
+    val servedAtMethods: List<String> = emptyList(),
+    /**
+     * Cloud-function HTTP triggers (Azure's `@HttpTrigger`): a function
+     * with a parameter carrying one is HTTP, served at
+     * `/<routePrefix>/<route or function name>` with the trigger's
+     * `methods` (all when none); a function without one is event-triggered
+     * and not HTTP. [functionRoutePrefixDefault] is the host's default
+     * prefix, overridden by `host.json` at [functionRoutePrefixHostKey].
+     */
+    val functionHttpTriggers: List<String> = emptyList(),
+    val functionRoutePrefixDefault: String = "",
+    val functionRoutePrefixHostKey: String = "",
     /** Handler method name -> the HTTP methods it serves (`doGet` -> GET). */
     val handlerMethodNames: List<HandlerMethodName> = emptyList(),
     /**
@@ -160,13 +297,107 @@ data class FrameworkModel(
      */
     val implicitBasePathDefault: String = "",
     /**
+     * [implicitRoutes] are also served when the analysed code has handlers
+     * of this framework, not only when a [dependencyMarkers] jar resolved:
+     * GraphiQL is served by the app that has GraphQL controllers, whether or
+     * not the run could resolve the starter.
+     */
+    val implicitWhenHandled: Boolean = false,
+    /**
+     * Property names whose WRITE in code sets the deployment base path:
+     * Javalin's `config.router.contextPath = "/api"` (3.x/4.x:
+     * `config.contextPath`), Ktor's `rootPath = "/api"` in the engine
+     * environment. Read through the `@codeBasePath` token in
+     * [basePathKeys], per module, only in files importing the framework.
+     */
+    val codeBasePathProperties: List<String> = emptyList(),
+    /**
+     * The calls that create one APP whose base path [codeBasePathProperties]
+     * sets (Javalin `create`, Ktor's environment builders). More sites than
+     * writes in a module leaves the base unproven.
+     */
+    val codeBasePathSites: List<String> = emptyList(),
+    /**
+     * Endpoint EXPOSURE for implicit routes carrying an [ImplicitRoute.id]:
+     * the include/exclude keys (comma lists, `*` = all, exclude wins) and
+     * the IDs exposed when neither is set — Spring Boot exposes "only the
+     * health endpoint" over HTTP by default.
+     */
+    val implicitExposureIncludeKey: String? = null,
+    val implicitExposureExcludeKey: String? = null,
+    val implicitExposureDefault: List<String> = emptyList(),
+    /** `management.endpoints.web.path-mapping.` + id renames that endpoint's segment. */
+    val implicitPathMappingPrefix: String? = null,
+    /**
      * Supertypes that make a declaration an implicitly-routed RESOURCE:
      * Spring Data REST exposes every `CrudRepository` as a collection
      * endpoint, named after the entity, with no handler in source.
      */
     val repositorySupertypes: List<String> = emptyList(),
-    /** HTTP methods a repository collection serves. */
-    val repositoryMethods: List<String> = emptyList(),
+    /**
+     * The routes a repository resource serves and the repository method
+     * backing each (Spring Data REST reference, "Repository resources"):
+     * the collection serves GET/HEAD via `findAll` and POST via `save`; the
+     * item `/{id}` serves GET/HEAD via `findById`, PUT/PATCH via `save` and
+     * DELETE via `delete`. A route whose backing method the repository
+     * declares with `exported = false` is not served. Replaces a flat verb
+     * list that published PUT and DELETE on the COLLECTION and no item route.
+     */
+    val repositoryRoutes: List<RepositoryRoute> = emptyList(),
+    /**
+     * Annotations on a repository TYPE that rename or hide its resource
+     * (`@RepositoryRestResource(path = "orders", exported = false)`).
+     */
+    val repositoryResourceAnnotations: List<String> = emptyList(),
+    /**
+     * Annotations on a repository METHOD that hide the routes it backs or
+     * rename its search resource (`@RestResource(exported = false)`).
+     */
+    val repositoryMethodAnnotations: List<String> = emptyList(),
+    /**
+     * Methods a repository declares that are CRUD plumbing, never search
+     * resources: every other abstract member the repository declares is a
+     * query method, served at `/{collection}/search/{name}`.
+     */
+    val repositoryCrudMethods: List<String> = emptyList(),
+    /**
+     * Repository supertypes that carry the CRUD methods only in older
+     * generations: spring-data-commons 3.0 split `PagingAndSortingRepository`
+     * off `CrudRepository`, leaving it [repositoryPagingMethods] alone. Below spring-data-commons major
+     * [repositoryPagingCrudBelowMajor] they still bring the full CRUD set.
+     */
+    val repositoryPagingSupertypes: List<String> = emptyList(),
+    val repositoryPagingMethods: List<String> = emptyList(),
+    val repositoryPagingCrudBelowMajor: Int = 0,
+    /** `group:artifact` whose major version decides [repositoryPagingCrudBelowMajor]. */
+    val repositoryGenerationArtifact: String? = null,
+    /**
+     * Artifact names whose presence in a module's build makes its
+     * repositories HTTP resources (Spring Data REST's starter/webmvc).
+     */
+    val repositoryDependencyMarkers: List<String> = emptyList(),
+    /**
+     * The bare repository MARKER supertypes (`Repository<T, ID>`): a
+     * repository extending only one serves exactly the CRUD methods it
+     * DECLARES (Spring Data "selectively exposing CRUD methods").
+     */
+    val repositoryMarkerSupertypes: List<String> = emptyList(),
+    /**
+     * Class markers whose handlers — and every repository resource — are
+     * served under the Spring Data REST BASE PATH:
+     * `@BasePathAwareController` and `@RepositoryRestController` (which is
+     * meta-annotated with it). Neither is a `@Controller`, which is why the
+     * base-path-aware handlers were invisible to [classMarkers] matching.
+     */
+    val dataRestBasePathMarkers: List<String> = emptyList(),
+    /** Config keys that set that base path (`spring.data.rest.base-path`). */
+    val dataRestBasePathKeys: List<String> = emptyList(),
+    /**
+     * Calls that set it in code (`RepositoryRestConfiguration.setBasePath`),
+     * which Spring applies after the properties — a folded call argument
+     * wins over the key.
+     */
+    val dataRestBasePathSetters: List<String> = emptyList(),
     /**
      * How a `context` handler reads its input, and WHICH TRANSPORT each
      * reader names.
@@ -241,6 +472,16 @@ data class FrameworkModel(
      * the roles begin.
      */
     val roleArgumentStart: Int = -1,
+    /**
+     * JAX-RS sub-resource locators (spec §3.4.1): a method with a
+     * [methodPathAnnotations] path and no verb returns the class that serves
+     * the rest of the path. That class needs no [classMarkers].
+     */
+    val subResourceLocators: Boolean = false,
+    /** WebSocket handshakes registered in code; see [HandshakeRegistration]. */
+    val handshakeRegistrations: List<HandshakeRegistration> = emptyList(),
+    /** Servlets and filters registered in code; see [RegistrationBean]. */
+    val registrationBeans: List<RegistrationBean> = emptyList(),
     /**
      * The DSL call that opens a CONTRACT BLOCK whose lambda sets a
      * block-wide security requirement (http4k's
@@ -347,10 +588,25 @@ const val TRANSPORT_QUERY: String = "query"
 const val TRANSPORT_MERGED: String = "merged"
 
 /** One route that exists because a dependency is on the classpath. */
-data class ImplicitRoute(val path: String, val methods: List<String>)
+data class ImplicitRoute(
+    val path: String,
+    val methods: List<String>,
+    /** The endpoint ID exposure is decided by (Actuator's `health`, `env`); null = always, when the tree is present. */
+    val id: String? = null,
+    /** A config key whose value REPLACES [path] (`springdoc.api-docs.path`), then [pathSuffix] is appended. */
+    val pathKey: String? = null,
+    val pathSuffix: String = "",
+    /** A config key that disables the route when `false` (`springdoc.swagger-ui.enabled`). */
+    val enabledKey: String? = null,
+    /**
+     * False for a route that is OFF until [enabledKey] says `true` (GraphiQL:
+     * `spring.graphql.graphiql.enabled` defaults to false).
+     */
+    val enabledByDefault: Boolean = true,
+)
 
 /** One convention-named handler: the method name and what it serves. */
-data class HandlerMethodName(val name: String, val methods: List<String>)
+data class HandlerMethodName(val name: String, val methods: List<String>, val anyMethod: Boolean = false)
 
 /** Handler-input shapes; see [FrameworkModel.handlerInput]. */
 const val HANDLER_INPUT_ANNOTATED: String = "annotated"
@@ -434,6 +690,14 @@ object EndpointModels {
                     pattern = require(m.str("pattern"), "frameworks[].${key}[].pattern"),
                     methods = m.arr("methods")?.strings() ?: emptyList(),
                     nesting = m.bool("nesting") ?: false,
+                    methodArgument = m.str("methodArgument"),
+                    anyMethod = m.bool("anyMethod") ?: false,
+                    nestingPath = m.bool("nestingPath") ?: false,
+                    nestingMethodArgument = m.long("nestingMethodArgument")?.toInt() ?: -1,
+                    pathIsRegex = m.bool("pathIsRegex") ?: false,
+                    customVerbs = m.bool("customVerbs") ?: false,
+                    pathFromMethodName = m.bool("pathFromMethodName") ?: false,
+                    crud = m.bool("crud") ?: false,
                 )
             } ?: emptyList()
             FrameworkModel(
@@ -459,6 +723,21 @@ object EndpointModels {
                 nonInputAnnotations = f.arr("nonInputAnnotations")?.strings() ?: emptyList(),
                 simpleParameterTypes = f.arr("simpleParameterTypes")?.strings() ?: emptyList(),
                 classMappingAnnotations = f.arr("classMappingAnnotations")?.strings() ?: emptyList(),
+                pathArguments = f.arr("pathArguments")?.strings() ?: emptyList(),
+                dslPredicateTypes = f.arr("dslPredicateTypes")?.strings() ?: emptyList(),
+                methodPathAnnotations = f.arr("methodPathAnnotations")?.strings() ?: emptyList(),
+                verbMetaAnnotations = f.arr("verbMetaAnnotations")?.strings() ?: emptyList(),
+                basePathKeys = f.arr("basePathKeys")?.items?.map { group ->
+                    (group as? io.cdxgen.kosi.schema.JsonArr)?.items?.mapNotNull { (it as? io.cdxgen.kosi.schema.JsonStr)?.value }.orEmpty()
+                } ?: emptyList(),
+                transport = f.str("transport") ?: "",
+                servedAtKeys = f.arr("servedAtKeys")?.strings() ?: emptyList(),
+                servedAtDefault = f.str("servedAtDefault"),
+                servedAlsoAtKey = f.str("servedAlsoAtKey"),
+                servedAtMethods = f.arr("servedAtMethods")?.strings() ?: emptyList(),
+                functionHttpTriggers = f.arr("functionHttpTriggers")?.strings() ?: emptyList(),
+                functionRoutePrefixDefault = f.str("functionRoutePrefixDefault") ?: "",
+                functionRoutePrefixHostKey = f.str("functionRoutePrefixHostKey") ?: "",
                 resourceAnnotations = f.arr("resourceAnnotations")?.strings() ?: emptyList(),
                 applicationPathAnnotations = f.arr("applicationPathAnnotations")?.strings() ?: emptyList(),
                 dependencyMarkers = f.arr("dependencyMarkers")?.strings() ?: emptyList(),
@@ -466,12 +745,42 @@ object EndpointModels {
                     ImplicitRoute(
                         path = require(r.str("path"), "frameworks[].implicitRoutes[].path"),
                         methods = r.arr("methods")?.strings() ?: emptyList(),
+                        id = r.str("id"),
+                        pathKey = r.str("pathKey"),
+                        pathSuffix = r.str("pathSuffix") ?: "",
+                        enabledKey = r.str("enabledKey"),
+                        enabledByDefault = r.bool("enabledByDefault") ?: true,
                     )
                 } ?: emptyList(),
                 implicitBasePathKeys = f.arr("implicitBasePathKeys")?.strings() ?: emptyList(),
                 implicitBasePathDefault = f.str("implicitBasePathDefault") ?: "",
+                implicitWhenHandled = f.bool("implicitWhenHandled") ?: false,
+                codeBasePathProperties = f.arr("codeBasePathProperties")?.strings() ?: emptyList(),
+                codeBasePathSites = f.arr("codeBasePathSites")?.strings() ?: emptyList(),
+                implicitExposureIncludeKey = f.str("implicitExposureIncludeKey"),
+                implicitExposureExcludeKey = f.str("implicitExposureExcludeKey"),
+                implicitExposureDefault = f.arr("implicitExposureDefault")?.strings() ?: emptyList(),
+                implicitPathMappingPrefix = f.str("implicitPathMappingPrefix"),
                 repositorySupertypes = f.arr("repositorySupertypes")?.strings() ?: emptyList(),
-                repositoryMethods = f.arr("repositoryMethods")?.strings() ?: emptyList(),
+                repositoryRoutes = f.arr("repositoryRoutes")?.objects()?.map { r ->
+                    RepositoryRoute(
+                        path = r.str("path") ?: "",
+                        method = require(r.str("method"), "frameworks[].repositoryRoutes[].method"),
+                        backedBy = r.arr("backedBy")?.strings() ?: emptyList(),
+                    )
+                } ?: emptyList(),
+                repositoryResourceAnnotations = f.arr("repositoryResourceAnnotations")?.strings() ?: emptyList(),
+                repositoryMethodAnnotations = f.arr("repositoryMethodAnnotations")?.strings() ?: emptyList(),
+                repositoryCrudMethods = f.arr("repositoryCrudMethods")?.strings() ?: emptyList(),
+                repositoryPagingSupertypes = f.arr("repositoryPagingSupertypes")?.strings() ?: emptyList(),
+                repositoryPagingMethods = f.arr("repositoryPagingMethods")?.strings() ?: emptyList(),
+                repositoryPagingCrudBelowMajor = f.long("repositoryPagingCrudBelowMajor")?.toInt() ?: 0,
+                repositoryGenerationArtifact = f.str("repositoryGenerationArtifact"),
+                repositoryDependencyMarkers = f.arr("repositoryDependencyMarkers")?.strings() ?: emptyList(),
+                repositoryMarkerSupertypes = f.arr("repositoryMarkerSupertypes")?.strings() ?: emptyList(),
+                dataRestBasePathMarkers = f.arr("dataRestBasePathMarkers")?.strings() ?: emptyList(),
+                dataRestBasePathKeys = f.arr("dataRestBasePathKeys")?.strings() ?: emptyList(),
+                dataRestBasePathSetters = f.arr("dataRestBasePathSetters")?.strings() ?: emptyList(),
                 contextReaders = f.arr("contextReaders")?.objects()?.map { c ->
                     ContextReader(
                         pattern = require(c.str("pattern"), "frameworks[].contextReaders[].pattern"),
@@ -503,6 +812,22 @@ object EndpointModels {
                 handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
                 mountFunctions = f.arr("mountFunctions")?.strings() ?: emptyList(),
                 roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
+                subResourceLocators = f.bool("subResourceLocators") ?: false,
+                handshakeRegistrations = f.arr("handshakeRegistrations")?.objects()?.map { r ->
+                    HandshakeRegistration(
+                        pattern = require(r.str("pattern"), "frameworks[].handshakeRegistrations[].pattern"),
+                        pathArgumentStart = r.long("pathArgumentStart")?.toInt() ?: 0,
+                        handlerArgument = r.long("handlerArgument")?.toInt() ?: -1,
+                        sockJs = r.str("sockJs"),
+                    )
+                } ?: emptyList(),
+                registrationBeans = f.arr("registrationBeans")?.objects()?.map { r ->
+                    RegistrationBean(
+                        pattern = require(r.str("pattern"), "frameworks[].registrationBeans[].pattern"),
+                        kind = require(r.str("kind"), "frameworks[].registrationBeans[].kind"),
+                        mappingMethods = r.arr("mappingMethods")?.strings() ?: emptyList(),
+                    )
+                } ?: emptyList(),
                 contractDsl = f.arr("contractDsl")?.strings() ?: emptyList(),
                 routeMetaDsl = f.arr("routeMetaDsl")?.strings() ?: emptyList(),
                 securityConstructors = f.arr("securityConstructors")?.strings() ?: emptyList(),
@@ -511,6 +836,7 @@ object EndpointModels {
                     HandlerMethodName(
                         name = require(h.str("name"), "frameworks[].handlerMethodNames[].name"),
                         methods = h.arr("methods")?.strings() ?: emptyList(),
+                        anyMethod = h.bool("anyMethod") ?: false,
                     )
                 } ?: emptyList(),
             )

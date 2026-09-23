@@ -4,7 +4,9 @@ import io.cdxgen.kosi.kir.KirCall
 import io.cdxgen.kosi.kir.KirDynamicCall
 import io.cdxgen.kosi.kir.uses
 import io.cdxgen.kosi.kir.KirLambda
+import io.cdxgen.kosi.kir.KirFunction
 import io.cdxgen.kosi.kir.KirModule
+import io.cdxgen.kosi.kir.KirStore
 import io.cdxgen.kosi.kir.KirValueFolder
 import io.cdxgen.kosi.models.EndpointsPack
 import io.cdxgen.kosi.schema.ApiEndpoint
@@ -30,6 +32,8 @@ object Endpoints {
         /** Config-derived values: total and how many resolved (the gate's two counts). */
         val configValuesTotal: Int,
         val configValuesResolved: Int,
+        /** Repositories whose CRUD surface depends on an unknown spring-data-commons generation. */
+        val repositoriesCrudUnknown: List<String> = emptyList(),
     )
 
     data class Attribution(
@@ -37,6 +41,9 @@ object Endpoints {
         val byAbsoluteFilePath: Map<String, Pair<String, String>>,
         val purlByModulePath: Map<String, String>,
     )
+
+    /** A type the run read: canonical name, its ROOT-RELATIVE file, and its supertypes. */
+    data class TypeDeclaration(val canonicalName: String, val file: String, val supertypes: List<String>)
 
     fun analyze(
         module: KirModule,
@@ -78,6 +85,15 @@ object Endpoints {
          * report's baseline column measures both ways over one capture.
          */
         crossBlock: Boolean = true,
+        /**
+         * Every TYPE the run read with its supertypes. A Spring Data
+         * repository is usually an interface with no body — `interface
+         * CustomerRepository : CrudRepository<Customer, Long>` — and a type
+         * with no members owns no function, so the KIR alone never sees it.
+         */
+        typeDeclarations: List<TypeDeclaration> = emptyList(),
+        /** File (root-relative) -> two-segment roots of the packages it imports. */
+        importRootsByFile: Map<String, Set<String>> = emptyMap(),
     ): Result {
         val configTable = ConfigResolver.load(root)
         // `value` is null for a key the config files DISAGREE about: known
@@ -108,13 +124,20 @@ object Endpoints {
                 annotationValues = annotationValues,
                 folder = folder,
                 lambdaLinks = lambdaLinks,
+                importRootsByFile = importRootsByFile,
             ),
             pack,
         )
         val manifests = if (includeManifests) AndroidManifestParser.parse(root) else emptyList()
         val manifestCandidates = manifestEndpoints(module, manifests, pack, analysedDeclarations)
-        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root), pack, root)
-        val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable)
+        val unreadRegistrations = mutableListOf<EndpointDetector.Candidate>()
+        val webXmlCandidates = webXmlEndpoints(module, WebXmlParser.parse(root) + registrationMappings(module, pack, folder, unreadRegistrations), pack, root) +
+            unreadRegistrations
+        val crudUnknown = mutableListOf<String>()
+        val modules = ModuleConfigs(root, configTable)
+        val handled = candidates.mapTo(HashSet()) { it.framework }
+        val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable, handled) +
+            repositoryEndpoints(module, pack, annotationValues, typeDeclarations, dependencyCoordinates, crudUnknown, modules)
 
         // The DEPLOYMENT base path. A handler's annotation or DSL call names
         // a path relative to the application; what a client actually calls
@@ -122,36 +145,57 @@ object Endpoints {
         // Reporting `/users` for an app served at `/api/users` is a wrong
         // URL, not a partial one — and the value is sitting in the same
         // application.properties the config table already read.
-        val basePath = basePathFrom(configTable)
-        // A base path declared in CODE, per framework: JAX-RS puts it on an
-        // `Application` subclass rather than in configuration, so a config
-        // lookup alone reports every Quarkus route without its prefix.
-        val annotationBasePaths: Map<String, String> = buildMap {
-            for (framework in pack.frameworks) {
-                if (framework.applicationPathAnnotations.isEmpty()) continue
-                val declared = annotationValues.values.asSequence()
-                    .flatten()
-                    .firstOrNull { ann ->
-                        framework.applicationPathAnnotations.any {
-                            EndpointDetector.matches(ann.fqn, it)
-                        }
-                    }
-                    ?.value?.trim()?.removeSurrounding("\"").orEmpty()
-                if (declared.isNotEmpty() && declared != "/") put(framework.id, declared)
-            }
+        // Resolved per MODULE: a multi-module build is several deployments,
+        // and one app's `server.servlet.context-path` is not its sibling's.
+        // digital-restaurant sets `spring.data.rest.base-path: /api/query`
+        // in its query modules only; read repo-wide, it was either applied
+        // to every command module's handlers or refused as ambiguous.
+        val dataRestBases = DataRestBases(module, pack, folder, modules)
+        val protos = ProtoServices(root)
+        // A base path declared in CODE: JAX-RS puts it on an `Application`
+        // subclass. Per MODULE, like the config keys — one module's
+        // `@ApplicationPath` is not its sibling's.
+        fun applicationPathFor(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? {
+            if (framework.applicationPathAnnotations.isEmpty()) return null
+            val module = modules.moduleRootOf(file)
+            return annotationValues.values.asSequence().flatten()
+                .filter { ann -> framework.applicationPathAnnotations.any { EndpointDetector.matches(ann.fqn, it) } }
+                .filter { ann -> modules.moduleRootOf(ann.file) == module }
+                .map { it.value?.trim()?.removeSurrounding("\"").orEmpty() }
+                .firstOrNull { it.isNotEmpty() && it != "/" }
         }
-        val all = (candidates + manifestCandidates + webXmlCandidates + implicitCandidates)
+        val codeBases = CodeBasePaths(module, folder, modules, importRootsByFile)
+        val all = (candidates + manifestCandidates + webXmlCandidates + implicitCandidates + handshakeEndpoints(module, pack, folder))
+            .map { candidate -> if (candidate.dataRestBase) dataRestBases.compose(candidate) else candidate }
+            .map { candidate -> servingFacts(candidate, pack, module, annotationValues, modules) }
+            .map { candidate -> if (candidate.transport == "grpc") protos.rpcPath(candidate) else candidate }
+            .flatMap { candidate -> listOf(candidate) + alsoServedAt(candidate, pack, modules) }
             .map { candidate ->
-                val prefix = annotationBasePaths[candidate.framework]?.takeIf { it.isNotEmpty() } ?: basePath
-                if (prefix.isEmpty() || candidate.framework == "android") {
-                    candidate
-                } else {
-                    candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
+                val framework = pack.frameworks.firstOrNull { it.id == candidate.framework }
+                if (framework == null || candidate.transport != null) return@map candidate
+                val file = candidate.position?.filename
+                val prefix = deploymentBasePath(
+                    framework, modules.tableFor(file),
+                    applicationPath = { applicationPathFor(framework, file) },
+                    codeBasePath = { codeBases.base(framework, file) },
+                )
+                val conflict = codeBases.conflict(framework, file)?.takeIf { CODE_BASE_PATH_TOKEN in framework.basePathKeys.flatten() }
+                // An EMPTY template is a route whose path kosi could not name
+                // (regex, unfolded, unresolved); prefixing it would invent
+                // the base path itself as a served route.
+                val based = if (prefix.isEmpty() || candidate.pathTemplate.isEmpty()) candidate
+                else candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
+                if (conflict != null && based.pathUnresolved == null) based.copy(pathUnresolved = conflict) else based
+            }
+            .map { candidate -> withTransportParameters(candidate, module, pack, folder, annotationValues) }
+            .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, annotationValues) }
+            .flatMap { candidate ->
+                EndpointDetector.expandOptionalSegments(candidate.pathTemplate).map { path ->
+                    if (path == candidate.pathTemplate) candidate
+                    else candidate.copy(pathTemplate = path, pathParameters = EndpointDetector.pathParametersOf(path))
                 }
             }
-            .map { candidate -> withTransportParameters(candidate, module, pack, folder) }
-            .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, annotationValues) }
-            .sortedWith(compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }))
+            .sortedWith(compareBy({ it.framework }, { it.pathTemplate }, { it.handlerSymbol }, { it.position?.filename.orEmpty() }))
 
         val apiEndpoints = all.mapIndexed { index, candidate ->
             val at = relPosition(candidate.position, attribution)
@@ -178,6 +222,9 @@ object Endpoints {
                 reachableSources = emptyList(),
                 sliceIds = emptyList(),
                 foundBy = candidate.foundBy,
+                pathUnresolved = candidate.pathUnresolved,
+                anyMethod = candidate.anyMethod,
+                transport = candidate.transport,
             )
         }
 
@@ -229,6 +276,7 @@ object Endpoints {
                 .associate { it.handlerCanonicalName to SOURCE_CATEGORY },
             configValuesTotal = configDerived.size,
             configValuesResolved = configResolved.size,
+            repositoriesCrudUnknown = crudUnknown.sorted(),
         )
     }
 
@@ -247,16 +295,24 @@ object Endpoints {
         module: KirModule,
         pack: EndpointsPack,
         folder: KirValueFolder,
+        annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>>,
     ): EndpointDetector.Candidate {
         if (candidate.handlerSymbol.isEmpty()) return candidate
         val framework = pack.frameworks.firstOrNull { it.id == candidate.framework } ?: return candidate
-        val fn = module.functions.firstOrNull { it.canonicalName == candidate.handlerSymbol } ?: return candidate
+        // The handler in the candidate's OWN file: one canonical name can be
+        // a handler in each of several app modules.
+        val file = candidate.position?.filename
+        val fn = module.functions.firstOrNull {
+            it.canonicalName == candidate.handlerSymbol && (file == null || sameFile(it.file, file))
+        } ?: return candidate
         val read = EndpointDetector.transportParameters(fn, framework, folder, candidate.pathTemplate)
-        val declaredByAnnotation = EndpointDetector.annotatedParameters(fn, framework)
+        val declaredByAnnotation = EndpointDetector.annotatedParameters(fn, framework) { param ->
+            EndpointDetector.declaredIn(annotationValues[fn.canonicalName + "#" + param].orEmpty(), fn.file)
+        }
         // The template's own variables stay authoritative for the path: a
         // route declares `{id}` whether or not the handler ever reads it.
         val path = (candidate.pathParameters + read.path + declaredByAnnotation.path).distinct().sorted()
-        val query = (read.query + declaredByAnnotation.query).distinct().sorted()
+        val query = (candidate.queryParameters + read.query + declaredByAnnotation.query).distinct().sorted()
         return candidate.copy(pathParameters = path, queryParameters = query)
     }
 
@@ -295,8 +351,9 @@ object Endpoints {
         if (framework == null) return candidate
         val handler = candidate.handlerSymbol
         val owner = handler.substringBeforeLast('.')
-        val handlerAnnotations = if (handler.isNotEmpty()) annotationValues[handler].orEmpty() else emptyList()
-        val ownerAnnotations = if (handler.isNotEmpty()) annotationValues[owner].orEmpty() else emptyList()
+        val file = candidate.position?.filename
+        val handlerAnnotations = if (handler.isNotEmpty()) EndpointDetector.declaredIn(annotationValues[handler].orEmpty(), file) else emptyList()
+        val ownerAnnotations = if (handler.isNotEmpty()) EndpointDetector.declaredIn(annotationValues[owner].orEmpty(), file) else emptyList()
 
         val consumes = sortedSetOf<String>()
         val produces = sortedSetOf<String>()
@@ -472,12 +529,13 @@ object Endpoints {
         pack: EndpointsPack,
         dependencyCoordinates: Set<String>,
         configTable: ConfigResolver.ConfigTable,
+        handledFrameworks: Set<String> = emptySet(),
     ): List<EndpointDetector.Candidate> {
         val out = mutableListOf<EndpointDetector.Candidate>()
         for (framework in pack.frameworks) {
             val present = framework.dependencyMarkers.any { marker ->
                 dependencyCoordinates.any { it.contains(marker) }
-            }
+            } || (framework.implicitWhenHandled && framework.id in handledFrameworks)
             if (present) {
                 // The configured base REPLACES the framework's default —
                 // Actuator served at `/ops` answers `/ops/health`, never
@@ -485,12 +543,39 @@ object Endpoints {
                 val base = framework.implicitBasePathKeys
                     .firstNotNullOfOrNull { key -> configTable[key]?.value?.trim()?.takeIf { it.isNotEmpty() } }
                     ?: framework.implicitBasePathDefault
+                // EXPOSURE: Spring Boot exposes "only the health endpoint"
+                // over HTTP unless `exposure.include` names more (`*` = all);
+                // `exclude` wins. Every Actuator route used to be published
+                // on every app with the starter — /env, /heapdump included.
+                fun ids(key: String?): Set<String>? = key?.let { k ->
+                    configTable[k]?.value?.split(',')?.map { it.trim().removeSurrounding("\"") }?.filter { it.isNotEmpty() }?.toSet()
+                }
+                val include = ids(framework.implicitExposureIncludeKey) ?: framework.implicitExposureDefault.toSet()
+                val exclude = ids(framework.implicitExposureExcludeKey).orEmpty()
+                fun exposed(id: String) = ("*" in include || id in include) && id !in exclude && "*" !in exclude
+                val anyExposed = framework.implicitRoutes.any { r -> r.id.let { it != null && it != DISCOVERY_ID && exposed(it) } }
                 for (route in framework.implicitRoutes) {
+                    val id = route.id
+                    val enabledKey = route.enabledKey
+                    val pathKey = route.pathKey
+                    if (id == DISCOVERY_ID) { if (!anyExposed) continue }
+                    else if (id != null && !exposed(id)) continue
+                    if (enabledKey != null && configTable[enabledKey]?.value?.trim() == "false") continue
+                    if (!route.enabledByDefault && (enabledKey == null || configTable[enabledKey]?.value?.trim() != "true")) continue
+                    // Per-endpoint path mapping (`path-mapping.health=healthz`)
+                    // renames that endpoint's first segment.
+                    val mapped = id?.let { framework.implicitPathMappingPrefix?.let { p -> configTable[p + id]?.value?.trim() } }
+                    val routePath = when {
+                        pathKey != null -> (configTable[pathKey]?.value?.trim()?.takeIf { it.isNotEmpty() } ?: route.path.removeSuffix(route.pathSuffix)) + route.pathSuffix
+                        mapped != null -> "/" + mapped.trim('/') + route.path.removePrefix("/$id")
+                        else -> route.path
+                    }
+                    val absolute = pathKey != null
                     out.add(
                         EndpointDetector.Candidate(
                             framework = framework.id,
                             httpMethods = route.methods,
-                            pathTemplate = EndpointDetector.normalizePath(joinPaths(base, route.path)),
+                            pathTemplate = EndpointDetector.normalizePath(if (absolute) routePath else joinPaths(base, routePath)),
                             pathParameters = emptyList(),
                             handlerSymbol = "",
                             foundBy = "implicit",
@@ -502,37 +587,474 @@ object Endpoints {
                     )
                 }
             }
-            if (framework.repositorySupertypes.isEmpty()) continue
-            // A repository is a TYPE, and types reach the KIR through the
-            // functions they own; a repository interface declares only
-            // abstract members, so its supertypes are read from any function
-            // the module attributes to it.
-            val repositories = module.functions.asSequence()
-                .filter { fn -> fn.supertypes.any { st -> framework.repositorySupertypes.any { EndpointDetector.matches(st, it) } } }
-                .map { it.canonicalName.substringBeforeLast('.') }
+        }
+        return out
+    }
+
+    /**
+     * The same handler over a WebSocket upgrade, where the framework serves
+     * one and config names its path ([io.cdxgen.kosi.models.FrameworkModel.servedAlsoAtKey]).
+     * An unprovable value (profile-only, conflicting files) is published
+     * with `pathUnresolved`, never dropped and never guessed.
+     */
+    private fun alsoServedAt(candidate: EndpointDetector.Candidate, pack: EndpointsPack, modules: ModuleConfigs): List<EndpointDetector.Candidate> {
+        val framework = pack.frameworks.firstOrNull { it.id == candidate.framework } ?: return emptyList()
+        val key = framework.servedAlsoAtKey ?: return emptyList()
+        if (candidate.foundBy == "implicit") return emptyList()
+        val configured = modules.tableFor(candidate.position?.filename)[key] ?: return emptyList()
+        val path = configured.value?.trim()?.takeIf { it.isNotEmpty() }
+        return listOf(
+            candidate.copy(
+                httpMethods = listOf("GET"),
+                pathTemplate = path?.let { EndpointDetector.normalizePath(it) } ?: "",
+                pathParameters = path?.let { EndpointDetector.pathParametersOf(it) } ?: emptyList(),
+                pathUnresolved = if (path == null) "$key: no value a default run serves (set only by a non-default profile, or config files of one precedence disagree)" else candidate.pathUnresolved,
+            ),
+        )
+    }
+
+    /**
+     * What SERVES a candidate, from the pack: a non-HTTP transport, the one
+     * path every handler of a single-endpoint framework answers at
+     * (GraphQL), or a cloud function's HTTP trigger.
+     */
+    private fun servingFacts(
+        candidate: EndpointDetector.Candidate,
+        pack: EndpointsPack,
+        module: KirModule,
+        annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>>,
+        modules: ModuleConfigs,
+    ): EndpointDetector.Candidate {
+        val framework = pack.frameworks.firstOrNull { it.id == candidate.framework } ?: return candidate
+        var out = candidate
+        if (framework.transport.isNotEmpty()) out = out.copy(transport = framework.transport)
+        val file = candidate.position?.filename
+        // An implicit route (GraphiQL, the schema printer) names its own
+        // path; only HANDLERS are served at the framework's one endpoint.
+        framework.servedAtDefault?.takeIf { candidate.foundBy != "implicit" }?.let { default ->
+            val table = modules.tableFor(file)
+            val configured = framework.servedAtKeys.firstNotNullOfOrNull { key -> table[key] }
+            val path = when {
+                configured == null -> default
+                configured.value == null -> default.also {
+                    out = out.copy(pathUnresolved = "${configured.key}: no value a default run serves (set only by a non-default profile, or config files of one precedence disagree)")
+                }
+                else -> configured.value.trim()
+            }
+            out = out.copy(
+                pathTemplate = EndpointDetector.normalizePath(path),
+                pathParameters = EndpointDetector.pathParametersOf(path),
+                httpMethods = framework.servedAtMethods,
+            )
+        }
+        if (framework.functionHttpTriggers.isNotEmpty()) {
+            val fn = module.functions.firstOrNull {
+                it.canonicalName == candidate.handlerSymbol && (file == null || sameFile(it.file, file))
+            }
+            val trigger = fn?.params?.firstNotNullOfOrNull { param ->
+                if (param.annotations.none { a -> framework.functionHttpTriggers.any { EndpointDetector.matches(a, it) } }) return@firstNotNullOfOrNull null
+                EndpointDetector.declaredIn(annotationValues[fn.canonicalName + "#" + param.name].orEmpty(), fn.file)
+                    .firstOrNull { ann -> framework.functionHttpTriggers.any { EndpointDetector.matches(ann.fqn, it) } }
+                    ?: EndpointDetector.DeclAnnotation("", null, 0)
+            }
+            if (trigger == null) {
+                // A queue, timer or blob trigger: the function is real, and
+                // it is not an HTTP route.
+                return out.copy(transport = "function", pathTemplate = "", pathParameters = emptyList(), httpMethods = emptyList())
+            }
+            val route = trigger.namedValues["route"]?.firstOrNull()?.takeIf { it.isNotEmpty() } ?: candidate.pathTemplate.trimStart('/')
+            val prefix = functionRoutePrefix(framework, modules.moduleRootOf(file))
+            val path = EndpointDetector.normalizePath(joinPaths(prefix, route).let { if (it.startsWith("/")) it else "/$it" })
+            val methods = trigger.namedValues["methods"].orEmpty()
+                .map { it.substringAfterLast('.').uppercase() }
+                .filter { it in setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT") }
                 .distinct()
-                .sorted()
-            for (repository in repositories) {
-                val simple = repository.substringAfterLast('.')
-                val collection = collectionNameOf(simple)
-                out.add(
-                    EndpointDetector.Candidate(
-                        framework = framework.id,
-                        httpMethods = framework.repositoryMethods,
-                        pathTemplate = EndpointDetector.normalizePath("/" + collection),
-                        pathParameters = emptyList(),
-                        handlerSymbol = repository,
-                        foundBy = "implicit",
-                        position = null,
-                        exported = true,
-                        permissions = emptyList(),
-                        deepLinkHosts = emptyList(),
-                    ),
+            out = out.copy(
+                pathTemplate = path,
+                pathParameters = EndpointDetector.pathParametersOf(path),
+                httpMethods = methods,
+                anyMethod = methods.isEmpty(),
+            )
+        }
+        return out
+    }
+
+    /** `host.json`'s route prefix for the module, else the framework's default. */
+    private fun functionRoutePrefix(framework: io.cdxgen.kosi.models.FrameworkModel, moduleRoot: Path): String {
+        val hostJson = moduleRoot.resolve("host.json")
+        if (framework.functionRoutePrefixHostKey.isEmpty() || !java.nio.file.Files.isRegularFile(hostJson)) {
+            return framework.functionRoutePrefixDefault
+        }
+        return try {
+            var node: io.cdxgen.kosi.schema.JsonValue? = io.cdxgen.kosi.schema.JsonReader.parse(java.nio.file.Files.readString(hostJson))
+            for (segment in framework.functionRoutePrefixHostKey.split('.')) {
+                node = (node as? io.cdxgen.kosi.schema.JsonObj)?.members?.get(segment)
+            }
+            (node as? io.cdxgen.kosi.schema.JsonStr)?.value ?: framework.functionRoutePrefixDefault
+        } catch (_: Exception) {
+            framework.functionRoutePrefixDefault
+        }
+    }
+
+    /**
+     * gRPC's wire path is `/{Service-Name}/{method name}` (grpc
+     * PROTOCOL-HTTP2.md), and Service-Name INCLUDES the proto package:
+     * `/helloworld.Greeter/SayHello`. Only the `.proto` states the package
+     * and the method's exact name (the Kotlin stub lower-cases its first
+     * letter), so the project's `.proto` files are read — as text, like
+     * every build input. A service no `.proto` declares keeps a best-effort
+     * path and says so in `pathUnresolved`.
+     */
+    internal class ProtoServices(root: Path) {
+        private class Service(val pkg: String, val rpcs: List<String>)
+
+        private val services: Map<String, List<Service>> = run {
+            val out = HashMap<String, MutableList<Service>>()
+            val files = runCatching {
+                java.nio.file.Files.walk(root).use { s ->
+                    s.filter { it.toString().endsWith(".proto") && java.nio.file.Files.isRegularFile(it) }.sorted().toList()
+                }
+            }.getOrDefault(emptyList())
+            for (file in files) {
+                val text = runCatching { java.nio.file.Files.readString(file) }.getOrDefault("")
+                    .replace(Regex("""//[^\n]*"""), "").replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
+                val pkg = Regex("""\bpackage\s+([\w.]+)\s*;""").find(text)?.groupValues?.get(1).orEmpty()
+                for (m in Regex("""\bservice\s+(\w+)\s*\{""").findAll(text)) {
+                    val body = text.substring(m.range.last + 1).let { rest ->
+                        var depth = 1; var k = 0
+                        while (k < rest.length && depth > 0) { if (rest[k] == '{') depth++ else if (rest[k] == '}') depth--; k++ }
+                        rest.substring(0, k)
+                    }
+                    val rpcs = Regex("""\brpc\s+(\w+)\s*\(""").findAll(body).map { it.groupValues[1] }.toList()
+                    out.getOrPut(m.groupValues[1]) { mutableListOf() }.add(Service(pkg, rpcs))
+                }
+            }
+            out
+        }
+
+        fun rpcPath(candidate: EndpointDetector.Candidate): EndpointDetector.Candidate {
+            val parts = candidate.pathTemplate.trim('/').split('/')
+            if (parts.size != 2) return candidate
+            val (service, method) = parts
+            val declared = services[service].orEmpty()
+            val match = declared.singleOrNull()
+            val rpc = match?.rpcs?.firstOrNull { it.equals(method, ignoreCase = true) }
+            return when {
+                match != null && rpc != null -> {
+                    val name = if (match.pkg.isEmpty()) service else "${match.pkg}.$service"
+                    candidate.copy(pathTemplate = "/$name/$rpc")
+                }
+                declared.size > 1 -> candidate.copy(
+                    pathTemplate = "/$service/" + method.replaceFirstChar { it.uppercaseChar() },
+                    pathUnresolved = "${declared.size} .proto files declare a service named $service; its package is ambiguous",
                 )
+                else -> candidate.copy(
+                    pathTemplate = "/$service/" + method.replaceFirstChar { it.uppercaseChar() },
+                    pathUnresolved = "no .proto in the tree declares service $service with this rpc; the package prefix and the " +
+                        "method's exact name are not proven",
+                )
+            }
+        }
+    }
+
+    /**
+     * Config tables per build MODULE: the nearest directory at or above a
+     * file that holds a build script, bounded by the analysed root. A file
+     * with no module above it, and a candidate with no file, read the
+     * root's table — which is what every lookup read before.
+     */
+    internal class ModuleConfigs(private val root: Path, private val rootTable: ConfigResolver.ConfigTable) {
+        private val absoluteRoot = root.toAbsolutePath().normalize()
+        private val tables = HashMap<Path, ConfigResolver.ConfigTable>()
+        private val moduleOf = HashMap<String, Path>()
+
+        fun moduleRootOf(file: String?): Path {
+            if (file == null) return absoluteRoot
+            return moduleOf.getOrPut(file) {
+                val path = Path.of(file).let { if (it.isAbsolute) it else absoluteRoot.resolve(it) }.normalize()
+                var dir: Path? = path.parent
+                while (dir != null && dir.startsWith(absoluteRoot)) {
+                    if (BUILD_SCRIPTS.any { java.nio.file.Files.isRegularFile(dir!!.resolve(it)) }) return@getOrPut dir
+                    if (dir == absoluteRoot) break
+                    dir = dir.parent
+                }
+                absoluteRoot
+            }
+        }
+
+        private val buildTexts = HashMap<Path, String?>()
+
+        /**
+         * Whether the build scripts from [file]'s module up to the analysed
+         * root declare any of [markers] (artifact-name substrings). With no
+         * build script anywhere on that chain, the resolved classpath
+         * [coordinates] decide.
+         */
+        fun declaresDependency(file: String?, markers: List<String>, coordinates: Set<String>): Boolean {
+            var dir: Path? = moduleRootOf(file)
+            var sawBuildScript = false
+            while (dir != null && dir.startsWith(absoluteRoot)) {
+                val text = buildTexts.getOrPut(dir) {
+                    BUILD_SCRIPTS.map { dir!!.resolve(it) }.filter { java.nio.file.Files.isRegularFile(it) }
+                        .takeIf { it.isNotEmpty() }
+                        ?.joinToString("\n") { runCatching { java.nio.file.Files.readString(it) }.getOrDefault("") }
+                }
+                if (text != null) {
+                    sawBuildScript = true
+                    if (markers.any { text.contains(it) }) return true
+                }
+                if (dir == absoluteRoot) break
+                dir = dir.parent
+            }
+            return !sawBuildScript && coordinates.any { c -> markers.any { c.contains(it) } }
+        }
+
+        fun tableFor(file: String?): ConfigResolver.ConfigTable {
+            val module = moduleRootOf(file)
+            if (module == absoluteRoot) return rootTable
+            return tables.getOrPut(module) { ConfigResolver.load(module) }
+        }
+
+        private companion object {
+            val BUILD_SCRIPTS = listOf("build.gradle.kts", "build.gradle", "pom.xml")
+        }
+    }
+
+    /**
+     * The Spring Data REST base path, per module. Spring applies the
+     * `spring.data.rest.base-path` property and then every
+     * `RepositoryRestConfigurer`, so a folded `setBasePath` argument wins
+     * over the key. What cannot be proven — two config files in one module
+     * disagreeing, a setter argument that does not fold, two setters with
+     * different values — is NOT guessed: the path stays relative and
+     * [EndpointDetector.Candidate.pathUnresolved] names why.
+     */
+    internal class DataRestBases(
+        module: KirModule,
+        private val pack: EndpointsPack,
+        folder: KirValueFolder,
+        private val modules: ModuleConfigs,
+    ) {
+        private class Setter(val value: String?, val detail: String)
+
+        private val settersByModule: Map<Path, List<Setter>> = buildMap<Path, MutableList<Setter>> {
+            val patterns = pack.frameworks.flatMap { it.dataRestBasePathSetters }
+            if (patterns.isEmpty()) return@buildMap
+            for (fn in module.functions) {
+                val body = fn.body ?: continue
+                for (block in body.blocks) {
+                    for ((index, ins) in block.instructions.withIndex()) {
+                        if (ins !is KirCall) continue
+                        if (patterns.none { EndpointDetector.matches(ins.callee.fqn, it) }) continue
+                        val arg = ins.args.firstOrNull()
+                        val folded = arg?.let { folder.valueAt(fn, block, index, it) }
+                        val proven = folded?.value?.takeIf {
+                            folded.status == KirValueFolder.ValueStatus.LITERAL ||
+                                folded.status == KirValueFolder.ValueStatus.FOLDED_CONST ||
+                                folded.status == KirValueFolder.ValueStatus.FOLDED_TEMPLATE ||
+                                folded.status == KirValueFolder.ValueStatus.CONFIG
+                        }
+                        val at = "${fn.canonicalName}:${if (ins.line > 0) ins.line else fn.line}"
+                        getOrPut(modules.moduleRootOf(fn.file)) { mutableListOf() }.add(Setter(proven, at))
+                    }
+                }
+            }
+        }
+
+        private val resolved = HashMap<Path, Pair<String, String?>>()
+
+        /** (base, unresolved reason) for the module [file] belongs to. */
+        fun baseFor(file: String?, framework: String): Pair<String, String?> {
+            val module = modules.moduleRootOf(file)
+            return resolved.getOrPut(module) {
+                val setters = settersByModule[module].orEmpty()
+                if (setters.isNotEmpty()) {
+                    val unfolded = setters.firstOrNull { it.value == null }
+                    val values = setters.mapNotNull { it.value }.distinct()
+                    return@getOrPut when {
+                        unfolded != null -> "" to "setBasePath argument did not fold at ${unfolded.detail}"
+                        values.size > 1 -> "" to "setBasePath is called with ${values.size} different values in one module"
+                        else -> values.single() to null
+                    }
+                }
+                val keys = pack.frameworks.firstOrNull { it.id == framework }?.dataRestBasePathKeys.orEmpty()
+                val table = modules.tableFor(file)
+                for (key in keys) {
+                    val entry = table[key] ?: continue
+                    val value = entry.value?.trim() ?: return@getOrPut "" to "$key: no value a default run serves (set only by a non-default profile, or config files of one precedence disagree)"
+                    return@getOrPut value to null
+                }
+                "" to null
+            }
+        }
+
+        fun compose(candidate: EndpointDetector.Candidate): EndpointDetector.Candidate {
+            val (base, unresolved) = baseFor(candidate.position?.filename, candidate.framework)
+            val path = EndpointDetector.normalizePath(joinPaths(base, candidate.pathTemplate))
+            return candidate.copy(
+                pathTemplate = path,
+                pathParameters = EndpointDetector.pathParametersOf(path),
+                pathUnresolved = unresolved ?: candidate.pathUnresolved,
+            )
+        }
+    }
+
+    /**
+     * Spring Data REST repository resources: one collection route, one item
+     * route and one search route per exported query method, with the verbs
+     * [FrameworkModel.repositoryRoutes] assigns and the repository's own
+     * `exported = false` declarations removing the verbs they back.
+     */
+    private fun repositoryEndpoints(
+        module: KirModule,
+        pack: EndpointsPack,
+        annotationValues: Map<String, List<EndpointDetector.DeclAnnotation>>,
+        typeDeclarations: List<TypeDeclaration>,
+        dependencyCoordinates: Set<String>,
+        crudUnknown: MutableList<String>,
+        modules: ModuleConfigs,
+    ): List<EndpointDetector.Candidate> {
+        val out = mutableListOf<EndpointDetector.Candidate>()
+        // spring-data-commons 3.0 split PagingAndSortingRepository off
+        // CrudRepository: before it, extending the former brought save,
+        // findById and delete; from it, only the paged findAll.
+        fun generationOf(framework: io.cdxgen.kosi.models.FrameworkModel): Int? {
+            val artifact = framework.repositoryGenerationArtifact ?: return null
+            // `group:artifact:version` from a resolved pin, or the jar's own
+            // file name (`spring-data-commons-2.6.4.jar`) for an explicit
+            // classpath entry that carries no coordinate.
+            val fileVersion = Regex("^" + Regex.escape(artifact.substringAfter(':')) + "-(\\d+)\\.")
+            return dependencyCoordinates.firstNotNullOfOrNull { coordinate ->
+                if (coordinate.startsWith("$artifact:")) {
+                    coordinate.removePrefix("$artifact:").substringBefore('.').toIntOrNull()
+                } else {
+                    fileVersion.find(coordinate)?.groupValues?.get(1)?.toIntOrNull()
+                }
+            }
+        }
+        for (framework in pack.frameworks) {
+            if (framework.repositorySupertypes.isEmpty()) continue
+            val commonsMajor = generationOf(framework)
+            fun isRepository(supertypes: List<String>) =
+                supertypes.any { st -> framework.repositorySupertypes.any { EndpointDetector.matches(st, it) } }
+            // (canonical name, file) -> the file as the KIR spells it when a
+            // member of the type lowered, else the root-relative spelling.
+            val repositories = sortedMapOf<Pair<String, String>, List<String>>(compareBy({ it.first }, { it.second }))
+            for (fn in module.functions) {
+                if (!isRepository(fn.supertypes)) continue
+                val owner = fn.canonicalName.substringBeforeLast('.')
+                val existing = repositories.keys.firstOrNull { it.first == owner && sameFile(it.second, fn.file) }
+                if (existing == null) repositories[owner to fn.file] = fn.supertypes
+            }
+            for (type in typeDeclarations) {
+                if (!isRepository(type.supertypes)) continue
+                if (repositories.keys.none { it.first == type.canonicalName && sameFile(it.second, type.file) }) {
+                    repositories[type.canonicalName to type.file] = type.supertypes
+                }
+            }
+            for ((key, supertypes) in repositories) {
+                val (repository, file) = key
+                // Spring Data REST exports a repository only where its
+                // starter is on the module's classpath: a data-jdbc or
+                // data-jpa module's CrudRepository serves no HTTP route.
+                // Publishing one there made 37 spurious endpoints in the
+                // corpus. The module's (or an enclosing) build script is the
+                // evidence, read as text; classpath coordinates stand in only
+                // for a tree with no build script at all.
+                if (framework.repositoryDependencyMarkers.isNotEmpty() &&
+                    !modules.declaresDependency(file, framework.repositoryDependencyMarkers, dependencyCoordinates)
+                ) continue
+                // The framework's own repository types (an in-source stub, a
+                // decompiled dependency) are the supertypes, not resources.
+                if (framework.repositorySupertypes.any { EndpointDetector.matches(repository, it) }) continue
+                val resource = EndpointDetector.declaredIn(annotationValues[repository].orEmpty(), file)
+                    .firstOrNull { ann -> framework.repositoryResourceAnnotations.any { EndpointDetector.matches(ann.fqn, it) } }
+                if (resource?.namedValues?.get("exported")?.firstOrNull() == "false") continue
+                val collection = resource?.namedValues?.get("path")?.firstOrNull()?.trim()?.trim('/')?.takeIf { it.isNotEmpty() }
+                    ?: collectionNameOf(repository.substringAfterLast('.'))
+                val declared = module.functions.filter { fn ->
+                    fn.canonicalName.substringBeforeLast('.') == repository && sameFile(fn.file, file)
+                }
+                val hidden = mutableSetOf<String>()
+                val searchPaths = sortedMapOf<String, String>()
+                for (fn in declared) {
+                    val name = fn.canonicalName.substringAfterLast('.')
+                    val rest = EndpointDetector.declaredIn(annotationValues[fn.canonicalName].orEmpty(), fn.file)
+                        .firstOrNull { ann -> framework.repositoryMethodAnnotations.any { EndpointDetector.matches(ann.fqn, it) } }
+                    if (rest?.namedValues?.get("exported")?.firstOrNull() == "false") {
+                        hidden.add(name)
+                        continue
+                    }
+                    if (fn.body == null && name !in framework.repositoryCrudMethods && "override" !in fn.modifiers) {
+                        searchPaths[name] = rest?.namedValues?.get("path")?.firstOrNull()?.trim()?.trim('/')
+                            ?.takeIf { it.isNotEmpty() } ?: name
+                    }
+                }
+                // Which backing methods the repository HAS. A CRUD supertype
+                // brings them all; a paging-only one brings them only in the
+                // generations whose paging type still extended the CRUD one.
+                val paging = framework.repositoryPagingSupertypes
+                val markers = framework.repositoryMarkerSupertypes
+                fun isMarker(st: String) = markers.any { EndpointDetector.matches(st, it) }
+                val crudSupertype = supertypes.any { st ->
+                    framework.repositorySupertypes.any { EndpointDetector.matches(st, it) } &&
+                        paging.none { EndpointDetector.matches(st, it) } && !isMarker(st)
+                }
+                val pagingSupertype = supertypes.any { st -> paging.any { EndpointDetector.matches(st, it) } }
+                val all = framework.repositoryRoutes.flatMap { it.backedBy }.toSet()
+                val available: Set<String> = when {
+                    crudSupertype -> all
+                    // The bare MARKER (`Repository<T, ID>`, Spring Data's
+                    // "selectively exposing CRUD methods"): only what the
+                    // interface itself declares exists.
+                    !pagingSupertype -> emptySet()
+                    commonsMajor != null && commonsMajor < framework.repositoryPagingCrudBelowMajor -> all
+                    else -> {
+                        if (commonsMajor == null) crudUnknown.add(repository)
+                        framework.repositoryPagingMethods.toSet()
+                    }
+                } + declared.map { it.canonicalName.substringAfterLast('.') }
+                val position = Position(
+                    declared.firstOrNull()?.file ?: file,
+                    declared.minOfOrNull { it.line } ?: 1,
+                    1,
+                )
+                fun add(path: String, methods: List<String>, handler: String) {
+                    if (methods.isEmpty()) return
+                    val template = EndpointDetector.normalizePath(path)
+                    out.add(
+                        EndpointDetector.Candidate(
+                            framework = framework.id,
+                            httpMethods = methods,
+                            pathTemplate = template,
+                            pathParameters = EndpointDetector.pathParametersOf(template),
+                            handlerSymbol = handler,
+                            foundBy = "implicit",
+                            position = position,
+                            exported = true,
+                            permissions = emptyList(),
+                            deepLinkHosts = emptyList(),
+                            dataRestBase = framework.dataRestBasePathMarkers.isNotEmpty(),
+                        ),
+                    )
+                }
+                for ((routePath, routes) in framework.repositoryRoutes.groupBy { it.path }.toSortedMap()) {
+                    val served = routes.filter { route ->
+                        route.backedBy.isEmpty() || route.backedBy.any { it in available && it !in hidden }
+                    }
+                    add("/$collection$routePath", served.map { it.method }.distinct(), repository)
+                }
+                if (searchPaths.isNotEmpty()) {
+                    add("/$collection/search", listOf("GET"), repository)
+                    for ((name, path) in searchPaths) add("/$collection/search/$path", listOf("GET"), "$repository.$name")
+                }
             }
         }
         return out
     }
+
+    internal fun sameFile(a: String, b: String): Boolean =
+        EndpointDetector.declaredIn(listOf(EndpointDetector.DeclAnnotation("", null, 0, file = a)), b).isNotEmpty()
 
     /**
      * Spring Data REST's default collection name: the repository's entity,
@@ -554,6 +1076,206 @@ object Endpoints {
         }
     }
 
+    /** SockJS protocol 0.3.3 URLs under a SockJS-enabled prefix, with the verbs each serves. */
+    private val SOCKJS_ROUTES = listOf(
+        "/info" to listOf("GET", "OPTIONS"),
+        "/iframe.html" to listOf("GET"),
+        "/websocket" to listOf("GET"),
+        "/{server}/{session}/{transport}" to listOf("GET", "POST"),
+    )
+
+    /**
+     * WebSocket handshakes registered in code (see
+     * [io.cdxgen.kosi.models.HandshakeRegistration]): one GET endpoint per
+     * folded path. The handler is the handler instance's class when the
+     * call passes one (`addHandler(EchoHandler(), "/echo")`), else the
+     * registering function itself, which is where the route is declared.
+     * `.withSockJS()` anywhere on the registration's call chain adds the
+     * SockJS transports under the same path.
+     */
+    private fun handshakeEndpoints(module: KirModule, pack: EndpointsPack, folder: KirValueFolder): List<EndpointDetector.Candidate> {
+        val out = mutableListOf<EndpointDetector.Candidate>()
+        for (framework in pack.frameworks) {
+            if (framework.handshakeRegistrations.isEmpty()) continue
+            for (fn in module.functions) {
+                val all = fn.body?.blocks.orEmpty().flatMap { b -> b.instructions.mapIndexed { i, ins -> Triple(b, i, ins) } }
+                for ((block, index, ins) in all) {
+                    val name = when (ins) {
+                        is KirCall -> ins.callee.fqn
+                        is KirDynamicCall -> ins.name
+                        else -> continue
+                    }
+                    val row = framework.handshakeRegistrations.firstOrNull { r ->
+                        if (ins is KirCall) r.pattern == name else r.pattern.substringAfterLast('.') == name
+                    } ?: continue
+                    val args = (ins as? KirCall)?.args ?: (ins as KirDynamicCall).args
+                    val result = (ins as? KirCall)?.result ?: (ins as KirDynamicCall).result
+                    val pathArgs = args.drop(row.pathArgumentStart)
+                    val paths = pathArgs.mapNotNull { folder.valueAt(fn, block, index, it)?.value }
+                    if (paths.size < pathArgs.size || pathArgs.isEmpty()) {
+                        out += EndpointDetector.Candidate(
+                            framework = framework.id, httpMethods = listOf("GET"), pathTemplate = "", pathParameters = emptyList(),
+                            handlerSymbol = fn.canonicalName, foundBy = "dsl", position = Position(fn.file, fn.line, fn.line),
+                            exported = null, permissions = null, deepLinkHosts = null,
+                            pathUnresolved = "${row.pattern.substringAfterLast('.')} registers a WebSocket handshake at a path that does not fold to a constant",
+                        )
+                    }
+                    if (paths.isEmpty()) continue
+                    val handlerClass = row.handlerArgument.takeIf { it >= 0 }?.let { args.getOrNull(it) }?.let { reg ->
+                        (all.firstOrNull { (_, _, d) -> d is KirCall && d.result == reg }?.third as? KirCall)
+                            ?.takeIf { it.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR }?.callee?.fqn
+                    }
+                    val handler = handlerClass?.let { cls ->
+                        listOf("handleTextMessage", "handleBinaryMessage", "handleMessage", "afterConnectionEstablished")
+                            .map { "$cls.$it" }.firstOrNull { c -> module.functions.any { it.canonicalName == c } } ?: cls
+                    } ?: fn.canonicalName
+                    // Follow the fluent chain for `.withSockJS()`.
+                    var sockJs = false
+                    var current = result
+                    var hops = 0
+                    while (current != null && hops++ < 8 && row.sockJs != null) {
+                        val next = all.firstOrNull { (_, _, c) -> (c as? KirCall)?.receiver == current || (c as? KirDynamicCall)?.receiver == current }?.third ?: break
+                        val nextName = (next as? KirCall)?.callee?.fqn?.substringAfterLast('.') ?: (next as? KirDynamicCall)?.name
+                        if (nextName == row.sockJs) { sockJs = true; break }
+                        current = (next as? KirCall)?.result ?: (next as? KirDynamicCall)?.result
+                    }
+                    for (path in paths) {
+                        val routes = listOf("" to listOf("GET")) + if (sockJs) SOCKJS_ROUTES else emptyList()
+                        for ((suffix, methods) in routes) {
+                            val served = EndpointDetector.normalizePath(joinPaths(path, suffix))
+                            out += EndpointDetector.Candidate(
+                                framework = framework.id,
+                                httpMethods = methods,
+                                pathTemplate = served,
+                                pathParameters = Regex("\\{([^}/]+)}").findAll(served).map { it.groupValues[1] }.toList(),
+                                handlerSymbol = handler,
+                                foundBy = "dsl",
+                                position = Position(fn.file, fn.line, fn.line),
+                                exported = null,
+                                permissions = null,
+                                deepLinkHosts = null,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /**
+     * Servlets and filters registered IN CODE, as the servlet mappings a
+     * web.xml would declare. The pattern is Spring Boot's
+     * `ServletRegistrationBean(ReportServlet(), "/reports")`, with the
+     * bean's later `addUrlMappings(..)`/`setUrlMappings(listOf(..))` calls,
+     * directly or inside `apply { }`/`also { }`. The servlet CLASS is the
+     * constructor call passed as the first argument. A servlet held in a
+     * variable of an interface type, or a pattern that does not fold, is
+     * not guessed at, and no endpoint is published for it.
+     */
+    private fun registrationMappings(
+        module: KirModule,
+        pack: EndpointsPack,
+        folder: KirValueFolder,
+        unread: MutableList<EndpointDetector.Candidate>,
+    ): List<WebXmlParser.ServletMapping> {
+        val servletFramework = pack.frameworks.firstOrNull { it.registrationBeans.isNotEmpty() }?.id ?: "servlet"
+        val rows = pack.frameworks.flatMap { it.registrationBeans }
+        if (rows.isEmpty()) return emptyList()
+        val out = mutableListOf<WebXmlParser.ServletMapping>()
+        val byName = module.functions.associateBy { it.canonicalName }
+        fun instructions(fn: KirFunction) = fn.body?.blocks.orEmpty().flatMap { b -> b.instructions.mapIndexed { i, ins -> Triple(b, i, ins) } }
+        fun strings(fn: KirFunction, block: io.cdxgen.kosi.kir.KirBlock, index: Int, reg: String): List<String> {
+            folder.valueAt(fn, block, index, reg)?.value?.let { return listOf(it) }
+            // `setUrlMappings(listOf("/a", "/b"))`
+            val built = instructions(fn).firstOrNull { (_, _, ins) -> ins is KirCall && ins.result == reg }?.third as? KirCall ?: return emptyList()
+            if (built.callee.fqn.substringAfterLast('.') !in setOf("listOf", "setOf", "arrayOf", "mutableListOf")) return emptyList()
+            return built.args.mapNotNull { a -> folder.valueAt(fn, block, index, a)?.value }
+        }
+        for (fn in module.functions) {
+            val all = instructions(fn)
+            for ((block, index, ins) in all) {
+                val ctor = ins as? KirCall ?: continue
+                if (ctor.callee.kind != io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) continue
+                val row = rows.firstOrNull { it.pattern == ctor.callee.fqn } ?: continue
+                val servletClass = ctor.args.firstOrNull()?.let { a ->
+                    (all.firstOrNull { (_, _, d) -> d is KirCall && d.result == a }?.third as? KirCall)
+                        ?.takeIf { it.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR }?.callee?.fqn
+                }
+                fun unreadRegistration(reason: String) {
+                    unread += EndpointDetector.Candidate(
+                        framework = servletFramework, httpMethods = emptyList(), pathTemplate = "", pathParameters = emptyList(),
+                        handlerSymbol = servletClass ?: fn.canonicalName, foundBy = "dsl",
+                        position = Position(fn.file, fn.line, fn.line), exported = null, permissions = null, deepLinkHosts = null,
+                        pathUnresolved = reason,
+                    )
+                }
+                val patterns = ctor.args.drop(1).flatMap { strings(fn, block, index, it) }.toMutableList()
+                var unfolded = ctor.args.drop(1).count { strings(fn, block, index, it).isEmpty() && folder.valueAt(fn, block, index, it)?.value == null && !isBooleanLoad(all, it) }
+                val aliases = mutableSetOf<String>().apply { ctor.result?.let(::add) }
+                all.forEach { (_, _, s) -> if (s is KirStore && s.value in aliases) aliases.add(s.target) }
+                for ((b, i, call) in all) {
+                    if (call !is KirCall || call.receiver !in aliases) continue
+                    val name = call.callee.fqn.substringAfterLast('.')
+                    if (name in row.mappingMethods) call.args.forEach { patterns += strings(fn, b, i, it) }
+                    // `bean.apply { addUrlMappings("/x") }`: the mapping call's
+                    // receiver is the lambda's receiver (or its parameter for `also`).
+                    // The stdlib scope functions are INLINED: `apply` lowers as
+                    // an argument-less call followed by its body, whose calls
+                    // on the implicit receiver carry no receiver register.
+                    // Those following calls, up to the next registration
+                    // constructor, are this bean's.
+                    if (name in setOf("apply", "also", "run", "let", "with") && call.args.isEmpty()) {
+                        for (k in i + 1 until b.instructions.size) {
+                            val next = b.instructions[k] as? KirCall ?: continue
+                            if (next.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR && rows.any { it.pattern == next.callee.fqn }) break
+                            if (next.receiver == null && next.callee.fqn.substringBeforeLast('.') == row.pattern &&
+                                next.callee.fqn.substringAfterLast('.') in row.mappingMethods
+                            ) {
+                                next.args.forEach { patterns += strings(fn, b, k, it) }
+                            }
+                        }
+                    }
+                    if (name in setOf("apply", "also", "run", "let")) {
+                        val lambda = call.args.lastOrNull()?.let { a -> all.firstOrNull { (_, _, l) -> l is io.cdxgen.kosi.kir.KirLambda && l.result == a }?.third as? io.cdxgen.kosi.kir.KirLambda }
+                        val body = lambda?.let { byName[it.function] } ?: continue
+                        val bodyAll = instructions(body)
+                        val selves = mutableSetOf("%r0", "%p0")
+                        bodyAll.forEach { (_, _, s) -> if (s is KirStore && s.value in selves) selves.add(s.target) }
+                        for ((lb, li, inner) in bodyAll) {
+                            if (inner is KirCall && (inner.receiver in selves || inner.receiver == null) &&
+                                inner.callee.fqn.substringAfterLast('.') in row.mappingMethods &&
+                                inner.callee.fqn.substringBeforeLast('.') == row.pattern
+                            ) {
+                                inner.args.forEach { patterns += strings(body, lb, li, it) }
+                            }
+                        }
+                    }
+                }
+                if (servletClass == null) {
+                    unreadRegistration("${row.pattern.substringAfterLast('.')} registers a ${row.kind} kosi cannot name (not a constructor call)")
+                    continue
+                }
+                if (unfolded > 0) unreadRegistration("${row.pattern.substringAfterLast('.')} maps $servletClass at a url pattern that does not fold to a constant")
+                if (patterns.isEmpty()) {
+                    if (unfolded == 0) unreadRegistration("${row.pattern.substringAfterLast('.')} maps $servletClass at no url pattern kosi could read")
+                    continue
+                }
+                out += WebXmlParser.ServletMapping(
+                    file = fn.file,
+                    className = servletClass,
+                    urlPatterns = patterns.distinct(),
+                    kind = if (row.kind == "filter") WebXmlParser.KIND_FILTER else WebXmlParser.KIND_SERVLET,
+                    foundBy = "dsl",
+                )
+            }
+        }
+        return out
+    }
+
+    private fun isBooleanLoad(all: List<Triple<io.cdxgen.kosi.kir.KirBlock, Int, io.cdxgen.kosi.kir.KirIns>>, reg: String): Boolean =
+        all.any { (_, _, ins) -> ins is io.cdxgen.kosi.kir.KirLoad && ins.result == reg && ins.constant is io.cdxgen.kosi.kir.KirConstant.Bool }
+
     private fun webXmlEndpoints(
         module: KirModule,
         mappings: List<WebXmlParser.ServletMapping>,
@@ -561,7 +1283,13 @@ object Endpoints {
         root: Path,
     ): List<EndpointDetector.Candidate> {
         if (mappings.isEmpty()) return emptyList()
-        val servlet = pack.frameworks.firstOrNull { it.handlerMethodNames.isNotEmpty() } ?: return emptyList()
+        // The SERVLET shape — class-declared routes dispatched to
+        // convention-named methods — not merely "has handler names": Ratpack
+        // names `handle` too, and the first such framework in pack order
+        // took every web.xml mapping and matched none of its classes.
+        val servlet = pack.frameworks.firstOrNull {
+            it.handlerMethodNames.isNotEmpty() && it.classMappingAnnotations.isNotEmpty()
+        } ?: return emptyList()
         // The descriptor's own authentication requirements: a
         // `<security-constraint>` names url-patterns and the roles that may
         // reach them — servlet spec 13.8 matching, exact / prefix / extension
@@ -583,9 +1311,8 @@ object Endpoints {
                     names.any { it.name == fn.canonicalName.substringAfterLast('.') }
             }
             for (fn in handlers) {
-                val methods = names
-                    .firstOrNull { it.name == fn.canonicalName.substringAfterLast('.') }
-                    ?.methods.orEmpty()
+                val named = names.firstOrNull { it.name == fn.canonicalName.substringAfterLast('.') }
+                val methods = named?.methods.orEmpty()
                 for (pattern in mapping.urlPatterns) {
                     val auth = constraints
                         .filter { c -> c.urlPatterns.any { cp -> urlPatternMatches(pattern, cp) } }
@@ -605,12 +1332,13 @@ object Endpoints {
                             pathTemplate = EndpointDetector.normalizePath(pattern),
                             pathParameters = emptyList(),
                             handlerSymbol = fn.canonicalName,
-                            foundBy = "descriptor",
+                            foundBy = mapping.foundBy,
                             position = io.cdxgen.kosi.schema.Position(fn.file, fn.line, fn.line),
                             exported = true,
                             permissions = emptyList(),
                             deepLinkHosts = emptyList(),
                             authentication = auth,
+                            anyMethod = methods.isEmpty() && named?.anyMethod == true,
                         ),
                     )
                 }
@@ -753,26 +1481,118 @@ object Endpoints {
         return links
     }
     /**
-     * The configured context path, by framework, first match wins in a fixed
-     * order. Each key is the one that framework documents; a project that
-     * sets none reports application-relative paths, as before.
+     * The DEPLOYMENT base path a framework's routes are served under, from
+     * its own [io.cdxgen.kosi.models.FrameworkModel.basePathKeys]: each group
+     * is a set of alternatives (first key set wins), and the groups COMPOSE
+     * in order — Spring MVC serves `server.servlet.context-path` +
+     * `spring.mvc.servlet.path` + the mapping; Quarkus `quarkus.http.root-path`
+     * + (`quarkus.rest.path` or `@ApplicationPath`) + the resource path. A
+     * key belongs to ITS framework: a Micronaut context path is not a gRPC
+     * or Azure prefix, which one repo-wide first-match list made it.
+     * [APPLICATION_PATH_TOKEN] in a group stands for the framework's
+     * `applicationPathAnnotations` value, consulted after the group's keys
+     * (the property takes precedence over the annotation).
      */
-    private val BASE_PATH_KEYS = listOf(
-        "server.servlet.context-path",
-        "spring.webflux.base-path",
-        "micronaut.server.context-path",
-        "quarkus.http.root-path",
-        "ktor.deployment.rootPath",
-        "server.base-path",
-    )
-
-    internal fun basePathFrom(configTable: ConfigResolver.ConfigTable): String {
-        for (key in BASE_PATH_KEYS) {
-            val value = configTable[key]?.value?.trim().orEmpty()
-            if (value.isNotEmpty() && value != "/") return value
+    internal fun deploymentBasePath(
+        framework: io.cdxgen.kosi.models.FrameworkModel,
+        table: ConfigResolver.ConfigTable,
+        applicationPath: () -> String? = { null },
+        codeBasePath: () -> String? = { null },
+    ): String {
+        var base = ""
+        for (group in framework.basePathKeys) {
+            val value = group.firstNotNullOfOrNull { key ->
+                when (key) {
+                    APPLICATION_PATH_TOKEN -> applicationPath()
+                    CODE_BASE_PATH_TOKEN -> codeBasePath()
+                    else -> table[key]?.value?.trim()?.takeIf { it.isNotEmpty() && it != "/" }
+                }
+            }
+            if (value != null) base = joinPaths(base, value)
         }
-        return ""
+        return base
     }
+
+    const val APPLICATION_PATH_TOKEN = "@applicationPath"
+
+    /** A base path written in code; see [io.cdxgen.kosi.models.FrameworkModel.codeBasePathProperties]. */
+    const val CODE_BASE_PATH_TOKEN = "@codeBasePath"
+
+    /**
+     * Base paths written IN CODE, per (framework, module): every write of a
+     * [io.cdxgen.kosi.models.FrameworkModel.codeBasePathProperties] property
+     * in a file that imports the framework, folded. One distinct value is
+     * the module's base; two are two apps whose routes kosi cannot assign,
+     * so the base is unproven (see [conflict]) and never picked.
+     */
+    internal class CodeBasePaths(
+        private val module: KirModule,
+        private val folder: KirValueFolder,
+        private val modules: ModuleConfigs,
+        private val importRootsByFile: Map<String, Set<String>>,
+    ) {
+        /** What one module's code says: folded values, unfolded writes, app-creation sites. */
+        private data class Scan(val values: Set<String>, val writes: Int, val unfolded: Int, val sites: Int)
+
+        private val cache = HashMap<Pair<String, Path?>, Scan>()
+
+        private fun scan(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): Scan {
+            if (framework.codeBasePathProperties.isEmpty()) return Scan(emptySet(), 0, 0, 0)
+            val moduleRoot = modules.moduleRootOf(file)
+            return cache.getOrPut(framework.id to moduleRoot) {
+                val roots = with(EndpointDetector) { framework.dslPackages() }
+                val out = sortedSetOf<String>()
+                var writes = 0
+                var unfolded = 0
+                var sites = 0
+                for (fn in module.functions) {
+                    if (modules.moduleRootOf(fn.file) != moduleRoot) continue
+                    val imports = importRootsByFile.entries.firstOrNull { (k, _) -> sameFile(k, fn.file) }?.value.orEmpty()
+                    if (roots.none { it in imports }) continue
+                    for (block in fn.body?.blocks.orEmpty()) {
+                        for ((index, ins) in block.instructions.withIndex()) {
+                            val site = when (ins) {
+                                is KirCall -> ins.callee.fqn in framework.codeBasePathSites
+                                is KirDynamicCall -> framework.codeBasePathSites.any { it.substringAfterLast('.') == ins.name }
+                                else -> false
+                            }
+                            if (site) sites++
+                            val set = ins as? io.cdxgen.kosi.kir.KirFieldSet ?: continue
+                            val name = (set.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name ?: continue
+                            if (name !in framework.codeBasePathProperties) continue
+                            writes++
+                            val value = folder.valueAt(fn, block, index, set.value)?.value?.trim()
+                            if (value == null) unfolded++ else if (value.isNotEmpty() && value != "/") out += value
+                        }
+                    }
+                }
+                Scan(out, writes, unfolded, sites)
+            }
+        }
+
+        /** The module's base path, only when every app the module creates is proven to use it. */
+        fun base(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? =
+            scan(framework, file).takeIf { conflict(framework, file) == null }?.values?.singleOrNull()
+
+        /**
+         * Why the base is unproven: two values in one module, a write whose
+         * value does not fold, or more apps created than base-path writes
+         * (one app's context path is not its sibling's).
+         */
+        fun conflict(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? {
+            val s = scan(framework, file)
+            val property = framework.codeBasePathProperties.joinToString("/")
+            return when {
+                s.values.size > 1 -> "$property is set to ${s.values.joinToString(" and ")} in one module; which app serves this route is not decided"
+                s.unfolded > 0 -> "$property is set in code to a value that does not fold to a constant"
+                s.writes > 0 && s.sites > s.writes -> "$property is set for ${s.writes} of the ${s.sites} apps this module creates; which app serves this route is not decided"
+                else -> null
+            }
+        }
+    }
+
+    /** The implicit route that lists the exposed endpoints (Actuator's `/actuator`): served when any is exposed. */
+    const val DISCOVERY_ID = "_links"
 
     /** `/api` + `/users` -> `/api/users`, with no doubled or missing slash. */
     internal fun joinPaths(base: String, path: String): String {
