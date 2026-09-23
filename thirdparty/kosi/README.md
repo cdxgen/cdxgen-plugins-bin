@@ -164,8 +164,12 @@ hides one.
 ### Endpoints and services (resolved tier)
 
 `apiEndpoints[]` covers Spring MVC, WebFlux and Actuator, springdoc, Spring
-Messaging, Ktor, Micronaut, Quarkus/JAX-RS, http4k, Javalin, Ratpack, Vert.x,
-SparkJava, Servlet/`web.xml`, gRPC, GraphQL, AWS Lambda, Azure Functions and
+Messaging, Ktor, Micronaut, Quarkus/JAX-RS (sub-resource locators included),
+http4k, Javalin, Ratpack, Vert.x, SparkJava, Servlet (`web.xml` and Spring
+Boot registration beans), WebSocket/STOMP handshakes (SockJS included),
+gRPC, GraphQL (Spring GraphQL and Netflix DGS, with the WebSocket path,
+GraphiQL and the schema printer when config enables them), AWS Lambda,
+Azure Functions and
 Android manifest components (activities, services, receivers, providers,
 including `namespace`-based packages and deep links). Each endpoint carries its
 path template, HTTP methods, path/query parameters, media types, declared

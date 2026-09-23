@@ -203,9 +203,13 @@ lambdas are the six that do not, each with a tracker defect.
 `apiEndpoints[]` with path template (deployment base path included), methods,
 declared authentication and media types. The frameworks are:
 - Spring MVC and WebFlux, including Spring Data REST, Actuator and springdoc;
-- Ktor, Micronaut, Quarkus/JAX-RS and Quarkus Reactive Routes;
-- http4k, Javalin, Ratpack, Vert.x, SparkJava and Servlet/`web.xml`;
-- gRPC, GraphQL, AWS Lambda and Azure Functions;
+- Ktor, Micronaut, Quarkus/JAX-RS (with sub-resource locators) and Quarkus
+  Reactive Routes;
+- http4k (with `routes(..)` mounts), Javalin, Ratpack, Vert.x, SparkJava and
+  Servlet (`web.xml` and `ServletRegistrationBean`);
+- WebSocket and STOMP handshakes, with SockJS;
+- gRPC, GraphQL (Spring GraphQL and Netflix DGS), AWS Lambda and Azure
+  Functions;
 - Android manifest components.
 
 See JSON_ATTRIBUTE_REFERENCE.md for `foundBy`, `anyMethod`, `pathUnresolved`
