@@ -98,8 +98,10 @@
       ]
     },
     {
+      "_dgs_comment": "netflix.github.io/dgs getting-started and data fetching: @DgsComponent classes, @DgsQuery/@DgsMutation/@DgsSubscription/@DgsData fetchers; served at dgs.graphql.path (default /graphql). Spring GraphQL @BatchMapping (docs.spring.io spring-graphql controllers) is a field fetcher like @SchemaMapping. @InputArgument adds no row: the framework's unannotated-by-name binding already seeds every argument (the liveness sweep measured the row inert).",
       "_p27_comment": ", from docs.spring.io/spring-graphql/reference/controllers.html rather than from memory. Verbatim: \"By default, if the method parameter name is available, for example with the -parameters compiler flag in Java 8+ or with debugging info from the compiler, it is used to look up the argument.\" An unannotated parameter is matched to a GraphQL argument by NAME, so it is client-supplied. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "_served_comment": "docs.spring.io/spring-boot/reference/web/spring-graphql.html: \"The GraphQL HTTP endpoint is at HTTP POST /graphql by default\", customised with spring.graphql.http.path (Boot 2.7: spring.graphql.path). Before this every GraphQL handler published pathTemplate \"\".",
+      "_ws_comment": "docs.spring.io spring-boot spring-graphql: \"The GraphQL WebSocket endpoint is off by default. To enable it: spring.graphql.websocket.path\"; GraphiQL \"is disabled by default\" (spring.graphql.graphiql.enabled, path spring.graphql.graphiql.path default /graphiql); spring.graphql.schema.printer.enabled exposes the schema at {http path}/schema. Boot 2.7 spells the http path spring.graphql.path, which the schema route does not follow.",
       "basePathKeys": [
         [
           "server.servlet.context-path",
@@ -110,7 +112,8 @@
         ]
       ],
       "classMarkers": [
-        "org.springframework.stereotype.Controller"
+        "org.springframework.stereotype.Controller",
+        "com.netflix.graphql.dgs.DgsComponent"
       ],
       "contextParameterTypes": [
         "graphql.schema.DataFetchingEnvironment",
@@ -123,8 +126,33 @@
         "org.springframework.graphql.data.query.ScrollSubrange",
         "org.springframework.data.domain.Subrange"
       ],
+      "dependencyMarkers": [
+        "spring-boot-starter-graphql"
+      ],
       "handlerInput": "annotated-or-bound",
       "id": "graphql",
+      "implicitRoutes": [
+        {
+          "enabledByDefault": false,
+          "enabledKey": "spring.graphql.graphiql.enabled",
+          "methods": [
+            "GET"
+          ],
+          "path": "/graphiql",
+          "pathKey": "spring.graphql.graphiql.path"
+        },
+        {
+          "enabledByDefault": false,
+          "enabledKey": "spring.graphql.schema.printer.enabled",
+          "methods": [
+            "GET"
+          ],
+          "path": "/graphql/schema",
+          "pathKey": "spring.graphql.http.path",
+          "pathSuffix": "/schema"
+        }
+      ],
+      "implicitWhenHandled": true,
       "kind": "annotation",
       "mappingAnnotations": [
         {
@@ -146,6 +174,31 @@
           "methods": [],
           "nesting": false,
           "pattern": "org.springframework.graphql.data.method.annotation.SchemaMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "org.springframework.graphql.data.method.annotation.BatchMapping"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "com.netflix.graphql.dgs.DgsQuery"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "com.netflix.graphql.dgs.DgsMutation"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "com.netflix.graphql.dgs.DgsSubscription"
+        },
+        {
+          "methods": [],
+          "nesting": false,
+          "pattern": "com.netflix.graphql.dgs.DgsData"
         }
       ],
       "nonInputAnnotations": [
@@ -160,10 +213,12 @@
           "pattern": "org.springframework.graphql.data.method.annotation.Argument"
         }
       ],
+      "servedAlsoAtKey": "spring.graphql.websocket.path",
       "servedAtDefault": "/graphql",
       "servedAtKeys": [
         "spring.graphql.http.path",
-        "spring.graphql.path"
+        "spring.graphql.path",
+        "dgs.graphql.path"
       ],
       "servedAtMethods": [
         "POST"
@@ -295,8 +350,17 @@
       ]
     },
     {
+      "_code_base_path_comment": "javalin.io/documentation#configuration: config.router.contextPath (6.x; 5.x config.routing.contextPath, 3.x/4.x config.contextPath) prefixes every route; the last property segment is matched, so all three generations are one row.",
       "_more_comment": "javalin.io docs: app.ws/app.sse (GET upgrades), ApiBuilder.crud(\"users/{user-id}\", h) maps GET/POST on the collection and GET/PATCH/DELETE on the item, addHttpHandler(HandlerType.X, path, h).",
       "_p15_comment": "the route builder's vararg RouteRole tail IS the auth requirement (get(\"/x\", handler, Role.ADMIN)). Media has no declaration site in Javalin's DSL - ctx.contentType() is a response detail inside the handler, not a route declaration - so consumes/produces stay an honest empty., sourced: at javalin-parent-6.7.0 (JavalinDefaultRoutingApi.kt:128-194) every route builder is (path, handler[, vararg roles]) - no content-type parameter exists on any of them; the only contentType in the routing API scopes ERROR handlers (error(status, contentType, handler),:44-96). The empty stands with evidence.",
+      "basePathKeys": [
+        [
+          "@codeBasePath"
+        ]
+      ],
+      "codeBasePathProperties": [
+        "contextPath"
+      ],
       "contextReaders": [
         {
           "kind": "path",
@@ -475,6 +539,7 @@
       "roleArgumentStart": 2
     },
     {
+      "_code_base_path_comment": "ktor.io server-configuration-code: the engine environment's rootPath (applicationEngineEnvironment { rootPath = .. } in 2.x, serverConfig { rootPath = .. } in 3.x) prefixes every route; code first, since an embeddedServer app does not read application.conf's ktor.deployment.rootPath.",
       "_more_comment": "ktor.io: sse(path) { } (io.ktor.server.sse) is a GET route; Resources get/post/put/delete/patch/head/options<T>; selectors (header/param/host) add no path segment and need no row: the prefix walk composes only path-bearing nesting; route(Regex(..)) is kept with its regex.",
       "_p18_comment": ", re-examining the honest empty ('media annotations do not exist for a bare DSL route', the Endpoints.kt comment): ktor HAS per-route media builders - RoutingBuilderKt (ktor-server-core-jvm 3.5.2, the artifact in the corpus warm cache) declares static `accept(ContentType...)` (matches the request's Accept header - the produces side) and `contentType(ContentType...)` (matches the request body's type - the consumes side). A capability nobody had looked for; not modelled yet because the argument is an external constant (io.ktor.http.ContentType.Application.Json etc.) whose STRING the value folder cannot derive - modelling needs a pack-side constant table sourced from ktor's own ContentType declarations, named as follow-up. Verified against the held jar's class file; same API present at 1.6.7 per ktor's compatibility history.",
       "_p19_dedup": "liveness sweep: io.ktor.server.routing.head and .options were each listed twice; the duplicates removed.",
@@ -485,8 +550,12 @@
       ],
       "basePathKeys": [
         [
+          "@codeBasePath",
           "ktor.deployment.rootPath"
         ]
+      ],
+      "codeBasePathProperties": [
+        "rootPath"
       ],
       "contextReaders": [
         {
@@ -979,6 +1048,7 @@
       "_base_path_comment": "quarkus.io/guides/rest: quarkus.http.root-path, then quarkus.rest.path or @ApplicationPath (the property takes precedence), then class and method @Path.",
       "_method_path_comment": "jakarta-restful-ws-spec-3.1: \"The method is only invoked for request URIs that match a URI template created by concatenating the URI template of the resource class with the URI template of the method.\" Before this every method-level @Path was dropped and each resource method published at its class path.",
       "_p27_comment": ", from Jakarta RESTful Web Services 3.1 specification, §3.3.2.1 rather than from memory. Verbatim: \"The value of a parameter not annotated with @FormParam or any of the annotations listed in Fields and Bean Properties, called the entity parameter, is mapped from the request entity body. Resource methods MUST have at most one entity parameter.\" The unannotated parameter IS the request body, so it is never a scalar: simpleParameterTypes stays empty. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
+      "_sub_resource_comment": "jakarta.ee RESTful Web Services 3.1 §3.4.1: \"Resource methods that have a @Path annotation, but no request method designator, are sub-resource locators\"; the object they return handles the rest of the request, so its class needs no @Path.",
       "applicationPathAnnotations": [
         "javax.ws.rs.ApplicationPath",
         "jakarta.ws.rs.ApplicationPath"
@@ -1231,6 +1301,7 @@
         "javax.ws.rs.Path"
       ],
       "simpleParameterTypes": [],
+      "subResourceLocators": true,
       "verbMetaAnnotations": [
         "jakarta.ws.rs.HttpMethod",
         "javax.ws.rs.HttpMethod"
@@ -1439,6 +1510,7 @@
     },
     {
       "_p15_comment": "media has no declaration site for servlets - the content type is a response header the handler sets. Authentication IS declared, in the deployment descriptor's <security-constraint>, which the web.xml parser reads and attaches per url-pattern; it is not an annotation., sourced: jakarta.servlet-api 6.0.0's own classes - setContentType lives on ServletResponse (the RESPONSE half); ServletRequest exposes only getContentType (reading the request body's type). No route-level media declaration exists in the servlet model; the empty stands with evidence.",
+      "_registration_comment": "docs.spring.io spring-boot \"Registering Servlets, Filters, and Listeners as Spring Beans\": ServletRegistrationBean(T, String...) and (T, boolean, String...), addUrlMappings(String...), setUrlMappings(Collection); FilterRegistrationBean inherits addUrlPatterns/setUrlPatterns from AbstractFilterRegistrationBean (javap, spring-boot 2.6.6 and 4.1.1).",
       "basePathKeys": [
         [
           "server.servlet.context-path"
@@ -1560,7 +1632,25 @@
         "value",
         "urlPatterns"
       ],
-      "pathPrefixAnnotations": []
+      "pathPrefixAnnotations": [],
+      "registrationBeans": [
+        {
+          "kind": "servlet",
+          "mappingMethods": [
+            "addUrlMappings",
+            "setUrlMappings"
+          ],
+          "pattern": "org.springframework.boot.web.servlet.ServletRegistrationBean"
+        },
+        {
+          "kind": "filter",
+          "mappingMethods": [
+            "addUrlPatterns",
+            "setUrlPatterns"
+          ],
+          "pattern": "org.springframework.boot.web.servlet.FilterRegistrationBean"
+        }
+      ]
     },
     {
       "contextReaders": [
@@ -1916,6 +2006,7 @@
       "_base_path_comment": "Deployment base paths are PER FRAMEWORK and COMPOSE: Spring Boot serves server.servlet.context-path (reactive: spring.webflux.base-path) + spring.mvc.servlet.path (the DispatcherServlet path) + the mapping. Before this one repo-wide first-match list applied a Micronaut context-path to gRPC and Azure routes, never composed the servlet path, and read \"server.base-path\", which no framework documents.",
       "_dsl_comment": "WebMvc.fn's router { } (org.springframework.web.servlet.function.RouterFunctionDsl, spring-webmvc 5.3.18 bytecode): the same builder surface on the servlet stack.",
       "_exchange_comment": "docs.spring.io ann-requestmapping: \"@HttpExchange and @GetExchange are supported as alternatives to @RequestMapping on server-side controllers\"; a class-level @HttpExchange is the base path. A client-only interface carries no controller marker and publishes nothing.",
+      "_handshake_comment": "docs.spring.io spring-framework websocket reference: registerStompEndpoints(StompEndpointRegistry) { addEndpoint(\"/portfolio\") } and registerWebSocketHandlers(WebSocketHandlerRegistry) { addHandler(handler, \"/myHandler\") }, each an HTTP GET handshake; withSockJS() adds the SockJS protocol URLs (sockjs-protocol 0.3.3: /info, /iframe.html, /websocket and /{server}/{session}/{transport}). spring-websocket is not held on the evidence machine: these symbols are transcribed from the API docs, not jar-verified.",
       "_issue92_comment": "atom-tools#92: Spring declares value/path as String[] aliases, so against the real jars every route arrives as an array constant and a detector reading only the first SCALAR constant published pathTemplate \"\" for every handler; the stub-annotation fixtures declared value: String and could not see it. @RequestMapping's method = [..] was never read, so the verbose style published httpMethod [].",
       "_p27_comment": ", from web/webmvc/mvc-controller/ann-methods/arguments.html and web/webflux/controller/ann-methods/arguments.html rather than from memory. Verbatim: \"If a method argument is not matched to any of the earlier values in this table and it is a simple type (as determined by BeanUtils#isSimpleProperty), it is resolved as a @RequestParam. Otherwise, it is resolved as a @ModelAttribute.\" This entry covers ANNOTATED controllers of both Spring MVC and Spring WebFlux — WebFlux's annotated model publishes the identical fallback rule, and kosi's spring-webflux entry is the FUNCTIONAL router DSL, where ServerRequest genuinely is a context. So WebFlux's own supplied types are listed here too. Every one of these frameworks was marked handlerInput=annotated, which seeds NOTHING for a handler that binds without annotations - the shape spring-petclinic is written in, where it read 3 of 11 real flows.",
       "_sdr_comment": "Spring Data REST, from docs.spring.io/spring-data/rest/reference/repository-resources.html and the 3.6.4 bytecode: @RepositoryRestController is meta-annotated @BasePathAwareController and both are @Component, NOT @Controller, so neither matched classMarkers; their handlers and every repository resource sit under spring.data.rest.base-path (or a folded RepositoryRestConfiguration.setBasePath argument, applied after the properties). getBasePath() returns URI while setBasePath takes String, so Kotlin synthesizes no basePath property and the call is the only code spelling. RepositoryRestResource was listed under repositorySupertypes, where an annotation can never match; it is the resource annotation (path, exported). DELETE is backed by delete(T), the method SDR prefers.",
@@ -2065,6 +2156,19 @@
         "org/springframework/web/servlet/function/RequestPredicate"
       ],
       "handlerInput": "annotated-or-bound",
+      "handshakeRegistrations": [
+        {
+          "pathArgumentStart": 0,
+          "pattern": "org.springframework.web.socket.config.annotation.StompEndpointRegistry.addEndpoint",
+          "sockJs": "withSockJS"
+        },
+        {
+          "handlerArgument": 0,
+          "pathArgumentStart": 1,
+          "pattern": "org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry.addHandler",
+          "sockJs": "withSockJS"
+        }
+      ],
       "id": "spring-mvc",
       "kind": "annotation",
       "mappingAnnotations": [

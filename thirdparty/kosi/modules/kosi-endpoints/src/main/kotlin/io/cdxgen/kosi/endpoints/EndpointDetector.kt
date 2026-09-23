@@ -110,6 +110,9 @@ object EndpointDetector {
         /** Abstract members an implementation inherited its mapping from; see [detect]. */
         internal val inheritedMappings: MutableSet<String> = mutableSetOf()
 
+        /** Framework id -> sub-resource class -> the prefixes its locators serve it under; see [subResourcePrefixes]. */
+        internal val subResources: MutableMap<String, Map<String, List<String>>> = mutableMapOf()
+
         private val callers: Map<String, List<String>> by lazy {
             val out = HashMap<String, MutableSet<String>>()
             for (f in module.functions) {
@@ -349,13 +352,16 @@ object EndpointDetector {
                 // A marker-bearing framework requires the marker on the
                 // enclosing class: the mapping annotation alone is not a
                 // published endpoint. (@Path is Quarkus's own marker.)
-                if (framework.classMarkers.isNotEmpty()) {
+                // A SUB-RESOURCE class carries no marker: a locator method
+                // returns it, and its routes are served under the locator.
+                val located = if (framework.subResourceLocators) subResourcePrefixes(framework, input)[ownerCanonical] else null
+                if (framework.classMarkers.isNotEmpty() && located == null) {
                     val hasMarker = ownerAnnotations.any { owner ->
                         framework.classMarkers.any { matches(owner, it) }
                     }
                     if (!hasMarker) continue
                 }
-                val prefixes = ownerDeclAnnotations
+                val prefixes = located ?: ownerDeclAnnotations
                     .firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
                     ?.let { pathsOf(it, framework.pathArguments) }
                     ?: listOf("")
@@ -413,6 +419,49 @@ object EndpointDetector {
     }
 
     /**
+     * JAX-RS sub-resource locators (Jakarta RESTful Web Services 3.1
+     * §3.4.1): "a resource method annotated with @Path but not with a
+     * request method designator" returns the object that handles the rest of
+     * the request. Its class needs no @Path; its methods are served under
+     * root-class path + locator path, and a locator on a located class
+     * chains. The graph is walked from every MARKED class, bounded, and a
+     * class reached twice with the same prefix is not walked again. The
+     * locator's DECLARED return type names the class. A locator returning
+     * `Any` or an interface kosi cannot pin serves nothing kosi claims.
+     */
+    private fun subResourcePrefixes(framework: FrameworkModel, input: Input): Map<String, List<String>> =
+        input.subResources.getOrPut(framework.id) {
+            val byOwner = input.module.functions.groupBy { it.canonicalName.substringBeforeLast('.') }
+            fun annotationsOf(canonical: String) = input.annotationValues[canonical].orEmpty()
+            fun isVerb(ann: DeclAnnotation) = framework.mappingAnnotations.any { matches(ann.fqn, it.pattern) } ||
+                input.annotationValues[ann.fqn].orEmpty().any { d -> framework.verbMetaAnnotations.any { matches(d.fqn, it) } }
+            val out = LinkedHashMap<String, MutableList<String>>()
+            val work = ArrayDeque<Triple<String, String, Int>>()
+            for ((owner, _) in byOwner) {
+                val classPath = annotationsOf(owner).firstOrNull { ann -> framework.classMarkers.any { matches(ann.fqn, it) } } ?: continue
+                pathsOf(classPath, framework.pathArguments).forEach { work.add(Triple(owner, it, 0)) }
+            }
+            val seen = HashSet<Pair<String, String>>()
+            while (work.isNotEmpty()) {
+                val (owner, prefix, depth) = work.removeFirst()
+                if (depth > 5 || !seen.add(owner to prefix)) continue
+                for (member in byOwner[owner].orEmpty()) {
+                    val anns = annotationsOf(member.canonicalName)
+                    if (anns.any(::isVerb)) continue
+                    val path = anns.firstOrNull { ann -> framework.methodPathAnnotations.any { matches(ann.fqn, it) } } ?: continue
+                    val returned = member.returnType?.substringBefore('<')?.removeSuffix("?")?.trim() ?: continue
+                    if (returned !in byOwner) continue
+                    for (segment in pathsOf(path, framework.pathArguments)) {
+                        val served = joinPaths(prefix, segment)
+                        out.getOrPut(returned) { mutableListOf() }.let { if (served !in it) it.add(served) }
+                        work.add(Triple(returned, served, depth + 1))
+                    }
+                }
+            }
+            out
+        }
+
+    /**
      * The route paths one mapping annotation declares. The first of
      * [arguments] that carries constants wins, every element of it a path:
      * `value`/`path` are `String[]` on the real Spring annotations, so the
@@ -435,7 +484,7 @@ object EndpointDetector {
 
     private val DEFAULT_PATH_ARGUMENTS = listOf("value")
 
-    private val HTTP_METHODS = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")
+    internal val HTTP_METHODS = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE")
 
     /**
      * The HTTP methods a mapping site serves: the site's own
@@ -460,7 +509,7 @@ object EndpointDetector {
      * (`io.ktor.server.routing.get` -> `io.ktor`): the evidence that decides
      * which framework an UNRESOLVED route call belongs to.
      */
-    private fun FrameworkModel.dslPackages(): Set<String> =
+    internal fun FrameworkModel.dslPackages(): Set<String> =
         dslFunctions.mapNotNullTo(mutableSetOf()) { mapping ->
             mapping.pattern.split('.').take(2).takeIf { it.size == 2 }?.joinToString(".")
         }
@@ -473,8 +522,24 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         val body = fn.body ?: return
+        val dslNames = pack.frameworks.flatMapTo(HashSet()) { f -> f.dslFunctions.map { it.pattern.substringAfterLast('.') } }
         for (block in body.blocks) {
-            for ((index, ins) in block.instructions.withIndex()) {
+            for ((index, raw) in block.instructions.withIndex()) {
+                // A route builder the classpath could not resolve can bind to
+                // a STDLIB homonym instead: `get { }` inside an unresolved
+                // Ktor `route(..)` resolved to `kotlin.collections.get` (the
+                // Map operator) with the route's lambda as the "key"
+                // (ktor-samples httpbin /range, no Ktor jar). A receiverless
+                // stdlib call whose last argument is a lambda and whose name
+                // is a route builder is that unresolved call, and is read as one.
+                val ins = if (raw is KirCall && raw.receiver == null && raw.callee.fqn.startsWith("kotlin.") &&
+                    raw.callee.fqn.substringAfterLast('.') in dslNames &&
+                    raw.args.lastOrNull()?.let { a -> block.instructions.any { it is KirLambda && it.result == a } } == true
+                ) {
+                    KirDynamicCall(raw.result, raw.callee.fqn.substringAfterLast('.'), null, raw.args, raw.line)
+                } else {
+                    raw
+                }
                 when (ins) {
                     is KirCall -> {
                         val framework = pack.frameworks.firstOrNull { f ->
@@ -622,19 +687,63 @@ object EndpointDetector {
         // the route is then neither a claimed verb nor "any method".
         var effectiveMethods = if (leadingMethod != null) listOf(leadingMethod) else methods
         var routeAdd: (Candidate) -> Unit = if (leadingMethod != null) { c -> add(c.copy(httpMethods = listOf(leadingMethod), anyMethod = false)) } else add
+        var loopSelector: LoopElements.Binding? = null
         if (effectiveMethods.isEmpty() && framework != null) {
             when (val selected = enclosingMethodSelector(fn, framework, input)) {
-                null -> Unit
-                SELECTOR_UNRESOLVED -> routeAdd = { c -> add(c.copy(anyMethod = false, methodSelectorUnresolved = true)) }
-                else -> {
-                    effectiveMethods = listOf(selected)
-                    routeAdd = { c -> add(c.copy(anyMethod = false, httpMethods = listOf(selected))) }
+                Selected.None -> Unit
+                Selected.Unresolved -> routeAdd = { c -> add(c.copy(anyMethod = false, methodSelectorUnresolved = true)) }
+                is Selected.Fixed -> {
+                    effectiveMethods = listOf(selected.verb)
+                    routeAdd = { c -> add(c.copy(anyMethod = false, httpMethods = listOf(selected.verb))) }
                 }
+                is Selected.Loop -> loopSelector = selected.binding
             }
         }
         val mounted = mountedPrefix(fn, (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver, framework, input)
-        for (outer in prefixChains(fn.canonicalName, input)) {
-            detectRouteCallAt(fn, block, index, ins, framework, effectiveMethods, input, routeAdd, callArgs, joinPaths(outer, mounted))
+        for (chain in prefixChains(fn.canonicalName, input)) {
+            // A prefix bound to a loop variable is one prefix PER ELEMENT;
+            // a verb selector bound to the SAME loop takes that element's
+            // verb, so `for ((m, p) in listOf(Post to "/post", ..))` pairs
+            // POST with /post and never with /delete.
+            for ((outer, element) in expandLoopScopes(chain)) {
+                var methodsHere = effectiveMethods
+                var addHere = routeAdd
+                loopSelector?.let { binding ->
+                    val verbs = element[binding.key]?.let { listOf(binding.values[it]) } ?: binding.values.distinct().sorted()
+                    methodsHere = verbs
+                    addHere = { c -> add(c.copy(anyMethod = false, httpMethods = verbs)) }
+                }
+                detectRouteCallAt(fn, block, index, ins, framework, methodsHere, input, addHere, callArgs, joinPaths(outer, mounted))
+            }
+        }
+    }
+
+    /**
+     * Every concrete prefix a chain carrying [LOOP_SCOPE] tokens stands for,
+     * with the element index each loop took. Distinct loops multiply (a
+     * route nested in two independent loops is served at every pairing).
+     */
+    private fun expandLoopScopes(chain: String): List<Pair<String, Map<String, Int>>> {
+        if (LOOP_SCOPE !in chain) return listOf(chain to emptyMap())
+        val segments = chain.split('/')
+        val loops = LinkedHashMap<String, List<String>>()
+        for (segment in segments) {
+            if (!segment.startsWith(LOOP_SCOPE)) continue
+            val parts = segment.removePrefix(LOOP_SCOPE).split(LOOP_SEPARATOR)
+            loops[parts.first()] = parts.drop(1).map { it.replace(LOOP_SLASH, '/') }
+        }
+        var expansions = listOf(emptyMap<String, Int>())
+        for ((key, values) in loops) {
+            expansions = expansions.flatMap { chosen -> values.indices.map { i -> chosen + (key to i) } }
+        }
+        return expansions.map { chosen ->
+            segments.joinToString("/") { segment ->
+                if (!segment.startsWith(LOOP_SCOPE)) segment
+                else {
+                    val key = segment.removePrefix(LOOP_SCOPE).substringBefore(LOOP_SEPARATOR)
+                    loops.getValue(key)[chosen.getValue(key)].trim('/')
+                }
+            }.replace(Regex("/{2,}"), "/") to chosen
         }
     }
 
@@ -1055,10 +1164,15 @@ object EndpointDetector {
             val blockSecurity = contractBlockSecurity(fn, framework, input)
             if (blockSecurity != null) authentication = listOf("contract-security($blockSecurity)")
         }
+        // `"/api" bind routes(..)` MOUNTS a route table under a prefix
+        // (http4k routing.kt `String.bind(RoutingHttpHandler)`): it is not
+        // an endpoint, and the routes inside are served under it.
+        val argument = ins.args.firstOrNull()
+        if (argument != null && isHttp4kRouteTable(fn, argument, input)) return
         // The handler lives on the `to` call whose receiver is this bind's
         // result, and the method constant is the bind's argument.
         val handler = bindHandler(fn, ins.result, input)
-        val method = ins.args.firstOrNull()?.let { methodReg ->
+        val method = argument?.let { methodReg ->
             block.instructions.firstOrNull {
                 it is io.cdxgen.kosi.kir.KirFieldGet && it.result == methodReg
             }?.let {
@@ -1066,7 +1180,108 @@ object EndpointDetector {
                     ?.let { e -> (e as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name }
             }
         }
-        publish(add, framework, listOfNotNull(method), path, handler ?: "", fn, "dsl", authentication = authentication)
+        // `"/any" bind { req -> .. }` binds a HANDLER, not a method: the
+        // route serves every method (`String.bind(HttpHandler)`).
+        val anyHandler = if (method == null && argument != null &&
+            block.instructions.any { it is KirLambda && it.result == argument }
+        ) LambdaResolver.resolve(fn, argument, input) else null
+        val routeValue = if (anyHandler != null) ins.result else toCallOf(fn, ins.result)?.result ?: ins.result
+        val prefixes = routeValue?.let { http4kPrefixes(fn, it, input) } ?: listOf("")
+        for (prefix in prefixes) {
+            val served = joinPaths(prefix, path)
+            if (anyHandler != null) {
+                publish({ c -> add(c.copy(anyMethod = true)) }, framework, emptyList(), served, anyHandler, fn, "dsl", authentication = authentication)
+            } else {
+                publish(add, framework, listOfNotNull(method), served, handler ?: "", fn, "dsl", authentication = authentication)
+            }
+        }
+    }
+
+    private fun toCallOf(fn: KirFunction, bindResult: String?): KirCall? {
+        if (bindResult == null) return null
+        return fn.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
+            ?.filterIsInstance<KirCall>()?.firstOrNull { it.receiver == bindResult && it.callee.fqn.substringAfterLast('.') == "to" }
+    }
+
+    private fun http4kInstructions(fn: KirFunction): Sequence<KirIns> =
+        fn.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }.orEmpty()
+
+    private fun resultOf(ins: KirIns): String? = when (ins) {
+        is KirCall -> ins.result
+        is KirDynamicCall -> ins.result
+        is io.cdxgen.kosi.kir.KirFieldGet -> ins.result
+        else -> null
+    }
+
+    /**
+     * Whether [register] holds an http4k ROUTE TABLE: a `routes(..)` or
+     * `contract { }` result, or the value of a function or top-level `val`
+     * that returns one (`"/admin" bind adminRoutes()`).
+     */
+    private fun isHttp4kRouteTable(fn: KirFunction, register: String, input: Input, depth: Int = 0): Boolean {
+        if (depth > 4) return false
+        val def = http4kInstructions(fn).firstOrNull { resultOf(it) == register } ?: return false
+        if (callName(def) in HTTP4K_TABLE_BUILDERS) return true
+        val target = when (def) {
+            is KirCall -> input.module.functions.firstOrNull { it.canonicalName == def.callee.fqn && it.params.isEmpty() }
+            is io.cdxgen.kosi.kir.KirFieldGet -> (def.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name
+                ?.let { name -> input.module.functions.firstOrNull { it.canonicalName == "${fn.canonicalName.substringBeforeLast('.', "")}.$name" && it.params.isEmpty() } }
+            else -> null
+        } ?: return false
+        val returned = http4kInstructions(target).filterIsInstance<io.cdxgen.kosi.kir.KirReturn>().mapNotNull { it.value }.singleOrNull() ?: return false
+        return isHttp4kRouteTable(target, returned, input, depth + 1)
+    }
+
+    /**
+     * Every prefix the route or table in [register] is served under: each
+     * `"/p" bind <table>` that mounts a `routes(..)` holding it, outermost
+     * first, across a function or top-level `val` that returns the table and
+     * a `contract { }` block's lambda. One prefix per mount site.
+     */
+    private fun http4kPrefixes(fn: KirFunction, register: String, input: Input, depth: Int = 0): List<String> {
+        if (depth > 8) return listOf("")
+        val out = mutableListOf<String>()
+        for (ins in http4kInstructions(fn)) {
+            val name = callName(ins) ?: continue
+            val args = (ins as? KirCall)?.args ?: (ins as? KirDynamicCall)?.args ?: continue
+            if (register !in args) continue
+            val result = resultOf(ins) ?: continue
+            when (name) {
+                "bind" -> {
+                    val receiver = (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver ?: continue
+                    val block = fn.body?.blocks?.firstOrNull { b -> b.instructions.any { it === ins } } ?: continue
+                    val at = block.instructions.indexOfFirst { it === ins }
+                    val segment = input.folder.valueAt(fn, block, at, receiver)?.value ?: continue
+                    http4kPrefixes(fn, result, input, depth + 1).forEach { outer -> out += joinPaths(outer, segment) }
+                }
+                in HTTP4K_TABLE_BUILDERS -> out += http4kPrefixes(fn, result, input, depth + 1)
+            }
+        }
+        if (out.isNotEmpty()) return out.distinct()
+        // The table leaves this function: returned (a helper or a top-level
+        // `val` initializer), or built inside a `contract { }` lambda.
+        val returned = http4kInstructions(fn).filterIsInstance<io.cdxgen.kosi.kir.KirReturn>().any { it.value == register }
+        if (returned && fn.params.isEmpty()) {
+            val short = fn.canonicalName.substringAfterLast('.')
+            for (caller in input.module.functions) {
+                for (ins in http4kInstructions(caller)) {
+                    val hit = when (ins) {
+                        is KirCall -> ins.callee.fqn == fn.canonicalName
+                        is io.cdxgen.kosi.kir.KirFieldGet -> (ins.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name == short &&
+                            caller.canonicalName.substringBeforeLast('.', "") == fn.canonicalName.substringBeforeLast('.', "")
+                        else -> false
+                    }
+                    if (hit) resultOf(ins)?.let { out += http4kPrefixes(caller, it, input, depth + 1) }
+                }
+            }
+        }
+        val link = input.lambdaLinks[fn.canonicalName]
+        if (out.isEmpty() && link != null && callName(link.creationCall) == "contract") {
+            val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction }
+            val result = resultOf(link.creationCall)
+            if (parent != null && result != null) out += http4kPrefixes(parent, result, input, depth + 1)
+        }
+        return out.ifEmpty { listOf("") }.distinct()
     }
 
     /** True when [register] is last written before [index] by a null literal. */
@@ -1239,7 +1454,20 @@ object EndpointDetector {
         return matches.singleOrNull()?.key
     }
 
-    private const val SELECTOR_UNRESOLVED = "\u0000unresolved"
+    /**
+     * A prefix segment bound to a loop variable (see [LoopElements]):
+     * `LOOP_SCOPE key SEP v1 SEP v2 ..`, each value with its slashes
+     * escaped so the segment stays one segment until [expandLoopScopes].
+     */
+    private const val LOOP_SCOPE = "\u0000loop:"
+    private const val LOOP_SEPARATOR = '\u0001'
+    private const val LOOP_SLASH = '\u0002'
+
+    /** http4k calls that build a ROUTE TABLE (routing.kt `routes`, contract.kt `contract`). */
+    private val HTTP4K_TABLE_BUILDERS = setOf("routes", "contract")
+
+    /** A prefix segment whose `route(..)` argument folded to no constant. */
+    private const val UNFOLDED_SCOPE = "\u0000unfolded"
 
     /** Marks a prefix segment that is a REGEX, not a path (see [prefixChain]). */
     private const val REGEX_SCOPE = "\u0000regex:"
@@ -1251,26 +1479,45 @@ object EndpointDetector {
      * [SELECTOR_UNRESOLVED] when one does but its value does not fold to a
      * verb (`HttpMethod.Post` lowers as a field read ending in `Post`).
      */
-    private fun enclosingMethodSelector(fn: KirFunction, framework: FrameworkModel, input: Input): String? {
+    private sealed interface Selected {
+        data object None : Selected
+        data object Unresolved : Selected
+        data class Fixed(val verb: String) : Selected
+        /** `for (m in listOf(HttpMethod.Get, ..)) { method(m) { } }`: one verb per element. */
+        data class Loop(val binding: LoopElements.Binding) : Selected
+    }
+
+    private fun enclosingMethodSelector(fn: KirFunction, framework: FrameworkModel, input: Input): Selected {
         val selectors = framework.dslFunctions.filter { it.nesting && it.nestingMethodArgument >= 0 }
-        if (selectors.isEmpty()) return null
+        if (selectors.isEmpty()) return Selected.None
         var current: String? = fn.canonicalName
         var hops = 0
         while (current != null && hops++ < 8) {
-            val link = input.lambdaLinks[current] ?: return null
-            val call = link.creationCall as? KirCall
-            val row = call?.let { c -> selectors.firstOrNull { matches(c.callee.fqn, it.pattern) } }
-            if (call != null && row != null && call.args.size > row.nestingMethodArgument + 1) {
-                val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction } ?: return SELECTOR_UNRESOLVED
-                val register = call.args[row.nestingMethodArgument]
+            val link = input.lambdaLinks[current] ?: return Selected.None
+            // Resolved by FQN; an unresolved selector (no framework jar) by
+            // its name, as every other nesting row falls back.
+            val creation = link.creationCall
+            val args = (creation as? KirCall)?.args ?: (creation as? KirDynamicCall)?.args
+            val row = when (creation) {
+                is KirCall -> selectors.firstOrNull { matches(creation.callee.fqn, it.pattern) }
+                is KirDynamicCall -> selectors.firstOrNull { creation.name == it.pattern.substringAfterLast('.') }
+                else -> null
+            }
+            if (args != null && row != null && args.size > row.nestingMethodArgument + 1) {
+                val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction } ?: return Selected.Unresolved
+                val register = args[row.nestingMethodArgument]
                 val read = parent.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
                     ?.filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>()?.firstOrNull { it.result == register }
                 val name = (read?.path?.elements?.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name?.uppercase()
-                return name?.takeIf { it in HTTP_METHODS } ?: SELECTOR_UNRESOLVED
+                if (name != null && name in HTTP_METHODS) return Selected.Fixed(name)
+                // A loop variable over a literal collection of verbs; any
+                // other run-time choice stays unresolved.
+                return LoopElements.resolve(parent, register, LoopElements.Kind.VERB, input)?.let { Selected.Loop(it) }
+                    ?: Selected.Unresolved
             }
             current = link.parentFunction
         }
-        return null
+        return Selected.None
     }
 
     /** The path and verbs set on a route object by chained `path(..)`/`method(..)` calls. */
@@ -1315,6 +1562,17 @@ object EndpointDetector {
         // `chain.get("search", ..)` and Ktor's `get("hello")` are `/search`
         // and `/hello`.
         val path = if (path.isNotEmpty() && !path.startsWith("/")) "/$path" else path
+        if (UNFOLDED_SCOPE in path || LOOP_SCOPE in path) {
+            add(
+                Candidate(
+                    framework = framework?.id ?: UNATTRIBUTED_FRAMEWORK, httpMethods = methods, pathTemplate = "",
+                    pathParameters = emptyList(), handlerSymbol = handler, foundBy = if (framework == null) "$foundBy-unattributed" else foundBy,
+                    position = Position(at.file, at.line, at.line), exported = null, permissions = null, deepLinkHosts = null,
+                    pathUnresolved = "an enclosing route(..) path argument is computed at run time and did not fold to a constant",
+                ),
+            )
+            return
+        }
         if (REGEX_SCOPE in path) {
             val regex = path.substringAfter(REGEX_SCOPE).substringBefore('/')
             add(
@@ -1505,8 +1763,26 @@ object EndpointDetector {
                     } else {
                         null
                     }
-                    if (regexScope != null) segments.add(0, REGEX_SCOPE + regexScope)
-                    else (folded?.value ?: viaPredicate)?.trim('/')?.takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
+                    val literal = folded?.value ?: viaPredicate
+                    // A path argument that did not fold: a loop variable over
+                    // literal paths is expanded per element; anything else is
+                    // a prefix kosi cannot name, and the route says so
+                    // instead of being published one segment short.
+                    val loop = if (literal == null && regexScope == null && first != null && isStringArgument(call, parent, first)) {
+                        LoopElements.resolve(parent, first, LoopElements.Kind.STRING, input)
+                    } else {
+                        null
+                    }
+                    when {
+                        regexScope != null -> segments.add(0, REGEX_SCOPE + regexScope)
+                        literal != null -> literal.trim('/').takeIf { it.isNotEmpty() }?.let { segments.add(0, it) }
+                        loop != null -> segments.add(
+                            0,
+                            LOOP_SCOPE + loop.key + LOOP_SEPARATOR +
+                                loop.values.joinToString(LOOP_SEPARATOR.toString()) { it.trim('/').replace('/', LOOP_SLASH) },
+                        )
+                        first != null && isStringArgument(call, parent, first) -> segments.add(0, UNFOLDED_SCOPE)
+                    }
                 }
             }
             current = link.parentFunction
@@ -1516,6 +1792,27 @@ object EndpointDetector {
         // from the nesting call's own template ("", "/metrics" etc.).
         val joined = segments.joinToString("/")
         return (if (joined.isEmpty()) "" else "/$joined") to root
+    }
+
+    /**
+     * Whether [register] is the String path argument of a nesting call, not
+     * its lambda or a predicate: only then does an unfolded value mean an
+     * unknown path segment. The resolved descriptor must take a String, and
+     * the register must not be the lambda itself.
+     */
+    private fun isStringArgument(call: KirIns, parent: KirFunction, register: String): Boolean {
+        // Resolved: the descriptor must take a String. Unresolved (no jar):
+        // the nesting row's first argument is its path by the pack's own
+        // definition, so any non-lambda first argument is that path.
+        if (call is KirCall) {
+            val descriptor = call.callee.descriptor ?: return false
+            if ("Ljava/lang/String;" !in descriptor.substringBefore(')')) return false
+        } else if (call !is KirDynamicCall) {
+            return false
+        }
+        val lambda = parent.body?.blocks?.asSequence()?.flatMap { it.instructions.asSequence() }
+            ?.any { it is KirLambda && it.result == register } == true
+        return !lambda
     }
 
     // ---- gRPC service impls --------------------------------------------------
@@ -1775,7 +2072,28 @@ object EndpointDetector {
     }
 
     internal fun pathParametersOf(path: String): List<String> =
-        Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim() }.sorted().toList()
+        Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim().removeSuffix("?") }.distinct().sorted().toList()
+
+    /**
+     * Every concrete template an optional-segment template stands for:
+     * `/user/{id?}` serves `/user/{id}` AND `/user` (ktor.io routing: "an
+     * optional path parameter"; Azure Functions `{id:int?}` the same).
+     * Trailing optional segments peel off one at a time; an optional segment
+     * followed by a required one is kept as a plain parameter, since no
+     * route without it exists.
+     */
+    internal fun expandOptionalSegments(path: String): List<String> {
+        if ("?}" !in path) return listOf(path)
+        val segments = path.split('/')
+        val plain = segments.map { if (it.startsWith("{") && it.endsWith("?}")) it.removeSuffix("?}") + "}" else it }
+        val out = mutableListOf(plain.joinToString("/"))
+        var end = segments.size
+        while (end > 1 && segments[end - 1].startsWith("{") && segments[end - 1].endsWith("?}")) {
+            end--
+            out += plain.take(end).joinToString("/").ifEmpty { "/" }
+        }
+        return out
+    }
 
     /**
      * ONE path-template spelling across frameworks. The same route is
@@ -1803,7 +2121,9 @@ object EndpointDetector {
         path.replace(Regex("""\{[?&][^}]*}"""), "")
             .replace(Regex("""\{#[^}]*}"""), "")
             .replace(Regex("""\{/([^}:]+)(?::[^}]*)?}"""), "/{$1}")
-            .replace(Regex("""\{\.([^}:]+)(?::[^}]*)?}"""), ".{$1}")
+            // `{.x}` is the LABEL operator; Ktor's `{...}` tailcard and
+            // `{name...}` are not, so the operator needs a name after the dot.
+            .replace(Regex("""\{\.([A-Za-z_][^}:]*)(?::[^}]*)?}"""), ".{$1}")
             .replace(Regex("""\{\+([^}:]+)(?::[^}]*)?}"""), "{$1}")
 
     /** The query names an RFC 6570 `{?a,b}` / `{&c}` expansion declares. */
@@ -1820,16 +2140,20 @@ object EndpointDetector {
             when {
                 // Vert.x / Spark / Javalin v3: `:id`
                 segment.startsWith(":") && segment.length > 1 -> "{" + segment.removePrefix(":") + "}"
-                // Spring `**`, Ktor `{...}` tailcard: any remaining path.
-                segment == "**" || segment == "{...}" -> "**"
+                // Spring `**`, Ktor `{...}` and named `{rest...}` tailcards:
+                // any remaining path.
+                segment == "**" || segment == "{...}" || (segment.startsWith("{") && segment.endsWith("...}")) -> "**"
                 segment == "*" -> "*"
                 segment.startsWith("{") && segment.endsWith("}") -> {
                     val inner = segment.removeSurrounding("{", "}")
                     // Spring `{id:[0-9]+}` / JAX-RS `{id: \\d+}`: the name is
-                    // everything before the first colon. Ktor's `{id?}`
-                    // marks the variable optional; the name is the same.
-                    // Spring's capture-all `{*path}` names the variable too.
-                    "{" + inner.substringBefore(':').removeSuffix("?").removePrefix("*").trim() + "}"
+                    // everything before the first colon. Spring's capture-all
+                    // `{*path}` names the variable too. An OPTIONAL segment —
+                    // Ktor `{id?}`, Azure `{id:int?}` — keeps its `?`:
+                    // [expandOptionalSegments] turns it into the two routes
+                    // it serves before anything is published.
+                    val optional = inner.trim().endsWith("?")
+                    "{" + inner.substringBefore(':').removeSuffix("?").removePrefix("*").trim() + (if (optional) "?" else "") + "}"
                 }
 
                 else -> segment

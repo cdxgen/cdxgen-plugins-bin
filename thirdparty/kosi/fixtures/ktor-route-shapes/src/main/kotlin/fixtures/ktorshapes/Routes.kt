@@ -10,13 +10,16 @@
 // kosi:want endpoint framework=ktor path=/anything anymethod=true mode=resolved
 // kosi:want endpoint framework=ktor path=/api/users/{id} method=GET fn=~userRoutes mode=resolved
 // kosi:want endpoint framework=ktor path=/v2/users/{id} method=GET fn=~userRoutes mode=resolved
-// kosi:want endpoint framework=ktor path=/loop anymethod=false mode=resolved
+// kosi:want endpoint framework=ktor path=/loop method=GET mode=resolved
+// kosi:want endpoint framework=ktor path=/loop method=DELETE mode=resolved
 //
 // Negative half: a method selector is not a path segment; an extension's
-// route is never published without the prefix it is mounted under; a verb
-// the program picks at run time is never claimed as every verb.
+// route is never published without the prefix it is mounted under; a loop
+// over literal verbs serves exactly those verbs (dsl-loop-verbs has the
+// run-time case).
 // kosi:want-not endpoint framework=ktor path=/users/{id}
 // kosi:want-not endpoint framework=ktor path=/loop anymethod=true
+// kosi:want-not endpoint framework=ktor path=/loop method=POST
 // kosi:want-not endpoint framework=ktor path=/submit anymethod=true
 package fixtures.ktorshapes
 

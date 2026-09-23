@@ -31,6 +31,8 @@ object WebXmlParser {
         val urlPatterns: List<String>,
         /** `servlet` or `filter` — a filter's handler is `doFilter` and it serves every verb. */
         val kind: String = KIND_SERVLET,
+        /** `descriptor` for web.xml; `dsl` for a registration bean in code. */
+        val foundBy: String = "descriptor",
     )
 
     const val KIND_SERVLET: String = "servlet"

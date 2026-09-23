@@ -136,6 +136,9 @@ class EndpointsPackLivenessTest {
             "mountFunctions" -> drop({ it.mountFunctions }, { x, l -> x.copy(mountFunctions = l) })
             "implicitRoutes" -> drop({ it.implicitRoutes }, { x, l -> x.copy(implicitRoutes = l) })
             "implicitExposureDefault" -> drop({ it.implicitExposureDefault }, { x, l -> x.copy(implicitExposureDefault = l) })
+            "registrationBeans" -> drop({ it.registrationBeans }, { x, l -> x.copy(registrationBeans = l) })
+            "handshakeRegistrations" -> drop({ it.handshakeRegistrations }, { x, l -> x.copy(handshakeRegistrations = l) })
+            "codeBasePathProperties" -> drop({ it.codeBasePathProperties }, { x, l -> x.copy(codeBasePathProperties = l) })
             // The three channels that state a framework's ARGUMENT
             // BINDING rule (Spring's "any other argument" fallback).
             "contextParameterTypes" -> drop({ it.contextParameterTypes }, { x, l -> x.copy(contextParameterTypes = l) })
@@ -227,6 +230,9 @@ class EndpointsPackLivenessTest {
         fw.mountFunctions.forEach { entry("mountFunctions", it, it.substringAfterLast('.'), it) }
         fw.implicitRoutes.forEach { entry("implicitRoutes", it, it.path, it.path) }
         fw.implicitExposureDefault.forEach { entry("implicitExposureDefault", it, it, it) }
+        fw.registrationBeans.forEach { entry("registrationBeans", it, it.pattern.substringAfterLast('.'), it.pattern) }
+        fw.handshakeRegistrations.forEach { entry("handshakeRegistrations", it, it.pattern.substringAfterLast('.'), it.pattern) }
+        fw.codeBasePathProperties.forEach { entry("codeBasePathProperties", it, it, it) }
     }
 
     private fun packRemovables(pack: EndpointsPack): List<Removable> =

@@ -786,6 +786,80 @@ capabilities = ["endpoints", "framework-semantics"]
 tolerated_resolution_errors = []
 
 [[fixtures]]
+slug = "dsl-loop-verbs"
+tier = "fixtures"
+path = "fixtures/dsl-loop-verbs"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-loop-verbs-unresolved"
+tier = "fixtures"
+path = "fixtures/dsl-loop-verbs-unresolved"
+# io.ktor is deliberately absent: every Ktor symbol resolves by import only.
+# The rest follow from HttpMethod not typing: listOf/to/for cannot infer,
+# and a destructured Pair of unknown types is ambiguous.
+capabilities = ["endpoints", "framework-semantics", "ktor", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "COMPONENT_FUNCTION_AMBIGUITY", "INAPPLICABLE_CANDIDATE"]
+
+[[fixtures]]
+slug = "http4k-routes"
+tier = "fixtures"
+path = "fixtures/http4k-routes"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "jaxrs-subresources"
+tier = "fixtures"
+path = "fixtures/jaxrs-subresources"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "servlet-registration"
+tier = "fixtures"
+path = "fixtures/servlet-registration"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "websocket-handshakes"
+tier = "fixtures"
+path = "fixtures/websocket-handshakes"
+capabilities = ["endpoints", "framework-semantics"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "graphql-surfaces"
+tier = "fixtures"
+path = "fixtures/graphql-surfaces"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "code-base-paths"
+tier = "fixtures"
+path = "fixtures/code-base-paths"
+capabilities = ["endpoints", "framework-semantics", "gradle-multi-module", "context-path", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "optional-segments"
+tier = "fixtures"
+path = "fixtures/optional-segments"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "graphql-graphiql-marker"
+tier = "fixtures"
+path = "fixtures/graphql-graphiql-marker"
+classpath_file = "classpath.txt"
+capabilities = ["endpoints", "implicit-routes", "config-resolution"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "dsl-extras"
 tier = "fixtures"
 path = "fixtures/dsl-extras"

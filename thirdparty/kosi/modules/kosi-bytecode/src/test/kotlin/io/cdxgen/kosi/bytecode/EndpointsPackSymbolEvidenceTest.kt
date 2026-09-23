@@ -205,7 +205,7 @@ class EndpointsPackSymbolEvidenceTest {
         "classMarkers", "classMappingAnnotations", "pathPrefixAnnotations", "applicationPathAnnotations",
         "supertypeMarkers", "repositorySupertypes", "securityConstructors", "resourceAnnotations",
         "dataRestBasePathMarkers", "repositoryResourceAnnotations", "repositoryMethodAnnotations",
-        "repositoryPagingSupertypes", "functionHttpTriggers",
+        "repositoryPagingSupertypes", "functionHttpTriggers", "registrationBeans",
     )
 
     /** Channels whose entries are member calls on an owner class. */
@@ -239,6 +239,10 @@ class EndpointsPackSymbolEvidenceTest {
             "repositoryMethodAnnotations" -> f.repositoryMethodAnnotations
             "repositoryPagingSupertypes" -> f.repositoryPagingSupertypes
             "functionHttpTriggers" -> f.functionHttpTriggers
+            // The bean CLASSES; their url-mapping members are inherited
+            // (AbstractFilterRegistrationBean), which an owner's own method
+            // table cannot witness — javap-verified in the pack comment.
+            "registrationBeans" -> f.registrationBeans.map { it.pattern }
             "dataRestBasePathSetters" -> f.dataRestBasePathSetters
             "dslFunctions" -> f.dslFunctions.map { it.pattern }
             "mediaDsl" -> f.mediaDsl.map { it.pattern }
@@ -483,6 +487,8 @@ class EndpointsPackSymbolEvidenceTest {
             "quarkus-reactive-routes" to listOf(Coordinate("io.quarkus", "quarkus-reactive-routes", "3.15.1")),
             "servlet" to listOf(
                 Coordinate("jakarta.servlet", "jakarta.servlet-api", "4.0.4"),
+                // ServletRegistrationBean / FilterRegistrationBean.
+                Coordinate("org.springframework.boot", "spring-boot", "2.6.6"),
                 // javax generations: the pack models both; the javax
                 // artifact is not held, so those rows stay recorded gaps.
             ),

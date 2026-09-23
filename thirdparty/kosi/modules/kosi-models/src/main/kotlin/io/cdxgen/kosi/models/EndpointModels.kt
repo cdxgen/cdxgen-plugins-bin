@@ -60,6 +60,33 @@ data class RepositoryRoute(
     val backedBy: List<String>,
 )
 
+/**
+ * A servlet or filter registered IN CODE (Spring Boot's
+ * `ServletRegistrationBean(servlet, "/x")`, `FilterRegistrationBean`):
+ * [pattern] is the bean's constructor, [mappingMethods] the members that
+ * add or set its url patterns, and [kind] `servlet` or `filter`.
+ */
+data class RegistrationBean(
+    val pattern: String,
+    val kind: String,
+    val mappingMethods: List<String>,
+)
+
+/**
+ * A WebSocket HANDSHAKE registered on a registry in code: Spring's
+ * `StompEndpointRegistry.addEndpoint("/ws")`,
+ * `WebSocketHandlerRegistry.addHandler(handler, "/echo")`. The handshake is
+ * an HTTP GET (Upgrade). Path arguments start at [pathArgumentStart];
+ * [handlerArgument] is the handler instance, or -1. A registration that
+ * chains [sockJs] also serves the SockJS protocol's HTTP transports.
+ */
+data class HandshakeRegistration(
+    val pattern: String,
+    val pathArgumentStart: Int,
+    val handlerArgument: Int = -1,
+    val sockJs: String? = null,
+)
+
 /** One framework's detection data. [kind] is `annotation`, `dsl`, `supertype` or `manifest`. */
 data class FrameworkModel(
     val id: String,
@@ -213,6 +240,12 @@ data class FrameworkModel(
      */
     val servedAtKeys: List<String> = emptyList(),
     val servedAtDefault: String? = null,
+    /**
+     * A config key naming a SECOND path every handler is also served at,
+     * over a WebSocket upgrade (GET), and only when the key is set: Spring
+     * GraphQL's `spring.graphql.websocket.path` has no default.
+     */
+    val servedAlsoAtKey: String? = null,
     val servedAtMethods: List<String> = emptyList(),
     /**
      * Cloud-function HTTP triggers (Azure's `@HttpTrigger`): a function
@@ -263,6 +296,21 @@ data class FrameworkModel(
      * base and the base is substituted, not prepended.
      */
     val implicitBasePathDefault: String = "",
+    /**
+     * [implicitRoutes] are also served when the analysed code has handlers
+     * of this framework, not only when a [dependencyMarkers] jar resolved:
+     * GraphiQL is served by the app that has GraphQL controllers, whether or
+     * not the run could resolve the starter.
+     */
+    val implicitWhenHandled: Boolean = false,
+    /**
+     * Property names whose WRITE in code sets the deployment base path:
+     * Javalin's `config.router.contextPath = "/api"` (3.x/4.x:
+     * `config.contextPath`), Ktor's `rootPath = "/api"` in the engine
+     * environment. Read through the `@codeBasePath` token in
+     * [basePathKeys], per module, only in files importing the framework.
+     */
+    val codeBasePathProperties: List<String> = emptyList(),
     /**
      * Endpoint EXPOSURE for implicit routes carrying an [ImplicitRoute.id]:
      * the include/exclude keys (comma lists, `*` = all, exclude wins) and
@@ -419,6 +467,16 @@ data class FrameworkModel(
      */
     val roleArgumentStart: Int = -1,
     /**
+     * JAX-RS sub-resource locators (spec §3.4.1): a method with a
+     * [methodPathAnnotations] path and no verb returns the class that serves
+     * the rest of the path. That class needs no [classMarkers].
+     */
+    val subResourceLocators: Boolean = false,
+    /** WebSocket handshakes registered in code; see [HandshakeRegistration]. */
+    val handshakeRegistrations: List<HandshakeRegistration> = emptyList(),
+    /** Servlets and filters registered in code; see [RegistrationBean]. */
+    val registrationBeans: List<RegistrationBean> = emptyList(),
+    /**
      * The DSL call that opens a CONTRACT BLOCK whose lambda sets a
      * block-wide security requirement (http4k's
      * `contract { security = ApiKeySecurity(..); routes += .. }`). Every
@@ -534,6 +592,11 @@ data class ImplicitRoute(
     val pathSuffix: String = "",
     /** A config key that disables the route when `false` (`springdoc.swagger-ui.enabled`). */
     val enabledKey: String? = null,
+    /**
+     * False for a route that is OFF until [enabledKey] says `true` (GraphiQL:
+     * `spring.graphql.graphiql.enabled` defaults to false).
+     */
+    val enabledByDefault: Boolean = true,
 )
 
 /** One convention-named handler: the method name and what it serves. */
@@ -664,6 +727,7 @@ object EndpointModels {
                 transport = f.str("transport") ?: "",
                 servedAtKeys = f.arr("servedAtKeys")?.strings() ?: emptyList(),
                 servedAtDefault = f.str("servedAtDefault"),
+                servedAlsoAtKey = f.str("servedAlsoAtKey"),
                 servedAtMethods = f.arr("servedAtMethods")?.strings() ?: emptyList(),
                 functionHttpTriggers = f.arr("functionHttpTriggers")?.strings() ?: emptyList(),
                 functionRoutePrefixDefault = f.str("functionRoutePrefixDefault") ?: "",
@@ -679,10 +743,13 @@ object EndpointModels {
                         pathKey = r.str("pathKey"),
                         pathSuffix = r.str("pathSuffix") ?: "",
                         enabledKey = r.str("enabledKey"),
+                        enabledByDefault = r.bool("enabledByDefault") ?: true,
                     )
                 } ?: emptyList(),
                 implicitBasePathKeys = f.arr("implicitBasePathKeys")?.strings() ?: emptyList(),
                 implicitBasePathDefault = f.str("implicitBasePathDefault") ?: "",
+                implicitWhenHandled = f.bool("implicitWhenHandled") ?: false,
+                codeBasePathProperties = f.arr("codeBasePathProperties")?.strings() ?: emptyList(),
                 implicitExposureIncludeKey = f.str("implicitExposureIncludeKey"),
                 implicitExposureExcludeKey = f.str("implicitExposureExcludeKey"),
                 implicitExposureDefault = f.arr("implicitExposureDefault")?.strings() ?: emptyList(),
@@ -738,6 +805,22 @@ object EndpointModels {
                 handlerDsl = f.arr("handlerDsl")?.strings() ?: emptyList(),
                 mountFunctions = f.arr("mountFunctions")?.strings() ?: emptyList(),
                 roleArgumentStart = f.long("roleArgumentStart")?.toInt() ?: -1,
+                subResourceLocators = f.bool("subResourceLocators") ?: false,
+                handshakeRegistrations = f.arr("handshakeRegistrations")?.objects()?.map { r ->
+                    HandshakeRegistration(
+                        pattern = require(r.str("pattern"), "frameworks[].handshakeRegistrations[].pattern"),
+                        pathArgumentStart = r.long("pathArgumentStart")?.toInt() ?: 0,
+                        handlerArgument = r.long("handlerArgument")?.toInt() ?: -1,
+                        sockJs = r.str("sockJs"),
+                    )
+                } ?: emptyList(),
+                registrationBeans = f.arr("registrationBeans")?.objects()?.map { r ->
+                    RegistrationBean(
+                        pattern = require(r.str("pattern"), "frameworks[].registrationBeans[].pattern"),
+                        kind = require(r.str("kind"), "frameworks[].registrationBeans[].kind"),
+                        mappingMethods = r.arr("mappingMethods")?.strings() ?: emptyList(),
+                    )
+                } ?: emptyList(),
                 contractDsl = f.arr("contractDsl")?.strings() ?: emptyList(),
                 routeMetaDsl = f.arr("routeMetaDsl")?.strings() ?: emptyList(),
                 securityConstructors = f.arr("securityConstructors")?.strings() ?: emptyList(),

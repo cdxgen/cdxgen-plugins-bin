@@ -123,7 +123,8 @@
     "repositoryResourceAnnotations",
     "repositoryMethodAnnotations",
     "repositoryPagingSupertypes",
-    "functionHttpTriggers"
+    "functionHttpTriggers",
+    "registrationBeans"
    ],
    "types": [
     {
@@ -135,7 +136,13 @@
    "members": [],
    "functions": [],
    "gaps": [
+    "com.netflix.graphql.dgs.DgsComponent: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsData: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsMutation: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsQuery: no held jar covers its package family",
+    "com.netflix.graphql.dgs.DgsSubscription: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.Argument: no held jar covers its package family",
+    "org.springframework.graphql.data.method.annotation.BatchMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.MutationMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.QueryMapping: no held jar covers its package family",
     "org.springframework.graphql.data.method.annotation.SchemaMapping: no held jar covers its package family",
@@ -799,7 +806,8 @@
   {
    "id": "servlet",
    "sources": [
-    "jakarta.servlet:jakarta.servlet-api:4.0.4"
+    "jakarta.servlet:jakarta.servlet-api:4.0.4",
+    "org.springframework.boot:spring-boot:2.6.6"
    ],
    "covers": [
     "mappingAnnotations",
@@ -818,7 +826,8 @@
     "repositoryResourceAnnotations",
     "repositoryMethodAnnotations",
     "repositoryPagingSupertypes",
-    "functionHttpTriggers"
+    "functionHttpTriggers",
+    "registrationBeans"
    ],
    "types": [
     {
@@ -840,6 +849,16 @@
      "fqn": "javax.servlet.annotation.WebServlet",
      "kind": "annotation",
      "constructible": false
+    },
+    {
+     "fqn": "org.springframework.boot.web.servlet.FilterRegistrationBean",
+     "kind": "class",
+     "constructible": true
+    },
+    {
+     "fqn": "org.springframework.boot.web.servlet.ServletRegistrationBean",
+     "kind": "class",
+     "constructible": true
     }
    ],
    "members": [],
