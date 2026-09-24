@@ -205,7 +205,7 @@ declared authentication and media types. The frameworks are:
 - Spring MVC and WebFlux, including Spring Data REST, Actuator and springdoc;
 - Ktor, Micronaut, Quarkus/JAX-RS (with sub-resource locators) and Quarkus
   Reactive Routes;
-- http4k (with `routes(..)` mounts), Javalin, Ratpack, Vert.x, SparkJava and
+- http4k (with `routes(..)` mounts, `bind VERB to routes(..)` verb mounts and router-predicate binds; MCP/LLM capability binds are not routes), Javalin, Ratpack, Vert.x, SparkJava and
   Servlet (`web.xml` and `ServletRegistrationBean`);
 - WebSocket and STOMP handshakes, with SockJS;
 - gRPC, GraphQL (Spring GraphQL and Netflix DGS), AWS Lambda and Azure
