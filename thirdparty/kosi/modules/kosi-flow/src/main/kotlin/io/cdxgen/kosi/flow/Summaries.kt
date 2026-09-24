@@ -53,6 +53,9 @@ internal fun functionKey(f: KirFunction): String = f.canonicalName + "\u0000" + 
 /** The key of a function known by name only (a lambda's canonical). */
 internal fun functionKeyByName(canonicalName: String): String = canonicalName + "\u0000"
 
+/** `KOSI_TRACE_FN=<substring>`: per-callee application costs inside matching visits (a measurement aid). */
+internal val TRACE_FN: String? = System.getenv("KOSI_TRACE_FN")?.takeIf { it.isNotBlank() }
+
 /** Visits per SCC member after which a still-moving SCC widens its paths (see Summarizer). */
 internal const val ADAPTIVE_ROUNDS = 4
 
@@ -1233,6 +1236,10 @@ internal class Summarizer(
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>, widen: Boolean = options.pathWidening): SummaryOutcome {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps, widen)
         analysis.run()
+        if (analysis.traceCosts.isNotEmpty()) {
+            val top = analysis.traceCosts.entries.sortedByDescending { it.value[0] }.take(8)
+            System.err.println("TRACE: fn-costs endEpochMs=${System.currentTimeMillis()} ${cf.function.canonicalName} " + top.joinToString("; ") { (k, v) -> "${v[0] / 1_000_000}ms x${v[1]} maxFacts=${v[2]} $k" })
+        }
         val summary = analysis.toSummary().let { if (analysis.exploded) it.widenPaths() else it }
         return SummaryOutcome(
             summary, analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops,
@@ -1354,10 +1361,21 @@ internal object SummaryPaths {
             // 1. Subsumption by a star path.
             val stars = paths.mapNotNullTo(HashSet()) { p -> if (p == "*") "" else if (p.endsWith(".*")) p.removeSuffix(".*") else null }
             if (stars.isNotEmpty()) {
+                // Covered when a PROPER dot-boundary prefix of the path is a
+                // star root: each path tests its own prefixes against the
+                // set, O(paths x depth). Testing every star against every
+                // path was quadratic (the rest of bridge.into's 86 s).
+                val coversAll = "" in stars
                 paths.removeIf { p ->
-                    p.isNotEmpty() && p != "*" && stars.any { prefix ->
-                        if (prefix.isEmpty()) true else p != "$prefix.*" && p.startsWith("$prefix.")
+                    if (p.isEmpty() || p == "*") return@removeIf false
+                    if (coversAll) return@removeIf true
+                    var i = p.indexOf('.')
+                    while (i > 0) {
+                        val prefix = p.substring(0, i)
+                        if (prefix in stars && p != "$prefix.*") return@removeIf true
+                        i = p.indexOf('.', i + 1)
                     }
+                    false
                 }
             }
             // 2. Widening past the budget: first segment plus `*`, then `*`.
@@ -1551,6 +1569,9 @@ internal class SummaryAnalysis(
      * later in the body overwrites the key that exploded.
      */
     private var peakKeyFacts = 0
+
+    /** `KOSI_TRACE_FN` diagnostics: callee -> [nanos, applications, max result facts]. */
+    val traceCosts = LinkedHashMap<String, LongArray>()
     fun maxKeyFacts(): Int = maxOf(peakKeyFacts, state.map.values.maxOfOrNull { it.size } ?: 0)
 
     /** Facts [SummaryPaths] widened in this analysis; published as `summary-path-widening`. */
@@ -2282,9 +2303,18 @@ internal class SummaryAnalysis(
         // Once this visit has exploded, callees apply in their path-widened
         // form: the exact summary's channels are what made the visit explode.
         val applied = if (widen || exploded) widenedSummaries.getOrPut(summary) { summary.widenPaths() } else summary
+        val traced = TRACE_FN != null && TRACE_FN in cf.function.canonicalName
+        val started = if (traced) System.nanoTime() else 0L
         try {
             applySummaryChannels(applied, binding, result, site, origin, state, chain)
         } finally {
+            if (traced) {
+                val key = summary.function.canonicalName
+                val cost = traceCosts.getOrPut(key) { longArrayOf(0, 0, 0) }
+                cost[0] += System.nanoTime() - started
+                cost[1] += 1
+                cost[2] = maxOf(cost[2], (result?.let { state.factsOf(reg(it)).size } ?: 0).toLong())
+            }
             if (result != null) {
                 val n = state.factsOf(reg(result)).size
                 if (n > peakKeyFacts) peakKeyFacts = n
