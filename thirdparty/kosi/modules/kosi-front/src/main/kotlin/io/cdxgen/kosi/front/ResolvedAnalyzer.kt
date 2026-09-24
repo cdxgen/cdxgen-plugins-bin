@@ -311,9 +311,20 @@ object ResolvedAnalyzer {
                                 // there.
                                 namedValues = it.arguments.mapNotNull { arg ->
                                     val argName = arg.name?.asString() ?: "value"
-                                    val constants = constantValuesOf(arg.expression) ?: return@mapNotNull null
+                                    val constants = constantValuesOf(arg.expression) ?: referenceTextOf(arg.expression)?.let(::listOf)
+                                        ?: return@mapNotNull null
                                     argName to constants
                                 }.toMap(),
+                                // An argument the resolver typed but could not
+                                // evaluate (a constant from a library that is
+                                // not on the classpath) keeps its source text,
+                                // marked a reference: the endpoint detector
+                                // folds it against the sources or reports the
+                                // path unresolved, instead of reading nothing
+                                // and publishing the class path alone.
+                                references = it.arguments.mapNotNullTo(HashSet()) { arg ->
+                                    if (constantValuesOf(arg.expression) == null) referenceTextOf(arg.expression) else null
+                                },
                                 // Placeholder: the real offset comes from the
                                 // declaration's PSI annotation entry at emission.
                                 position = positionAt(lines, relativePath, 0),
@@ -400,12 +411,23 @@ object ResolvedAnalyzer {
                                 val entry = declaration.annotationEntries.firstOrNull { candidate ->
                                     candidate.shortName?.asString() == evidence.name
                                 }
+                                // An argument the resolver could not evaluate is
+                                // absent from the typed annotation (a constant
+                                // from a library not on the classpath): PSI still
+                                // has it, as a reference the endpoint detector
+                                // folds or reports unresolved (atom-tools#95).
+                                val written = entry?.let { SyntaxAnalyzer.annotationEvidenceOf(it) }
+                                val missing = written?.namedValues.orEmpty()
+                                    .filterKeys { it !in evidence.namedValues }
+                                    .filterValues { values -> values.all { it in written!!.references } }
                                 evidence.copy(
                                     position = positionAt(
                                         lines,
                                         relativePath,
                                         entry?.textOffset ?: declaration.textOffset,
                                     ),
+                                    namedValues = evidence.namedValues + missing,
+                                    references = evidence.references + missing.values.flatten(),
                                 )
                             }).filter { it.name != "<error>" }
                                 // Entries the resolver could not type (no jar
@@ -757,6 +779,18 @@ object ResolvedAnalyzer {
         }
         return constants?.map { it.removeSurrounding("\"") }?.ifEmpty { null }
     }
+
+    /** The source text of a non-constant argument written as a (qualified) name, else null. */
+    private fun referenceTextOf(value: org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue?): String? {
+        if (value == null || value is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ConstantValue ||
+            value is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.ArrayValue ||
+            value is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.EnumEntryValue
+        ) return null
+        val text = value.sourcePsi?.text?.trim() ?: return null
+        return text.takeIf { REFERENCE_TEXT.matches(it) }
+    }
+
+    private val REFERENCE_TEXT = Regex("""[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*""")
 
     /** Kind/signature from PSI text, matching the syntax tier's forms. */
     private fun declarationShapes(declaration: KtDeclaration): Shape? = when (declaration) {

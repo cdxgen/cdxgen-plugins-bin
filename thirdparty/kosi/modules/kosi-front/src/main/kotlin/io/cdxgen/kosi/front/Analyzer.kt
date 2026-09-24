@@ -1431,6 +1431,7 @@ object Analyzer {
                             line = annotation.position.line,
                             namedValues = annotation.namedValues,
                             file = draft.position.filename,
+                            references = annotation.references,
                         ),
                     )
                 }

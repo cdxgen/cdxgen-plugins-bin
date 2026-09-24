@@ -107,9 +107,10 @@ object Endpoints {
         val configValues = configTable.keys()
             .mapNotNull { key -> configTable[key]?.value?.let { key to it } }
             .toMap()
+        val constValues = ConstTable.fromSources(sourceTexts)
         val folder = KirValueFolder(
             module = module,
-            constValues = ConstTable.fromSources(sourceTexts),
+            constValues = constValues,
             configReaders = pack.configReaders.map { it.pattern to it.argument },
             configTable = configValues,
             statsSink = foldStats,
@@ -126,6 +127,7 @@ object Endpoints {
                 lambdaLinks = lambdaLinks,
                 importRootsByFile = importRootsByFile,
                 typeDeclarations = typeDeclarations,
+                constValues = constValues,
             ),
             pack,
         )
@@ -1609,8 +1611,18 @@ object Endpoints {
 /** Workspace `const val` name -> value, only for names with a UNIQUE value. */
 object ConstTable {
     private val PATTERN = Regex(
-        """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
+        """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"$\\]*)"(?=[ \t]*(?:$|;|}|//))""",
+        RegexOption.MULTILINE,
     )
+
+    /**
+     * A `const val` whose initializer is not one plain literal: another
+     * constant, a concatenation (`API + "/users"`) or a template
+     * (`"$API/users"`, `"${Paths.API}/users"`). Kotlin folds these at compile
+     * time, and route constants are routinely built this way (atom-tools#95).
+     * The initializer runs to the end of the line.
+     */
+    private val COMPOSED = Regex("""\bconst\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*String\s*)?=\s*([^\n;]+)""")
 
     // Keyed by the `const val` NAME — deliberately name-unique: a
     // name mapping to two values anywhere is ambiguous and is REFUSED below
@@ -1618,12 +1630,141 @@ object ConstTable {
     // mechanism, not a defect.
     fun fromSources(sourceTexts: Map<String, String>): Map<String, String> {
         val byName = HashMap<String, MutableSet<String>>()
+        fun record(owner: String?, name: String, value: String) {
+            byName.getOrPut(name) { mutableSetOf() }.add(value)
+            // `Holder.PATH` names its owner, so it stays unique where the bare
+            // name is not (two objects each declaring PATH).
+            if (owner != null) byName.getOrPut("$owner.$name") { mutableSetOf() }.add(value)
+        }
         for (text in sourceTexts.values) {
+            val owners = ownerSpans(text)
+            fun ownerAt(offset: Int): String? = owners.lastOrNull { (range, _) -> offset in range }?.second
+            val literalStarts = HashSet<Int>()
             for (match in PATTERN.findAll(text)) {
-                byName.getOrPut(match.groupValues[1]) { mutableSetOf() }.add(match.groupValues[2])
+                literalStarts.add(match.range.first)
+                record(ownerAt(match.range.first), match.groupValues[1], match.groupValues[2])
+            }
+            for (match in COMPOSED.findAll(text)) {
+                if (match.range.first in literalStarts) continue
+                val initializer = match.groupValues[2].substringBefore("//").trim()
+                record(ownerAt(match.range.first), match.groupValues[1], UNEVALUATED + initializer)
             }
         }
-        return byName.filterValues { it.size == 1 }.mapValues { (_, vs) -> vs.first() }
+        // Fold to a fixpoint: each pass evaluates the expressions whose
+        // references all have a unique value already. A cycle or an unknown
+        // reference never folds, and its name stays out; a name declared as
+        // a literal in one place and an expression in another keeps both,
+        // and is refused unless they agree.
+        var changed = true
+        var passes = 0
+        while (changed && passes++ < 16) {
+            changed = false
+            for (values in byName.values) {
+                for (expression in values.filter { it.startsWith(UNEVALUATED) }) {
+                    val value = evaluate(expression.removePrefix(UNEVALUATED), byName) ?: continue
+                    values.remove(expression)
+                    values.add(value)
+                    changed = true
+                }
+            }
+        }
+        return byName.filterValues { vs -> vs.size == 1 && !vs.first().startsWith(UNEVALUATED) }.mapValues { (_, vs) -> vs.first() }
     }
 
+    private val OWNER = Regex("""\b(?:object|class|interface)\s+([A-Za-z_][A-Za-z0-9_]*)[^{};=]*\{""")
+    private val COMPANION = Regex("""\bcompanion\s+object\s*(?:([A-Za-z_][A-Za-z0-9_]*)\s*)?\{""")
+
+    /**
+     * The brace span of every named `object`/`class`/`interface` body in
+     * [text], innermost last. A companion object's members are named through
+     * the enclosing class (`C1.IN_COMPANION`), so its span carries that name.
+     * Braces inside strings and comments are skipped.
+     */
+    private fun ownerSpans(text: String): List<Pair<IntRange, String>> {
+        val opens = HashMap<Int, String>()
+        for (m in OWNER.findAll(text)) opens[m.range.last] = m.groupValues[1]
+        val companions = COMPANION.findAll(text).mapTo(HashSet()) { it.range.last }
+        val out = mutableListOf<Pair<IntRange, String>>()
+        val stack = ArrayDeque<Pair<Int, String?>>()
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                text.startsWith("//", i) -> { i = text.indexOf('\n', i).let { if (it < 0) text.length else it }; continue }
+                text.startsWith("/*", i) -> { i = text.indexOf("*/", i + 2).let { if (it < 0) text.length else it + 2 }; continue }
+                c == '"' -> {
+                    i++
+                    while (i < text.length && text[i] != '"' && text[i] != '\n') { if (text[i] == '\\') i++; i++ }
+                }
+                c == '{' -> {
+                    val name = if (i in companions) stack.lastOrNull { it.second != null }?.second else opens[i]
+                    stack.addLast(i to name)
+                }
+                c == '}' -> stack.removeLastOrNull()?.let { (start, name) -> if (name != null) out.add(start..i to name) }
+            }
+            i++
+        }
+        return out.sortedBy { it.first.first }
+    }
+
+    private const val UNEVALUATED = "\u0000expr:"
+    private val REFERENCE = Regex("""[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*""")
+
+    /** `A + "/x"`, `"$A/x"`, `"${B.C}/x"`: literals and unique constants only. */
+    private fun evaluate(expression: String, table: Map<String, Set<String>>): String? {
+        fun constant(reference: String): String? {
+            fun unique(key: String) = table[key]?.singleOrNull()?.takeIf { !it.startsWith(UNEVALUATED) }
+            val parts = reference.split('.')
+            return (if (parts.size >= 2) unique(parts.takeLast(2).joinToString(".")) else null) ?: unique(parts.last())
+        }
+        val out = StringBuilder()
+        var i = 0
+        val e = expression.trim()
+        var expectOperand = true
+        while (i < e.length) {
+            val c = e[i]
+            when {
+                c.isWhitespace() -> i++
+                !expectOperand && c == '+' -> { expectOperand = true; i++ }
+                // `object P { const val X = A + "/x" }` on one line: the
+                // body's closing brace ends the initializer.
+                !expectOperand && c == '}' -> break
+                expectOperand && c == '"' -> {
+                    if (e.startsWith("\"\"\"", i)) return null
+                    i++
+                    while (i < e.length && e[i] != '"') {
+                        when {
+                            e[i] == '\\' -> return null
+                            e[i] == '$' && i + 1 < e.length && e[i + 1] == '{' -> {
+                                val end = e.indexOf('}', i)
+                                if (end < 0) return null
+                                val reference = e.substring(i + 2, end).trim()
+                                if (!REFERENCE.matches(reference)) return null
+                                out.append(constant(reference) ?: return null)
+                                i = end + 1
+                            }
+                            e[i] == '$' && i + 1 < e.length && (e[i + 1].isLetter() || e[i + 1] == '_') -> {
+                                var j = i + 1
+                                while (j < e.length && (e[j].isLetterOrDigit() || e[j] == '_')) j++
+                                out.append(constant(e.substring(i + 1, j)) ?: return null)
+                                i = j
+                            }
+                            else -> out.append(e[i++])
+                        }
+                    }
+                    if (i >= e.length) return null
+                    i++
+                    expectOperand = false
+                }
+                expectOperand && (c.isLetter() || c == '_') -> {
+                    val match = REFERENCE.matchAt(e, i) ?: return null
+                    out.append(constant(match.value) ?: return null)
+                    i += match.value.length
+                    expectOperand = false
+                }
+                else -> return null
+            }
+        }
+        return if (expectOperand) null else out.toString()
+    }
 }

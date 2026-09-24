@@ -174,6 +174,13 @@ capabilities = ["diagnostics", "parse-error"]
 tolerated_resolution_errors = ["RETURN_TYPE_MISMATCH"]
 
 [[fixtures]]
+slug = "java-signature-kotlin-types"
+tier = "fixtures"
+path = "fixtures/java-signature-kotlin-types"
+capabilities = ["java-interop"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "java-interop"
 tier = "fixtures"
 path = "fixtures/java-interop"
@@ -818,6 +825,41 @@ path = "fixtures/dsl-loop-paths-unresolved"
 # takes one argument, not two.
 capabilities = ["endpoints", "framework-semantics", "ktor", "classpath-partial"]
 tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "TOO_MANY_ARGUMENTS"]
+
+[[fixtures]]
+slug = "javalin-loop-paths"
+tier = "fixtures"
+path = "fixtures/javalin-loop-paths"
+capabilities = ["endpoints", "framework-semantics", "javalin"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "javalin-loop-paths-unresolved"
+tier = "fixtures"
+path = "fixtures/javalin-loop-paths-unresolved"
+# io.javalin is deliberately absent: every Javalin symbol resolves by import only.
+# Handler lambdas then have no parameter type to infer, and `app.get(p) { }`
+# on the untyped app binds to a stdlib `get` of one argument.
+capabilities = ["endpoints", "framework-semantics", "javalin", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "CANNOT_INFER_VALUE_PARAMETER_TYPE", "TOO_MANY_ARGUMENTS"]
+
+[[fixtures]]
+slug = "spring-const-paths"
+tier = "fixtures"
+path = "fixtures/spring-const-paths"
+capabilities = ["endpoints", "framework-semantics", "spring", "const-fold"]
+# com.acme.shared is deliberately absent: the negative half's constant
+# comes from a library the run cannot see.
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "spring-const-paths-unresolved"
+tier = "fixtures"
+path = "fixtures/spring-const-paths-unresolved"
+# spring-web is deliberately absent: the mappings resolve by import only, and
+# their constant arguments fold against the sources.
+capabilities = ["endpoints", "framework-semantics", "spring", "const-fold", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
 slug = "spring-inherited-mappings"

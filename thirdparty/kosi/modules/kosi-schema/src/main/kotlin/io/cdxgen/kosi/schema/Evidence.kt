@@ -123,6 +123,15 @@ data class AnnotationEvidence(
      * `@RequestMapping(produces=[..])`.
      */
     val namedValues: Map<String, List<String>> = emptyMap(),
+    /**
+     * The argument values that were written as a REFERENCE (`IN_COMPANION`,
+     * `Holder.PATH`), not a literal, in an entry the resolved tier could not
+     * type. [namedValues] keeps them as written, which is right for an enum
+     * entry and wrong for a path: the endpoint detector folds these against
+     * the source constants or reports the path unresolved (atom-tools#95).
+     * Not serialised.
+     */
+    val references: Set<String> = emptySet(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)

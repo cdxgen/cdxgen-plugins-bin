@@ -8,6 +8,10 @@
 #   java-interop           Java PSI reached from Kotlin. The one that caught
 #                          the JDK-discovery gap: 1 of 2 calls resolved
 #                          natively against the JVM's 2.
+#   java-signature-kotlin-types  Java fields and methods typed by Kotlin
+#                          declarations: the cache shape that killed the image
+#                          (Caffeine WIA/FWA, atom-tools#95) on every mixed
+#                          Java/Kotlin repository while the JVM completed.
 #   android-agp-namespace  Java + a manifest + endpoint substantiation: the
 #                          only other fixture with .java sources, and the one
 #                          that exercises the endpoint path over them.
@@ -31,6 +35,7 @@
 # list, and anything the corpus shows that no fixture does. The full sweep
 # stays the release check for that reason.
 java-interop
+java-signature-kotlin-types
 android-agp-namespace
 latest-syntax
 dep-taint-through-lib

@@ -558,6 +558,7 @@ class SyntaxAnalyzer(
          * only route to its FQN.
          */
         fun annotationEvidenceOf(entry: org.jetbrains.kotlin.psi.KtAnnotationEntry, position: Position = Position("", 0, 0)): AnnotationEvidence {
+            val references = mutableSetOf<String>()
             val named = entry.valueArgumentList?.arguments?.mapNotNull { argument ->
                 val key = argument.getArgumentName()?.asName?.asString() ?: "value"
                 val expression = argument.getArgumentExpression() ?: return@mapNotNull null
@@ -572,6 +573,7 @@ class SyntaxAnalyzer(
                         // An enum entry (`HttpMethod.GET`), kept as written.
                         is org.jetbrains.kotlin.psi.KtDotQualifiedExpression, is org.jetbrains.kotlin.psi.KtNameReferenceExpression ->
                             element.text.takeIf { text -> text.all { it.isLetterOrDigit() || it == '.' || it == '_' } }
+                                ?.also { references.add(it) }
                         is org.jetbrains.kotlin.psi.KtConstantExpression -> element.text
                         else -> null
                     }
@@ -583,6 +585,7 @@ class SyntaxAnalyzer(
                 value = named["value"]?.firstOrNull(),
                 namedValues = named,
                 position = position,
+                references = references,
             )
         }
 

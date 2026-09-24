@@ -61,6 +61,8 @@ object EndpointDetector {
          * one key and a handler takes another module's route.
          */
         val file: String? = null,
+        /** Values written as references, not literals; see AnnotationEvidence.references. */
+        val references: Set<String> = emptySet(),
     )
 
     /**
@@ -94,6 +96,8 @@ object EndpointDetector {
         val importRootsByFile: Map<String, Set<String>> = emptyMap(),
         /** Every analysed type with its supertypes; members-less subclasses included. */
         val typeDeclarations: List<Endpoints.TypeDeclaration> = emptyList(),
+        /** Workspace `const val` name -> its unique value (ConstTable): folds reference-valued mapping paths. */
+        val constValues: Map<String, String> = emptyMap(),
     ) {
         /** Supertype canonical name -> the analysed types that name it directly. */
         internal val subtypes: Map<String, List<Endpoints.TypeDeclaration>> by lazy {
@@ -345,17 +349,19 @@ object EndpointDetector {
                 val classMapping = ownerDeclAnnotations.firstOrNull { ann ->
                     framework.classMappingAnnotations.any { matches(ann.fqn, it) }
                 } ?: continue
-                for (path in pathsOf(classMapping, framework.pathArguments)) {
+                for (path in pathsOf(classMapping, framework.pathArguments, input.constValues)) {
+                    val unresolvedReference = unresolvedReferenceOf(path)
                     add(
                         Candidate(
                             framework = framework.id,
                             httpMethods = handler.methods,
                             anyMethod = handler.methods.isEmpty() && handler.anyMethod,
-                            pathTemplate = normalizePath(path),
-                            pathParameters = pathParametersOf(path),
+                            pathTemplate = if (unresolvedReference != null) "" else normalizePath(path),
+                            pathParameters = if (unresolvedReference != null) emptyList() else pathParametersOf(path),
                             handlerSymbol = fn.canonicalName,
                             foundBy = "annotation",
                             position = Position(fn.file, fn.line, fn.line),
+                            pathUnresolved = unresolvedReference,
                             exported = true,
                             permissions = emptyList(),
                             deepLinkHosts = emptyList(),
@@ -389,7 +395,7 @@ object EndpointDetector {
                     if (!hasMarker && located == null) continue
                     val own = prefixAnnotations
                         .firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
-                        ?.let { pathsOf(it, framework.pathArguments) }
+                        ?.let { pathsOf(it, framework.pathArguments, input.constValues) }
                         ?: listOf("")
                     // A root resource that a locator ALSO returns is served at
                     // both: its own @Path and every locator path.
@@ -412,7 +418,7 @@ object EndpointDetector {
                         val methodPath = framework.methodPathAnnotations.takeIf { it.isNotEmpty() }?.let { patterns ->
                             annotations.firstOrNull { ann -> patterns.any { matches(ann.fqn, it) } }
                         }
-                        var rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments) } ?: pathsOf(matched, framework.pathArguments)
+                        var rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments, input.constValues) } ?: pathsOf(matched, framework.pathArguments, input.constValues)
                         // Quarkus @Route with neither path nor regex "match[es] a
                         // path derived from the method name".
                         var derivedPath: String? = null
@@ -426,6 +432,18 @@ object EndpointDetector {
                             // Spring, JAX-RS and Micronaut all prepend the missing
                             // slash: `@GetMapping("vets.json")` serves `/vets.json`.
                             val path = joinPaths(prefix, rawPath).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
+                            val unresolvedReference = unresolvedReferenceOf(path)
+                            if (unresolvedReference != null) {
+                                add(
+                                    Candidate(
+                                        framework = framework.id, httpMethods = methods, pathTemplate = "", pathParameters = emptyList(),
+                                        handlerSymbol = fn.canonicalName, foundBy = "annotation", position = Position(fn.file, fn.line, fn.line),
+                                        exported = null, permissions = null, deepLinkHosts = null,
+                                        anyMethod = methods.isEmpty() && mapping.anyMethod, pathUnresolved = unresolvedReference,
+                                    ),
+                                )
+                                continue
+                            }
                             add(
                                 Candidate(
                                     framework = framework.id,
@@ -503,7 +521,7 @@ object EndpointDetector {
             val work = ArrayDeque<Triple<String, String, Int>>()
             for ((owner, _) in byOwner) {
                 val classPath = annotationsOf(owner).firstOrNull { ann -> framework.classMarkers.any { matches(ann.fqn, it) } } ?: continue
-                pathsOf(classPath, framework.pathArguments).forEach { work.add(Triple(owner, it, 0)) }
+                pathsOf(classPath, framework.pathArguments, input.constValues).forEach { work.add(Triple(owner, it, 0)) }
             }
             val seen = HashSet<Pair<String, String>>()
             while (work.isNotEmpty()) {
@@ -515,7 +533,7 @@ object EndpointDetector {
                     val path = anns.firstOrNull { ann -> framework.methodPathAnnotations.any { matches(ann.fqn, it) } } ?: continue
                     val returned = member.returnType?.substringBefore('<')?.removeSuffix("?")?.trim() ?: continue
                     if (returned !in byOwner) continue
-                    for (segment in pathsOf(path, framework.pathArguments)) {
+                    for (segment in pathsOf(path, framework.pathArguments, input.constValues)) {
                         val served = joinPaths(prefix, segment)
                         out.getOrPut(returned) { mutableListOf() }.let { if (served !in it) it.add(served) }
                         work.add(Triple(returned, served, depth + 1))
@@ -537,14 +555,36 @@ object EndpointDetector {
      * folded to a constant at all (an interpolated template the syntax tier
      * keeps as text), which is what it meant before.
      */
-    internal fun pathsOf(annotation: DeclAnnotation, arguments: List<String>): List<String> {
+    internal fun pathsOf(annotation: DeclAnnotation, arguments: List<String>, consts: Map<String, String> = emptyMap()): List<String> {
+        // A value WRITTEN AS A REFERENCE in an entry the resolver could not
+        // type (`@GetMapping(IN_COMPANION)` with no spring-web on the
+        // classpath) is the constant's name, not a path: it folds against
+        // the source constants, or it is a path kosi cannot prove. It used
+        // to be published as `/IN_COMPANION` (atom-tools#95).
+        fun folded(raw: String): String {
+            val value = raw.trim().removeSurrounding("\"")
+            if (raw !in annotation.references) return value
+            val parts = value.split('.')
+            // `Holder.PATH` by its owner first, then the bare name.
+            return (if (parts.size >= 2) consts[parts.takeLast(2).joinToString(".")] else null)
+                ?: consts[parts.last()] ?: (UNRESOLVED_REFERENCE + value)
+        }
         for (argument in arguments.ifEmpty { DEFAULT_PATH_ARGUMENTS }) {
             val declared = annotation.namedValues[argument].orEmpty()
-            if (declared.isNotEmpty()) return declared.map { it.trim().removeSurrounding("\"") }.distinct()
+            if (declared.isNotEmpty()) return declared.map(::folded).distinct()
         }
         if (annotation.namedValues.isNotEmpty()) return listOf("")
-        return listOf(annotation.value?.trim()?.removeSurrounding("\"").orEmpty())
+        return listOf(annotation.value?.let(::folded).orEmpty())
     }
+
+    /** Marks a path segment that is an unfolded constant reference; see [pathsOf]. */
+    internal const val UNRESOLVED_REFERENCE = "\u0000ref:"
+
+    /** The `pathUnresolved` for a path carrying an [UNRESOLVED_REFERENCE], or null. */
+    internal fun unresolvedReferenceOf(path: String): String? =
+        path.substringAfter(UNRESOLVED_REFERENCE, "").takeIf { UNRESOLVED_REFERENCE in path }
+            ?.substringBefore('/')
+            ?.let { "the mapping's path is the constant $it, which neither the classpath nor the analysed sources fold to one value" }
 
     private val DEFAULT_PATH_ARGUMENTS = listOf("value")
 
