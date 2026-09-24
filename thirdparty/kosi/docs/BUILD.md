@@ -452,7 +452,7 @@ the whole surface is now re-derived from our own runs:
 
 ## 4. Size levers still available (05-BUILD-DIST.md §3, in order)
 
-1. `-Os`, `--gc=serial` — applied. `-H:-IncludeMethodData` not yet needed.
+1. `--gc=serial` — applied. `-Os` was applied and is REVERTED to `-O2`: it halved analysis speed (http4k core 207 s against 102 s) to save 13% of the binary. Young-generation sizing (`-Xmn1g`, `-Xmn4g`) measured no change. `-H:-IncludeMethodData` not yet needed.
 2. shadowJar minimisation (drop compiler backends, daemon, JLine) — partially
    applied (`org/jline/**` dropped wholesale); further trimming is future
    work measured against the corpus.
