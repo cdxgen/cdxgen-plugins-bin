@@ -29,7 +29,7 @@ fi
 
 run_kosi() {
   local mode="$1" out="$2"
-  java -Djava.awt.headless=true -Xmx4g -jar "$jar" analyze \
+  java -Djava.awt.headless=true -Xmx"${KOSI_JVM_HEAP:-16g}" -jar "$jar" analyze \
     --backend resolved --dataflow "$mode" --deps --endpoint-sources \
     --classpath-file "$sample/classpath.txt" \
     --dir "$sample" --out "$out" 2>/dev/null
