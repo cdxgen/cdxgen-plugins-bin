@@ -426,6 +426,16 @@ the whole surface is now re-derived from our own runs:
   API session's ServiceLoader, reflection and proxy surface is recorded),
   merged by `scripts/merge-agent-metadata.py` (deterministic union; CI diffs
   the checked-in file via `make native-metadata-check`).
+- `native-metadata/kosi-psi/reachability-metadata.json` — the surfaces the
+  platform reaches reflectively and LAZILY, derived from the jar by
+  `scripts/GenPsiReflection.java` (`make psi-metadata`; CI runs
+  `make psi-metadata-check`), because an agent run registers only what it
+  happened to wake: PSI element constructors and arrays, plugin-descriptor
+  services, `ServiceLoader` providers, and every Caffeine generated cache and
+  node class. Caffeine picks those by name from the builder's feature
+  combination, and the combination the Analysis API builds depends on the
+  project's size: fixtures never reached `FWA`, and reposilite, kuvasz and
+  http4k exited 3 on it (atom-tools#95).
 - `native-metadata/proxy-config.json` (the hand-maintained relocated
   proxies) and the JetBrains seed (`native-metadata/jetbrains/`) are retired;
   proxy groups arrive through the agent's reachability metadata now.
