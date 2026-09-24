@@ -1319,7 +1319,16 @@ object TaintEngine {
         override fun aliasTokens(register: String): Set<String> = aliases.tokensOf(register)
 
         /** One summary lookup for a call site (the alias feed; may-union across targets). */
+        /** Joined summary per callee: the table is final here (see SummaryAnalysis.summaryForCall). */
+        private val summaryForCallMemo = HashMap<Triple<String, String?, CallKind>, FunctionSummary?>()
+
         private fun summaryForCall(ins: KirCall): FunctionSummary? {
+            val key = Triple(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
+            if (summaryForCallMemo.containsKey(key)) return summaryForCallMemo[key]
+            return computeSummaryForCall(ins).also { summaryForCallMemo[key] = it }
+        }
+
+        private fun computeSummaryForCall(ins: KirCall): FunctionSummary? {
             if (ins.callee.kind == CallKind.CONSTRUCTOR) {
                 val name = ins.callee.fqn + ".<init>"
                 var joined: FunctionSummary? = null

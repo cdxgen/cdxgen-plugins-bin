@@ -1588,7 +1588,23 @@ internal class SummaryAnalysis(
      * Constructors resolve by `<init>` name — the call site's descriptor is
      * the constructor-CALL shape, which no declared `<init>` matches.
      */
+    /**
+     * The joined summary per callee, for this visit. The table does not
+     * change while one body is analysed, and a call inside a loop is applied
+     * on every fixpoint iteration: re-joining a wide dispatch's summaries
+     * each time (http4k's bridge `into` reads an InputStream in a loop, over
+     * every `read` in the tree) cost 88 s in one visit. The first lookup
+     * records the dependencies, exactly as before.
+     */
+    private val summaryForCallMemo = HashMap<Triple<String, String?, io.cdxgen.kosi.kir.CallKind>, FunctionSummary?>()
+
     private fun summaryForCall(ins: KirCall): FunctionSummary? {
+        val key = Triple(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
+        if (summaryForCallMemo.containsKey(key)) return summaryForCallMemo[key]
+        return computeSummaryForCall(ins).also { summaryForCallMemo[key] = it }
+    }
+
+    private fun computeSummaryForCall(ins: KirCall): FunctionSummary? {
         if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
             val name = ins.callee.fqn + ".<init>"
             val overloads = (table as? OverloadIndex)?.keysNamed(name)
