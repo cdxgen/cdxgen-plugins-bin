@@ -675,6 +675,7 @@ object TaintEngine {
     fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
         val diagnostics = mutableListOf<Diagnostic>()
         val truncations = java.util.TreeMap<String, Int>()
+        val convergence = java.util.TreeMap<String, Int>()
         val skips = java.util.TreeMap<String, Int>()
         /**
          * The skip kinds that are POLICY, not caps — reported in
@@ -748,7 +749,7 @@ object TaintEngine {
             // the sccIterationCapHits the run publishes over sccsProcessed.
             val depSummary = Summarizer(depsCompiled, depCallIndex, pack, options, SummaryOrigin.BYTECODE).compute()
             for ((kind, count) in depSummary.skipped) {
-                truncations.merge(kind, count, Int::plus)
+                if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
             }
             // The composed-path depth cap's exact drops, counted per
             // run — the degradation was real but invisible before.
@@ -777,7 +778,7 @@ object TaintEngine {
         val summarizer = Summarizer(compiled, callIndex, pack, options, deps = depsTier)
         val summaryResult = summarizer.compute()
         for ((kind, count) in summaryResult.skipped) {
-            truncations.merge(kind, count, Int::plus)
+            if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
         }
         if (summaryResult.composedPathDrops > 0) {
             truncations.merge("composed-path-depth", summaryResult.composedPathDrops, Int::plus)
@@ -1044,7 +1045,12 @@ object TaintEngine {
                 Diagnostic(
                     code = DiagnosticCodes.DATAFLOW_TRUNCATED,
                     severity = Severity.INFO,
-                    message = "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent",
+                    message = if (kind in WIDENING_KINDS) {
+                        "dataflow widening '$kind' applied $count time(s); the affected summaries carry coarser " +
+                            "access paths (a reader of an exact deeper path can miss them)"
+                    } else {
+                        "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent"
+                    },
                     count = count,
                 ),
             )
@@ -1066,6 +1072,17 @@ object TaintEngine {
         // skip is not a truncation), but SILENCE is not the alternative
         // either: the counts are published in stats.skips{} and
         // stats.policySkips{} for consumers.
+        for ((kind, count) in convergence) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.DATAFLOW_SKIPPED_POLICY,
+                    severity = Severity.INFO,
+                    message = "$count summary SCC(s) did not settle and were made monotone ('$kind'); a join only " +
+                        "adds effects, so no flow is lost — see stats.convergence",
+                    count = count,
+                ),
+            )
+        }
         for ((kind, count) in skips) {
             diagnostics.add(
                 Diagnostic(
@@ -1111,7 +1128,7 @@ object TaintEngine {
         // consumer must parse — `truncations{}` per cap, empty when none
         // bound (which is the depth doctrine's claim, checkable).
         val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
-            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips)) }
+            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips, convergence = convergence)) }
         return Result(
             evidence = evidence,
             functionsAnalysed = functionsAnalysed,
@@ -3253,3 +3270,9 @@ object TaintEngine {
         return digest.digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     }
 }
+
+/** Summary counters that are convergence aids, not caps: published in `stats.convergence`. */
+internal val CONVERGENCE_KINDS = setOf("summary-scc-join")
+
+/** Truncation kinds that COARSEN rather than drop: their diagnostic says so. */
+internal val WIDENING_KINDS = setOf("summary-path-widening", "summary-scc-adaptive-widening", "summary-fact-explosion")

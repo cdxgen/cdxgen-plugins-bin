@@ -13,6 +13,11 @@
 // kosi:want service protocol=redis name=redis://cache.example.com resolution=literal mode=resolved
 // kosi:want service protocol=uri name=uri://plain.example.com/path resolution=literal mode=resolved
 // kosi:want service protocol=https name=cdn.example.com resolution=literal mode=resolved
+// `HttpRequest.newBuilder().uri(URI(..))` takes a URI object, not a string:
+// that row is unresolved, and it is never named after a register (atom-tools#95).
+// kosi:want service protocol=http name=<unresolved> resolution=unresolved mode=resolved
+// kosi:want-not service name=t13
+// kosi:want-not service name=t17
 // kosi:want service protocol=bolt name=bolt://graph.example.com resolution=literal mode=resolved
 // kosi:want service protocol=https name=rest.example.com resolution=literal mode=resolved
 // kosi:want service protocol=http name=webclient.example.com resolution=literal mode=resolved

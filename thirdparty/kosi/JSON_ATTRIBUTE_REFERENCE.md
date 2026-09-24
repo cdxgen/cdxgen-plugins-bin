@@ -68,7 +68,7 @@ bench harness both consume (a test on each side asserts the equality).
 Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `dataflowMaxSlices`, `dataflowWorkers`, `dataflowMaxFunctionInstructions`,
 `dataflowMaxTraceNodes`, `dataflowMaxTraceEdges`, `accessPathDepth`,
-`dataflowSkipGenerated`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
+`dataflowSkipGenerated`, `dataflowPathWidening`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
 `classpathFile` (one jar path per line, `#` comments), `jdkHome`,
@@ -550,7 +550,17 @@ pre-narrowing (where `dispatchJoins{}` counts APPLIED summaries — both
 stay because the bench reads the old one); `truncations{}` — every dataflow
 cap that bound the run, by published name, with its cut count. Empty
 `truncations{}` is the claim "no cap bound", which is what the deep tier's
-gate asserts. Narrowing modes (`reachable`, `crypto`) recompute the depth
+gate asserts. Three kinds there COARSEN rather than cut, and their
+`dataflow-truncated` diagnostic says so: `summary-path-widening` (facts
+whose access paths were widened), `summary-scc-adaptive-widening` (SCCs
+still moving with an exploding key, switched to widening) and
+`summary-fact-explosion` (single visits that passed 10,000 facts on one
+key or 500,000 derived facts, and widened themselves). A widened fact can
+miss a reader of an exact deeper path; `--dataflow-path-widening` turns
+widening on for the whole run and is echoed in `options`.
+`convergence{}`, present only when non-empty, counts aids that cost no
+flow: `summary-scc-join`, SCCs made monotone by joining each member's
+previous summary (a join only adds effects). Narrowing modes (`reachable`, `crypto`) recompute the depth
 measurements from the surviving slices and leave the run-level
 `dispatchWidthHistogram`/`truncations` alone.
 
@@ -677,7 +687,9 @@ client, RestTemplate, Redis, Kafka). Every value carries its
 a `const val` or a string template), `config` (resolved through
 `application.yml`/`.properties`/`BuildConfig`), `env` (an
 `System.getenv` read — the KEY is the evidence; kosi never reads the
-analysed build's environment), or `unresolved` (never a guess). `urls[]`
+analysed build's environment), or `unresolved` (never a guess). An
+unresolved value kosi cannot render at all (a `URI` object, a computed
+value) is named `<unresolved>`, never after an internal register. `urls[]`
 carries the same values with their enclosing symbol.
 
 ## securitySignals — SecuritySignal

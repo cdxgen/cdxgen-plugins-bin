@@ -247,8 +247,7 @@ data class AnalyzeOptions(
         w.num("dataflowMaxSummarySinkEffects", dataflowMaxSummarySinkEffects)
         w.num("dataflowMaxTraceEdges", dataflowMaxTraceEdges)
         w.num("dataflowMaxTraceNodes", dataflowMaxTraceNodes)
-        // Written only when ON: a default run's report is unchanged.
-        if (dataflowPathWidening) w.bool("dataflowPathWidening", true)
+        w.bool("dataflowPathWidening", dataflowPathWidening)
         w.bool("dataflowSkipGenerated", dataflowSkipGenerated)
         w.num("dataflowWorkers", dataflowWorkers)
         w.str("dependencyDetail", dependencyDetail.id)

@@ -222,6 +222,37 @@ class SummaryOverloadTest {
         }
     }
 
+    /**
+     * `join` must be IDEMPOTENT: the summariser joins each member's previous
+     * summary every round once an SCC is slow to settle, and a join that
+     * appended its sink effects instead of uniting them published one flow
+     * 30 times (layered-app) and kept `sameAs` false forever (atom-tools#95).
+     */
+    @Test
+    fun `join is idempotent on sink effects`() {
+        val effect = SummarySinkEffect(
+            paramIndex = 0, paramPath = "", sinkSite = 7, sinkCalleeFqn = "java.lang.Runtime.exec",
+            sinkCategory = "process-exec", sinkSeverity = "high", sinkArgumentIndex = 0, sinkAccessPath = "",
+            path = listOf(1, 7), elided = false,
+        )
+        val longer = effect.copy(path = listOf(1, 3, 7))
+        val s = FunctionSummary(
+            function = overload("(Ljava/lang/String;)V", KirReturn("%0")),
+            paramToReturn = emptySet(), paramToParam = emptyMap(), paramFieldWrites = emptyMap(),
+            receiverWrites = emptyMap(), sinkEffects = listOf(effect), sourceReturns = emptyMap(),
+            sanitizes = emptySet(), invokedParams = emptySet(), origin = SummaryOrigin.COMPUTED,
+        )
+        val again = s.join(s).join(s)
+        assertEquals(listOf(effect), again.sinkEffects)
+        assertTrue(again.sameAs(s))
+        val withLonger = FunctionSummary(
+            function = s.function, paramToReturn = emptySet(), paramToParam = emptyMap(), paramFieldWrites = emptyMap(),
+            receiverWrites = emptyMap(), sinkEffects = listOf(longer), sourceReturns = emptyMap(),
+            sanitizes = emptySet(), invokedParams = emptySet(), origin = SummaryOrigin.COMPUTED,
+        )
+        assertEquals(listOf(effect), s.join(withLonger).sinkEffects, "one effect, the shortest witness")
+    }
+
     private fun summaryWithSourceReturn(descriptor: String, path: List<Int>) = FunctionSummary(
         function = overload(descriptor, KirReturn("%0")),
         paramToReturn = emptySet(),

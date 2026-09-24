@@ -636,6 +636,13 @@ data class DataFlowStats(
      * under numbers that meant "working as intended".
      */
     val skips: Map<String, Int> = emptyMap(),
+    /**
+     * Convergence aids that cost NO flow: `summary-scc-join`, the SCCs whose
+     * fixpoint was made monotone by joining each member's previous summary
+     * (a join only adds effects). Never in `truncations{}`, which is caps
+     * only. Serialised only when non-empty.
+     */
+    val convergence: Map<String, Int> = emptyMap(),
 ) {
     fun writeJson(w: JsonWriter, key: String? = null) {
         w.beginObject(key)
@@ -679,6 +686,11 @@ data class DataFlowStats(
         w.beginObject("skips")
         for ((key, value) in skips.toSortedMap()) w.num(key, value.toLong())
         w.endObject()
+        if (convergence.isNotEmpty()) {
+            w.beginObject("convergence")
+            for ((key, value) in convergence.toSortedMap()) w.num(key, value.toLong())
+            w.endObject()
+        }
         w.endObject()
     }
 }

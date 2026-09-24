@@ -392,9 +392,19 @@ internal class FunctionSummary(
         paramToParam = mergeSets(paramToParam, other.paramToParam),
         paramFieldWrites = mergeWith(paramFieldWrites, other.paramFieldWrites) { a, b -> mergeSets(a, b) },
         receiverWrites = mergeSets(receiverWrites, other.receiverWrites),
-        sinkEffects = (sinkEffects + other.sinkEffects).sortedWith(
-            compareBy({ it.paramIndex }, { it.paramPath }, { it.sinkSite }, { it.sinkCalleeFqn }, { it.sinkArgumentIndex }, { it.sinkAccessPath }),
-        ),
+        // One effect per canonical effect (its witness path aside), the
+        // shortest witness chosen, as for every other channel below. A plain
+        // concatenation was harmless while joins were one-off unions of
+        // overloads; once an SCC joins each round (Summarizer's monotone
+        // mode) it appended the same effects every round — layered-app
+        // published one flow 30 times, and the growing list kept `sameAs`
+        // false so the SCC never settled (atom-tools#95).
+        sinkEffects = (sinkEffects + other.sinkEffects)
+            .groupBy { it.copy(path = emptyList()) }
+            .map { (_, effects) -> effects.minWithOrNull(compareBy({ it.path.size }, { it.path.joinToString(",") }))!! }
+            .sortedWith(
+                compareBy({ it.paramIndex }, { it.paramPath }, { it.sinkSite }, { it.sinkCalleeFqn }, { it.sinkArgumentIndex }, { it.sinkAccessPath }),
+            ),
         // NOT a union: this value is a WITNESS PATH, not a set of effects.
         // `recordSourceReturn` prepends it verbatim to the published slice's
         // trace, so unioning two overloads' paths (a later review —
