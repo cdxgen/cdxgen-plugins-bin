@@ -1208,6 +1208,20 @@ func (s *intra) pathKey(v ssa.Value) string {
 		// value. Collapsing to the map's [*] location, the way Index and
 		// IndexAddr do, keeps the location stable.
 		return s.pathKey(x.X) + "[*]"
+	case *ssa.Slice:
+		// A re-slice aliases its base's backing store: `o := out[1:]` followed
+		// by a store through IndexAddr(o) must land in out's location, whether
+		// out is a local or a parameter. Keyed off the Slice register instead,
+		// the store goes to a location no read of out consults and the write
+		// is lost. Strings lower to the same instruction but accept no stores,
+		// so their reads are unchanged — evaluate already read through to the
+		// base in the read direction.
+		return s.pathKey(x.X)
+	case *ssa.SliceToArrayPointer:
+		// Converting a slice to an array pointer addresses the same backing
+		// store, so a write through the pointer reaches the base slice's
+		// location.
+		return s.pathKey(x.X)
 	default:
 		return "value:" + s.fn.String() + ":" + x.Name()
 	}

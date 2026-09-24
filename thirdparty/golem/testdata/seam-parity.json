@@ -2,7 +2,7 @@
   "note": "Corpus cases where SEAM is knowingly allowed to differ from the legacy engine, each with a reason. The list is a ratchet in both directions: an unlisted difference fails, and a listed case that starts matching fails too. Most differences are now SEAM wins - flows SEAM finds that legacy cannot, because its summaries iterate to a fixpoint over the SCC condensation, because it carries taint through package-level globals, or because its model database covers cgo and template-injection sinks legacy has no rule family for.",
   "cases": {
     "copy-taint/all": "As copy-taint/security.",
-    "copy-taint/security": "SEAM models the copy builtin's write into its destination (defect 36 closed for SEAM), so CopySlice reports the flow; legacy has no builtin handling and reports nothing. CopyArray stays failed in both engines until writes through a re-slice reach the base (defect 37).",
+    "copy-taint/security": "SEAM models the copy builtin's write into its destination (defect 36 closed for SEAM), and re-slices alias their base for writes (defect 37 closed for SEAM), so both CopySlice and CopyArray report the flow. Legacy handles neither builtin writes nor re-slice aliasing and reports nothing.",
     "cgo-string-roundtrip/all": "Under --dataflow all SEAM reports three native-interop slices where legacy reports two, one per cgo boundary call rather than collapsing the pair that share a source. The command-execution flow is identical. Same cause as cgo-string-roundtrip/security: SEAM recognises every _Cfunc_ wrapper and models the conversion functions, so it is stricter, not different.",
     "cgo-string-roundtrip/security": "SEAM recognises every cgo wrapper via the _Cfunc_ prefix sink and models the conversion functions, so it reports four slices (one per boundary call plus the command-execution flow); legacy reports three (it has no source for C.GoString and so collapses the duplicate). The shape SEAM reports is correct, just stricter.",
     "context-value/all": "As context-value/security.",
@@ -22,6 +22,8 @@
     "linkname/all": "As linkname/security.",
     "linkname/security": "SEAM finds it and legacy does not: SEAM follows a //go:linkname directive from the body-less declaration to the implementing function, using the mapping the call graph already draws its alias edge from (defect 25 closed for SEAM).",
     "slice-of-pointer/all": "As slice-of-pointer/security.",
+    "reslice-write/all": "As reslice-write/security.",
+    "reslice-write/security": "SEAM keys a re-slice to its base slice's location, so the write through o := out[1:] reaches out and the flow to the sink is found. Legacy keeps the write on the re-slice's own register and reports nothing (defect 37).",
     "slice-of-pointer/security": "SEAM finds it and legacy does not: SEAM marks the base allocation tainted when a field is stored, so a returned pointer carries field taint (defect 21).",
     "template-injection/all": "As template-injection/security.",
     "template-injection/security": "SEAM finds it and legacy does not: SEAM has html/template sink models, legacy has no template rule family (defect 24).",

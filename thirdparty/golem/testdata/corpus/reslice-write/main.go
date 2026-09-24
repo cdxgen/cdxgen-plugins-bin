@@ -18,7 +18,7 @@ func resliceWrite(in []byte) []byte {
 }
 
 // ResliceWrite: the taint written through o must be visible when out is read.
-// golem:want flow source=http-input sink=command-execution sinkFn=~ResliceWrite known-fail=seam:37 known-fail=legacy:37
+// golem:want flow source=http-input sink=command-execution sinkFn=~ResliceWrite known-fail=legacy:37
 func ResliceWrite(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := resliceWrite(in)
