@@ -1,0 +1,40 @@
+Every pipeline the wrapper links runs with progress=false, and --no-progress
+is forced anyway. The progress bar, github.com/cheggaaa/pb, renders through
+text/template, which makes the linker keep every exported method of every
+reachable type.
+
+--- a/github.com/aquasecurity/trivy/pkg/parallel/pipeline.go
++++ b/github.com/aquasecurity/trivy/pkg/parallel/pipeline.go
+@@ -3,7 +3,6 @@
+ import (
+ 	"context"
+ 
+-	"github.com/cheggaaa/pb/v3"
+ 	"golang.org/x/sync/errgroup"
+ )
+ 
+@@ -46,12 +45,8 @@
+ // Do executes pipeline processing.
+ // It exits when any error occurs.
+ func (p *Pipeline[T, U]) Do(ctx context.Context) error {
+-	// progress bar
+-	var bar *pb.ProgressBar
+-	if p.progress {
+-		bar = pb.StartNew(len(p.items))
+-		defer bar.Finish()
+-	}
++	// trivy-cdxgen: the progress bar is not linked. Every caller the wrapper
++	// links passes progress=false, and --no-progress is forced anyway.
+ 
+ 	g, ctx := errgroup.WithContext(ctx)
+ 	itemCh := make(chan T)
+@@ -60,9 +55,6 @@
+ 	g.Go(func() error {
+ 		defer close(itemCh)
+ 		for _, item := range p.items {
+-			if p.progress {
+-				bar.Increment()
+-			}
+ 			select {
+ 			case itemCh <- item:
+ 			case <-ctx.Done():

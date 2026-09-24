@@ -48,12 +48,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: '^1.27.0'
+      # Both targets run twice: against upstream Trivy and against the build
+      # overlay/patches produces (see the Makefile).
       - name: go test
-        run: |
-          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go test ./...
+        run: make test
       - name: go vet
-        run: |
-          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go vet ./...
+        run: make lint
+      - name: gofmt
+        run: make fmt-check
 
   golem_test:
     name: golem test

@@ -1,0 +1,132 @@
+pkg/fanal/analyzer is imported by every part of the scan pipeline, and it
+imported pkg/iac/detection for eleven string constants and pkg/misconf for
+the type of one option field. Those two edges alone linked the whole IaC and
+misconfiguration stack: Helm and the Kubernetes client, Terraform and
+go-getter (S3, GCS, gRPC/xDS), OPA and chroma.
+
+The constants are inlined with their values, and the misconfiguration scanner
+option becomes `any`: the wrapper never enables misconfiguration scanning, so
+the option is never set, and the config analyzers that read it are not
+linked. pkg/cache folds the option's (always empty) check and data paths into
+its cache key; it now uses the empty list directly.
+
+--- a/github.com/aquasecurity/trivy/pkg/fanal/analyzer/const.go
++++ b/github.com/aquasecurity/trivy/pkg/fanal/analyzer/const.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"github.com/aquasecurity/trivy/pkg/fanal/types"
+-	"github.com/aquasecurity/trivy/pkg/iac/detection"
+ )
+ 
+ // Type is an alias for types.AnalyzerType for backward compatibility
+@@ -125,17 +124,17 @@
+ 	// =================
+ 	// Structured Config
+ 	// =================
+-	TypeAzureARM              Type = Type(detection.FileTypeAzureARM)
+-	TypeCloudFormation        Type = Type(detection.FileTypeCloudFormation)
+-	TypeDockerfile            Type = Type(detection.FileTypeDockerfile)
+-	TypeHelm                  Type = Type(detection.FileTypeHelm)
+-	TypeKubernetes            Type = Type(detection.FileTypeKubernetes)
+-	TypeTerraform             Type = Type(detection.FileTypeTerraform)
+-	TypeTerraformPlanJSON     Type = Type(detection.FileTypeTerraformPlanJSON)
+-	TypeTerraformPlanSnapshot Type = Type(detection.FileTypeTerraformPlanSnapshot)
+-	TypeYAML                  Type = Type(detection.FileTypeYAML)
+-	TypeJSON                  Type = Type(detection.FileTypeJSON)
+-	TypeAnsible               Type = Type(detection.FileTypeAnsible)
++	TypeAzureARM              Type = "azure-arm"
++	TypeCloudFormation        Type = "cloudformation"
++	TypeDockerfile            Type = "dockerfile"
++	TypeHelm                  Type = "helm"
++	TypeKubernetes            Type = "kubernetes"
++	TypeTerraform             Type = "terraform"
++	TypeTerraformPlanJSON     Type = "terraformplan-json"
++	TypeTerraformPlanSnapshot Type = "terraformplan-snapshot"
++	TypeYAML                  Type = "yaml"
++	TypeJSON                  Type = "json"
++	TypeAnsible               Type = "ansible"
+ 
+ 	// ========
+ 	// License
+
+--- a/github.com/aquasecurity/trivy/pkg/fanal/analyzer/analyzer.go
++++ b/github.com/aquasecurity/trivy/pkg/fanal/analyzer/analyzer.go
+@@ -20,7 +20,6 @@
+ 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
+ 	"github.com/aquasecurity/trivy/pkg/licensing"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/misconf"
+ 	"github.com/aquasecurity/trivy/pkg/types"
+ 	xio "github.com/aquasecurity/trivy/pkg/x/io"
+ 	xslices "github.com/aquasecurity/trivy/pkg/x/slices"
+@@ -49,7 +48,7 @@
+ 	FilePatterns         []string
+ 	DisabledAnalyzers    []Type
+ 	DetectionPriority    ftypes.DetectionPriority
+-	MisconfScannerOption misconf.ScannerOption
++	MisconfScannerOption any // trivy-cdxgen: misconf.ScannerOption; misconfiguration scanning is not linked
+ 	SecretScannerOption  SecretScannerOption
+ 	LicenseScannerOption LicenseScannerOption
+ }
+
+--- a/github.com/aquasecurity/trivy/pkg/fanal/analyzer/config_analyzer.go
++++ b/github.com/aquasecurity/trivy/pkg/fanal/analyzer/config_analyzer.go
+@@ -9,7 +9,6 @@
+ 
+ 	"github.com/aquasecurity/trivy/pkg/fanal/types"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/misconf"
+ )
+ 
+ var configAnalyzerConstructors = make(map[Type]configAnalyzerConstructor)
+@@ -38,7 +37,7 @@
+ type ConfigAnalyzerOptions struct {
+ 	FilePatterns         []string
+ 	DisabledAnalyzers    []Type
+-	MisconfScannerOption misconf.ScannerOption
++	MisconfScannerOption any // trivy-cdxgen: misconf.ScannerOption; misconfiguration scanning is not linked
+ 	SecretScannerOption  SecretScannerOption
+ }
+ 
+
+--- a/github.com/aquasecurity/trivy/pkg/fanal/artifact/artifact.go
++++ b/github.com/aquasecurity/trivy/pkg/fanal/artifact/artifact.go
+@@ -11,7 +11,6 @@
+ 	"github.com/aquasecurity/trivy/pkg/fanal/image/name"
+ 	"github.com/aquasecurity/trivy/pkg/fanal/types"
+ 	"github.com/aquasecurity/trivy/pkg/fanal/walker"
+-	"github.com/aquasecurity/trivy/pkg/misconf"
+ 	"github.com/aquasecurity/trivy/pkg/sbom/core"
+ )
+ 
+@@ -48,7 +47,7 @@
+ 	// For image scanning
+ 	ImageOption types.ImageOptions
+ 
+-	MisconfScannerOption misconf.ScannerOption
++	MisconfScannerOption any // trivy-cdxgen: misconf.ScannerOption; misconfiguration scanning is not linked
+ 	SecretScannerOption  analyzer.SecretScannerOption
+ 	LicenseScannerOption analyzer.LicenseScannerOption
+ 
+
+--- a/github.com/aquasecurity/trivy/pkg/cache/key.go
++++ b/github.com/aquasecurity/trivy/pkg/cache/key.go
+@@ -19,7 +19,6 @@
+ func CalcKey(id string, artifactVersion int, analyzerVersions analyzer.Versions, hookVersions map[string]int, artifactOpt artifact.Option) (string, error) {
+ 	// Sort options for consistent results
+ 	artifactOpt.Sort()
+-	artifactOpt.MisconfScannerOption.Sort()
+ 
+ 	h := sha256.New()
+ 
+@@ -49,7 +48,8 @@
+ 	}
+ 
+ 	// Write check, data contents and secret config file
+-	paths := append(artifactOpt.MisconfScannerOption.PolicyPaths, artifactOpt.MisconfScannerOption.DataPaths...)
++	// trivy-cdxgen: misconfiguration scanning is not linked, so there are no check or data paths.
++	var paths []string
+ 
+ 	// Check if the secret config exists.
+ 	if _, err := os.Stat(artifactOpt.SecretScannerOption.ConfigPath); err == nil {

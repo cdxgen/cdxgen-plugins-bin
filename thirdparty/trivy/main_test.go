@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aquasecurity/trivy/pkg/commands/artifact"
 	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/flag"
@@ -96,7 +95,7 @@ func TestEnrichReportBOMAddsOSPackageMetadata(t *testing.T) {
 		},
 	}
 
-	if err := enrichReportBOM(&report, rootfs, artifact.TargetRootfs, enrichmentOptions{
+	if err := enrichReportBOM(&report, rootfs, targetRootfs, enrichmentOptions{
 		includeCapabilities:   true,
 		includeInstalledFiles: true,
 		includeInstalledCmds:  true,
@@ -160,7 +159,7 @@ func TestEnrichReportBOMRetainsTrustMetadataWhenExecutionSignalsAreDisabled(t *t
 		}},
 	}
 
-	if err := enrichReportBOM(&report, rootfs, artifact.TargetRootfs, enrichmentOptions{}); err != nil {
+	if err := enrichReportBOM(&report, rootfs, targetRootfs, enrichmentOptions{}); err != nil {
 		t.Fatalf("enrich report bom: %v", err)
 	}
 	pkgComponent := findComponentByProperty(report.BOM, core.PropertyPkgID, "bash@1.0")

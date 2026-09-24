@@ -1,0 +1,23 @@
+pkg/scan imported pkg/report, and with it every report writer (table,
+template, SARIF, SPDX, GitHub), for one constant: the report schema version.
+It is inlined. The wrapper writes CycloneDX through pkg/report/cyclonedx.
+
+--- a/github.com/aquasecurity/trivy/pkg/scan/service.go
++++ b/github.com/aquasecurity/trivy/pkg/scan/service.go
+@@ -13,7 +13,6 @@
+ 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
+ 	"github.com/aquasecurity/trivy/pkg/fingerprint"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/report"
+ 	"github.com/aquasecurity/trivy/pkg/types"
+ 	"github.com/aquasecurity/trivy/pkg/uuid"
+ 	"github.com/aquasecurity/trivy/pkg/version/app"
+@@ -85,7 +84,7 @@
+ 	}
+ 
+ 	r := types.Report{
+-		SchemaVersion: report.SchemaVersion,
++		SchemaVersion: 2, // trivy-cdxgen: report.SchemaVersion; the report writers are not linked
+ 		Trivy: types.TrivyInfo{
+ 			Version: app.Version(),
+ 			Server:  scanResponse.ServerInfo,
