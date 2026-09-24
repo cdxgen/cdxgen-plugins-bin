@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	trivydb "github.com/aquasecurity/trivy-db/pkg/db"
+	javadbschema "github.com/aquasecurity/trivy-java-db/pkg/db"
 	"github.com/aquasecurity/trivy/pkg/db"
 	"github.com/aquasecurity/trivy/pkg/iac/detection"
 	"github.com/aquasecurity/trivy/pkg/iac/rego"
+	"github.com/aquasecurity/trivy/pkg/javadb"
 	"github.com/aquasecurity/trivy/pkg/policy"
 	"github.com/aquasecurity/trivy/pkg/report"
 	"github.com/aquasecurity/trivy/pkg/result"
@@ -81,12 +83,30 @@ func TestInlinedValuesMatchUpstream(t *testing.T) {
 		t.Errorf("rego.BuiltinNamespaces() = %v, 02-scan-local-without-registration.patch inlines %v", namespaces, want)
 	}
 
-	// 03-flag-without-scanners.patch derives the DB repositories from
-	// trivy-db's schema version the same way pkg/db does.
-	if got := fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-db", trivydb.SchemaVersion); got != db.DefaultGCRRepository {
-		t.Errorf("patched GCR repository %q, upstream %q", got, db.DefaultGCRRepository)
+	// 03-flag-without-scanners.patch derives the DB repositories from the
+	// schema versions the same way pkg/db and pkg/javadb do.
+	for patched, upstream := range map[string]string{
+		fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-db", trivydb.SchemaVersion):           db.DefaultGCRRepository,
+		fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-db", trivydb.SchemaVersion):            db.DefaultGHCRRepository,
+		fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-java-db", javadbschema.SchemaVersion): javadb.DefaultGCRRepository,
+		fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-java-db", javadbschema.SchemaVersion):  javadb.DefaultGHCRRepository,
+	} {
+		if patched != upstream {
+			t.Errorf("patched DB repository %q, upstream %q", patched, upstream)
+		}
 	}
-	if got := fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-db", trivydb.SchemaVersion); got != db.DefaultGHCRRepository {
-		t.Errorf("patched GHCR repository %q, upstream %q", got, db.DefaultGHCRRepository)
+	flagPatch := readPatch(t, "03-flag-without-scanners.patch")
+	for _, expr := range []string{
+		`fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-db", trivydb.SchemaVersion)`,
+		`fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-db", trivydb.SchemaVersion)`,
+		`fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-java-db", javadb.SchemaVersion)`,
+		`fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-java-db", javadb.SchemaVersion)`,
+	} {
+		if !strings.Contains(flagPatch, expr) {
+			t.Errorf("03-flag-without-scanners.patch no longer derives a DB repository as %s", expr)
+		}
+	}
+	if javadbschema.SchemaVersion != javadb.SchemaVersion {
+		t.Errorf("the patch reads the Java DB schema version %d, pkg/javadb uses %d", javadbschema.SchemaVersion, javadb.SchemaVersion)
 	}
 }

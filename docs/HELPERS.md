@@ -6,7 +6,7 @@ The other four come from upstream projects and have a dedicated page each: [triv
 
 ## The trivy fork
 
-trivy is the only true fork. Its `main.go` is replaced with a cdxgen-specific entry point, pinned in `thirdparty/trivy`, so the binary can only do three things: scan an image, scan a rootfs, and print its version, offline, defaulting to CycloneDX output. The detail lives on the [trivy-cdxgen page](TRIVY.md); the reason for forking rather than calling upstream is control. Fewer commands means fewer flags to keep compatible across upstream releases, and a binary that cannot do anything else is one that cannot do anything else in your environment either.
+trivy is the only true fork. Its `main.go` is replaced with a cdxgen-specific entry point, pinned in `thirdparty/trivy`, so the binary can only do two things: scan an unpacked root filesystem and print its version, offline, defaulting to CycloneDX output. The detail lives on the [trivy-cdxgen page](TRIVY.md); the reason for forking rather than calling upstream is control. Fewer commands means fewer flags to keep compatible across upstream releases, and a binary that cannot do anything else is one that cannot do anything else in your environment either.
 
 ## The repackaged releases
 

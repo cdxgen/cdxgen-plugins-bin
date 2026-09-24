@@ -302,7 +302,7 @@ before scanning, so none of those paths is reachable.
 
 --- a/github.com/aquasecurity/trivy/pkg/flag/db_flags.go
 +++ b/github.com/aquasecurity/trivy/pkg/flag/db_flags.go
-@@ -1,12 +1,13 @@
+@@ -1,13 +1,14 @@
  package flag
  
  import (
@@ -313,11 +313,13 @@ before scanning, so none of those paths is reachable.
  	"golang.org/x/xerrors"
  
 -	"github.com/aquasecurity/trivy/pkg/db"
+-	"github.com/aquasecurity/trivy/pkg/javadb"
 +	trivydb "github.com/aquasecurity/trivy-db/pkg/db"
- 	"github.com/aquasecurity/trivy/pkg/javadb"
++	javadb "github.com/aquasecurity/trivy-java-db/pkg/db"
  	"github.com/aquasecurity/trivy/pkg/log"
  )
-@@ -53,8 +54,9 @@
+ 
+@@ -53,14 +54,16 @@
  	DBRepositoryFlag = Flag[[]string]{
  		Name:       "db-repository",
  		ConfigName: "db.repository",
@@ -329,7 +331,16 @@ before scanning, so none of those paths is reachable.
  	}
  	JavaDBRepositoryFlag = Flag[[]string]{
  		Name:       "java-db-repository",
-@@ -145,7 +147,7 @@
+ 		ConfigName: "db.java-repository",
+-		Default:    []string{javadb.DefaultGCRRepository, javadb.DefaultGHCRRepository},
+-		Usage:      "OCI repository(ies) to retrieve trivy-java-db in order of priority",
++		// trivy-cdxgen: javadb.DefaultGCRRepository and javadb.DefaultGHCRRepository; the Java DB client is not linked.
++		Default: []string{fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-java-db", javadb.SchemaVersion), fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-java-db", javadb.SchemaVersion)},
++		Usage:   "OCI repository(ies) to retrieve trivy-java-db in order of priority",
+ 	}
+ 	LightFlag = Flag[bool]{
+ 		Name:       "light",
+@@ -145,7 +148,7 @@
  
  	var dbRepositories, javaDBRepositories []name.Reference
  	for _, repo := range f.DBRepositories.Value() {

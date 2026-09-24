@@ -1,6 +1,6 @@
 package main
 
-// The scan pipeline the wrapper runs for its two targets.
+// The scan pipeline the wrapper runs for rootfs targets.
 //
 // Upstream Trivy reaches the same pipeline through pkg/commands and
 // pkg/commands/artifact, which also wire in every other subcommand, client/
@@ -9,8 +9,8 @@ package main
 // those packages links all of it, and none of it can run here: the wrapper
 // forces an offline, SBOM-only, CycloneDX scan. The functions below keep the
 // parts of github.com/aquasecurity/trivy/pkg/commands (Apache-2.0) that do run
-// for rootfs and image targets, in the same order and with the same options, so
-// the binary no longer carries the rest.
+// for a rootfs target, in the same order and with the same options, so the
+// binary no longer carries the rest.
 
 import (
 	"context"
@@ -31,13 +31,10 @@ import (
 	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	"github.com/aquasecurity/trivy/pkg/fanal/applier"
 	"github.com/aquasecurity/trivy/pkg/fanal/artifact"
-	artimage "github.com/aquasecurity/trivy/pkg/fanal/artifact/image"
 	artlocal "github.com/aquasecurity/trivy/pkg/fanal/artifact/local"
-	"github.com/aquasecurity/trivy/pkg/fanal/image"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/fanal/walker"
 	"github.com/aquasecurity/trivy/pkg/flag"
-	"github.com/aquasecurity/trivy/pkg/javadb"
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/report/cyclonedx"
 	"github.com/aquasecurity/trivy/pkg/scan"
@@ -47,15 +44,11 @@ import (
 	trivytypes "github.com/aquasecurity/trivy/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/version/app"
 	"github.com/aquasecurity/trivy/pkg/vulnerability"
-	xhttp "github.com/aquasecurity/trivy/pkg/x/http"
 )
 
 type targetKind string
 
-const (
-	targetContainerImage targetKind = "image"
-	targetRootfs         targetKind = "rootfs"
-)
+const targetRootfs targetKind = "rootfs"
 
 // newRootCommand mirrors commands.NewRootCommand: global flags, config file
 // loading, logger initialisation and the `--version` printer.
@@ -160,8 +153,6 @@ func checkSupportedModes(opts flag.Options) error {
 		return errors.New("client/server mode (--server) is not supported by trivy-cdxgen")
 	case cache.NewType(opts.CacheBackend) == cache.TypeRedis:
 		return errors.New("the redis cache backend is not supported by trivy-cdxgen")
-	case opts.Compliance.Spec.ID != "":
-		return errors.New("compliance reports (--compliance) are not supported by trivy-cdxgen")
 	case len(opts.SBOMSources) > 0:
 		return errors.New("remote SBOM sources (--sbom-sources) are not supported by trivy-cdxgen")
 	case strings.HasPrefix(opts.Output, "plugin="):
@@ -174,7 +165,7 @@ func checkSupportedModes(opts flag.Options) error {
 	return nil
 }
 
-func runTarget(ctx context.Context, opts flag.Options, target string, kind targetKind) error {
+func runTarget(ctx context.Context, opts flag.Options, target string) error {
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
@@ -182,29 +173,18 @@ func runTarget(ctx context.Context, opts flag.Options, target string, kind targe
 		return err
 	}
 
-	// Set the default HTTP transport, used for registry access.
-	xhttp.SetDefaultTransport(xhttp.NewTransport(xhttp.Options{
-		Insecure:  opts.Insecure,
-		CACerts:   opts.CACerts,
-		Timeout:   opts.Timeout,
-		TraceHTTP: opts.TraceHTTP,
-	}))
+	// Upstream also sets the default HTTP transport and initialises the Java
+	// DB client here. A rootfs scan makes no HTTP requests, and the jar
+	// analyzer, the Java DB's only user, is disabled with the other language
+	// analyzers.
+	opts.DisabledAnalyzers = rootfsDisabledAnalyzers(opts)
 
-	// SBOM output initialises the Java DB client for the jar analyzer; the
-	// wrapper never updates it (--skip-java-db-update is forced).
-	javadb.Init(opts.CacheDir, opts.JavaDBRepositories, opts.SkipJavaDBUpdate, opts.Quiet || opts.NoProgress, opts.RegistryOpts())
-
-	var err error
-	if opts.DisabledAnalyzers, err = targetDisabledAnalyzers(opts, kind); err != nil {
-		return err
-	}
-
-	report, err := scanArtifact(ctx, opts, kind)
+	report, err := scanRootfs(ctx, opts)
 	if err != nil {
-		return fmt.Errorf("%s scan error: %w", kind, err)
+		return fmt.Errorf("%s scan error: %w", targetRootfs, err)
 	}
 
-	if err = enrichReportBOM(&report, target, kind, loadEnrichmentOptions()); err != nil {
+	if err = enrichReportBOM(&report, target, targetRootfs, loadEnrichmentOptions()); err != nil {
 		return fmt.Errorf("bom enrichment error: %w", err)
 	}
 
@@ -214,21 +194,12 @@ func runTarget(ctx context.Context, opts flag.Options, target string, kind targe
 	return nil
 }
 
-// targetDisabledAnalyzers mirrors the runner's ScanImage and ScanRootfs.
-func targetDisabledAnalyzers(opts flag.Options, kind targetKind) ([]analyzer.Type, error) {
-	switch kind {
-	case targetContainerImage:
-		// The lock file analyzers replace, rather than extend, the disabled
-		// analyzers, so image scans keep the individual package analyzers.
-		return analyzer.TypeLockfiles, nil
-	case targetRootfs:
-		return append(opts.DisabledAnalyzers, analyzer.TypeLockfiles...), nil
-	default:
-		return nil, fmt.Errorf("unsupported target kind: %s", kind)
-	}
+// rootfsDisabledAnalyzers mirrors the runner's ScanRootfs.
+func rootfsDisabledAnalyzers(opts flag.Options) []analyzer.Type {
+	return append(opts.DisabledAnalyzers, analyzer.TypeLockfiles...)
 }
 
-func scanArtifact(ctx context.Context, opts flag.Options, kind targetKind) (trivytypes.Report, error) {
+func scanRootfs(ctx context.Context, opts flag.Options) (trivytypes.Report, error) {
 	artifactOpt, scanOptions := initScannerConfig(opts)
 
 	c, cleanupCache, err := cache.New(opts.CacheOpts())
@@ -237,11 +208,10 @@ func scanArtifact(ctx context.Context, opts flag.Options, kind targetKind) (triv
 	}
 	defer cleanupCache()
 
-	art, cleanupArtifact, err := newArtifact(ctx, opts, kind, c, artifactOpt)
+	art, err := artlocal.NewArtifact(opts.Target, c, walker.NewFS(), artifactOpt)
 	if err != nil {
-		return trivytypes.Report{}, fmt.Errorf("unable to initialize artifact: %w", err)
+		return trivytypes.Report{}, fmt.Errorf("unable to initialize filesystem artifact: %w", err)
 	}
-	defer cleanupArtifact()
 
 	service := local.NewService(applier.NewApplier(c), ospkg.NewScanner(), langpkg.NewScanner(), vulnerability.NewClient(db.Config{}))
 	report, err := scan.NewService(service, art).ScanArtifact(ctx, scanOptions)
@@ -249,40 +219,6 @@ func scanArtifact(ctx context.Context, opts flag.Options, kind targetKind) (triv
 		return trivytypes.Report{}, fmt.Errorf("scan failed: %w", err)
 	}
 	return report, nil
-}
-
-func newArtifact(ctx context.Context, opts flag.Options, kind targetKind, c cache.ArtifactCache, artifactOpt artifact.Option) (artifact.Artifact, func(), error) {
-	target := opts.Target
-	if kind == targetRootfs {
-		art, err := artlocal.NewArtifact(target, c, walker.NewFS(), artifactOpt)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to initialize filesystem artifact: %w", err)
-		}
-		return art, func() {}, nil
-	}
-
-	if opts.Input != "" {
-		img, err := image.NewArchiveImage(opts.Input)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to initialize archive image: %w", err)
-		}
-		art, err := artimage.NewArtifact(img, c, artifactOpt)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to initialize artifact: %w", err)
-		}
-		return art, func() {}, nil
-	}
-
-	img, cleanupImage, err := image.NewContainerImage(ctx, target, artifactOpt.ImageOption)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to initialize container image: %w", err)
-	}
-	art, err := artimage.NewArtifact(img, c, artifactOpt)
-	if err != nil {
-		cleanupImage()
-		return nil, nil, fmt.Errorf("unable to initialize artifact: %w", err)
-	}
-	return art, cleanupImage, nil
 }
 
 // initScannerConfig mirrors the runner's initScannerConfig for an SBOM-only,
@@ -314,13 +250,6 @@ func initScannerConfig(opts flag.Options) (artifact.Option, trivytypes.ScanOptio
 		FileChecksum:      true,
 		DetectionPriority: opts.DetectionPriority,
 		MavenMirrors:      opts.MavenMirrors,
-		ImageOption: ftypes.ImageOptions{
-			RegistryOptions: opts.RegistryOpts(),
-			DockerOptions:   ftypes.DockerOptions{Host: opts.DockerHost},
-			PodmanOptions:   ftypes.PodmanOptions{Host: opts.PodmanHost},
-			ImageSources:    opts.ImageSources,
-			MaxImageSize:    opts.MaxImageSize,
-		},
 		WalkerOption: walker.Option{
 			SkipFiles: opts.SkipFiles,
 			SkipDirs:  opts.SkipDirs,

@@ -7,7 +7,7 @@
 //
 //	go mod vendor
 //	go run ./overlay
-//	go build -mod=vendor -overlay=.overlay/overlay.json -tags grpcnotrace .
+//	go build -mod=vendor -overlay=.overlay/overlay.json .
 package main
 
 import (

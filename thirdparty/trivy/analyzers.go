@@ -4,11 +4,11 @@ package main
 //
 // Upstream registers every analyzer through pkg/fanal/analyzer/all, which the
 // local scan service imports. Most of them never run here: applyCDXGenDefaults
-// and the runner disable secret, license-file, misconfiguration, executable and
-// image-history analysis, and rootfs scans keep only the Go binary analyzer
-// among the language analyzers. Registering only the analyzers that can be
-// enabled keeps the others, and the scanners they pull in, out of the binary.
-// TestRegisteredAnalyzersMatchUpstream pins this list against the analyzers
+// and the runner disable secret, license-file, misconfiguration, executable
+// and image-history analysis, and keep only the Go binary analyzer among the
+// language analyzers. Registering only the analyzers that can be enabled keeps
+// the others, and the scanners they pull in, out of the binary.
+// TestEnabledAnalyzersMatchUpstream pins this list against the analyzers
 // upstream would enable for the same options.
 
 import (
@@ -28,21 +28,8 @@ import (
 
 	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/golang/binary"
 
-	// Image scans inherit Trivy's image defaults, which disable only the lock
-	// file analyzers, so the individual package analyzers stay enabled there.
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/conda/meta"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/dotnet/deps"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/dotnet/nuget"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/dotnet/packagesprops"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/java/jar"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/julia/pkg"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/nodejs/pkg"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/php/composer"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/python/packaging"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/ruby/gemspec"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/rust/binary"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/language/rust/cargo"
-	_ "github.com/aquasecurity/trivy/pkg/fanal/analyzer/sbom"
-
+	// Of the two post handlers, only the system file filter can act: the
+	// unpackaged handler looks up executable digests in Rekor, and the
+	// executable analyzer that produces them is disabled.
 	_ "github.com/aquasecurity/trivy/pkg/fanal/handler/sysfile"
 )

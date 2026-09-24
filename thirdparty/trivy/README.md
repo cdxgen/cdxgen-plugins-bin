@@ -8,13 +8,19 @@ Compared to the stock `cmd/trivy/main.go`, this wrapper is intentionally optimiz
 
 ### Command Restriction
 
-The wrapper exposes only three commands:
+The wrapper exposes only two commands:
 
-- `image` - scan a container image
 - `rootfs` - scan an unpacked root filesystem
 - `version` - print version information
 
 All other Trivy commands (config, secret, misconfig, license, etc.) are removed to reduce binary size and attack surface.
+
+There is no `image` command. cdxgen extracts container images itself and
+scans the resulting directory with `rootfs`; the `image` command this wrapper
+used to carry never scanned anything, because it lacked Trivy's image flag
+group and so always failed with "no image sources supplied". Without it, the
+registry, Docker, containerd and Podman clients, and the language analyzers
+only image scans enabled, are not linked.
 
 ### Linked Trivy Subset
 
@@ -31,21 +37,22 @@ the wrapper runs is linked (see [Slim Build](#slim-build)):
   in place of `pkg/fanal/analyzer/all`;
 - `overlay/patches` cuts the imports that linked the rest.
 
-Every flag group, environment variable and `trivy.yaml` key the commands
-accepted before is still accepted. The options that would select a code path
+Every flag, environment variable and `trivy.yaml` key `rootfs` accepted
+before is still accepted. The options that would select a code path
 the binary no longer carries fail with an explicit error instead of scanning
 some other way: `--server` (client/server mode), a `redis://` cache backend,
-`--sbom-sources`, `--output plugin=...` and `--compliance`. Result filtering
+`--sbom-sources`, `--output plugin=...` and `--download-java-db-only`; a
+failing command now prints its error to stderr. Result filtering
 (`.trivyignore`, `--ignore-policy`, `--vex`) no longer runs: an SBOM-only scan
-has no findings for it to filter. Misconfiguration,
-secret, license and vulnerability scanning were already forced off, WASM
-modules in `~/.trivy/modules` are no longer loaded, and `version` reports only
-the Trivy version: the wrapper never reads the vulnerability DB, Java DB or
-checks bundle whose metadata upstream prints there.
+has no findings for it to filter. Misconfiguration, secret, license and
+vulnerability scanning were already forced off, WASM modules in
+`~/.trivy/modules` are no longer loaded, and `version` reports only the Trivy
+version: the wrapper never reads the vulnerability DB, Java DB or checks
+bundle whose metadata upstream prints there.
 
 ### Default Output Format
 
-The `image` and `rootfs` commands default to CycloneDX SBOM output instead of Trivy's default vulnerability report format. This eliminates the need for users to specify `--format cyclonedx` on every invocation.
+The `rootfs` command defaults to CycloneDX SBOM output instead of Trivy's default vulnerability report format. This eliminates the need for users to specify `--format cyclonedx` on every invocation.
 
 ### Offline Operation
 
@@ -193,7 +200,7 @@ unified diffs against the pinned Trivy release:
 ```bash
 go mod vendor
 go run ./overlay    # patches vendor/ copies into .overlay/, writes .overlay/overlay.json
-go build -mod=vendor -overlay=.overlay/overlay.json -tags grpcnotrace .
+go build -mod=vendor -overlay=.overlay/overlay.json .
 ```
 
 Go refuses `-overlay` replacements for files inside `GOMODCACHE`, which is
@@ -202,12 +209,12 @@ starts with a description of the import it cuts and why the code behind it
 cannot run under the options the wrapper forces. Most replace a constant or a
 type with its value, or remove a function the wrapper never calls.
 
-Two of the cuts matter beyond their own size. `text/template` finds methods
-by name through reflection, and a reachable caller makes the Go linker keep
-every exported method of every reachable type. Trivy's progress bar
-(`github.com/cheggaaa/pb`, reached through the vulnerability detectors and
-`pkg/parallel`) and gRPC's `golang.org/x/net/trace` debug pages (dropped by
-the `grpcnotrace` build tag) were the two reachable callers.
+One cut matters beyond its own size. `text/template` finds methods by name
+through reflection, and a reachable caller makes the Go linker keep every
+exported method of every reachable type. Trivy's progress bar
+(`github.com/cheggaaa/pb`, reached through the vulnerability detectors) was
+the last reachable caller; `go build -ldflags=-dumpdep` shows whether one is
+back, as an edge into `text/template.(*state).evalField <ReflectMethod>`.
 
 `make test` runs the tests twice: against upstream Trivy and against the
 patched build. The upstream pass also checks every inlined value against the

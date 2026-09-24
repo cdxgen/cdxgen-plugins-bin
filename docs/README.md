@@ -54,7 +54,7 @@ If you are deciding where to look first, the helpers fall into four groups.
 
 **Fast paths on the BOM itself.** cdxrs accelerates BOM validation and registry metadata fetch inside cdxgen, and cdxui turns a finished BOM into something a human can browse, search, and present.
 
-**Inventory from outside the source tree.** trivy-cdxgen reads container images and unpacked root filesystems for OS packages, sourcekitten and dosai bring Swift and .NET semantics to cdxgen, osquery queries the live operating system, and trustinspector reports trust anchors and code-signing state.
+**Inventory from outside the source tree.** trivy-cdxgen reads the unpacked root filesystems of container images for OS packages, sourcekitten and dosai bring Swift and .NET semantics to cdxgen, osquery queries the live operating system, and trustinspector reports trust anchors and code-signing state.
 
 ## Use cases
 

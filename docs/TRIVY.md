@@ -1,16 +1,20 @@
 # trivy-cdxgen: container and rootfs OS package inventory
 
-trivy-cdxgen is a fork of [Trivy](https://github.com/aquasecurity/trivy) with a cdxgen-specific entry point, built from the pinned source in `thirdparty/trivy`. Trivy is best known as a vulnerability scanner. This build repurposes its OS package analyzers for one job: producing CycloneDX SBOMs of container images and unpacked root filesystems, offline, with compliance-grade enrichment.
+trivy-cdxgen is a fork of [Trivy](https://github.com/aquasecurity/trivy) with a cdxgen-specific entry point, built from the pinned source in `thirdparty/trivy`. Trivy is best known as a vulnerability scanner. This build repurposes its OS package analyzers for one job: producing CycloneDX SBOMs of unpacked root filesystems, offline, with compliance-grade enrichment.
 
-cdxgen invokes it for Docker and OCI image scans and for rootfs scans when the binary is present. A custom build can be wired in with `TRIVY_CMD`.
+cdxgen invokes it for Docker and OCI image scans, after extracting the image layers itself, and for rootfs scans when the binary is present. A custom build can be wired in with `TRIVY_CMD`.
 
 ## What the fork changes
 
 The wrapper keeps upstream's analyzers and strips everything cdxgen does not need. Compared to stock `cmd/trivy/main.go`:
 
-Only three commands survive: `image` for a container image, `rootfs` for an unpacked filesystem, and `version`. The config, secret, misconfiguration, and license scanning commands are removed, which reduces both binary size and the surface area to keep compatible across upstream releases.
+Only two commands survive: `rootfs` for an unpacked filesystem, and `version`. The image, config, secret, misconfiguration, and license scanning commands are removed, which reduces both binary size and the surface area to keep compatible across upstream releases.
 
-`image` and `rootfs` default to CycloneDX output, so no flag is needed per invocation. Operation is forced offline: no update checks, no progress bars, which makes the binary suitable for air-gapped builds. Noisy output is suppressed unless `--debug` is passed. Language package collection is limited to Go modules and Go binaries, because cdxgen covers other ecosystems with its own analyzers: golem for Go source, rusi for Rust, sourcekitten for Swift, dosai for .NET.
+`rootfs` defaults to CycloneDX output, so no flag is needed per invocation. Operation is forced offline: no update checks, no progress bars, which makes the binary suitable for air-gapped builds. Noisy output is suppressed unless `--debug` is passed. Language package collection is limited to Go modules and Go binaries, because cdxgen covers other ecosystems with its own analyzers: golem for Go source, rusi for Rust, sourcekitten for Swift, dosai for .NET.
+
+## Binary size
+
+Removing commands is not enough to shrink the binary: Trivy's core packages import its misconfiguration, vulnerability, Kubernetes and client/server stacks for a handful of constants and types, so a plain build links almost all of Trivy. The wrapper runs its own scan pipeline in place of Trivy's `pkg/commands`, registers only the analyzers it can enable, and builds through `thirdparty/trivy/overlay/patches`, a small set of diffs that cut the remaining imports. The darwin-arm64 binary is about 21 MB instead of 158 MB, and the SBOMs are unchanged. The [wrapper README](../thirdparty/trivy/README.md) describes the mechanism and the steps for a Trivy upgrade.
 
 ## OS package enrichment
 
@@ -40,7 +44,7 @@ Build a local binary and scan an unpacked rootfs:
 
 ```bash
 cd thirdparty/trivy
-GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+make local
 ./build/trivy-cdxgen-local rootfs --output result.cdx.json /path/to/rootfs
 ```
 
@@ -60,4 +64,4 @@ linux-amd64, linux-arm64, linuxmusl-amd64, linuxmusl-arm64, linux-riscv64, linux
 
 ## What it will not do
 
-It does not scan for vulnerabilities, misconfigurations, secrets, or licenses. Those commands were removed on purpose. It does not analyze language dependencies beyond Go modules and binaries. Treat it as an OS package inventory engine that speaks CycloneDX natively.
+It does not pull or unpack container images; cdxgen does that and hands it the root filesystem. It does not scan for vulnerabilities, misconfigurations, secrets, or licenses. Those commands were removed on purpose. It does not analyze language dependencies beyond Go modules and binaries. Treat it as an OS package inventory engine that speaks CycloneDX natively.
