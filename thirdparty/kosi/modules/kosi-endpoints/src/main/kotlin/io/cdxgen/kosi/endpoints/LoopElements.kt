@@ -85,6 +85,7 @@ internal object LoopElements {
         val stores = instructions(fn).filterIsInstance<KirStore>().filter { it.target == register }.toList()
         if (stores.size > 1) return null
         val value = stores.singleOrNull()?.value ?: register
+        if (value.startsWith("%p")) return forEachParameter(fn, value, kind, input)
         val producer = call(definer(fn, value)) ?: return null
         val (nextCall, component) = when (producer.name) {
             "next" -> producer to 0
@@ -106,6 +107,32 @@ internal object LoopElements {
         if (values.isEmpty()) return null
         return Binding("${fn.canonicalName}#${iterator.result}", values)
     }
+
+    /**
+     * `listOf("/x", "/y").forEach { p -> get(p) { } }` (atom-tools#95): the
+     * lambda's element parameter takes each element of the RECEIVER of the
+     * `forEach`/`onEach` that created the lambda. Only the element parameter
+     * of those two is bound; `forEachIndexed`, `map` and friends resolve to
+     * null, as does a receiver that is not a literal collection.
+     */
+    private fun forEachParameter(fn: KirFunction, param: String, kind: Kind, input: EndpointDetector.Input): Binding? {
+        if (param != "%p0") return null
+        val link = input.lambdaLinks[fn.canonicalName] ?: return null
+        val loop = call(link.creationCall) ?: return null
+        if (loop.name !in ELEMENT_LOOPS || (loop.fqn != null && loop.fqn !in ELEMENT_LOOP_FQNS)) return null
+        val collection = loop.receiver ?: return null
+        val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction } ?: return null
+        // The lambda must be the loop's own argument, not a capture beside it.
+        val lambda = instructions(parent).filterIsInstance<KirLambda>().firstOrNull { it.function == fn.canonicalName } ?: return null
+        if (loop.args.singleOrNull() != lambda.result) return null
+        val (owner, elements) = elementsOf(parent, collection, input) ?: return null
+        val values = elements.map { valueOf(owner, it, kind, input) ?: return null }
+        if (values.isEmpty()) return null
+        return Binding("${parent.canonicalName}#${loop.result}", values)
+    }
+
+    private val ELEMENT_LOOPS = setOf("forEach", "onEach")
+    private val ELEMENT_LOOP_FQNS = setOf("kotlin.collections.forEach", "kotlin.collections.onEach")
 
     /** The element registers of a literal collection, and the function they live in. */
     private fun elementsOf(fn: KirFunction, register: String, input: EndpointDetector.Input): Pair<KirFunction, List<String>>? {

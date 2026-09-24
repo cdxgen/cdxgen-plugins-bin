@@ -803,6 +803,38 @@ capabilities = ["endpoints", "framework-semantics", "ktor", "classpath-partial"]
 tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "ARGUMENT_TYPE_MISMATCH", "CANNOT_INFER_PARAMETER_TYPE", "COMPONENT_FUNCTION_AMBIGUITY", "INAPPLICABLE_CANDIDATE"]
 
 [[fixtures]]
+slug = "dsl-loop-paths"
+tier = "fixtures"
+path = "fixtures/dsl-loop-paths"
+capabilities = ["endpoints", "framework-semantics", "ktor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "dsl-loop-paths-unresolved"
+tier = "fixtures"
+path = "fixtures/dsl-loop-paths-unresolved"
+# io.ktor is deliberately absent: every Ktor symbol resolves by import only.
+# A bare `get(p) { }` then binds to the stdlib's Map `get` operator, which
+# takes one argument, not two.
+capabilities = ["endpoints", "framework-semantics", "ktor", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "TOO_MANY_ARGUMENTS"]
+
+[[fixtures]]
+slug = "spring-inherited-mappings"
+tier = "fixtures"
+path = "fixtures/spring-inherited-mappings"
+capabilities = ["endpoints", "framework-semantics", "spring"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-inherited-mappings-unresolved"
+tier = "fixtures"
+path = "fixtures/spring-inherited-mappings-unresolved"
+# spring-web and jakarta.ws.rs are deliberately absent: the mappings resolve by import only.
+capabilities = ["endpoints", "framework-semantics", "spring", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
 slug = "http4k-routes"
 tier = "fixtures"
 path = "fixtures/http4k-routes"

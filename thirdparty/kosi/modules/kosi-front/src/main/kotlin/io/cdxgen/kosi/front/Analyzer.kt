@@ -1055,8 +1055,8 @@ object Analyzer {
                 Diagnostic(
                     code = DiagnosticCodes.ENDPOINT_PATH_UNRESOLVED,
                     severity = Severity.WARNING,
-                    message = "$pathUnresolvedEndpoints endpoint(s) sit under a base path the deployment sets but kosi " +
-                        "could not prove; their pathTemplate is relative to it and each names why in pathUnresolved",
+                    message = "$pathUnresolvedEndpoints endpoint(s) have a path kosi could not prove (a base path the deployment sets, " +
+                        "or a path computed at run time); their pathTemplate is partial or empty and each names why in pathUnresolved",
                     position = Position(".", 1, 1),
                     count = pathUnresolvedEndpoints,
                 )

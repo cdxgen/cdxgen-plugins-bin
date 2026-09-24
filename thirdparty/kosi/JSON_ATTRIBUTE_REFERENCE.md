@@ -45,7 +45,7 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | Attribute | Type | Value |
 | --- | --- | --- |
 | `name` | string | `kosi` |
-| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.1`); `unknown` for a build outside that tree |
+| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.2`); `unknown` for a build outside that tree |
 | `description` | string | human description |
 | `commit` | string | git commit injected at build time (`unknown` fallback) |
 
@@ -613,7 +613,12 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
 
 - `annotation`: a mapping annotation at its resolved FQN, including a
   composed or meta-annotated one and a server-side `@HttpExchange`
-  inherited from an interface.
+  inherited from an interface. A mapping on a base class or an interface
+  default method is published once per analysed controller that inherits
+  the member without overriding it, under that controller's own class-level
+  path (or, when it declares none, the declaring class's). The subclass must
+  carry the controller marker itself; `handlerSymbol` names the declaring
+  member.
 - `dsl`: a routing call, with the handler resolved to the extracted lambda
   body. This also covers:
   - registrations in code, such as Spring Boot's `ServletRegistrationBean`
@@ -621,7 +626,12 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
     registries;
   - routes registered in a loop over a literal collection (`for (m in
     listOf(HttpMethod.Get, ..)) { method(m) { } }`), one route per element,
-    with a destructured `(verb, path)` pair kept together.
+    with a destructured `(verb, path)` pair kept together. A `forEach` or
+    `onEach` lambda's element parameter binds the same way
+    (`listOf("/x", "/y").forEach { get(it) { } }`). A path that does not
+    fold, including a loop over a parameter, a mutated collection or
+    `forEachIndexed`, is published with an empty `pathTemplate` and
+    `pathUnresolved`, never under a name taken from the code.
 - `manifest`: an Android component.
 - `descriptor`: a `web.xml` servlet mapping.
 - `implicit`: a route that has no handler in the source. These are served
@@ -655,7 +665,7 @@ endpoint.
 | `sliceIds` | string[] | endpoint-rooted slices (same flag) |
 | `foundBy` | string | `annotation` \| `dsl` \| `dsl-unattributed` \| `manifest` \| `descriptor` \| `implicit` (above) |
 | `anyMethod` | boolean? | present (`true`) only when the framework serves EVERY HTTP method at this route: `@RequestMapping` or `@HttpExchange` without `method`, a servlet, Vert.x `route()` or `routeWithRegex()`. `httpMethod` is then empty by design. An empty `httpMethod` WITHOUT this flag means kosi could not resolve the method |
-| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
+| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a DSL route's own path argument computed at run time, a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
 | `transport` | string? | present only for an endpoint NOT served over HTTP: `messaging`, `grpc`, `android`, `function`. Absent means HTTP |
 
 ## services — ServiceRef and urls — UrlEvidence (resolved tier)

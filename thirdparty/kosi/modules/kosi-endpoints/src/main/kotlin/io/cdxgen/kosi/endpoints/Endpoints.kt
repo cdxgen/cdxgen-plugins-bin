@@ -125,6 +125,7 @@ object Endpoints {
                 folder = folder,
                 lambdaLinks = lambdaLinks,
                 importRootsByFile = importRootsByFile,
+                typeDeclarations = typeDeclarations,
             ),
             pack,
         )
