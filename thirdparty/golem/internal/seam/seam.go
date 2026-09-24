@@ -261,6 +261,29 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 		}
 	}
 
+	// The simd experiment packages are bodiless stubs on amd64, arm64 and wasm
+	// and carry real emulated bodies everywhere else, and they appear in no
+	// model database, so without a rule of their own every call into them
+	// returned empty here and recordUnmodeledSink fired. The rule is keyed on
+	// the package path rather than on body presence — the acceptance
+	// criterion is that amd64 stubs, arm64 stubs and riscv64 emulated bodies
+	// all behave identically — and it is applied before any body walk, model
+	// lookup or summary consultation, so it also keeps recordUnmodeledSink
+	// silent for these packages.
+	if callee != nil && isSimdIntrinsicPackage(simdFunctionPackagePath(callee)) {
+		if simdIntrinsicKindOf(callee) == simdPropagate {
+			// The result is the union of the receiver's and the arguments'
+			// taint. For a static method call the receiver travels as
+			// Args[0], so it is already part of argLabels; recvLabels covers
+			// the invoke form. Tuple results are tainted as a whole — the
+			// engine has no per-result precision to be more careful with.
+			return argLabels.Merge(recvLabels)
+		}
+		// Store* results and the derived results carry no data; the Store
+		// side effect is applied by (*intra).applySimdStoreWrites.
+		return NewLabelSet()
+	}
+
 	return e.resolveStaticCallTaint(caller, callee, common, argLabels, recvLabels, callPos, argAt)
 }
 

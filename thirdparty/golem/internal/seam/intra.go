@@ -479,6 +479,7 @@ func (s *intra) transferCall(state taintState, common *ssa.CallCommon, pos token
 	result := s.engine.resolveCallTaint(s.fn, common, argLabels, recvLabels, pos, argAt)
 	s.applyCallArgumentWrites(state, common, argLabels, pos)
 	s.applyBuiltinArgumentWrites(state, common, pos)
+	s.applySimdStoreWrites(state, common, pos)
 	if result.IsEmpty() {
 		return result
 	}
@@ -566,26 +567,61 @@ func (s *intra) applyBuiltinArgumentWrites(state taintState, common *ssa.CallCom
 			return
 		}
 		dst := unwrapWriteTarget(unwrapAddr(common.Args[0]))
-		if dst == nil {
-			return
-		}
-		step := s.step("argument-write", "argument-write", valueName(dst), callSymbolOf(common), valueTypeOf(dst), s.fieldPathOf(dst), pos)
-		written := withStep(labels, step)
-		key := s.pathKey(dst)
-		state.memory[key] = state.memory[key].Merge(written)
-		// A read of dst's elements looks through the `[*]` view, the way
-		// applyCallArgumentWrites records it.
-		state.memory[key+"[*]"] = state.memory[key+"[*]"].Merge(written)
-		if field, isField := dst.(*ssa.FieldAddr); isField {
-			state.memory[key+fieldSuffix(field)] = state.memory[key+fieldSuffix(field)].Merge(written)
-		}
-		// The destination of copy is usually a slice VALUE rather than an
-		// address, and a direct read of it (`string(out)`) is answered from
-		// the value map: evaluate() never consults the destination's memory
-		// key. Depositing the taint on the value as well is what lets the
-		// flow continue past the call.
-		state.setValue(dst, written)
+		s.depositArgumentWrite(state, dst, labels, callSymbolOf(common), pos)
 	}
+}
+
+// applySimdStoreWrites deposits the receiver's taint into the destination of a
+// simd Store* method, the write half of the simd intrinsic rule.
+//
+// For a static method call SSA passes the receiver as Args[0], so the
+// destination slice is Args[1]; the receiver itself is common.Value only in an
+// invoke, which a call on a concrete simd type never is. The destination may be
+// a plain slice or an array pointer (a slice-to-array-pointer conversion), both
+// of which depositArgumentWrite resolves to the base allocation.
+func (s *intra) applySimdStoreWrites(state taintState, common *ssa.CallCommon, pos token.Pos) {
+	if common == nil || common.IsInvoke() {
+		return
+	}
+	callee := common.StaticCallee()
+	if !isSimdIntrinsicPackage(simdFunctionPackagePath(callee)) {
+		return
+	}
+	if simdIntrinsicKindOf(callee) != simdStore {
+		return
+	}
+	if len(common.Args) < 2 {
+		return
+	}
+	recv := common.Args[0]
+	labels := s.taintOf(state, recv).Merge(s.variadicElementTaint(state, recv))
+	if labels.IsEmpty() {
+		return
+	}
+	dst := unwrapWriteTarget(unwrapAddr(common.Args[1]))
+	s.depositArgumentWrite(state, dst, labels, callSymbolOf(common), pos)
+}
+
+// depositArgumentWrite merges written into the location dst addresses and onto
+// the destination value itself, recording one argument-write hop.
+//
+// The memory write covers reads through element and field addresses, which look
+// at the `[*]` view; the value write covers a direct read of the destination
+// (`string(out)` after `copy(out, in)`), which evaluate() answers from the
+// value map without consulting the destination's memory key.
+func (s *intra) depositArgumentWrite(state taintState, dst ssa.Value, written LabelSet, symbol string, pos token.Pos) {
+	if dst == nil || written.IsEmpty() {
+		return
+	}
+	step := s.step("argument-write", "argument-write", valueName(dst), symbol, valueTypeOf(dst), s.fieldPathOf(dst), pos)
+	with := withStep(written, step)
+	key := s.pathKey(dst)
+	state.memory[key] = state.memory[key].Merge(with)
+	state.memory[key+"[*]"] = state.memory[key+"[*]"].Merge(with)
+	if field, isField := dst.(*ssa.FieldAddr); isField {
+		state.memory[key+fieldSuffix(field)] = state.memory[key+fieldSuffix(field)].Merge(with)
+	}
+	state.setValue(dst, with)
 }
 
 // unwrapWriteTarget looks through the conversions a destination argument
@@ -605,6 +641,11 @@ func unwrapWriteTarget(v ssa.Value) ssa.Value {
 		case *ssa.ChangeType:
 			v = x.X
 		case *ssa.Convert:
+			v = x.X
+		case *ssa.SliceToArrayPointer:
+			// An array-pointer destination — the shape an archsimd store can
+			// arrive through — addresses the same backing store as the slice
+			// it was converted from.
 			v = x.X
 		default:
 			return v
