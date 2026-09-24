@@ -408,7 +408,7 @@ against-the-pin comparison.
 | --- | --- | --- |
 | Shaded JLine ships `META-INF/native-image/org.jline/...` properties pointing at absent files (KT-68829) | `kosiFatJar` strips `META-INF/native-image/org.jline/**` and `org/jline/**` (the REPL/daemon classes kosi never calls) | fixed |
 | intellij-core registers services/extension points via ServiceLoader + XML; the 2.4.0 environment located its own jar via `PathUtil.getResourcePathForClass`, which cannot work in an image | Kotlin 2.4.20 registers the compiler's extension points in code (`KotlinCoreEnvironment.createApplicationEnvironment`) and dropped both the jar lookup and `CLIConfigurationKeys.INTELLIJ_PLUGIN_ROOT`, so the `kosi-ext/` descriptors and their materialization are gone; only the `idea.home.path` seed remains | fixed |
-| IntelliJ `EventDispatcher`/`Proxy` dynamic proxies | `native-metadata/proxy-config.json` registers one proxy group per listener interface; note this GraalVM wants the **array-of-interface-arrays** proxy config format, and reachability-metadata `proxy` entries passed via `-H:ConfigurationFileDirectories` did **not** register (see deviations) | fixed |
+| IntelliJ `EventDispatcher`/`Proxy` dynamic proxies | every listener interface a `Topic`, `EventDispatcher.create`, `ReflectionUtil.proxy` or descriptor `<listener topic>` names is derived from the jar into `native-metadata/kosi-psi` as a reachability-metadata `proxy` entry (GraalVM 25 registers these through `-H:ConfigurationFileDirectories`); the relocated `proxy-config.json` and the shaded-name group in the jar's own `META-INF/native-image` config named classes this jar does not carry and are gone | fixed |
 | `kotlin-reflect` retention | no `kotlin-reflect` anywhere; hand-rolled JSON writer/reader and arg parser | avoided by design |
 | build-time class-init clashes | `--initialize-at-run-time=...EarlyAccessRegistry`; `--trace-class-initialization` documents any further clashes | minimal list, grows on evidence |
 | reachability drift when the Kotlin pin bumps | `make native-metadata` re-runs the tracing agent over every fixture and deterministically re-merges (`scripts/merge-agent-metadata.py`); `make native-metadata-check` fails CI on drift | wired |
@@ -431,14 +431,20 @@ the whole surface is now re-derived from our own runs:
   `scripts/GenPsiReflection.java` (`make psi-metadata`; CI runs
   `make psi-metadata-check`), because an agent run registers only what it
   happened to wake: PSI element constructors and arrays, plugin-descriptor
-  services, `ServiceLoader` providers, and every Caffeine generated cache and
-  node class. Caffeine picks those by name from the builder's feature
-  combination, and the combination the Analysis API builds depends on the
-  project's size: fixtures never reached `FWA`, and reposilite, kuvasz and
-  http4k exited 3 on it (atom-tools#95).
-- `native-metadata/proxy-config.json` (the hand-maintained relocated
-  proxies) and the JetBrains seed (`native-metadata/jetbrains/`) are retired;
-  proxy groups arrive through the agent's reachability metadata now.
+  services, `ServiceLoader` providers and their interfaces, and every Caffeine
+  generated cache and node class. Caffeine picks those by name from the
+  builder's feature combination; a Java field or method typed by a Kotlin
+  declaration builds a combination no Kotlin-only fixture does, and every
+  mixed Java/Kotlin repository exited 3 on `WIA`/`FWA` (atom-tools#95,
+  pinned by `java-signature-kotlin-types` on the native subset). The same
+  audit of every reflective call site in the jar added the rest of the
+  platform's by-name surface: extension-point and code-registered service
+  types with their arrays, message-bus listener proxies, descriptor
+  listeners, stub-element-type holders, K1 slice and diagnostic holders,
+  fields named through `UnsafeAccess` wrappers, classes a method loads from
+  its own string constants, and lz4/xxhash. `-H:IncludeResources` gained
+  `misc/*.properties` (the IntelliJ Registry's bundled defaults, read for
+  every key without one) and `kotlinManifest.properties`.
 - The fat jar carries the kotlin-stdlib JAR FILE as a resource
   (`kosi-libs/kotlin-stdlib.jar`): the native resolved tier materializes it
   to a temp jar at run time as the module provider's stdlib binary root —
