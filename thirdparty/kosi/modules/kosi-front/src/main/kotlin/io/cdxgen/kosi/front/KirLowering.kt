@@ -2376,10 +2376,10 @@ object KirLowering {
             // paths until the depth cap (`deflationBuffer.Deflater.FULL_FLUSH
             // .Deflater.FULL_FLUSH.*`), over a thousand facts per key, and
             // the run did not finish (atom-tools#95). One register per
-            // qualifier per function, never stored, like `v super`: a static
+            // qualifier per function, never stored, like `v super` (but spaceless: the KIR text form splits on spaces): a static
             // member read through it carries only what was written through
             // it in this function (a Kotlin `object`'s field).
-            lambdaContext?.resolveQualifier?.invoke(psi)?.let { return "v static:" + it.replace('.', '/') }
+            lambdaContext?.resolveQualifier?.invoke(psi)?.let { return "vstatic:" + it.replace('.', '/') }
             // A stored field read, carried by the access path over the
             // CURRENT `this` (a scope function's receiver when inside an
             // inlined apply/run/with).
