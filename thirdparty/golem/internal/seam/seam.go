@@ -194,6 +194,15 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 		return NewLabelSet()
 	}
 
+	// A builtin (append, copy, min, max, …) has no static callee and is not an
+	// invoke, so every resolution path below returns an empty set for it and
+	// taint silently died at every append-shaped hop. The value-moving ones are
+	// handled explicitly here rather than by widening isSuppliedFuncValue,
+	// which would blur every unresolved dynamic call into a passthrough.
+	if builtin, ok := common.Value.(*ssa.Builtin); ok {
+		return resolveBuiltinTaint(builtin, argLabels)
+	}
+
 	callee := e.throughLinkname(common.StaticCallee())
 
 	// Interface dispatch: resolve through the implements-index and merge
@@ -268,6 +277,27 @@ func isSuppliedFuncValue(v ssa.Value) bool {
 		}
 	}
 	return false
+}
+
+// resolveBuiltinTaint returns the result taint of a builtin call.
+//
+// argLabels is the caller's union over every argument of the argument's own
+// taint and its variadic-element view, which is exactly what append and min/max
+// return: a value derived from what was passed in. append's spread form
+// (`append(x, y...)`) passes y directly and the packed form (`append(x, a, b)`)
+// arrives as a fresh varargs slice whose elements' taint the variadic view
+// already carries, so both shapes are covered without inspecting Ellipsis.
+//
+// copy moves data through memory instead of returning it — its write is applied
+// by (*intra).applyBuiltinArgumentWrites — and its count result is clean. Every
+// other builtin keeps the previous behaviour of a clean result.
+func resolveBuiltinTaint(builtin *ssa.Builtin, argLabels LabelSet) LabelSet {
+	switch builtin.Name() {
+	case "append", "min", "max":
+		return argLabels
+	default:
+		return NewLabelSet()
+	}
 }
 
 // resolveStaticCallTaint handles a call with a known static callee.

@@ -1,8 +1,8 @@
 {
   "note": "Corpus cases where SEAM is knowingly allowed to differ from the legacy engine, each with a reason. The list is a ratchet in both directions: an unlisted difference fails, and a listed case that starts matching fails too. Most differences are now SEAM wins - flows SEAM finds that legacy cannot, because its summaries iterate to a fixpoint over the SCC condensation, because it carries taint through package-level globals, or because its model database covers cgo and template-injection sinks legacy has no rule family for.",
   "cases": {
-    "append-taint/all": "As append-taint/security.",
-    "append-taint/security": "SEAM returns an empty set for the append builtin: its CallCommon.Value is an *ssa.Builtin with no static callee, so none of the four append shapes (spread, single element, loop accumulator, packed varargs) reach the sink. Legacy's walker handles append directly and reports one flow per shape (defect 35).",
+    "copy-taint/all": "As copy-taint/security.",
+    "copy-taint/security": "SEAM models the copy builtin's write into its destination (defect 36 closed for SEAM), so CopySlice reports the flow; legacy has no builtin handling and reports nothing. CopyArray stays failed in both engines until writes through a re-slice reach the base (defect 37).",
     "cgo-string-roundtrip/all": "Under --dataflow all SEAM reports three native-interop slices where legacy reports two, one per cgo boundary call rather than collapsing the pair that share a source. The command-execution flow is identical. Same cause as cgo-string-roundtrip/security: SEAM recognises every _Cfunc_ wrapper and models the conversion functions, so it is stricter, not different.",
     "cgo-string-roundtrip/security": "SEAM recognises every cgo wrapper via the _Cfunc_ prefix sink and models the conversion functions, so it reports four slices (one per boundary call plus the command-execution flow); legacy reports three (it has no source for C.GoString and so collapses the duplicate). The shape SEAM reports is correct, just stricter.",
     "context-value/all": "As context-value/security.",

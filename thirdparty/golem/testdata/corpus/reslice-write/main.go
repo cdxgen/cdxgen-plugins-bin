@@ -18,7 +18,7 @@ func resliceWrite(in []byte) []byte {
 }
 
 // ResliceWrite: the taint written through o must be visible when out is read.
-// golem:want flow source=http-input sink=command-execution known-fail=seam:37 known-fail=legacy:37
+// golem:want flow source=http-input sink=command-execution sinkFn=~ResliceWrite known-fail=seam:37 known-fail=legacy:37
 func ResliceWrite(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := resliceWrite(in)
@@ -26,8 +26,9 @@ func ResliceWrite(r *http.Request) {
 }
 
 // ResliceOfOther writes through a re-slice of a DIFFERENT allocation, so out
-// must stay clean.
-// golem:want-not flow source=http-input sink=command-execution
+// must stay clean. Scoped to this function; the positive handler legitimately
+// produces the same category pair.
+// golem:want-not flow source=http-input sink=command-execution sinkFn=~ResliceOfOther
 func ResliceOfOther(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := make([]byte, len(in)+1)

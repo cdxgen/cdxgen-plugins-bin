@@ -478,6 +478,7 @@ func (s *intra) transferCall(state taintState, common *ssa.CallCommon, pos token
 	}
 	result := s.engine.resolveCallTaint(s.fn, common, argLabels, recvLabels, pos, argAt)
 	s.applyCallArgumentWrites(state, common, argLabels, pos)
+	s.applyBuiltinArgumentWrites(state, common, pos)
 	if result.IsEmpty() {
 		return result
 	}
@@ -536,6 +537,54 @@ func (s *intra) applyCallArgumentWrites(state taintState, common *ssa.CallCommon
 		if field, isField := target.(*ssa.FieldAddr); isField {
 			state.memory[key+fieldSuffix(field)] = state.memory[key+fieldSuffix(field)].Merge(written)
 		}
+	}
+}
+
+// applyBuiltinArgumentWrites deposits taint into the memory a builtin call
+// writes through, using the same write pattern as applyCallArgumentWrites.
+//
+// Only copy moves data this way today: it writes src — including its `[*]`
+// element view, and whatever string the taint arrived on — into dst's backing
+// store and returns a clean count. Without it, `copy(out, in)` silently
+// laundered the flow the same way every unresolved builtin did.
+func (s *intra) applyBuiltinArgumentWrites(state taintState, common *ssa.CallCommon, pos token.Pos) {
+	if common == nil {
+		return
+	}
+	builtin, ok := common.Value.(*ssa.Builtin)
+	if !ok {
+		return
+	}
+	switch builtin.Name() {
+	case "copy":
+		if len(common.Args) != 2 {
+			return
+		}
+		src := common.Args[1]
+		labels := s.taintOf(state, src).Merge(s.variadicElementTaint(state, src))
+		if labels.IsEmpty() {
+			return
+		}
+		dst := unwrapWriteTarget(unwrapAddr(common.Args[0]))
+		if dst == nil {
+			return
+		}
+		step := s.step("argument-write", "argument-write", valueName(dst), callSymbolOf(common), valueTypeOf(dst), s.fieldPathOf(dst), pos)
+		written := withStep(labels, step)
+		key := s.pathKey(dst)
+		state.memory[key] = state.memory[key].Merge(written)
+		// A read of dst's elements looks through the `[*]` view, the way
+		// applyCallArgumentWrites records it.
+		state.memory[key+"[*]"] = state.memory[key+"[*]"].Merge(written)
+		if field, isField := dst.(*ssa.FieldAddr); isField {
+			state.memory[key+fieldSuffix(field)] = state.memory[key+fieldSuffix(field)].Merge(written)
+		}
+		// The destination of copy is usually a slice VALUE rather than an
+		// address, and a direct read of it (`string(out)`) is answered from
+		// the value map: evaluate() never consults the destination's memory
+		// key. Depositing the taint on the value as well is what lets the
+		// flow continue past the call.
+		state.setValue(dst, written)
 	}
 }
 
