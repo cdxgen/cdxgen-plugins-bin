@@ -59,7 +59,9 @@ go mod vendor
 if ($LASTEXITCODE -ne 0) { throw "go mod vendor failed for trivy-cdxgen" }
 go run ./overlay
 if ($LASTEXITCODE -ne 0) { throw "overlay/patches no longer apply to the vendored Trivy" }
-go build -mod=vendor -overlay=.overlay/overlay.json -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
+# Quoted: PowerShell splits an unquoted native argument at "=." and would
+# pass ".overlay/overlay.json" to go as a package path.
+go build -mod=vendor "-overlay=.overlay/overlay.json" -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
 if ($LASTEXITCODE -ne 0) { throw "go build failed for trivy-cdxgen" }
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
