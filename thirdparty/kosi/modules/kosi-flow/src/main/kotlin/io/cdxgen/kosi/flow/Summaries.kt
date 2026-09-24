@@ -53,6 +53,19 @@ internal fun functionKey(f: KirFunction): String = f.canonicalName + "\u0000" + 
 /** The key of a function known by name only (a lambda's canonical). */
 internal fun functionKeyByName(canonicalName: String): String = canonicalName + "\u0000"
 
+/** Visits per SCC member after which a still-moving SCC widens its paths (see Summarizer). */
+internal const val ADAPTIVE_ROUNDS = 4
+
+/**
+ * ...and whose visits hold more than this many facts on one key. Rounds
+ * alone also catch a small recursive SCC that is merely slow to settle
+ * (class-delegation's decorator cycle), whose exact paths carry a real flow.
+ */
+internal const val ADAPTIVE_KEY_FACTS = 256
+
+/** One key's fact count at which a single summary analysis widens on its own ([SummaryAnalysis.exploded]). */
+internal const val EXPLOSION_KEY_FACTS = 10_000
+
 /** `KOSI_TRACE` set: name summary visits over 200 ms on stderr (a measurement aid, like the effect-budget trace). */
 private val TRACE_SLOW = !System.getenv("KOSI_TRACE").isNullOrBlank()
 
@@ -291,6 +304,41 @@ internal class FunctionSummary(
      */
     val paramPathToReturnPath: Map<Int, Set<String>> = emptyMap(),
 ) {
+    /**
+     * The summary's own path channels under [SummaryPaths]' rules: each path
+     * cycle-collapsed, and a parameter's set past [SummaryPaths.WIDEN_AT]
+     * widened to first segment plus `*`. Applied only to an ADAPTIVE SCC
+     * (see Summarizer): facts are bounded by the normaliser, but the moves a
+     * summary records (`a.b` -> `c.d`) grew on their own and kept http4k's
+     * ChaosTriggers cycle running to its visit budget.
+     */
+    fun widenPaths(): FunctionSummary {
+        fun widenSet(paths: Set<String>, one: (String) -> String, wide: (String) -> String): Set<String> {
+            val collapsed = paths.mapTo(sortedSetOf(), one)
+            return if (collapsed.size <= SummaryPaths.WIDEN_AT) collapsed else collapsed.mapTo(sortedSetOf(), wide)
+        }
+        fun first(p: String) = if ('.' in p) p.substringBefore('.') + ".*" else p
+        fun pair(m: String, f: (String) -> String) = f(m.substringBefore('\u0000')) + "\u0000" + f(m.substringAfter('\u0000'))
+        val fields = paramFieldToReturn.mapValues { (_, v) -> widenSet(v, ::collapseCycle, ::first) }
+        return FunctionSummary(
+            function = function, paramToReturn = paramToReturn, paramToParam = paramToParam,
+            paramFieldWrites = paramFieldWrites, receiverWrites = receiverWrites, sinkEffects = sinkEffects,
+            sourceReturns = sourceReturns, sanitizes = sanitizes, invokedParams = invokedParams, origin = origin,
+            paramToReturnPaths = paramToReturnPaths, paramToReturnFields = paramToReturnFields,
+            paramToReturnFieldPaths = paramToReturnFieldPaths, sourceFieldWrites = sourceFieldWrites,
+            invokedBinds = invokedBinds, invokedArgSinks = invokedArgSinks, sourceReturnFields = sourceReturnFields,
+            sourceReturnFieldPaths = sourceReturnFieldPaths,
+            paramFieldToReturn = fields,
+            paramFieldToReturnPaths = paramFieldToReturnPaths.filterKeys { key ->
+                val param = key.substringBefore('\u0000').toIntOrNull()
+                param != null && key.substringAfter('\u0000') in fields[param].orEmpty()
+            },
+            paramPathToReturnPath = paramPathToReturnPath.mapValues { (_, v) ->
+                widenSet(v, { pair(it, ::collapseCycle) }, { pair(it, ::first) })
+            },
+        )
+    }
+
     fun sameAs(other: FunctionSummary): Boolean =
         paramToReturn == other.paramToReturn &&
             paramToParam == other.paramToParam &&
@@ -943,7 +991,25 @@ internal class Summarizer(
             )
             val hit = { capHits++ }
             val sccStarted = if (TRACE_SLOW) System.nanoTime() else 0L
+            // ADAPTIVE widening (atom-tools#95): an SCC still moving after
+            // ADAPTIVE_ROUNDS visits per member WHILE one of its keys holds
+            // more than ADAPTIVE_KEY_FACTS facts is growing access paths, not
+            // converging — http4k's 17-member InputStream.read cycle ran 170
+            // rounds with single visits past four seconds and climbing,
+            // bound for the visit budget, whose fallback publishes the last
+            // iterate as recursive-approx anyway. Widening from there
+            // converges it; an SCC that converges normally (every fixture's)
+            // never reaches the switch and keeps exact paths.
+            val adaptiveAfter = members.size.toLong() * ADAPTIVE_ROUNDS
+            var adaptive = false
+            var exploding = false
+            var joining = false
             while (worklist.isNotEmpty()) {
+                if (!adaptive && !options.pathWidening && exploding && rounds > adaptiveAfter) {
+                    adaptive = true
+                    skipped.merge("summary-scc-adaptive-widening", 1, Int::plus)
+                    if (TRACE_SLOW) System.err.println("TRACE: adaptive-widening scc=${members.size} first=${members.first()}")
+                }
                 if (rounds++ > visitBudget) {
                     hit()
                     break
@@ -973,12 +1039,14 @@ internal class Summarizer(
                         continue
                     }
                     val started = if (TRACE_SLOW) System.nanoTime() else 0L
-                    val analysis = computeSummary(cf, reads)
+                    val analysis = computeSummary(cf, reads, options.pathWidening || adaptive)
                     if (TRACE_SLOW) {
                         val ms = (System.nanoTime() - started) / 1_000_000
-                        if (ms >= 200) System.err.println("TRACE: slow-summary ${ms}ms $member scc=${members.size} round=$rounds")
+                        if (ms >= 200) System.err.println("TRACE: slow-summary ${ms}ms $member scc=${members.size} round=$rounds peakKeyFacts=${analysis.maxKeyFacts} widened=${analysis.pathWidenings}")
                     }
                     composedPathDrops += analysis.composedPathDrops
+                    if (analysis.maxKeyFacts > ADAPTIVE_KEY_FACTS) exploding = true
+                    if (analysis.exploded) skipped.merge("summary-fact-explosion", 1, Int::plus)
                     if (analysis.pathWidenings > 0) skipped.merge("summary-path-widening", analysis.pathWidenings, Int::plus)
                     if (analysis.overBudget) {
                         // The state or the escape set exploded past its
@@ -1009,6 +1077,22 @@ internal class Summarizer(
                 for (key in reads.observed) {
                     dependents.getOrPut(key) { sortedSetOf() }.add(member)
                 }
+                // MONOTONE past the adaptive point (atom-tools#95): a visit
+                // REPLACES the member's summary, which is right while the SCC
+                // is settling, but a recursive SCC can then OSCILLATE forever
+                // (http4k: BodyTest's read ran paramFieldToReturn 27, 5, 16,
+                // 21, 5, 10 ... for 546 rounds, to the visit budget). Joining
+                // the previous summary from there makes the iteration
+                // ascending, so it converges; a join only ADDS effects, so no
+                // flow is dropped. SCCs that settle first never reach it.
+                if (union != null && previousSummary != null && rounds > adaptiveAfter) {
+                    if (!joining) {
+                        joining = true
+                        skipped.merge("summary-scc-join", 1, Int::plus)
+                    }
+                    union = previousSummary.join(union)
+                }
+                if (union != null && adaptive) union = union.widenPaths()
                 val nowSummary = if (union != null) union else table[member]
                 if (union != null) table[member] = union
                 // A change is a change in EITHER direction: a new or altered
@@ -1069,6 +1153,10 @@ internal class Summarizer(
         val overBudget: Boolean,
         val composedPathDrops: Int,
         val pathWidenings: Int,
+        /** The largest fact set any one key held at the end of the visit. */
+        val maxKeyFacts: Int,
+        /** The visit crossed [EXPLOSION_KEY_FACTS] and widened itself. */
+        val exploded: Boolean,
     )
 
     /**
@@ -1124,10 +1212,14 @@ internal class Summarizer(
         }
     }
 
-    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): SummaryOutcome {
-        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
+    private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>, widen: Boolean = options.pathWidening): SummaryOutcome {
+        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps, widen)
         analysis.run()
-        return SummaryOutcome(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops, analysis.pathWidenings)
+        val summary = analysis.toSummary().let { if (analysis.exploded) it.widenPaths() else it }
+        return SummaryOutcome(
+            summary, analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops,
+            analysis.pathWidenings, analysis.maxKeyFacts(), analysis.exploded,
+        )
     }
 }
 
@@ -1188,9 +1280,12 @@ internal object Tarjan {
 
 /** Summary facts derive along field reads of their parameter roots only. */
 internal class SummaryFactOps(
-    /** `--dataflow-path-widening`: collapse repeated segments ([collapseCycle]). */
-    private val collapseCycles: Boolean = false,
+    /** `--dataflow-path-widening`, or an exploded analysis: collapse repeated segments ([collapseCycle]). */
+    private val collapse: () -> Boolean = { false },
 ) : FactOps<SummaryFact> {
+    constructor(collapseCycles: Boolean) : this({ collapseCycles })
+    private val collapseCycles: Boolean get() = collapse()
+
     override fun categoryOf(fact: SummaryFact): String = fact.category
 
     override fun deriveOnFieldRead(fact: SummaryFact, suffix: String): SummaryFact? =
@@ -1198,7 +1293,7 @@ internal class SummaryFactOps(
 
     companion object {
         /** Exact paths: what every run uses unless widening is asked for. */
-        val EXACT = SummaryFactOps()
+        val EXACT = SummaryFactOps({ false })
     }
 }
 
@@ -1402,14 +1497,52 @@ internal class SummaryAnalysis(
     private val originLabel: String = SummaryOrigin.COMPUTED,
     /** The `--deps` tier, for call sites whose callee lives in a jar. */
     private val deps: TaintEngine.DepsTier? = null,
+    /** Path widening for this analysis: the option, or the SCC's adaptive switch (see Summarizer). */
+    private val widen: Boolean = options.pathWidening,
 ) : TransferHost<SummaryFact, Boolean> {
-    override val ops = if (options.pathWidening) SummaryFactOps(collapseCycles = true) else SummaryFactOps.EXACT
+    /**
+     * True once a key in THIS analysis passed [EXPLOSION_KEY_FACTS] facts
+     * (atom-tools#95: http4k's ChaosTriggers held 1,034,543 on one key, a
+     * `Function1.invoke` dispatch joining every lambda's field paths). From
+     * then on this visit widens as if `--dataflow-path-widening` were on, and
+     * the summary it publishes is path-widened; counted as
+     * `summary-fact-explosion`. No fixture comes near the threshold.
+     */
+    var exploded = false
+        private set
+    override val ops = SummaryFactOps { widen || exploded }
+
+    /**
+     * The largest fact set one key reached while callee summaries were
+     * applied: the adaptive widening's explosion signal. Measured at the
+     * application, not at the end of the visit, because a strong update
+     * later in the body overwrites the key that exploded.
+     */
+    private var peakKeyFacts = 0
+    fun maxKeyFacts(): Int = maxOf(peakKeyFacts, state.map.values.maxOfOrNull { it.size } ?: 0)
 
     /** Facts [SummaryPaths] widened in this analysis; published as `summary-path-widening`. */
     var pathWidenings: Int = 0
         private set
-    override val normalizer: ((java.util.TreeSet<SummaryFact>) -> Unit)? =
-        if (options.pathWidening) { set -> pathWidenings += SummaryPaths.normalize(set) } else null
+    /**
+     * Each set's size after its last normalisation, by identity: a set is
+     * normalised again only once it has DOUBLED since, so the grouping pass
+     * is amortised over insertions instead of rerun on every one (it was
+     * the next hot frame on http4k once widening engaged). Deterministic:
+     * the same insertions reach the same sizes in the same order.
+     */
+    private val normalizedAt = java.util.IdentityHashMap<java.util.TreeSet<SummaryFact>, Int>()
+
+    override val normalizer: ((java.util.TreeSet<SummaryFact>) -> Unit)? = normalize@{ set ->
+        if (!widen && !exploded) {
+            if (set.size <= EXPLOSION_KEY_FACTS) return@normalize
+            exploded = true
+        }
+        val last = normalizedAt[set]
+        if (last != null && set.size < last * 2) return@normalize
+        pathWidenings += SummaryPaths.normalize(set)
+        normalizedAt[set] = maxOf(set.size, NORMALIZE_AT)
+    }
     override val pack = pack
     override val unknownCallPropagate = options.unknownCallPropagate
     override val fieldSensitive = options.accessPathDepth > 0
@@ -2089,6 +2222,26 @@ internal class SummaryAnalysis(
      * through a known lambda.
      */
     private fun applySummaryWith(
+        summary: FunctionSummary,
+        binding: (Int) -> String?,
+        result: String?,
+        site: Int,
+        origin: String,
+        state: FlowState<SummaryFact>,
+        chain: HashMap<ChainKey<SummaryFact>, Move>,
+    ) {
+        fun reg(register: String): TaintKey = TaintKey(register, "")
+        try {
+            applySummaryChannels(summary, binding, result, site, origin, state, chain)
+        } finally {
+            if (result != null) {
+                val n = state.factsOf(reg(result)).size
+                if (n > peakKeyFacts) peakKeyFacts = n
+            }
+        }
+    }
+
+    private fun applySummaryChannels(
         summary: FunctionSummary,
         binding: (Int) -> String?,
         result: String?,
