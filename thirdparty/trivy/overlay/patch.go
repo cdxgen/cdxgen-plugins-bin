@@ -26,8 +26,10 @@ type hunk struct {
 // parsePatch reads a unified diff as `diff -u` writes it. Text before the first
 // `--- ` header is a free-form description and is skipped. Only modifications
 // and deletions are supported: every patched file must already be vendored.
+// CRLF line endings, as a Windows checkout may produce, are read as LF: the
+// vendored Go sources the hunks are matched against are LF-terminated.
 func parsePatch(text string) ([]filePatch, error) {
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var patches []filePatch
 	var cur *filePatch
 	var h *hunk

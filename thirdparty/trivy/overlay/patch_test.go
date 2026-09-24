@@ -68,6 +68,18 @@ func TestApplyToleratesStrippedBlankContextLines(t *testing.T) {
 	}
 }
 
+func TestApplyReadsCRLFPatches(t *testing.T) {
+	// A Windows checkout with core.autocrlf rewrites the patch files.
+	crlf := strings.ReplaceAll(patchText, "\n", "\r\n")
+	got, err := mustParse(t, crlf)[0].apply(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "\r") || strings.Contains(got, "heavy/dependency") {
+		t.Fatalf("CRLF patch applied incorrectly:\n%q", got)
+	}
+}
+
 func TestApplyFailsWhenUpstreamChanged(t *testing.T) {
 	changed := strings.Replace(original, "dependency.Value", "dependency.Other", 1)
 	_, err := mustParse(t, patchText)[0].apply(changed)
