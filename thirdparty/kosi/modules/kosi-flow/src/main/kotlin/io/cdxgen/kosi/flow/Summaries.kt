@@ -66,6 +66,14 @@ internal const val ADAPTIVE_KEY_FACTS = 256
 /** One key's fact count at which a single summary analysis widens on its own ([SummaryAnalysis.exploded]). */
 internal const val EXPLOSION_KEY_FACTS = 10_000
 
+/**
+ * ...or once one visit has derived this many facts through callee
+ * summaries: a recursive function applying its own large summary at every
+ * call site (dagger's XTypeNames.replaceTypeVariablesWithBounds, 44 s in
+ * one visit) explodes in work before any single key reaches the count.
+ */
+internal const val EXPLOSION_DERIVATIONS = 500_000L
+
 /** `KOSI_TRACE` set: name summary visits over 200 ms on stderr (a measurement aid, like the effect-budget trace). */
 private val TRACE_SLOW = !System.getenv("KOSI_TRACE").isNullOrBlank()
 
@@ -1323,43 +1331,47 @@ internal object SummaryPaths {
 
     /** Returns how many facts step 3 replaced. */
     fun normalize(set: java.util.TreeSet<SummaryFact>): Int {
+        // Each (param, site, category) group is computed on its own path set
+        // and only its changes touch [set]: O(n log n). The first version
+        // re-filtered the whole set once per group, quadratic in the number
+        // of groups (46 s for one dagger visit, atom-tools#95).
         var widened = 0
-        val groups = set.groupBy { Triple(it.param, it.site, it.category) }
-        for ((group, facts) in groups) {
+        val groups = LinkedHashMap<Triple<Int?, Int?, String>, MutableList<SummaryFact>>()
+        for (f in set) groups.getOrPut(Triple(f.param, f.site, f.category)) { mutableListOf() }.add(f)
+        for (facts in groups.values) {
             if (facts.size < 2) continue
-            val stars = facts.mapNotNullTo(HashSet()) { f ->
-                if (f.path == "*") "" else if (f.path.endsWith(".*")) f.path.removeSuffix(".*") else null
-            }
+            val paths = facts.mapTo(java.util.TreeSet()) { it.path }
+            // 1. Subsumption by a star path.
+            val stars = paths.mapNotNullTo(HashSet()) { p -> if (p == "*") "" else if (p.endsWith(".*")) p.removeSuffix(".*") else null }
             if (stars.isNotEmpty()) {
-                for (f in facts) {
-                    if (f.path.isEmpty() || f.path == "*") continue
-                    val covered = stars.any { p ->
-                        if (p.isEmpty()) true else f.path != "$p.*" && f.path.startsWith("$p.")
+                paths.removeIf { p ->
+                    p.isNotEmpty() && p != "*" && stars.any { prefix ->
+                        if (prefix.isEmpty()) true else p != "$prefix.*" && p.startsWith("$prefix.")
                     }
-                    if (covered) set.remove(f)
                 }
             }
-            val remaining = facts.filter { it in set }
-            if (remaining.size <= WIDEN_AT) continue
-            for (f in remaining) {
-                if (f.path.isEmpty() || f.path == "*") continue
-                val first = f.path.substringBefore('.')
-                val wide = if (first == f.path) f.path else "$first.*"
-                if (wide != f.path) {
-                    set.remove(f)
-                    set.add(f.withPath(wide))
-                    widened++
+            // 2. Widening past the budget: first segment plus `*`, then `*`.
+            var replaced = 0
+            if (paths.size > WIDEN_AT) {
+                val wide = java.util.TreeSet<String>()
+                for (p in paths) {
+                    val w = if (p.isEmpty() || p == "*" || '.' !in p) p else p.substringBefore('.') + ".*"
+                    if (w != p) replaced++
+                    wide.add(w)
+                }
+                paths.clear()
+                paths.addAll(wide)
+                if (paths.size > WIDEN_AT) {
+                    replaced += paths.count { it.isNotEmpty() && it != "*" }
+                    paths.removeIf { it.isNotEmpty() && it != "*" }
+                    paths.add("*")
                 }
             }
-            val now = set.filter { Triple(it.param, it.site, it.category) == group }
-            if (now.size > WIDEN_AT) {
-                for (f in now) {
-                    if (f.path.isEmpty() || f.path == "*") continue
-                    set.remove(f)
-                    widened++
-                }
-                set.add(now.first().withPath("*"))
-            }
+            widened += replaced
+            val template = facts.first()
+            for (f in facts) if (f.path !in paths) set.remove(f)
+            val present = facts.mapTo(HashSet()) { it.path }
+            for (p in paths) if (p !in present) set.add(template.withPath(p))
         }
         return widened
     }
@@ -1510,6 +1522,16 @@ internal class SummaryAnalysis(
      */
     var exploded = false
         private set
+
+    /** Facts derived through callee summaries in this visit; see [EXPLOSION_DERIVATIONS]. */
+    private var derivations = 0L
+    private fun noteDerivations(n: Int) {
+        derivations += n
+        if (!exploded && derivations > EXPLOSION_DERIVATIONS) exploded = true
+    }
+
+    /** Callee summaries in widened form, once this visit widens (identity: summaries are immutable). */
+    private val widenedSummaries = java.util.IdentityHashMap<FunctionSummary, FunctionSummary>()
     override val ops = SummaryFactOps { widen || exploded }
 
     /**
@@ -2231,8 +2253,11 @@ internal class SummaryAnalysis(
         chain: HashMap<ChainKey<SummaryFact>, Move>,
     ) {
         fun reg(register: String): TaintKey = TaintKey(register, "")
+        // Once this visit has exploded, callees apply in their path-widened
+        // form: the exact summary's channels are what made the visit explode.
+        val applied = if (widen || exploded) widenedSummaries.getOrPut(summary) { summary.widenPaths() } else summary
         try {
-            applySummaryChannels(summary, binding, result, site, origin, state, chain)
+            applySummaryChannels(applied, binding, result, site, origin, state, chain)
         } finally {
             if (result != null) {
                 val n = state.factsOf(reg(result)).size
@@ -2280,6 +2305,7 @@ internal class SummaryAnalysis(
                     val fromPath = move.substringBefore('\u0000')
                     val toPath = move.substringAfter('\u0000')
                     val (fromKey, derived) = readAtPath(state, from, fromPath, aliases.aliasClass(from), ops)
+                    noteDerivations(derived.size)
                     if (derived.isEmpty()) continue
                     val toKey = TaintKey(result, toPath)
                     state.addFacts(toKey, derived)
@@ -2292,6 +2318,7 @@ internal class SummaryAnalysis(
                 val from = binding(param) ?: continue
                 for (suffix in suffixes.sorted()) {
                     val (fromKey, derived) = readAtPath(state, from, suffix, aliases.aliasClass(from), ops)
+                    noteDerivations(derived.size)
                     if (derived.isEmpty()) continue
                     state.addFacts(resultKey, derived)
                     val via = summary.paramFieldToReturnPaths["$param\u0000$suffix"].orEmpty()
