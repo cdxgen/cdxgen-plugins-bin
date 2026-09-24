@@ -1,0 +1,351 @@
+pkg/flag keeps every flag group, so trivy-cdxgen still accepts and ignores
+the same flags, environment variables and trivy.yaml keys as before. What
+goes is what the flag package imported only for defaults and option helpers
+the wrapper never calls:
+
+- rego, policy, result and the DB packages for default values, inlined;
+- k8s.io/api for the toleration type of the Kubernetes flags;
+- pkg/vex for the type of the VEX sources;
+- pkg/result, pkg/rpc/client and pkg/plugin for FilterOpts,
+  RemoteCacheOpts, ClientScannerOpts and output plugins.
+
+The runner rejects --server, --output plugin=... and a redis cache backend
+before scanning, so none of those paths is reachable.
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/rego_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/rego_flags.go
+@@ -1,9 +1,5 @@
+ package flag
+ 
+-import (
+-	"github.com/aquasecurity/trivy/pkg/iac/rego"
+-)
+-
+ // e.g. config yaml:
+ //
+ //	rego:
+@@ -83,7 +79,7 @@
+ 		ConfigName:    "rego.error-limit",
+ 		Usage:         "maximum number of compile errors allowed during Rego policy evaluation",
+ 		TelemetrySafe: true,
+-		Default:       rego.DefaultAllowedRegoErrors,
++		Default:       10, // trivy-cdxgen: rego.DefaultAllowedRegoErrors; the rego engine is not linked
+ 	}
+ )
+ 
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/misconf_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/misconf_flags.go
+@@ -1,13 +1,10 @@
+ package flag
+ 
+ import (
+-	"fmt"
+-
+ 	"github.com/samber/lo"
+ 
+ 	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
+ 	"github.com/aquasecurity/trivy/pkg/fanal/types"
+-	"github.com/aquasecurity/trivy/pkg/policy"
+ 	xstrings "github.com/aquasecurity/trivy/pkg/x/strings"
+ )
+ 
+@@ -88,7 +85,7 @@
+ 	ChecksBundleRepositoryFlag = Flag[string]{
+ 		Name:       "checks-bundle-repository",
+ 		ConfigName: "misconfiguration.checks-bundle-repository",
+-		Default:    fmt.Sprintf("%s:%d", policy.BundleRepository, policy.BundleVersion),
++		Default:    "mirror.gcr.io/aquasec/trivy-checks:2", // trivy-cdxgen: policy.BundleRepository:policy.BundleVersion; the checks bundle client is not linked
+ 		Usage:      "OCI registry URL to retrieve checks bundle from",
+ 		Aliases: []Alias{
+ 			{
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/report_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/report_flags.go
+@@ -13,7 +13,6 @@
+ 	"github.com/aquasecurity/trivy/pkg/cache"
+ 	"github.com/aquasecurity/trivy/pkg/compliance/spec"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/result"
+ 	"github.com/aquasecurity/trivy/pkg/types"
+ 	"github.com/aquasecurity/trivy/pkg/utils/fsutils"
+ 	xslices "github.com/aquasecurity/trivy/pkg/x/slices"
+@@ -68,7 +67,7 @@
+ 	IgnoreFileFlag = Flag[string]{
+ 		Name:       "ignorefile",
+ 		ConfigName: "ignorefile",
+-		Default:    result.DefaultIgnoreFile,
++		Default:    ".trivyignore", // trivy-cdxgen: result.DefaultIgnoreFile; result filtering is not linked
+ 		Usage:      "specify .trivyignore file",
+ 	}
+ 	IgnorePolicyFlag = Flag[string]{
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/options.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/options.go
+@@ -23,9 +23,6 @@
+ 	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
+ 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/plugin"
+-	"github.com/aquasecurity/trivy/pkg/result"
+-	"github.com/aquasecurity/trivy/pkg/rpc/client"
+ 	"github.com/aquasecurity/trivy/pkg/types"
+ 	"github.com/aquasecurity/trivy/pkg/version/app"
+ )
+@@ -542,19 +539,7 @@
+ 	}
+ }
+ 
+-// FilterOpts returns options for filtering
+-func (o *Options) FilterOpts() result.FilterOptions {
+-	return result.FilterOptions{
+-		Severities:         o.Severities,
+-		IgnoreStatuses:     o.IgnoreStatuses,
+-		IncludeNonFailures: o.IncludeNonFailures,
+-		IgnoreFile:         o.IgnoreFile,
+-		PolicyFile:         o.IgnorePolicy,
+-		IgnoreLicenses:     o.IgnoredLicenses,
+-		CacheDir:           o.CacheDir,
+-		VEXSources:         o.VEXSources,
+-	}
+-}
++// trivy-cdxgen: FilterOpts is removed; result filtering is not linked.
+ 
+ // CacheOpts returns options for scan cache
+ func (o *Options) CacheOpts() cache.Options {
+@@ -566,26 +551,13 @@
+ 		RedisKey:    o.RedisKey,
+ 		RedisTLS:    o.RedisTLS,
+ 		TTL:         o.CacheTTL,
+-	}
+-}
+-
+-// RemoteCacheOpts returns options for remote scan cache
+-func (o *Options) RemoteCacheOpts() cache.RemoteOptions {
+-	return cache.RemoteOptions{
+-		ServerAddr:    o.ServerAddr,
+-		CustomHeaders: o.CustomHeaders,
+-		PathPrefix:    o.PathPrefix,
+ 	}
+ }
+ 
+-func (o *Options) ClientScannerOpts() client.ServiceOption {
+-	return client.ServiceOption{
+-		RemoteURL:     o.ServerAddr,
+-		CustomHeaders: o.CustomHeaders,
+-		PathPrefix:    o.PathPrefix,
+-	}
+-}
++// trivy-cdxgen: RemoteCacheOpts is removed; client/server mode is not linked.
+ 
++// trivy-cdxgen: ClientScannerOpts is removed; client/server mode is not linked.
++
+ // SetOutputWriter sets an output writer.
+ func (o *Options) SetOutputWriter(w io.Writer) {
+ 	o.outputWriter = w
+@@ -616,41 +588,9 @@
+ 	return o.usedFlags
+ }
+ 
+-func (o *Options) outputPluginWriter(ctx context.Context) (writer io.Writer, cleanup func() error, err error) {
+-	pluginName := strings.TrimPrefix(o.Output, "plugin=")
+-
+-	pr, pw := io.Pipe()
+-
+-	// Close pipes on error
+-	defer func() {
+-		if err != nil {
+-			if pr != nil {
+-				pr.Close()
+-			}
+-			if pw != nil {
+-				pw.Close()
+-			}
+-		}
+-	}()
+-
+-	wait, err := plugin.Start(ctx, pluginName, plugin.Options{
+-		Args:  o.OutputPluginArgs,
+-		Stdin: pr,
+-	})
+-	if err != nil {
+-		return nil, nil, xerrors.Errorf("plugin start: %w", err)
+-	}
+-
+-	cleanup = func() error {
+-		if err = pw.Close(); err != nil {
+-			return xerrors.Errorf("failed to close pipe: %w", err)
+-		}
+-		if err = wait(); err != nil {
+-			return xerrors.Errorf("plugin error: %w", err)
+-		}
+-		return nil
+-	}
+-	return pw, cleanup, nil
++// trivy-cdxgen: output plugins are not linked.
++func (o *Options) outputPluginWriter(context.Context) (io.Writer, func() error, error) {
++	return nil, nil, xerrors.Errorf("output plugins (--output %s) are not supported by trivy-cdxgen", o.Output)
+ }
+ 
+ // groups returns all the flag groups other than global flags
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/kubernetes_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/kubernetes_flags.go
+@@ -6,9 +6,30 @@
+ 	"strings"
+ 
+ 	"golang.org/x/xerrors"
+-	corev1 "k8s.io/api/core/v1"
+ )
+ 
++// trivy-cdxgen: the Kubernetes scanner is not linked, and neither is
++// k8s.io/api. These are the parts of its core/v1 API this parser uses.
++type (
++	taintEffect        string
++	tolerationOperator string
++	k8sToleration      struct {
++		Key               string
++		Operator          tolerationOperator
++		Value             string
++		Effect            taintEffect
++		TolerationSeconds *int64
++	}
++)
++
++var corev1 = struct {
++	TaintEffectNoSchedule       taintEffect
++	TaintEffectPreferNoSchedule taintEffect
++	TaintEffectNoExecute        taintEffect
++	TolerationOpEqual           tolerationOperator
++	TolerationOpExists          tolerationOperator
++}{"NoSchedule", "PreferNoSchedule", "NoExecute", "Equal", "Exists"}
++
+ var (
+ 	KubeConfigFlag = Flag[string]{
+ 		Name:       "kubeconfig",
+@@ -113,7 +134,7 @@
+ type K8sOptions struct {
+ 	KubeConfig             string
+ 	K8sVersion             string
+-	Tolerations            []corev1.Toleration
++	Tolerations            []k8sToleration
+ 	NodeCollectorImageRef  string
+ 	NodeCollectorNamespace string
+ 	ExcludeOwned           bool
+@@ -214,28 +235,28 @@
+ 	return nil
+ }
+ 
+-func optionToTolerations(tolerationsOptions []string) ([]corev1.Toleration, error) {
+-	var tolerations []corev1.Toleration
++func optionToTolerations(tolerationsOptions []string) ([]k8sToleration, error) {
++	var tolerations []k8sToleration
+ 	for _, toleration := range tolerationsOptions {
+ 		tolerationParts := strings.Split(toleration, ":")
+ 		if len(tolerationParts) < 2 {
+-			return []corev1.Toleration{}, errors.New("toleration must include key and effect")
++			return []k8sToleration{}, errors.New("toleration must include key and effect")
+ 		}
+-		if corev1.TaintEffect(tolerationParts[1]) != corev1.TaintEffectNoSchedule &&
+-			corev1.TaintEffect(tolerationParts[1]) != corev1.TaintEffectPreferNoSchedule &&
+-			corev1.TaintEffect(tolerationParts[1]) != corev1.TaintEffectNoExecute {
+-			return []corev1.Toleration{}, errors.New("toleration effect must be a valid value")
++		if taintEffect(tolerationParts[1]) != corev1.TaintEffectNoSchedule &&
++			taintEffect(tolerationParts[1]) != corev1.TaintEffectPreferNoSchedule &&
++			taintEffect(tolerationParts[1]) != corev1.TaintEffectNoExecute {
++			return []k8sToleration{}, errors.New("toleration effect must be a valid value")
+ 		}
+ 		keyValue := strings.Split(tolerationParts[0], "=")
+ 		operator := corev1.TolerationOpEqual
+ 		if keyValue[1] == "" {
+ 			operator = corev1.TolerationOpExists
+ 		}
+-		toleration := corev1.Toleration{
++		toleration := k8sToleration{
+ 			Key:      keyValue[0],
+ 			Value:    keyValue[1],
+ 			Operator: operator,
+-			Effect:   corev1.TaintEffect(tolerationParts[1]),
++			Effect:   taintEffect(tolerationParts[1]),
+ 		}
+ 		var tolerationSec int
+ 		var err error
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/vulnerability_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/vulnerability_flags.go
+@@ -6,7 +6,6 @@
+ 	dbTypes "github.com/aquasecurity/trivy-db/pkg/types"
+ 	"github.com/aquasecurity/trivy-db/pkg/vulnsrc/vulnerability"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+-	"github.com/aquasecurity/trivy/pkg/vex"
+ 	xslices "github.com/aquasecurity/trivy/pkg/x/slices"
+ 	xstrings "github.com/aquasecurity/trivy/pkg/x/strings"
+ )
+@@ -58,7 +57,7 @@
+ 
+ type VulnerabilityOptions struct {
+ 	IgnoreStatuses      []dbTypes.Status
+-	VEXSources          []vex.Source
++	VEXSources          []string // trivy-cdxgen: []vex.Source; VEX filtering is not linked
+ 	SkipVEXRepoUpdate   bool
+ 	VulnSeveritySources []dbTypes.SourceID
+ }
+@@ -111,7 +110,7 @@
+ 
+ 	opts.VulnerabilityOptions = VulnerabilityOptions{
+ 		IgnoreStatuses:      ignoreStatuses,
+-		VEXSources:          xslices.Map(f.VEX.Value(), vex.NewSource),
++		VEXSources:          f.VEX.Value(),
+ 		SkipVEXRepoUpdate:   f.SkipVEXRepoUpdate.Value(),
+ 		VulnSeveritySources: xstrings.ToTSlice[dbTypes.SourceID](f.VulnSeveritySource.Value()),
+ 	}
+
+--- a/github.com/aquasecurity/trivy/pkg/flag/db_flags.go
++++ b/github.com/aquasecurity/trivy/pkg/flag/db_flags.go
+@@ -1,13 +1,14 @@
+ package flag
+ 
+ import (
++	"fmt"
+ 	"strconv"
+ 
+ 	"github.com/google/go-containerregistry/pkg/name"
+ 	"golang.org/x/xerrors"
+ 
+-	"github.com/aquasecurity/trivy/pkg/db"
+-	"github.com/aquasecurity/trivy/pkg/javadb"
++	trivydb "github.com/aquasecurity/trivy-db/pkg/db"
++	javadb "github.com/aquasecurity/trivy-java-db/pkg/db"
+ 	"github.com/aquasecurity/trivy/pkg/log"
+ )
+ 
+@@ -53,14 +54,16 @@
+ 	DBRepositoryFlag = Flag[[]string]{
+ 		Name:       "db-repository",
+ 		ConfigName: "db.repository",
+-		Default:    []string{db.DefaultGCRRepository, db.DefaultGHCRRepository},
+-		Usage:      "OCI repository(ies) to retrieve trivy-db in order of priority",
++		// trivy-cdxgen: db.DefaultGCRRepository and db.DefaultGHCRRepository; the DB downloader is not linked.
++		Default: []string{fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-db", trivydb.SchemaVersion), fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-db", trivydb.SchemaVersion)},
++		Usage:   "OCI repository(ies) to retrieve trivy-db in order of priority",
+ 	}
+ 	JavaDBRepositoryFlag = Flag[[]string]{
+ 		Name:       "java-db-repository",
+ 		ConfigName: "db.java-repository",
+-		Default:    []string{javadb.DefaultGCRRepository, javadb.DefaultGHCRRepository},
+-		Usage:      "OCI repository(ies) to retrieve trivy-java-db in order of priority",
++		// trivy-cdxgen: javadb.DefaultGCRRepository and javadb.DefaultGHCRRepository; the Java DB client is not linked.
++		Default: []string{fmt.Sprintf("%s:%d", "mirror.gcr.io/aquasec/trivy-java-db", javadb.SchemaVersion), fmt.Sprintf("%s:%d", "ghcr.io/aquasecurity/trivy-java-db", javadb.SchemaVersion)},
++		Usage:   "OCI repository(ies) to retrieve trivy-java-db in order of priority",
+ 	}
+ 	LightFlag = Flag[bool]{
+ 		Name:       "light",
+@@ -145,7 +148,7 @@
+ 
+ 	var dbRepositories, javaDBRepositories []name.Reference
+ 	for _, repo := range f.DBRepositories.Value() {
+-		ref, err := parseRepository(repo, db.SchemaVersion)
++		ref, err := parseRepository(repo, trivydb.SchemaVersion)
+ 		if err != nil {
+ 			return xerrors.Errorf("invalid DB repository: %w", err)
+ 		}

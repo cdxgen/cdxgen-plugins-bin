@@ -1,0 +1,3 @@
+# The overlay patches are applied byte-for-byte to LF-terminated Go sources;
+# a CRLF checkout (core.autocrlf on Windows) must not rewrite them.
+overlay/patches/*.patch text eol=lf

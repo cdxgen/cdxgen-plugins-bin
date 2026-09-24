@@ -38,11 +38,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: '3.13'
+      # `make local` builds through overlay/patches exactly like the release
+      # binaries, so the assertions below cover what ships.
       - name: Build local trivy-cdxgen
         working-directory: thirdparty/trivy
-        run: |
-          mkdir -p build
-          GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+        run: make local
       - name: Export image rootfs
         env:
           IMAGE_NAME: ${{ matrix.image_name }}

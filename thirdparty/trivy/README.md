@@ -8,17 +8,51 @@ Compared to the stock `cmd/trivy/main.go`, this wrapper is intentionally optimiz
 
 ### Command Restriction
 
-The wrapper exposes only three commands:
+The wrapper exposes only two commands:
 
-- `image` - scan a container image
 - `rootfs` - scan an unpacked root filesystem
 - `version` - print version information
 
 All other Trivy commands (config, secret, misconfig, license, etc.) are removed to reduce binary size and attack surface.
 
+There is no `image` command. cdxgen extracts container images itself and
+scans the resulting directory with `rootfs`; the `image` command this wrapper
+used to carry never scanned anything, because it lacked Trivy's image flag
+group and so always failed with "no image sources supplied". Without it, the
+registry, Docker, containerd and Podman clients, and the language analyzers
+only image scans enabled, are not linked.
+
+### Linked Trivy Subset
+
+Removing the commands is not enough on its own: Trivy's core packages import
+its misconfiguration, vulnerability, Kubernetes and client/server stacks for a
+handful of constants and types, so a plain build of this wrapper links almost
+all of Trivy. The release binaries are built so that only the scan pipeline
+the wrapper runs is linked (see [Slim Build](#slim-build)):
+
+- the CLI and scan runner are the wrapper's own (`main.go`, `runner.go`), in
+  place of `pkg/commands` and `pkg/commands/artifact`, which wire in every
+  Trivy subcommand;
+- only the analyzers the wrapper can enable are registered (`analyzers.go`),
+  in place of `pkg/fanal/analyzer/all`;
+- `overlay/patches` cuts the imports that linked the rest.
+
+Every flag, environment variable and `trivy.yaml` key `rootfs` accepted
+before is still accepted. The options that would select a code path
+the binary no longer carries fail with an explicit error instead of scanning
+some other way: `--server` (client/server mode), a `redis://` cache backend,
+`--sbom-sources`, `--output plugin=...` and `--download-java-db-only`; a
+failing command now prints its error to stderr. Result filtering
+(`.trivyignore`, `--ignore-policy`, `--vex`) no longer runs: an SBOM-only scan
+has no findings for it to filter. Misconfiguration, secret, license and
+vulnerability scanning were already forced off, WASM modules in
+`~/.trivy/modules` are no longer loaded, and `version` reports only the Trivy
+version: the wrapper never reads the vulnerability DB, Java DB or checks
+bundle whose metadata upstream prints there.
+
 ### Default Output Format
 
-The `image` and `rootfs` commands default to CycloneDX SBOM output instead of Trivy's default vulnerability report format. This eliminates the need for users to specify `--format cyclonedx` on every invocation.
+The `rootfs` command defaults to CycloneDX SBOM output instead of Trivy's default vulnerability report format. This eliminates the need for users to specify `--format cyclonedx` on every invocation.
 
 ### Offline Operation
 
@@ -74,10 +108,10 @@ No `distro_name` qualifier is emitted: Alpaquita has no `VERSION_CODENAME`, so t
 
 ### Build a Local Test Binary
 
-Build a local test binary from this directory:
+Build a local test binary from this directory, the same way the release binaries are built:
 
 ```bash
-GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+make local
 ```
 
 ### Generate a CycloneDX SBOM from an Unpacked Root Filesystem
@@ -141,10 +175,11 @@ Emits one `InstalledFile` property per file installed by each OS package. This c
 ## Build Notes
 
 The wrapper builds with Go 1.26 and the `jsonv2` experiment enabled — a
-pinned toolchain, not a floor:
+pinned toolchain, not a floor (`make local` and every release target pass
+both):
 
 ```bash
-GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-local .
+GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 go build -o build/trivy-cdxgen-full .
 ```
 
 The `jsonv2` experiment is required for the JSON marshaling of enriched
@@ -155,3 +190,39 @@ experiment — so 1.27 cannot compile it. `go.mod` can only state a minimum
 version, which is why the ceiling is set by `GOTOOLCHAIN` here and in the
 Makefile. The rest of this repository's Go helpers are on 1.27; when a trivy
 release supports it, drop `GOTOOLCHAIN` and `GOEXPERIMENT` together.
+
+### Slim Build
+
+A plain `go build` produces a working binary that links nearly all of Trivy.
+The Makefile targets instead build through `overlay/patches`, a set of
+unified diffs against the pinned Trivy release:
+
+```bash
+go mod vendor
+go run ./overlay    # patches vendor/ copies into .overlay/, writes .overlay/overlay.json
+go build -mod=vendor -overlay=.overlay/overlay.json .
+```
+
+Go refuses `-overlay` replacements for files inside `GOMODCACHE`, which is
+why the build vendors first; `vendor/` itself is never modified. Each patch
+starts with a description of the import it cuts and why the code behind it
+cannot run under the options the wrapper forces. Most replace a constant or a
+type with its value, or remove a function the wrapper never calls.
+
+One cut matters beyond its own size. `text/template` finds methods by name
+through reflection, and a reachable caller makes the Go linker keep every
+exported method of every reachable type. Trivy's progress bar
+(`github.com/cheggaaa/pb`, reached through the vulnerability detectors) was
+the last reachable caller; `go build -ldflags=-dumpdep` shows whether one is
+back, as an edge into `text/template.(*state).evalField <ReflectMethod>`.
+
+`make test` runs the tests twice: against upstream Trivy and against the
+patched build. The upstream pass also checks every inlined value against the
+package it came from (`overlay/upstream`), and `TestEnabledAnalyzersMatchUpstream`
+passes in both only if `analyzers.go` registers exactly the analyzers
+upstream would run for cdxgen's options.
+
+When upgrading Trivy, `go run ./overlay` fails on any patch whose context no
+longer matches exactly once, rather than guessing. Regenerate that patch
+against the new release with `diff -u`, keeping the `a/` and `b/` paths
+relative to `vendor/`, then run `make test`.

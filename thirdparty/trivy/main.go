@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"net/textproto"
@@ -19,13 +18,9 @@ import (
 	rpmdb "github.com/knqyf263/go-rpmdb/pkg"
 
 	"github.com/aquasecurity/trivy/pkg/cache"
-	"github.com/aquasecurity/trivy/pkg/commands"
-	"github.com/aquasecurity/trivy/pkg/commands/artifact"
-	"github.com/aquasecurity/trivy/pkg/commands/operation"
 	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/flag"
-	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/sbom/core"
 	sbomio "github.com/aquasecurity/trivy/pkg/sbom/io"
 	trivytypes "github.com/aquasecurity/trivy/pkg/types"
@@ -84,14 +79,11 @@ func main() {
 
 func run() int {
 	globalFlags := flag.NewGlobalFlagGroup()
-	app := commands.NewRootCommand(globalFlags)
+	app := newRootCommand(globalFlags)
 	app.Use = "trivy-cdxgen [global flags] command [flags] target"
 	app.Short = "cdxgen-focused Trivy wrapper"
-	app.Long = "Trivy wrapper tailored for cdxgen rootfs/image SBOM generation"
-	app.Example = `  # Generate a CycloneDX SBOM from an image
-  $ trivy-cdxgen image --output image.cdx ubuntu:24.04
-
-  # Generate a CycloneDX SBOM from an unpacked root filesystem
+	app.Long = "Trivy wrapper tailored for cdxgen rootfs SBOM generation"
+	app.Example = `  # Generate a CycloneDX SBOM from an unpacked root filesystem
   $ trivy-cdxgen rootfs --output rootfs.cdx /tmp/rootfs`
 	app.AddGroup(
 		&cobra.Group{ID: groupScanning, Title: "Scanning Commands"},
@@ -100,68 +92,18 @@ func run() int {
 	app.SetCompletionCommandGroupID(groupUtility)
 	app.SetHelpCommandGroupID(groupUtility)
 	app.AddCommand(
-		newImageCommand(globalFlags),
 		newRootfsCommand(globalFlags),
-		commands.NewVersionCommand(globalFlags),
+		newVersionCommand(globalFlags),
 	)
-	if err := app.Execute(); err != nil {
+	if cmd, err := app.ExecuteC(); err != nil {
+		// The scan commands silence cobra's own error output; say why they
+		// failed once, as cobra does for the root command.
+		if cmd.SilenceErrors {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
 		return 1
 	}
 	return 0
-}
-
-func newImageCommand(globalFlags *flag.GlobalFlagGroup) *cobra.Command {
-	cacheFlagGroup := flag.NewCacheFlagGroup()
-	cacheFlagGroup.CacheBackend.Default = string(cache.TypeMemory)
-
-	reportFlagGroup := flag.NewReportFlagGroup()
-	packageFlagGroup := flag.NewPackageFlagGroup()
-	packageFlagGroup.IncludeDevDeps = nil
-
-	imageFlags := flag.Flags{
-		globalFlags,
-		cacheFlagGroup,
-		flag.NewDBFlagGroup(),
-		flag.NewLicenseFlagGroup(),
-		flag.NewMisconfFlagGroup(),
-		flag.NewModuleFlagGroup(),
-		packageFlagGroup,
-		flag.NewClientFlags(),
-		flag.NewRegistryFlagGroup(),
-		flag.NewRegoFlagGroup(),
-		reportFlagGroup,
-		flag.NewScanFlagGroup(),
-		flag.NewSecretFlagGroup(),
-		flag.NewVulnerabilityFlagGroup(),
-	}
-
-	cmd := &cobra.Command{
-		Use:     "image [flags] IMAGE_NAME",
-		Aliases: []string{"i"},
-		GroupID: groupScanning,
-		Short:   "Generate an OS-package CycloneDX SBOM from a container image",
-		Example: `  # Generate a CycloneDX SBOM for a container image
-  $ trivy-cdxgen image --output result.cdx alpine:3.20`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := imageFlags.Bind(cmd); err != nil {
-				return fmt.Errorf("flag bind error: %w", err)
-			}
-			return validateSingleTarget(args)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			options, err := imageFlags.ToOptions(args)
-			if err != nil {
-				return fmt.Errorf("flag error: %w", err)
-			}
-			applyCDXGenDefaults(&options)
-			return runTarget(cmd.Context(), options, args[0], artifact.TargetContainerImage)
-		},
-		SilenceErrors: true,
-		SilenceUsage:  true,
-	}
-
-	imageFlags.AddFlags(cmd)
-	return cmd
 }
 
 func newRootfsCommand(globalFlags *flag.GlobalFlagGroup) *cobra.Command {
@@ -210,7 +152,7 @@ func newRootfsCommand(globalFlags *flag.GlobalFlagGroup) *cobra.Command {
 				return fmt.Errorf("flag error: %w", err)
 			}
 			applyCDXGenDefaults(&options)
-			return runTarget(cmd.Context(), options, args[0], artifact.TargetRootfs)
+			return runTarget(cmd.Context(), options, args[0])
 		},
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -222,7 +164,7 @@ func newRootfsCommand(globalFlags *flag.GlobalFlagGroup) *cobra.Command {
 
 func validateSingleTarget(args []string) error {
 	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
-		return errors.New("requires exactly one target path or image reference")
+		return errors.New("requires exactly one root filesystem path")
 	}
 	return nil
 }
@@ -261,52 +203,6 @@ func cdxgenDisabledLanguageAnalyzers() []analyzer.Type {
 	return disabled
 }
 
-func runTarget(ctx context.Context, opts flag.Options, target string, targetKind artifact.TargetKind) error {
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
-
-	r, err := artifact.NewRunner(ctx, opts, targetKind)
-	if err != nil {
-		if errors.Is(err, artifact.SkipScan) {
-			return nil
-		}
-		return fmt.Errorf("init error: %w", err)
-	}
-	defer func() {
-		if closeErr := r.Close(ctx); closeErr != nil {
-			log.ErrorContext(ctx, "failed to close runner: %s", closeErr)
-		}
-	}()
-
-	var report trivytypes.Report
-	switch targetKind {
-	case artifact.TargetContainerImage:
-		report, err = r.ScanImage(ctx, opts)
-	case artifact.TargetRootfs:
-		report, err = r.ScanRootfs(ctx, opts)
-	default:
-		return fmt.Errorf("unsupported target kind: %s", targetKind)
-	}
-	if err != nil {
-		return fmt.Errorf("%s scan error: %w", targetKind, err)
-	}
-
-	report, err = r.Filter(ctx, opts, report)
-	if err != nil {
-		return fmt.Errorf("filter error: %w", err)
-	}
-
-	if err = enrichReportBOM(&report, target, targetKind, loadEnrichmentOptions()); err != nil {
-		return fmt.Errorf("bom enrichment error: %w", err)
-	}
-
-	if err = r.Report(ctx, opts, report); err != nil {
-		return fmt.Errorf("report error: %w", err)
-	}
-
-	return operation.Exit(opts, report.Results.Failed(), report.Metadata)
-}
-
 func loadEnrichmentOptions() enrichmentOptions {
 	return enrichmentOptions{
 		includeCapabilities:   envBool("TRIVY_CDXGEN_INCLUDE_OS_CAPABILITIES", true),
@@ -330,7 +226,7 @@ func envBool(name string, defaultValue bool) bool {
 	}
 }
 
-func enrichReportBOM(report *trivytypes.Report, target string, targetKind artifact.TargetKind, opts enrichmentOptions) error {
+func enrichReportBOM(report *trivytypes.Report, target string, targetKind targetKind, opts enrichmentOptions) error {
 	if report == nil || report.ArtifactName == "" && len(report.Results) == 0 {
 		return nil
 	}
@@ -370,12 +266,12 @@ func enrichReportBOM(report *trivytypes.Report, target string, targetKind artifa
 	return nil
 }
 
-func collectPackageDecorations(results trivytypes.Results, target string, targetKind artifact.TargetKind, opts enrichmentOptions) map[string]packageDecoration {
+func collectPackageDecorations(results trivytypes.Results, target string, targetKind targetKind, opts enrichmentOptions) map[string]packageDecoration {
 	decorations := make(map[string]packageDecoration)
 	rootfsTarget := ""
 	capabilitiesByPackage := make(map[string][]string)
 	trustMetadataByPackage := make(map[string]packageDecoration)
-	if targetKind == artifact.TargetRootfs {
+	if targetKind == targetRootfs {
 		rootfsTarget = target
 		if opts.includeCapabilities {
 			capabilitiesByPackage = collectPackageCapabilities(target)

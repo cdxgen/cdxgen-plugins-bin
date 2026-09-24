@@ -52,7 +52,17 @@ cd thirdparty\trivy
 $env:GOTOOLCHAIN = "go1.26.8"
 $env:GOEXPERIMENT = "jsonv2"
 $env:CGO_ENABLED = "0"
-go build -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
+# Mirror the Makefile's slim build: vendor the dependencies, apply
+# overlay/patches to the vendored Trivy and build through the overlay. A patch
+# that no longer applies must stop the build, not fall back to a full one.
+go mod vendor
+if ($LASTEXITCODE -ne 0) { throw "go mod vendor failed for trivy-cdxgen" }
+go run ./overlay
+if ($LASTEXITCODE -ne 0) { throw "overlay/patches no longer apply to the vendored Trivy" }
+# Quoted: PowerShell splits an unquoted native argument at "=." and would
+# pass ".overlay/overlay.json" to go as a package path.
+go build -mod=vendor "-overlay=.overlay/overlay.json" -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
+if ($LASTEXITCODE -ne 0) { throw "go build failed for trivy-cdxgen" }
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
 Remove-Item build -Recurse -Force
