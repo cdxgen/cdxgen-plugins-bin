@@ -1276,7 +1276,12 @@ object EndpointDetector {
             if (metaSecurity != null) authentication = listOf("meta-security($metaSecurity)")
         } else {
             val folded = input.folder.valueAt(fn, block, index, receiver)
-            path = folded?.value ?: rawOf(fn, block, index, receiver, input)
+            // `queryPresent("x") bind { .. }`, `header("h") bind ..`: the
+            // receiver is a ROUTER PREDICATE, not a path (http4k
+            // `Router.bind(HttpHandler)`), and the route is served at the
+            // enclosing mount's path. The resolved descriptor says which
+            // overload it is; without it (no jar) the path stays unresolved.
+            path = if (isHttp4kRouter(fn, receiver)) "" else folded?.value ?: rawOf(fn, block, index, receiver, input)
         }
         if (authentication.isEmpty()) {
             val blockSecurity = contractBlockSecurity(fn, framework, input)
@@ -1287,6 +1292,10 @@ object EndpointDetector {
         // an endpoint, and the routes inside are served under it.
         val argument = ins.args.firstOrNull()
         if (argument != null && isHttp4kRouteTable(fn, argument, input)) return
+        // `"/p" bind GET to routes(..)` mounts a table too, behind a verb
+        // filter (http4k `PathMethod.to(RoutingHttpHandler)`): the `to`
+        // argument is the table, and it is not an endpoint either.
+        toCallOf(fn, ins.result)?.args?.firstOrNull()?.let { if (isHttp4kRouteTable(fn, it, input)) return }
         // The handler lives on the `to` call whose receiver is this bind's
         // result, and the method constant is the bind's argument.
         val handler = bindHandler(fn, ins.result, input)
@@ -1304,13 +1313,22 @@ object EndpointDetector {
             block.instructions.any { it is KirLambda && it.result == argument }
         ) LambdaResolver.resolve(fn, argument, input) else null
         val routeValue = if (anyHandler != null) ins.result else toCallOf(fn, ins.result)?.result ?: ins.result
-        val prefixes = routeValue?.let { http4kPrefixes(fn, it, input) } ?: listOf("")
-        for (prefix in prefixes) {
-            val served = joinPaths(prefix, path)
+        val mounts = routeValue?.let { http4kPrefixes(fn, it, input) } ?: listOf(Http4kMount(""))
+        for (mount in mounts) {
+            val served = joinPaths(mount.prefix, path)
+            val filter = mount.verb
             if (anyHandler != null) {
-                publish({ c -> add(c.copy(anyMethod = true)) }, framework, emptyList(), served, anyHandler, fn, "dsl", authentication = authentication)
+                // Behind a verb mount an any-method handler serves that verb.
+                if (filter != null) {
+                    publish({ c -> add(c.copy(anyMethod = false)) }, framework, listOf(filter), served, anyHandler, fn, "dsl", authentication = authentication)
+                } else {
+                    publish({ c -> add(c.copy(anyMethod = true)) }, framework, emptyList(), served, anyHandler, fn, "dsl", authentication = authentication)
+                }
             } else {
-                publish(add, framework, listOfNotNull(method), served, handler ?: "", fn, "dsl", authentication = authentication)
+                // A route whose own verb the mount filters out is never
+                // reached (the filter answers first); it serves nothing.
+                if (filter != null && method != null && method.uppercase() != filter) continue
+                publish(add, framework, listOfNotNull(method ?: filter), served, handler ?: "", fn, "dsl", authentication = authentication)
             }
         }
     }
@@ -1357,9 +1375,24 @@ object EndpointDetector {
      * first, across a function or top-level `val` that returns the table and
      * a `contract { }` block's lambda. One prefix per mount site.
      */
-    private fun http4kPrefixes(fn: KirFunction, register: String, input: Input, depth: Int = 0): List<String> {
-        if (depth > 8) return listOf("")
-        val out = mutableListOf<String>()
+    /**
+     * Whether [register] holds an http4k ROUTER PREDICATE (`queryPresent(..)`,
+     * `header(..)`): produced by a call whose resolved descriptor returns
+     * `org.http4k.routing.Router`. The infix `bind` itself lowers with no
+     * descriptor, so the receiver's producer is the evidence; without the
+     * jar it does not resolve and the path stays unresolved.
+     */
+    private fun isHttp4kRouter(fn: KirFunction, register: String): Boolean =
+        http4kInstructions(fn).any { ins ->
+            ins is KirCall && ins.result == register && ins.callee.descriptor?.endsWith(")Lorg/http4k/routing/Router;") == true
+        }
+
+    /** One mount site's prefix, and the verb its `bind VERB to` filter admits (null: any). */
+    private data class Http4kMount(val prefix: String, val verb: String? = null)
+
+    private fun http4kPrefixes(fn: KirFunction, register: String, input: Input, depth: Int = 0): List<Http4kMount> {
+        if (depth > 8) return listOf(Http4kMount(""))
+        val out = mutableListOf<Http4kMount>()
         for (ins in http4kInstructions(fn)) {
             val name = callName(ins) ?: continue
             val args = (ins as? KirCall)?.args ?: (ins as? KirDynamicCall)?.args ?: continue
@@ -1372,8 +1405,35 @@ object EndpointDetector {
                     val at = block.instructions.indexOfFirst { it === ins }
                     // A mount whose path does not fold still mounts: its routes
                     // are under a prefix kosi cannot name, never at the root.
-                    val segment = input.folder.valueAt(fn, block, at, receiver)?.value ?: UNFOLDED_SCOPE
-                    http4kPrefixes(fn, result, input, depth + 1).forEach { outer -> out += joinPaths(outer, segment) }
+                    // A PREDICATE mount (`queryPresent("x") bind routes(..)`,
+                    // http4k `Router.bind(RoutingHttpHandler)`) adds no segment.
+                    val segment = if (isHttp4kRouter(fn, receiver)) "" else input.folder.valueAt(fn, block, at, receiver)?.value ?: UNFOLDED_SCOPE
+                    http4kPrefixes(fn, result, input, depth + 1).forEach { outer -> out += outer.copy(prefix = joinPaths(outer.prefix, segment)) }
+                }
+                // `"/p" bind GET to <table>`: the `to` receiver is a verb
+                // bind, whose receiver is the segment and argument the verb.
+                "to" -> {
+                    val receiver = (ins as? KirCall)?.receiver ?: (ins as? KirDynamicCall)?.receiver ?: continue
+                    val bind = http4kInstructions(fn).firstOrNull { resultOf(it) == receiver && callName(it) == "bind" } ?: continue
+                    val bindReceiver = (bind as? KirCall)?.receiver ?: (bind as? KirDynamicCall)?.receiver ?: continue
+                    val verbReg = ((bind as? KirCall)?.args ?: (bind as? KirDynamicCall)?.args)?.firstOrNull()
+                    val verb = verbReg?.let { r ->
+                        http4kInstructions(fn).filterIsInstance<io.cdxgen.kosi.kir.KirFieldGet>().firstOrNull { it.result == r }
+                            ?.let { (it.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name?.uppercase() }
+                            ?.takeIf { it in HTTP_METHODS }
+                    }
+                    val block = fn.body?.blocks?.firstOrNull { b -> b.instructions.any { it === bind } } ?: continue
+                    val at = block.instructions.indexOfFirst { it === bind }
+                    val segment = input.folder.valueAt(fn, block, at, bindReceiver)?.value ?: UNFOLDED_SCOPE
+                    http4kPrefixes(fn, result, input, depth + 1).forEach { outer ->
+                        // Nested verb filters: an inner one different from an outer one admits nothing.
+                        val admitted = when {
+                            outer.verb == null -> verb
+                            verb == null || verb == outer.verb -> outer.verb
+                            else -> return@forEach
+                        }
+                        out += Http4kMount(joinPaths(outer.prefix, segment), admitted)
+                    }
                 }
                 in HTTP4K_TABLE_BUILDERS -> out += http4kPrefixes(fn, result, input, depth + 1)
             }
@@ -1402,7 +1462,7 @@ object EndpointDetector {
             val result = resultOf(link.creationCall)
             if (parent != null && result != null) out += http4kPrefixes(parent, result, input, depth + 1)
         }
-        return out.ifEmpty { listOf("") }.distinct()
+        return out.ifEmpty { listOf(Http4kMount("")) }.distinct()
     }
 
     /** True when [register] is last written before [index] by a null literal. */
@@ -2226,7 +2286,14 @@ object EndpointDetector {
     }
 
     internal fun pathParametersOf(path: String): List<String> =
-        Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim().removeSuffix("?") }.distinct().sorted().toList()
+        Regex("\\{([^}:]+)}").findAll(normalizePath(path)).map { it.groupValues[1].trim().removeSuffix("?") }
+            // A placeholder that names nothing — an anonymous regex (`{.*}`,
+            // JAX-RS and http4k) — is a wildcard segment, not a parameter.
+            .filter { PARAMETER_NAME.matches(it) }
+            .distinct().sorted().toList()
+
+    /** A path-variable name: an identifier, hyphens allowed (Javalin `{user-id}`). */
+    private val PARAMETER_NAME = Regex("[A-Za-z_][A-Za-z0-9_.-]*")
 
     /**
      * Every concrete template an optional-segment template stands for:
@@ -2290,6 +2357,11 @@ object EndpointDetector {
 
     internal fun normalizePath(path: String): String {
         if (path.isEmpty()) return path
+        // http4k's `{$}` anchors the match at the end ("stop matching extra
+        // parts", `"/a{$}" bind GET`): the route IS `/a`, and `$` was being
+        // published as a path parameter (atom-tools#95, found converting
+        // http4k to OpenAPI). No other framework spells anything with it.
+        if ("{$}" in path) return normalizePath(path.replace("{$}", "").ifEmpty { "/" })
         val segments = rewriteUriTemplate(path).split('/').map { segment ->
             when {
                 // Vert.x / Spark / Javalin v3: `:id`
