@@ -886,6 +886,7 @@ object Analyzer {
                         maxSummarySinkEffects = options.dataflowMaxSummarySinkEffects,
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
+                        pathWidening = options.dataflowPathWidening,
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
                         // The framework's own statement about which handler

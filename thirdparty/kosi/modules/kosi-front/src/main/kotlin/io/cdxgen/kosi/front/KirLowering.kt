@@ -1,5 +1,6 @@
 package io.cdxgen.kosi.front
 
+import org.jetbrains.kotlin.idea.references.mainReference
 import io.cdxgen.kosi.kir.AccessPath
 import java.util.TreeSet
 import io.cdxgen.kosi.kir.CallKind
@@ -388,6 +389,21 @@ object KirLowering {
                 null
             }
 
+            // A bare name that is a TYPE or PACKAGE qualifier, not a value
+            // read: `Deflater` in `Deflater.FULL_FLUSH`, `Holder` in
+            // `Holder.PATH`. K2's reference resolution (the Analysis API's own
+            // symbol lookup, not PSI `resolve()`).
+            fun resolveQualifier(psi: KtNameReferenceExpression): String? = try {
+                when (val symbol = psi.mainReference.resolveToSymbol()) {
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol ->
+                        symbol.classId?.asSingleFqName()?.asString()
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaPackageSymbol -> symbol.fqName.asString()
+                    else -> null
+                }
+            } catch (_: Exception) {
+                null
+            }
+
             fun resolve(psi: KtCallExpression): CallInfo? = try {
                 val call = psi.resolveCall() ?: return null
                 val symbol = call.symbol as? KaCallableSymbol ?: return null
@@ -655,7 +671,7 @@ object KirLowering {
             }
 
             val lambdaContext =
-                LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference, ::lambdaHasReceiver)
+                LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference, ::lambdaHasReceiver, ::resolveQualifier)
             for (file in files) {
                 // The walk budget and the per-file boundary, exactly as
                 // in ResolvedAnalyzer — the same PSI trees are walked here,
@@ -1187,6 +1203,8 @@ object KirLowering {
         val resolveReference: (org.jetbrains.kotlin.psi.KtCallableReferenceExpression) -> String? = { null },
         /** True when the lambda's EXPECTED type carries an extension receiver. */
         val lambdaHasReceiver: (KtLambdaExpression) -> Boolean = { false },
+        /** The class, object or package FQN a bare name resolves to, or null (see [BodyLower.reference]). */
+        val resolveQualifier: (KtNameReferenceExpression) -> String? = { null },
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -2350,6 +2368,18 @@ object KirLowering {
                     return reg
                 }
             }
+            // A TYPE or PACKAGE qualifier is not a field of `this`. It was
+            // lowered as one: `Deflater.FULL_FLUSH` became `fieldget vthis
+            // vthis.Deflater` then `.FULL_FLUSH`, so every static constant a
+            // method touched was a fake field path of its receiver. On
+            // http4k the summary engine derived receiver facts along those
+            // paths until the depth cap (`deflationBuffer.Deflater.FULL_FLUSH
+            // .Deflater.FULL_FLUSH.*`), over a thousand facts per key, and
+            // the run did not finish (atom-tools#95). One register per
+            // qualifier per function, never stored, like `v super`: a static
+            // member read through it carries only what was written through
+            // it in this function (a Kotlin `object`'s field).
+            lambdaContext?.resolveQualifier?.invoke(psi)?.let { return "v static:" + it.replace('.', '/') }
             // A stored field read, carried by the access path over the
             // CURRENT `this` (a scope function's receiver when inside an
             // inlined apply/run/with).

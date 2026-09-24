@@ -144,6 +144,15 @@ data class AnalyzeOptions(
     val dataflowMaxTraceEdges: Int = 128,
     val accessPathDepth: Int = 5,
     val dataflowSkipGenerated: Boolean = true,
+    /**
+     * `--dataflow-path-widening`: bound the access paths summary facts carry
+     * (cycle collapse and per-group widening; see kosi-flow SummaryPaths),
+     * for repositories whose summaries otherwise do not converge in useful
+     * time. OFF by default: path lookups match exactly, so a widened fact can
+     * miss a reader of a deeper path, and a default run never trades a flow
+     * for speed. The widenings are counted in `dataflow.stats.truncations`.
+     */
+    val dataflowPathWidening: Boolean = false,
     val callgraphTimeoutSeconds: Int = 60,
     val maxPathsPerSymbol: Int = 3,
     val includeStdlib: Boolean = false,
@@ -238,6 +247,8 @@ data class AnalyzeOptions(
         w.num("dataflowMaxSummarySinkEffects", dataflowMaxSummarySinkEffects)
         w.num("dataflowMaxTraceEdges", dataflowMaxTraceEdges)
         w.num("dataflowMaxTraceNodes", dataflowMaxTraceNodes)
+        // Written only when ON: a default run's report is unchanged.
+        if (dataflowPathWidening) w.bool("dataflowPathWidening", true)
         w.bool("dataflowSkipGenerated", dataflowSkipGenerated)
         w.num("dataflowWorkers", dataflowWorkers)
         w.str("dependencyDetail", dependencyDetail.id)

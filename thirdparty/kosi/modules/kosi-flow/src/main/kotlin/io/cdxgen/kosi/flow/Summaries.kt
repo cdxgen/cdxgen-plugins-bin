@@ -53,6 +53,14 @@ internal fun functionKey(f: KirFunction): String = f.canonicalName + "\u0000" + 
 /** The key of a function known by name only (a lambda's canonical). */
 internal fun functionKeyByName(canonicalName: String): String = canonicalName + "\u0000"
 
+/** `KOSI_TRACE` set: name summary visits over 200 ms on stderr (a measurement aid, like the effect-budget trace). */
+private val TRACE_SLOW = !System.getenv("KOSI_TRACE").isNullOrBlank()
+
+/** Function keys by canonical name, without scanning a summary table (see Summarizer.keysByName). */
+internal interface OverloadIndex {
+    fun keysNamed(canonicalName: String): List<String>
+}
+
 /** One interprocedurally-visible escape: a parameter's taint reaches a sink. */
 internal data class SummarySinkEffect(
     /** Index into the summary's function's [KirFunction.params]. */
@@ -823,6 +831,18 @@ internal class Summarizer(
     private val byKey: Map<String, List<CompiledFunction>> =
         compiledInOrder.groupBy { functionKey(it.function) }
 
+    /**
+     * Canonical name -> every function key it can ever have in this run,
+     * sorted. A constructor call looks up its class's overloads by name, and
+     * scanning the whole table for them cost O(table) per call AND recorded
+     * the whole table as the caller's dependency, so any change in an SCC
+     * revisited every member that constructs anything (atom-tools#95,
+     * http4k). The universe is every compiled key, not the current table, so
+     * an overload not yet summarised is still a recorded dependency.
+     */
+    private val keysByName: Map<String, List<String>> =
+        byKey.keys.groupBy { it.substringBefore('\u0000') }.mapValues { (_, v) -> v.sorted() }
+
     fun compute(): Result {
         // Constructor call edges. `CallIndex.targets` answers empty
         // for CONSTRUCTOR calls (a constructor has no dispatch), so the SCC
@@ -922,6 +942,7 @@ internal class Summarizer(
                 options.summaryIterationBudget.toLong(),
             )
             val hit = { capHits++ }
+            val sccStarted = if (TRACE_SLOW) System.nanoTime() else 0L
             while (worklist.isNotEmpty()) {
                 if (rounds++ > visitBudget) {
                     hit()
@@ -930,7 +951,7 @@ internal class Summarizer(
                 val member = worklist.pollFirst()!!
                 // Every table lookup this visit makes is a dependency of
                 // this member, recorded as it happens (see `dependents`).
-                val reads = ReadRecordingTable(table)
+                val reads = ReadRecordingTable(table, keysByName)
                 val previousSummary = table[member]
                 // Several bodies can share one function key (the
                 // corpus's duplicated framework stubs - and, since the
@@ -951,8 +972,14 @@ internal class Summarizer(
                         table.remove(member)
                         continue
                     }
+                    val started = if (TRACE_SLOW) System.nanoTime() else 0L
                     val analysis = computeSummary(cf, reads)
+                    if (TRACE_SLOW) {
+                        val ms = (System.nanoTime() - started) / 1_000_000
+                        if (ms >= 200) System.err.println("TRACE: slow-summary ${ms}ms $member scc=${members.size} round=$rounds")
+                    }
                     composedPathDrops += analysis.composedPathDrops
+                    if (analysis.pathWidenings > 0) skipped.merge("summary-path-widening", analysis.pathWidenings, Int::plus)
                     if (analysis.overBudget) {
                         // The state or the escape set exploded past its
                         // budget: publish NO summary rather than a partial
@@ -994,6 +1021,11 @@ internal class Summarizer(
                 }
                 if (movedOn) worklist.addAll(dependents[member].orEmpty())
             }
+            if (TRACE_SLOW) {
+                val ms = (System.nanoTime() - sccStarted) / 1_000_000
+                if (ms >= 1000) System.err.println("TRACE: slow-scc ${ms}ms members=${members.size} rounds=$rounds first=${members.first()}")
+            }
+
             if (rounds > visitBudget) {
                 // The last iterate is what callers saw: honest, but labelled
                 // — on the WORKSPACE tier. The `--deps` tier keeps
@@ -1036,6 +1068,7 @@ internal class Summarizer(
         val overBudgetLabel: String,
         val overBudget: Boolean,
         val composedPathDrops: Int,
+        val pathWidenings: Int,
     )
 
     /**
@@ -1052,8 +1085,18 @@ internal class Summarizer(
      */
     private class ReadRecordingTable(
         private val backing: Map<String, FunctionSummary>,
-    ) : Map<String, FunctionSummary> {
+        private val keysByName: Map<String, List<String>>,
+    ) : Map<String, FunctionSummary>, OverloadIndex {
         val observed = HashSet<String>()
+
+        override fun keysNamed(canonicalName: String): List<String> {
+            val keys = keysByName[canonicalName].orEmpty()
+            observed.addAll(keys)
+            // The by-name key too: a lookup that finds nothing still depends
+            // on that key appearing.
+            observed.add(functionKeyByName(canonicalName))
+            return keys.filter { backing.containsKey(it) }
+        }
 
         override fun get(key: String): FunctionSummary? {
             observed.add(key)
@@ -1084,7 +1127,7 @@ internal class Summarizer(
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>): SummaryOutcome {
         val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps)
         analysis.run()
-        return SummaryOutcome(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops)
+        return SummaryOutcome(analysis.toSummary(), analysis.overBudgetLabel, analysis.stateOverBudget, analysis.composedPathDrops, analysis.pathWidenings)
     }
 }
 
@@ -1144,11 +1187,87 @@ internal object Tarjan {
 }
 
 /** Summary facts derive along field reads of their parameter roots only. */
-internal object SummaryFactOps : FactOps<SummaryFact> {
+internal class SummaryFactOps(
+    /** `--dataflow-path-widening`: collapse repeated segments ([collapseCycle]). */
+    private val collapseCycles: Boolean = false,
+) : FactOps<SummaryFact> {
     override fun categoryOf(fact: SummaryFact): String = fact.category
 
     override fun deriveOnFieldRead(fact: SummaryFact, suffix: String): SummaryFact? =
-        fact.param?.let { fact.withPath(joinPath(fact.path, suffix)) }
+        fact.param?.let { fact.withPath(joinPath(fact.path, suffix, collapseCycles)) }
+
+    companion object {
+        /** Exact paths: what every run uses unless widening is asked for. */
+        val EXACT = SummaryFactOps()
+    }
+}
+
+/**
+ * OPT-IN access-path bounding for summary facts (`--dataflow-path-widening`,
+ * atom-tools#95). A value reached through many fields across a wide dispatch
+ * (http4k's InputStream decorators: 38 `read` targets) derives one fact per
+ * path combination, over a thousand per key, and a summary pass over
+ * http4k's core did not finish in five minutes. With the flag:
+ *
+ *  1. CYCLE COLLAPSE ([collapseCycle]): a repeated segment ends the path
+ *     at `*` (`buffer.buffer.x` is `buffer.*`);
+ *  2. SUBSUMPTION: `p.*` beside `p.x` and `p.x.*` keeps only `p.*`;
+ *  3. WIDENING past [WIDEN_AT] paths for one (param, site, category):
+ *     paths of depth two or more become their first segment plus `.*`, and
+ *     past it again the group is `*`.
+ *
+ * Why it is not the default: no lookup treats `*` as "any deeper", so a
+ * widened fact can miss a reader of the exact deeper path. Measured:
+ * class-delegation's `twoWrappersDeep` flow is lost under cycle collapse.
+ * Every widening is COUNTED as `summary-path-widening` in
+ * `dataFlow.stats.truncations`, and the option is written into the report's
+ * `options`, so a widened report says so.
+ */
+internal object SummaryPaths {
+    const val WIDEN_AT = 64
+
+    /** Returns how many facts step 3 replaced. */
+    fun normalize(set: java.util.TreeSet<SummaryFact>): Int {
+        var widened = 0
+        val groups = set.groupBy { Triple(it.param, it.site, it.category) }
+        for ((group, facts) in groups) {
+            if (facts.size < 2) continue
+            val stars = facts.mapNotNullTo(HashSet()) { f ->
+                if (f.path == "*") "" else if (f.path.endsWith(".*")) f.path.removeSuffix(".*") else null
+            }
+            if (stars.isNotEmpty()) {
+                for (f in facts) {
+                    if (f.path.isEmpty() || f.path == "*") continue
+                    val covered = stars.any { p ->
+                        if (p.isEmpty()) true else f.path != "$p.*" && f.path.startsWith("$p.")
+                    }
+                    if (covered) set.remove(f)
+                }
+            }
+            val remaining = facts.filter { it in set }
+            if (remaining.size <= WIDEN_AT) continue
+            for (f in remaining) {
+                if (f.path.isEmpty() || f.path == "*") continue
+                val first = f.path.substringBefore('.')
+                val wide = if (first == f.path) f.path else "$first.*"
+                if (wide != f.path) {
+                    set.remove(f)
+                    set.add(f.withPath(wide))
+                    widened++
+                }
+            }
+            val now = set.filter { Triple(it.param, it.site, it.category) == group }
+            if (now.size > WIDEN_AT) {
+                for (f in now) {
+                    if (f.path.isEmpty() || f.path == "*") continue
+                    set.remove(f)
+                    widened++
+                }
+                set.add(now.first().withPath("*"))
+            }
+        }
+        return widened
+    }
 }
 
 /**
@@ -1185,22 +1304,54 @@ internal fun readAtPath(
     register: String,
     path: String,
     aliases: Set<String> = setOf(register),
+    ops: SummaryFactOps = SummaryFactOps.EXACT,
 ): Pair<TaintKey, List<SummaryFact>> {
     val out = mutableListOf<SummaryFact>()
+    // One join per DISTINCT fact path, not per fact: the bare key's facts
+    // routinely share a path and differ only in param, site or category, and
+    // this call runs once per recorded suffix of every applied summary (the
+    // hottest frame on http4k, atom-tools#95). Same facts, same order.
+    val joined = HashMap<String, SummaryFact?>()
     for (base in aliases.sorted()) {
         out += state.factsOf(TaintKey(base, path))
-        out += state.factsOf(TaintKey(base, ""))
-            .mapNotNull { SummaryFactOps.deriveOnFieldRead(it, path) }
+        for (fact in state.factsOf(TaintKey(base, ""))) {
+            if (fact.param == null) continue
+            val template = joined.getOrPut(fact.path) { ops.deriveOnFieldRead(fact, path) } ?: continue
+            out += if (template.param == fact.param && template.site == fact.site && template.category == fact.category) {
+                template
+            } else {
+                fact.withPath(template.path)
+            }
+        }
     }
     return TaintKey(register, path) to out.distinct()
 }
 
-internal fun joinPath(prefix: String, suffix: String): String =
+internal fun joinPath(prefix: String, suffix: String, collapseCycles: Boolean = false): String =
     when {
         prefix.isEmpty() -> suffix
         suffix.isEmpty() -> prefix
+        collapseCycles -> capPath(collapseCycle("$prefix.$suffix"))
         else -> capPath("$prefix.$suffix")
     }
+
+/**
+ * `--dataflow-path-widening` only ([SummaryPaths]): ends a path at its first
+ * repeated segment (`buffer.buffer.x` is `buffer.*`, `next.value.next` is
+ * `next.*`), and nothing extends a `*`. A recursive structure otherwise
+ * derives one fact per unrolling until the depth cap.
+ */
+internal fun collapseCycle(path: String): String {
+    if (path.indexOf('.') < 0) return path
+    val segments = path.split('.')
+    val seen = HashSet<String>()
+    for ((i, segment) in segments.withIndex()) {
+        if (segment == "*") return if (i == segments.size - 1) path else segments.subList(0, i + 1).joinToString(".")
+        if (!seen.add(segment)) return segments.subList(0, i).joinToString(".") + ".*"
+    }
+    return path
+}
+
 
 /** Collapses an access path to `*` beyond the KIR's default depth. */
 internal fun capPath(path: String): String {
@@ -1252,7 +1403,13 @@ internal class SummaryAnalysis(
     /** The `--deps` tier, for call sites whose callee lives in a jar. */
     private val deps: TaintEngine.DepsTier? = null,
 ) : TransferHost<SummaryFact, Boolean> {
-    override val ops = SummaryFactOps
+    override val ops = if (options.pathWidening) SummaryFactOps(collapseCycles = true) else SummaryFactOps.EXACT
+
+    /** Facts [SummaryPaths] widened in this analysis; published as `summary-path-widening`. */
+    var pathWidenings: Int = 0
+        private set
+    override val normalizer: ((java.util.TreeSet<SummaryFact>) -> Unit)? =
+        if (options.pathWidening) { set -> pathWidenings += SummaryPaths.normalize(set) } else null
     override val pack = pack
     override val unknownCallPropagate = options.unknownCallPropagate
     override val fieldSensitive = options.accessPathDepth > 0
@@ -1268,8 +1425,9 @@ internal class SummaryAnalysis(
      */
     private fun summaryForCall(ins: KirCall): FunctionSummary? {
         if (ins.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
-            val key = functionKeyByName(ins.callee.fqn + ".<init>")
-            val overloads = table.keys.filter { it == key || it.substringBefore('\u0000') == ins.callee.fqn + ".<init>" }
+            val name = ins.callee.fqn + ".<init>"
+            val overloads = (table as? OverloadIndex)?.keysNamed(name)
+                ?: table.keys.filter { it.substringBefore('\u0000') == name }
             // May-union across the class's constructor overloads: the site
             // cannot narrow by descriptor, so every overload's writes hold.
             var joined: FunctionSummary? = null
@@ -1289,7 +1447,7 @@ internal class SummaryAnalysis(
     }
 
     private val chain = HashMap<ChainKey<SummaryFact>, Move>()
-    private val state = FlowState<SummaryFact>()
+    private val state = FlowState<SummaryFact>().also { it.normalize = normalizer }
 
     /** Upstream paths for facts born at summary applications inside this body. */
     private val upstream = HashMap<SummaryFact, List<Int>>()
@@ -1968,7 +2126,7 @@ internal class SummaryAnalysis(
                 for (move in moves.sorted()) {
                     val fromPath = move.substringBefore('\u0000')
                     val toPath = move.substringAfter('\u0000')
-                    val (fromKey, derived) = readAtPath(state, from, fromPath, aliases.aliasClass(from))
+                    val (fromKey, derived) = readAtPath(state, from, fromPath, aliases.aliasClass(from), ops)
                     if (derived.isEmpty()) continue
                     val toKey = TaintKey(result, toPath)
                     state.addFacts(toKey, derived)
@@ -1980,7 +2138,7 @@ internal class SummaryAnalysis(
             for ((param, suffixes) in summary.paramFieldToReturn) {
                 val from = binding(param) ?: continue
                 for (suffix in suffixes.sorted()) {
-                    val (fromKey, derived) = readAtPath(state, from, suffix, aliases.aliasClass(from))
+                    val (fromKey, derived) = readAtPath(state, from, suffix, aliases.aliasClass(from), ops)
                     if (derived.isEmpty()) continue
                     state.addFacts(resultKey, derived)
                     val via = summary.paramFieldToReturnPaths["$param\u0000$suffix"].orEmpty()

@@ -108,17 +108,34 @@ internal class FixpointResult<F>(
 )
 
 /** The abstract state: sorted maps and sorted sets, for deterministic joins. */
+/** A key's fact count past which [FlowState.normalize] runs. */
+internal const val NORMALIZE_AT = 32
+
 internal class FlowState<F> {
     val map = java.util.TreeMap<TaintKey, java.util.TreeSet<F>>()
 
+    /**
+     * Bounds one key's fact set in place: the summary engine's opt-in path
+     * widening (`--dataflow-path-widening`, [SummaryPaths]). Null, the
+     * default, leaves every set exact. Runs only past [NORMALIZE_AT] facts,
+     * and is carried by [copy] and the fixpoint's joins.
+     */
+    var normalize: ((java.util.TreeSet<F>) -> Unit)? = null
+
+    private fun bounded(set: java.util.TreeSet<F>): java.util.TreeSet<F> {
+        val n = normalize
+        if (n != null && set.size > NORMALIZE_AT) n(set)
+        return set
+    }
+
     fun factsOf(key: TaintKey): java.util.TreeSet<F> = map[key] ?: java.util.TreeSet<F>()    fun setFacts(key: TaintKey, facts: java.util.TreeSet<F>) {
-        if (facts.isEmpty()) map.remove(key) else map[key] = facts
+        if (facts.isEmpty()) map.remove(key) else map[key] = bounded(facts)
     }
 
     fun addFacts(key: TaintKey, facts: Collection<F>) {
         if (facts.isEmpty()) return
         val existing = map[key]
-        if (existing == null) map[key] = java.util.TreeSet(facts) else existing.addAll(facts)
+        if (existing == null) map[key] = bounded(java.util.TreeSet(facts)) else { existing.addAll(facts); bounded(existing) }
     }
 
     fun removeKey(key: TaintKey) {
@@ -127,6 +144,7 @@ internal class FlowState<F> {
 
     fun copy(): FlowState<F> {
         val out = FlowState<F>()
+        out.normalize = normalize
         for ((k, v) in map) out.map[k] = java.util.TreeSet(v)
         return out
     }
@@ -158,6 +176,9 @@ internal interface TransferHost<F, C> {
 
     /** `Options.accessPathDepth > 0`: paths on keys are tracked, not collapsed. */
     val fieldSensitive: Boolean
+
+    /** Bounds a key's fact set; see [FlowState.normalize]. Null: exact (the default). */
+    val normalizer: ((java.util.TreeSet<F>) -> Unit)? get() = null
 
     /** A fact born at a pack source call [site] with [category]. */
     fun birthFact(site: Int, category: String): F
@@ -378,6 +399,7 @@ internal class FlowTransfer<F, C>(
         predecessors: Map<String, List<String>>,
     ): FlowState<F> {
         val joined = FlowState<F>()
+        joined.normalize = host.normalizer
         for (pred in predecessors[blockId].orEmpty()) {
             outStates[pred]?.let { joined.mergeFrom(it) }
         }
@@ -459,7 +481,14 @@ internal class FlowTransfer<F, C>(
             }
             val resultKey = reg(result)
             state.setFacts(resultKey, merged)
-            for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site, blame.getValue(fact), kind)
+            // Under path widening the stored set can hold a fact no operand
+            // did (a widened replacement): it takes the blame of the first
+            // operand carrying its category. Without widening every stored
+            // fact is an operand's, exactly as before.
+            for (fact in state.factsOf(resultKey)) {
+                val from = blame[fact] ?: blame.entries.firstOrNull { (f, _) -> host.ops.categoryOf(f) == host.ops.categoryOf(fact) }?.value
+                chain[ChainKey(fact, resultKey)] = Move(site, from, kind)
+            }
         }
 
         for ((sitePos, site) in sites.withIndex()) {

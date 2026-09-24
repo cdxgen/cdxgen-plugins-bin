@@ -91,7 +91,7 @@ object Main {
         "max-analysis-seconds", "max-rss-mb", "deps-max-classes", "max-summary-sink-effects",
     )
     private val ANALYZE_BOOLEAN_FLAGS = setOf(
-        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "progressive", "endpoint-sources",
+        "help", "pretty", "include-stdlib", "dataflow-skip-generated", "dataflow-path-widening", "progressive", "endpoint-sources",
         "deps",
     )
     private val BENCH_VALUE_FLAGS = setOf("tier", "only", "repo-root", "baseline", "compare")
@@ -247,6 +247,7 @@ object Main {
                 ?: defaults.dataflowMaxTraceEdges,
             accessPathDepth = parsed.value("access-path-depth")?.toIntOrNull() ?: defaults.accessPathDepth,
             dataflowSkipGenerated = parsed.bool("dataflow-skip-generated", defaults.dataflowSkipGenerated),
+            dataflowPathWidening = parsed.bool("dataflow-path-widening", defaults.dataflowPathWidening),
             callgraphTimeoutSeconds = parsed.value("callgraph-timeout")?.toIntOrNull() ?: defaults.callgraphTimeoutSeconds,
             maxPathsPerSymbol = parsed.value("max-paths-per-symbol")?.toIntOrNull() ?: defaults.maxPathsPerSymbol,
             includeStdlib = parsed.bool("include-stdlib", defaults.includeStdlib),

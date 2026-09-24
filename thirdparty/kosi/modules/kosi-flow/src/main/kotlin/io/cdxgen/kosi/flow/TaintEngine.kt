@@ -239,6 +239,8 @@ object TaintEngine {
         /** `--unknown-call propagate|drop` (02-ARCHITECTURE.md §6). */
         val unknownCallPropagate: Boolean,
         val skipGenerated: Boolean,
+        /** `--dataflow-path-widening`: see SummaryPaths. Off unless asked for. */
+        val pathWidening: Boolean = false,
         /**
          * How virtual call sites pick the summaries to join — `cha` joins
          * every overriding body, `rta`/`vta`/`auto` keep only targets whose
@@ -501,6 +503,19 @@ object TaintEngine {
          */
         val functionValues: Map<String, FunctionValueTarget> = emptyMap(),
     ) {
+        /**
+         * The table's summaries by canonical name, in the table's own
+         * iteration order (so the may-union joins in the order the scan it
+         * replaces did). A constructor call used to scan the whole table.
+         */
+        private val byName: Map<String, List<FunctionSummary>> by lazy {
+            val out = LinkedHashMap<String, MutableList<FunctionSummary>>()
+            for ((key, summary) in table) out.getOrPut(key.substringBefore('\u0000')) { mutableListOf() }.add(summary)
+            out
+        }
+
+        fun summariesNamed(canonicalName: String): List<FunctionSummary> = byName[canonicalName].orEmpty()
+
         private val lock = Any()
         var joinOverruns: Int = 0
             private set
@@ -1291,8 +1306,7 @@ object TaintEngine {
             if (ins.callee.kind == CallKind.CONSTRUCTOR) {
                 val name = ins.callee.fqn + ".<init>"
                 var joined: FunctionSummary? = null
-                for ((key, summary) in context.table) {
-                    if (key.substringBefore('\u0000') != name) continue
+                for (summary in context.summariesNamed(name)) {
                     joined = if (joined == null) summary else joined.join(summary)
                 }
                 return joined
@@ -1781,8 +1795,7 @@ object TaintEngine {
         private fun constructorSummary(ins: KirCall): FunctionSummary? {
             val name = ins.callee.fqn + ".<init>"
             var joined: FunctionSummary? = null
-            for ((key, summary) in context.table) {
-                if (key.substringBefore('\u0000') != name) continue
+            for (summary in context.summariesNamed(name)) {
                 joined = if (joined == null) summary else joined.join(summary)
             }
             return joined
