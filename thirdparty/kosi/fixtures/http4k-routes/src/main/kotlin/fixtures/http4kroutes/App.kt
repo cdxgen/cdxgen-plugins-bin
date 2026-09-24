@@ -44,12 +44,16 @@
 // segment; neither is a path kosi cannot fold.
 // kosi:want endpoint framework=http4k path=/b/{key} method=PUT pathunresolved=none mode=resolved
 // kosi:want endpoint framework=http4k path=/c/d method=GET pathunresolved=none mode=resolved
+// An MCP capability binding (`Tool(..) bind { }`) is not an HTTP route,
+// resolved or not.
+// kosi:want-not endpoint framework=http4k fn=~diaryTool
 package fixtures.http4kroutes
 
 import org.http4k.core.Method
 import org.http4k.core.Request
 import org.http4k.core.Response
 import org.http4k.routing.RoutingHttpHandler
+import org.http4k.ai.mcp.bind
 import org.http4k.routing.bind
 import org.http4k.routing.queryPresent
 import org.http4k.routing.routes
@@ -91,3 +95,5 @@ val app: RoutingHttpHandler = routes(
         queryPresent("q") bind routes("/d" bind Method.GET to { _: Request -> Response("d") }),
     ),
 )
+
+fun diaryTool(name: String) = org.http4k.ai.mcp.Tool("diary_for_$name") bind { arg: String -> org.http4k.ai.mcp.ToolResponse(arg) }

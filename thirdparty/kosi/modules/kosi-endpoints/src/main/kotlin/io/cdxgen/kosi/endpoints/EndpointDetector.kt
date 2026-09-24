@@ -1259,6 +1259,11 @@ object EndpointDetector {
         add: (Candidate) -> Unit,
     ) {
         val receiver = ins.receiver ?: return
+        // http4k's MCP and LLM SDKs spell CAPABILITY bindings with the same
+        // infix `bind` (`Tool(..) bind { }`, `Prompt`, `Resource`,
+        // `Reference`, `LLMTool`): not HTTP routes. On the whole http4k tree
+        // they were most of its 259 "unresolved routes" (atom-tools#95).
+        if (http4kNonRouteReceiver(fn, receiver)) return
         var authentication: List<String> = emptyList()
         val path: String
         val metaCall = producerOf(block, index, receiver)
@@ -1386,6 +1391,24 @@ object EndpointDetector {
         http4kInstructions(fn).any { ins ->
             ins is KirCall && ins.result == register && ins.callee.descriptor?.endsWith(")Lorg/http4k/routing/Router;") == true
         }
+
+    /**
+     * True when [register]'s producer is a resolved call or constructor whose
+     * TYPE is known and is none of the types an http4k HTTP `bind` has a
+     * receiver of (String, Method, the routing types). Unknown producers (no
+     * jar, a parameter, a field) are not evidence either way.
+     */
+    private fun http4kNonRouteReceiver(fn: KirFunction, register: String): Boolean {
+        val producer = http4kInstructions(fn).firstOrNull { it is KirCall && it.result == register } as? KirCall ?: return false
+        val type = if (producer.callee.kind == io.cdxgen.kosi.kir.CallKind.CONSTRUCTOR) {
+            producer.callee.fqn.replace('.', '/')
+        } else {
+            producer.callee.descriptor?.substringAfterLast(')')?.takeIf { it.startsWith("L") && it.endsWith(";") }
+                ?.removePrefix("L")?.removeSuffix(";") ?: return false
+        }
+        return type != "java/lang/String" && type != "org/http4k/core/Method" && !type.startsWith("org/http4k/routing/") &&
+            !type.startsWith("kotlin/") && type.startsWith("org/http4k/")
+    }
 
     /** One mount site's prefix, and the verb its `bind VERB to` filter admits (null: any). */
     private data class Http4kMount(val prefix: String, val verb: String? = null)
