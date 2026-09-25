@@ -15,7 +15,7 @@ import (
 
 // golem:env GOEXPERIMENT=simd
 
-// golem:want flow source=http-input sink=command-execution sinkFn=~ChunkedXor
+// golem:want flow source=http-input sink=command-execution sinkFn=~ChunkedXor known-fail=legacy:38
 func ChunkedXor(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := make([]byte, len(in))

@@ -18,7 +18,7 @@ import (
 
 // golem:env GOEXPERIMENT=simd GOARCH=amd64
 
-// golem:want flow source=http-input sink=command-execution sinkFn=~ArchLoadStore
+// golem:want flow source=http-input sink=command-execution sinkFn=~ArchLoadStore known-fail=legacy:38
 func ArchLoadStore(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := make([]byte, len(in))
@@ -26,7 +26,7 @@ func ArchLoadStore(r *http.Request) {
 	_ = exec.Command("sh", "-c", string(out))
 }
 
-// golem:want flow source=http-input sink=command-execution sinkFn=~ArchStoreArray
+// golem:want flow source=http-input sink=command-execution sinkFn=~ArchStoreArray known-fail=legacy:38
 func ArchStoreArray(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	var arr [64]byte

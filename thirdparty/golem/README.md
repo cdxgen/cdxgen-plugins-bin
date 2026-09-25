@@ -161,7 +161,7 @@ open in the other is the normal state of the project and the corpus has to be
 able to say so.
 
 On the quick tier (110 paired results) SEAM reaches recall 1.000 against legacy's
-0.836 at the same precision, 0.994, with no open defects against 19 and 0.41x the
+0.836 at the same precision, 0.994, with no open defects against 19 and 0.96x the
 median wall clock. It finds flows legacy cannot — through package-level
 variables, eight-deep call chains, a slice of pointers, into `html/template`,
 across the cgo boundary, through deferred closures and through goroutine worker
@@ -266,7 +266,7 @@ Golem's accuracy is measured rather than asserted. Two artifacts do the work:
   megabytes of mostly machine-specific detail.
 
 Current quick-tier measurement, for reference: 97 expectations across 63 corpus
-cases, 13 of them marked against a known defect — every one still open in
+cases, 18 of them marked against a known defect — every one still open in
 legacy and closed in SEAM. On the labeled upstream
 fixtures `edgeConnectivity` is 0.43 to 0.84 — a quarter to a half of reported
 flows carry a path that does not connect, which the small corpus cases never

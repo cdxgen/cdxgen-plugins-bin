@@ -20,7 +20,7 @@ import (
 // ValueChain: the vector carries the taint of the slice it was loaded from,
 // through the lane-wise op, and Store writes the receiver's taint into its
 // destination argument.
-// golem:want flow source=http-input sink=command-execution sinkFn=~ValueChain
+// golem:want flow source=http-input sink=command-execution sinkFn=~ValueChain known-fail=legacy:38
 func ValueChain(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	out := make([]byte, len(in))
@@ -29,7 +29,7 @@ func ValueChain(r *http.Request) {
 }
 
 // Stringify: String propagates, so the vector's taint reaches the sink as text.
-// golem:want flow source=http-input sink=command-execution sinkFn=~Stringify
+// golem:want flow source=http-input sink=command-execution sinkFn=~Stringify known-fail=legacy:38
 func Stringify(r *http.Request) {
 	in := []byte(r.FormValue("cmd"))
 	_ = exec.Command("sh", "-c", simd.LoadUint8s(in).String())
