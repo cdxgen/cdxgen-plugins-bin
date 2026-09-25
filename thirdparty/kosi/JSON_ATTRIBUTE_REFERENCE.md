@@ -45,7 +45,7 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | Attribute | Type | Value |
 | --- | --- | --- |
 | `name` | string | `kosi` |
-| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.2`); `unknown` for a build outside that tree |
+| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.3`); `unknown` for a build outside that tree |
 | `description` | string | human description |
 | `commit` | string | git commit injected at build time (`unknown` fallback) |
 

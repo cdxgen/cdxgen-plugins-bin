@@ -532,7 +532,6 @@ object TaintEngine {
          */
         var unnameableInvokes: Int = 0
             private set
-        private val unnameableSites = HashSet<String>()
         val joinWidths: java.util.TreeMap<Int, Int> = java.util.TreeMap()
         /** Callee FQNs where a pack entry actually moved taint (pack-origin summaries). */
         val packAppliedSources = sortedSetOf<String>()
@@ -584,11 +583,21 @@ object TaintEngine {
         /**
          * One count per SITE, not per visit: the worklist reaches a call site
          * once per fixpoint round, and a number that grew with the iteration
-         * count would say more about the budget than about the code.
+         * count would say more about the budget than about the code. The
+         * distinct enclosing functions are kept so the diagnostic can NAME
+         * where taint stopped — a bare count gives a consumer nothing to
+         * triage.
          */
+        private val unnameableSites = HashSet<String>()
+        private val unnameableFunctions = LinkedHashSet<String>()
         fun recordUnnameableInvoke(function: String, site: Int) = synchronized(lock) {
-            if (unnameableSites.add("$function#$site")) unnameableInvokes += 1
+            if (unnameableSites.add("$function#$site")) {
+                unnameableInvokes += 1
+                if (unnameableFunctions.size < 16) unnameableFunctions.add(function)
+            }
         }
+        fun unnameableInvokeSummary(): String? =
+            unnameableFunctions.joinToString("; ").ifEmpty { null }
         fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
 
         // ---- the per-site evidence the frames read ------------------
@@ -1017,13 +1026,15 @@ object TaintEngine {
             )
         }
         if (context.unnameableInvokes > 0) {
+            val where = context.unnameableInvokeSummary()
             diagnostics.add(
                 Diagnostic(
                     code = DiagnosticCodes.TAINT_UNNAMEABLE_INVOKE,
                     severity = Severity.INFO,
                     message = "${context.unnameableInvokes} call site(s) invoke a function value the engine " +
                         "could not name; taint stops at each one, so an absent flow through them means " +
-                        "unexamined, not clean",
+                        "unexamined, not clean" +
+                        (where?.let { "; in: $it" } ?: ""),
                     count = context.unnameableInvokes,
                 ),
             )

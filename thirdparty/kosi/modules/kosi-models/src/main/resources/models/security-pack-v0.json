@@ -39,6 +39,18 @@
   ],
   "effects": [
     {
+      "pattern": "java.lang.StringBuilder.append",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "java.lang.ThreadLocal.set",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
       "pattern": "kotlin.io.copyTo",
       "writesToArguments": [
         1
@@ -922,6 +934,22 @@
     },
     {
       "category": "string-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuilder.toString"
+    },
+    {
+      "category": "string-adapter",
       "flows": [
         [
           0,
@@ -933,6 +961,22 @@
         ]
       ],
       "pattern": "java.lang.StringBuilder.append"
+    },
+    {
+      "category": "value-wrapper",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.ThreadLocal.get"
     },
     {
       "category": "string-adapter",
@@ -947,7 +991,13 @@
         ]
       ],
       "pattern": "kotlin.Any.toString"
-    },
+    ,
+        "elementFlows": [
+          [
+            0,
+            -1
+          ]
+        ]},
     {
       "category": "string-adapter",
       "flows": [
@@ -1087,7 +1137,13 @@
         ]
       ],
       "pattern": "kotlin.text.toString"
-    },
+    ,
+        "elementFlows": [
+          [
+            0,
+            -1
+          ]
+        ]},
     {
       "category": "string-adapter",
       "flows": [
@@ -1135,6 +1191,78 @@
         "untrusted-input"
       ],
       "pattern": "java.util.UUID.fromString"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toByte"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toByteOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toDouble"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toDoubleOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toFloat"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toFloatOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toInt"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toIntOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toLong"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toLongOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toShort"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toShortOrNull"
     },
     {
       "clears": [
@@ -1704,7 +1832,8 @@
       "pattern": "java.io.File",
       "receiverType": null,
       "relevantArguments": [
-        0
+        0,
+        1
       ],
       "severity": "high"
     },
@@ -1713,7 +1842,8 @@
       "pattern": "java.io.FileOutputStream",
       "receiverType": null,
       "relevantArguments": [
-        0
+        0,
+        1
       ],
       "severity": "high"
     },
@@ -1721,7 +1851,8 @@
       "category": "path-traversal",
       "pattern": "java.io.FileWriter",
       "relevantArguments": [
-        0
+        0,
+        1
       ],
       "severity": "high"
     },

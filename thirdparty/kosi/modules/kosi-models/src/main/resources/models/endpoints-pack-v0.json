@@ -2997,8 +2997,7 @@
         }
       ],
       "mountFunctions": [
-        "io.vertx.ext.web.Route.subRouter",
-        "io.vertx.ext.web.Router.mountSubRouter"
+        "io.vertx.ext.web.Route.subRouter"
       ]
     }
   ],
