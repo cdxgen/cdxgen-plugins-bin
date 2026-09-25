@@ -53,3 +53,25 @@ func BroadcastConstant(r *http.Request) {
 	simd.BroadcastUint8s(1).Store(out)
 	_ = exec.Command("sh", "-c", string(out))
 }
+
+// put stores a vector into its destination parameter; the caller sees the
+// write only through the helper's summary (defect 39).
+func put(v simd.Uint8s, dst []byte) { v.Store(dst) }
+
+// StoreViaHelper stores the tainted vector into out through put.
+// golem:want flow source=http-input sink=command-execution sinkFn=~StoreViaHelper known-fail=legacy:38
+func StoreViaHelper(r *http.Request) {
+	in := []byte(r.FormValue("cmd"))
+	out := make([]byte, len(in))
+	put(simd.LoadUint8s(in), out)
+	_ = exec.Command("sh", "-c", string(out))
+}
+
+// PartCountMustNotPropagate: the int half of LoadUint8sPart's tuple is a lane
+// count derived from the slice's length, like Len(), so it is clean (defect 41).
+// golem:want-not flow source=http-input sink=command-execution sinkFn=~PartCountMustNotPropagate
+func PartCountMustNotPropagate(r *http.Request) {
+	in := []byte(r.FormValue("cmd"))
+	_, n := simd.LoadUint8sPart(in)
+	_ = exec.Command("sh", "-c", strconv.Itoa(n))
+}

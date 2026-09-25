@@ -584,7 +584,7 @@ func (s *intra) applySimdStoreWrites(state taintState, common *ssa.CallCommon, p
 		return
 	}
 	callee := common.StaticCallee()
-	if !isSimdIntrinsicPackage(simdFunctionPackagePath(callee)) {
+	if !s.engine.isSimdIntrinsic(callee) {
 		return
 	}
 	if simdIntrinsicKindOf(callee) != simdStore {
@@ -612,6 +612,14 @@ func (s *intra) applySimdStoreWrites(state taintState, common *ssa.CallCommon, p
 func (s *intra) depositArgumentWrite(state taintState, dst ssa.Value, written LabelSet, symbol string, pos token.Pos) {
 	if dst == nil || written.IsEmpty() {
 		return
+	}
+	// A destination loaded from a field or variable (`copy(b.buf, in)` passes
+	// the load *FieldAddr) is written through the location it was loaded from.
+	// Keyed on the load's own register the write is lost: a later read of
+	// b.buf is a fresh load of a fresh FieldAddr, and only the location's key
+	// is shared between them.
+	if load, ok := dst.(*ssa.UnOp); ok && load.Op == token.MUL {
+		dst = load.X
 	}
 	step := s.step("argument-write", "argument-write", valueName(dst), symbol, valueTypeOf(dst), s.fieldPathOf(dst), pos)
 	with := withStep(written, step)
@@ -984,6 +992,15 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 	case *ssa.SliceToArrayPointer:
 		return s.evaluate(state, x.X, visited)
 	case *ssa.Extract:
+		// The integer half of a simd Load*Part tuple is the number of lanes
+		// loaded — derived from the slice's length, like Len(), not from its
+		// contents — so it must not carry the vector's taint into index
+		// arithmetic and beyond.
+		if call, ok := x.Tuple.(*ssa.Call); ok && isIntegerType(x.Type()) {
+			if callee := call.Call.StaticCallee(); callee != nil && s.engine.isSimdIntrinsic(callee) {
+				return LabelSet{}
+			}
+		}
 		return s.evaluate(state, x.Tuple, visited)
 	case *ssa.Next:
 		return s.evaluate(state, x.Iter, visited)

@@ -37,3 +37,28 @@ func CopyConstants(r *http.Request) {
 	copy(dst, []byte("abc"))
 	_ = exec.Command("sh", "-c", string(dst))
 }
+
+// fill is the usual shape of copy: a helper that fills its destination
+// parameter. The caller only sees the write if the helper's summary records it
+// (defect 39).
+func fill(dst []byte, src string) { copy(dst, src) }
+
+// CopyViaHelper fills out through fill.
+// golem:want flow source=http-input sink=command-execution sinkFn=~CopyViaHelper known-fail=legacy:39
+func CopyViaHelper(r *http.Request) {
+	out := make([]byte, 64)
+	fill(out, r.FormValue("cmd"))
+	_ = exec.Command("sh", "-c", string(out))
+}
+
+type buffer struct{ buf []byte }
+
+// CopyIntoField copies into a struct field's slice. copy's destination is the
+// load of the field, and the write has to reach the field's location for the
+// later read of b.buf to see it (defect 40).
+// golem:want flow source=http-input sink=command-execution sinkFn=~CopyIntoField known-fail=legacy:40
+func CopyIntoField(r *http.Request) {
+	b := &buffer{buf: make([]byte, 64)}
+	copy(b.buf, r.FormValue("cmd"))
+	_ = exec.Command("sh", "-c", string(b.buf))
+}

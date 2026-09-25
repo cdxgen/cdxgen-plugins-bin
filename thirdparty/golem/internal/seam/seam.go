@@ -267,10 +267,15 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 	// returned empty here and recordUnmodeledSink fired. The rule is keyed on
 	// the package path rather than on body presence — the acceptance
 	// criterion is that amd64 stubs, arm64 stubs and riscv64 emulated bodies
-	// all behave identically — and it is applied before any body walk, model
-	// lookup or summary consultation, so it also keeps recordUnmodeledSink
-	// silent for these packages.
-	if callee != nil && isSimdIntrinsicPackage(simdFunctionPackagePath(callee)) {
+	// all behave identically — and it decides the call's result before any
+	// model lookup or summary is consulted, which also keeps
+	// recordUnmodeledSink silent for these packages. On architectures with
+	// emulated bodies those bodies are still summarised like any reachable
+	// code, and a summary's argument writes still apply at the call; they
+	// carry the same taint the rule deposits, so the result is unchanged.
+	// The package must also belong to no module: `module simd/local` is user
+	// code, not the standard library's intrinsic.
+	if callee != nil && e.isSimdIntrinsic(callee) {
 		if simdIntrinsicKindOf(callee) == simdPropagate {
 			// The result is the union of the receiver's and the arguments'
 			// taint. For a static method call the receiver travels as

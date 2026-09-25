@@ -24,11 +24,12 @@ const (
 	simdClean
 )
 
-// isSimdIntrinsicPackage reports whether a package path is one of Go's simd
-// experiment packages: the portable `simd`, the architecture-specific
-// `simd/archsimd`, or their internal helpers. Only standard-library packages
-// have a dot-less first path element, so the prefix cannot reach a third-party
-// module that merely starts with the same letters.
+// isSimdIntrinsicPackage reports whether a package path has the shape of one of
+// Go's simd experiment packages: the portable `simd`, the architecture-specific
+// `simd/archsimd`, or their internal helpers. The path alone does not prove the
+// package is the standard library's — a module may legally be named `simd/…`
+// — so callers go through (*Engine).isSimdIntrinsic, which also requires the
+// package to belong to no module.
 //
 // This predicate is deliberately local to SEAM. IsStdlibCarrierPackage is
 // shared with the legacy engine, and adding simd there would change legacy's
@@ -99,4 +100,33 @@ func simdFunctionPackagePath(fn *ssa.Function) string {
 		return ""
 	}
 	return fn.Pkg.Pkg.Path()
+}
+
+// isSimdIntrinsic reports whether fn belongs to the standard library's simd
+// packages. A package with module information is never the standard library:
+// `module simd/local` is a user module whose bodies must be walked and whose
+// sinks must be found, not an intrinsic to be approximated.
+func (e *Engine) isSimdIntrinsic(fn *ssa.Function) bool {
+	path := simdFunctionPackagePath(fn)
+	return isSimdIntrinsicPackage(path) && e.moduleForPackagePath(path) == nil
+}
+
+// simdCallWriteDestination returns the destination argument of a call to a simd
+// Store* method, or nil. For a static method call the receiver is Args[0], so
+// the destination is Args[1].
+func (e *Engine) simdCallWriteDestination(common *ssa.CallCommon) ssa.Value {
+	if common == nil || common.IsInvoke() || len(common.Args) < 2 {
+		return nil
+	}
+	callee := common.StaticCallee()
+	if callee == nil || !e.isSimdIntrinsic(callee) || simdIntrinsicKindOf(callee) != simdStore {
+		return nil
+	}
+	return common.Args[1]
+}
+
+// isIntegerType reports whether t is an integer basic type.
+func isIntegerType(t types.Type) bool {
+	basic, ok := t.Underlying().(*types.Basic)
+	return ok && basic.Info()&types.IsInteger != 0
 }
