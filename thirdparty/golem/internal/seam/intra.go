@@ -1000,7 +1000,31 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 	case *ssa.Global:
 		return s.engine.globalTaintFor(x)
 	}
+	// A value whose own location key holds taint carries it when read as an
+	// operand — `string(out)` after `copy(out, in)`, or the base slice a simd
+	// Store* deposited into through a re-slice of it. Aggregates are
+	// excluded: rememberAggregate marks a struct's base key on every field
+	// store precisely so whole-value reads work, and a field read that fell
+	// back to it would read sibling fields' taint — the false positive
+	// field-discrimination-negative locks out.
+	if labels, ok := state.memory[s.pathKey(v)]; ok && !labels.IsEmpty() && !blursFields(v.Type()) {
+		return labels
+	}
 	return LabelSet{}
+}
+
+// blursFields reports whether consulting a value's own location key as a whole
+// would blur per-field records: a struct or array, or a pointer to one, whose
+// base key rememberAggregate marks on every element or field store.
+func blursFields(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	t = types.Unalias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	return isAggregate(t)
 }
 
 // unwrapAddr follows FieldAddr/IndexAddr chains to find the base address.
