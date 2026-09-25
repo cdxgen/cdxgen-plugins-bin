@@ -1,0 +1,25 @@
+thirdparty/golem/internal/analyzer/buildenv.go
+  s_0766c78faa0ee3::t_432710f9bacb05 73-79,81,85-86,89,97,99
+thirdparty/golem/internal/analyzer/buildenv_test.go
+  s_0766c78faa0ee3::t_a6995e8b6a3581 59-62,67-75
+  s_0766c78faa0ee3::t_65e6b94a8223b4 76
+thirdparty/golem/internal/analyzer/report.go
+  s_0766c78faa0ee3::t_a6995e8b6a3581 4
+  s_0766c78faa0ee3::t_432710f9bacb05 60-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c9271b28093ca531e9b58149a0a36a996934424b",
+  "prompts": {},
+  "sessions": {
+    "s_0766c78faa0ee3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1854c4b8-e5fe-41f6-88b4-dd514033efc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
