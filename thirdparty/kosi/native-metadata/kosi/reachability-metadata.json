@@ -504,6 +504,23 @@
         {
           "name": "<init>",
           "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinBlockStringTemplateEntryStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtBlockStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
             "org.jetbrains.kotlin.psi.stubs.KotlinClassStub"
           ]
         }
@@ -1086,7 +1103,41 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderWithTextStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderWithTextStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
     },
     {
       "methods": [
@@ -1238,17 +1289,6 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtBlockStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtClassLiteralExpression"
     },
     {
@@ -1271,29 +1311,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtLambdaArgument"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
     },
     {
       "methods": [

@@ -26,6 +26,13 @@
 #   crypto-algorithms      The crypto collector, which reads its own
 #                          resource-backed model packs.
 #   kosi-vulnerable-service  Taint: the deepest data-flow path in the tree.
+#   spring-const-scoping-unresolved  Mapping paths written as templates,
+#                          escapes and Java constants, read from PSI: the
+#                          string-template entry types the resolved tier
+#                          had never reflected on (atom-tools#95 review).
+#   dsl-loop-scoping-unresolved  DSL routes over constants and loop lists
+#                          with no framework jar: the scoped constant table
+#                          reached from the KIR value folder.
 #
 # What this subset would have caught: the JDK gap (java-interop, on stats),
 # and the JavaClassSupersImpl crash (android-agp-namespace or java-interop,
@@ -43,3 +50,5 @@ multi-module-gradle
 ktor-app
 crypto-algorithms
 kosi-vulnerable-service
+spring-const-scoping-unresolved
+dsl-loop-scoping-unresolved
