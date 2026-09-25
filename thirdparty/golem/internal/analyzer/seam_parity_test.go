@@ -65,6 +65,10 @@ func flowShapes(report *model.Report) []string {
 
 func analyzeWithEngine(t *testing.T, dir, mode, engine string) *model.Report {
 	t.Helper()
+	env, err := corpus.ParseEnvSettings(dir)
+	if err != nil {
+		t.Fatalf("parsing golem:env directives: %v", err)
+	}
 	report, err := Analyze(Options{
 		Dir:                   dir,
 		IncludeLocal:          true,
@@ -73,6 +77,7 @@ func analyzeWithEngine(t *testing.T, dir, mode, engine string) *model.Report {
 		DataFlowCallGraphMode: "rta",
 		DataFlowMax:           200,
 		TaintEngine:           engine,
+		Env:                   env,
 		ToolVersion:           "test",
 	})
 	if err != nil {

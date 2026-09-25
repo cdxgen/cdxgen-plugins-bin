@@ -24,6 +24,13 @@ const corpusRoot = "../../testdata/corpus"
 
 func analyzeCorpusCase(t *testing.T, dir, mode string) *model.Report {
 	t.Helper()
+	// The case's golem:env build shape (GOEXPERIMENT, target GOARCH) travels
+	// in the load configuration: cases run in parallel in this process, so
+	// the process environment is not available to them.
+	env, err := corpus.ParseEnvSettings(dir)
+	if err != nil {
+		t.Fatalf("parsing golem:env directives: %v", err)
+	}
 	report, err := Analyze(Options{
 		Dir:                   dir,
 		IncludeLocal:          true,
@@ -31,6 +38,7 @@ func analyzeCorpusCase(t *testing.T, dir, mode string) *model.Report {
 		DataFlowMode:          mode,
 		DataFlowCallGraphMode: "rta",
 		DataFlowMax:           200,
+		Env:                   env,
 		ToolVersion:           "test",
 	})
 	if err != nil {

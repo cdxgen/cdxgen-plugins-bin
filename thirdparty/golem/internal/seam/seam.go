@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -70,6 +71,12 @@ type Engine struct {
 	moduleByPath  map[string]*model.Module
 	packageByPath map[string]*packages.Package
 
+	// goroot is the GOROOT of the go command the packages were loaded with,
+	// and standardByPath the standard-library classification of every loaded
+	// package, derived from it and the load metadata. See isStandardPackage.
+	goroot         string
+	standardByPath map[string]bool
+
 	elapsed time.Duration
 }
 
@@ -83,6 +90,10 @@ type Options struct {
 	SCCIterCap   int
 	TaintGlobals string
 	AliasMode    string
+	// Goroot is the GOROOT of the go command that loaded the packages. It
+	// decides which module-less packages are the standard library; see
+	// IsStandardLibraryPackage.
+	Goroot string
 }
 
 // DefaultOptions returns sensible defaults.
@@ -108,6 +119,7 @@ func NewEngine(opts Options) *Engine {
 		fieldDepth:        opts.FieldDepth,
 		intraIterationCap: opts.IntraIterCap,
 		sccIterationCap:   opts.SCCIterCap,
+		goroot:            opts.Goroot,
 		models:            models_pkg.NewDB(),
 		summaries:         make(map[*ssa.Function]*FuncSummary),
 		globalTaint:       make(map[string]LabelSet),
@@ -146,6 +158,10 @@ func (e *Engine) Analyze(program *ssa.Program, pkgs []*packages.Package, cg *cal
 	}
 	e.moduleByPath = moduleByPath
 	e.packageByPath = packageByPath
+	e.standardByPath = make(map[string]bool, len(packageByPath))
+	for path, pkg := range packageByPath {
+		e.standardByPath[path] = IsStandardLibraryPackage(pkg, e.goroot)
+	}
 	e.fset = fset
 
 	if err := e.models.LoadBuiltins(); err != nil {
@@ -192,6 +208,15 @@ type argResolver func(index int, fields []string) LabelSet
 func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, argLabels LabelSet, recvLabels LabelSet, callPos token.Pos, argAt argResolver) LabelSet {
 	if common == nil {
 		return NewLabelSet()
+	}
+
+	// A builtin (append, copy, min, max, …) has no static callee and is not an
+	// invoke, so every resolution path below returns an empty set for it and
+	// taint silently died at every append-shaped hop. The value-moving ones are
+	// handled explicitly here rather than by widening isSuppliedFuncValue,
+	// which would blur every unresolved dynamic call into a passthrough.
+	if builtin, ok := common.Value.(*ssa.Builtin); ok {
+		return resolveBuiltinTaint(builtin, argLabels)
 	}
 
 	callee := e.throughLinkname(common.StaticCallee())
@@ -252,6 +277,34 @@ func (e *Engine) resolveCallTaint(caller *ssa.Function, common *ssa.CallCommon, 
 		}
 	}
 
+	// The simd experiment packages are bodiless stubs on amd64, arm64 and wasm
+	// and carry real emulated bodies everywhere else, and they appear in no
+	// model database, so without a rule of their own every call into them
+	// returned empty here and recordUnmodeledSink fired. The rule is keyed on
+	// the package path rather than on body presence — the acceptance
+	// criterion is that amd64 stubs, arm64 stubs and riscv64 emulated bodies
+	// all behave identically — and it decides the call's result before any
+	// model lookup or summary is consulted, which also keeps
+	// recordUnmodeledSink silent for these packages. On architectures with
+	// emulated bodies those bodies are still summarised like any reachable
+	// code, and a summary's argument writes still apply at the call; they
+	// carry the same taint the rule deposits, so the result is unchanged.
+	// The package must also belong to no module: `module simd/local` is user
+	// code, not the standard library's intrinsic.
+	if callee != nil && e.isSimdIntrinsic(callee) {
+		if simdIntrinsicKindOf(callee) == simdPropagate {
+			// The result is the union of the receiver's and the arguments'
+			// taint. For a static method call the receiver travels as
+			// Args[0], so it is already part of argLabels; recvLabels covers
+			// the invoke form. Tuple results are tainted as a whole — the
+			// engine has no per-result precision to be more careful with.
+			return argLabels.Merge(recvLabels)
+		}
+		// Store* results and the derived results carry no data; the Store
+		// side effect is applied by (*intra).applySimdStoreWrites.
+		return NewLabelSet()
+	}
+
 	return e.resolveStaticCallTaint(caller, callee, common, argLabels, recvLabels, callPos, argAt)
 }
 
@@ -268,6 +321,27 @@ func isSuppliedFuncValue(v ssa.Value) bool {
 		}
 	}
 	return false
+}
+
+// resolveBuiltinTaint returns the result taint of a builtin call.
+//
+// argLabels is the caller's union over every argument of the argument's own
+// taint and its variadic-element view, which is exactly what append and min/max
+// return: a value derived from what was passed in. append's spread form
+// (`append(x, y...)`) passes y directly and the packed form (`append(x, a, b)`)
+// arrives as a fresh varargs slice whose elements' taint the variadic view
+// already carries, so both shapes are covered without inspecting Ellipsis.
+//
+// copy moves data through memory instead of returning it — its write is applied
+// by (*intra).applyBuiltinArgumentWrites — and its count result is clean. Every
+// other builtin keeps the previous behaviour of a clean result.
+func resolveBuiltinTaint(builtin *ssa.Builtin, argLabels LabelSet) LabelSet {
+	switch builtin.Name() {
+	case "append", "min", "max":
+		return argLabels
+	default:
+		return NewLabelSet()
+	}
 }
 
 // resolveStaticCallTaint handles a call with a known static callee.
@@ -363,7 +437,7 @@ func (e *Engine) resolveStaticCallTaint(caller *ssa.Function, callee *ssa.Functi
 	// summary was computed, if it found no effects (common for methods whose
 	// taint flows through internal state the summary can't capture), the
 	// blanket carrier rule is more sound than dropping the taint entirely.
-	if isStdlibPropagate(callee) {
+	if e.isStdlibPropagate(callee) {
 		return argLabels.Merge(recvLabels)
 	}
 
@@ -1039,7 +1113,7 @@ func (e *Engine) collectFunctions(program *ssa.Program, cg *callgraph.Graph) []*
 		if node == nil {
 			continue
 		}
-		fnIsStdlib := fn.Pkg != nil && fn.Pkg.Pkg != nil && isStandardPackagePath(fn.Pkg.Pkg.Path())
+		fnIsStdlib := fn.Pkg != nil && fn.Pkg.Pkg != nil && e.isStandardPackage(fn.Pkg.Pkg.Path())
 		for _, edge := range node.Out {
 			if edge == nil || edge.Callee == nil || edge.Callee.Func == nil {
 				continue
@@ -1090,7 +1164,7 @@ func (e *Engine) inScope(fn *ssa.Function) bool {
 		return false
 	}
 	pkgPath := fn.Pkg.Pkg.Path()
-	if isStandardPackagePath(pkgPath) {
+	if e.isStandardPackage(pkgPath) {
 		return e.scope == "all"
 	}
 	mod := e.moduleForPackagePath(pkgPath)
@@ -1104,8 +1178,66 @@ func (e *Engine) inScope(fn *ssa.Function) bool {
 	}
 }
 
-// isStandardPackagePath reports whether a package path names a standard library
-// package. Standard paths have no dot in their first segment.
+// isStandardPackage reports whether pkgPath names a standard library package,
+// from the load metadata where there is any.
+//
+// It used to be decided from the path alone: no dot in the first element. That
+// is how the standard library is laid out but not a property only it has.
+// `go mod init myapp` and `module example/local` are dot-less too, and under
+// that rule every package of such a module was the standard library, so under
+// the default local scope nothing in it materialised and its callees were never
+// expanded: SEAM reported no flows at all where the legacy engine, which asks
+// the module first, found them.
+func (e *Engine) isStandardPackage(pkgPath string) bool {
+	if standard, ok := e.standardByPath[pkgPath]; ok {
+		return standard
+	}
+	// No metadata for this path. A package attributed to a module is still not
+	// the standard library, whatever its path looks like.
+	if e.moduleForPackagePath(pkgPath) != nil {
+		return false
+	}
+	return isStandardPackagePath(pkgPath)
+}
+
+// IsStandardLibraryPackage reports whether a loaded package belongs to the Go
+// standard library. Both engines classify through it, so they cannot disagree
+// about what the standard library is.
+//
+// A package the go command attributes to a module is not, whatever its path.
+// A module-less one is when it lives under goroot's src tree: goroot must be
+// the GOROOT of the go command that loaded the package, which in a -trimpath
+// release build is not the one go/build reports. Without a goroot or a
+// directory to go on, only the path's shape is left.
+func IsStandardLibraryPackage(pkg *packages.Package, goroot string) bool {
+	if pkg == nil || pkg.Module != nil {
+		return false
+	}
+	dir := packageDir(pkg)
+	if goroot == "" || dir == "" {
+		return isStandardPackagePath(pkg.PkgPath)
+	}
+	src := filepath.Join(filepath.Clean(goroot), "src")
+	return strings.HasPrefix(filepath.Clean(dir), src+string(filepath.Separator))
+}
+
+// packageDir returns the directory a loaded package lives in.
+func packageDir(pkg *packages.Package) string {
+	if pkg.Dir != "" {
+		return pkg.Dir
+	}
+	for _, files := range [][]string{pkg.GoFiles, pkg.CompiledGoFiles, pkg.OtherFiles} {
+		if len(files) > 0 {
+			return filepath.Dir(files[0])
+		}
+	}
+	return ""
+}
+
+// isStandardPackagePath reports whether a package path has the shape of a
+// standard library path: no dot in its first segment. A dot-less module path
+// has the same shape, so this is only the fallback for a package with no load
+// metadata; see isStandardPackage.
 func isStandardPackagePath(pkgPath string) bool {
 	if pkgPath == "" {
 		return false
@@ -1137,11 +1269,16 @@ func allPackages(pkgs []*packages.Package) []*types.Package {
 	return out
 }
 
-func isStdlibPropagate(fn *ssa.Function) bool {
+// isStdlibPropagate reports whether fn is in a standard library carrier
+// package. The carrier list matches paths, and a dot-less module can own one of
+// those paths (`module encoding/app`), so the package must also be the standard
+// library: otherwise a module helper that drops its input would propagate it.
+func (e *Engine) isStdlibPropagate(fn *ssa.Function) bool {
 	if fn.Pkg == nil || fn.Pkg.Pkg == nil {
 		return false
 	}
-	return IsStdlibCarrierPackage(fn.Pkg.Pkg.Path())
+	pkgPath := fn.Pkg.Pkg.Path()
+	return IsStdlibCarrierPackage(pkgPath) && e.isStandardPackage(pkgPath)
 }
 
 // IsStdlibCarrierPackage reports whether a package path names a standard
@@ -1157,7 +1294,9 @@ func isStdlibPropagate(fn *ssa.Function) bool {
 // engine and dropped it under the other.
 // Matching is on whole path elements: "path" covers path/filepath and
 // "encoding" covers encoding/json, but neither covers a module package that
-// merely starts with those letters.
+// merely starts with those letters. A dot-less module can still own a matching
+// path outright, so callers also require the package to be the standard
+// library (IsStandardLibraryPackage).
 func IsStdlibCarrierPackage(pkgPath string) bool {
 	for _, prefix := range stdlibCarrierPrefixes {
 		if pkgPath == prefix || strings.HasPrefix(pkgPath, prefix+"/") {

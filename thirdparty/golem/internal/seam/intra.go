@@ -478,6 +478,8 @@ func (s *intra) transferCall(state taintState, common *ssa.CallCommon, pos token
 	}
 	result := s.engine.resolveCallTaint(s.fn, common, argLabels, recvLabels, pos, argAt)
 	s.applyCallArgumentWrites(state, common, argLabels, pos)
+	s.applyBuiltinArgumentWrites(state, common, pos)
+	s.applySimdStoreWrites(state, common, pos)
 	if result.IsEmpty() {
 		return result
 	}
@@ -539,6 +541,97 @@ func (s *intra) applyCallArgumentWrites(state taintState, common *ssa.CallCommon
 	}
 }
 
+// applyBuiltinArgumentWrites deposits taint into the memory a builtin call
+// writes through, using the same write pattern as applyCallArgumentWrites.
+//
+// Only copy moves data this way today: it writes src — including its `[*]`
+// element view, and whatever string the taint arrived on — into dst's backing
+// store and returns a clean count. Without it, `copy(out, in)` silently
+// laundered the flow the same way every unresolved builtin did.
+func (s *intra) applyBuiltinArgumentWrites(state taintState, common *ssa.CallCommon, pos token.Pos) {
+	if common == nil {
+		return
+	}
+	builtin, ok := common.Value.(*ssa.Builtin)
+	if !ok {
+		return
+	}
+	switch builtin.Name() {
+	case "copy":
+		if len(common.Args) != 2 {
+			return
+		}
+		src := common.Args[1]
+		labels := s.taintOf(state, src).Merge(s.variadicElementTaint(state, src))
+		if labels.IsEmpty() {
+			return
+		}
+		dst := unwrapWriteTarget(unwrapAddr(common.Args[0]))
+		s.depositArgumentWrite(state, dst, labels, callSymbolOf(common), pos)
+	}
+}
+
+// applySimdStoreWrites deposits the receiver's taint into the destination of a
+// simd Store* method, the write half of the simd intrinsic rule.
+//
+// For a static method call SSA passes the receiver as Args[0], so the
+// destination slice is Args[1]; the receiver itself is common.Value only in an
+// invoke, which a call on a concrete simd type never is. The destination may be
+// a plain slice or an array pointer (a slice-to-array-pointer conversion), both
+// of which depositArgumentWrite resolves to the base allocation.
+func (s *intra) applySimdStoreWrites(state taintState, common *ssa.CallCommon, pos token.Pos) {
+	if common == nil || common.IsInvoke() {
+		return
+	}
+	callee := common.StaticCallee()
+	if !s.engine.isSimdIntrinsic(callee) {
+		return
+	}
+	if simdIntrinsicKindOf(callee) != simdStore {
+		return
+	}
+	if len(common.Args) < 2 {
+		return
+	}
+	recv := common.Args[0]
+	labels := s.taintOf(state, recv).Merge(s.variadicElementTaint(state, recv))
+	if labels.IsEmpty() {
+		return
+	}
+	dst := unwrapWriteTarget(unwrapAddr(common.Args[1]))
+	s.depositArgumentWrite(state, dst, labels, callSymbolOf(common), pos)
+}
+
+// depositArgumentWrite merges written into the location dst addresses and onto
+// the destination value itself, recording one argument-write hop.
+//
+// The memory write covers reads through element and field addresses, which look
+// at the `[*]` view; the value write covers a direct read of the destination
+// (`string(out)` after `copy(out, in)`), which evaluate() answers from the
+// value map without consulting the destination's memory key.
+func (s *intra) depositArgumentWrite(state taintState, dst ssa.Value, written LabelSet, symbol string, pos token.Pos) {
+	if dst == nil || written.IsEmpty() {
+		return
+	}
+	// A destination loaded from a field or variable (`copy(b.buf, in)` passes
+	// the load *FieldAddr) is written through the location it was loaded from.
+	// Keyed on the load's own register the write is lost: a later read of
+	// b.buf is a fresh load of a fresh FieldAddr, and only the location's key
+	// is shared between them.
+	if load, ok := dst.(*ssa.UnOp); ok && load.Op == token.MUL {
+		dst = load.X
+	}
+	step := s.step("argument-write", "argument-write", valueName(dst), symbol, valueTypeOf(dst), s.fieldPathOf(dst), pos)
+	with := withStep(written, step)
+	key := s.pathKey(dst)
+	state.memory[key] = state.memory[key].Merge(with)
+	state.memory[key+"[*]"] = state.memory[key+"[*]"].Merge(with)
+	if field, isField := dst.(*ssa.FieldAddr); isField {
+		state.memory[key+fieldSuffix(field)] = state.memory[key+fieldSuffix(field)].Merge(with)
+	}
+	state.setValue(dst, with)
+}
+
 // unwrapWriteTarget looks through the conversions a destination argument
 // passes through on its way to an interface or generic parameter.
 //
@@ -556,6 +649,11 @@ func unwrapWriteTarget(v ssa.Value) ssa.Value {
 		case *ssa.ChangeType:
 			v = x.X
 		case *ssa.Convert:
+			v = x.X
+		case *ssa.SliceToArrayPointer:
+			// An array-pointer destination — the shape an archsimd store can
+			// arrive through — addresses the same backing store as the slice
+			// it was converted from.
 			v = x.X
 		default:
 			return v
@@ -894,6 +992,15 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 	case *ssa.SliceToArrayPointer:
 		return s.evaluate(state, x.X, visited)
 	case *ssa.Extract:
+		// The integer half of a simd Load*Part tuple is the number of lanes
+		// loaded — derived from the slice's length, like Len(), not from its
+		// contents — so it must not carry the vector's taint into index
+		// arithmetic and beyond.
+		if call, ok := x.Tuple.(*ssa.Call); ok && isIntegerType(x.Type()) {
+			if callee := call.Call.StaticCallee(); callee != nil && s.engine.isSimdIntrinsic(callee) {
+				return LabelSet{}
+			}
+		}
 		return s.evaluate(state, x.Tuple, visited)
 	case *ssa.Next:
 		return s.evaluate(state, x.Iter, visited)
@@ -910,7 +1017,39 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 	case *ssa.Global:
 		return s.engine.globalTaintFor(x)
 	}
+	// A value whose own location key holds taint carries it when read as an
+	// operand — `string(out)` after `copy(out, in)`, or the base slice a simd
+	// Store* deposited into through a re-slice of it. Aggregates are
+	// excluded: rememberAggregate marks a struct's base key on every field
+	// store precisely so whole-value reads work, and a field read that fell
+	// back to it would read sibling fields' taint — the false positive
+	// field-discrimination-negative locks out.
+	//
+	// Only the kinds that can be a write destination get the lookup. This
+	// fallthrough runs for every operand of every read during the fixpoint,
+	// and pathKey builds strings, so an unconditional check here was a
+	// measurable share of wall clock on the corpus.
+	switch v.(type) {
+	case *ssa.Alloc, *ssa.MakeSlice, *ssa.Parameter, *ssa.FreeVar:
+		if labels, ok := state.memory[s.pathKey(v)]; ok && !labels.IsEmpty() && !blursFields(v.Type()) {
+			return labels
+		}
+	}
 	return LabelSet{}
+}
+
+// blursFields reports whether consulting a value's own location key as a whole
+// would blur per-field records: a struct or array, or a pointer to one, whose
+// base key rememberAggregate marks on every element or field store.
+func blursFields(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	t = types.Unalias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	return isAggregate(t)
 }
 
 // unwrapAddr follows FieldAddr/IndexAddr chains to find the base address.
@@ -1159,6 +1298,20 @@ func (s *intra) pathKey(v ssa.Value) string {
 		// value. Collapsing to the map's [*] location, the way Index and
 		// IndexAddr do, keeps the location stable.
 		return s.pathKey(x.X) + "[*]"
+	case *ssa.Slice:
+		// A re-slice aliases its base's backing store: `o := out[1:]` followed
+		// by a store through IndexAddr(o) must land in out's location, whether
+		// out is a local or a parameter. Keyed off the Slice register instead,
+		// the store goes to a location no read of out consults and the write
+		// is lost. Strings lower to the same instruction but accept no stores,
+		// so their reads are unchanged — evaluate already read through to the
+		// base in the read direction.
+		return s.pathKey(x.X)
+	case *ssa.SliceToArrayPointer:
+		// Converting a slice to an array pointer addresses the same backing
+		// store, so a write through the pointer reaches the base slice's
+		// location.
+		return s.pathKey(x.X)
 	default:
 		return "value:" + s.fn.String() + ":" + x.Name()
 	}

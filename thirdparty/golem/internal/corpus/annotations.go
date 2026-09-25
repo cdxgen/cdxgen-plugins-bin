@@ -10,6 +10,17 @@
 //	// golem:want-not edge from=<symbol> to=<symbol> [known-fail=<defect>]
 //	// golem:want     reachable symbol=<symbol> [from=<symbol>] [maxdepth=N] [known-fail=<defect>]
 //	// golem:want-not reachable symbol=<symbol>
+//	// golem:env      KEY=VALUE [KEY=VALUE …]
+//
+// golem:env is not an expectation but the case's build shape: the KEY=VALUE
+// pairs (allowlisted to GOEXPERIMENT, GOOS, GOARCH, GOAMD64 and GOARM64 by
+// ValidateEnvPair) are applied to the load configuration, never to the process
+// environment, because cases run in parallel in one process. A case whose
+// files are all gated behind //go:build goexperiment.simd states
+// golem:env GOEXPERIMENT=simd, and one that targets an architecture the host
+// is not states golem:env GOARCH=amd64; a driver that fails to honour the
+// directive then fails loudly on a load error instead of analysing an empty
+// package set and passing vacuously.
 //
 // Values match exactly by default. Prefix a value with "~" for a substring
 // match. Exact matching is deliberate: substring matching on categories makes
@@ -188,6 +199,12 @@ func parseFileComments(fset *token.FileSet, file *ast.File, path string) ([]Anno
 			for _, line := range commentLines(comment.Text) {
 				text, ok := trimAnnotationPrefix(line)
 				if !ok {
+					continue
+				}
+				// golem:env carries build-shape settings for the whole case,
+				// not an expectation about the report; ParseEnvSettings reads
+				// and validates it.
+				if isEnvDirective(text) {
 					continue
 				}
 				ann, err := parseAnnotation(text)

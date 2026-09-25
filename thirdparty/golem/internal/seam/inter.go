@@ -630,11 +630,22 @@ func (e *Engine) detectSummaryArgumentWrites(fn *ssa.Function, summary *FuncSumm
 			continue
 		}
 		for _, instr := range block.Instrs {
-			store, ok := instr.(*ssa.Store)
-			if !ok {
+			// A write through a parameter is a Store, a builtin copy into it,
+			// or a simd Store* method into it. The calls matter as much as the
+			// instruction: `func fill(dst, src []byte) { copy(dst, src) }` is
+			// how copy usually appears, and without the call forms the caller
+			// never learns that its argument was filled.
+			var addr ssa.Value
+			switch x := instr.(type) {
+			case *ssa.Store:
+				addr = x.Addr
+			case *ssa.Call:
+				addr = e.callWriteDestination(&x.Call)
+			}
+			if addr == nil {
 				continue
 			}
-			target := unwrapWriteTarget(store.Addr)
+			target := unwrapWriteTarget(addr)
 			// Walk the address chain to find the base pointer; if that base
 			// is one of the function's parameters, this store writes through
 			// an argument.
@@ -681,4 +692,17 @@ func (e *Engine) detectSummaryArgumentWrites(fn *ssa.Function, summary *FuncSumm
 // addDiagnostic adds a diagnostic message.
 func (e *Engine) addDiagnostic(msg string) {
 	e.diagnostics = append(e.diagnostics, msg)
+}
+
+// callWriteDestination returns the argument a call writes through without a
+// Store instruction — builtin copy's destination, or a simd Store* method's —
+// or nil for any other call.
+func (e *Engine) callWriteDestination(common *ssa.CallCommon) ssa.Value {
+	if builtin, ok := common.Value.(*ssa.Builtin); ok {
+		if builtin.Name() == "copy" && len(common.Args) == 2 {
+			return common.Args[0]
+		}
+		return nil
+	}
+	return e.simdCallWriteDestination(common)
 }

@@ -379,7 +379,7 @@ func (a *Analyzer) includeDataFlowFunction(fn *ssa.Function) bool {
 	}
 	pkgPath := fn.Pkg.Pkg.Path()
 	mod := a.moduleForPackagePath(pkgPath)
-	standard := isStandardPackage(pkgPath, mod)
+	standard := a.isStandardPackage(pkgPath, mod)
 	local := isLocalModule(mod)
 	if standard && !a.options.IncludeStdlib {
 		return false
@@ -2350,8 +2350,11 @@ func (b *dataFlowBuilder) shouldPropagate(common *ssa.CallCommon) bool {
 	}
 	// The carrier list is the one the SEAM engine uses
 	// (seam.IsStdlibCarrierPackage); sharing it is what keeps the two engines
-	// from disagreeing about which standard library calls preserve taint.
-	return seam.IsStdlibCarrierPackage(callee.Pkg.Pkg.Path())
+	// from disagreeing about which standard library calls preserve taint. The
+	// list matches paths, which a dot-less module can own, so the package must
+	// also be the standard library.
+	pkgPath := callee.Pkg.Pkg.Path()
+	return seam.IsStdlibCarrierPackage(pkgPath) && b.analyzer.isStandardPackage(pkgPath, nil)
 }
 
 func (b *dataFlowBuilder) matchCall(common *ssa.CallCommon, patterns []model.DataFlowPattern) []model.DataFlowPattern {
@@ -3222,6 +3225,7 @@ func (a *Analyzer) buildDataFlowSEAM(pkgs []*packages.Package, ctx *ssaContext, 
 		Mode:      mode,
 		Scope:     scope,
 		MaxSlices: a.options.DataFlowMax,
+		Goroot:    a.goroot,
 	}
 	if seamOpts.MaxSlices <= 0 {
 		seamOpts.MaxSlices = 1000

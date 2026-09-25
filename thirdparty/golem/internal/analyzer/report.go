@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"fmt"
 	"go/build"
 	"go/token"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/native"
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/seam"
 )
 
 func Analyze(options Options) (*model.Report, error) {
@@ -52,6 +54,20 @@ func Analyze(options Options) (*model.Report, error) {
 	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 
 	fset := token.NewFileSet()
+	loadEnv, err := effectiveLoadEnv(options.Env)
+	if err != nil {
+		return nil, err
+	}
+	// The build shape the packages are LOADED for, from one `go env -json`
+	// call under the same environment and directory the load uses. goos/goarch
+	// in the report remain golem's own platform; these name the load target,
+	// which differs whenever GOOS/GOARCH/GOEXPERIMENT were set for the
+	// analysis. Probing before the load means an override the toolchain
+	// rejects fails here, with the toolchain's message.
+	target, targetErr := targetEnv(absDir, loadEnv)
+	if targetErr != nil && len(options.Env) > 0 {
+		return nil, fmt.Errorf("build-shape override %s rejected by the toolchain: %w", strings.Join(options.Env, " "), targetErr)
+	}
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedFiles |
@@ -66,6 +82,9 @@ func Analyze(options Options) (*model.Report, error) {
 		Dir:   absDir,
 		Fset:  fset,
 		Tests: options.Tests,
+		// nil when no override is set, which loads under the process
+		// environment — the default every existing consumer relies on.
+		Env: loadEnv,
 	}
 	if len(options.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(options.BuildTags, ",")}
@@ -75,11 +94,13 @@ func Analyze(options Options) (*model.Report, error) {
 	pkgs, loadErr := packages.Load(cfg, options.Patterns...)
 	progress.Memoryf("loaded %d package roots", len(pkgs))
 	a := &Analyzer{
-		fset:          fset,
-		options:       options,
-		packageByPath: map[string]*packages.Package{},
-		moduleByPath:  map[string]*model.Module{},
-		rootModules:   map[string]*model.Module{},
+		fset:           fset,
+		options:        options,
+		packageByPath:  map[string]*packages.Package{},
+		moduleByPath:   map[string]*model.Module{},
+		rootModules:    map[string]*model.Module{},
+		goroot:         loadGOROOT(target),
+		standardByPath: map[string]bool{},
 	}
 	a.indexPackages(pkgs)
 
@@ -100,6 +121,9 @@ func Analyze(options Options) (*model.Report, error) {
 			Patterns:        append([]string{}, options.Patterns...),
 			BuildTags:       append([]string{}, options.BuildTags...),
 			Tests:           options.Tests,
+			GoExperiment:    target.GOEXPERIMENT,
+			TargetGOOS:      target.GOOS,
+			TargetGOARCH:    target.GOARCH,
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,
@@ -190,6 +214,7 @@ func (a *Analyzer) indexPackages(pkgs []*packages.Package) {
 		seen[pkg.ID] = true
 		if pkg.PkgPath != "" {
 			a.packageByPath[pkg.PkgPath] = pkg
+			a.standardByPath[pkg.PkgPath] = seam.IsStandardLibraryPackage(pkg, a.goroot)
 		}
 		if pkg.Module != nil {
 			mod := convertModule(pkg.Module)
