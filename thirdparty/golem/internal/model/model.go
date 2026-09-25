@@ -29,6 +29,15 @@ type RuntimeInfo struct {
 	Patterns        []string `json:"patterns,omitempty"`
 	BuildTags       []string `json:"buildTags,omitempty"`
 	Tests           bool     `json:"tests"`
+	// The build shape the packages were loaded for, resolved with one
+	// `go env -json` call under the load environment. goos/goarch above are
+	// golem's OWN platform and keep that documented meaning; these three name
+	// the target the analysis actually saw, which differs whenever GOOS,
+	// GOARCH or GOEXPERIMENT were set for the load (--goexperiment,
+	// Options.Env, or the analyst's environment).
+	GoExperiment string `json:"goExperiment,omitempty"`
+	TargetGOOS   string `json:"targetGoos,omitempty"`
+	TargetGOARCH string `json:"targetGoarch,omitempty"`
 }
 type AnalysisOptions struct {
 	Directory                       string   `json:"directory"`

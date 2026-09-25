@@ -131,6 +131,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	cpuProfile := flags.String("cpuprofile", "", "write a CPU profile to this path; for diagnosing analysis slowness on large repositories")
 	progressInterval := flags.Duration("progress-interval", 5*time.Second, "minimum interval between progress logs")
 	tags := flags.String("tags", "", "comma-separated Go build tags")
+	goexperiment := flags.String("goexperiment", "", "set GOEXPERIMENT for the load (e.g. simd); wins over the same variable in the process environment")
 	tests := flags.Bool("tests", false, "include test variants")
 	includeStdlib := flags.Bool("include-stdlib", false, "include standard library usages and call graph nodes")
 	includeLocal := flags.Bool("include-local", true, "include current module usages and call graph nodes")
@@ -195,7 +196,11 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, NoRecurse: *noRecurse, IncludeAllFlows: *includeAllFlows, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, Roots: splitCSV(*rootsFlag), CallGraphTimeout: *callgraphTimeout, ReachableSymbols: *reachableSymbols, MaxPathsPerSymbol: *maxPathsPerSymbol, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, DependencyDetail: detail, TaintEngine: te, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
+	var envOverrides []string
+	if v := strings.TrimSpace(*goexperiment); v != "" {
+		envOverrides = append(envOverrides, "GOEXPERIMENT="+v)
+	}
+	report, err := analyzer.Analyze(analyzer.Options{Dir: *dir, Env: envOverrides, NoRecurse: *noRecurse, IncludeAllFlows: *includeAllFlows, Patterns: splitCSV(*patterns), BuildTags: splitCSV(*tags), Tests: *tests, IncludeStdlib: *includeStdlib, IncludeLocal: *includeLocal, CallGraphMode: mode, Roots: splitCSV(*rootsFlag), CallGraphTimeout: *callgraphTimeout, ReachableSymbols: *reachableSymbols, MaxPathsPerSymbol: *maxPathsPerSymbol, DataFlowMode: dfMode, DataFlowPacks: splitCSV(*dataflowPacks), DataFlowConfig: *dataflowPatterns, DataFlowMax: *dataflowMax, DataFlowCallGraphMode: dfCallgraphMode, DataFlowWorkers: *dataflowWorkers, DataFlowLargeRepoFunctions: *dataflowLargeRepoFunctions, DataFlowMaxFunctionInstructions: *dataflowMaxFunctionInstructions, DataFlowMaxTraceNodes: *dataflowMaxTraceNodes, DataFlowMaxTraceEdges: *dataflowMaxTraceEdges, DataFlowSkipGenerated: *dataflowSkipGenerated, DataFlowSkipTests: *dataflowSkipTests, DependencyDetail: detail, TaintEngine: te, MaxProcs: *maxProcs, MemoryLimit: memoryLimitBytes, Progress: *progress, ProgressInterval: *progressInterval, ProgressWriter: stderr, ToolVersion: version})
 	if err != nil {
 		return err
 	}
@@ -279,6 +284,8 @@ analyze Options:
   --progress               Emit coarse progress logs to stderr
   --progress-interval      Minimum interval between progress logs (default: 5s)
   --tags <tags>            Comma-separated Go build tags
+  --goexperiment <value>   Set GOEXPERIMENT for the load, e.g. simd; wins over
+                           the same variable already in the process environment
   --tests                  Include test variants
   --include-stdlib         Include standard-library usages and call graph nodes
   --include-local          Include current-module usages and graph nodes (default: true)

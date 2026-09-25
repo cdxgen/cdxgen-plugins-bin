@@ -140,11 +140,19 @@ func Run(options Options) ([]Result, error) {
 			continue
 		}
 		annotations = append(annotations, sidecar...)
+		// A corpus case's golem:env build shape (GOEXPERIMENT, target GOARCH)
+		// applies to every matrix slot: it decides what the loader sees, not
+		// what the engine measures.
+		env, err := corpus.ParseEnvSettings(dir)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", fixture.Name, err))
+			continue
+		}
 		for _, slot := range fixture.Matrix {
 			if slot.TaintEngine == "" {
 				slot.TaintEngine = options.TaintEngine
 			}
-			result, err := runSlot(fixture, slot, dir, annotations, options)
+			result, err := runSlot(fixture, slot, dir, annotations, env, options)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s/%s: %v", fixture.Name, slot.Label, err))
 				continue
@@ -161,7 +169,7 @@ func Run(options Options) ([]Result, error) {
 	return results, nil
 }
 
-func runSlot(fixture Fixture, slot MatrixSlot, dir string, annotations []corpus.Annotation, options Options) (Result, error) {
+func runSlot(fixture Fixture, slot MatrixSlot, dir string, annotations []corpus.Annotation, env []string, options Options) (Result, error) {
 	maxSlices := slot.DataFlowMax
 	if maxSlices == 0 {
 		maxSlices = 1000
@@ -178,6 +186,7 @@ func runSlot(fixture Fixture, slot MatrixSlot, dir string, annotations []corpus.
 		DataFlowCallGraphMode: slot.DFCallGraph,
 		DataFlowMax:           maxSlices,
 		TaintEngine:           slot.TaintEngine,
+		Env:                   env,
 		ToolVersion:           "bench",
 	})
 	elapsed := time.Since(started)

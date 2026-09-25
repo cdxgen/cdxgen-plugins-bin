@@ -52,6 +52,10 @@ func Analyze(options Options) (*model.Report, error) {
 	progress.Logf("analysis starting dir=%s patterns=%s maxProcs=%d workers=%d memoryLimit=%s", options.Dir, strings.Join(options.Patterns, ","), runtime.GOMAXPROCS(0), dataFlowWorkerCount(options, 0), formatBytes(options.MemoryLimit))
 
 	fset := token.NewFileSet()
+	loadEnv, err := effectiveLoadEnv(options.Env)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedFiles |
@@ -66,6 +70,9 @@ func Analyze(options Options) (*model.Report, error) {
 		Dir:   absDir,
 		Fset:  fset,
 		Tests: options.Tests,
+		// nil when no override is set, which loads under the process
+		// environment — the default every existing consumer relies on.
+		Env: loadEnv,
 	}
 	if len(options.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(options.BuildTags, ",")}
@@ -82,6 +89,12 @@ func Analyze(options Options) (*model.Report, error) {
 		rootModules:   map[string]*model.Module{},
 	}
 	a.indexPackages(pkgs)
+
+	// The build shape the packages were LOADED for, from one `go env -json`
+	// call under the same environment the load used. goos/goarch above remain
+	// golem's own platform; these name the load target, which differs whenever
+	// GOOS/GOARCH/GOEXPERIMENT were set for the analysis.
+	targetGoos, targetGoarch, targetGoexperiment := targetEnv(loadEnv)
 
 	report := &model.Report{
 		SchemaVersion: SchemaVersion,
@@ -100,6 +113,9 @@ func Analyze(options Options) (*model.Report, error) {
 			Patterns:        append([]string{}, options.Patterns...),
 			BuildTags:       append([]string{}, options.BuildTags...),
 			Tests:           options.Tests,
+			GoExperiment:    targetGoexperiment,
+			TargetGOOS:      targetGoos,
+			TargetGOARCH:    targetGoarch,
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,

@@ -41,14 +41,21 @@ type Options struct {
 	DataFlowSkipTests               bool
 	DependencyDetail                string
 	TaintEngine                     string // "seam" (default) or "legacy" (escape hatch)
-	MaxProcs                        int
-	MemoryLimit                     int64
-	Progress                        bool
-	ProgressInterval                time.Duration
-	ProgressWriter                  io.Writer
-	IncludeSSA                      bool
-	IncludeSources                  bool
-	ToolVersion                     string
+	// Env carries extra KEY=VALUE pairs applied to the load configuration's
+	// environment, on top of the process environment and winning over it.
+	// Keys are allowlisted to the build shape by corpus.ValidateEnvPair —
+	// GOEXPERIMENT, GOOS, GOARCH, GOAMD64, GOARM64 — because arbitrary keys
+	// such as GOFLAGS would turn an analysis option into command execution in
+	// the toolchain. See THREAT_MODEL.md.
+	Env              []string
+	MaxProcs         int
+	MemoryLimit      int64
+	Progress         bool
+	ProgressInterval time.Duration
+	ProgressWriter   io.Writer
+	IncludeSSA       bool
+	IncludeSources   bool
+	ToolVersion      string
 }
 
 type Analyzer struct {
