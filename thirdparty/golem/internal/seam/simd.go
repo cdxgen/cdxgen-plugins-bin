@@ -29,7 +29,7 @@ const (
 // `simd/archsimd`, or their internal helpers. The path alone does not prove the
 // package is the standard library's — a module may legally be named `simd/…`
 // — so callers go through (*Engine).isSimdIntrinsic, which also requires the
-// package to belong to no module.
+// package to be the standard library.
 //
 // This predicate is deliberately local to SEAM. IsStdlibCarrierPackage is
 // shared with the legacy engine, and adding simd there would change legacy's
@@ -103,12 +103,14 @@ func simdFunctionPackagePath(fn *ssa.Function) string {
 }
 
 // isSimdIntrinsic reports whether fn belongs to the standard library's simd
-// packages. A package with module information is never the standard library:
+// packages, classified like every other standard-library question in the
+// engine (isStandardPackage). A package with module information is never the
+// standard library:
 // `module simd/local` is a user module whose bodies must be walked and whose
 // sinks must be found, not an intrinsic to be approximated.
 func (e *Engine) isSimdIntrinsic(fn *ssa.Function) bool {
 	path := simdFunctionPackagePath(fn)
-	return isSimdIntrinsicPackage(path) && e.moduleForPackagePath(path) == nil
+	return isSimdIntrinsicPackage(path) && e.isStandardPackage(path)
 }
 
 // simdCallWriteDestination returns the destination argument of a call to a simd

@@ -462,7 +462,7 @@ func (a *Analyzer) nodeVisibility(pkgPath string, mod *model.Module, position mo
 }
 
 // isGoRootPath reports whether a file lives in the Go toolchain tree rooted at
-// root, the GOROOT the packages were loaded with (see toolchainGOROOT).
+// root, the GOROOT the packages were loaded with (see loadGOROOT).
 func isGoRootPath(path, root string) bool {
 	root = strings.TrimSpace(root)
 	if root == "" || path == "" {

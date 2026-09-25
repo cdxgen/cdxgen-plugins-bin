@@ -3,6 +3,7 @@ package analyzer
 import (
 	"encoding/json"
 	"fmt"
+	"go/build"
 	"os"
 	"os/exec"
 	"strings"
@@ -76,8 +77,13 @@ func effectiveLoadEnv(extra []string) ([]string, error) {
 // than swallowed: Analyze turns it into an error when the analyst asked for an
 // override (a typo such as --goexperiment smd must not become an empty report
 // that exits 0), and ignores it otherwise, leaving the fields omitted.
-func targetEnv(dir string, loadEnv []string) (goos, goarch, goexperiment string, err error) {
-	cmd := exec.Command("go", "env", "-json", "GOOS", "GOARCH", "GOEXPERIMENT")
+//
+// The same call answers GOROOT: the root of the go command the packages are
+// loaded through, which decides which module-less packages are the standard
+// library (see seam.IsStandardLibraryPackage). One probe serves both, so the
+// classification and the reported target always describe the same toolchain.
+func targetEnv(dir string, loadEnv []string) (target buildTarget, err error) {
+	cmd := exec.Command("go", "env", "-json", "GOOS", "GOARCH", "GOEXPERIMENT", "GOROOT")
 	cmd.Dir = dir
 	if loadEnv != nil {
 		cmd.Env = loadEnv
@@ -86,15 +92,29 @@ func targetEnv(dir string, loadEnv []string) (goos, goarch, goexperiment string,
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", "", "", fmt.Errorf("go env: %v: %s", err, strings.TrimSpace(stderr.String()))
+		return buildTarget{}, fmt.Errorf("go env: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	var resolved struct {
-		GOOS         string `json:"GOOS"`
-		GOARCH       string `json:"GOARCH"`
-		GOEXPERIMENT string `json:"GOEXPERIMENT"`
+	if err := json.Unmarshal(out, &target); err != nil {
+		return buildTarget{}, fmt.Errorf("go env: %w", err)
 	}
-	if err := json.Unmarshal(out, &resolved); err != nil {
-		return "", "", "", fmt.Errorf("go env: %w", err)
+	return target, nil
+}
+
+// buildTarget is the toolchain's answer to targetEnv's probe.
+type buildTarget struct {
+	GOOS         string `json:"GOOS"`
+	GOARCH       string `json:"GOARCH"`
+	GOEXPERIMENT string `json:"GOEXPERIMENT"`
+	GOROOT       string `json:"GOROOT"`
+}
+
+// loadGOROOT returns the GOROOT the packages are loaded with: the probed one,
+// or build.Default.GOROOT when the probe could not answer. build.Default
+// describes the toolchain golem was built with, and a -trimpath release build
+// has none, so it is only the fallback.
+func loadGOROOT(target buildTarget) string {
+	if root := strings.TrimSpace(target.GOROOT); root != "" {
+		return root
 	}
-	return resolved.GOOS, resolved.GOARCH, resolved.GOEXPERIMENT, nil
+	return strings.TrimSpace(build.Default.GOROOT)
 }

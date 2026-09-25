@@ -64,7 +64,7 @@ func Analyze(options Options) (*model.Report, error) {
 	// which differs whenever GOOS/GOARCH/GOEXPERIMENT were set for the
 	// analysis. Probing before the load means an override the toolchain
 	// rejects fails here, with the toolchain's message.
-	targetGoos, targetGoarch, targetGoexperiment, targetErr := targetEnv(absDir, loadEnv)
+	target, targetErr := targetEnv(absDir, loadEnv)
 	if targetErr != nil && len(options.Env) > 0 {
 		return nil, fmt.Errorf("build-shape override %s rejected by the toolchain: %w", strings.Join(options.Env, " "), targetErr)
 	}
@@ -99,7 +99,7 @@ func Analyze(options Options) (*model.Report, error) {
 		packageByPath:  map[string]*packages.Package{},
 		moduleByPath:   map[string]*model.Module{},
 		rootModules:    map[string]*model.Module{},
-		goroot:         toolchainGOROOT(absDir),
+		goroot:         loadGOROOT(target),
 		standardByPath: map[string]bool{},
 	}
 	a.indexPackages(pkgs)
@@ -121,9 +121,9 @@ func Analyze(options Options) (*model.Report, error) {
 			Patterns:        append([]string{}, options.Patterns...),
 			BuildTags:       append([]string{}, options.BuildTags...),
 			Tests:           options.Tests,
-			GoExperiment:    targetGoexperiment,
-			TargetGOOS:      targetGoos,
-			TargetGOARCH:    targetGoarch,
+			GoExperiment:    target.GOEXPERIMENT,
+			TargetGOOS:      target.GOOS,
+			TargetGOARCH:    target.GOARCH,
 		},
 		Options: model.AnalysisOptions{
 			Directory:                       absDir,

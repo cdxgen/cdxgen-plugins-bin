@@ -56,9 +56,13 @@ func TestTargetEnvReportsOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveLoadEnv: %v", err)
 	}
-	goos, goarch, goexperiment, err := targetEnv(".", env)
+	target, err := targetEnv(".", env)
 	if err != nil {
 		t.Fatalf("targetEnv: %v", err)
+	}
+	goos, goarch, goexperiment := target.GOOS, target.GOARCH, target.GOEXPERIMENT
+	if target.GOROOT == "" {
+		t.Error("targetEnv did not report the toolchain's GOROOT")
 	}
 	if goos != "linux" || goarch != "amd64" || goexperiment != "simd" {
 		t.Errorf("targetEnv = %q/%q/%q, want linux/amd64/simd", goos, goarch, goexperiment)
