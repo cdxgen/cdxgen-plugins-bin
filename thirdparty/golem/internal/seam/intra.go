@@ -1007,8 +1007,16 @@ func (s *intra) evaluate(state taintState, v ssa.Value, visited map[ssa.Value]bo
 	// store precisely so whole-value reads work, and a field read that fell
 	// back to it would read sibling fields' taint — the false positive
 	// field-discrimination-negative locks out.
-	if labels, ok := state.memory[s.pathKey(v)]; ok && !labels.IsEmpty() && !blursFields(v.Type()) {
-		return labels
+	//
+	// Only the kinds that can be a write destination get the lookup. This
+	// fallthrough runs for every operand of every read during the fixpoint,
+	// and pathKey builds strings, so an unconditional check here was a
+	// measurable share of wall clock on the corpus.
+	switch v.(type) {
+	case *ssa.Alloc, *ssa.MakeSlice, *ssa.Parameter, *ssa.FreeVar:
+		if labels, ok := state.memory[s.pathKey(v)]; ok && !labels.IsEmpty() && !blursFields(v.Type()) {
+			return labels
+		}
 	}
 	return LabelSet{}
 }
