@@ -631,10 +631,18 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
   composed or meta-annotated one and a server-side `@HttpExchange`
   inherited from an interface. A mapping on a base class or an interface
   default method is published once per analysed controller that inherits
-  the member without overriding it, under that controller's own class-level
-  path (or, when it declares none, the declaring class's). The subclass must
-  carry the controller marker itself; `handlerSymbol` names the declaring
-  member.
+  the member without overriding it — through an unmarked class in between
+  that overrides it without re-mapping it too — under that controller's own
+  class-level path, or when it declares none the NEAREST one on its
+  hierarchy the way Spring's merged-annotation search finds it (the class,
+  its interfaces, then its superclass, recursively). The subclass must
+  carry the controller marker itself and be concrete; an overload (same
+  name, other parameter types) is not an override; `handlerSymbol` names
+  the declaring member. A mapping path written as a constant, a template
+  (`"${API}/x"`) or a concatenation folds against the analysed sources the
+  way the compiler scopes the name — enclosing classes, the file's imports,
+  its package, its star imports — never a same-named constant elsewhere; one
+  that does not fold is `pathUnresolved`.
 - `dsl`: a routing call, with the handler resolved to the extracted lambda
   body. This also covers:
   - registrations in code, such as Spring Boot's `ServletRegistrationBean`
@@ -644,10 +652,14 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
     listOf(HttpMethod.Get, ..)) { method(m) { } }`), one route per element,
     with a destructured `(verb, path)` pair kept together. A `forEach` or
     `onEach` lambda's element parameter binds the same way
-    (`listOf("/x", "/y").forEach { get(it) { } }`). A path that does not
-    fold, including a loop over a parameter, a mutated collection or
-    `forEachIndexed`, is published with an empty `pathTemplate` and
-    `pathUnresolved`, never under a name taken from the code.
+    (`listOf("/x", "/y").forEach { get(it) { } }`), and so does a local
+    `val` holding the literal. A path that does not fold, including a loop
+    over a parameter, a mutated collection, a top-level `var` something
+    reassigns, or `forEachIndexed`, is published with an empty
+    `pathTemplate` and `pathUnresolved`, never under a name taken from the
+    code. A constant path argument (`get(Paths.USERS) { }`) resolves in the
+    reading function's scope, never to a same-named constant elsewhere, and
+    is never read as the route's verb.
 - `manifest`: an Android component.
 - `descriptor`: a `web.xml` servlet mapping.
 - `implicit`: a route that has no handler in the source. These are served
@@ -681,7 +693,7 @@ endpoint.
 | `sliceIds` | string[] | endpoint-rooted slices (same flag) |
 | `foundBy` | string | `annotation` \| `dsl` \| `dsl-unattributed` \| `manifest` \| `descriptor` \| `implicit` (above) |
 | `anyMethod` | boolean? | present (`true`) only when the framework serves EVERY HTTP method at this route: `@RequestMapping` or `@HttpExchange` without `method`, a servlet, Vert.x `route()` or `routeWithRegex()`. `httpMethod` is then empty by design. An empty `httpMethod` WITHOUT this flag means kosi could not resolve the method |
-| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a DSL route's own path argument computed at run time, a mapping path held in a constant that neither the classpath nor the analysed sources fold (a constant from a library off the classpath, or a bare name two constants share), a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
+| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a DSL route's own path argument computed at run time, a mapping path held in a constant (or a template or concatenation over one) that neither the classpath nor the analysed sources fold (a constant from a library off the classpath, or a name its scope holds ambiguously), a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
 | `transport` | string? | present only for an endpoint NOT served over HTTP: `messaging`, `grpc`, `android`, `function`. Absent means HTTP |
 
 ## services — ServiceRef and urls — UrlEvidence (resolved tier)

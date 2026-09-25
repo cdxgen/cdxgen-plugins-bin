@@ -96,9 +96,29 @@ object EndpointDetector {
         val importRootsByFile: Map<String, Set<String>> = emptyMap(),
         /** Every analysed type with its supertypes; members-less subclasses included. */
         val typeDeclarations: List<Endpoints.TypeDeclaration> = emptyList(),
-        /** Workspace `const val` name -> its unique value (ConstTable): folds reference-valued mapping paths. */
-        val constValues: Map<String, String> = emptyMap(),
+        /**
+         * Config key -> the value a default run serves (ConfigResolver);
+         * resolves `${key}` property placeholders in mapping paths.
+         */
+        val configValues: Map<String, String> = emptyMap(),
     ) {
+        /** Canonical name -> its declarations (one per module that declares it). */
+        internal val typesByName: Map<String, List<Endpoints.TypeDeclaration>> by lazy {
+            typeDeclarations.groupBy { it.canonicalName }
+        }
+
+        /**
+         * The declaration of [name] that [file] sees: the one in that file,
+         * else the one whose path shares the longest prefix with it (the same
+         * module in a multi-module build), else the only one.
+         */
+        internal fun typeOf(name: String, file: String?): Endpoints.TypeDeclaration? {
+            val all = typesByName[name].orEmpty()
+            if (all.size <= 1 || file == null) return all.firstOrNull()
+            all.firstOrNull { sameFile(it.file, file) }?.let { return it }
+            return all.maxByOrNull { it.file.commonPrefixWith(file).length }
+        }
+
         /** Supertype canonical name -> the analysed types that name it directly. */
         internal val subtypes: Map<String, List<Endpoints.TypeDeclaration>> by lazy {
             val out = HashMap<String, MutableList<Endpoints.TypeDeclaration>>()
@@ -311,9 +331,13 @@ object EndpointDetector {
         // A mapping declared on a BASE class or an interface default method
         // is served by every controller that inherits the member without
         // overriding it (atom-tools#95: shared CRUD base controllers). The
-        // overriding case is the inheritedFrom arm above, on the override.
+        // overriding case is the inheritedFrom arm above, on the override —
+        // and an override in an unmarked class in the MIDDLE (`abstract class
+        // Mid : Base() { override fun g() }`, or an abstract implementation
+        // of an interface controller) is inherited by the controllers below
+        // it the same way.
         val owners = listOf(fn.canonicalName.substringBeforeLast('.') to fn.file) +
-            if (inheritedFrom == null && own.any(::isMapping)) inheritingSubclasses(fn, input) else emptyList()
+            if (inheritedFrom != null || own.any(::isMapping)) inheritingSubclasses(fn, input) else emptyList()
         owners@ for ((ownerCanonical, ownerFile) in owners) {
             val inherits = ownerCanonical != fn.canonicalName.substringBeforeLast('.')
             val ownDeclAnnotations = declaredIn(input.annotationValues[ownerCanonical].orEmpty(), ownerFile)
@@ -321,22 +345,16 @@ object EndpointDetector {
             val inheritedOwnerAnnotations = inheritedOwner?.let { input.annotationValues[it].orEmpty() }.orEmpty()
             // The KIR carries RESOLVED owner annotations only; the declaration
             // table also carries import-resolved ones (see Analyzer).
+            // The MARKER of an inheriting controller is its own
+            // (@RestController is not @Inherited; a subclass that is not
+            // itself a component is not a controller).
+            val markerSources = if (inherits) ownDeclAnnotations else ownDeclAnnotations + inheritedOwnerAnnotations
             val ownerAnnotations = (
-                (if (inherits) emptyList() else fn.ownerAnnotations) + ownDeclAnnotations.map { it.fqn } + inheritedOwnerAnnotations.map { it.fqn } +
+                (if (inherits) emptyList() else fn.ownerAnnotations) + markerSources.map { it.fqn } +
                     // A custom stereotype (`@ApiController` meta-annotated with @RestController).
-                    (ownDeclAnnotations + inheritedOwnerAnnotations).flatMap { use -> input.annotationValues[use.fqn].orEmpty().map { it.fqn } }
+                    markerSources.flatMap { use -> input.annotationValues[use.fqn].orEmpty().map { it.fqn } }
                 ).distinct()
             val ownerDeclAnnotations = ownDeclAnnotations + inheritedOwnerAnnotations
-            // An inheriting controller without a class-level path of its own
-            // takes the declaring class's: Spring finds the type-level
-            // @RequestMapping on the hierarchy. The MARKER never comes from
-            // there (@RestController is not @Inherited; a subclass that is
-            // not itself a component is not a controller).
-            val prefixAnnotations = if (inherits) {
-                ownerDeclAnnotations + declaredIn(input.annotationValues[fn.canonicalName.substringBeforeLast('.')].orEmpty(), fn.file)
-            } else {
-                ownerDeclAnnotations
-            }
 
             // Class-declared routes with convention-named handlers: the servlet
             // shape, where `@WebServlet("/run")` sits on the class and `doGet`
@@ -349,8 +367,10 @@ object EndpointDetector {
                 val classMapping = ownerDeclAnnotations.firstOrNull { ann ->
                     framework.classMappingAnnotations.any { matches(ann.fqn, it) }
                 } ?: continue
-                for (path in pathsOf(classMapping, framework.pathArguments, input.constValues)) {
-                    val unresolvedReference = unresolvedReferenceOf(path)
+                for (written in pathsOf(classMapping, framework.pathArguments)) {
+                    val (resolved, placeholderGap) = resolvePlaceholders(written, input.configValues)
+                    val unresolvedReference = unresolvedReferenceOf(written) ?: placeholderGap
+                    val path = resolved ?: written
                     add(
                         Candidate(
                             framework = framework.id,
@@ -393,9 +413,14 @@ object EndpointDetector {
                         framework.classMarkers.any { matches(owner, it) }
                     }
                     if (!hasMarker && located == null) continue
-                    val own = prefixAnnotations
-                        .firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
-                        ?.let { pathsOf(it, framework.pathArguments, input.constValues) }
+                    // A controller without a class-level path of its own takes
+                    // the NEAREST one on its hierarchy, as Spring's merged
+                    // annotation search finds it: the class, then its
+                    // interfaces, then its superclass, recursively — never
+                    // the declaring class's by default (Root("/root") ->
+                    // Mid("/mid") -> Leaf serves /mid/.., not /root/..).
+                    val own = typeLevelPrefix(ownerCanonical, ownerFile, framework, ownDeclAnnotations + inheritedOwnerAnnotations, input)
+                        ?.let { pathsOf(it, framework.pathArguments) }
                         ?: listOf("")
                     // A root resource that a locator ALSO returns is served at
                     // both: its own @Path and every locator path.
@@ -418,7 +443,7 @@ object EndpointDetector {
                         val methodPath = framework.methodPathAnnotations.takeIf { it.isNotEmpty() }?.let { patterns ->
                             annotations.firstOrNull { ann -> patterns.any { matches(ann.fqn, it) } }
                         }
-                        var rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments, input.constValues) } ?: pathsOf(matched, framework.pathArguments, input.constValues)
+                        var rawPaths = methodPath?.let { pathsOf(it, framework.pathArguments) } ?: pathsOf(matched, framework.pathArguments)
                         // Quarkus @Route with neither path nor regex "match[es] a
                         // path derived from the method name".
                         var derivedPath: String? = null
@@ -431,8 +456,14 @@ object EndpointDetector {
                         for (rawPath in rawPaths) {
                             // Spring, JAX-RS and Micronaut all prepend the missing
                             // slash: `@GetMapping("vets.json")` serves `/vets.json`.
-                            val path = joinPaths(prefix, rawPath).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
-                            val unresolvedReference = unresolvedReferenceOf(path)
+                            val written = joinPaths(prefix, rawPath).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
+                            // `@RequestMapping("\${api.base}/users")`: Spring
+                            // resolves the property from the config a default run
+                            // serves. It was published as `/${api.base}/users`
+                            // with a jar, and silently dropped without one.
+                            val (resolved, placeholderGap) = resolvePlaceholders(written, input.configValues)
+                            val unresolvedReference = unresolvedReferenceOf(written) ?: placeholderGap
+                            val path = (resolved ?: written).let { if (it.isNotEmpty() && !it.startsWith("/")) "/$it" else it }
                             if (unresolvedReference != null) {
                                 add(
                                     Candidate(
@@ -472,11 +503,14 @@ object EndpointDetector {
 
     /**
      * The analysed subclasses (transitively) of [fn]'s owner that inherit
-     * [fn] as declared: a subclass redeclaring the member (by override, or
-     * by name and arity when the override did not resolve) stops the walk
-     * down that branch, because the redeclaration publishes itself. Each
-     * with its declaring file, so a same-FQN class in another module does
-     * not lend its annotations. Sorted, for a deterministic report.
+     * [fn] as declared: a subclass redeclaring the member (by override, or —
+     * when the override did not resolve — by name and the same parameter
+     * types) stops the walk down that branch, because the redeclaration
+     * publishes itself. An OVERLOAD (same name and arity, other types) is
+     * not a redeclaration. An abstract class or an interface is walked
+     * through but never listed: it is not a component. Each with its
+     * declaring file, so a same-FQN class in another module does not lend its
+     * annotations. Sorted, for a deterministic report.
      */
     private fun inheritingSubclasses(fn: KirFunction, input: Input): List<Pair<String, String?>> {
         val base = fn.canonicalName.substringBeforeLast('.')
@@ -490,14 +524,57 @@ object EndpointDetector {
                 if (!seen.add(child.canonicalName)) continue
                 val redeclared = input.module.functions.any { f ->
                     f.canonicalName == "${child.canonicalName}.$name" &&
-                        (fn.canonicalName in f.overrides || (f.overrides.isEmpty() && f.params.count { !it.receiver } == fn.params.count { !it.receiver }))
+                        (fn.canonicalName in f.overrides || (f.overrides.isEmpty() && sameParameters(f, fn)))
                 }
                 if (redeclared) continue
-                out.add(child.canonicalName to child.file)
+                if (child.kind != "interface" && "abstract" !in child.modifiers) out.add(child.canonicalName to child.file)
                 queue.add(child.canonicalName)
             }
         }
         return out.sortedBy { it.first }
+    }
+
+    /** Same value-parameter list: arity, and each type where both sides state one. */
+    private fun sameParameters(a: KirFunction, b: KirFunction): Boolean {
+        val x = a.params.filter { !it.receiver }
+        val y = b.params.filter { !it.receiver }
+        if (x.size != y.size) return false
+        return x.zip(y).all { (p, q) ->
+            val pt = p.resolvedType ?: p.type?.replace(" ", "")
+            val qt = q.resolvedType ?: q.type?.replace(" ", "")
+            pt == null || qt == null || pt == qt || pt.substringAfterLast('.') == qt.substringAfterLast('.')
+        }
+    }
+
+    /**
+     * The class-level path annotation [owner] is served under for
+     * [framework]: its own ([ownAnnotations]) first, else the nearest one on
+     * its hierarchy in Spring's search order — a type's interfaces before
+     * its superclass, depth first — else none.
+     */
+    private fun typeLevelPrefix(
+        owner: String,
+        ownerFile: String?,
+        framework: FrameworkModel,
+        ownAnnotations: List<DeclAnnotation>,
+        input: Input,
+    ): DeclAnnotation? {
+        fun prefixIn(annotations: List<DeclAnnotation>) =
+            annotations.firstOrNull { ann -> framework.pathPrefixAnnotations.any { matches(ann.fqn, it) } }
+        prefixIn(ownAnnotations)?.let { return it }
+        val seen = hashSetOf(owner)
+        fun visit(type: String, file: String?): DeclAnnotation? {
+            val decl = input.typeOf(type, file) ?: return null
+            val supers = decl.supertypes.map { it.substringBefore('<') }.filter { seen.add(it) }
+            val (interfaces, classes) = supers.partition { input.typeOf(it, decl.file)?.kind == "interface" }
+            for (sup in interfaces + classes) {
+                val supFile = input.typeOf(sup, decl.file)?.file
+                prefixIn(declaredIn(input.annotationValues[sup].orEmpty(), supFile))?.let { return it }
+                visit(sup, supFile ?: decl.file)?.let { return it }
+            }
+            return null
+        }
+        return visit(owner, ownerFile)
     }
 
     /**
@@ -521,7 +598,7 @@ object EndpointDetector {
             val work = ArrayDeque<Triple<String, String, Int>>()
             for ((owner, _) in byOwner) {
                 val classPath = annotationsOf(owner).firstOrNull { ann -> framework.classMarkers.any { matches(ann.fqn, it) } } ?: continue
-                pathsOf(classPath, framework.pathArguments, input.constValues).forEach { work.add(Triple(owner, it, 0)) }
+                pathsOf(classPath, framework.pathArguments).forEach { work.add(Triple(owner, it, 0)) }
             }
             val seen = HashSet<Pair<String, String>>()
             while (work.isNotEmpty()) {
@@ -533,7 +610,7 @@ object EndpointDetector {
                     val path = anns.firstOrNull { ann -> framework.methodPathAnnotations.any { matches(ann.fqn, it) } } ?: continue
                     val returned = member.returnType?.substringBefore('<')?.removeSuffix("?")?.trim() ?: continue
                     if (returned !in byOwner) continue
-                    for (segment in pathsOf(path, framework.pathArguments, input.constValues)) {
+                    for (segment in pathsOf(path, framework.pathArguments)) {
                         val served = joinPaths(prefix, segment)
                         out.getOrPut(returned) { mutableListOf() }.let { if (served !in it) it.add(served) }
                         work.add(Triple(returned, served, depth + 1))
@@ -555,19 +632,17 @@ object EndpointDetector {
      * folded to a constant at all (an interpolated template the syntax tier
      * keeps as text), which is what it meant before.
      */
-    internal fun pathsOf(annotation: DeclAnnotation, arguments: List<String>, consts: Map<String, String> = emptyMap()): List<String> {
-        // A value WRITTEN AS A REFERENCE in an entry the resolver could not
-        // type (`@GetMapping(IN_COMPANION)` with no spring-web on the
-        // classpath) is the constant's name, not a path: it folds against
-        // the source constants, or it is a path kosi cannot prove. It used
-        // to be published as `/IN_COMPANION` (atom-tools#95).
+    internal fun pathsOf(annotation: DeclAnnotation, arguments: List<String>): List<String> {
+        // A value still WRITTEN AS A REFERENCE here is one the sources did not
+        // fold (Endpoints.foldReferences): a constant from a library the run
+        // cannot see, an ambiguous name, an expression over either. It is not
+        // a path, and publishing its text made `/IN_COMPANION` and
+        // `/{monitorId}` under a dropped `${API}/x` prefix (atom-tools#95).
         fun folded(raw: String): String {
-            val value = raw.trim().removeSurrounding("\"")
-            if (raw !in annotation.references) return value
-            val parts = value.split('.')
-            // `Holder.PATH` by its owner first, then the bare name.
-            return (if (parts.size >= 2) consts[parts.takeLast(2).joinToString(".")] else null)
-                ?: consts[parts.last()] ?: (UNRESOLVED_REFERENCE + value)
+            if (raw in annotation.references) {
+                return UNRESOLVED_REFERENCE + raw.trim().replace('/', REFERENCE_SLASH) + REFERENCE_END
+            }
+            return raw.trim().removeSurrounding("\"")
         }
         for (argument in arguments.ifEmpty { DEFAULT_PATH_ARGUMENTS }) {
             val declared = annotation.namedValues[argument].orEmpty()
@@ -577,14 +652,50 @@ object EndpointDetector {
         return listOf(annotation.value?.let(::folded).orEmpty())
     }
 
+    /**
+     * [path] with its Spring property placeholders (`${key}`,
+     * `${key:default}`) resolved against [config], the values a default run
+     * serves; `(null, reason)` when a key has no value and no default, or the
+     * path holds a SpEL `#{..}` expression kosi does not evaluate.
+     */
+    internal fun resolvePlaceholders(path: String, config: Map<String, String>): Pair<String?, String?> {
+        if ("\${" !in path && "#{" !in path) return path to null
+        if ("#{" in path) return null to "the mapping's path holds a SpEL expression, which kosi does not evaluate"
+        val out = StringBuilder()
+        var i = 0
+        while (i < path.length) {
+            if (!path.startsWith("\${", i)) {
+                out.append(path[i++])
+                continue
+            }
+            val end = path.indexOf('}', i)
+            if (end < 0) return null to "the mapping's path holds an unterminated property placeholder"
+            val body = path.substring(i + 2, end)
+            val key = body.substringBefore(':')
+            val value = config[key] ?: body.takeIf { ':' in it }?.substringAfter(':')
+            if (value == null || "\${" in value) {
+                return null to "the mapping's path uses the property \${$key}, which no config file of a default run sets"
+            }
+            out.append(value)
+            i = end + 1
+        }
+        return out.toString() to null
+    }
+
     /** Marks a path segment that is an unfolded constant reference; see [pathsOf]. */
     internal const val UNRESOLVED_REFERENCE = "\u0000ref:"
+    private const val REFERENCE_END = '\u0001'
+    private const val REFERENCE_SLASH = '\u0002'
 
     /** The `pathUnresolved` for a path carrying an [UNRESOLVED_REFERENCE], or null. */
-    internal fun unresolvedReferenceOf(path: String): String? =
-        path.substringAfter(UNRESOLVED_REFERENCE, "").takeIf { UNRESOLVED_REFERENCE in path }
-            ?.substringBefore('/')
-            ?.let { "the mapping's path is the constant $it, which neither the classpath nor the analysed sources fold to one value" }
+    internal fun unresolvedReferenceOf(path: String): String? {
+        if (UNRESOLVED_REFERENCE !in path) return null
+        val written = path.substringAfter(UNRESOLVED_REFERENCE).substringBefore(REFERENCE_END).replace(REFERENCE_SLASH, '/')
+        val what = if (REFERENCE_NAME.matches(written)) "the constant $written" else "written as $written"
+        return "the mapping's path is $what, which neither the classpath nor the analysed sources fold to one value"
+    }
+
+    private val REFERENCE_NAME = Regex("""[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*""")
 
     private val DEFAULT_PATH_ARGUMENTS = listOf("value")
 
@@ -1230,7 +1341,12 @@ object EndpointDetector {
         for (i in index - 1 downTo 0) {
             val candidate = block.instructions.getOrNull(i) ?: continue
             if (candidate is io.cdxgen.kosi.kir.KirFieldGet && candidate.result == methodReg) {
+                // Only a VERB (`HttpMethod.Get`): in `get(Paths.USERS) { }` the
+                // second-to-last argument is the PATH, and its field name was
+                // published as the route's method (`["USERS"]`, atom-tools#95
+                // review).
                 return (candidate.path.elements.lastOrNull() as? io.cdxgen.kosi.kir.AccessPath.Element.Field)?.name
+                    ?.takeIf { it.uppercase() in HTTP_METHODS }
             }
         }
         return null

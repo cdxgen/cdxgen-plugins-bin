@@ -877,6 +877,54 @@ capabilities = ["endpoints", "framework-semantics", "spring", "classpath-partial
 tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
 
 [[fixtures]]
+slug = "spring-inherited-hierarchy"
+tier = "fixtures"
+path = "fixtures/spring-inherited-hierarchy"
+capabilities = ["endpoints", "framework-semantics", "spring"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "spring-inherited-hierarchy-unresolved"
+tier = "fixtures"
+path = "fixtures/spring-inherited-hierarchy-unresolved"
+# spring-web is deliberately absent: the mappings resolve by import only.
+capabilities = ["endpoints", "framework-semantics", "spring", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "spring-const-scoping"
+tier = "fixtures"
+path = "fixtures/spring-const-scoping"
+# com.external.lib is a library the run cannot see, on purpose.
+capabilities = ["endpoints", "framework-semantics", "spring", "micronaut", "const-fold"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "ANNOTATION_ARGUMENT_MUST_BE_CONST"]
+
+[[fixtures]]
+slug = "spring-const-scoping-unresolved"
+tier = "fixtures"
+path = "fixtures/spring-const-scoping-unresolved"
+# spring-web and Micronaut are deliberately absent: the mappings resolve by
+# import only, and their constant arguments fold against the sources.
+capabilities = ["endpoints", "framework-semantics", "spring", "micronaut", "const-fold", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "ANNOTATION_ARGUMENT_MUST_BE_CONST"]
+
+[[fixtures]]
+slug = "dsl-loop-scoping"
+tier = "fixtures"
+path = "fixtures/dsl-loop-scoping"
+# com.external.lib is a library the run cannot see, on purpose.
+capabilities = ["endpoints", "framework-semantics", "ktor", "const-fold"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "dsl-loop-scoping-unresolved"
+tier = "fixtures"
+path = "fixtures/dsl-loop-scoping-unresolved"
+# io.ktor is deliberately absent: every Ktor symbol resolves by import only.
+capabilities = ["endpoints", "framework-semantics", "ktor", "const-fold", "classpath-partial"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE", "TOO_MANY_ARGUMENTS"]
+
+[[fixtures]]
 slug = "http4k-routes"
 tier = "fixtures"
 path = "fixtures/http4k-routes"

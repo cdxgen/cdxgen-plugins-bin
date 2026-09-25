@@ -1453,6 +1453,8 @@ object Analyzer {
         Regex(""""((?:[a-z_][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9_]*)"""").findAll(text).mapTo(HashSet()) { it.groupValues[1] }
     }
 
+    private val TYPE_KINDS = setOf("class", "interface", "data-class", "sealed-class", "object")
+
     /** The types a run read, with supertypes: a member-less repository interface is visible only here. */
     private fun typeDeclarationsOf(
         drafts: List<DeclarationDraft>,
@@ -1474,8 +1476,12 @@ object Analyzer {
                 }
             }
             val supertypes = (draft.supertypes + recovered).distinct()
-            if (supertypes.isEmpty()) null
-            else io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(draft.canonicalName, file, supertypes)
+            // A supertype-less CLASS is kept too: a hierarchy search needs
+            // its kind (interface or class) and whether it is abstract.
+            if (supertypes.isEmpty() && draft.kind !in TYPE_KINDS) null
+            else io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(
+                draft.canonicalName, file, supertypes, draft.kind, draft.modifiers.toSet(),
+            )
         }
     }
 

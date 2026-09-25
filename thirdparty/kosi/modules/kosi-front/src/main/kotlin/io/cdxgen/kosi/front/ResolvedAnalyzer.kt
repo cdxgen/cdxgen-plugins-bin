@@ -417,9 +417,17 @@ object ResolvedAnalyzer {
                                 // has it, as a reference the endpoint detector
                                 // folds or reports unresolved (atom-tools#95).
                                 val written = entry?.let { SyntaxAnalyzer.annotationEvidenceOf(it) }
-                                val missing = written?.namedValues.orEmpty()
-                                    .filterKeys { it !in evidence.namedValues }
-                                    .filterValues { values -> values.all { it in written!!.references } }
+                                // PSI's values replace the typed ones for an
+                                // argument that holds a reference the resolver
+                                // DROPPED: absent altogether, or an array that
+                                // lost the elements it could not evaluate
+                                // (`value = [LibPaths.X, "/lit"]` typed to
+                                // `["/lit"]`, silently one path short).
+                                val missing = written?.namedValues.orEmpty().filter { (key, values) ->
+                                    val typedValues = evidence.namedValues[key]
+                                    values.any { it in written!!.references } &&
+                                        (typedValues == null || typedValues.size < values.size)
+                                }
                                 evidence.copy(
                                     position = positionAt(
                                         lines,
@@ -427,7 +435,7 @@ object ResolvedAnalyzer {
                                         entry?.textOffset ?: declaration.textOffset,
                                     ),
                                     namedValues = evidence.namedValues + missing,
-                                    references = evidence.references + missing.values.flatten(),
+                                    references = evidence.references + missing.values.flatten().filter { it in written!!.references },
                                 )
                             }).filter { it.name != "<error>" }
                                 // Entries the resolver could not type (no jar
@@ -787,7 +795,10 @@ object ResolvedAnalyzer {
             value is org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue.EnumEntryValue
         ) return null
         val text = value.sourcePsi?.text?.trim() ?: return null
-        return text.takeIf { REFERENCE_TEXT.matches(it) }
+        // A name, or a template / concatenation over names (`"${Lib.API}/x"`,
+        // `Lib.API + "/x"`): the source text, which the endpoint detector
+        // folds against the sources or reports unresolved.
+        return text.takeIf { REFERENCE_TEXT.matches(it) || (it.startsWith("\"") && '$' in it) || '+' in it }
     }
 
     private val REFERENCE_TEXT = Regex("""[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*""")
