@@ -558,6 +558,7 @@ class SyntaxAnalyzer(
          * only route to its FQN.
          */
         fun annotationEvidenceOf(entry: org.jetbrains.kotlin.psi.KtAnnotationEntry, position: Position = Position("", 0, 0)): AnnotationEvidence {
+            val references = mutableSetOf<String>()
             val named = entry.valueArgumentList?.arguments?.mapNotNull { argument ->
                 val key = argument.getArgumentName()?.asName?.asString() ?: "value"
                 val expression = argument.getArgumentExpression() ?: return@mapNotNull null
@@ -567,11 +568,34 @@ class SyntaxAnalyzer(
                     when (element) {
                         is org.jetbrains.kotlin.psi.KtStringTemplateExpression -> {
                             val only = element.entries.singleOrNull() as? org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry
-                            only?.text ?: if (element.entries.isEmpty()) "" else null
+                            // Literal text and escapes only (`"\${app.base}/x"`,
+                            // a Spring property placeholder): a literal, as
+                            // the compiler folds it.
+                            val literal = element.entries.takeIf { entries ->
+                                entries.size > 1 && entries.all {
+                                    it is org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry ||
+                                        it is org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry
+                                }
+                            }?.joinToString("") { entry ->
+                                (entry as? org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry)?.unescapedValue ?: entry.text
+                            }
+                            only?.text ?: literal ?: if (element.entries.isEmpty()) "" else
+                                // A TEMPLATE (`"${API_V2_PREFIX}/monitors"`):
+                                // its text, marked a reference, folds against
+                                // the sources or is reported unresolved. It
+                                // used to be dropped, so a class prefix built
+                                // this way silently published `/{id}` for
+                                // `/api/v2/monitors/{id}` (kuvasz).
+                                element.text.also { references.add(it) }
                         }
                         // An enum entry (`HttpMethod.GET`), kept as written.
                         is org.jetbrains.kotlin.psi.KtDotQualifiedExpression, is org.jetbrains.kotlin.psi.KtNameReferenceExpression ->
                             element.text.takeIf { text -> text.all { it.isLetterOrDigit() || it == '.' || it == '_' } }
+                                ?.also { references.add(it) }
+                        // `API + "/x"`, `(A + "/x")`: a concatenation, the same way.
+                        is org.jetbrains.kotlin.psi.KtBinaryExpression, is org.jetbrains.kotlin.psi.KtParenthesizedExpression ->
+                            element.text.takeIf { element !is org.jetbrains.kotlin.psi.KtBinaryExpression || element.operationToken == org.jetbrains.kotlin.lexer.KtTokens.PLUS }
+                                ?.also { references.add(it) }
                         is org.jetbrains.kotlin.psi.KtConstantExpression -> element.text
                         else -> null
                     }
@@ -583,6 +607,7 @@ class SyntaxAnalyzer(
                 value = named["value"]?.firstOrNull(),
                 namedValues = named,
                 position = position,
+                references = references,
             )
         }
 

@@ -125,11 +125,17 @@ bootstrap-darwin bootstrap-linux bootstrap-windows:
 # flag they produced is set. (An earlier draft of the narrative lived here
 # too and was superseded mid-phase — it credited the `awt.toolkit` property
 # route, which JDK 25 does not read.)
+# The image's optimisation level. -O2, not -Os: measured on http4k's core
+# (1,526 files) the -Os image took 207 s and the -O2 image 102 s, for 13%
+# more binary (110 MB -> 124 MB). Size is not the constraint the analysis
+# time is. Overridable (`make native KOSI_NATIVE_OPT=-Os`).
+KOSI_NATIVE_OPT ?= -O2
+
 define build_native
 	$(graal_env) native-image -jar $(fat_jar) \
-	  -Os --gc=serial \
+	  $(KOSI_NATIVE_OPT) --gc=serial \
 	  -H:ConfigurationFileDirectories=native-metadata/kosi,native-metadata/kosi-psi \
-	  -H:IncludeResources='^kosi-libs/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$|^messages/.*\.properties$$' \
+	  -H:IncludeResources='^kosi-libs/.*|^META-INF/services/.*|^META-INF/.*\.xml$$|^META-INF/extensions/.*\.xml$$|^messages/.*\.properties$$|^misc/.*\.properties$$|^kotlinManifest\.properties$$' \
 	  -H:+UnlockExperimentalVMOptions \
 	  -H:+AddAllCharsets \
 	  $(KOSI_AWT_FLAG) \
@@ -176,7 +182,7 @@ fat-jar:
 $(fat_jar): fat-jar
 	@test -f $@
 
-$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
+$(build_dir)/kosi-darwin-%: native-metadata/kosi/reachability-metadata.json native-metadata/kosi-psi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-darwin-$*)
 
 # The arm64 and static-musl points-to analyses need more than the default
@@ -205,13 +211,13 @@ $(build_dir)/kosi-darwin-arm64: KOSI_NATIVE_HEAP = 8g
 # LWCToolkit into the image heap and every probe fails — darwin needs no
 # flag (libawt.dylib has no JNI_OnLoad) and none is set.
 $(build_dir)/kosi-linux-%: KOSI_AWT_FLAG = -Djava.awt.headless=true --initialize-at-build-time=java.awt.Toolkit,java.awt.GraphicsEnvironment
-$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
+$(build_dir)/kosi-linux-%: native-metadata/kosi/reachability-metadata.json native-metadata/kosi-psi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-linux-$*)
 
-$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
+$(build_dir)/kosi-linuxmusl-%: native-metadata/kosi/reachability-metadata.json native-metadata/kosi-psi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,--static --libc=musl,$(build_dir)/kosi-linuxmusl-$*)
 
-$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
+$(build_dir)/kosi-windows-%.exe: native-metadata/kosi/reachability-metadata.json native-metadata/kosi-psi/reachability-metadata.json $(fat_jar) native-toolchain-check | $(build_dir)
 	$(call build_native,,$(build_dir)/kosi-windows-$*.exe)
 
 ## native: host-platform binary (whichever family this machine is).

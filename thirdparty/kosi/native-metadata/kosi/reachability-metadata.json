@@ -48,6 +48,20 @@
           "parameterTypes": []
         }
       ],
+      "type": "com.github.benmanes.caffeine.cache.FWA"
+    },
+    {
+      "fields": [
+        {
+          "name": "accessTime"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
       "type": "com.github.benmanes.caffeine.cache.PDA"
     },
     {
@@ -264,6 +278,20 @@
           "parameterTypes": []
         }
       ],
+      "type": "com.github.benmanes.caffeine.cache.FD"
+    },
+    {
+      "fields": [
+        {
+          "name": "value"
+        }
+      ],
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
       "type": "com.github.benmanes.caffeine.cache.PW"
     },
     {
@@ -272,7 +300,7 @@
           "name": "value"
         }
       ],
-      "type": "com.github.benmanes.caffeine.cache.FD"
+      "type": "com.github.benmanes.caffeine.cache.FW"
     },
     {
       "fields": [
@@ -390,6 +418,19 @@
           ]
         }
       ],
+      "type": "com.github.benmanes.caffeine.cache.WI"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.github.benmanes.caffeine.cache.Caffeine",
+            "com.github.benmanes.caffeine.cache.CacheLoader",
+            "boolean"
+          ]
+        }
+      ],
       "type": "com.github.benmanes.caffeine.cache.WIA"
     },
     {
@@ -451,6 +492,23 @@
         }
       ],
       "type": "org.jetbrains.kotlin.psi.KtBackingField"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinBlockStringTemplateEntryStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtBlockStringTemplateEntry"
     },
     {
       "methods": [
@@ -1045,7 +1103,41 @@
           ]
         }
       ],
+      "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderWithTextStub"
+          ]
+        }
+      ],
       "type": "org.jetbrains.kotlin.psi.KtLiteralStringTemplateEntry"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.lang.ASTNode"
+          ]
+        },
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderWithTextStub"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
     },
     {
       "methods": [
@@ -1197,17 +1289,6 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtBlockStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtClassLiteralExpression"
     },
     {
@@ -1230,29 +1311,7 @@
           ]
         }
       ],
-      "type": "org.jetbrains.kotlin.psi.KtEscapeStringTemplateEntry"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
       "type": "org.jetbrains.kotlin.psi.KtLambdaArgument"
-    },
-    {
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": [
-            "com.intellij.lang.ASTNode"
-          ]
-        }
-      ],
-      "type": "org.jetbrains.kotlin.psi.KtSimpleNameStringTemplateEntry"
     },
     {
       "methods": [
@@ -1352,6 +1411,17 @@
         }
       ],
       "type": "org.jetbrains.kotlin.analysis.api.impl.base.projectStructure.KotlinOptimizingGlobalSearchScopeMerger"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "com.intellij.openapi.project.Project"
+          ]
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.impl.base.references.KotlinReferenceProvidersServiceImpl"
     },
     {
       "methods": [
@@ -1655,6 +1725,105 @@
           "parameterTypes": []
         }
       ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseArrayAccessReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseCollectionLiteralReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseConstructorDelegationReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseDefaultAnnotationArgumentReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseDestructuringDeclarationReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseForLoopInReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseInvokeFunctionReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseKDocReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBasePropertyDelegationMethodsReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.KaBaseSimpleNameReference$Provider"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
+      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.ReadWriteAccessCheckerBaseImpl"
+    },
+    {
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ],
       "type": "org.jetbrains.kotlin.analysis.decompiler.konan.KotlinKlibMetadataDecompiler"
     },
     {
@@ -1878,10 +2047,16 @@
       "type": "com.intellij.psi.PsiAnnotation[]"
     },
     {
+      "type": "com.intellij.psi.PsiClass[]"
+    },
+    {
       "type": "com.intellij.psi.PsiElementFinder"
     },
     {
       "type": "com.intellij.psi.PsiMethod[]"
+    },
+    {
+      "type": "com.intellij.psi.PsiReference[]"
     },
     {
       "type": "com.intellij.psi.SingleRootFileViewProvider"
@@ -2004,6 +2179,9 @@
       "type": "java.util.Map.Entry"
     },
     {
+      "type": "java.util.ResourceBundle"
+    },
+    {
       "type": "java.util.Set"
     },
     {
@@ -2109,9 +2287,6 @@
       "type": "org.jetbrains.kotlin.analysis.api.fir.utils.KaFirCacheCleaner"
     },
     {
-      "type": "org.jetbrains.kotlin.analysis.api.impl.base.references.KotlinReferenceProvidersServiceImpl"
-    },
-    {
       "type": "org.jetbrains.kotlin.analysis.api.imports.KaDefaultImportsProvider"
     },
     {
@@ -2167,9 +2342,6 @@
     },
     {
       "type": "org.jetbrains.kotlin.analysis.api.standalone.base.projectStructure.PluginStructureProvider$PluginDesignation"
-    },
-    {
-      "type": "org.jetbrains.kotlin.analysis.api.standalone.base.references.ReadWriteAccessCheckerBaseImpl"
     },
     {
       "type": "org.jetbrains.kotlin.analysis.api.symbols.AdditionalKDocResolutionProvider"
@@ -2257,6 +2429,12 @@
     },
     {
       "type": "org.jetbrains.kotlin.kdoc.psi.impl.KDocTag"
+    },
+    {
+      "type": "org.jetbrains.kotlin.light.classes.symbol.annotations.GranularAnnotationsBox"
+    },
+    {
+      "type": "org.jetbrains.kotlin.light.classes.symbol.modifierLists.GranularModifiersBox"
     },
     {
       "type": "org.jetbrains.kotlin.load.java.structure.impl.JavaClassifierTypeImpl"
@@ -2605,6 +2783,12 @@
   ],
   "resources": [
     {
+      "bundle": "localization//messages/JavaPsiBundle"
+    },
+    {
+      "bundle": "messages.JavaPsiBundle"
+    },
+    {
       "bundle": "sun.awt.resources.awt"
     },
     {
@@ -2679,6 +2863,18 @@
     },
     {
       "glob": "kotlin/reflect/reflect.kotlin_builtins"
+    },
+    {
+      "glob": "localization/messages/JavaPsiBundle.properties"
+    },
+    {
+      "glob": "localization/messages/JavaPsiBundle_en.properties"
+    },
+    {
+      "glob": "localization/messages/JavaPsiBundle_en_US.properties"
+    },
+    {
+      "glob": "messages/JavaPsiBundle.properties"
     },
     {
       "glob": "models/crypto-mappings-v0.json"

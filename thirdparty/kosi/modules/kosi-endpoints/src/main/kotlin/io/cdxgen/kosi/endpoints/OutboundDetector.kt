@@ -152,22 +152,30 @@ object OutboundDetector {
      * The honest raw rendering of an unresolvable argument: an env read
      * renders `${KEY}` (the key is the evidence, the value is never read),
      * a config key renders `${key}`, anything else renders its constant or
-     * the register.
+     * [UNRESOLVED_RAW]. It rendered the REGISTER (`t13`) there, which became
+     * a service NAMED after a register — a name that exists nowhere, and that
+     * moved whenever lowering renumbered temporaries (atom-tools#95).
      */
     private fun rawRendering(fn: KirFunction, block: KirBlock, index: Int, register: String, folder: KirValueFolder): String {
         val folded = folder.valueAt(fn, block, index, register)
         val detail = folded?.detail
         return when {
-            folded?.status == KirValueFolder.ValueStatus.ENV -> "\${" + (detail ?: register) + "}"
+            folded?.status == KirValueFolder.ValueStatus.ENV -> "\${" + (detail ?: "env") + "}"
             // The code passed the null LITERAL: that is the honest raw
             // rendering — the register's machine name is not evidence of
             // anything. The row keeps endpoint = null (absence), never an
             // endpoint called "null".
             folded?.status == KirValueFolder.ValueStatus.NULL -> "null"
             folded?.status == KirValueFolder.ValueStatus.UNRESOLVED && detail != null -> "\${" + detail + "}"
-            else -> folded?.value ?: register
+            else -> folded?.value ?: UNRESOLVED_RAW
         }
     }
+
+    /** The raw rendering of a value kosi could not name at all. */
+    const val UNRESOLVED_RAW = "<unresolved>"
+
+    /** Raw renderings that name no value: never an endpoint (see Endpoints). */
+    val NAMELESS_RAW = setOf(UNRESOLVED_RAW, "\${env}")
 
     private fun KirValueFolder.ValueStatus.toResolution(): String = when (this) {
         KirValueFolder.ValueStatus.LITERAL -> "literal"

@@ -8,6 +8,10 @@
 #   java-interop           Java PSI reached from Kotlin. The one that caught
 #                          the JDK-discovery gap: 1 of 2 calls resolved
 #                          natively against the JVM's 2.
+#   java-signature-kotlin-types  Java fields and methods typed by Kotlin
+#                          declarations: the cache shape that killed the image
+#                          (Caffeine WIA/FWA, atom-tools#95) on every mixed
+#                          Java/Kotlin repository while the JVM completed.
 #   android-agp-namespace  Java + a manifest + endpoint substantiation: the
 #                          only other fixture with .java sources, and the one
 #                          that exercises the endpoint path over them.
@@ -22,6 +26,13 @@
 #   crypto-algorithms      The crypto collector, which reads its own
 #                          resource-backed model packs.
 #   kosi-vulnerable-service  Taint: the deepest data-flow path in the tree.
+#   spring-const-scoping-unresolved  Mapping paths written as templates,
+#                          escapes and Java constants, read from PSI: the
+#                          string-template entry types the resolved tier
+#                          had never reflected on (atom-tools#95 review).
+#   dsl-loop-scoping-unresolved  DSL routes over constants and loop lists
+#                          with no framework jar: the scoped constant table
+#                          reached from the KIR value folder.
 #
 # What this subset would have caught: the JDK gap (java-interop, on stats),
 # and the JavaClassSupersImpl crash (android-agp-namespace or java-interop,
@@ -31,6 +42,7 @@
 # list, and anything the corpus shows that no fixture does. The full sweep
 # stays the release check for that reason.
 java-interop
+java-signature-kotlin-types
 android-agp-namespace
 latest-syntax
 dep-taint-through-lib
@@ -38,3 +50,5 @@ multi-module-gradle
 ktor-app
 crypto-algorithms
 kosi-vulnerable-service
+spring-const-scoping-unresolved
+dsl-loop-scoping-unresolved

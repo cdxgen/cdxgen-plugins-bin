@@ -3,27 +3,27 @@
     {
       "type": "jdk.internal.jimage.BasicImageReader",
       "methods": [
-        { "name": "open", "parameterTypes": ["java.nio.file.Path"] },
-        { "name": "getEntryNames", "parameterTypes": [] },
-        { "name": "getResource", "parameterTypes": ["java.lang.String"] },
-        { "name": "close", "parameterTypes": [] }
+        {
+          "name": "open",
+          "parameterTypes": [
+            "java.nio.file.Path"
+          ]
+        },
+        {
+          "name": "getEntryNames",
+          "parameterTypes": []
+        },
+        {
+          "name": "getResource",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        },
+        {
+          "name": "close",
+          "parameterTypes": []
+        }
       ]
-    },
-    {
-      "type": {
-        "proxy": [
-          "org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.vfs.BulkFileListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.vfs.AsyncFileListener",
-          "org.jetbrains.kotlin.com.intellij.psi.PsiTreeChangeListener",
-          "org.jetbrains.kotlin.com.intellij.psi.PsiModificationListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.project.ProjectManagerListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.editor.event.DocumentListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.application.ApplicationActivationListener",
-          "org.jetbrains.kotlin.com.intellij.openapi.util.registry.RegistryValueListener",
-          "java.lang.reflect.InvocationHandler"
-        ]
-      }
     }
   ],
   "resources": [

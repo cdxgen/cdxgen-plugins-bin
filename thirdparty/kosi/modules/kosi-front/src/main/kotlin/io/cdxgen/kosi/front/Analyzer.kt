@@ -886,6 +886,7 @@ object Analyzer {
                         maxSummarySinkEffects = options.dataflowMaxSummarySinkEffects,
                         unknownCallPropagate = options.unknownCall == "propagate",
                         skipGenerated = options.dataflowSkipGenerated,
+                        pathWidening = options.dataflowPathWidening,
                         dispatchMode = options.callgraph.id,
                         endpointSources = if (options.endpointSources) endpoints.sourceHandlers else emptyMap(),
                         // The framework's own statement about which handler
@@ -1055,8 +1056,8 @@ object Analyzer {
                 Diagnostic(
                     code = DiagnosticCodes.ENDPOINT_PATH_UNRESOLVED,
                     severity = Severity.WARNING,
-                    message = "$pathUnresolvedEndpoints endpoint(s) sit under a base path the deployment sets but kosi " +
-                        "could not prove; their pathTemplate is relative to it and each names why in pathUnresolved",
+                    message = "$pathUnresolvedEndpoints endpoint(s) have a path kosi could not prove (a base path the deployment sets, " +
+                        "or a path computed at run time); their pathTemplate is partial or empty and each names why in pathUnresolved",
                     position = Position(".", 1, 1),
                     count = pathUnresolvedEndpoints,
                 )
@@ -1431,6 +1432,7 @@ object Analyzer {
                             line = annotation.position.line,
                             namedValues = annotation.namedValues,
                             file = draft.position.filename,
+                            references = annotation.references,
                         ),
                     )
                 }
@@ -1450,6 +1452,8 @@ object Analyzer {
             ?.bufferedReader()?.use { it.readText() }.orEmpty()
         Regex(""""((?:[a-z_][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9_]*)"""").findAll(text).mapTo(HashSet()) { it.groupValues[1] }
     }
+
+    private val TYPE_KINDS = setOf("class", "interface", "data-class", "sealed-class", "object")
 
     /** The types a run read, with supertypes: a member-less repository interface is visible only here. */
     private fun typeDeclarationsOf(
@@ -1472,8 +1476,12 @@ object Analyzer {
                 }
             }
             val supertypes = (draft.supertypes + recovered).distinct()
-            if (supertypes.isEmpty()) null
-            else io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(draft.canonicalName, file, supertypes)
+            // A supertype-less CLASS is kept too: a hierarchy search needs
+            // its kind (interface or class) and whether it is abstract.
+            if (supertypes.isEmpty() && draft.kind !in TYPE_KINDS) null
+            else io.cdxgen.kosi.endpoints.Endpoints.TypeDeclaration(
+                draft.canonicalName, file, supertypes, draft.kind, draft.modifiers.toSet(),
+            )
         }
     }
 

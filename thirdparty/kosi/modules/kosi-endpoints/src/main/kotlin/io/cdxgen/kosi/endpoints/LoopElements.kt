@@ -5,6 +5,7 @@ import io.cdxgen.kosi.kir.KirBlock
 import io.cdxgen.kosi.kir.KirCall
 import io.cdxgen.kosi.kir.KirDynamicCall
 import io.cdxgen.kosi.kir.KirFieldGet
+import io.cdxgen.kosi.kir.KirFieldSet
 import io.cdxgen.kosi.kir.KirFunction
 import io.cdxgen.kosi.kir.KirIns
 import io.cdxgen.kosi.kir.KirLambda
@@ -24,7 +25,8 @@ import io.cdxgen.kosi.kir.KirStore
  * `hasNext()`/`next()`, with the loop variable stored from `next()` (or from
  * `componentN()` of it when destructured). This walks back from a register
  * to that `next()`, then to the collection: a `listOf`/`setOf`/`arrayOf`
- * call, inline or as the initializer of a top-level `val`. It never guesses:
+ * call, inline, in a local `val`, or as the initializer of a top-level
+ * property nothing reassigns. It never guesses:
  * a collection that is a parameter, a computed value or a call kosi does
  * not model resolves to null, and the route stays unresolved.
  *
@@ -85,6 +87,7 @@ internal object LoopElements {
         val stores = instructions(fn).filterIsInstance<KirStore>().filter { it.target == register }.toList()
         if (stores.size > 1) return null
         val value = stores.singleOrNull()?.value ?: register
+        if (value.startsWith("%p")) return forEachParameter(fn, value, kind, input)
         val producer = call(definer(fn, value)) ?: return null
         val (nextCall, component) = when (producer.name) {
             "next" -> producer to 0
@@ -107,9 +110,42 @@ internal object LoopElements {
         return Binding("${fn.canonicalName}#${iterator.result}", values)
     }
 
+    /**
+     * `listOf("/x", "/y").forEach { p -> get(p) { } }` (atom-tools#95): the
+     * lambda's element parameter takes each element of the RECEIVER of the
+     * `forEach`/`onEach` that created the lambda. Only the element parameter
+     * of those two is bound; `forEachIndexed`, `map` and friends resolve to
+     * null, as does a receiver that is not a literal collection.
+     */
+    private fun forEachParameter(fn: KirFunction, param: String, kind: Kind, input: EndpointDetector.Input): Binding? {
+        if (param != "%p0") return null
+        val link = input.lambdaLinks[fn.canonicalName] ?: return null
+        val loop = call(link.creationCall) ?: return null
+        if (loop.name !in ELEMENT_LOOPS || (loop.fqn != null && loop.fqn !in ELEMENT_LOOP_FQNS)) return null
+        val collection = loop.receiver ?: return null
+        val parent = input.module.functions.firstOrNull { it.canonicalName == link.parentFunction } ?: return null
+        // The lambda must be the loop's own argument, not a capture beside it.
+        val lambda = instructions(parent).filterIsInstance<KirLambda>().firstOrNull { it.function == fn.canonicalName } ?: return null
+        if (loop.args.singleOrNull() != lambda.result) return null
+        val (owner, elements) = elementsOf(parent, collection, input) ?: return null
+        val values = elements.map { valueOf(owner, it, kind, input) ?: return null }
+        if (values.isEmpty()) return null
+        return Binding("${parent.canonicalName}#${loop.result}", values)
+    }
+
+    private val ELEMENT_LOOPS = setOf("forEach", "onEach")
+    private val ELEMENT_LOOP_FQNS = setOf("kotlin.collections.forEach", "kotlin.collections.onEach")
+
     /** The element registers of a literal collection, and the function they live in. */
-    private fun elementsOf(fn: KirFunction, register: String, input: EndpointDetector.Input): Pair<KirFunction, List<String>>? {
+    private fun elementsOf(fn: KirFunction, register: String, input: EndpointDetector.Input, depth: Int = 0): Pair<KirFunction, List<String>>? {
+        if (depth > 4) return null
         when (val def = definer(fn, register)) {
+            // A local `val paths = listOf(..)`: the one store names the
+            // collection. A reassigned `var` has two and binds nothing.
+            null -> {
+                val store = instructions(fn).filterIsInstance<KirStore>().filter { it.target == register }.singleOrNull() ?: return null
+                return elementsOf(fn, store.value, input, depth + 1)
+            }
             is KirCall, is KirDynamicCall -> call(def)?.takeIf { isBuilder(it) && !mutated(fn, register, it) }?.let { return fn to it.args }
             is KirFieldGet -> {
                 // A top-level `val` read: its initializer lowers to a
@@ -124,6 +160,16 @@ internal object LoopElements {
                 } ?: return null
                 val returned = instructions(initializer).filterIsInstance<KirReturn>().mapNotNull { it.value }.singleOrNull() ?: return null
                 val built = call(definer(initializer, returned)) ?: return null
+                // A top-level `var` any function REASSIGNS holds whatever was
+                // last written, not its initializer: `var P = listOf("/a")`
+                // set elsewhere published `/a` as proven (atom-tools#95
+                // review). Any write of that name counts, conservatively.
+                val reassigned = input.module.functions.any { f ->
+                    f !== initializer && instructions(f).any { ins ->
+                        ins is KirFieldSet && (ins.path.elements.lastOrNull() as? AccessPath.Element.Field)?.name == name
+                    }
+                }
+                if (reassigned) return null
                 // A mutable val any function mutates is not its initializer.
                 val mutatedAnywhere = MUTABLE_BUILDERS.contains(built.name) && input.module.functions.any { f ->
                     instructions(f).any { ins ->

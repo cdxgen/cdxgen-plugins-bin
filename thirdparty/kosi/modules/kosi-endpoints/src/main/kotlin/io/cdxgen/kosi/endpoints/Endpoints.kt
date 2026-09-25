@@ -43,7 +43,20 @@ object Endpoints {
     )
 
     /** A type the run read: canonical name, its ROOT-RELATIVE file, and its supertypes. */
-    data class TypeDeclaration(val canonicalName: String, val file: String, val supertypes: List<String>)
+    /**
+     * An analysed type: its supertypes, its declaration kind (`class`,
+     * `interface`, `object`, ..; empty when unknown) and modifiers
+     * (`abstract`). The kind orders a hierarchy search the way Spring's does
+     * (a type's interfaces before its superclass); `abstract` says a type is
+     * never a component itself.
+     */
+    data class TypeDeclaration(
+        val canonicalName: String,
+        val file: String,
+        val supertypes: List<String>,
+        val kind: String = "",
+        val modifiers: Set<String> = emptySet(),
+    )
 
     fun analyze(
         module: KirModule,
@@ -107,9 +120,18 @@ object Endpoints {
         val configValues = configTable.keys()
             .mapNotNull { key -> configTable[key]?.value?.let { key to it } }
             .toMap()
+        val constValues = ConstTable.fromSources(sourceTexts)
+        // Reference-valued annotation arguments fold ONCE, each in its own
+        // file's scope, so every reader (paths, media types, verbs) sees the
+        // same answer; one that does not fold stays a marked reference.
+        val constScope = ConstTable.scoped(sourceTexts)
+        val folded = foldReferences(annotationValues, constScope)
         val folder = KirValueFolder(
             module = module,
-            constValues = ConstTable.fromSources(sourceTexts),
+            constValues = constValues,
+            // A constant READ in code resolves in the reading function's own
+            // scope too: its file's imports and package, its classes.
+            constLookup = { fn, reference -> constScope.resolve(reference, fn.file, fn.canonicalName.substringBefore('$')) },
             configReaders = pack.configReaders.map { it.pattern to it.argument },
             configTable = configValues,
             statsSink = foldStats,
@@ -121,10 +143,12 @@ object Endpoints {
         val candidates = EndpointDetector.detect(
             EndpointDetector.Input(
                 module = module,
-                annotationValues = annotationValues,
+                annotationValues = folded,
                 folder = folder,
                 lambdaLinks = lambdaLinks,
                 importRootsByFile = importRootsByFile,
+                typeDeclarations = typeDeclarations,
+                configValues = configValues,
             ),
             pack,
         )
@@ -137,7 +161,7 @@ object Endpoints {
         val modules = ModuleConfigs(root, configTable)
         val handled = candidates.mapTo(HashSet()) { it.framework }
         val implicitCandidates = implicitEndpoints(module, pack, dependencyCoordinates, configTable, handled) +
-            repositoryEndpoints(module, pack, annotationValues, typeDeclarations, dependencyCoordinates, crudUnknown, modules)
+            repositoryEndpoints(module, pack, folded, typeDeclarations, dependencyCoordinates, crudUnknown, modules)
 
         // The DEPLOYMENT base path. A handler's annotation or DSL call names
         // a path relative to the application; what a client actually calls
@@ -158,7 +182,7 @@ object Endpoints {
         fun applicationPathFor(framework: io.cdxgen.kosi.models.FrameworkModel, file: String?): String? {
             if (framework.applicationPathAnnotations.isEmpty()) return null
             val module = modules.moduleRootOf(file)
-            return annotationValues.values.asSequence().flatten()
+            return folded.values.asSequence().flatten()
                 .filter { ann -> framework.applicationPathAnnotations.any { EndpointDetector.matches(ann.fqn, it) } }
                 .filter { ann -> modules.moduleRootOf(ann.file) == module }
                 .map { it.value?.trim()?.removeSurrounding("\"").orEmpty() }
@@ -167,7 +191,7 @@ object Endpoints {
         val codeBases = CodeBasePaths(module, folder, modules, importRootsByFile)
         val all = (candidates + manifestCandidates + webXmlCandidates + implicitCandidates + handshakeEndpoints(module, pack, folder))
             .map { candidate -> if (candidate.dataRestBase) dataRestBases.compose(candidate) else candidate }
-            .map { candidate -> servingFacts(candidate, pack, module, annotationValues, modules) }
+            .map { candidate -> servingFacts(candidate, pack, module, folded, modules) }
             .map { candidate -> if (candidate.transport == "grpc") protos.rpcPath(candidate) else candidate }
             .flatMap { candidate -> listOf(candidate) + alsoServedAt(candidate, pack, modules) }
             .map { candidate ->
@@ -187,8 +211,8 @@ object Endpoints {
                 else candidate.copy(pathTemplate = joinPaths(prefix, candidate.pathTemplate))
                 if (conflict != null && based.pathUnresolved == null) based.copy(pathUnresolved = conflict) else based
             }
-            .map { candidate -> withTransportParameters(candidate, module, pack, folder, annotationValues) }
-            .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, annotationValues) }
+            .map { candidate -> withTransportParameters(candidate, module, pack, folder, folded) }
+            .map { candidate -> withMediaAndAuthentication(candidate, module, pack, folder, lambdaLinks, folded) }
             .flatMap { candidate ->
                 EndpointDetector.expandOptionalSegments(candidate.pathTemplate).map { path ->
                     if (path == candidate.pathTemplate) candidate
@@ -229,13 +253,18 @@ object Endpoints {
         }
 
         // ---- outbound services and URLs ---------------------------------------
-        val outbounds = OutboundDetector.detect(module, folder, pack, annotationValues)
+        val outbounds = OutboundDetector.detect(module, folder, pack, folded)
         val services = outbounds.mapIndexed { index, outbound ->
             val modulePath = attribution.byAbsoluteFilePath[outbound.position.filename]?.second ?: ""
             ServiceRef(
                 id = "svc-" + (index + 1).toString().padStart(6, '0'),
                 name = serviceName(outbound),
-                endpoints = listOfNotNull(outbound.endpoint ?: outbound.raw),
+                // A value kosi could not name (`<unresolved>`, a key-less
+                // `${env}`) is not an endpoint: published as one, every such
+                // service shared it, and a consumer joining url rows by
+                // endpoint value (cdxgen) pooled every unresolved call site
+                // under each of them (atom-tools#95 review).
+                endpoints = listOfNotNull(outbound.endpoint ?: outbound.raw.takeUnless { it in OutboundDetector.NAMELESS_RAW }),
                 authenticated = null,
                 xTrustBoundary = null,
                 protocol = outbound.protocol,
@@ -1603,13 +1632,108 @@ object Endpoints {
         return if (right.isEmpty()) prefix else "$prefix/$right"
     }
 
+    /**
+     * Every annotation argument WRITTEN AS A REFERENCE — a constant
+     * (`@GetMapping(Paths.USERS)`), a template (`@Controller("${API}/x")`) or
+     * a concatenation (`API + "/x"`) the resolver could not evaluate (no jar,
+     * or a library constant) — folded in its own file's scope, inside the
+     * annotated declaration [values]' key names. A value that does not fold
+     * stays in [EndpointDetector.DeclAnnotation.references], and a path
+     * reader reports it unresolved instead of publishing its text.
+     */
+    internal fun foldReferences(
+        values: Map<String, List<EndpointDetector.DeclAnnotation>>,
+        scope: ConstTable.Scope,
+    ): Map<String, List<EndpointDetector.DeclAnnotation>> = values.mapValues { (key, annotations) ->
+        val enclosing = key.substringBefore('#')
+        annotations.map { ann ->
+            if (ann.references.isEmpty()) return@map ann
+            val unfolded = HashSet<String>()
+            fun fold(value: String): String {
+                if (value !in ann.references) return value
+                return scope.evaluate(value, ann.file, enclosing) ?: value.also { unfolded += it }
+            }
+            ann.copy(value = ann.value?.let(::fold), namedValues = ann.namedValues.mapValues { (_, vs) -> vs.map(::fold) }, references = unfolded)
+        }
+    }
+
 }
 
-/** Workspace `const val` name -> value, only for names with a UNIQUE value. */
+/**
+ * Workspace constants (`const val`, Java `static final String` fields and
+ * interface constants) and the values they fold to.
+ *
+ * Two views. [fromSources] is keyed by the bare NAME (and `Owner.NAME`) for
+ * the KIR value folder, which reads a `const val` by its last access-path
+ * element. [scoped] is keyed by FULLY-QUALIFIED name and resolves a reference
+ * the way the compiler does — the enclosing classes (a companion's members),
+ * the file's explicit imports, its own package, its star imports — and never
+ * falls back to a same-named constant somewhere else: `LibPaths.USERS` from a
+ * library the run cannot see is unresolved, never `Local.USERS`
+ * (atom-tools#95 review).
+ */
 object ConstTable {
     private val PATTERN = Regex(
-        """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"""",
+        """(?:\bconst\s+val\s+|\bpublic\s+static\s+final\s+String\s+|\bstatic\s+final\s+String\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"$\\]*)"(?=[ \t]*(?:$|;|}|//))""",
+        RegexOption.MULTILINE,
     )
+
+    /**
+     * A `const val` whose initializer is not one plain literal: another
+     * constant, a concatenation (`API + "/users"`) or a template
+     * (`"$API/users"`, `"${Paths.API}/users"`). Kotlin folds these at compile
+     * time, and route constants are routinely built this way (atom-tools#95).
+     * The initializer runs to the end of the line.
+     */
+    private val COMPOSED = Regex("""\bconst\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*String\s*)?=\s*([^\n;]+)""")
+
+    /**
+     * A Java `String` field: `static final` in a class, or any field of an
+     * interface (implicitly `public static final`). Its initializer runs to
+     * the `;`; Java has no string templates, so `$` is a plain character.
+     */
+    private val JAVA_FIELD = Regex("""((?:\b(?:public|protected|private|static|final)\s+)*)String\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;{}]+);""")
+
+    private val PACKAGE = Regex("""^\s*package\s+([A-Za-z_][\w.]*)""", RegexOption.MULTILINE)
+    private val IMPORT = Regex("""^\s*import\s+(static\s+)?([A-Za-z_][\w.]*?)(\.\*)?(?:\s+as\s+([A-Za-z_]\w*))?\s*;?\s*$""", RegexOption.MULTILINE)
+
+    /** One declared constant: its file, package, owner chain within the package, name, and literal or expression. */
+    private data class Declared(val file: String, val pkg: String, val owner: String?, val name: String, val raw: String, val java: Boolean)
+
+    /** What a file's names resolve through. */
+    internal data class FileScope(val pkg: String, val imports: Map<String, String>, val stars: List<String>, val java: Boolean)
+
+    private fun declarations(sourceTexts: Map<String, String>): List<Declared> {
+        val out = mutableListOf<Declared>()
+        for ((file, text) in sourceTexts) {
+            val java = file.endsWith(".java")
+            val pkg = PACKAGE.find(text)?.groupValues?.get(1).orEmpty()
+            val spans = braceSpans(text)
+            if (java) {
+                for (match in JAVA_FIELD.findAll(text)) {
+                    val at = spanAt(spans, match.range.first) ?: continue
+                    // A FIELD: directly in a named class/interface body, not a
+                    // local in a method body.
+                    if (at.chain == null || !at.named) continue
+                    val modifiers = match.groupValues[1]
+                    if (!at.isInterface && !("static" in modifiers && "final" in modifiers)) continue
+                    out += Declared(file, pkg, at.chain, match.groupValues[2], UNEVALUATED + match.groupValues[3].trim(), java = true)
+                }
+                continue
+            }
+            val literalStarts = HashSet<Int>()
+            for (match in PATTERN.findAll(text)) {
+                literalStarts.add(match.range.first)
+                out += Declared(file, pkg, spanAt(spans, match.range.first)?.chain, match.groupValues[1], match.groupValues[2], java = false)
+            }
+            for (match in COMPOSED.findAll(text)) {
+                if (match.range.first in literalStarts) continue
+                val initializer = match.groupValues[2].substringBefore("//").trim()
+                out += Declared(file, pkg, spanAt(spans, match.range.first)?.chain, match.groupValues[1], UNEVALUATED + initializer, java = false)
+            }
+        }
+        return out
+    }
 
     // Keyed by the `const val` NAME — deliberately name-unique: a
     // name mapping to two values anywhere is ambiguous and is REFUSED below
@@ -1617,12 +1741,309 @@ object ConstTable {
     // mechanism, not a defect.
     fun fromSources(sourceTexts: Map<String, String>): Map<String, String> {
         val byName = HashMap<String, MutableSet<String>>()
-        for (text in sourceTexts.values) {
-            for (match in PATTERN.findAll(text)) {
-                byName.getOrPut(match.groupValues[1]) { mutableSetOf() }.add(match.groupValues[2])
+        for (d in declarations(sourceTexts)) {
+            byName.getOrPut(d.name) { mutableSetOf() }.add(d.raw)
+            // `Holder.PATH` names its owner, so it stays unique where the bare
+            // name is not (two objects each declaring PATH).
+            val owner = d.owner?.substringAfterLast('.')
+            if (owner != null) byName.getOrPut("$owner.${d.name}") { mutableSetOf() }.add(d.raw)
+        }
+        fun unique(key: String) = byName[key]?.singleOrNull()?.takeIf { !it.startsWith(UNEVALUATED) }
+        // Fold to a fixpoint: each pass evaluates the expressions whose
+        // references all have a unique value already. A cycle or an unknown
+        // reference never folds, and its name stays out; a name declared as
+        // a literal in one place and an expression in another keeps both,
+        // and is refused unless they agree.
+        fixpoint(byName.values) { expression ->
+            evaluate(expression, templates = true) { reference ->
+                val parts = reference.split('.')
+                (if (parts.size >= 2) unique(parts.takeLast(2).joinToString(".")) else null) ?: unique(parts.last())
             }
         }
-        return byName.filterValues { it.size == 1 }.mapValues { (_, vs) -> vs.first() }
+        return byName.filterValues { vs -> vs.size == 1 && !vs.first().startsWith(UNEVALUATED) }.mapValues { (_, vs) -> vs.first() }
     }
 
+    /** The FQN-keyed view; see the class comment. */
+    class Scope internal constructor(
+        private val values: Map<String, String>,
+        /** Every declared FQN, folded or not: an ambiguous one still shadows an outer scope. */
+        private val declared: Set<String>,
+        private val files: Map<String, FileScope>,
+    ) {
+        private val scopeByFile = HashMap<String, FileScope?>()
+
+        private fun scopeOf(file: String?): FileScope? = file?.let { f ->
+            scopeByFile.getOrPut(f) {
+                files[f] ?: files.entries.firstOrNull { (k, _) -> sameFile(k, f) }?.value
+            }
+        }
+
+        /**
+         * The value [expression] folds to — a (qualified) constant name, a
+         * string template or a `+` concatenation, as written in [file] inside
+         * the declaration [enclosing] (a canonical name; its enclosing classes
+         * are searched first). Null when any part does not fold.
+         */
+        fun evaluate(expression: String, file: String?, enclosing: String?): String? {
+            val scope = scopeOf(file)
+            return evaluate(expression, templates = scope?.java != true) { resolve(it, scope, enclosing, declared::contains, values::get) }
+        }
+
+        /** The value one reference names, or null. */
+        fun resolve(reference: String, file: String?, enclosing: String?): String? =
+            resolve(reference, scopeOf(file), enclosing, declared::contains, values::get)
+    }
+
+    fun scoped(sourceTexts: Map<String, String>): Scope {
+        val files = sourceTexts.mapValues { (file, text) -> fileScopeOf(file, text) }
+        val byFqn = HashMap<String, MutableSet<String>>()
+        // Each expression folds in its OWN declaration's scope.
+        val context = HashMap<Pair<String, String>, Declared>()
+        for (d in declarations(sourceTexts)) {
+            val fqn = listOf(d.pkg, d.owner.orEmpty(), d.name).filter { it.isNotEmpty() }.joinToString(".")
+            byFqn.getOrPut(fqn) { mutableSetOf() }.add(d.raw)
+            if (d.raw.startsWith(UNEVALUATED)) context[fqn to d.raw] = d
+        }
+        fun unique(key: String) = byFqn[key]?.singleOrNull()?.takeIf { !it.startsWith(UNEVALUATED) }
+        var changed = true
+        var passes = 0
+        while (changed && passes++ < 16) {
+            changed = false
+            for ((fqn, values) in byFqn) {
+                for (expression in values.filter { it.startsWith(UNEVALUATED) }) {
+                    val d = context[fqn to expression] ?: continue
+                    val scope = files[d.file]
+                    val enclosing = listOf(d.pkg, d.owner.orEmpty()).filter { it.isNotEmpty() }.joinToString(".").ifEmpty { null }
+                    val value = evaluate(expression.removePrefix(UNEVALUATED), templates = !d.java) { reference ->
+                        resolve(reference, scope, enclosing, byFqn::containsKey, ::unique)
+                    } ?: continue
+                    values.remove(expression)
+                    values.add(value)
+                    changed = true
+                }
+            }
+        }
+        val final = byFqn.filterValues { vs -> vs.size == 1 && !vs.first().startsWith(UNEVALUATED) }.mapValues { (_, vs) -> vs.first() }
+        return Scope(final, byFqn.keys.toHashSet(), files)
+    }
+
+    private fun fileScopeOf(file: String, text: String): FileScope {
+        val imports = HashMap<String, String>()
+        val stars = mutableListOf<String>()
+        for (m in IMPORT.findAll(text)) {
+            val name = m.groupValues[2]
+            if (m.groupValues[3].isNotEmpty()) stars += name else imports[m.groupValues[4].ifEmpty { name.substringAfterLast('.') }] = name
+        }
+        return FileScope(PACKAGE.find(text)?.groupValues?.get(1).orEmpty(), imports, stars, file.endsWith(".java"))
+    }
+
+    /**
+     * Kotlin's order for a name used in [enclosing] (Java's is the same for
+     * these shapes): the enclosing classes, innermost first (a companion's
+     * members are its class's); an explicit import, which shadows the package
+     * and names a library when the table does not hold it; the file's own
+     * package; the star imports, only when exactly one of them holds it.
+     * `Companion` segments are dropped: `C1.Companion.X` is `C1.X`.
+     */
+    private fun resolve(
+        reference: String,
+        scope: FileScope?,
+        enclosing: String?,
+        declared: (String) -> Boolean,
+        value: (String) -> String?,
+    ): String? {
+        // The FIRST scope that declares the name decides, folded or not: a
+        // name it holds ambiguously (or not yet folded) never falls through
+        // to a same-named constant further out.
+        fun lookup(key: String): String? = value(key)
+        fun holds(key: String) = declared(key)
+        val ref = reference.split('.').filter { it != "Companion" }.joinToString(".")
+        if (ref.isEmpty()) return null
+        val head = ref.substringBefore('.')
+        val pkg = scope?.pkg.orEmpty()
+        var owner = enclosing?.takeIf { pkg.isEmpty() || it.startsWith("$pkg.") }
+        while (owner != null && owner.length > pkg.length) {
+            if (holds("$owner.$ref")) return lookup("$owner.$ref")
+            owner = owner.substringBeforeLast('.', "").ifEmpty { null }
+        }
+        if (scope != null) {
+            scope.imports[head]?.let { imported -> return lookup(imported + ref.removePrefix(head)) }
+            val local = if (pkg.isEmpty()) ref else "$pkg.$ref"
+            if (holds(local)) return lookup(local)
+            val starred = scope.stars.map { "$it.$ref" }.filter(::holds)
+            if (starred.isNotEmpty()) return starred.singleOrNull()?.let(::lookup)
+        }
+        // Already fully qualified (`com.acme.Paths.USERS`).
+        return if ('.' in ref) lookup(ref) else null
+    }
+
+    private fun fixpoint(sets: Collection<MutableSet<String>>, eval: (String) -> String?) {
+        var changed = true
+        var passes = 0
+        while (changed && passes++ < 16) {
+            changed = false
+            for (values in sets) {
+                for (expression in values.filter { it.startsWith(UNEVALUATED) }) {
+                    val value = eval(expression.removePrefix(UNEVALUATED)) ?: continue
+                    values.remove(expression)
+                    values.add(value)
+                    changed = true
+                }
+            }
+        }
+    }
+
+    private val OWNER = Regex("""\b(?:object|class|interface)\s+([A-Za-z_][A-Za-z0-9_]*)""")
+    private val COMPANION = Regex("""\bcompanion\s+object\s*(?:([A-Za-z_][A-Za-z0-9_]*)\s*)?\{""")
+
+    /** One brace span: its owner chain (null outside every named body), and whether it IS a named body. */
+    private class Span(val range: IntRange, val chain: String?, val named: Boolean, val isInterface: Boolean)
+
+    /** The innermost span containing [offset]. */
+    private fun spanAt(spans: List<Span>, offset: Int): Span? =
+        spans.filter { offset in it.range }.minByOrNull { it.range.last - it.range.first }
+
+    /**
+     * Every brace span in [text], with the dotted chain of named
+     * `object`/`class`/`interface` bodies it sits in. A companion object's
+     * members are named through the enclosing class (`C1.IN_COMPANION`), so
+     * its span carries that chain. A class header may carry a primary
+     * constructor with defaults (`class C(val a: String = "x") {`), so the
+     * body brace is found past balanced parentheses. Braces inside strings,
+     * characters and comments are skipped.
+     */
+    private fun braceSpans(text: String): List<Span> {
+        val opens = HashMap<Int, Pair<String, Boolean>>()
+        for (m in OWNER.findAll(text)) {
+            val body = bodyBraceAfter(text, m.range.last + 1) ?: continue
+            opens[body] = m.groupValues[1] to (m.value.startsWith("interface"))
+        }
+        val companions = COMPANION.findAll(text).mapTo(HashSet()) { it.range.last }
+        val out = mutableListOf<Span>()
+        data class Open(val at: Int, val chain: String?, val named: Boolean, val isInterface: Boolean)
+        val stack = ArrayDeque<Open>()
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                text.startsWith("//", i) -> { i = text.indexOf('\n', i).let { if (it < 0) text.length else it }; continue }
+                text.startsWith("/*", i) -> { i = text.indexOf("*/", i + 2).let { if (it < 0) text.length else it + 2 }; continue }
+                text.startsWith("\"\"\"", i) -> { i = text.indexOf("\"\"\"", i + 3).let { if (it < 0) text.length else it + 3 }; continue }
+                c == '"' -> {
+                    i++
+                    while (i < text.length && text[i] != '"' && text[i] != '\n') { if (text[i] == '\\') i++; i++ }
+                }
+                c == '\'' -> { i = (text.indexOf('\'', i + 1 + if (text.getOrNull(i + 1) == '\\') 1 else 0)).let { if (it < 0) i else it } }
+                c == '{' -> {
+                    val enclosing = stack.lastOrNull()?.chain
+                    val open = when {
+                        i in companions -> Open(i, enclosing, named = enclosing != null, isInterface = false)
+                        opens[i] != null -> {
+                            val (name, iface) = opens.getValue(i)
+                            Open(i, if (enclosing == null) name else "$enclosing.$name", named = true, isInterface = iface)
+                        }
+                        else -> Open(i, enclosing, named = false, isInterface = false)
+                    }
+                    stack.addLast(open)
+                }
+                c == '}' -> stack.removeLastOrNull()?.let { o -> out.add(Span(o.at..i, o.chain, o.named, o.isInterface)) }
+            }
+            i++
+        }
+        return out
+    }
+
+    /** The `{` that opens the body of a class header starting at [from], past balanced `(..)` and `<..>`; null when it has none. */
+    private fun bodyBraceAfter(text: String, from: Int): Int? {
+        var depth = 0
+        var i = from
+        while (i < text.length) {
+            when (text[i]) {
+                '(', '<', '[' -> depth++
+                ')', '>', ']' -> if (depth > 0) depth--
+                '"' -> { i++; while (i < text.length && text[i] != '"' && text[i] != '\n') { if (text[i] == '\\') i++; i++ } }
+                '{' -> if (depth == 0) return i
+                '}', ';' -> if (depth == 0) return null
+                '=' -> if (depth == 0) return null
+            }
+            if (depth == 0 && text.startsWith("class ", i) || depth == 0 && text.startsWith("fun ", i)) return null
+            i++
+        }
+        return null
+    }
+
+    private fun sameFile(a: String, b: String): Boolean {
+        val x = a.replace('\\', '/')
+        val y = b.replace('\\', '/')
+        return x == y || x.endsWith("/" + y.trimStart('/')) || y.endsWith("/" + x.trimStart('/'))
+    }
+
+    private const val UNEVALUATED = "\u0000expr:"
+    private val REFERENCE = Regex("""[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*""")
+
+    /**
+     * `A + "/x"`, `"$A/x"`, `"${B.C}/x"`: literals and constants [constant]
+     * resolves. [templates] is false for Java, where `$` is a character.
+     */
+    private fun evaluate(expression: String, templates: Boolean, constant: (String) -> String?): String? {
+        val out = StringBuilder()
+        var i = 0
+        val e = expression.trim()
+        var expectOperand = true
+        while (i < e.length) {
+            val c = e[i]
+            when {
+                c.isWhitespace() -> i++
+                !expectOperand && c == '+' -> { expectOperand = true; i++ }
+                // `object P { const val X = A + "/x" }` on one line: the
+                // body's closing brace ends the initializer.
+                !expectOperand && c == '}' -> break
+                expectOperand && c == '(' -> {
+                    // `(A + "/x")`: a parenthesised operand folds on its own.
+                    var depth = 0
+                    var j = i
+                    while (j < e.length) { if (e[j] == '(') depth++ else if (e[j] == ')') { depth--; if (depth == 0) break }; j++ }
+                    if (j >= e.length) return null
+                    out.append(evaluate(e.substring(i + 1, j), templates, constant) ?: return null)
+                    i = j + 1
+                    expectOperand = false
+                }
+                expectOperand && c == '"' -> {
+                    if (e.startsWith("\"\"\"", i)) return null
+                    i++
+                    while (i < e.length && e[i] != '"') {
+                        when {
+                            e[i] == '\\' -> return null
+                            templates && e[i] == '$' && i + 1 < e.length && e[i + 1] == '{' -> {
+                                val end = e.indexOf('}', i)
+                                if (end < 0) return null
+                                val reference = e.substring(i + 2, end).trim()
+                                if (!REFERENCE.matches(reference)) return null
+                                out.append(constant(reference) ?: return null)
+                                i = end + 1
+                            }
+                            templates && e[i] == '$' && i + 1 < e.length && (e[i + 1].isLetter() || e[i + 1] == '_') -> {
+                                var j = i + 1
+                                while (j < e.length && (e[j].isLetterOrDigit() || e[j] == '_')) j++
+                                out.append(constant(e.substring(i + 1, j)) ?: return null)
+                                i = j
+                            }
+                            else -> out.append(e[i++])
+                        }
+                    }
+                    if (i >= e.length) return null
+                    i++
+                    expectOperand = false
+                }
+                expectOperand && (c.isLetter() || c == '_') -> {
+                    val match = REFERENCE.matchAt(e, i) ?: return null
+                    out.append(constant(match.value) ?: return null)
+                    i += match.value.length
+                    expectOperand = false
+                }
+                else -> return null
+            }
+        }
+        return if (expectOperand) null else out.toString()
+    }
 }

@@ -829,4 +829,43 @@ fun nestedQualifiersComposeIntoOneAccessPath() {
             "the implicit parameter is bound to the seed",
         )
     }
+
+    // ---- type qualifiers (atom-tools#95) ----------------------------------
+
+    @Test
+    fun aTypeQualifierIsNotAFieldOfThis() {
+        // `Deflater.FULL_FLUSH` lowered as `fieldget vthis vthis.Deflater`
+        // then `.FULL_FLUSH`: every static constant a method touched became a
+        // fake field path of its receiver, and on http4k the summary engine
+        // derived receiver facts along those paths until it never finished.
+        val root = project(
+            mapOf(
+                "src/main/kotlin/p/S.kt" to """
+                    package p
+                    import java.util.zip.Deflater
+                    object Holder { var state: String = "" }
+                    class G(private val buf: ByteArray) {
+                        fun read(d: Deflater): Int = d.deflate(buf, 0, 1, Deflater.FULL_FLUSH)
+                        fun viaObject(x: String): String { Holder.state = x; return Holder.state }
+                    }
+                """.trimIndent(),
+            ),
+        )
+        val result = loweredFunctions(root)
+        fun fields(path: io.cdxgen.kosi.kir.AccessPath) =
+            path.elements.filterIsInstance<io.cdxgen.kosi.kir.AccessPath.Element.Field>().map { it.name }
+
+        val reads = result.instructionsOf("G.read").filterIsInstance<KirFieldGet>()
+        assertTrue(reads.none { "Deflater" in fields(it.path) }, "no field named after a class: ${reads.map { fields(it.path) }}")
+        val flush = reads.single { fields(it.path) == listOf("FULL_FLUSH") }
+        assertEquals("vstatic:java/util/zip/Deflater", flush.receiver, "the qualifier register survives the KIR text round trip")
+
+        // A Kotlin `object`'s field written and read in one function: both
+        // through the same qualifier register, so a flow through it holds.
+        val objectIns = result.instructionsOf("viaObject")
+        val set = objectIns.filterIsInstance<io.cdxgen.kosi.kir.KirFieldSet>().single { fields(it.path) == listOf("state") }
+        val get = objectIns.filterIsInstance<KirFieldGet>().single { fields(it.path) == listOf("state") }
+        assertEquals(set.receiver, get.receiver)
+        assertTrue(set.receiver.startsWith("vstatic:"), set.receiver)
+    }
 }

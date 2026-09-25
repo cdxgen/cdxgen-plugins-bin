@@ -102,7 +102,7 @@ for dir in "${dirs[@]}"; do
     if ! "${native_env[@]}" "$NATIVE" analyze "$@" --dir "$dir" --out "$n" > /dev/null 2>&1; then
       printf '%-28s %-9s %8s %10s\n' "$slug" "$slot" - "NATIVE FAILED"; failed=$((failed+1)); continue
     fi
-    if ! java -jar "$JAR" analyze "$@" --dir "$dir" --out "$j" > /dev/null 2>&1; then
+    if ! java -Xmx"${KOSI_JVM_HEAP:-16g}" -jar "$JAR" analyze "$@" --dir "$dir" --out "$j" > /dev/null 2>&1; then
       printf '%-28s %-9s %8s %10s\n' "$slug" "$slot" - "JVM FAILED"; failed=$((failed+1)); continue
     fi
     if [ ! -s "$n" ] || [ ! -s "$j" ]; then

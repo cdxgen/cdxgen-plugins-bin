@@ -17,6 +17,13 @@
 // kosi:want flow source=untrusted-input sink=process-exec fn=~delegateOfObject known-fail=172 known-fail=syntax:1
 // kosi:want flow source=untrusted-input sink=process-exec fn=~throughOverriddenSibling known-fail=syntax:1
 //
+// The traces keep every hop through the wrappers: an SCC joined each round
+// dropped the callee witnesses, 14 frames to 8 (atom-tools#95 review).
+// kosi:want flow source=untrusted-input sink=process-exec fn=~functionThroughDelegate frames=12 mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~propertyThroughDelegate frames=11 mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~throughOverriddenSibling frames=11 mode=resolved
+// kosi:want flow source=untrusted-input sink=process-exec fn=~twoWrappersDeep frames=14 mode=resolved
+//
 // Negative halves:
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~cleanThroughDelegate
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~overrideWinsOverForwarder

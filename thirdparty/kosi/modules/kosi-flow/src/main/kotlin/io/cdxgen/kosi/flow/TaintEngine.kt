@@ -239,6 +239,8 @@ object TaintEngine {
         /** `--unknown-call propagate|drop` (02-ARCHITECTURE.md §6). */
         val unknownCallPropagate: Boolean,
         val skipGenerated: Boolean,
+        /** `--dataflow-path-widening`: see SummaryPaths. Off unless asked for. */
+        val pathWidening: Boolean = false,
         /**
          * How virtual call sites pick the summaries to join — `cha` joins
          * every overriding body, `rta`/`vta`/`auto` keep only targets whose
@@ -501,6 +503,19 @@ object TaintEngine {
          */
         val functionValues: Map<String, FunctionValueTarget> = emptyMap(),
     ) {
+        /**
+         * The table's summaries by canonical name, in the table's own
+         * iteration order (so the may-union joins in the order the scan it
+         * replaces did). A constructor call used to scan the whole table.
+         */
+        private val byName: Map<String, List<FunctionSummary>> by lazy {
+            val out = LinkedHashMap<String, MutableList<FunctionSummary>>()
+            for ((key, summary) in table) out.getOrPut(key.substringBefore('\u0000')) { mutableListOf() }.add(summary)
+            out
+        }
+
+        fun summariesNamed(canonicalName: String): List<FunctionSummary> = byName[canonicalName].orEmpty()
+
         private val lock = Any()
         var joinOverruns: Int = 0
             private set
@@ -660,6 +675,7 @@ object TaintEngine {
     fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
         val diagnostics = mutableListOf<Diagnostic>()
         val truncations = java.util.TreeMap<String, Int>()
+        val convergence = java.util.TreeMap<String, Int>()
         val skips = java.util.TreeMap<String, Int>()
         /**
          * The skip kinds that are POLICY, not caps — reported in
@@ -733,7 +749,7 @@ object TaintEngine {
             // the sccIterationCapHits the run publishes over sccsProcessed.
             val depSummary = Summarizer(depsCompiled, depCallIndex, pack, options, SummaryOrigin.BYTECODE).compute()
             for ((kind, count) in depSummary.skipped) {
-                truncations.merge(kind, count, Int::plus)
+                if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
             }
             // The composed-path depth cap's exact drops, counted per
             // run — the degradation was real but invisible before.
@@ -762,7 +778,7 @@ object TaintEngine {
         val summarizer = Summarizer(compiled, callIndex, pack, options, deps = depsTier)
         val summaryResult = summarizer.compute()
         for ((kind, count) in summaryResult.skipped) {
-            truncations.merge(kind, count, Int::plus)
+            if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
         }
         if (summaryResult.composedPathDrops > 0) {
             truncations.merge("composed-path-depth", summaryResult.composedPathDrops, Int::plus)
@@ -1029,7 +1045,13 @@ object TaintEngine {
                 Diagnostic(
                     code = DiagnosticCodes.DATAFLOW_TRUNCATED,
                     severity = Severity.INFO,
-                    message = "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent",
+                    message = if (kind in WIDENING_KINDS) {
+                        "dataflow widening '$kind' applied $count time(s); the affected summaries carry coarser " +
+                            "access paths: a widened path matches every deeper one, so a flow through them can be " +
+                            "an over-approximation, and none is dropped"
+                    } else {
+                        "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent"
+                    },
                     count = count,
                 ),
             )
@@ -1051,6 +1073,19 @@ object TaintEngine {
         // skip is not a truncation), but SILENCE is not the alternative
         // either: the counts are published in stats.skips{} and
         // stats.policySkips{} for consumers.
+        for ((kind, count) in convergence) {
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.DATAFLOW_CONVERGENCE,
+                    severity = Severity.INFO,
+                    message = "$count summary SCC(s) were still changing after four visits per member and were " +
+                        "made monotone ('$kind'): each visit joins the member's previous summary, so an effect an " +
+                        "earlier iterate had is kept (a flow can be an over-approximation) and none is dropped — " +
+                        "see stats.convergence",
+                    count = count,
+                ),
+            )
+        }
         for ((kind, count) in skips) {
             diagnostics.add(
                 Diagnostic(
@@ -1096,7 +1131,7 @@ object TaintEngine {
         // consumer must parse — `truncations{}` per cap, empty when none
         // bound (which is the depth doctrine's claim, checkable).
         val evidence = materialise(candidates, nodeInfos, pack, options, allSummaries, context, bytecodeSummaries.size)
-            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips)) }
+            .let { it.copy(stats = it.stats.copy(truncations = truncations, skips = skips, convergence = convergence)) }
         return Result(
             evidence = evidence,
             functionsAnalysed = functionsAnalysed,
@@ -1287,12 +1322,20 @@ object TaintEngine {
         override fun aliasTokens(register: String): Set<String> = aliases.tokensOf(register)
 
         /** One summary lookup for a call site (the alias feed; may-union across targets). */
+        /** Joined summary per callee: the table is final here (see SummaryAnalysis.summaryForCall). */
+        private val summaryForCallMemo = HashMap<Triple<String, String?, CallKind>, FunctionSummary?>()
+
         private fun summaryForCall(ins: KirCall): FunctionSummary? {
+            val key = Triple(ins.callee.fqn, ins.callee.descriptor, ins.callee.kind)
+            if (summaryForCallMemo.containsKey(key)) return summaryForCallMemo[key]
+            return computeSummaryForCall(ins).also { summaryForCallMemo[key] = it }
+        }
+
+        private fun computeSummaryForCall(ins: KirCall): FunctionSummary? {
             if (ins.callee.kind == CallKind.CONSTRUCTOR) {
                 val name = ins.callee.fqn + ".<init>"
                 var joined: FunctionSummary? = null
-                for ((key, summary) in context.table) {
-                    if (key.substringBefore('\u0000') != name) continue
+                for (summary in context.summariesNamed(name)) {
                     joined = if (joined == null) summary else joined.join(summary)
                 }
                 return joined
@@ -1781,8 +1824,7 @@ object TaintEngine {
         private fun constructorSummary(ins: KirCall): FunctionSummary? {
             val name = ins.callee.fqn + ".<init>"
             var joined: FunctionSummary? = null
-            for ((key, summary) in context.table) {
-                if (key.substringBefore('\u0000') != name) continue
+            for (summary in context.summariesNamed(name)) {
                 joined = if (joined == null) summary else joined.join(summary)
             }
             return joined
@@ -3240,3 +3282,9 @@ object TaintEngine {
         return digest.digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     }
 }
+
+/** Summary counters that are convergence aids, not caps: published in `stats.convergence`. */
+internal val CONVERGENCE_KINDS = setOf("summary-scc-join")
+
+/** Truncation kinds that COARSEN rather than drop: their diagnostic says so. */
+internal val WIDENING_KINDS = setOf("summary-path-widening", "summary-scc-adaptive-widening", "summary-fact-explosion")

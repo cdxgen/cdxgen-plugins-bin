@@ -1,6 +1,6 @@
 [package]
 name = "cdxrs"
-version = "4.0.1"
+version = "4.0.2"
 edition = "2024"
 rust-version = "1.98"
 description = "Rust-native CycloneDX BOM tooling for cdxgen"

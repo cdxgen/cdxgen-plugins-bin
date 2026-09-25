@@ -45,7 +45,7 @@ any behaviour it describes. Conventions (03-SCHEMA.md):
 | Attribute | Type | Value |
 | --- | --- | --- |
 | `name` | string | `kosi` |
-| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.1`); `unknown` for a build outside that tree |
+| `version` | string | the cdxgen-plugins-bin release kosi ships in, read from its `package.json` at build time (e.g. `4.0.2`); `unknown` for a build outside that tree |
 | `description` | string | human description |
 | `commit` | string | git commit injected at build time (`unknown` fallback) |
 
@@ -68,7 +68,7 @@ bench harness both consume (a test on each side asserts the equality).
 Flags: `backend`, `dataflow`, `callgraph`, `dependencyDetail`, `roots`,
 `dataflowMaxSlices`, `dataflowWorkers`, `dataflowMaxFunctionInstructions`,
 `dataflowMaxTraceNodes`, `dataflowMaxTraceEdges`, `accessPathDepth`,
-`dataflowSkipGenerated`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
+`dataflowSkipGenerated`, `dataflowPathWidening`, `callgraphTimeoutSeconds`, `maxPathsPerSymbol`,
 `includeStdlib`, `unknownCall`, `languageVersion`, `apiVersion`, `jvmTarget`,
 `progressive`, `optIn`, `multiplatformTarget`, `classpath` (repeatable jars),
 `classpathFile` (one jar path per line, `#` comments), `jdkHome`,
@@ -238,6 +238,7 @@ rather than a negative expectation that passes vacuously.
 | `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
 | `fixpoint-cap` | warning | the taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
+| `dataflow-convergence` | info | summary SCCs still changing after four visits per member were made monotone by joining each member's previous summary (`summary-scc-join`, counted in `stats.convergence{}`); nothing was cut, and a flow through them can be an over-approximation |
 | `summary-iteration-cap` | warning | the summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
 | `taint-unnameable-invoke` | info | call sites where what runs is a function VALUE the engine could not name — a `FunctionN.invoke` whose receiver holds no traceable body, or a call on an interface neither the workspace nor the `--deps` tier resolves. Taint STOPS at each one, so an absent flow through them means unexamined, not clean. A site the engine DOES name is never counted, even when it moved nothing: a named callee with no live facts is an ordinary clean result, and a function-valued PARAMETER is named by the caller (its failures are `lambda-unresolved`). `count` and `stats.unnameableInvokes` are the same number, counted once per site |
@@ -550,7 +551,22 @@ pre-narrowing (where `dispatchJoins{}` counts APPLIED summaries — both
 stay because the bench reads the old one); `truncations{}` — every dataflow
 cap that bound the run, by published name, with its cut count. Empty
 `truncations{}` is the claim "no cap bound", which is what the deep tier's
-gate asserts. Narrowing modes (`reachable`, `crypto`) recompute the depth
+gate asserts. Three kinds there COARSEN rather than cut, and their
+`dataflow-truncated` diagnostic says so: `summary-path-widening` (facts
+whose access paths were widened), `summary-scc-adaptive-widening` (SCCs
+still moving with an exploding key, switched to widening) and
+`summary-fact-explosion` (single visits that passed 10,000 facts on one
+key or 500,000 derived facts, and widened themselves). A widened path
+(`a.*`) matches every deeper reader and writer, so widening can add a flow
+(an over-approximation) and never drops one; the count covers every
+widening (the normaliser's, each collapsed cycle, each widened summary
+path). `--dataflow-path-widening` turns widening on for the whole run and
+is echoed in `options`.
+`convergence{}`, present only when non-empty, counts aids that cost no
+flow: `summary-scc-join`, SCCs still changing after four visits per member
+and made monotone by joining each member's previous summary. A join keeps
+every effect an earlier iterate had, so it can over-approximate and never
+drops one; its diagnostic is `dataflow-convergence`. Narrowing modes (`reachable`, `crypto`) recompute the depth
 measurements from the surviving slices and leave the run-level
 `dispatchWidthHistogram`/`truncations` alone.
 
@@ -613,7 +629,20 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
 
 - `annotation`: a mapping annotation at its resolved FQN, including a
   composed or meta-annotated one and a server-side `@HttpExchange`
-  inherited from an interface.
+  inherited from an interface. A mapping on a base class or an interface
+  default method is published once per analysed controller that inherits
+  the member without overriding it — through an unmarked class in between
+  that overrides it without re-mapping it too — under that controller's own
+  class-level path, or when it declares none the NEAREST one on its
+  hierarchy the way Spring's merged-annotation search finds it (the class,
+  its interfaces, then its superclass, recursively). The subclass must
+  carry the controller marker itself and be concrete; an overload (same
+  name, other parameter types) is not an override; `handlerSymbol` names
+  the declaring member. A mapping path written as a constant, a template
+  (`"${API}/x"`) or a concatenation folds against the analysed sources the
+  way the compiler scopes the name — enclosing classes, the file's imports,
+  its package, its star imports — never a same-named constant elsewhere; one
+  that does not fold is `pathUnresolved`.
 - `dsl`: a routing call, with the handler resolved to the extracted lambda
   body. This also covers:
   - registrations in code, such as Spring Boot's `ServletRegistrationBean`
@@ -621,7 +650,16 @@ a framework, and its `foundBy` is `dsl-unattributed`. `foundBy` names HOW the en
     registries;
   - routes registered in a loop over a literal collection (`for (m in
     listOf(HttpMethod.Get, ..)) { method(m) { } }`), one route per element,
-    with a destructured `(verb, path)` pair kept together.
+    with a destructured `(verb, path)` pair kept together. A `forEach` or
+    `onEach` lambda's element parameter binds the same way
+    (`listOf("/x", "/y").forEach { get(it) { } }`), and so does a local
+    `val` holding the literal. A path that does not fold, including a loop
+    over a parameter, a mutated collection, a top-level `var` something
+    reassigns, or `forEachIndexed`, is published with an empty
+    `pathTemplate` and `pathUnresolved`, never under a name taken from the
+    code. A constant path argument (`get(Paths.USERS) { }`) resolves in the
+    reading function's scope, never to a same-named constant elsewhere, and
+    is never read as the route's verb.
 - `manifest`: an Android component.
 - `descriptor`: a `web.xml` servlet mapping.
 - `implicit`: a route that has no handler in the source. These are served
@@ -655,7 +693,7 @@ endpoint.
 | `sliceIds` | string[] | endpoint-rooted slices (same flag) |
 | `foundBy` | string | `annotation` \| `dsl` \| `dsl-unattributed` \| `manifest` \| `descriptor` \| `implicit` (above) |
 | `anyMethod` | boolean? | present (`true`) only when the framework serves EVERY HTTP method at this route: `@RequestMapping` or `@HttpExchange` without `method`, a servlet, Vert.x `route()` or `routeWithRegex()`. `httpMethod` is then empty by design. An empty `httpMethod` WITHOUT this flag means kosi could not resolve the method |
-| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
+| `pathUnresolved` | string? | present only when `pathTemplate` is known to be INCOMPLETE, and names why. Examples: a base-path key set to different values in one module's config files, a `setBasePath(..)` argument that did not fold, a DSL route's own path argument computed at run time, a mapping path held in a constant (or a template or concatenation over one) that neither the classpath nor the analysed sources fold (a constant from a library off the classpath, or a name its scope holds ambiguously), a Vert.x `*WithRegex` route (a regex, not a template), or a class that declares no route of its own. Counted in the `endpoint-path-unresolved` diagnostic. Absent means the template is the full served path as far as the analysed sources and config say |
 | `transport` | string? | present only for an endpoint NOT served over HTTP: `messaging`, `grpc`, `android`, `function`. Absent means HTTP |
 
 ## services — ServiceRef and urls — UrlEvidence (resolved tier)
@@ -667,7 +705,11 @@ client, RestTemplate, Redis, Kafka). Every value carries its
 a `const val` or a string template), `config` (resolved through
 `application.yml`/`.properties`/`BuildConfig`), `env` (an
 `System.getenv` read — the KEY is the evidence; kosi never reads the
-analysed build's environment), or `unresolved` (never a guess). `urls[]`
+analysed build's environment), or `unresolved` (never a guess). An
+unresolved value kosi cannot render at all (a `URI` object, a computed
+value) is named `<unresolved>`, never after an internal register, and
+publishes no endpoint (nor does a key-less `${env}` read): it names no
+value, and a consumer joining by endpoint would pool every such call site. `urls[]`
 carries the same values with their enclosing symbol.
 
 ## securitySignals — SecuritySignal

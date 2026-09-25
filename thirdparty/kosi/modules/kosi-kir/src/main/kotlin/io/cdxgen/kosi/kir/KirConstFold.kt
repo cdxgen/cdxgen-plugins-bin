@@ -54,6 +54,16 @@ class KirValueFolder(
      * initializers.
      */
     private val constValues: Map<String, String> = emptyMap(),
+    /**
+     * When set, a `const val` read resolves through it instead of
+     * [constValues]: the reading FUNCTION (its file's imports and package,
+     * its enclosing classes) and the reference as written — an FQN for a
+     * resolved qualifier (`probe.Local.OWN`), `LibPaths.USERS` for a
+     * qualifier that did not resolve, or the bare name. A bare-name table
+     * took `LibPaths.USERS` from a library off the classpath for the
+     * workspace's unrelated `Local.USERS` (atom-tools#95 review).
+     */
+    private val constLookup: ((KirFunction, String) -> String?)? = null,
     /** Config-reader callee FQN -> argument index (the config table's key). */
     configReaders: List<Pair<String, Int>> = emptyList(),
     private val envReaders: Set<String> = DEFAULT_ENV_READERS,
@@ -439,8 +449,7 @@ class KirValueFolder(
                 is KirFieldGet -> {
                     // `const val` reads lower as a fieldget whose path ends in
                     // the property name; a unique workspace value folds.
-                    val name = (ins.path.elements.lastOrNull() as? AccessPath.Element.Field)?.name
-                    val constValue = name?.let { constValues[it] }
+                    val constValue = constOf(fn, ins)
                     if (constValue != null) {
                         FoldedValue(constValue, ValueStatus.FOLDED_CONST)
                     } else {
@@ -639,8 +648,7 @@ class KirValueFolder(
             is KirAssign -> fold(fn, block, index, ins.source, depth)
             is KirStore -> fold(fn, block, index, ins.value, depth)
             is KirFieldGet -> {
-                val name = (ins.path.elements.lastOrNull() as? AccessPath.Element.Field)?.name
-                val constValue = name?.let { constValues[it] }
+                val constValue = constOf(fn, ins)
                 if (constValue != null) {
                     FoldedValue(constValue, ValueStatus.FOLDED_CONST)
                 } else {
@@ -869,6 +877,39 @@ class KirValueFolder(
             }
             sites
         }
+
+    /** The workspace constant [ins] reads, or null; see [constLookup]. */
+    private fun constOf(fn: KirFunction, ins: KirFieldGet): String? {
+        val fields = ins.path.elements.map { (it as? AccessPath.Element.Field)?.name ?: return null }
+        val name = fields.lastOrNull() ?: return null
+        val lookup = constLookup ?: return constValues[name]
+        return lookup(fn, constReference(fn, ins.receiver, fields))
+    }
+
+    /**
+     * The reference [fields] read through [receiver] spells: `vstatic:a/b/C`
+     * is the resolved qualifier `a.b.C`; a chain of Capitalised field reads
+     * (`fieldget(fieldget(%r0, LibPaths), USERS)`, a qualifier that did not
+     * resolve) is `LibPaths.USERS`; anything else, the bare name.
+     */
+    private fun constReference(fn: KirFunction, receiver: String, fields: List<String>): String {
+        if (receiver.startsWith("vstatic:")) return receiver.removePrefix("vstatic:").replace('/', '.') + "." + fields.joinToString(".")
+        val qualifiers = ArrayDeque(fields.dropLast(1).takeLastWhile { it.firstOrNull()?.isUpperCase() == true })
+        var register = receiver
+        var hops = 0
+        while (hops++ < 4 && qualifiers.size == fields.size - 1) {
+            val def = fn.body?.blocks.orEmpty().asSequence().flatMap { it.instructions.asSequence() }
+                .firstOrNull { it is KirFieldGet && it.result == register } as? KirFieldGet ?: break
+            val names = def.path.elements.map { (it as? AccessPath.Element.Field)?.name ?: "" }
+            if (names.isEmpty() || names.any { it.firstOrNull()?.isUpperCase() != true }) break
+            names.asReversed().forEach { qualifiers.addFirst(it) }
+            if (def.receiver.startsWith("vstatic:")) {
+                return def.receiver.removePrefix("vstatic:").replace('/', '.') + "." + (qualifiers + fields.last()).joinToString(".")
+            }
+            register = def.receiver
+        }
+        return (qualifiers + fields.last()).joinToString(".")
+    }
 
     private fun defOf(ins: KirIns): String? = when (ins) {
         is KirLoad -> ins.result
