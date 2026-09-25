@@ -16,6 +16,12 @@ Golem must not copy raw secret-bearing content into the report. This includes en
 
 Golem should avoid network access initiated by its own logic. Package loading uses the local Go toolchain and module environment, so module downloads can still occur depending on the user's Go configuration. Run with a controlled module cache and proxy configuration when analyzing untrusted or sensitive projects.
 
+## Build-shape environment overrides
+
+Golem accepts build-shape overrides for the package load — the `--goexperiment` flag, `Options.Env` for API consumers, and `// golem:env` corpus annotations — and applies them to the environment the `go` command runs under. Keys are allowlisted to `GOEXPERIMENT`, `GOOS`, `GOARCH`, `GOAMD64` and `GOARM64`, and anything else is rejected with an error.
+
+The allowlist is a command-execution boundary, not a convenience. Keys that change how the toolchain invokes other programs must never be settable this way: `GOFLAGS` accepts `-toolexec`, which substitutes the compiler and linker with attacker-chosen commands, and `GOENV` would redirect the toolchain's whole configuration file. Because corpus annotations are untrusted input carried inside analyzed repositories, a key that can execute code in the analyst's environment is exactly as dangerous arriving through a `golem:env` line as through any other path.
+
 ## Sensitive metadata
 
 Even when raw secrets are omitted, reports can contain sensitive metadata. Examples include absolute source paths, package and module paths, private repository names, internal service names, endpoint paths, function names, dependency names, and source line numbers.

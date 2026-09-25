@@ -107,7 +107,7 @@ The analyzer starts by loading source, sink, passthrough, and sanitizer patterns
 
 A data-flow run has two phases. First, Golem infers per-function summaries for parameter-to-return flows, parameter-to-sink flows, and calls that return source values. This summary pass iterates up to four times so simple interprocedural relationships can stabilize. Second, Golem analyzes selected functions and materializes concrete source-to-sink slices.
 
-Within a function, taint is tracked through SSA values, stores, loads, map updates, field and index addresses, channel sends and receives, select, phi nodes, conversions, interface wrapping, type assertions, slices, binary operations, and closure bindings. Calls are handled by matching patterns, replaying summaries for static callees, replaying dynamic summaries from the selected call graph, and using compatibility checks for interface method summaries. Known passthrough calls propagate taint from arguments or receivers to returns.
+Within a function, taint is tracked through SSA values, stores, loads, map updates, field and index addresses, channel sends and receives, select, phi nodes, conversions, interface wrapping, type assertions, slices, binary operations, and closure bindings. Re-slices alias their base slice for writes, so a store through `out[1:]` is visible when `out` is read. The `append`, `copy`, `min` and `max` builtins are modelled directly — `append` and the ordering functions return the union of their arguments' taint, and `copy` writes the source's taint into its destination — which closes a class of flows that previously died at every builtin call. Calls are handled by matching patterns, replaying summaries for static callees, replaying dynamic summaries from the selected call graph, and using compatibility checks for interface method summaries. Known passthrough calls propagate taint from arguments or receivers to returns.
 
 Sanitizers can either stop a trace completely or remove selected taint kinds. They can also mark categories as sanitized, which suppresses later sinks in those categories while allowing unrelated taint to continue. This lets a path sanitizer reduce filesystem findings without hiding a secret flowing to a log sink.
 
@@ -160,8 +160,8 @@ name an engine (`known-fail=seam:9`), because a defect closed in one engine and
 open in the other is the normal state of the project and the corpus has to be
 able to say so.
 
-On the quick tier (94 paired results) SEAM reaches recall 1.000 against legacy's
-0.766 at the same precision, 0.982, with no open defects against 23 and 0.90x the
+On the quick tier (110 paired results) SEAM reaches recall 1.000 against legacy's
+0.836 at the same precision, 0.994, with no open defects against 19 and 0.41x the
 median wall clock. It finds flows legacy cannot — through package-level
 variables, eight-deep call chains, a slice of pointers, into `html/template`,
 across the cgo boundary, through deferred closures and through goroutine worker
@@ -190,14 +190,24 @@ carrier in Go, returned clean.
 The following limitations are measured by the corpus rather than estimated, and each is tracked by a `known-fail` marker:
 
 - **Dependencies are not summarized outside `--dataflow all`.** In the default modes no summary is computed for any function in a third-party module, so a flow contained within a dependency is invisible (`testdata/corpus/dep-only-flow`). Where taint does appear to cross a dependency in those modes, it is usually the blanket "assume an unresolved call returns its arguments" rule rather than an understanding of the callee — which also invents flows through functions that discard their input (`dep-drops-taint-negative`).
-- **Standard-library coverage is a model list, not a general mechanism.** The common carriers are modelled — `io.Copy`, `io.ReadAll`, `bufio.Scanner`, `strings.Builder`, `bytes.Buffer`, `encoding/json.Unmarshal`, `context.WithValue`/`Value`, error wrapping — including the calls that fill memory reached through an argument rather than returning it. Anything not on that list still terminates taint, and `dataFlow.unmodeledSinks` is not yet emitted, so absence is silent.
+- **Standard-library coverage is a model list, not a general mechanism.** The common carriers are modelled — `io.Copy`, `io.ReadAll`, `bufio.Scanner`, `strings.Builder`, `bytes.Buffer`, `encoding/json.Unmarshal`, `context.WithValue`/`Value`, error wrapping — including the calls that fill memory reached through an argument rather than returning it, and the `append`/`copy`/`min`/`max` builtins are handled in the engine itself. Anything not on that list still terminates taint, and `dataFlow.unmodeledSinks` is not yet emitted, so absence is silent. Every builtin other than those four keeps a clean-result behaviour: a flow through `delete`, `close`, `complex`, `print` or `recover` is not tracked.
 - **Only one route to a value is kept.** When taint reaches a value by two routes the shorter one is reported and the other is dropped, because a trace is a path and merging two of them leaves a slice whose nodes and edges disagree about how the taint travelled. Every reported slice is a connected source-to-sink path, enforced on every corpus case; the route shown is not necessarily the only one.
 - **Symbols are matched as substrings of the SSA symbol text.** Patterns written in source notation are normalised into the notation the SSA printer uses, which is what makes `database/sql` and the framework patterns match at all; but the matcher is still textual, so a pattern can match a symbol it was not meant to. Structural matching on resolved types is the durable fix.
 - **Loops, deep chains and recursion.** The intra-procedural pass runs once per function with no fixpoint and treats a value cycle as untainted; the summary pass iterates a fixed four times (`loop-carried-taint`, `deep-chain-8-levels`, `recursion`, `mutual-recursion`).
 - **Globals and generics.** Package-level variables carry no taint between functions, and summaries do not follow generic instantiations back to their origin (`global-var-carrier`, `generic-container`, `generic-constraint-method`).
 - **The native boundary is recognised but not yet traversed by every analysis.** cgo crossings are reported in `nativeBoundary[]` in both directions, the conversion functions are modelled as taint operations, and `//go:linkname` produces real call-graph edges. What does not yet work: taint does not cross a pull linkname, because the local declaration has no body to walk into (`linkname`); there is no C-side call graph, so a flow that enters C and returns through a different function is two findings rather than one; and `--build-matrix` is not implemented, so a single build configuration is analysed and `buildShapeDeltas[]` reports what that configuration left out rather than analysing it.
 
+### Go SIMD (GOEXPERIMENT=simd)
+
+Go 1.27 ships the `simd` and `simd/archsimd` packages behind `GOEXPERIMENT=simd`. Golem treats them as value-propagating intrinsics, keyed on the callee's package path: a call result carries the union of the receiver's and the arguments' taint, `Store*` methods write the receiver's taint into their destination argument, and `Len` and the CPU feature checks (`archsimd.X86.AVX512()`, …) do not propagate. `ToArch`, the `*FromArch` generics and `String` propagate like any other call.
+
+- **Default build shape.** Without the experiment the simd packages are excluded by build constraints, so simd-using code either fails to load or is absent from the analysis; `buildShapeDeltas[]` reports the exclusion as `constraint: "goexperiment.simd"`. Because every simd function is a bodiless stub on amd64, arm64 and wasm and a real emulated body elsewhere, the rule is keyed on the package path rather than on body presence, so the same code analysed under `GOARCH=amd64`, `arm64` and `riscv64` emits identical `flowKey`s.
+- **`--goexperiment simd`** sets `GOEXPERIMENT` for the package load. It wins over the same variable already present in the process environment. `Options.Env` carries arbitrary `KEY=VALUE` overrides for API consumers, allowlisted to the build shape (`GOEXPERIMENT`, `GOOS`, `GOARCH`, `GOAMD64`, `GOARM64`); anything else is rejected, because keys like `GOFLAGS` can turn an analysis option into command execution (see [THREAT_MODEL.md](THREAT_MODEL.md)).
+- **Report fields.** `runtime.goExperiment`, `runtime.targetGoos` and `runtime.targetGoarch` record the build shape the packages were actually loaded for, resolved with one `go env -json` call under the load environment. The pre-existing `runtime.goos`/`runtime.goarch` keep their meaning — golem's own platform — so consumers reading them are unaffected.
+- **For consumers.** A compiled simd-using binary contains per-width clones named `pkg.fn@simd0`, `@simd128`, `@simd256` or `@simd512` (`go tool nm`), dispatched at program start. Golem's findings use source-level names, which have no such suffix; anything joining golem output against binary symbols or stack traces should strip `@simd\d+`.
+
 Crypto evidence classifies API use and obvious material indicators. It does not validate protocol handshakes, key sizes derived at runtime, entropy quality beyond recognized APIs, certificate validation logic beyond simple patterns, or whether a weak primitive is acceptable for a non-security checksum.
+
 
 Package loading follows the local Go environment. Missing modules, unsupported build tags, cgo settings, platform differences, or incomplete workspaces can change what Golem sees. Always inspect diagnostics before treating absence of evidence as meaningful.
 
@@ -255,8 +265,9 @@ Golem's accuracy is measured rather than asserted. Two artifacts do the work:
   rather than whole reports, which for a medium repository run to tens of
   megabytes of mostly machine-specific detail.
 
-Current quick-tier measurement, for reference: 90 expectations across 41 corpus
-cases, 38 of them marked against a known defect. On the labeled upstream
+Current quick-tier measurement, for reference: 97 expectations across 63 corpus
+cases, 13 of them marked against a known defect — every one still open in
+legacy and closed in SEAM. On the labeled upstream
 fixtures `edgeConnectivity` is 0.43 to 0.84 — a quarter to a half of reported
 flows carry a path that does not connect, which the small corpus cases never
 trigger. `golem bench --tier full` reproduces this.
