@@ -2,7 +2,8 @@
 // Ktor sse/webSocketRaw, Resources put/delete, selectors that add no path
 // segment, regex routes; Javalin ws/sse, crud's five routes,
 // addHttpHandler(HandlerType, ..); Vert.x's chained route().path().method()
-// and Vert.x 4's mountSubRouter(prefix, router).
+// and the Vert.x 5 sub-router mount (Route.subRouter, replacing the
+// Vert.x 4 mountSubRouter removed in 5.x).
 //
 // kosi:want endpoint framework=ktor path=/events method=GET mode=resolved
 // kosi:want endpoint framework=ktor path=/raw method=GET mode=resolved
@@ -96,5 +97,5 @@ fun javalin(app: Javalin) {
 fun vertx(router: Router, sub: Router) {
     router.route().path("/chained").method(HttpMethod.POST).handler { }
     sub.get("/inner").handler { }
-    router.mountSubRouter("/mounted", sub)
+    router.route("/mounted/*").subRouter(sub)
 }

@@ -49,7 +49,7 @@ The compiler backend adds an embedded nightly rustc wrapper and MIR/HIR-derived 
 
 ## Data flow and custom patterns
 
-Flows track environment, CLI, file, and HTTP sources into process execution, filesystem write or delete, network, SQL, and HTML-response sinks. The `security` pack is built in; `--deps` extends analysis into dependency crates, and `--dataflow security-deps` keeps dependency bodies so taint can flow through them:
+Flows track environment, CLI, file, and HTTP sources into process execution, filesystem write or delete, network, SQL, and HTML-response sinks. File sources include the `read_to_string`/`read_to_end` method forms (`File::open(p).read_to_string(&mut s)` fills the out-parameter) and `env::vars()` iteration; `write!`/`writeln!` lower to a filesystem-write sink; and taint rides container round-trips (`push`/`insert` then read), tuple destructuring, bound closures, iterator chains (`map`/`filter`/`collect`/`join`), `&mut` out-parameters (through summaries), and `OnceLock`-style statics seeded anywhere in the workspace. The bare HTTP-verb sinks (`get`, `post`, `put`, `patch`, `delete`, `request`) fire only on receivers typed as an HTTP client (`Client`, `Agent`), so a `HashMap::get` lookup is not an outbound request. The `security` pack is built in; `--deps` extends analysis into dependency crates, and `--dataflow security-deps` keeps dependency bodies so taint can flow through them:
 
 ```bash
 rusi analyze --dir . --deps --dataflow security-deps --out rusi-deps-taint.json
@@ -90,4 +90,4 @@ rusi analyze --dir . --callgraph static --max-call-candidates 0 --out rusi-full.
 
 ## What rusi will not tell you
 
-The stable backend resolves calls by receiver type and syntax, not by borrow-checker-grade type inference, so heavily generic or macro-generated dispatch can resolve conservatively. The compiler backend closes much of that gap but requires a nightly toolchain and speaks only where rustc itself succeeds. Neither backend executes your code, so dynamic dispatch through strings, `eval`-style builders, or process spawning of generated binaries is out of scope.
+The stable backend resolves calls by receiver type and syntax, not by borrow-checker-grade type inference, so heavily generic or macro-generated dispatch can resolve conservatively. It is also not path-sensitive: a validation guard (`if !is_valid(&raw) { return }` before a sink) does not suppress the slice, because whether the guard ran is a runtime fact; treat such findings as review candidates. `env::set_var`/`env::remove_var` are reported as `env-mutation` security signals. The compiler backend closes much of that gap but requires a nightly toolchain and speaks only where rustc itself succeeds. Neither backend executes your code, so dynamic dispatch through strings, `eval`-style builders, or process spawning of generated binaries is out of scope.

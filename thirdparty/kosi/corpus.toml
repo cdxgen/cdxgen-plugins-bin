@@ -21,6 +21,41 @@
 # under partial classpaths resolves legitimately imperfectly).
 
 [[fixtures]]
+slug = "stringbuilder-carrier"
+tier = "fixtures"
+path = "fixtures/stringbuilder-carrier"
+capabilities = ["receiver-state-carrier", "stringbuilder"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "file-two-arg-ctor"
+tier = "fixtures"
+path = "fixtures/file-two-arg-ctor"
+capabilities = ["file-ctor", "path-traversal"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "getter-mapping"
+tier = "fixtures"
+path = "fixtures/getter-mapping"
+capabilities = ["getter-use-site", "spring-mvc"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "threadlocal-carrier"
+tier = "fixtures"
+path = "fixtures/threadlocal-carrier"
+capabilities = ["receiver-state-carrier", "threadlocal"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "numeric-sanitizer"
+tier = "fixtures"
+path = "fixtures/numeric-sanitizer"
+capabilities = ["sanitizer", "numeric-coercion"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "scope-functions"
 tier = "fixtures"
 path = "fixtures/scope-functions"

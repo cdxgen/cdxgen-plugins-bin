@@ -1422,19 +1422,33 @@ object Analyzer {
         for (draft in drafts) {
             if (draft.annotations.isEmpty()) continue
             val entries = out.getOrPut(draft.canonicalName) { mutableListOf() }
+            // A property's `@get:`-targeted annotations land on the GETTER
+            // the JVM calls, and the KIR lowers the getter as its own
+            // function (`Api.prop` -> `Api.getProp`). Endpoint detection
+            // asks by that function's name, so the property's annotations
+            // are also registered under it — without the alias a
+            // `@get:GetMapping("/x") val handler` published nothing.
+            val getterKey: String? = if (draft.kind == "property" && draft.name.isNotEmpty()) {
+                val owner = draft.canonicalName.substringBeforeLast('.')
+                if (owner == draft.canonicalName) null
+                else owner + ".get" + draft.name.replaceFirstChar { it.uppercase() }
+            } else {
+                null
+            }
+            val getterEntries = getterKey?.let { out.getOrPut(it) { mutableListOf() } }
             for (annotation in draft.annotations) {
                 val fqns = fqnsOf(annotation.name, draft.position.filename)
                 for (fqn in fqns.sorted()) {
-                    entries.add(
-                        io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
-                            fqn = fqn,
-                            value = annotation.value?.removeSurrounding("\"")?.removeSurrounding("'"),
-                            line = annotation.position.line,
-                            namedValues = annotation.namedValues,
-                            file = draft.position.filename,
-                            references = annotation.references,
-                        ),
+                    val decl = io.cdxgen.kosi.endpoints.EndpointDetector.DeclAnnotation(
+                        fqn = fqn,
+                        value = annotation.value?.removeSurrounding("\"")?.removeSurrounding("'"),
+                        line = annotation.position.line,
+                        namedValues = annotation.namedValues,
+                        file = draft.position.filename,
+                        references = annotation.references,
                     )
+                    entries.add(decl)
+                    getterEntries?.add(decl)
                 }
             }
         }
