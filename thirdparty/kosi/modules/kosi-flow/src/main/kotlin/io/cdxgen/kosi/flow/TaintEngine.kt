@@ -1047,7 +1047,8 @@ object TaintEngine {
                     severity = Severity.INFO,
                     message = if (kind in WIDENING_KINDS) {
                         "dataflow widening '$kind' applied $count time(s); the affected summaries carry coarser " +
-                            "access paths (a reader of an exact deeper path can miss them)"
+                            "access paths: a widened path matches every deeper one, so a flow through them can be " +
+                            "an over-approximation, and none is dropped"
                     } else {
                         "dataflow limit '$kind' hit $count time(s); the affected functions or slices are absent"
                     },
@@ -1075,10 +1076,12 @@ object TaintEngine {
         for ((kind, count) in convergence) {
             diagnostics.add(
                 Diagnostic(
-                    code = DiagnosticCodes.DATAFLOW_SKIPPED_POLICY,
+                    code = DiagnosticCodes.DATAFLOW_CONVERGENCE,
                     severity = Severity.INFO,
-                    message = "$count summary SCC(s) did not settle and were made monotone ('$kind'); a join only " +
-                        "adds effects, so no flow is lost — see stats.convergence",
+                    message = "$count summary SCC(s) were still changing after four visits per member and were " +
+                        "made monotone ('$kind'): each visit joins the member's previous summary, so an effect an " +
+                        "earlier iterate had is kept (a flow can be an over-approximation) and none is dropped — " +
+                        "see stats.convergence",
                     count = count,
                 ),
             )

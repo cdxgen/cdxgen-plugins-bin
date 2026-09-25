@@ -101,6 +101,17 @@ object DiagnosticCodes {
     const val DATAFLOW_SKIPPED_POLICY = "dataflow-skipped-policy"
 
     /**
+     * Summaries: an SCC still changing after four visits per member was
+     * made monotone by joining each member's previous summary
+     * (`summary-scc-join`, counted in `stats.convergence`). Nothing was cut:
+     * a join keeps every effect an earlier iterate had, so the result can
+     * over-approximate but drops no flow. Distinct from
+     * [DATAFLOW_SKIPPED_POLICY] (a policy skip) and [DATAFLOW_TRUNCATED] (a
+     * cap).
+     */
+    const val DATAFLOW_CONVERGENCE = "dataflow-convergence"
+
+    /**
      * Summaries: a strongly connected component of the call graph hit
      * its summary iteration budget before its members' summaries converged.
      * The last iterate is what callers applied — labelled
@@ -252,6 +263,7 @@ object DiagnosticCodes {
         FIXPOINT_CAP,
         DATAFLOW_TRUNCATED,
         DATAFLOW_SKIPPED_POLICY,
+        DATAFLOW_CONVERGENCE,
         SUMMARY_ITERATION_CAP,
         DISPATCH_JOIN_WIDTH,
         LAMBDA_UNRESOLVED,

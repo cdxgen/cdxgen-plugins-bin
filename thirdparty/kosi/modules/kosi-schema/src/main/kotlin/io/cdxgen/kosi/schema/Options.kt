@@ -145,12 +145,15 @@ data class AnalyzeOptions(
     val accessPathDepth: Int = 5,
     val dataflowSkipGenerated: Boolean = true,
     /**
-     * `--dataflow-path-widening`: bound the access paths summary facts carry
-     * (cycle collapse and per-group widening; see kosi-flow SummaryPaths),
-     * for repositories whose summaries otherwise do not converge in useful
-     * time. OFF by default: path lookups match exactly, so a widened fact can
-     * miss a reader of a deeper path, and a default run never trades a flow
-     * for speed. The widenings are counted in `dataflow.stats.truncations`.
+     * `--dataflow-path-widening`: bound the access paths EVERY summary's facts
+     * carry (cycle collapse and per-group widening; see kosi-flow
+     * SummaryPaths), for repositories whose summaries otherwise do not
+     * converge in useful time. Off by default, where only a summary visit
+     * that explodes (`summary-fact-explosion`) or an SCC whose paths keep
+     * growing (`summary-scc-adaptive-widening`) widens. Either way a widened
+     * path (`a.*`) matches every deeper reader and writer, so widening can
+     * add a flow (over-approximation) and never drops one; every widening is
+     * counted in `dataflow.stats.truncations`.
      */
     val dataflowPathWidening: Boolean = false,
     val callgraphTimeoutSeconds: Int = 60,

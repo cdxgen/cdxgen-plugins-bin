@@ -1617,6 +1617,16 @@ tolerated_resolution_errors = ["UNRESOLVED_REFERENCE"]
 # member, none of them with PSI. The other half of carried the
 # source back inside the returned object's FIELD, and http4k's consumers
 # still could not read it, because they read through exactly these.
+# Widening is meant to COARSEN: a widened path (`p0.*`) matches every
+# deeper reader. Exact lookups made a default run lose flows through an
+# exploding visit and an adaptive SCC (atom-tools#95 review).
+[[fixtures]]
+slug = "flow-widened-paths"
+tier = "fixtures"
+path = "fixtures/flow-widened-paths"
+capabilities = ["taint", "summaries", "widening"]
+tolerated_resolution_errors = []
+
 [[fixtures]]
 slug = "class-delegation"
 tier = "fixtures"

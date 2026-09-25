@@ -128,12 +128,56 @@ internal class FlowState<F> {
         return set
     }
 
-    fun factsOf(key: TaintKey): java.util.TreeSet<F> = map[key] ?: java.util.TreeSet<F>()    fun setFacts(key: TaintKey, facts: java.util.TreeSet<F>) {
+    /**
+     * Whether any key's path ends in a widened `*` ([SummaryPaths]: a
+     * collapsed cycle, a widened group). False unless widening ran, and then
+     * [factsOf] costs exactly one map lookup, as it always did.
+     */
+    private var starKeys = false
+
+    /**
+     * The facts a read of [key] sees. Exact, unless a path is WIDENED: a key
+     * `a.*` holds what any deeper read (`a.b.c`) would, and a read of `a.*`
+     * sees every key under `a`. Exact-only lookups made widening LOSE flows
+     * — `p0.g5.f0` never matched a summary's `p0.*`, in default mode as well
+     * as under `--dataflow-path-widening` (atom-tools#95 review) — where a
+     * widened path is meant to coarsen: it may add a flow, never drop one.
+     */
+    fun factsOf(key: TaintKey): java.util.TreeSet<F> {
+        val exact = map[key]
+        val path = key.path
+        val readsStar = '*' in path
+        if (!readsStar && (!starKeys || path.isEmpty())) return exact ?: java.util.TreeSet<F>()
+        val out = if (exact != null) java.util.TreeSet(exact) else java.util.TreeSet<F>()
+        if (starKeys && path.isNotEmpty()) {
+            // Every widened ancestor: `a.b.*`, `a.*`, `*` for a read of `a.b.c`.
+            var p = path
+            while (true) {
+                val cut = p.lastIndexOf('.')
+                val parent = if (cut < 0) "" else p.substring(0, cut)
+                val star = if (parent.isEmpty()) "*" else "$parent.*"
+                if (star != path) map[TaintKey(key.base, star)]?.let { out.addAll(it) }
+                if (cut < 0) break
+                p = parent
+            }
+        }
+        if (readsStar) {
+            val prefix = path.substringBefore('*').removeSuffix(".")
+            for ((k, facts) in map.subMap(TaintKey(key.base, ""), true, TaintKey(key.base, "\uffff"), true)) {
+                if (prefix.isEmpty() || k.path == prefix || k.path.startsWith("$prefix.")) out.addAll(facts)
+            }
+        }
+        return out
+    }
+
+    fun setFacts(key: TaintKey, facts: java.util.TreeSet<F>) {
         if (facts.isEmpty()) map.remove(key) else map[key] = bounded(facts)
+        if ('*' in key.path && facts.isNotEmpty()) starKeys = true
     }
 
     fun addFacts(key: TaintKey, facts: Collection<F>) {
         if (facts.isEmpty()) return
+        if ('*' in key.path) starKeys = true
         val existing = map[key]
         if (existing == null) map[key] = bounded(java.util.TreeSet(facts)) else { existing.addAll(facts); bounded(existing) }
     }
@@ -145,6 +189,7 @@ internal class FlowState<F> {
     fun copy(): FlowState<F> {
         val out = FlowState<F>()
         out.normalize = normalize
+        out.starKeys = starKeys
         for ((k, v) in map) out.map[k] = java.util.TreeSet(v)
         return out
     }

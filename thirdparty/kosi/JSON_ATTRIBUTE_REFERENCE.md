@@ -238,6 +238,7 @@ rather than a negative expectation that passes vacuously.
 | `callgraph-root-not-found` | warning | a declared root scope matched no function, so reachability starts nowhere for it |
 | `fixpoint-cap` | warning | the taint worklist hit its per-function iteration budget before converging (`count` is how many functions, out of `stats.functionsAnalysed`); the affected functions' slices are best-effort and flows a further round would have added are absent |
 | `dataflow-truncated` | info | a dataflow limit shortened the analysis (`stats.truncations{}` itemises which: a function skipped for exceeding `--dataflow-max-function-instructions`, generated members skipped under `--dataflow-skip-generated`, or the `--dataflow-max-slices` cap reached) |
+| `dataflow-convergence` | info | summary SCCs still changing after four visits per member were made monotone by joining each member's previous summary (`summary-scc-join`, counted in `stats.convergence{}`); nothing was cut, and a flow through them can be an over-approximation |
 | `summary-iteration-cap` | warning | the summary fixpoint's SCC hit its iteration budget before its members' summaries converged; the last iterate is what callers applied (labelled `origin=recursive-approx`), and `stats.sccIterationCapHits` names how many out of `stats.sccsProcessed` |
 | `dispatch-join-width` | info | a virtual call site joined more dispatch-target summaries than the width budget; the full JOIN was applied and precision may suffer where the targets disagree; the histogram is `dataFlow.stats.dispatchJoins{}` |
 | `taint-unnameable-invoke` | info | call sites where what runs is a function VALUE the engine could not name — a `FunctionN.invoke` whose receiver holds no traceable body, or a call on an interface neither the workspace nor the `--deps` tier resolves. Taint STOPS at each one, so an absent flow through them means unexamined, not clean. A site the engine DOES name is never counted, even when it moved nothing: a named callee with no live facts is an ordinary clean result, and a function-valued PARAMETER is named by the caller (its failures are `lambda-unresolved`). `count` and `stats.unnameableInvokes` are the same number, counted once per site |
@@ -555,12 +556,17 @@ gate asserts. Three kinds there COARSEN rather than cut, and their
 whose access paths were widened), `summary-scc-adaptive-widening` (SCCs
 still moving with an exploding key, switched to widening) and
 `summary-fact-explosion` (single visits that passed 10,000 facts on one
-key or 500,000 derived facts, and widened themselves). A widened fact can
-miss a reader of an exact deeper path; `--dataflow-path-widening` turns
-widening on for the whole run and is echoed in `options`.
+key or 500,000 derived facts, and widened themselves). A widened path
+(`a.*`) matches every deeper reader and writer, so widening can add a flow
+(an over-approximation) and never drops one; the count covers every
+widening (the normaliser's, each collapsed cycle, each widened summary
+path). `--dataflow-path-widening` turns widening on for the whole run and
+is echoed in `options`.
 `convergence{}`, present only when non-empty, counts aids that cost no
-flow: `summary-scc-join`, SCCs made monotone by joining each member's
-previous summary (a join only adds effects). Narrowing modes (`reachable`, `crypto`) recompute the depth
+flow: `summary-scc-join`, SCCs still changing after four visits per member
+and made monotone by joining each member's previous summary. A join keeps
+every effect an earlier iterate had, so it can over-approximate and never
+drops one; its diagnostic is `dataflow-convergence`. Narrowing modes (`reachable`, `crypto`) recompute the depth
 measurements from the surviving slices and leave the run-level
 `dispatchWidthHistogram`/`truncations` alone.
 
