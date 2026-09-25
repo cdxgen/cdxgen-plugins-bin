@@ -70,16 +70,23 @@ func effectiveLoadEnv(extra []string) ([]string, error) {
 // build the packages were actually loaded for, and not golem's own platform
 // (which the existing runtime.goos/runtime.goarch fields continue to mean,
 // unchanged, for consumers already reading them).
-func targetEnv(loadEnv []string) (goos, goarch, goexperiment string) {
+//
+// The probe runs in the analysed directory, as the load does, so a go.mod or
+// go.work toolchain line is honoured the same way. A failure is returned rather
+// than swallowed: Analyze turns it into an error when the analyst asked for an
+// override (a typo such as --goexperiment smd must not become an empty report
+// that exits 0), and ignores it otherwise, leaving the fields omitted.
+func targetEnv(dir string, loadEnv []string) (goos, goarch, goexperiment string, err error) {
 	cmd := exec.Command("go", "env", "-json", "GOOS", "GOARCH", "GOEXPERIMENT")
+	cmd.Dir = dir
 	if loadEnv != nil {
 		cmd.Env = loadEnv
 	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		// A toolchain that cannot answer should not fail the analysis; the
-		// omitted fields say the target is unknown.
-		return "", "", ""
+		return "", "", "", fmt.Errorf("go env: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	var resolved struct {
 		GOOS         string `json:"GOOS"`
@@ -87,7 +94,7 @@ func targetEnv(loadEnv []string) (goos, goarch, goexperiment string) {
 		GOEXPERIMENT string `json:"GOEXPERIMENT"`
 	}
 	if err := json.Unmarshal(out, &resolved); err != nil {
-		return "", "", ""
+		return "", "", "", fmt.Errorf("go env: %w", err)
 	}
-	return resolved.GOOS, resolved.GOARCH, resolved.GOEXPERIMENT
+	return resolved.GOOS, resolved.GOARCH, resolved.GOEXPERIMENT, nil
 }

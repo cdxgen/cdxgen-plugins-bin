@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"fmt"
 	"go/build"
 	"go/token"
 	"path/filepath"
@@ -56,6 +57,16 @@ func Analyze(options Options) (*model.Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The build shape the packages are LOADED for, from one `go env -json`
+	// call under the same environment and directory the load uses. goos/goarch
+	// in the report remain golem's own platform; these name the load target,
+	// which differs whenever GOOS/GOARCH/GOEXPERIMENT were set for the
+	// analysis. Probing before the load means an override the toolchain
+	// rejects fails here, with the toolchain's message.
+	targetGoos, targetGoarch, targetGoexperiment, targetErr := targetEnv(absDir, loadEnv)
+	if targetErr != nil && len(options.Env) > 0 {
+		return nil, fmt.Errorf("build-shape override %s rejected by the toolchain: %w", strings.Join(options.Env, " "), targetErr)
+	}
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedFiles |
@@ -89,12 +100,6 @@ func Analyze(options Options) (*model.Report, error) {
 		rootModules:   map[string]*model.Module{},
 	}
 	a.indexPackages(pkgs)
-
-	// The build shape the packages were LOADED for, from one `go env -json`
-	// call under the same environment the load used. goos/goarch above remain
-	// golem's own platform; these name the load target, which differs whenever
-	// GOOS/GOARCH/GOEXPERIMENT were set for the analysis.
-	targetGoos, targetGoarch, targetGoexperiment := targetEnv(loadEnv)
 
 	report := &model.Report{
 		SchemaVersion: SchemaVersion,

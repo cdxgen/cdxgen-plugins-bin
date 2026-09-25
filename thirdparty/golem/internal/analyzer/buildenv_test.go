@@ -56,8 +56,21 @@ func TestTargetEnvReportsOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveLoadEnv: %v", err)
 	}
-	goos, goarch, goexperiment := targetEnv(env)
+	goos, goarch, goexperiment, err := targetEnv(".", env)
+	if err != nil {
+		t.Fatalf("targetEnv: %v", err)
+	}
 	if goos != "linux" || goarch != "amd64" || goexperiment != "simd" {
 		t.Errorf("targetEnv = %q/%q/%q, want linux/amd64/simd", goos, goarch, goexperiment)
+	}
+}
+
+// An override the toolchain rejects must fail the analysis rather than produce
+// an empty report that exits 0: a typo in --goexperiment is otherwise
+// indistinguishable from a module with no findings.
+func TestAnalyzeRejectsUnknownGoexperiment(t *testing.T) {
+	_, err := Analyze(Options{Dir: "../../testdata/corpus/direct-flow", Env: []string{"GOEXPERIMENT=smd"}, ToolVersion: "test"})
+	if err == nil || !strings.Contains(err.Error(), "unknown GOEXPERIMENT") {
+		t.Fatalf("Analyze with GOEXPERIMENT=smd: err = %v, want the toolchain's unknown GOEXPERIMENT error", err)
 	}
 }
