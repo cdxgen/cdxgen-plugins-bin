@@ -707,7 +707,9 @@ a `const val` or a string template), `config` (resolved through
 `System.getenv` read — the KEY is the evidence; kosi never reads the
 analysed build's environment), or `unresolved` (never a guess). An
 unresolved value kosi cannot render at all (a `URI` object, a computed
-value) is named `<unresolved>`, never after an internal register. `urls[]`
+value) is named `<unresolved>`, never after an internal register, and
+publishes no endpoint (nor does a key-less `${env}` read): it names no
+value, and a consumer joining by endpoint would pool every such call site. `urls[]`
 carries the same values with their enclosing symbol.
 
 ## securitySignals — SecuritySignal

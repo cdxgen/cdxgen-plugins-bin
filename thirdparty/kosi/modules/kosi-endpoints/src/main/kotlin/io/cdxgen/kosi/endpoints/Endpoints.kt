@@ -253,13 +253,18 @@ object Endpoints {
         }
 
         // ---- outbound services and URLs ---------------------------------------
-        val outbounds = OutboundDetector.detect(module, folder, pack, annotationValues)
+        val outbounds = OutboundDetector.detect(module, folder, pack, folded)
         val services = outbounds.mapIndexed { index, outbound ->
             val modulePath = attribution.byAbsoluteFilePath[outbound.position.filename]?.second ?: ""
             ServiceRef(
                 id = "svc-" + (index + 1).toString().padStart(6, '0'),
                 name = serviceName(outbound),
-                endpoints = listOfNotNull(outbound.endpoint ?: outbound.raw),
+                // A value kosi could not name (`<unresolved>`, a key-less
+                // `${env}`) is not an endpoint: published as one, every such
+                // service shared it, and a consumer joining url rows by
+                // endpoint value (cdxgen) pooled every unresolved call site
+                // under each of them (atom-tools#95 review).
+                endpoints = listOfNotNull(outbound.endpoint ?: outbound.raw.takeUnless { it in OutboundDetector.NAMELESS_RAW }),
                 authenticated = null,
                 xTrustBoundary = null,
                 protocol = outbound.protocol,

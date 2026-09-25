@@ -174,6 +174,9 @@ object OutboundDetector {
     /** The raw rendering of a value kosi could not name at all. */
     const val UNRESOLVED_RAW = "<unresolved>"
 
+    /** Raw renderings that name no value: never an endpoint (see Endpoints). */
+    val NAMELESS_RAW = setOf(UNRESOLVED_RAW, "\${env}")
+
     private fun KirValueFolder.ValueStatus.toResolution(): String = when (this) {
         KirValueFolder.ValueStatus.LITERAL -> "literal"
         KirValueFolder.ValueStatus.FOLDED_CONST, KirValueFolder.ValueStatus.FOLDED_TEMPLATE -> "folded"
