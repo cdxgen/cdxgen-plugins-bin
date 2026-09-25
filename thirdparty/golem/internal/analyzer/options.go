@@ -65,4 +65,9 @@ type Analyzer struct {
 	moduleByPath  map[string]*model.Module
 	rootModules   map[string]*model.Module
 	native        *native.Analyzer
+	// goroot is the GOROOT of the go command the packages were loaded with,
+	// and standardByPath the standard-library classification of every loaded
+	// package. See isStandardPackage.
+	goroot         string
+	standardByPath map[string]bool
 }

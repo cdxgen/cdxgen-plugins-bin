@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"go/build"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -392,7 +391,7 @@ func (a *Analyzer) callGraphNode(fn *ssa.Function) model.CallGraphNode {
 		PackageName:   pkgName,
 		Module:        mod,
 		PURL:          packagePURL(pkgPath, mod),
-		Standard:      isStandardPackage(pkgPath, mod),
+		Standard:      a.isStandardPackage(pkgPath, mod),
 		Local:         isLocalModule(mod),
 		External:      !isLocalModule(mod),
 		Synthetic:     fn.Synthetic != "",
@@ -444,7 +443,7 @@ func derivePkgPath(fn *ssa.Function) string {
 func (a *Analyzer) nodeVisibility(pkgPath string, mod *model.Module, position model.Position) string {
 	if pkgPath != "" {
 		switch {
-		case isStandardPackage(pkgPath, mod):
+		case a.isStandardPackage(pkgPath, mod):
 			return "stdlib"
 		case isLocalModule(mod):
 			return "local"
@@ -453,7 +452,7 @@ func (a *Analyzer) nodeVisibility(pkgPath string, mod *model.Module, position mo
 		}
 	}
 	switch {
-	case isGoRootPath(position.Filename):
+	case isGoRootPath(position.Filename, a.goroot):
 		return "stdlib"
 	case isGoModuleCachePath(position.Filename):
 		return "dependency"
@@ -462,9 +461,10 @@ func (a *Analyzer) nodeVisibility(pkgPath string, mod *model.Module, position mo
 	}
 }
 
-// isGoRootPath reports whether a file lives in the Go toolchain tree.
-func isGoRootPath(path string) bool {
-	root := strings.TrimSpace(build.Default.GOROOT)
+// isGoRootPath reports whether a file lives in the Go toolchain tree rooted at
+// root, the GOROOT the packages were loaded with (see toolchainGOROOT).
+func isGoRootPath(path, root string) bool {
+	root = strings.TrimSpace(root)
 	if root == "" || path == "" {
 		return false
 	}
@@ -656,7 +656,7 @@ func (a *Analyzer) isRootCandidate(fn *ssa.Function) bool {
 		return false
 	}
 	mod := a.moduleForPackagePath(pkgPath)
-	if isStandardPackage(pkgPath, mod) {
+	if a.isStandardPackage(pkgPath, mod) {
 		return false
 	}
 	return isLocalModule(mod)

@@ -18,7 +18,7 @@ func (a *Analyzer) packageEvidence(pkg *packages.Package) model.PackageEvidence 
 		Name:            pkg.Name,
 		PackagePath:     pkg.PkgPath,
 		Module:          mod,
-		Standard:        isStandardPackage(pkg.PkgPath, mod),
+		Standard:        a.isStandardPackage(pkg.PkgPath, mod),
 		Local:           isLocalModule(mod),
 		GoFiles:         sortedStrings(pkg.GoFiles),
 		CompiledGoFiles: sortedStrings(pkg.CompiledGoFiles),
@@ -154,7 +154,7 @@ func (a *Analyzer) importsForFile(pkg *packages.Package, file *ast.File) []model
 			pkgName = importPkg.Name
 		}
 		rangeInfo := a.nodeRange(spec)
-		imports = append(imports, model.ImportUsage{Path: path, Name: alias, AliasKind: aliasKind, UsageScope: fileRole(rangeInfo.Start.Filename), PackageID: pkgID, PackageName: pkgName, Module: mod, Standard: isStandardPackage(path, mod), Local: isLocalModule(mod), Direct: true, Range: rangeInfo, Resolved: resolved, ResolutionNote: resolutionNote(resolved)})
+		imports = append(imports, model.ImportUsage{Path: path, Name: alias, AliasKind: aliasKind, UsageScope: fileRole(rangeInfo.Start.Filename), PackageID: pkgID, PackageName: pkgName, Module: mod, Standard: a.isStandardPackage(path, mod), Local: isLocalModule(mod), Direct: true, Range: rangeInfo, Resolved: resolved, ResolutionNote: resolutionNote(resolved)})
 	}
 	return imports
 }
@@ -434,7 +434,7 @@ func (a *Analyzer) objectUsage(pkg *packages.Package, obj types.Object, n ast.No
 		signature = types.TypeString(sig, qualifier(pkg.PkgPath))
 	}
 	rangeInfo := a.nodeRange(n)
-	usage := model.LibraryUsage{ID: stableUsageID(pkg.ID, qualified, rangeInfo), Kind: "reference", Name: obj.Name(), QualifiedName: qualified, PackagePath: pkgPath, PackageName: pkgName, UsageScope: usageScopeForUsage(rangeInfo, enclosing), Module: mod, Standard: isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), SymbolKind: objectKind(obj), Type: typeText, Signature: signature, Builtin: isBuiltinObject(obj), Range: rangeInfo, Enclosing: enclosing, Properties: constantProperties(obj)}
+	usage := model.LibraryUsage{ID: stableUsageID(pkg.ID, qualified, rangeInfo), Kind: "reference", Name: obj.Name(), QualifiedName: qualified, PackagePath: pkgPath, PackageName: pkgName, UsageScope: usageScopeForUsage(rangeInfo, enclosing), Module: mod, Standard: a.isStandardPackage(pkgPath, mod), Local: isLocalModule(mod), SymbolKind: objectKind(obj), Type: typeText, Signature: signature, Builtin: isBuiltinObject(obj), Range: rangeInfo, Enclosing: enclosing, Properties: constantProperties(obj)}
 	if recv := receiverFromObject(obj, pkg.PkgPath); recv != "" {
 		usage.Receiver = recv
 		usage.Method = true

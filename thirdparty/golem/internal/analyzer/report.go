@@ -14,6 +14,7 @@ import (
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/native"
+	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/seam"
 )
 
 func Analyze(options Options) (*model.Report, error) {
@@ -93,11 +94,13 @@ func Analyze(options Options) (*model.Report, error) {
 	pkgs, loadErr := packages.Load(cfg, options.Patterns...)
 	progress.Memoryf("loaded %d package roots", len(pkgs))
 	a := &Analyzer{
-		fset:          fset,
-		options:       options,
-		packageByPath: map[string]*packages.Package{},
-		moduleByPath:  map[string]*model.Module{},
-		rootModules:   map[string]*model.Module{},
+		fset:           fset,
+		options:        options,
+		packageByPath:  map[string]*packages.Package{},
+		moduleByPath:   map[string]*model.Module{},
+		rootModules:    map[string]*model.Module{},
+		goroot:         toolchainGOROOT(absDir),
+		standardByPath: map[string]bool{},
 	}
 	a.indexPackages(pkgs)
 
@@ -211,6 +214,7 @@ func (a *Analyzer) indexPackages(pkgs []*packages.Package) {
 		seen[pkg.ID] = true
 		if pkg.PkgPath != "" {
 			a.packageByPath[pkg.PkgPath] = pkg
+			a.standardByPath[pkg.PkgPath] = seam.IsStandardLibraryPackage(pkg, a.goroot)
 		}
 		if pkg.Module != nil {
 			mod := convertModule(pkg.Module)

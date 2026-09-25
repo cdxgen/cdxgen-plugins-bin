@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/constant"
 	"go/token"
 	"go/types"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -115,15 +117,38 @@ func (a *Analyzer) moduleForPackagePath(pkgPath string) *model.Module {
 	return best
 }
 
-func isStandardPackage(pkgPath string, mod *model.Module) bool {
+// isStandardPackage reports whether pkgPath names a standard library package.
+// A loaded package is classified from its metadata (seam.IsStandardLibraryPackage,
+// shared with the SEAM engine). Only for a path no loaded package has do mod and
+// then the path's shape decide, a dot-less first element reading as the
+// standard library.
+func (a *Analyzer) isStandardPackage(pkgPath string, mod *model.Module) bool {
 	if pkgPath == "" {
 		return false
+	}
+	if standard, ok := a.standardByPath[pkgPath]; ok {
+		return standard
 	}
 	if mod != nil && mod.Path != "" {
 		return false
 	}
 	first, _, _ := strings.Cut(pkgPath, "/")
 	return !strings.Contains(first, ".")
+}
+
+// toolchainGOROOT returns the GOROOT of the go command go/packages loads
+// through, run from dir so a toolchain directive selects the same toolchain.
+// build.Default.GOROOT describes the toolchain golem was built with, and a
+// -trimpath release build has none; it is only the fallback.
+func toolchainGOROOT(dir string) string {
+	cmd := exec.Command("go", "env", "GOROOT")
+	cmd.Dir = dir
+	if out, err := cmd.Output(); err == nil {
+		if root := strings.TrimSpace(string(out)); root != "" {
+			return root
+		}
+	}
+	return strings.TrimSpace(build.Default.GOROOT)
 }
 
 func isLocalModule(mod *model.Module) bool {
