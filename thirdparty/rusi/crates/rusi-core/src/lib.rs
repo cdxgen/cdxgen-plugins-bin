@@ -2748,9 +2748,20 @@ impl<'ast> Visit<'ast> for SourceCollector {
             properties,
         });
 
+        // A lazy initializer's closure argument is recorded as a call of the
+        // closure's own record: the value stored is what the closure returns,
+        // which is how `TOKEN.get_or_init(|| env::var(..))` seeds the static.
+        let lazy_initializer = STATIC_STORE_METHODS.contains(&node.method.to_string().as_str());
+        let mut args = vec![simple_expr(&node.receiver)];
+        args.extend(node.args.iter().map(|arg| match arg {
+            Expr::Closure(closure) if lazy_initializer => SimpleExpr::Call {
+                callee: qualify_name(&self.file_ctx, None, &closure_symbol_name(closure.span())),
+                args: Vec::new(),
+                position: position_from_span(&self.file_ctx.relative_file_path, closure.span()),
+            },
+            other => simple_expr(other),
+        }));
         if let Some(frame) = self.current_function.as_mut() {
-            let mut args = vec![simple_expr(&node.receiver)];
-            args.extend(node.args.iter().map(simple_expr));
             let call = SimpleExpr::Call {
                 callee: callee_name.clone(),
                 args: args.clone(),
@@ -8026,78 +8037,167 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
     }
 }
 
+/// Methods that store a value into a once-initialized global: `set` takes the
+/// value, `get_or_init`/`get_or_try_init` take a closure whose result is
+/// stored (the collector records such a closure argument as a call of the
+/// closure's record, so its returned sources evaluate like a value).
+const STATIC_STORE_METHODS: &[&str] = &["set", "get_or_init", "get_or_try_init"];
+
+/// One source a global carrier was seeded with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticSeed {
+    category: String,
+    /// `NAME.set`, `NAME.get_or_init`, ..: how the source got in.
+    via: String,
+    /// The storing call, in the storing function's file.
+    position: Position,
+}
+
 /// Sources poured into global carriers anywhere in the analysis, keyed by
-/// the carrier's name. A static written by `NAME.set(<source>)` — the
-/// `OnceLock`/`OnceCell` idiom — carries that source to every later
-/// `NAME.get()` read, in whatever function does the reading: statics have no
-/// scope, so the seed is workspace-wide. Only an UPPERCASE-initial receiver
-/// counts, the naming convention a global owes; a lowercase local that
-/// happens to own a `set` method is left alone.
+/// the carrier's name. A static written by `NAME.set(<source>)` or
+/// `NAME.get_or_init(|| <source>)` — the `OnceLock`/`OnceCell` idiom —
+/// carries that source to every later `NAME.get()` read, in whatever function
+/// does the reading: statics have no scope, so the seed is workspace-wide.
+/// Only an UPPERCASE-initial receiver counts, the naming convention a global
+/// owes; a lowercase local that happens to own a `set` method is left alone.
+///
+/// The stored value is evaluated against the storing function's own bindings
+/// as they stand at the store, so `let k = env::var(..); TOKEN.set(k)` seeds
+/// `TOKEN` as surely as the inline form does.
 fn infer_static_source_seeds(
     functions: &[FunctionRecord],
     summaries: &BTreeMap<String, FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
-) -> HashMap<String, Vec<String>> {
-    let mut seeds: HashMap<String, Vec<String>> = HashMap::new();
-    let empty_env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+) -> HashMap<String, Vec<StaticSeed>> {
+    let mut seeds: HashMap<String, Vec<StaticSeed>> = HashMap::new();
     for function in functions {
-        for operation in &function.operations {
-            let Operation::Expr(expr) = operation else {
-                continue;
-            };
-            // (carrier name, stored value) from either record shape of a
-            // method call: the MethodCall statement form and the collector's
-            // call form with the receiver at argument 0.
-            let stored: Option<(&str, &SimpleExpr)> = match expr {
-                SimpleExpr::MethodCall {
-                    method,
-                    receiver,
-                    args,
-                    ..
-                } if last_segment(method) == "set" && args.len() == 1 => match receiver.as_ref() {
-                    SimpleExpr::Var(name)
-                        if name.chars().next().is_some_and(char::is_uppercase) =>
-                    {
-                        Some((name.as_str(), &args[0]))
-                    }
-                    _ => None,
-                },
-                SimpleExpr::Call { callee, args, .. }
-                    if !callee.contains("::") && callee == "set" && args.len() == 2 =>
-                {
-                    match args.first() {
-                        Some(SimpleExpr::Var(name))
-                            if name.chars().next().is_some_and(char::is_uppercase) =>
-                        {
-                            Some((name.as_str(), &args[1]))
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            let Some((name, value)) = stored else {
-                continue;
-            };
-            let origins = eval_abstract_expr(
+        let eval = |value: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+            eval_abstract_expr(
                 value,
-                &empty_env,
+                env,
                 summaries,
                 &function.package_path,
                 local_index,
                 patterns,
-            );
-            for origin in origins {
-                if let AbstractOrigin::Source(category) = origin
-                    && !seeds.get(name).is_some_and(|list| list.contains(&category))
-                {
-                    seeds.entry(name.to_string()).or_default().push(category);
+            )
+        };
+        let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+        for operation in &function.operations {
+            let expr = match operation {
+                Operation::Assign { target, value } | Operation::AssignDeref { target, value } => {
+                    let taint = eval(value, &env);
+                    env.insert(target.clone(), taint);
+                    continue;
+                }
+                Operation::AssignField {
+                    target,
+                    field,
+                    value,
+                } => {
+                    let taint = eval(value, &env);
+                    env.insert(format!("{target}.{field}"), taint);
+                    continue;
+                }
+                Operation::LoopBody(_) => continue,
+                Operation::Expr(expr) | Operation::Return(expr) => expr,
+            };
+            let Some((name, method, value, position)) = static_store(expr) else {
+                continue;
+            };
+            let mut position = position.clone();
+            if position.filename.is_empty() {
+                position.filename = function.file_path.clone();
+            }
+            for origin in eval(value, &env) {
+                if let AbstractOrigin::Source(category) = origin {
+                    let seed = StaticSeed {
+                        category,
+                        via: format!("{name}.{method}"),
+                        position: position.clone(),
+                    };
+                    let entry = seeds.entry(name.to_string()).or_default();
+                    if !entry.contains(&seed) {
+                        entry.push(seed);
+                    }
                 }
             }
         }
     }
     seeds
+}
+
+/// `(carrier, store method, stored value, call position)` when `expr` stores
+/// into an UPPERCASE global, from either record shape of a method call: the
+/// MethodCall statement form and the collector's call form with the receiver
+/// at argument 0.
+fn static_store(expr: &SimpleExpr) -> Option<(&str, &str, &SimpleExpr, &Position)> {
+    let is_global = |name: &str| name.chars().next().is_some_and(char::is_uppercase);
+    match expr {
+        SimpleExpr::MethodCall {
+            method,
+            receiver,
+            args,
+            position,
+        } if STATIC_STORE_METHODS.contains(&last_segment(method)) && args.len() == 1 => {
+            match receiver.as_ref() {
+                SimpleExpr::Var(name) if is_global(name) => {
+                    Some((name, last_segment(method), &args[0], position))
+                }
+                _ => None,
+            }
+        }
+        SimpleExpr::Call {
+            callee,
+            args,
+            position,
+        } if STATIC_STORE_METHODS.contains(&callee.as_str()) && args.len() == 2 => match &args[0] {
+            SimpleExpr::Var(name) if is_global(name) => {
+                Some((name, callee.as_str(), &args[1], position))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Where a function first names `name` as a call's receiver or argument: the
+/// read of a global carrier (`NAME.get()`), for placing its seed.
+fn first_named_use(operations: &[Operation], name: &str) -> Option<Position> {
+    fn in_expr(expr: &SimpleExpr, name: &str) -> Option<Position> {
+        let names = |candidate: &SimpleExpr| {
+            let mut vars = BTreeSet::new();
+            collect_expr_vars(candidate, &mut vars);
+            vars.contains(name)
+        };
+        match expr {
+            SimpleExpr::Call { args, position, .. } => args
+                .iter()
+                .find_map(|arg| in_expr(arg, name))
+                .or_else(|| args.iter().any(names).then(|| position.clone())),
+            SimpleExpr::MethodCall {
+                receiver,
+                args,
+                position,
+                ..
+            } => in_expr(receiver, name)
+                .or_else(|| args.iter().find_map(|arg| in_expr(arg, name)))
+                .or_else(|| (names(receiver) || args.iter().any(names)).then(|| position.clone())),
+            SimpleExpr::Compose(items) => items.iter().find_map(|item| in_expr(item, name)),
+            SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
+                in_expr(base, name)
+            }
+            SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+        }
+    }
+    operations.iter().find_map(|operation| match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => in_expr(value, name),
+        Operation::LoopBody(inner) => first_named_use(inner, name),
+    })
 }
 
 fn infer_summaries(
@@ -8631,7 +8731,7 @@ struct DataFlowBuilder<'a> {
     /// Sources poured into global carriers anywhere in the analysis
     /// (`TOKEN.set(env::var(..))`), keyed by the static's name: reads of the
     /// same name carry them in every function.
-    static_source_seeds: &'a HashMap<String, Vec<String>>,
+    static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
     /// Type bindings of the function currently being materialized.
     current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -8648,7 +8748,7 @@ impl<'a> DataFlowBuilder<'a> {
         local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
         indexes: &'a TypeIndexes<'a>,
-        static_source_seeds: &'a HashMap<String, Vec<String>>,
+        static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
     ) -> Self {
         Self {
             mode,
@@ -8689,19 +8789,43 @@ impl<'a> DataFlowBuilder<'a> {
             );
             env.insert(param.clone(), ConcreteTaint { paths: vec![path] });
         }
-        // Global carriers seeded anywhere in the analysis are tainted from
-        // the start of every function: a static has no scope, and the write
-        // may happen in a function analyzed later.
-        for (name, categories) in self.static_source_seeds {
+        // A global carrier seeded anywhere in the analysis is tainted from the
+        // start of every function that reads it: a static has no scope, and
+        // the write may happen in a function analyzed later. The source node
+        // sits at this function's read and records where the seed was stored;
+        // a function that never names the carrier gets no node at all.
+        let mut seeded_names: Vec<&String> = self.static_source_seeds.keys().collect();
+        seeded_names.sort();
+        for name in seeded_names {
+            let Some(mut read_at) = first_named_use(&function.operations, name) else {
+                continue;
+            };
+            if read_at.filename.is_empty() {
+                read_at.filename = function.file_path.clone();
+            }
             let mut taint = env.get(name).cloned().unwrap_or_default();
-            for category in categories {
-                taint.paths.push(self.new_source_path(
+            for seed in &self.static_source_seeds[name] {
+                let mut path = self.new_source_path(
                     function,
-                    &format!("{name}.set"),
-                    category,
-                    function.declaration.position.clone(),
+                    &seed.via,
+                    &seed.category,
+                    read_at.clone(),
                     None,
-                ));
+                );
+                // On the path's own copy too: slices carry their step nodes,
+                // and merging partial builders re-inserts nodes from them.
+                let seeded_at = format!(
+                    "{}:{}:{}",
+                    seed.position.filename, seed.position.line, seed.position.column
+                );
+                path.steps[0]
+                    .node
+                    .properties
+                    .insert("seededAt".to_string(), seeded_at.clone());
+                if let Some(node) = self.nodes.get_mut(&path.steps[0].node.id) {
+                    node.properties.insert("seededAt".to_string(), seeded_at);
+                }
+                taint.paths.push(path);
             }
             let bounded = taint.bounded();
             if !bounded.paths.is_empty() {
@@ -11842,6 +11966,89 @@ pub fn persist_tainted() {
                 .iter()
                 .map(|slice| (&slice.source_category, &slice.sink_category))
                 .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn static_seeds_follow_bindings_and_initializers_and_stay_with_readers() {
+        let root = fixture_crate(
+            "static-carrier-shapes",
+            r#"
+use std::sync::OnceLock;
+
+static TOKEN: OnceLock<String> = OnceLock::new();
+static CONFIG: OnceLock<String> = OnceLock::new();
+
+pub fn seed_through_a_binding() {
+    let token = std::env::var("API_TOKEN").unwrap_or_default();
+    TOKEN.set(token).unwrap();
+}
+
+pub fn seed_through_an_initializer() -> &'static String {
+    CONFIG.get_or_init(|| std::env::var("CONFIG").unwrap_or_default())
+}
+
+pub fn read_token() {
+    std::fs::write("/tmp/rusi-token", TOKEN.get().unwrap()).unwrap();
+}
+
+pub fn read_config() {
+    std::fs::write("/tmp/rusi-config", CONFIG.get().unwrap()).unwrap();
+}
+
+pub fn unrelated(value: u32) -> u32 {
+    value + 1
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let readers: BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            })
+            .map(|slice| slice.sink_function.rsplit("::").next().unwrap_or_default())
+            .collect();
+        assert_eq!(readers, BTreeSet::from(["read_config", "read_token"]));
+
+        let seed_nodes: Vec<(&str, usize, Option<&String>)> = data_flow
+            .nodes
+            .iter()
+            .filter(|node| node.name == "TOKEN.set" || node.name == "CONFIG.get_or_init")
+            .map(|node| {
+                (
+                    node.function.rsplit("::").next().unwrap_or_default(),
+                    node.position.line,
+                    node.properties.get("seededAt"),
+                )
+            })
+            .collect();
+        // One node per function that names the carrier, at its use, never one
+        // per function in the crate.
+        assert!(
+            seed_nodes
+                .iter()
+                .all(|(function, _, _)| *function != "unrelated"),
+            "{seed_nodes:?}"
+        );
+        let token_read = seed_nodes
+            .iter()
+            .find(|(function, _, _)| *function == "read_token")
+            .expect("a seed node in the reader");
+        assert_eq!(token_read.1, 17);
+        assert_eq!(
+            token_read.2.map(String::as_str),
+            Some("src/lib.rs:9:11"),
+            "the node records where the seed was stored"
         );
         let _ = fs::remove_dir_all(&root);
     }
