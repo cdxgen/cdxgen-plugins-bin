@@ -980,6 +980,12 @@
     },
     {
       "category": "string-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
       "flows": [
         [
           0,
@@ -991,13 +997,7 @@
         ]
       ],
       "pattern": "kotlin.Any.toString"
-    ,
-        "elementFlows": [
-          [
-            0,
-            -1
-          ]
-        ]},
+    },
     {
       "category": "string-adapter",
       "flows": [
@@ -1126,6 +1126,12 @@
     },
     {
       "category": "string-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
       "flows": [
         [
           0,
@@ -1137,13 +1143,7 @@
         ]
       ],
       "pattern": "kotlin.text.toString"
-    ,
-        "elementFlows": [
-          [
-            0,
-            -1
-          ]
-        ]},
+    },
     {
       "category": "string-adapter",
       "flows": [
