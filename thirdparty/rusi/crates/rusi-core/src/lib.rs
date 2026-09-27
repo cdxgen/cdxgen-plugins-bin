@@ -5181,25 +5181,32 @@ fn resolutions_via_trait(
         .collect()
 }
 
+/// Container methods that store their arguments into the receiver, so the
+/// receiver binding becomes tainted by what was stored (`v.push(secret)`
+/// makes later reads of `v` carry `secret`). Argument 0 is the receiver, as
+/// in every method call the collector records. The slice copies
+/// (`buf.copy_from_slice(src)`) are the shape chunked byte loops write with.
+const RECEIVER_MUTATING_METHODS: &[&str] = &[
+    "append",
+    "clone_from_slice",
+    "copy_from_slice",
+    "extend",
+    "extend_from_slice",
+    "insert",
+    "insert_str",
+    "push",
+    "push_back",
+    "push_front",
+    "push_str",
+    "push_within_capacity",
+];
+
 /// Methods that yield their receiver's type.
 ///
 /// Typing a binding through them is what makes `connect()?.query(..)` and
 /// `make().unwrap().run()` resolve. `?` itself is not represented — `syn`'s
 /// `Expr::Try` is flattened to the inner call — which is the other half of why
 /// return types are indexed already unwrapped.
-/// Container methods that store their arguments into the receiver, so the
-/// receiver binding becomes tainted by what was stored (`v.push(secret)`
-/// makes later reads of `v` carry `secret`). Argument 0 is the receiver, as
-/// in every method call the collector records.
-const RECEIVER_MUTATING_METHODS: &[&str] = &[
-    "push",
-    "push_str",
-    "insert",
-    "extend",
-    "append",
-    "push_within_capacity",
-];
-
 const TYPE_PRESERVING_METHODS: &[&str] = &[
     "as_mut",
     "as_ref",
@@ -7956,20 +7963,10 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
-            DataFlowPattern {
-                target: "passthrough".to_string(),
-                pattern: "map".to_string(),
-                category: "collection-accessor".to_string(),
-                relevant_arguments: vec![0],
-                receiver_type: None,
-            },
-            DataFlowPattern {
-                target: "passthrough".to_string(),
-                pattern: "filter".to_string(),
-                category: "collection-accessor".to_string(),
-                relevant_arguments: vec![0],
-                receiver_type: None,
-            },
+            // Element and adapter accessors that hand back the receiver's
+            // contents (`map`, `filter`, `collect`, `to_vec`, `flat_map` and
+            // `join` are modelled above). The removals take an element out of
+            // a container a receiver-mutating method filled.
             DataFlowPattern {
                 target: "passthrough".to_string(),
                 pattern: "skip".to_string(),
@@ -7993,28 +7990,56 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
-                pattern: "to_vec".to_string(),
+                pattern: "copied".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
-                pattern: "flat_map".to_string(),
+                pattern: "pop".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
-                pattern: "collect".to_string(),
+                pattern: "pop_front".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
             DataFlowPattern {
                 target: "passthrough".to_string(),
-                pattern: "join".to_string(),
+                pattern: "pop_back".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "front".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "back".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "remove".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "swap_remove".to_string(),
                 category: "collection-accessor".to_string(),
                 relevant_arguments: vec![0],
                 receiver_type: None,
@@ -8495,6 +8520,24 @@ fn summarize_function(
                         }
                     }
 
+                    // The writes the concrete pass models, so a helper's
+                    // summary carries them to its callers: a container method
+                    // storing into its receiver, a source call filling a
+                    // `&mut` argument, and a callee writing through a `&mut`
+                    // parameter.
+                    if let SimpleExpr::Call { .. } = expr {
+                        apply_summary_call_writes(
+                            function,
+                            callee,
+                            args,
+                            &mut env,
+                            &mut summary,
+                            summaries,
+                            local_index,
+                            patterns,
+                        );
+                    }
+
                     // Free calls only: a method's parameter indexes are shifted
                     // by the receiver, and resolving a bare method name here
                     // would propagate through any same-named function.
@@ -8532,6 +8575,150 @@ fn summarize_function(
         }
     }
     summary
+}
+
+/// The caller binding a `&mut` argument writes into: `&mut x`, or a parameter
+/// that is itself a `&mut` reference passed on (`fn outer(v: &mut String) {
+/// load(v) }`), which Rust reborrows without a `&mut` at the call.
+fn written_binding<'e>(arg: &'e SimpleExpr, function: &FunctionRecord) -> Option<&'e str> {
+    match arg {
+        SimpleExpr::Reference {
+            expr,
+            mutable: true,
+        } => match expr.as_ref() {
+            SimpleExpr::Var(name) => Some(name.as_str()),
+            _ => None,
+        },
+        SimpleExpr::Var(name) => function
+            .params
+            .iter()
+            .position(|param| param == name)
+            .filter(|index| {
+                function
+                    .param_types
+                    .get(*index)
+                    .is_some_and(|ty| ty.replace(' ', "").starts_with("&mut"))
+            })
+            .map(|_| name.as_str()),
+        _ => None,
+    }
+}
+
+/// Records origins poured into `binding` by a call, both in the abstract
+/// environment and, when `binding` is one of the function's own `&mut`
+/// parameters, in its summary: the write then reaches this function's callers
+/// too.
+fn record_summary_write(
+    function: &FunctionRecord,
+    binding: &str,
+    origins: &BTreeSet<AbstractOrigin>,
+    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    summary: &mut FunctionSummary,
+) {
+    if origins.is_empty() {
+        return;
+    }
+    env.entry(binding.to_string())
+        .or_default()
+        .extend(origins.iter().cloned());
+    let Some(index) = function.params.iter().position(|param| param == binding) else {
+        return;
+    };
+    for origin in origins {
+        match origin {
+            AbstractOrigin::Source(category) => {
+                summary
+                    .param_written_sources
+                    .entry(index)
+                    .or_default()
+                    .insert(category.clone());
+            }
+            AbstractOrigin::Param(from) if *from != index => {
+                summary
+                    .param_written_params
+                    .entry(index)
+                    .or_default()
+                    .insert(*from);
+            }
+            AbstractOrigin::Param(_) => {}
+        }
+    }
+}
+
+/// The abstract counterpart of the concrete pass's call-site writes: what a
+/// call stores into its receiver or into its `&mut` arguments.
+#[allow(clippy::too_many_arguments)]
+fn apply_summary_call_writes(
+    function: &FunctionRecord,
+    callee: &str,
+    args: &[SimpleExpr],
+    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    summary: &mut FunctionSummary,
+    summaries: &BTreeMap<String, FunctionSummary>,
+    local_index: &HashMap<String, Vec<String>>,
+    patterns: &DataFlowPatternSet,
+) {
+    let eval = |expr: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+        eval_abstract_expr(
+            expr,
+            env,
+            summaries,
+            &function.package_path,
+            local_index,
+            patterns,
+        )
+    };
+    if RECEIVER_MUTATING_METHODS.contains(&callee)
+        && let Some(SimpleExpr::Var(receiver)) = args.first()
+    {
+        let mut stored = BTreeSet::new();
+        for arg in args.iter().skip(1) {
+            stored.extend(eval(arg, env));
+        }
+        record_summary_write(function, receiver, &stored, env, summary);
+    }
+    if let Some(source_match) = find_source_pattern(callee, &patterns.sources) {
+        let origins = BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
+        for arg in args {
+            if let SimpleExpr::Reference { mutable: true, .. } = arg
+                && let Some(binding) = written_binding(arg, function)
+            {
+                record_summary_write(function, binding, &origins, env, summary);
+            }
+        }
+    }
+    let Some(callee_summary) =
+        resolve_call_target(callee, &function.package_path, local_index, None)
+            .and_then(|resolved| summaries.get(&resolved))
+    else {
+        return;
+    };
+    for (index, categories) in &callee_summary.param_written_sources {
+        if let Some(binding) = args
+            .get(*index)
+            .and_then(|arg| written_binding(arg, function))
+        {
+            let origins = categories
+                .iter()
+                .map(|category| AbstractOrigin::Source(category.clone()))
+                .collect();
+            record_summary_write(function, binding, &origins, env, summary);
+        }
+    }
+    for (index, froms) in &callee_summary.param_written_params {
+        if let Some(binding) = args
+            .get(*index)
+            .and_then(|arg| written_binding(arg, function))
+        {
+            let mut origins = BTreeSet::new();
+            for from in froms {
+                if let Some(arg) = args.get(*from) {
+                    origins.extend(eval(arg, env));
+                }
+            }
+            record_summary_write(function, binding, &origins, env, summary);
+        }
+    }
 }
 
 fn eval_abstract_expr(
@@ -9174,52 +9361,40 @@ impl<'a> DataFlowBuilder<'a> {
                                 .unwrap_or_else(|| callee.to_string());
                             let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
                             for (param_index, categories) in &summary.param_written_sources {
-                                let Some(SimpleExpr::Reference {
-                                    expr: written,
-                                    mutable: true,
-                                }) = args.get(*param_index)
+                                let Some(var_name) = args
+                                    .get(*param_index)
+                                    .and_then(|arg| written_binding(arg, function))
                                 else {
                                     continue;
                                 };
-                                if let SimpleExpr::Var(var_name) = written.as_ref() {
-                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
-                                    for category in categories {
-                                        taint.paths.push(self.new_source_path(
-                                            function,
-                                            &callee_name,
-                                            category,
-                                            position.clone(),
-                                            None,
-                                        ));
-                                    }
-                                    out_param_writes.push((var_name.to_string(), taint.bounded()));
-                                }
-                            }
-                            for (writee, sources) in &summary.param_written_params {
-                                let Some(SimpleExpr::Reference {
-                                    expr: written,
-                                    mutable: true,
-                                }) = args.get(*writee)
-                                else {
-                                    continue;
-                                };
-                                if let SimpleExpr::Var(var_name) = written.as_ref() {
-                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
-                                    for from in sources {
-                                        if let Some(arg) = args.get(*from) {
-                                            taint.paths.extend(
-                                                self.eval_concrete_expr(function, arg, &env).paths,
-                                            );
-                                        }
-                                    }
-                                    let bounded = taint.bounded();
-                                    out_param_writes.push((
-                                        var_name.to_string(),
-                                        ConcreteTaint {
-                                            paths: bounded.paths.clone(),
-                                        },
+                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                for category in categories {
+                                    taint.paths.push(self.new_source_path(
+                                        function,
+                                        &callee_name,
+                                        category,
+                                        position.clone(),
+                                        None,
                                     ));
                                 }
+                                out_param_writes.push((var_name.to_string(), taint.bounded()));
+                            }
+                            for (writee, sources) in &summary.param_written_params {
+                                let Some(var_name) = args
+                                    .get(*writee)
+                                    .and_then(|arg| written_binding(arg, function))
+                                else {
+                                    continue;
+                                };
+                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                for from in sources {
+                                    if let Some(arg) = args.get(*from) {
+                                        taint.paths.extend(
+                                            self.eval_concrete_expr(function, arg, &env).paths,
+                                        );
+                                    }
+                                }
+                                out_param_writes.push((var_name.to_string(), taint.bounded()));
                             }
                             for (var_name, taint) in out_param_writes {
                                 if !taint.paths.is_empty() {
@@ -11926,6 +12101,97 @@ pub fn persist_tainted() {
                 .iter()
                 .map(|slice| (&slice.source_category, &slice.sink_category))
                 .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn helper_summaries_carry_container_and_out_parameter_writes() {
+        // Each write happens inside a helper, so it reaches the caller only
+        // through the helper's summary.
+        let root = fixture_crate(
+            "summary-writes",
+            r#"
+use std::io::Read;
+
+fn collect_bytes(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for byte in input.iter() {
+        out.push(*byte);
+    }
+    out
+}
+
+fn read_config(path: &str) -> String {
+    let mut text = String::new();
+    std::fs::File::open(path).unwrap().read_to_string(&mut text).unwrap();
+    text
+}
+
+fn load(value: &mut String) {
+    *value = std::env::var("TOKEN").unwrap_or_default();
+}
+
+fn load_through(value: &mut String) {
+    load(value);
+}
+
+pub fn container_helper() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    std::fs::write("/tmp/rusi-h1", collect_bytes(secret.as_bytes())).unwrap();
+}
+
+pub fn read_helper() {
+    std::process::Command::new(read_config("/etc/rusi")).status().unwrap();
+}
+
+pub fn two_level_out_parameter() {
+    let mut value = String::new();
+    load_through(&mut value);
+    std::fs::write("/tmp/rusi-h3", value).unwrap();
+}
+
+pub fn queue_round_trip() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(secret);
+    std::process::Command::new(queue.pop_front().unwrap()).status().unwrap();
+}
+
+pub fn clean_container() {
+    let _secret = std::env::var("TOKEN").unwrap_or_default();
+    std::fs::write("/tmp/rusi-h5", collect_bytes(b"static")).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let flows: BTreeSet<(&str, &str, &str)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| !slice.source_category.starts_with("param-"))
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    slice.source_category.as_str(),
+                    slice.sink_category.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            flows,
+            BTreeSet::from([
+                ("container_helper", "env", "filesystem-write"),
+                ("queue_round_trip", "env", "process-exec"),
+                ("read_helper", "file", "process-exec"),
+                ("two_level_out_parameter", "env", "filesystem-write"),
+            ])
         );
         let _ = fs::remove_dir_all(&root);
     }
