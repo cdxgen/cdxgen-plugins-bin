@@ -1266,6 +1266,150 @@
     },
     {
       "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBigDecimal"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBigDecimalOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBigInteger"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBigIntegerOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUByte"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUByteOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUInt"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUIntOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toULong"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toULongOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUShort"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toUShortOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Byte.parseByte"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Byte.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Double.parseDouble"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Double.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Float.parseFloat"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Float.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Integer.parseInt"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Integer.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Long.parseLong"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Long.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Short.parseShort"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Short.valueOf"
+    },
+    {
+      "clears": [
         "sql-query"
       ],
       "pattern": "java.util.regex.Pattern.quote"
