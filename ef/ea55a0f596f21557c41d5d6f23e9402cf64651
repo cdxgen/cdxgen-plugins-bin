@@ -1,0 +1,19 @@
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  s_659a4b41ad2e7b::t_920f63cb1563dc 983-988,1000,1129-1134,1146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efea55a0f596f21557c41d5d6f23e9402cf64651",
+  "prompts": {},
+  "sessions": {
+    "s_659a4b41ad2e7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07f55a35-593c-48fc-a9bb-2b3e3fe96970",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
