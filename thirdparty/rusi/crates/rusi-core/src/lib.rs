@@ -217,11 +217,6 @@ struct FunctionRecord {
     /// `(loop variable, iterable receiver path)` pairs from this function's
     /// `for` loops.
     loop_iterables: Vec<(String, String)>,
-    /// Extra names a call site may reach this record by. A closure bound to
-    /// a local (`let f = |u| ..; f(x)`) is called by that binding's name,
-    /// which the synthesized closure symbol never matches; the alias closes
-    /// the gap.
-    name_aliases: Vec<String>,
     /// Whether this record's body was analyzed.
     ///
     /// False for a dependency at the lighter tier. Data flow must skip such a
@@ -1900,9 +1895,61 @@ struct FunctionFrame {
     /// but the per-statement trees, which are the bulk of the memory, are not
     /// retained.
     collect_bodies: bool,
+    /// Closures bound to a local of this frame (`let f = |u| ..`), in binding
+    /// order. Calls through the binding are rewritten to the closure's own
+    /// record when the frame finishes (see [`FunctionFrame::apply_bound_closures`]).
+    bound_closures: Vec<BoundClosure>,
+}
+
+/// A closure bound to a local, and where in its frame the binding took effect.
+#[derive(Debug, Clone)]
+struct BoundClosure {
+    /// The local the closure is bound to, which is what call sites name.
+    binding: String,
+    /// The closure record's qualified name, which the call graph and the
+    /// summaries resolve.
+    callee: String,
+    /// Variables the closure body reads from its enclosing function. They are
+    /// appended to the closure's parameters and to every call through the
+    /// binding, so a captured value's taint rides the ordinary argument path.
+    captures: Vec<String>,
+    /// Index of the first frame operation recorded after the binding: earlier
+    /// operations name whatever the identifier meant before it.
+    first_operation: usize,
+    /// Same, for the frame's call records.
+    first_call: usize,
 }
 
 impl FunctionFrame {
+    /// Rewrites calls through a closure binding to the closure record itself.
+    ///
+    /// Scoped to this frame and to the operations after the binding: a local
+    /// name is not a crate-wide symbol, so resolving `f(x)` through a global
+    /// alias would bind every same-named call in the crate to this closure.
+    fn apply_bound_closures(&mut self) {
+        if self.bound_closures.is_empty() {
+            return;
+        }
+        let bound = std::mem::take(&mut self.bound_closures);
+        for (index, operation) in self.operations.iter_mut().enumerate() {
+            rewrite_bound_closure_operation(operation, &|name| {
+                bound_closure_in_effect(&bound, name, index, |closure| closure.first_operation)
+                    .cloned()
+            });
+        }
+        for (index, call) in self.direct_calls.iter_mut().enumerate() {
+            if call.receiver_text.is_none()
+                && let Some(closure) =
+                    bound_closure_in_effect(&bound, &call.callee_text, index, |closure| {
+                        closure.first_call
+                    })
+            {
+                call.callee_text = closure.callee.clone();
+            }
+        }
+        self.bound_closures = bound;
+    }
+
     fn record_operation(&mut self, operation: Operation) {
         if self.collect_bodies {
             self.operations.push(operation);
@@ -2196,7 +2243,7 @@ impl SourceCollector {
 
     /// Collects an inline closure as its own callable record and returns the
     /// record's declaration id, so a caller that binds the closure to a local
-    /// (`let f = |u| ..; f(x)`) can register the binding as a name alias.
+    /// (`let f = |u| ..; f(x)`) can route calls through the binding to it.
     fn collect_inline_closure(
         &mut self,
         closure: &ExprClosure,
@@ -2235,12 +2282,14 @@ impl SourceCollector {
             declared_element_types: BTreeMap::new(),
             loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
+            bound_closures: Vec::new(),
         });
         visit_callable_body(self, &closure.body);
         let mut finished = self.current_function.take().expect("closure frame exists");
         if let Some(tail_expr) = callable_body_tail_expr(&closure.body) {
             finished.operations.push(Operation::Return(tail_expr));
         }
+        finished.apply_bound_closures();
         let param_types = closure_parameter_types(closure);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2263,7 +2312,6 @@ impl SourceCollector {
             declared_type_texts: finished.declared_type_texts.clone(),
             declared_element_types: finished.declared_element_types.clone(),
             loop_iterables: finished.loop_iterables.clone(),
-            name_aliases: Vec::new(),
             has_body: self.collect_bodies,
         });
         self.current_function = previous;
@@ -2334,12 +2382,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
             declared_element_types: BTreeMap::new(),
             loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
+            bound_closures: Vec::new(),
         });
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
         if let Some(tail_expr) = block_tail_expr(&node.block) {
             finished.operations.push(Operation::Return(tail_expr));
         }
+        finished.apply_bound_closures();
         let param_types = function_parameter_types(&node.sig);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2361,7 +2411,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
             declared_type_texts: finished.declared_type_texts.clone(),
             declared_element_types: finished.declared_element_types.clone(),
             loop_iterables: finished.loop_iterables.clone(),
-            name_aliases: Vec::new(),
             has_body: self.collect_bodies,
         });
         self.current_function = previous;
@@ -2411,12 +2460,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     declared_element_types: BTreeMap::new(),
                     loop_iterables: Vec::new(),
                     collect_bodies: self.collect_bodies,
+                    bound_closures: Vec::new(),
                 });
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
                 if let Some(tail_expr) = block_tail_expr(&method.block) {
                     finished.operations.push(Operation::Return(tail_expr));
                 }
+                finished.apply_bound_closures();
                 let param_types = function_parameter_types(&method.sig);
                 self.functions.push(FunctionRecord {
                     declaration,
@@ -2438,7 +2489,6 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     declared_type_texts: finished.declared_type_texts.clone(),
                     declared_element_types: finished.declared_element_types.clone(),
                     loop_iterables: finished.loop_iterables.clone(),
-                    name_aliases: Vec::new(),
                     has_body: self.collect_bodies,
                 });
                 self.current_function = previous;
@@ -2824,10 +2874,15 @@ impl<'ast> Visit<'ast> for SourceCollector {
             self.push_crypto_material(span, kind, &name);
         }
         // A closure bound to a local (`let f = |u| ..; f(x)`) is called by
-        // the binding's name. The closure is collected and aliased here,
+        // the binding's name. The closure is collected as its own record here,
         // before the frame borrow below records assignments, because the
-        // collector and the frame cannot be borrowed at once.
+        // collector and the frame cannot be borrowed at once. The variables it
+        // reads from this function become trailing parameters, and calls
+        // through the binding are rewritten to pass them when the frame
+        // finishes.
+        let mut bound_closure = false;
         if let Stmt::Local(local) = node
+            && self.current_function.is_some()
             && let Some(init) = &local.init
             && let Pat::Ident(PatIdent { ident, .. }) = match &local.pat {
                 Pat::Type(pat_type) => pat_type.pat.as_ref(),
@@ -2839,9 +2894,25 @@ impl<'ast> Visit<'ast> for SourceCollector {
             if let Some(record) = self
                 .functions
                 .iter_mut()
+                .rev()
                 .find(|record| record.declaration.id == closure_id)
             {
-                record.name_aliases.push(ident.to_string());
+                let captures = closure_captures(record);
+                record.params.extend(captures.iter().cloned());
+                record
+                    .param_types
+                    .extend(captures.iter().map(|_| String::new()));
+                let callee = record.declaration.qualified_name.clone();
+                if let Some(frame) = self.current_function.as_mut() {
+                    frame.bound_closures.push(BoundClosure {
+                        binding: ident.to_string(),
+                        callee,
+                        captures,
+                        first_operation: frame.operations.len(),
+                        first_call: frame.direct_calls.len(),
+                    });
+                }
+                bound_closure = true;
             }
         }
         if let Some(frame) = self.current_function.as_mut() {
@@ -3023,7 +3094,158 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 _ => {}
             }
         }
-        syn::visit::visit_stmt(self, node);
+        if bound_closure && let Stmt::Local(local) = node {
+            // The closure body was collected as its own record above. Walking
+            // the initializer again would attribute every call, usage, and
+            // signal inside it to this function a second time.
+            syn::visit::visit_pat(self, &local.pat);
+            if let Some(init) = &local.init
+                && let Some((_, diverge)) = &init.diverge
+            {
+                syn::visit::visit_expr(self, diverge);
+            }
+        } else {
+            syn::visit::visit_stmt(self, node);
+        }
+    }
+}
+
+/// Variables a collected closure reads from its enclosing function: the plain
+/// names its operations reference that it neither declares as a parameter nor
+/// assigns itself. Paths (`std::env::var`) are not variables.
+fn closure_captures(record: &FunctionRecord) -> Vec<String> {
+    let mut referenced = BTreeSet::new();
+    let mut assigned = BTreeSet::new();
+    fn walk_operations(
+        operations: &[Operation],
+        referenced: &mut BTreeSet<String>,
+        assigned: &mut BTreeSet<String>,
+    ) {
+        for operation in operations {
+            match operation {
+                Operation::Assign { target, value }
+                | Operation::AssignField { target, value, .. }
+                | Operation::AssignDeref { target, value } => {
+                    if let Some(root) = target.split('.').next() {
+                        assigned.insert(root.to_string());
+                    }
+                    collect_expr_vars(value, referenced);
+                }
+                Operation::Expr(value) | Operation::Return(value) => {
+                    collect_expr_vars(value, referenced);
+                }
+                Operation::LoopBody(inner) => walk_operations(inner, referenced, assigned),
+            }
+        }
+    }
+    walk_operations(&record.operations, &mut referenced, &mut assigned);
+    referenced
+        .into_iter()
+        .filter(|name| !record.params.contains(name) && !assigned.contains(name))
+        .collect()
+}
+
+/// The root binding names a simplified expression reads.
+fn collect_expr_vars(expr: &SimpleExpr, out: &mut BTreeSet<String>) {
+    match expr {
+        SimpleExpr::Var(name) => {
+            let root = name.split('.').next().unwrap_or(name).trim();
+            if !root.is_empty()
+                && !root.contains("::")
+                && root
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+            {
+                out.insert(root.to_string());
+            }
+        }
+        SimpleExpr::Call { args, .. } => {
+            for arg in args {
+                collect_expr_vars(arg, out);
+            }
+        }
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            collect_expr_vars(receiver, out);
+            for arg in args {
+                collect_expr_vars(arg, out);
+            }
+        }
+        SimpleExpr::Compose(items) => {
+            for item in items {
+                collect_expr_vars(item, out);
+            }
+        }
+        SimpleExpr::Field { base, .. } => collect_expr_vars(base, out),
+        SimpleExpr::Reference { expr, .. } => collect_expr_vars(expr, out),
+        SimpleExpr::Literal | SimpleExpr::Unknown => {}
+    }
+}
+
+/// The closure binding of `name` in effect at a frame index: the last one made
+/// at or before it, so a shadowing `let f = ..` takes over from the earlier one.
+fn bound_closure_in_effect<'a>(
+    bound: &'a [BoundClosure],
+    name: &str,
+    index: usize,
+    first_index: fn(&BoundClosure) -> usize,
+) -> Option<&'a BoundClosure> {
+    bound
+        .iter()
+        .rfind(|closure| closure.binding == name && first_index(closure) <= index)
+}
+
+/// Applies [`FunctionFrame::apply_bound_closures`]' rewrite to one operation.
+fn rewrite_bound_closure_operation(
+    operation: &mut Operation,
+    binding_in_effect: &dyn Fn(&str) -> Option<BoundClosure>,
+) {
+    match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => rewrite_bound_closure_expr(value, binding_in_effect),
+        Operation::LoopBody(inner) => {
+            for operation in inner {
+                rewrite_bound_closure_operation(operation, binding_in_effect);
+            }
+        }
+    }
+}
+
+fn rewrite_bound_closure_expr(
+    expr: &mut SimpleExpr,
+    binding_in_effect: &dyn Fn(&str) -> Option<BoundClosure>,
+) {
+    match expr {
+        SimpleExpr::Call { callee, args, .. } => {
+            for arg in args.iter_mut() {
+                rewrite_bound_closure_expr(arg, binding_in_effect);
+            }
+            if let Some(closure) = binding_in_effect(callee) {
+                *callee = closure.callee.clone();
+                args.extend(
+                    closure
+                        .captures
+                        .iter()
+                        .map(|name| SimpleExpr::Var(name.clone())),
+                );
+            }
+        }
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            rewrite_bound_closure_expr(receiver, binding_in_effect);
+            for arg in args.iter_mut() {
+                rewrite_bound_closure_expr(arg, binding_in_effect);
+            }
+        }
+        SimpleExpr::Compose(items) => {
+            for item in items.iter_mut() {
+                rewrite_bound_closure_expr(item, binding_in_effect);
+            }
+        }
+        SimpleExpr::Field { base, .. } => rewrite_bound_closure_expr(base, binding_in_effect),
+        SimpleExpr::Reference { expr, .. } => rewrite_bound_closure_expr(expr, binding_in_effect),
+        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
     }
 }
 
@@ -4488,14 +4710,6 @@ fn build_local_function_index(functions: &[FunctionRecord]) -> HashMap<String, V
         {
             index
                 .entry(stripped.to_string())
-                .or_default()
-                .push(function.declaration.id.clone());
-        }
-        // A closure bound to a local is called by the binding's name; the
-        // alias resolves those call sites to the closure's record.
-        for alias in &function.name_aliases {
-            index
-                .entry(alias.clone())
                 .or_default()
                 .push(function.declaration.id.clone());
         }
@@ -9807,6 +10021,7 @@ fn compute_stats(report: &Report) -> Stats {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashMap};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -11457,6 +11672,100 @@ pub fn run_tainted() {
                 .map(|slice| (&slice.source_category, &slice.sink_category))
                 .collect::<Vec<_>>()
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bound_closures_are_scoped_to_their_function_and_see_captures() {
+        // Two functions bind a closure to the same local name, a third calls a
+        // free function of that name, and one closure reads a captured
+        // variable instead of a parameter.
+        let root = fixture_crate(
+            "closure-binding-scope",
+            r#"
+use std::process::Command;
+
+pub fn captured() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let run = || {
+        let _ = unsafe { std::ptr::null::<u8>().add(0) };
+        Command::new(&secret).status().unwrap();
+    };
+    run();
+}
+
+pub fn by_reference() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let run = |s: &str| {
+        Command::new(s).status().unwrap();
+    };
+    run(&secret);
+}
+
+pub fn through_return() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let wrap = |s: &str| s.to_string();
+    let wrapped = wrap(&secret);
+    Command::new(wrapped).status().unwrap();
+}
+
+pub fn free_function_of_the_same_name() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    run(&secret);
+}
+
+pub fn run(s: &str) -> usize {
+    s.len()
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        let env_exec_functions: BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .map(|slice| slice.sink_function.rsplit("::").next().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            env_exec_functions,
+            BTreeSet::from(["by_reference", "captured", "through_return"]),
+            "each bound closure's flow is reported at its own call site"
+        );
+
+        // The body is collected once, as the closure's record: the unsafe
+        // block inside it is one signal, not one per walk.
+        assert_eq!(
+            report
+                .security_signals
+                .iter()
+                .filter(|signal| signal.category == "unsafe-code")
+                .count(),
+            1
+        );
+
+        // `run(&secret)` in the last function names the free function, not
+        // either closure bound to `run` elsewhere.
+        let call_graph = report.call_graph.as_ref().expect("call graph emitted");
+        let names: HashMap<&str, &str> = call_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.name.as_str()))
+            .collect();
+        let callees: BTreeSet<&str> = call_graph
+            .edges
+            .iter()
+            .filter(|edge| names[edge.source_id.as_str()] == "free_function_of_the_same_name")
+            .map(|edge| names[edge.target_id.as_str()])
+            .filter(|name| *name == "run" || name.starts_with("closure_"))
+            .collect();
+        assert_eq!(callees, BTreeSet::from(["run"]));
         let _ = fs::remove_dir_all(&root);
     }
 
