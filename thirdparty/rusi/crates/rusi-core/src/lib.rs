@@ -2708,10 +2708,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 // MethodCall record of the same call: the sink nodes the two
                 // records produce must share an id, or every sink fires
                 // twice — once per form.
-                position: position_from_span(
-                    &self.file_ctx.relative_file_path,
-                    node.method.span(),
-                ),
+                position: position_from_span(&self.file_ctx.relative_file_path, node.method.span()),
             };
             frame.record_operation(Operation::Expr(call.clone()));
             frame.record_call(SimplifiedCall {
@@ -3477,7 +3474,8 @@ fn write_macro_simple_expr(path: &str, tokens: &proc_macro2::TokenStream) -> Opt
             if index == 0 {
                 match arg {
                     Expr::Lit(ExprLit {
-                        lit: Lit::Str(value), ..
+                        lit: Lit::Str(value),
+                        ..
                     }) => {
                         let _ = value;
                         None
@@ -3501,10 +3499,7 @@ fn write_macro_simple_expr(path: &str, tokens: &proc_macro2::TokenStream) -> Opt
 
 fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
     if expr.mac.path.is_ident("write") || expr.mac.path.is_ident("writeln") {
-        return write_macro_simple_expr(
-            &path_to_string(&expr.mac.path),
-            &expr.mac.tokens,
-        );
+        return write_macro_simple_expr(&path_to_string(&expr.mac.path), &expr.mac.tokens);
     }
     // `vec![a, b]` behaves like the tuple it builds for taint purposes:
     // a whole-container binding made of the elements' taints.
@@ -4918,8 +4913,14 @@ fn resolutions_via_trait(
 /// receiver binding becomes tainted by what was stored (`v.push(secret)`
 /// makes later reads of `v` carry `secret`). Argument 0 is the receiver, as
 /// in every method call the collector records.
-const RECEIVER_MUTATING_METHODS: &[&str] =
-    &["push", "push_str", "insert", "extend", "append", "push_within_capacity"];
+const RECEIVER_MUTATING_METHODS: &[&str] = &[
+    "push",
+    "push_str",
+    "insert",
+    "extend",
+    "append",
+    "push_within_capacity",
+];
 
 const TYPE_PRESERVING_METHODS: &[&str] = &[
     "as_mut",
@@ -7685,9 +7686,10 @@ fn infer_static_source_seeds(
                     receiver,
                     args,
                     ..
-                } if last_segment(method) == "set" && args.len() == 1 => match receiver.as_ref()
-                {
-                    SimpleExpr::Var(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+                } if last_segment(method) == "set" && args.len() == 1 => match receiver.as_ref() {
+                    SimpleExpr::Var(name)
+                        if name.chars().next().is_some_and(char::is_uppercase) =>
+                    {
                         Some((name.as_str(), &args[0]))
                     }
                     _ => None,
@@ -7719,9 +7721,7 @@ fn infer_static_source_seeds(
             );
             for origin in origins {
                 if let AbstractOrigin::Source(category) = origin
-                    && !seeds
-                        .get(name)
-                        .is_some_and(|list| list.contains(&category))
+                    && !seeds.get(name).is_some_and(|list| list.contains(&category))
                 {
                     seeds.entry(name.to_string()).or_default().push(category);
                 }
@@ -8476,7 +8476,12 @@ impl<'a> DataFlowBuilder<'a> {
                             } else {
                                 None
                             };
-                            (callee.clone(), args.clone(), position.clone(), receiver_type)
+                            (
+                                callee.clone(),
+                                args.clone(),
+                                position.clone(),
+                                receiver_type,
+                            )
                         }
                         SimpleExpr::MethodCall {
                             method,
@@ -8531,7 +8536,10 @@ impl<'a> DataFlowBuilder<'a> {
                             find_source_pattern(callee, &self.patterns.sources)
                         {
                             for arg in args {
-                                if let SimpleExpr::Reference { expr, mutable: true } = arg
+                                if let SimpleExpr::Reference {
+                                    expr,
+                                    mutable: true,
+                                } = arg
                                     && let SimpleExpr::Var(var_name) = expr.as_ref()
                                 {
                                     let path = self.new_source_path(
@@ -8562,8 +8570,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     .extend(self.eval_concrete_expr(function, arg, &env).paths);
                             }
                             if !stored.paths.is_empty() {
-                                let mut taint =
-                                    env.get(name).cloned().unwrap_or_default();
+                                let mut taint = env.get(name).cloned().unwrap_or_default();
                                 taint.paths.extend(stored.paths);
                                 env.insert(name.clone(), taint.bounded());
                             }
@@ -8682,8 +8689,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     continue;
                                 };
                                 if let SimpleExpr::Var(var_name) = written.as_ref() {
-                                    let mut taint =
-                                        env.get(var_name).cloned().unwrap_or_default();
+                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
                                     for category in categories {
                                         taint.paths.push(self.new_source_path(
                                             function,
@@ -8693,8 +8699,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             None,
                                         ));
                                     }
-                                    out_param_writes
-                                        .push((var_name.to_string(), taint.bounded()));
+                                    out_param_writes.push((var_name.to_string(), taint.bounded()));
                                 }
                             }
                             for (writee, sources) in &summary.param_written_params {
@@ -8706,13 +8711,11 @@ impl<'a> DataFlowBuilder<'a> {
                                     continue;
                                 };
                                 if let SimpleExpr::Var(var_name) = written.as_ref() {
-                                    let mut taint =
-                                        env.get(var_name).cloned().unwrap_or_default();
+                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
                                     for from in sources {
                                         if let Some(arg) = args.get(*from) {
                                             taint.paths.extend(
-                                                self.eval_concrete_expr(function, arg, &env)
-                                                    .paths,
+                                                self.eval_concrete_expr(function, arg, &env).paths,
                                             );
                                         }
                                     }
@@ -11060,7 +11063,6 @@ pub fn write_tainted() -> std::io::Result<()> {
         let _ = fs::remove_dir_all(&root);
     }
 
-
     #[test]
     fn a_chained_builder_reaches_its_restricted_sink() {
         // `Command::new(..).arg(t)` — the idiomatic chained form. The
@@ -11362,14 +11364,12 @@ pub fn copy_env_to_file() {
         })
         .expect("analysis succeeds");
         let data_flow = report.data_flow.expect("dataflow emitted");
-        let has_env = data_flow
-            .slices
-            .iter()
-            .any(|slice| slice.source_category == "env" && slice.sink_category == "filesystem-write");
-        let has_file = data_flow
-            .slices
-            .iter()
-            .any(|slice| slice.source_category == "file" && slice.sink_category == "filesystem-write");
+        let has_env = data_flow.slices.iter().any(|slice| {
+            slice.source_category == "env" && slice.sink_category == "filesystem-write"
+        });
+        let has_file = data_flow.slices.iter().any(|slice| {
+            slice.source_category == "file" && slice.sink_category == "filesystem-write"
+        });
         assert!(
             has_env && has_file,
             "expected env and file sources through iteration and read_to_string, got {:?}",
@@ -11412,7 +11412,8 @@ pub fn destructure_tainted() {
             data_flow
                 .slices
                 .iter()
-                .any(|slice| slice.source_category == "env" && slice.sink_category == "filesystem-write"),
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "filesystem-write"),
             "expected env -> filesystem-write through PathBuf::from and tuple destructure, got {:?}",
             data_flow
                 .slices
