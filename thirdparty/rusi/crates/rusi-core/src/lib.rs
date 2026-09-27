@@ -2066,7 +2066,7 @@ impl SourceCollector {
         // if the macro itself is recorded as an operation — the statement
         // visitor's `simple_expr` never sees it in those positions. The
         // arguments are still visited below for nested usages.
-        if let Some(expr) = write_macro_simple_expr(&path, &mac.tokens)
+        if let Some(expr) = write_macro_simple_expr(&path, &mac.tokens, mac.path.span())
             && let Some(frame) = self.current_function.as_mut()
         {
             frame.record_operation(Operation::Expr(expr));
@@ -3676,52 +3676,107 @@ fn rewrite_static_ref_tokens(tokens: proc_macro2::TokenStream) -> proc_macro2::T
     output
 }
 
-/// The write-target pseudo-call a `write!`/`writeln!` macro lowers to, from
-/// its raw tokens: `[target, values..]` with the format-string literal
-/// dropped (see [`parse_macro_like_call`]).
-fn write_macro_simple_expr(path: &str, tokens: &proc_macro2::TokenStream) -> Option<SimpleExpr> {
-    let is_write = path == "write" || path == "writeln";
-    if !is_write {
+/// The pseudo-callee a `write!`/`writeln!` macro lowers to. Which sink it is
+/// depends on the writer's type (see the `write!#io` patterns): a file or a
+/// socket is one, a `String` or a `fmt::Formatter` is not.
+const WRITE_MACRO_CALLEE: &str = "write!#io";
+
+/// The pseudo-call a `write!`/`writeln!` macro lowers to, from its raw tokens:
+/// `[writer, values..]`, with the format string replaced by the variables its
+/// inline placeholders name (`"{secret}"`). The position is the macro name's,
+/// so the statement-form and expression-form records of one macro produce one
+/// sink node.
+fn write_macro_simple_expr(
+    path: &str,
+    tokens: &proc_macro2::TokenStream,
+    span: proc_macro2::Span,
+) -> Option<SimpleExpr> {
+    if path != "write" && path != "writeln" {
         return None;
     }
     let args = Punctuated::<Expr, Token![,]>::parse_terminated
         .parse2(tokens.clone())
         .ok()?;
     let mut args_iter = args.into_iter();
-    let target = args_iter.next()?;
-    let values: Vec<SimpleExpr> = args_iter
-        .enumerate()
-        .filter_map(|(index, arg)| {
-            // Index 0 of the remainder is the format string literal.
-            if index == 0 {
-                match arg {
-                    Expr::Lit(ExprLit {
-                        lit: Lit::Str(value),
-                        ..
-                    }) => {
-                        let _ = value;
-                        None
-                    }
-                    _ => Some(simple_expr(&arg)),
-                }
-            } else {
-                Some(simple_expr(&arg))
-            }
-        })
-        .collect();
-    let mut call_args = Vec::with_capacity(values.len() + 1);
-    call_args.push(simple_expr(&target));
-    call_args.extend(values);
+    let writer = args_iter.next()?;
+    let mut call_args = vec![simple_expr(&writer)];
+    call_args.extend(format_macro_values(args_iter));
+    let start = span.start();
     Some(SimpleExpr::Call {
-        callee: "write!#file".to_string(),
+        callee: WRITE_MACRO_CALLEE.to_string(),
         args: call_args,
-        position: Position::default(),
+        position: Position {
+            filename: String::new(),
+            line: start.line,
+            column: start.column + 1,
+        },
     })
+}
+
+/// The values a format-style macro interpolates: the arguments after the
+/// format string, plus the variables its inline placeholders capture
+/// (`format!("{name}")` reads `name` without passing it).
+fn format_macro_values(mut args: impl Iterator<Item = Expr>) -> Vec<SimpleExpr> {
+    let mut values = Vec::new();
+    match args.next() {
+        Some(Expr::Lit(ExprLit {
+            lit: Lit::Str(template),
+            ..
+        })) => values.extend(
+            inline_format_captures(&template.value())
+                .into_iter()
+                .map(SimpleExpr::Var),
+        ),
+        Some(other) => values.push(simple_expr(&other)),
+        None => {}
+    }
+    values.extend(args.map(|arg| simple_expr(&arg)));
+    values
+}
+
+/// Identifiers named by a format string's inline placeholders: `{name}`,
+/// `{name:?}`, `{name:>8}`. Positional (`{0}`), empty (`{}`), and escaped
+/// (`{{`) placeholders capture nothing.
+fn inline_format_captures(template: &str) -> Vec<String> {
+    let mut captures = Vec::new();
+    let mut chars = template.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '{' {
+            continue;
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next();
+            continue;
+        }
+        let mut name = String::new();
+        for next in chars.by_ref() {
+            if next == '}' || next == ':' {
+                break;
+            }
+            name.push(next);
+        }
+        let name = name.trim();
+        let is_identifier = name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_alphabetic() || first == '_')
+            && name
+                .chars()
+                .all(|character| character.is_alphanumeric() || character == '_');
+        if is_identifier && !captures.iter().any(|seen| seen == name) {
+            captures.push(name.to_string());
+        }
+    }
+    captures
 }
 
 fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
     if expr.mac.path.is_ident("write") || expr.mac.path.is_ident("writeln") {
-        return write_macro_simple_expr(&path_to_string(&expr.mac.path), &expr.mac.tokens);
+        return write_macro_simple_expr(
+            &path_to_string(&expr.mac.path),
+            &expr.mac.tokens,
+            expr.mac.path.span(),
+        );
     }
     // `vec![a, b]` behaves like the tuple it builds for taint purposes:
     // a whole-container binding made of the elements' taints.
@@ -3739,10 +3794,8 @@ fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
 
     let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
     let args = parser.parse2(expr.mac.tokens.clone()).ok()?;
-    let mut args_iter = args.into_iter();
-    let first = args_iter.next();
     let html_template = matches!(
-        first,
+        args.first(),
         Some(Expr::Lit(ExprLit {
             lit: Lit::Str(value),
             ..
@@ -3755,7 +3808,7 @@ fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
     };
     Some(SimpleExpr::Call {
         callee: callee.to_string(),
-        args: args_iter.map(|arg| simple_expr(&arg)).collect(),
+        args: format_macro_values(args.into_iter()),
         position: Position::default(),
     })
 }
@@ -5162,13 +5215,17 @@ const UNWRAPPING_METHODS: &[&str] = &[
 ];
 
 /// Standard-library constructors whose result type is worth knowing, since the
-/// value they produce is often what a sink is called on.
+/// value they produce is often what a sink is called on. The HTTP-client
+/// builder entry points are here too: the client they build is the receiver
+/// the `get`/`post`/.. sinks are restricted to.
 ///
 /// The second element is the type produced *after* unwrapping any `Result` or
 /// `Option`, matching how return types are indexed.
 const STD_CONSTRUCTOR_RETURNS: &[(&str, &str)] = &[
+    ("Client::builder", "ClientBuilder"),
     ("Command::new", "Command"),
     ("File::create", "File"),
+    ("File::options", "OpenOptions"),
     ("File::open", "File"),
     ("OsString::from", "OsString"),
     ("PathBuf::from", "PathBuf"),
@@ -5178,7 +5235,83 @@ const STD_CONSTRUCTOR_RETURNS: &[(&str, &str)] = &[
     ("TcpStream::connect", "TcpStream"),
     ("Vec::new", "Vec"),
     ("Vec::with_capacity", "Vec"),
+    ("ureq::agent", "Agent"),
+    ("ureq::builder", "AgentBuilder"),
 ];
+
+/// Methods of external builder types that return the builder, keyed by the
+/// type token. Typing through them is what lets a receiver-typed sink see the
+/// end of a chain; anything not listed leaves the chain untyped.
+const EXTERNAL_BUILDER_METHODS: &[(&str, &[&str])] = &[
+    (
+        "Command",
+        &[
+            "arg",
+            "arg0",
+            "args",
+            "creation_flags",
+            "current_dir",
+            "env",
+            "env_clear",
+            "env_remove",
+            "envs",
+            "gid",
+            "groups",
+            "pre_exec",
+            "process_group",
+            "raw_arg",
+            "stderr",
+            "stdin",
+            "stdout",
+            "uid",
+        ],
+    ),
+    (
+        "OpenOptions",
+        &[
+            "append",
+            "create",
+            "create_new",
+            "custom_flags",
+            "mode",
+            "read",
+            "truncate",
+            "write",
+        ],
+    ),
+];
+
+/// External methods that finish a builder into the type the sinks key on.
+const EXTERNAL_METHOD_RETURNS: &[(&str, &str, &str)] = &[("OpenOptions", "open", "File")];
+
+/// The type an external method returns, when it is known: a listed builder
+/// method keeps the builder, a listed finisher names its product, and any
+/// method of a `*Builder` type other than `build` keeps the builder, which is
+/// the builder pattern's own contract (`build` then yields the type the name
+/// was built from, `ClientBuilder` → `Client`).
+fn external_method_return(receiver_type: &str, method: &str) -> Option<String> {
+    if EXTERNAL_BUILDER_METHODS
+        .iter()
+        .any(|(owner, methods)| *owner == receiver_type && methods.contains(&method))
+    {
+        return Some(receiver_type.to_string());
+    }
+    if let Some((_, _, returns)) = EXTERNAL_METHOD_RETURNS
+        .iter()
+        .find(|(owner, name, _)| *owner == receiver_type && *name == method)
+    {
+        return Some((*returns).to_string());
+    }
+    let built = receiver_type.strip_suffix("Builder")?;
+    if built.is_empty() {
+        return None;
+    }
+    if method == "build" {
+        Some(built.to_string())
+    } else {
+        Some(receiver_type.to_string())
+    }
+}
 
 /// Reduce a return type to the type a caller actually goes on to use.
 ///
@@ -5358,17 +5491,14 @@ fn infer_expr_type(
             if let Some(returns) = return_types.method(&receiver_type, method_name) {
                 return Some(returns.to_string());
             }
-            // No local method answers: the receiver is an external type
-            // (std or a dependency) whose method bodies the index never
-            // sees. A builder chain stays on its builder —
-            // `Command::new(..).arg(a).arg(b)` types every hop `Command`,
-            // because the real return type lives in a crate that was not
-            // analyzed — so the receiver's type carries through rather than
-            // dropping the rest of the chain to unknown. For a local type
-            // this arm is unreachable for methods that exist (they answer
-            // above); it answers only for a method the type does not
-            // define, where unknown bought nothing.
-            Some(receiver_type)
+            // No local method answers: the receiver is an external type whose
+            // method bodies the index never sees. Only the methods known to
+            // hand back a builder carry a type through, so the chained
+            // `Command::new(..).arg(a).arg(b)` types every hop `Command`.
+            // Carrying the receiver through every unknown method instead typed
+            // `resp.headers()` as the client it came from, and a later
+            // `headers.get(&key)` fired the HTTP-client `get` sink.
+            external_method_return(&receiver_type, method_name)
         }
         SimpleExpr::Compose(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
     }
@@ -6885,14 +7015,39 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
+            // `write!`/`writeln!` are sinks only by their writer: argument 0,
+            // typed as the receiver. A file or socket is one; the far more
+            // common `String` buffer and `fmt::Formatter` (every `Display`
+            // impl) are not, and an untyped writer fires nothing. The values
+            // follow the writer; the writer itself is not relevant, because a
+            // file opened at a tainted path is already the open call's sink.
             DataFlowPattern {
                 target: "sink".to_string(),
-                pattern: "write!#file".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
                 category: "filesystem-write".to_string(),
-                // 0 is the write target (a tainted path written through
-                // counts), then the value arguments the macro lowered.
-                relevant_arguments: vec![0, 1, 2, 3, 4],
-                receiver_type: None,
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("File".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("BufWriter".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("LineWriter".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("TcpStream".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
@@ -11398,6 +11553,67 @@ pub fn fetch_tainted() {
     }
 
     #[test]
+    fn only_builder_methods_carry_an_external_receiver_type() {
+        // `resp.headers()` is not a client, so a lookup on its result is not
+        // an outbound request; builder chains still type their last hop.
+        let root = fixture_crate(
+            "external-builder-types",
+            r#"
+use std::process::Command;
+
+pub fn header_lookup(url: &str) -> Option<String> {
+    let key = std::env::var("HEADER").unwrap_or_default();
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(url).send().unwrap();
+    let headers = response.headers();
+    headers.get(&key).map(|value| value.to_str().unwrap().to_string())
+}
+
+pub fn built_client() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let _ = client.get(&target).send();
+}
+
+pub fn command_chain() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    Command::new("sh").env("A", "b").current_dir("/").arg(target).status().unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let env_flows: BTreeSet<(&str, &str)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env")
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    slice.sink_category.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            env_flows,
+            BTreeSet::from([
+                ("built_client", "network-request"),
+                ("command_chain", "process-exec"),
+            ])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn write_macros_are_filesystem_sinks() {
         let root = fixture_crate(
             "write-macro-sink",
@@ -11431,6 +11647,85 @@ pub fn log_tainted() -> std::io::Result<()> {
                 .iter()
                 .map(|slice| (&slice.source_category, &slice.sink_category))
                 .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_macros_are_sinks_only_for_file_and_socket_writers() {
+        let root = fixture_crate(
+            "write-macro-writers",
+            r#"
+use std::fmt::Write as _;
+use std::io::Write as _;
+
+pub fn into_string() -> String {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut buffer = String::new();
+    write!(buffer, "{}", secret).unwrap();
+    buffer
+}
+
+pub fn to_stdout() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    writeln!(std::io::stdout(), "{}", secret).unwrap();
+}
+
+pub struct Shown(pub String);
+impl std::fmt::Display for Shown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub fn render(f: &mut std::fmt::Formatter<'_>, value: &str) -> std::fmt::Result {
+    write!(f, "{value}")
+}
+
+pub fn buffered_file() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut writer = std::io::BufWriter::new(std::fs::File::create("/tmp/rusi-w").unwrap());
+    writeln!(writer, "{}", secret).unwrap();
+}
+
+pub fn appended_file_inline_argument() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut file = std::fs::OpenOptions::new().append(true).open("/tmp/rusi-w2").unwrap();
+    write!(file, "token={secret}").unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let sink_nodes: HashMap<&str, &rusi_schema::DataFlowNode> = data_flow
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
+        let mut writes: Vec<(&str, usize)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category == "filesystem-write")
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    sink_nodes[slice.sink_id.as_str()].position.line,
+                )
+            })
+            .collect();
+        writes.sort();
+        writes.dedup();
+        // Only the two file writers, each at its macro's own line: a String
+        // buffer, stdout, and a Formatter are not filesystem writes.
+        assert_eq!(
+            writes,
+            vec![("appended_file_inline_argument", 37), ("buffered_file", 31)]
         );
         let _ = fs::remove_dir_all(&root);
     }
