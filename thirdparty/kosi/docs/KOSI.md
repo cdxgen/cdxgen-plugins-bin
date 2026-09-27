@@ -258,6 +258,12 @@ read a result:
 - **Reflection, dynamic loading and generated code** are reported as
   conditions (`dynamic-code-load`, `generated-functions`,
   `dataflow-skip-generated`), not silently followed.
+- **Function values kosi cannot name.** A call site that invokes a value the
+  engine could not resolve stops taint; the `taint-unnameable-invoke`
+  diagnostic counts the sites AND names the enclosing functions, so a
+  classpath-less run can see that a framework sink (a `JdbcTemplate` the jars
+  never arrived for) was unexamined rather than clean. Framework sinks
+  resolve when the project classpath is passed (`--classpath-file`).
 
 ## How cdxgen consumes it
 

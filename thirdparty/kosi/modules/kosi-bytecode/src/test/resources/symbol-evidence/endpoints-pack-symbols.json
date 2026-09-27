@@ -1619,7 +1619,6 @@
     "io.vertx.ext.web.Router.getWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
     "io.vertx.ext.web.Router.head: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
     "io.vertx.ext.web.Router.headWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
-    "io.vertx.ext.web.Router.mountSubRouter: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
     "io.vertx.ext.web.Router.options: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
     "io.vertx.ext.web.Router.optionsWithRegex: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",
     "io.vertx.ext.web.Router.patch: added after the pinned derivation; the pinned artifact is not held on the machine that recorded it — unverified, not inferred",

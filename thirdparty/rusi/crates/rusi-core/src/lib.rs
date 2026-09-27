@@ -237,6 +237,12 @@ enum Operation {
         field: String,
         value: SimpleExpr,
     },
+    /// `*target = value` — a write through a dereference, the shape an
+    /// out-parameter fills (`fn load(v: &mut String) { *v = .. }`).
+    AssignDeref {
+        target: String,
+        value: SimpleExpr,
+    },
     Expr(SimpleExpr),
     Return(SimpleExpr),
     // Matched where loop operations are walked, but not yet emitted by the
@@ -284,6 +290,12 @@ struct FunctionSummary {
     param_to_sink: BTreeMap<String, BTreeSet<usize>>,
     param_to_field_sink: BTreeMap<(usize, String), BTreeSet<String>>,
     field_to_return: BTreeSet<String>,
+    /// Parameter indexes the callee writes through a dereference with taint
+    /// from a source (`fn load(v: &mut String) { *v = env::var(..) }`): the
+    /// caller's variable at that position carries the source afterwards.
+    param_written_sources: BTreeMap<usize, BTreeSet<String>>,
+    /// Same, for taint copied from another parameter into the written one.
+    param_written_params: BTreeMap<usize, BTreeSet<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1398,6 +1410,7 @@ fn rewrite_operation_paths(
     match operation {
         Operation::Assign { value, .. }
         | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
         | Operation::Expr(value)
         | Operation::Return(value) => rewrite_expr_paths(value, resolution, module_path),
         Operation::LoopBody(operations) => {
@@ -1882,9 +1895,61 @@ struct FunctionFrame {
     /// but the per-statement trees, which are the bulk of the memory, are not
     /// retained.
     collect_bodies: bool,
+    /// Closures bound to a local of this frame (`let f = |u| ..`), in binding
+    /// order. Calls through the binding are rewritten to the closure's own
+    /// record when the frame finishes (see [`FunctionFrame::apply_bound_closures`]).
+    bound_closures: Vec<BoundClosure>,
+}
+
+/// A closure bound to a local, and where in its frame the binding took effect.
+#[derive(Debug, Clone)]
+struct BoundClosure {
+    /// The local the closure is bound to, which is what call sites name.
+    binding: String,
+    /// The closure record's qualified name, which the call graph and the
+    /// summaries resolve.
+    callee: String,
+    /// Variables the closure body reads from its enclosing function. They are
+    /// appended to the closure's parameters and to every call through the
+    /// binding, so a captured value's taint rides the ordinary argument path.
+    captures: Vec<String>,
+    /// Index of the first frame operation recorded after the binding: earlier
+    /// operations name whatever the identifier meant before it.
+    first_operation: usize,
+    /// Same, for the frame's call records.
+    first_call: usize,
 }
 
 impl FunctionFrame {
+    /// Rewrites calls through a closure binding to the closure record itself.
+    ///
+    /// Scoped to this frame and to the operations after the binding: a local
+    /// name is not a crate-wide symbol, so resolving `f(x)` through a global
+    /// alias would bind every same-named call in the crate to this closure.
+    fn apply_bound_closures(&mut self) {
+        if self.bound_closures.is_empty() {
+            return;
+        }
+        let bound = std::mem::take(&mut self.bound_closures);
+        for (index, operation) in self.operations.iter_mut().enumerate() {
+            rewrite_bound_closure_operation(operation, &|name| {
+                bound_closure_in_effect(&bound, name, index, |closure| closure.first_operation)
+                    .cloned()
+            });
+        }
+        for (index, call) in self.direct_calls.iter_mut().enumerate() {
+            if call.receiver_text.is_none()
+                && let Some(closure) =
+                    bound_closure_in_effect(&bound, &call.callee_text, index, |closure| {
+                        closure.first_call
+                    })
+            {
+                call.callee_text = closure.callee.clone();
+            }
+        }
+        self.bound_closures = bound;
+    }
+
     fn record_operation(&mut self, operation: Operation) {
         if self.collect_bodies {
             self.operations.push(operation);
@@ -1995,6 +2060,16 @@ impl SourceCollector {
         if path == "macro_rules" {
             self.unanalyzed_macros.insert(format!("{path}!"));
             return;
+        }
+        // A `write!`/`writeln!` in statement position, or under a chained
+        // method (`write!(f, ..).unwrap()`), reaches the sink matcher only
+        // if the macro itself is recorded as an operation — the statement
+        // visitor's `simple_expr` never sees it in those positions. The
+        // arguments are still visited below for nested usages.
+        if let Some(expr) = write_macro_simple_expr(&path, &mac.tokens, mac.path.span())
+            && let Some(frame) = self.current_function.as_mut()
+        {
+            frame.record_operation(Operation::Expr(expr));
         }
         let tokens = mac.tokens.clone();
         if tokens.is_empty() {
@@ -2166,7 +2241,14 @@ impl SourceCollector {
         }
     }
 
-    fn collect_inline_closure(&mut self, closure: &ExprClosure, source_category: Option<&str>) {
+    /// Collects an inline closure as its own callable record and returns the
+    /// record's declaration id, so a caller that binds the closure to a local
+    /// (`let f = |u| ..; f(x)`) can route calls through the binding to it.
+    fn collect_inline_closure(
+        &mut self,
+        closure: &ExprClosure,
+        source_category: Option<&str>,
+    ) -> String {
         let name = closure_symbol_name(closure.span());
         let declaration = self.push_declaration(
             &name,
@@ -2175,6 +2257,7 @@ impl SourceCollector {
             None,
             closure.span(),
         );
+        let id = declaration.id.clone();
         let position = position_from_span(&self.file_ctx.relative_file_path, closure.span());
         if let Some(parent) = self.current_function.as_mut() {
             parent.record_call(SimplifiedCall {
@@ -2199,12 +2282,14 @@ impl SourceCollector {
             declared_element_types: BTreeMap::new(),
             loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
+            bound_closures: Vec::new(),
         });
         visit_callable_body(self, &closure.body);
         let mut finished = self.current_function.take().expect("closure frame exists");
         if let Some(tail_expr) = callable_body_tail_expr(&closure.body) {
             finished.operations.push(Operation::Return(tail_expr));
         }
+        finished.apply_bound_closures();
         let param_types = closure_parameter_types(closure);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2230,6 +2315,7 @@ impl SourceCollector {
             has_body: self.collect_bodies,
         });
         self.current_function = previous;
+        id
     }
 }
 
@@ -2296,12 +2382,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
             declared_element_types: BTreeMap::new(),
             loop_iterables: Vec::new(),
             collect_bodies: self.collect_bodies,
+            bound_closures: Vec::new(),
         });
         syn::visit::visit_block(self, &node.block);
         let mut finished = self.current_function.take().expect("function frame exists");
         if let Some(tail_expr) = block_tail_expr(&node.block) {
             finished.operations.push(Operation::Return(tail_expr));
         }
+        finished.apply_bound_closures();
         let param_types = function_parameter_types(&node.sig);
         self.functions.push(FunctionRecord {
             declaration,
@@ -2372,12 +2460,14 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     declared_element_types: BTreeMap::new(),
                     loop_iterables: Vec::new(),
                     collect_bodies: self.collect_bodies,
+                    bound_closures: Vec::new(),
                 });
                 syn::visit::visit_block(self, &method.block);
                 let mut finished = self.current_function.take().expect("method frame exists");
                 if let Some(tail_expr) = block_tail_expr(&method.block) {
                     finished.operations.push(Operation::Return(tail_expr));
                 }
+                finished.apply_bound_closures();
                 let param_types = function_parameter_types(&method.sig);
                 self.functions.push(FunctionRecord {
                     declaration,
@@ -2549,6 +2639,39 @@ impl<'ast> Visit<'ast> for SourceCollector {
         if let Some(rule) = classify_stable_crypto_call(&callee_name, None) {
             self.push_crypto_component(&rule, node.span(), "syntax-call");
         }
+        // Mutating the process environment is a security-relevant hotspot
+        // (`env::set_var` is `unsafe` from the 2024 edition for its
+        // thread-safety), so it is signalled like unsafe code rather than
+        // left invisible.
+        {
+            let last_two = callee_name.rsplit("::").take(2).collect::<Vec<_>>();
+            let suffix = if last_two.len() == 2 {
+                format!("{}::{}", last_two[1], last_two[0])
+            } else {
+                callee_name.clone()
+            };
+            if suffix == "env::set_var" || suffix == "env::remove_var" {
+                self.security_signals.push(SecuritySignal {
+                    id: stable_id(
+                        "signal",
+                        &[
+                            &self.file_ctx.relative_file_path,
+                            "env-mutation",
+                            &span_key(node.span()),
+                        ],
+                    ),
+                    category: "env-mutation".to_string(),
+                    severity: "low".to_string(),
+                    confidence: "high".to_string(),
+                    description: format!("environment mutation via {suffix}"),
+                    package_path: self.file_ctx.package_path.clone(),
+                    purl: String::new(),
+                    file_path: self.file_ctx.relative_file_path.clone(),
+                    position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                    cfg_gate: self.current_cfg_gate(),
+                });
+            }
+        }
         let usage_id = stable_id(
             "usage",
             &[
@@ -2625,13 +2748,28 @@ impl<'ast> Visit<'ast> for SourceCollector {
             properties,
         });
 
+        // A lazy initializer's closure argument is recorded as a call of the
+        // closure's own record: the value stored is what the closure returns,
+        // which is how `TOKEN.get_or_init(|| env::var(..))` seeds the static.
+        let lazy_initializer = STATIC_STORE_METHODS.contains(&node.method.to_string().as_str());
+        let mut args = vec![simple_expr(&node.receiver)];
+        args.extend(node.args.iter().map(|arg| match arg {
+            Expr::Closure(closure) if lazy_initializer => SimpleExpr::Call {
+                callee: qualify_name(&self.file_ctx, None, &closure_symbol_name(closure.span())),
+                args: Vec::new(),
+                position: position_from_span(&self.file_ctx.relative_file_path, closure.span()),
+            },
+            other => simple_expr(other),
+        }));
         if let Some(frame) = self.current_function.as_mut() {
-            let mut args = vec![simple_expr(&node.receiver)];
-            args.extend(node.args.iter().map(simple_expr));
             let call = SimpleExpr::Call {
                 callee: callee_name.clone(),
                 args: args.clone(),
-                position: position_from_span(&self.file_ctx.relative_file_path, node.span()),
+                // The METHOD token's span, matching the statement-level
+                // MethodCall record of the same call: the sink nodes the two
+                // records produce must share an id, or every sink fires
+                // twice — once per form.
+                position: position_from_span(&self.file_ctx.relative_file_path, node.method.span()),
             };
             frame.record_operation(Operation::Expr(call.clone()));
             frame.record_call(SimplifiedCall {
@@ -2688,9 +2826,19 @@ impl<'ast> Visit<'ast> for SourceCollector {
         // values, which are the dispatching half.
         if let Some(frame) = self.current_function.as_mut()
             && let Some(var) = loop_pattern_ident(&node.pat)
-            && let Some(iterable) = for_loop_iterable_path(&node.expr)
         {
-            frame.loop_iterables.push((var, iterable));
+            // The loop variable is bound from the iterable each iteration;
+            // recording the assignment carries the iterable's taint to it
+            // (`for a in env::args()` yields a tainted `a`, a call iterable
+            // included). A map/tuple pattern binds its last name, the values
+            // half.
+            frame.record_operation(Operation::Assign {
+                target: var.clone(),
+                value: simple_expr(&node.expr),
+            });
+            if let Some(iterable) = for_loop_iterable_path(&node.expr) {
+                frame.loop_iterables.push((var, iterable));
+            }
         }
         syn::visit::visit_expr_for_loop(self, node);
     }
@@ -2735,6 +2883,48 @@ impl<'ast> Visit<'ast> for SourceCollector {
         };
         if let Some((span, kind, name)) = secret_binding {
             self.push_crypto_material(span, kind, &name);
+        }
+        // A closure bound to a local (`let f = |u| ..; f(x)`) is called by
+        // the binding's name. The closure is collected as its own record here,
+        // before the frame borrow below records assignments, because the
+        // collector and the frame cannot be borrowed at once. The variables it
+        // reads from this function become trailing parameters, and calls
+        // through the binding are rewritten to pass them when the frame
+        // finishes.
+        let mut bound_closure = false;
+        if let Stmt::Local(local) = node
+            && self.current_function.is_some()
+            && let Some(init) = &local.init
+            && let Pat::Ident(PatIdent { ident, .. }) = match &local.pat {
+                Pat::Type(pat_type) => pat_type.pat.as_ref(),
+                other => other,
+            }
+            && let Expr::Closure(closure) = &*init.expr
+        {
+            let closure_id = self.collect_inline_closure(closure, None);
+            if let Some(record) = self
+                .functions
+                .iter_mut()
+                .rev()
+                .find(|record| record.declaration.id == closure_id)
+            {
+                let captures = closure_captures(record);
+                record.params.extend(captures.iter().cloned());
+                record
+                    .param_types
+                    .extend(captures.iter().map(|_| String::new()));
+                let callee = record.declaration.qualified_name.clone();
+                if let Some(frame) = self.current_function.as_mut() {
+                    frame.bound_closures.push(BoundClosure {
+                        binding: ident.to_string(),
+                        callee,
+                        captures,
+                        first_operation: frame.operations.len(),
+                        first_call: frame.direct_calls.len(),
+                    });
+                }
+                bound_closure = true;
+            }
         }
         if let Some(frame) = self.current_function.as_mut() {
             match node {
@@ -2793,6 +2983,30 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                 target: rx_name,
                                 value: simple_expr(&init.expr),
                             });
+                        } else if let Pat::Tuple(pat_tuple) = pattern {
+                            // Tuple destructuring. Against a tuple literal the
+                            // element expression binds directly; against
+                            // anything else (a var, a call) a positional field
+                            // read is recorded, whose whole-object fallback
+                            // keeps soundness when the tuple was bound whole.
+                            let value = simple_expr(&init.expr);
+                            for (index, elem) in pat_tuple.elems.iter().enumerate() {
+                                if let Pat::Ident(PatIdent { ident, .. }) = elem {
+                                    let elem_expr = match &value {
+                                        SimpleExpr::Compose(items) => {
+                                            items.get(index).cloned().unwrap_or(SimpleExpr::Unknown)
+                                        }
+                                        other => SimpleExpr::Field {
+                                            base: Box::new(other.clone()),
+                                            field: index.to_string(),
+                                        },
+                                    };
+                                    frame.record_operation(Operation::Assign {
+                                        target: ident.to_string(),
+                                        value: elem_expr,
+                                    });
+                                }
+                            }
                         } else if let Pat::Ident(PatIdent { ident, .. }) = pattern {
                             if let Expr::Field(ExprField { base, member, .. }) = &*init.expr
                                 && let Some(target_var) = extract_path_name(base)
@@ -2858,6 +3072,29 @@ impl<'ast> Visit<'ast> for SourceCollector {
                                 field: qualified_field,
                                 value: simple_expr(&assign.right),
                             });
+                        } else if let syn::Expr::Unary(syn::ExprUnary {
+                            op: syn::UnOp::Deref(_),
+                            expr: deref_target,
+                            ..
+                        }) = &*assign.left
+                            && let Some(target) = dotted_ident_path(deref_target)
+                        {
+                            // `*v = value`: a write through a reference, the
+                            // out-parameter shape (`fn load(v: &mut String)
+                            // { *v = .. }`).
+                            frame.record_operation(Operation::AssignDeref {
+                                target,
+                                value: simple_expr(&assign.right),
+                            });
+                        } else if let Some(target) = dotted_ident_path(&assign.left) {
+                            // A plain re-assignment (`s = x.clone();`) is an
+                            // assignment to the binding, not an opaque
+                            // expression: recording it as Assign keeps the
+                            // binding's taint current.
+                            frame.record_operation(Operation::Assign {
+                                target,
+                                value: simple_expr(&assign.right),
+                            });
                         } else {
                             frame.record_operation(Operation::Expr(simple_expr(expr)));
                         }
@@ -2868,7 +3105,158 @@ impl<'ast> Visit<'ast> for SourceCollector {
                 _ => {}
             }
         }
-        syn::visit::visit_stmt(self, node);
+        if bound_closure && let Stmt::Local(local) = node {
+            // The closure body was collected as its own record above. Walking
+            // the initializer again would attribute every call, usage, and
+            // signal inside it to this function a second time.
+            syn::visit::visit_pat(self, &local.pat);
+            if let Some(init) = &local.init
+                && let Some((_, diverge)) = &init.diverge
+            {
+                syn::visit::visit_expr(self, diverge);
+            }
+        } else {
+            syn::visit::visit_stmt(self, node);
+        }
+    }
+}
+
+/// Variables a collected closure reads from its enclosing function: the plain
+/// names its operations reference that it neither declares as a parameter nor
+/// assigns itself. Paths (`std::env::var`) are not variables.
+fn closure_captures(record: &FunctionRecord) -> Vec<String> {
+    let mut referenced = BTreeSet::new();
+    let mut assigned = BTreeSet::new();
+    fn walk_operations(
+        operations: &[Operation],
+        referenced: &mut BTreeSet<String>,
+        assigned: &mut BTreeSet<String>,
+    ) {
+        for operation in operations {
+            match operation {
+                Operation::Assign { target, value }
+                | Operation::AssignField { target, value, .. }
+                | Operation::AssignDeref { target, value } => {
+                    if let Some(root) = target.split('.').next() {
+                        assigned.insert(root.to_string());
+                    }
+                    collect_expr_vars(value, referenced);
+                }
+                Operation::Expr(value) | Operation::Return(value) => {
+                    collect_expr_vars(value, referenced);
+                }
+                Operation::LoopBody(inner) => walk_operations(inner, referenced, assigned),
+            }
+        }
+    }
+    walk_operations(&record.operations, &mut referenced, &mut assigned);
+    referenced
+        .into_iter()
+        .filter(|name| !record.params.contains(name) && !assigned.contains(name))
+        .collect()
+}
+
+/// The root binding names a simplified expression reads.
+fn collect_expr_vars(expr: &SimpleExpr, out: &mut BTreeSet<String>) {
+    match expr {
+        SimpleExpr::Var(name) => {
+            let root = name.split('.').next().unwrap_or(name).trim();
+            if !root.is_empty()
+                && !root.contains("::")
+                && root
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+            {
+                out.insert(root.to_string());
+            }
+        }
+        SimpleExpr::Call { args, .. } => {
+            for arg in args {
+                collect_expr_vars(arg, out);
+            }
+        }
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            collect_expr_vars(receiver, out);
+            for arg in args {
+                collect_expr_vars(arg, out);
+            }
+        }
+        SimpleExpr::Compose(items) => {
+            for item in items {
+                collect_expr_vars(item, out);
+            }
+        }
+        SimpleExpr::Field { base, .. } => collect_expr_vars(base, out),
+        SimpleExpr::Reference { expr, .. } => collect_expr_vars(expr, out),
+        SimpleExpr::Literal | SimpleExpr::Unknown => {}
+    }
+}
+
+/// The closure binding of `name` in effect at a frame index: the last one made
+/// at or before it, so a shadowing `let f = ..` takes over from the earlier one.
+fn bound_closure_in_effect<'a>(
+    bound: &'a [BoundClosure],
+    name: &str,
+    index: usize,
+    first_index: fn(&BoundClosure) -> usize,
+) -> Option<&'a BoundClosure> {
+    bound
+        .iter()
+        .rfind(|closure| closure.binding == name && first_index(closure) <= index)
+}
+
+/// Applies [`FunctionFrame::apply_bound_closures`]' rewrite to one operation.
+fn rewrite_bound_closure_operation(
+    operation: &mut Operation,
+    binding_in_effect: &dyn Fn(&str) -> Option<BoundClosure>,
+) {
+    match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => rewrite_bound_closure_expr(value, binding_in_effect),
+        Operation::LoopBody(inner) => {
+            for operation in inner {
+                rewrite_bound_closure_operation(operation, binding_in_effect);
+            }
+        }
+    }
+}
+
+fn rewrite_bound_closure_expr(
+    expr: &mut SimpleExpr,
+    binding_in_effect: &dyn Fn(&str) -> Option<BoundClosure>,
+) {
+    match expr {
+        SimpleExpr::Call { callee, args, .. } => {
+            for arg in args.iter_mut() {
+                rewrite_bound_closure_expr(arg, binding_in_effect);
+            }
+            if let Some(closure) = binding_in_effect(callee) {
+                *callee = closure.callee.clone();
+                args.extend(
+                    closure
+                        .captures
+                        .iter()
+                        .map(|name| SimpleExpr::Var(name.clone())),
+                );
+            }
+        }
+        SimpleExpr::MethodCall { receiver, args, .. } => {
+            rewrite_bound_closure_expr(receiver, binding_in_effect);
+            for arg in args.iter_mut() {
+                rewrite_bound_closure_expr(arg, binding_in_effect);
+            }
+        }
+        SimpleExpr::Compose(items) => {
+            for item in items.iter_mut() {
+                rewrite_bound_closure_expr(item, binding_in_effect);
+            }
+        }
+        SimpleExpr::Field { base, .. } => rewrite_bound_closure_expr(base, binding_in_effect),
+        SimpleExpr::Reference { expr, .. } => rewrite_bound_closure_expr(expr, binding_in_effect),
+        SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
     }
 }
 
@@ -3299,17 +3687,126 @@ fn rewrite_static_ref_tokens(tokens: proc_macro2::TokenStream) -> proc_macro2::T
     output
 }
 
+/// The pseudo-callee a `write!`/`writeln!` macro lowers to. Which sink it is
+/// depends on the writer's type (see the `write!#io` patterns): a file or a
+/// socket is one, a `String` or a `fmt::Formatter` is not.
+const WRITE_MACRO_CALLEE: &str = "write!#io";
+
+/// The pseudo-call a `write!`/`writeln!` macro lowers to, from its raw tokens:
+/// `[writer, values..]`, with the format string replaced by the variables its
+/// inline placeholders name (`"{secret}"`). The position is the macro name's,
+/// so the statement-form and expression-form records of one macro produce one
+/// sink node.
+fn write_macro_simple_expr(
+    path: &str,
+    tokens: &proc_macro2::TokenStream,
+    span: proc_macro2::Span,
+) -> Option<SimpleExpr> {
+    if path != "write" && path != "writeln" {
+        return None;
+    }
+    let args = Punctuated::<Expr, Token![,]>::parse_terminated
+        .parse2(tokens.clone())
+        .ok()?;
+    let mut args_iter = args.into_iter();
+    let writer = args_iter.next()?;
+    let mut call_args = vec![simple_expr(&writer)];
+    call_args.extend(format_macro_values(args_iter));
+    let start = span.start();
+    Some(SimpleExpr::Call {
+        callee: WRITE_MACRO_CALLEE.to_string(),
+        args: call_args,
+        position: Position {
+            filename: String::new(),
+            line: start.line,
+            column: start.column + 1,
+        },
+    })
+}
+
+/// The values a format-style macro interpolates: the arguments after the
+/// format string, plus the variables its inline placeholders capture
+/// (`format!("{name}")` reads `name` without passing it).
+fn format_macro_values(mut args: impl Iterator<Item = Expr>) -> Vec<SimpleExpr> {
+    let mut values = Vec::new();
+    match args.next() {
+        Some(Expr::Lit(ExprLit {
+            lit: Lit::Str(template),
+            ..
+        })) => values.extend(
+            inline_format_captures(&template.value())
+                .into_iter()
+                .map(SimpleExpr::Var),
+        ),
+        Some(other) => values.push(simple_expr(&other)),
+        None => {}
+    }
+    values.extend(args.map(|arg| simple_expr(&arg)));
+    values
+}
+
+/// Identifiers named by a format string's inline placeholders: `{name}`,
+/// `{name:?}`, `{name:>8}`. Positional (`{0}`), empty (`{}`), and escaped
+/// (`{{`) placeholders capture nothing.
+fn inline_format_captures(template: &str) -> Vec<String> {
+    let mut captures = Vec::new();
+    let mut chars = template.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '{' {
+            continue;
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next();
+            continue;
+        }
+        let mut name = String::new();
+        for next in chars.by_ref() {
+            if next == '}' || next == ':' {
+                break;
+            }
+            name.push(next);
+        }
+        let name = name.trim();
+        let is_identifier = name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_alphabetic() || first == '_')
+            && name
+                .chars()
+                .all(|character| character.is_alphanumeric() || character == '_');
+        if is_identifier && !captures.iter().any(|seen| seen == name) {
+            captures.push(name.to_string());
+        }
+    }
+    captures
+}
+
 fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
+    if expr.mac.path.is_ident("write") || expr.mac.path.is_ident("writeln") {
+        return write_macro_simple_expr(
+            &path_to_string(&expr.mac.path),
+            &expr.mac.tokens,
+            expr.mac.path.span(),
+        );
+    }
+    // `vec![a, b]` behaves like the tuple it builds for taint purposes:
+    // a whole-container binding made of the elements' taints.
+    if expr.mac.path.is_ident("vec") {
+        let args = Punctuated::<Expr, Token![,]>::parse_terminated
+            .parse2(expr.mac.tokens.clone())
+            .ok()?;
+        return Some(SimpleExpr::Compose(
+            args.into_iter().map(|arg| simple_expr(&arg)).collect(),
+        ));
+    }
     if !expr.mac.path.is_ident("format") {
         return None;
     }
 
     let parser = Punctuated::<Expr, Token![,]>::parse_terminated;
     let args = parser.parse2(expr.mac.tokens.clone()).ok()?;
-    let mut args_iter = args.into_iter();
-    let first = args_iter.next();
     let html_template = matches!(
-        first,
+        args.first(),
         Some(Expr::Lit(ExprLit {
             lit: Lit::Str(value),
             ..
@@ -3322,7 +3819,7 @@ fn parse_macro_like_call(expr: &ExprMacro) -> Option<SimpleExpr> {
     };
     Some(SimpleExpr::Call {
         callee: callee.to_string(),
-        args: args_iter.map(|arg| simple_expr(&arg)).collect(),
+        args: format_macro_values(args.into_iter()),
         position: Position::default(),
     })
 }
@@ -4684,6 +5181,26 @@ fn resolutions_via_trait(
         .collect()
 }
 
+/// Container methods that store their arguments into the receiver, so the
+/// receiver binding becomes tainted by what was stored (`v.push(secret)`
+/// makes later reads of `v` carry `secret`). Argument 0 is the receiver, as
+/// in every method call the collector records. The slice copies
+/// (`buf.copy_from_slice(src)`) are the shape chunked byte loops write with.
+const RECEIVER_MUTATING_METHODS: &[&str] = &[
+    "append",
+    "clone_from_slice",
+    "copy_from_slice",
+    "extend",
+    "extend_from_slice",
+    "insert",
+    "insert_str",
+    "push",
+    "push_back",
+    "push_front",
+    "push_str",
+    "push_within_capacity",
+];
+
 /// Methods that yield their receiver's type.
 ///
 /// Typing a binding through them is what makes `connect()?.query(..)` and
@@ -4716,13 +5233,17 @@ const UNWRAPPING_METHODS: &[&str] = &[
 ];
 
 /// Standard-library constructors whose result type is worth knowing, since the
-/// value they produce is often what a sink is called on.
+/// value they produce is often what a sink is called on. The HTTP-client
+/// builder entry points are here too: the client they build is the receiver
+/// the `get`/`post`/.. sinks are restricted to.
 ///
 /// The second element is the type produced *after* unwrapping any `Result` or
 /// `Option`, matching how return types are indexed.
 const STD_CONSTRUCTOR_RETURNS: &[(&str, &str)] = &[
+    ("Client::builder", "ClientBuilder"),
     ("Command::new", "Command"),
     ("File::create", "File"),
+    ("File::options", "OpenOptions"),
     ("File::open", "File"),
     ("OsString::from", "OsString"),
     ("PathBuf::from", "PathBuf"),
@@ -4732,7 +5253,83 @@ const STD_CONSTRUCTOR_RETURNS: &[(&str, &str)] = &[
     ("TcpStream::connect", "TcpStream"),
     ("Vec::new", "Vec"),
     ("Vec::with_capacity", "Vec"),
+    ("ureq::agent", "Agent"),
+    ("ureq::builder", "AgentBuilder"),
 ];
+
+/// Methods of external builder types that return the builder, keyed by the
+/// type token. Typing through them is what lets a receiver-typed sink see the
+/// end of a chain; anything not listed leaves the chain untyped.
+const EXTERNAL_BUILDER_METHODS: &[(&str, &[&str])] = &[
+    (
+        "Command",
+        &[
+            "arg",
+            "arg0",
+            "args",
+            "creation_flags",
+            "current_dir",
+            "env",
+            "env_clear",
+            "env_remove",
+            "envs",
+            "gid",
+            "groups",
+            "pre_exec",
+            "process_group",
+            "raw_arg",
+            "stderr",
+            "stdin",
+            "stdout",
+            "uid",
+        ],
+    ),
+    (
+        "OpenOptions",
+        &[
+            "append",
+            "create",
+            "create_new",
+            "custom_flags",
+            "mode",
+            "read",
+            "truncate",
+            "write",
+        ],
+    ),
+];
+
+/// External methods that finish a builder into the type the sinks key on.
+const EXTERNAL_METHOD_RETURNS: &[(&str, &str, &str)] = &[("OpenOptions", "open", "File")];
+
+/// The type an external method returns, when it is known: a listed builder
+/// method keeps the builder, a listed finisher names its product, and any
+/// method of a `*Builder` type other than `build` keeps the builder, which is
+/// the builder pattern's own contract (`build` then yields the type the name
+/// was built from, `ClientBuilder` → `Client`).
+fn external_method_return(receiver_type: &str, method: &str) -> Option<String> {
+    if EXTERNAL_BUILDER_METHODS
+        .iter()
+        .any(|(owner, methods)| *owner == receiver_type && methods.contains(&method))
+    {
+        return Some(receiver_type.to_string());
+    }
+    if let Some((_, _, returns)) = EXTERNAL_METHOD_RETURNS
+        .iter()
+        .find(|(owner, name, _)| *owner == receiver_type && *name == method)
+    {
+        return Some((*returns).to_string());
+    }
+    let built = receiver_type.strip_suffix("Builder")?;
+    if built.is_empty() {
+        return None;
+    }
+    if method == "build" {
+        Some(built.to_string())
+    } else {
+        Some(receiver_type.to_string())
+    }
+}
 
 /// Reduce a return type to the type a caller actually goes on to use.
 ///
@@ -4909,9 +5506,17 @@ fn infer_expr_type(
                     None => Some(receiver_type),
                 };
             }
-            return_types
-                .method(&receiver_type, method)
-                .map(str::to_string)
+            if let Some(returns) = return_types.method(&receiver_type, method_name) {
+                return Some(returns.to_string());
+            }
+            // No local method answers: the receiver is an external type whose
+            // method bodies the index never sees. Only the methods known to
+            // hand back a builder carry a type through, so the chained
+            // `Command::new(..).arg(a).arg(b)` types every hop `Command`.
+            // Carrying the receiver through every unknown method instead typed
+            // `resp.headers()` as the client it came from, and a later
+            // `headers.get(&key)` fired the HTTP-client `get` sink.
+            external_method_return(&receiver_type, method_name)
         }
         SimpleExpr::Compose(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
     }
@@ -5147,6 +5752,13 @@ fn infer_type_bindings(
             let Some(var) = bare_ident(target) else {
                 continue;
             };
+            // A loop variable's binding is the iterable's ELEMENT type
+            // (inserted above); the taint assignment recorded for it names
+            // the whole iterable, and must not re-type the variable as the
+            // container.
+            if function.loop_iterables.iter().any(|(v, _)| *v == var) {
+                continue;
+            }
             let inferred = binding_from_simple_expr(target, value)
                 .map(|(_, ty)| ty)
                 .or_else(|| infer_expr_type(value, &bindings, field_types, return_types));
@@ -5792,6 +6404,8 @@ fn build_data_flow(
         return_types: &ReturnTypeIndex::build(functions),
     };
     let summaries = infer_summaries(functions, &local_index, &patterns, &indexes);
+    let static_source_seeds =
+        infer_static_source_seeds(functions, &summaries, &local_index, &patterns);
     let partials = parallel_map_collect(functions, |function| {
         let mut builder = DataFlowBuilder::new(
             mode,
@@ -5800,6 +6414,7 @@ fn build_data_flow(
             &local_index,
             &function_map,
             &indexes,
+            &static_source_seeds,
         );
         builder.materialize_function(function);
         builder
@@ -5811,6 +6426,7 @@ fn build_data_flow(
         &local_index,
         &function_map,
         &indexes,
+        &static_source_seeds,
     );
     for partial in partials {
         builder.merge_materialized(partial);
@@ -5897,6 +6513,53 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 target: "source".to_string(),
                 pattern: "fs::read".to_string(),
                 category: "file".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            // Method forms of the file reads: `File::open(p).read_to_string
+            // (&mut s)` reads through a handle rather than the one-call
+            // helpers, and the read lands in a `&mut` out-parameter.
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "read_to_string".to_string(),
+                category: "file".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "read_to_end".to_string(),
+                category: "file".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            // Whole-environment iteration yields attacker-adjacent values
+            // the same way a per-key lookup does.
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "std::env::vars".to_string(),
+                category: "env".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "env::vars".to_string(),
+                category: "env".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "std::env::vars_os".to_string(),
+                category: "env".to_string(),
+                relevant_arguments: vec![],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "source".to_string(),
+                pattern: "env::vars_os".to_string(),
+                category: "env".to_string(),
                 relevant_arguments: vec![],
                 receiver_type: None,
             },
@@ -6222,42 +6885,90 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 pattern: "get".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
-                receiver_type: None,
+                // A bare verb matches every same-named method in the crate
+                // (`HashMap::get(&key)` above all), so the sink fires only on
+                // a receiver actually typed as an HTTP client: `Client`
+                // (reqwest, hyper) or `Agent` (ureq). Two entries carry the
+                // two names; an unresolved receiver fires neither — the
+                // restriction's documented trade.
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "get".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "post".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
-                receiver_type: None,
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "post".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "put".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
-                receiver_type: None,
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "put".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "patch".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
-                receiver_type: None,
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "patch".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "delete".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![1],
-                receiver_type: None,
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "delete".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![1],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
                 pattern: "request".to_string(),
                 category: "network-request".to_string(),
                 relevant_arguments: vec![2],
-                receiver_type: None,
+                receiver_type: Some("Client".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: "request".to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: vec![2],
+                receiver_type: Some("Agent".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
@@ -6321,6 +7032,40 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 category: "network-request".to_string(),
                 relevant_arguments: vec![0],
                 receiver_type: None,
+            },
+            // `write!`/`writeln!` are sinks only by their writer: argument 0,
+            // typed as the receiver. A file or socket is one; the far more
+            // common `String` buffer and `fmt::Formatter` (every `Display`
+            // impl) are not, and an untyped writer fires nothing. The values
+            // follow the writer; the writer itself is not relevant, because a
+            // file opened at a tainted path is already the open call's sink.
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("File".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("BufWriter".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "filesystem-write".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("LineWriter".to_string()),
+            },
+            DataFlowPattern {
+                target: "sink".to_string(),
+                pattern: WRITE_MACRO_CALLEE.to_string(),
+                category: "network-request".to_string(),
+                relevant_arguments: (1..=16).collect(),
+                receiver_type: Some("TcpStream".to_string()),
             },
             DataFlowPattern {
                 target: "sink".to_string(),
@@ -7218,8 +7963,266 @@ pub fn built_in_dataflow_patterns() -> DataFlowPatternSet {
                 relevant_arguments: vec![0],
                 receiver_type: None,
             },
+            // Element and adapter accessors that hand back the receiver's
+            // contents (`map`, `filter`, `collect`, `to_vec`, `flat_map` and
+            // `join` are modelled above). The removals take an element out of
+            // a container a receiver-mutating method filled.
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "skip".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "take".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "cloned".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "copied".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "pop".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "pop_front".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "pop_back".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "front".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "back".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "remove".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "swap_remove".to_string(),
+                category: "collection-accessor".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "PathBuf::from".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
+            DataFlowPattern {
+                target: "passthrough".to_string(),
+                pattern: "Path::new".to_string(),
+                category: "value-wrapper".to_string(),
+                relevant_arguments: vec![0],
+                receiver_type: None,
+            },
         ],
     }
+}
+
+/// Methods that store a value into a once-initialized global: `set` takes the
+/// value, `get_or_init`/`get_or_try_init` take a closure whose result is
+/// stored (the collector records such a closure argument as a call of the
+/// closure's record, so its returned sources evaluate like a value).
+const STATIC_STORE_METHODS: &[&str] = &["set", "get_or_init", "get_or_try_init"];
+
+/// One source a global carrier was seeded with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StaticSeed {
+    category: String,
+    /// `NAME.set`, `NAME.get_or_init`, ..: how the source got in.
+    via: String,
+    /// The storing call, in the storing function's file.
+    position: Position,
+}
+
+/// Sources poured into global carriers anywhere in the analysis, keyed by
+/// the carrier's name. A static written by `NAME.set(<source>)` or
+/// `NAME.get_or_init(|| <source>)` — the `OnceLock`/`OnceCell` idiom —
+/// carries that source to every later `NAME.get()` read, in whatever function
+/// does the reading: statics have no scope, so the seed is workspace-wide.
+/// Only an UPPERCASE-initial receiver counts, the naming convention a global
+/// owes; a lowercase local that happens to own a `set` method is left alone.
+///
+/// The stored value is evaluated against the storing function's own bindings
+/// as they stand at the store, so `let k = env::var(..); TOKEN.set(k)` seeds
+/// `TOKEN` as surely as the inline form does.
+fn infer_static_source_seeds(
+    functions: &[FunctionRecord],
+    summaries: &BTreeMap<String, FunctionSummary>,
+    local_index: &HashMap<String, Vec<String>>,
+    patterns: &DataFlowPatternSet,
+) -> HashMap<String, Vec<StaticSeed>> {
+    let mut seeds: HashMap<String, Vec<StaticSeed>> = HashMap::new();
+    for function in functions {
+        let eval = |value: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+            eval_abstract_expr(
+                value,
+                env,
+                summaries,
+                &function.package_path,
+                local_index,
+                patterns,
+            )
+        };
+        let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+        for operation in &function.operations {
+            let expr = match operation {
+                Operation::Assign { target, value } | Operation::AssignDeref { target, value } => {
+                    let taint = eval(value, &env);
+                    env.insert(target.clone(), taint);
+                    continue;
+                }
+                Operation::AssignField {
+                    target,
+                    field,
+                    value,
+                } => {
+                    let taint = eval(value, &env);
+                    env.insert(format!("{target}.{field}"), taint);
+                    continue;
+                }
+                Operation::LoopBody(_) => continue,
+                Operation::Expr(expr) | Operation::Return(expr) => expr,
+            };
+            let Some((name, method, value, position)) = static_store(expr) else {
+                continue;
+            };
+            let mut position = position.clone();
+            if position.filename.is_empty() {
+                position.filename = function.file_path.clone();
+            }
+            for origin in eval(value, &env) {
+                if let AbstractOrigin::Source(category) = origin {
+                    let seed = StaticSeed {
+                        category,
+                        via: format!("{name}.{method}"),
+                        position: position.clone(),
+                    };
+                    let entry = seeds.entry(name.to_string()).or_default();
+                    if !entry.contains(&seed) {
+                        entry.push(seed);
+                    }
+                }
+            }
+        }
+    }
+    seeds
+}
+
+/// `(carrier, store method, stored value, call position)` when `expr` stores
+/// into an UPPERCASE global, from either record shape of a method call: the
+/// MethodCall statement form and the collector's call form with the receiver
+/// at argument 0.
+fn static_store(expr: &SimpleExpr) -> Option<(&str, &str, &SimpleExpr, &Position)> {
+    let is_global = |name: &str| name.chars().next().is_some_and(char::is_uppercase);
+    match expr {
+        SimpleExpr::MethodCall {
+            method,
+            receiver,
+            args,
+            position,
+        } if STATIC_STORE_METHODS.contains(&last_segment(method)) && args.len() == 1 => {
+            match receiver.as_ref() {
+                SimpleExpr::Var(name) if is_global(name) => {
+                    Some((name, last_segment(method), &args[0], position))
+                }
+                _ => None,
+            }
+        }
+        SimpleExpr::Call {
+            callee,
+            args,
+            position,
+        } if STATIC_STORE_METHODS.contains(&callee.as_str()) && args.len() == 2 => match &args[0] {
+            SimpleExpr::Var(name) if is_global(name) => {
+                Some((name, callee.as_str(), &args[1], position))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Where a function first names `name` as a call's receiver or argument: the
+/// read of a global carrier (`NAME.get()`), for placing its seed.
+fn first_named_use(operations: &[Operation], name: &str) -> Option<Position> {
+    fn in_expr(expr: &SimpleExpr, name: &str) -> Option<Position> {
+        let names = |candidate: &SimpleExpr| {
+            let mut vars = BTreeSet::new();
+            collect_expr_vars(candidate, &mut vars);
+            vars.contains(name)
+        };
+        match expr {
+            SimpleExpr::Call { args, position, .. } => args
+                .iter()
+                .find_map(|arg| in_expr(arg, name))
+                .or_else(|| args.iter().any(names).then(|| position.clone())),
+            SimpleExpr::MethodCall {
+                receiver,
+                args,
+                position,
+                ..
+            } => in_expr(receiver, name)
+                .or_else(|| args.iter().find_map(|arg| in_expr(arg, name)))
+                .or_else(|| (names(receiver) || args.iter().any(names)).then(|| position.clone())),
+            SimpleExpr::Compose(items) => items.iter().find_map(|item| in_expr(item, name)),
+            SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
+                in_expr(base, name)
+            }
+            SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => None,
+        }
+    }
+    operations.iter().find_map(|operation| match operation {
+        Operation::Assign { value, .. }
+        | Operation::AssignField { value, .. }
+        | Operation::AssignDeref { value, .. }
+        | Operation::Expr(value)
+        | Operation::Return(value) => in_expr(value, name),
+        Operation::LoopBody(inner) => first_named_use(inner, name),
+    })
 }
 
 fn infer_summaries(
@@ -7340,6 +8343,40 @@ fn summarize_function(
                 let key = format!("{}.{}", target, field);
                 env.insert(key, value_taint);
             }
+            Operation::AssignDeref { target, value } => {
+                let value_taint = eval_abstract_expr(
+                    value,
+                    &env,
+                    summaries,
+                    &function.package_path,
+                    local_index,
+                    patterns,
+                );
+                env.insert(target.clone(), value_taint.clone());
+                // A write through a parameter's dereference is visible in
+                // the CALLER's variable; the summary records what pours in
+                // so call sites can taint the `&mut` argument.
+                if let Some(index) = function.params.iter().position(|p| p == target) {
+                    for origin in &value_taint {
+                        match origin {
+                            AbstractOrigin::Source(category) => {
+                                summary
+                                    .param_written_sources
+                                    .entry(index)
+                                    .or_default()
+                                    .insert(category.clone());
+                            }
+                            AbstractOrigin::Param(from) => {
+                                summary
+                                    .param_written_params
+                                    .entry(index)
+                                    .or_default()
+                                    .insert(*from);
+                            }
+                        }
+                    }
+                }
+            }
             Operation::LoopBody(loop_ops) => {
                 let mut loop_env = env.clone();
                 for _iter in 0..3 {
@@ -7415,7 +8452,24 @@ fn summarize_function(
                 // set's `relevant_arguments` index them.
                 let call_parts = match expr {
                     SimpleExpr::Call { callee, args, .. } => {
-                        Some((callee.clone(), args.clone(), None))
+                        // A method call the collector recorded in call form
+                        // carries its receiver as argument 0 (the chained
+                        // `Command::new(x).arg(t)` shape never exists as a
+                        // top-level MethodCall). A bare callee names one, so
+                        // the receiver is typed from argument 0 — the same
+                        // inference the MethodCall arm runs. Qualified
+                        // callees are free functions and keep no receiver.
+                        let receiver_type = if !callee.contains("::") && !args.is_empty() {
+                            infer_expr_type(
+                                &args[0],
+                                &type_bindings,
+                                indexes.field_types,
+                                indexes.return_types,
+                            )
+                        } else {
+                            None
+                        };
+                        Some((callee.clone(), args.clone(), receiver_type))
                     }
                     SimpleExpr::MethodCall {
                         method,
@@ -7466,6 +8520,24 @@ fn summarize_function(
                         }
                     }
 
+                    // The writes the concrete pass models, so a helper's
+                    // summary carries them to its callers: a container method
+                    // storing into its receiver, a source call filling a
+                    // `&mut` argument, and a callee writing through a `&mut`
+                    // parameter.
+                    if let SimpleExpr::Call { .. } = expr {
+                        apply_summary_call_writes(
+                            function,
+                            callee,
+                            args,
+                            &mut env,
+                            &mut summary,
+                            summaries,
+                            local_index,
+                            patterns,
+                        );
+                    }
+
                     // Free calls only: a method's parameter indexes are shifted
                     // by the receiver, and resolving a bare method name here
                     // would propagate through any same-named function.
@@ -7503,6 +8575,150 @@ fn summarize_function(
         }
     }
     summary
+}
+
+/// The caller binding a `&mut` argument writes into: `&mut x`, or a parameter
+/// that is itself a `&mut` reference passed on (`fn outer(v: &mut String) {
+/// load(v) }`), which Rust reborrows without a `&mut` at the call.
+fn written_binding<'e>(arg: &'e SimpleExpr, function: &FunctionRecord) -> Option<&'e str> {
+    match arg {
+        SimpleExpr::Reference {
+            expr,
+            mutable: true,
+        } => match expr.as_ref() {
+            SimpleExpr::Var(name) => Some(name.as_str()),
+            _ => None,
+        },
+        SimpleExpr::Var(name) => function
+            .params
+            .iter()
+            .position(|param| param == name)
+            .filter(|index| {
+                function
+                    .param_types
+                    .get(*index)
+                    .is_some_and(|ty| ty.replace(' ', "").starts_with("&mut"))
+            })
+            .map(|_| name.as_str()),
+        _ => None,
+    }
+}
+
+/// Records origins poured into `binding` by a call, both in the abstract
+/// environment and, when `binding` is one of the function's own `&mut`
+/// parameters, in its summary: the write then reaches this function's callers
+/// too.
+fn record_summary_write(
+    function: &FunctionRecord,
+    binding: &str,
+    origins: &BTreeSet<AbstractOrigin>,
+    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    summary: &mut FunctionSummary,
+) {
+    if origins.is_empty() {
+        return;
+    }
+    env.entry(binding.to_string())
+        .or_default()
+        .extend(origins.iter().cloned());
+    let Some(index) = function.params.iter().position(|param| param == binding) else {
+        return;
+    };
+    for origin in origins {
+        match origin {
+            AbstractOrigin::Source(category) => {
+                summary
+                    .param_written_sources
+                    .entry(index)
+                    .or_default()
+                    .insert(category.clone());
+            }
+            AbstractOrigin::Param(from) if *from != index => {
+                summary
+                    .param_written_params
+                    .entry(index)
+                    .or_default()
+                    .insert(*from);
+            }
+            AbstractOrigin::Param(_) => {}
+        }
+    }
+}
+
+/// The abstract counterpart of the concrete pass's call-site writes: what a
+/// call stores into its receiver or into its `&mut` arguments.
+#[allow(clippy::too_many_arguments)]
+fn apply_summary_call_writes(
+    function: &FunctionRecord,
+    callee: &str,
+    args: &[SimpleExpr],
+    env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    summary: &mut FunctionSummary,
+    summaries: &BTreeMap<String, FunctionSummary>,
+    local_index: &HashMap<String, Vec<String>>,
+    patterns: &DataFlowPatternSet,
+) {
+    let eval = |expr: &SimpleExpr, env: &HashMap<String, BTreeSet<AbstractOrigin>>| {
+        eval_abstract_expr(
+            expr,
+            env,
+            summaries,
+            &function.package_path,
+            local_index,
+            patterns,
+        )
+    };
+    if RECEIVER_MUTATING_METHODS.contains(&callee)
+        && let Some(SimpleExpr::Var(receiver)) = args.first()
+    {
+        let mut stored = BTreeSet::new();
+        for arg in args.iter().skip(1) {
+            stored.extend(eval(arg, env));
+        }
+        record_summary_write(function, receiver, &stored, env, summary);
+    }
+    if let Some(source_match) = find_source_pattern(callee, &patterns.sources) {
+        let origins = BTreeSet::from([AbstractOrigin::Source(source_match.category)]);
+        for arg in args {
+            if let SimpleExpr::Reference { mutable: true, .. } = arg
+                && let Some(binding) = written_binding(arg, function)
+            {
+                record_summary_write(function, binding, &origins, env, summary);
+            }
+        }
+    }
+    let Some(callee_summary) =
+        resolve_call_target(callee, &function.package_path, local_index, None)
+            .and_then(|resolved| summaries.get(&resolved))
+    else {
+        return;
+    };
+    for (index, categories) in &callee_summary.param_written_sources {
+        if let Some(binding) = args
+            .get(*index)
+            .and_then(|arg| written_binding(arg, function))
+        {
+            let origins = categories
+                .iter()
+                .map(|category| AbstractOrigin::Source(category.clone()))
+                .collect();
+            record_summary_write(function, binding, &origins, env, summary);
+        }
+    }
+    for (index, froms) in &callee_summary.param_written_params {
+        if let Some(binding) = args
+            .get(*index)
+            .and_then(|arg| written_binding(arg, function))
+        {
+            let mut origins = BTreeSet::new();
+            for from in froms {
+                if let Some(arg) = args.get(*from) {
+                    origins.extend(eval(arg, env));
+                }
+            }
+            record_summary_write(function, binding, &origins, env, summary);
+        }
+    }
 }
 
 fn eval_abstract_expr(
@@ -7699,6 +8915,10 @@ struct DataFlowBuilder<'a> {
     local_index: &'a HashMap<String, Vec<String>>,
     function_map: &'a HashMap<String, &'a FunctionRecord>,
     indexes: &'a TypeIndexes<'a>,
+    /// Sources poured into global carriers anywhere in the analysis
+    /// (`TOKEN.set(env::var(..))`), keyed by the static's name: reads of the
+    /// same name carry them in every function.
+    static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
     /// Type bindings of the function currently being materialized.
     current_bindings: HashMap<String, String>,
     nodes: IndexMap<String, DataFlowNode>,
@@ -7715,6 +8935,7 @@ impl<'a> DataFlowBuilder<'a> {
         local_index: &'a HashMap<String, Vec<String>>,
         function_map: &'a HashMap<String, &'a FunctionRecord>,
         indexes: &'a TypeIndexes<'a>,
+        static_source_seeds: &'a HashMap<String, Vec<StaticSeed>>,
     ) -> Self {
         Self {
             mode,
@@ -7723,6 +8944,7 @@ impl<'a> DataFlowBuilder<'a> {
             local_index,
             function_map,
             indexes,
+            static_source_seeds,
             current_bindings: HashMap::new(),
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
@@ -7753,6 +8975,49 @@ impl<'a> DataFlowBuilder<'a> {
                 Some(idx),
             );
             env.insert(param.clone(), ConcreteTaint { paths: vec![path] });
+        }
+        // A global carrier seeded anywhere in the analysis is tainted from the
+        // start of every function that reads it: a static has no scope, and
+        // the write may happen in a function analyzed later. The source node
+        // sits at this function's read and records where the seed was stored;
+        // a function that never names the carrier gets no node at all.
+        let mut seeded_names: Vec<&String> = self.static_source_seeds.keys().collect();
+        seeded_names.sort();
+        for name in seeded_names {
+            let Some(mut read_at) = first_named_use(&function.operations, name) else {
+                continue;
+            };
+            if read_at.filename.is_empty() {
+                read_at.filename = function.file_path.clone();
+            }
+            let mut taint = env.get(name).cloned().unwrap_or_default();
+            for seed in &self.static_source_seeds[name] {
+                let mut path = self.new_source_path(
+                    function,
+                    &seed.via,
+                    &seed.category,
+                    read_at.clone(),
+                    None,
+                );
+                // On the path's own copy too: slices carry their step nodes,
+                // and merging partial builders re-inserts nodes from them.
+                let seeded_at = format!(
+                    "{}:{}:{}",
+                    seed.position.filename, seed.position.line, seed.position.column
+                );
+                path.steps[0]
+                    .node
+                    .properties
+                    .insert("seededAt".to_string(), seeded_at.clone());
+                if let Some(node) = self.nodes.get_mut(&path.steps[0].node.id) {
+                    node.properties.insert("seededAt".to_string(), seeded_at);
+                }
+                taint.paths.push(path);
+            }
+            let bounded = taint.bounded();
+            if !bounded.paths.is_empty() {
+                env.insert(name.clone(), bounded);
+            }
         }
         for operation in &function.operations {
             match operation {
@@ -7826,6 +9091,12 @@ impl<'a> DataFlowBuilder<'a> {
                         env.insert(key, taint);
                     }
                 }
+                Operation::AssignDeref { target, value } => {
+                    let taint = self.eval_concrete_expr(function, value, &env);
+                    if !taint.paths.is_empty() {
+                        env.insert(target.clone(), taint);
+                    }
+                }
                 Operation::LoopBody(loop_ops) => {
                     let mut loop_env = env.clone();
                     for _iter in 0..4 {
@@ -7871,7 +9142,27 @@ impl<'a> DataFlowBuilder<'a> {
                             callee,
                             args,
                             position,
-                        } => (callee.clone(), args.clone(), position.clone(), None),
+                        } => {
+                            // See the abstract pass: a bare callee is a
+                            // method call recorded in call form, its receiver
+                            // sitting at argument 0.
+                            let receiver_type = if !callee.contains("::") && !args.is_empty() {
+                                infer_expr_type(
+                                    &args[0],
+                                    &self.current_bindings,
+                                    self.indexes.field_types,
+                                    self.indexes.return_types,
+                                )
+                            } else {
+                                None
+                            };
+                            (
+                                callee.clone(),
+                                args.clone(),
+                                position.clone(),
+                                receiver_type,
+                            )
+                        }
                         SimpleExpr::MethodCall {
                             method,
                             receiver,
@@ -7913,6 +9204,55 @@ impl<'a> DataFlowBuilder<'a> {
                                         position,
                                     );
                                 }
+                            }
+                        }
+                        // A source-pattern call that fills a `&mut`
+                        // out-parameter (`handle.read_to_string(&mut buf)`)
+                        // seeds that parameter with the source's taint: the
+                        // value the callee read is the untrusted input and it
+                        // lands in the caller's variable, not in the call's
+                        // (discarded) result.
+                        if let Some(source_match) =
+                            find_source_pattern(callee, &self.patterns.sources)
+                        {
+                            for arg in args {
+                                if let SimpleExpr::Reference {
+                                    expr,
+                                    mutable: true,
+                                } = arg
+                                    && let SimpleExpr::Var(var_name) = expr.as_ref()
+                                {
+                                    let path = self.new_source_path(
+                                        function,
+                                        callee,
+                                        &source_match.category,
+                                        position.clone(),
+                                        None,
+                                    );
+                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                    taint.paths.push(path);
+                                    env.insert(var_name.clone(), taint.bounded());
+                                }
+                            }
+                        }
+                        // A receiver-mutating container method
+                        // (`v.push(x)`, `m.insert(k, x)`) stores its
+                        // arguments INTO the receiver: the stored value is
+                        // reachable through later reads of the container, so
+                        // the receiver binding carries the stored taint.
+                        if RECEIVER_MUTATING_METHODS.contains(&callee.as_str())
+                            && let Some(SimpleExpr::Var(name)) = args.first()
+                        {
+                            let mut stored = ConcreteTaint::default();
+                            for arg in args.iter().skip(1) {
+                                stored
+                                    .paths
+                                    .extend(self.eval_concrete_expr(function, arg, &env).paths);
+                            }
+                            if !stored.paths.is_empty() {
+                                let mut taint = env.get(name).cloned().unwrap_or_default();
+                                taint.paths.extend(stored.paths);
+                                env.insert(name.clone(), taint.bounded());
                             }
                         }
                         // P4.1 out-parameter mutation: only propagate
@@ -8008,6 +9348,57 @@ impl<'a> DataFlowBuilder<'a> {
                                             position,
                                         );
                                     }
+                                }
+                            }
+                            // The callee writes through a `&mut` parameter
+                            // (`fn load(v: &mut String) { *v = env::var(..)
+                            // }`): the caller's variable at that position
+                            // carries what the summary says was poured in.
+                            let callee_name = self
+                                .function_map
+                                .get(&resolved)
+                                .map(|f| f.declaration.qualified_name.clone())
+                                .unwrap_or_else(|| callee.to_string());
+                            let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
+                            for (param_index, categories) in &summary.param_written_sources {
+                                let Some(var_name) = args
+                                    .get(*param_index)
+                                    .and_then(|arg| written_binding(arg, function))
+                                else {
+                                    continue;
+                                };
+                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                for category in categories {
+                                    taint.paths.push(self.new_source_path(
+                                        function,
+                                        &callee_name,
+                                        category,
+                                        position.clone(),
+                                        None,
+                                    ));
+                                }
+                                out_param_writes.push((var_name.to_string(), taint.bounded()));
+                            }
+                            for (writee, sources) in &summary.param_written_params {
+                                let Some(var_name) = args
+                                    .get(*writee)
+                                    .and_then(|arg| written_binding(arg, function))
+                                else {
+                                    continue;
+                                };
+                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                for from in sources {
+                                    if let Some(arg) = args.get(*from) {
+                                        taint.paths.extend(
+                                            self.eval_concrete_expr(function, arg, &env).paths,
+                                        );
+                                    }
+                                }
+                                out_param_writes.push((var_name.to_string(), taint.bounded()));
+                            }
+                            for (var_name, taint) in out_param_writes {
+                                if !taint.paths.is_empty() {
+                                    env.insert(var_name, taint);
                                 }
                             }
                         }
@@ -9084,6 +10475,7 @@ fn compute_stats(report: &Report) -> Stats {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashMap};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -10335,6 +11727,846 @@ pub fn write_tainted() -> std::io::Result<()> {
                 .slices
                 .iter()
                 .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_chained_builder_reaches_its_restricted_sink() {
+        // `Command::new(..).arg(t)` — the idiomatic chained form. The
+        // receiver is a temporary, so the sink only fires when the call-form
+        // record types argument 0.
+        let root = fixture_crate(
+            "chained-builder-sink",
+            r#"
+use std::process::Command;
+
+pub fn exec_tainted() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    Command::new("sh").arg("-c").arg(secret).status().unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let exec_slices: Vec<_> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category == "process-exec")
+            .collect();
+        assert_eq!(
+            exec_slices.len(),
+            1,
+            "expected exactly one chained process-exec flow, got {:?}",
+            exec_slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hashmap_get_is_not_a_network_request() {
+        // The bare `get` verb must fire only on an HTTP-client receiver;
+        // a HashMap lookup is not an outbound request.
+        let root = fixture_crate(
+            "hashmap-get-fp",
+            r#"
+use std::collections::HashMap;
+
+pub fn lookup_tainted() -> Option<String> {
+    let key = std::env::var("KEY").unwrap_or_default();
+    let mut map: HashMap<String, String> = HashMap::new();
+    map.insert(key.clone(), "v".to_string());
+    map.get(&key).cloned()
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            !data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.sink_category == "network-request"),
+            "a HashMap lookup must not be a network request, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_typed_http_client_get_still_fires() {
+        // The receiver restriction keeps the real sink alive: a `Client`
+        // receiver (reqwest/hyper shape) with a tainted URL argument.
+        let root = fixture_crate(
+            "client-get-sink",
+            r#"
+pub struct Client;
+impl Client { pub fn new() -> Client { Client } pub fn get(&self, url: &str) { let _ = url; } }
+
+pub fn fetch_tainted() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    Client::new().get(&target);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "network-request"
+            }),
+            "expected env -> network-request on the Client receiver, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_builder_methods_carry_an_external_receiver_type() {
+        // `resp.headers()` is not a client, so a lookup on its result is not
+        // an outbound request; builder chains still type their last hop.
+        let root = fixture_crate(
+            "external-builder-types",
+            r#"
+use std::process::Command;
+
+pub fn header_lookup(url: &str) -> Option<String> {
+    let key = std::env::var("HEADER").unwrap_or_default();
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(url).send().unwrap();
+    let headers = response.headers();
+    headers.get(&key).map(|value| value.to_str().unwrap().to_string())
+}
+
+pub fn built_client() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let _ = client.get(&target).send();
+}
+
+pub fn command_chain() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    Command::new("sh").env("A", "b").current_dir("/").arg(target).status().unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let env_flows: BTreeSet<(&str, &str)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env")
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    slice.sink_category.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            env_flows,
+            BTreeSet::from([
+                ("built_client", "network-request"),
+                ("command_chain", "process-exec"),
+            ])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_macros_are_filesystem_sinks() {
+        let root = fixture_crate(
+            "write-macro-sink",
+            r#"
+use std::fs::File;
+use std::io::Write;
+
+pub fn log_tainted() -> std::io::Result<()> {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut file = File::create("/tmp/rusi-write-macro")?;
+    writeln!(file, "token={}", secret)?;
+    Ok(())
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            }),
+            "expected env -> filesystem-write through writeln!, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_macros_are_sinks_only_for_file_and_socket_writers() {
+        let root = fixture_crate(
+            "write-macro-writers",
+            r#"
+use std::fmt::Write as _;
+use std::io::Write as _;
+
+pub fn into_string() -> String {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut buffer = String::new();
+    write!(buffer, "{}", secret).unwrap();
+    buffer
+}
+
+pub fn to_stdout() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    writeln!(std::io::stdout(), "{}", secret).unwrap();
+}
+
+pub struct Shown(pub String);
+impl std::fmt::Display for Shown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub fn render(f: &mut std::fmt::Formatter<'_>, value: &str) -> std::fmt::Result {
+    write!(f, "{value}")
+}
+
+pub fn buffered_file() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut writer = std::io::BufWriter::new(std::fs::File::create("/tmp/rusi-w").unwrap());
+    writeln!(writer, "{}", secret).unwrap();
+}
+
+pub fn appended_file_inline_argument() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut file = std::fs::OpenOptions::new().append(true).open("/tmp/rusi-w2").unwrap();
+    write!(file, "token={secret}").unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let sink_nodes: HashMap<&str, &rusi_schema::DataFlowNode> = data_flow
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
+        let mut writes: Vec<(&str, usize)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.sink_category == "filesystem-write")
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    sink_nodes[slice.sink_id.as_str()].position.line,
+                )
+            })
+            .collect();
+        writes.sort();
+        writes.dedup();
+        // Only the two file writers, each at its macro's own line: a String
+        // buffer, stdout, and a Formatter are not filesystem writes.
+        assert_eq!(
+            writes,
+            vec![("appended_file_inline_argument", 37), ("buffered_file", 31)]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn container_round_trips_carry_taint() {
+        let root = fixture_crate(
+            "container-roundtrip",
+            r#"
+use std::process::Command;
+
+pub fn accumulate_tainted() {
+    let mut parts: Vec<String> = Vec::new();
+    for arg in std::env::args() {
+        parts.push(arg);
+    }
+    Command::new("echo").arg(parts.join(" ")).status().unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "cli" && slice.sink_category == "process-exec"
+            }),
+            "expected cli -> process-exec through push/join, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mut_out_parameters_carry_taint_to_callers() {
+        let root = fixture_crate(
+            "mut-out-param",
+            r#"
+pub fn load(value: &mut String) {
+    *value = std::env::var("TOKEN").unwrap_or_default();
+}
+
+pub fn persist_tainted() {
+    let mut loaded = String::new();
+    load(&mut loaded);
+    std::fs::write("/tmp/rusi-out-param", loaded).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            }),
+            "expected env -> filesystem-write through the &mut out-parameter, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn helper_summaries_carry_container_and_out_parameter_writes() {
+        // Each write happens inside a helper, so it reaches the caller only
+        // through the helper's summary.
+        let root = fixture_crate(
+            "summary-writes",
+            r#"
+use std::io::Read;
+
+fn collect_bytes(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for byte in input.iter() {
+        out.push(*byte);
+    }
+    out
+}
+
+fn read_config(path: &str) -> String {
+    let mut text = String::new();
+    std::fs::File::open(path).unwrap().read_to_string(&mut text).unwrap();
+    text
+}
+
+fn load(value: &mut String) {
+    *value = std::env::var("TOKEN").unwrap_or_default();
+}
+
+fn load_through(value: &mut String) {
+    load(value);
+}
+
+pub fn container_helper() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    std::fs::write("/tmp/rusi-h1", collect_bytes(secret.as_bytes())).unwrap();
+}
+
+pub fn read_helper() {
+    std::process::Command::new(read_config("/etc/rusi")).status().unwrap();
+}
+
+pub fn two_level_out_parameter() {
+    let mut value = String::new();
+    load_through(&mut value);
+    std::fs::write("/tmp/rusi-h3", value).unwrap();
+}
+
+pub fn queue_round_trip() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(secret);
+    std::process::Command::new(queue.pop_front().unwrap()).status().unwrap();
+}
+
+pub fn clean_container() {
+    let _secret = std::env::var("TOKEN").unwrap_or_default();
+    std::fs::write("/tmp/rusi-h5", collect_bytes(b"static")).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let flows: BTreeSet<(&str, &str, &str)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| !slice.source_category.starts_with("param-"))
+            .map(|slice| {
+                (
+                    slice.sink_function.rsplit("::").next().unwrap_or_default(),
+                    slice.source_category.as_str(),
+                    slice.sink_category.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            flows,
+            BTreeSet::from([
+                ("container_helper", "env", "filesystem-write"),
+                ("queue_round_trip", "env", "process-exec"),
+                ("read_helper", "file", "process-exec"),
+                ("two_level_out_parameter", "env", "filesystem-write"),
+            ])
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn static_carriers_seed_reads_across_functions() {
+        let root = fixture_crate(
+            "static-carrier",
+            r#"
+use std::sync::OnceLock;
+
+static TOKEN: OnceLock<String> = OnceLock::new();
+
+pub fn seed() {
+    TOKEN.set(std::env::var("API_TOKEN").unwrap_or_default()).unwrap();
+}
+
+pub fn persist_tainted() {
+    std::fs::write("/tmp/rusi-static", TOKEN.get().unwrap()).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            }),
+            "expected env -> filesystem-write through the OnceLock static, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn static_seeds_follow_bindings_and_initializers_and_stay_with_readers() {
+        let root = fixture_crate(
+            "static-carrier-shapes",
+            r#"
+use std::sync::OnceLock;
+
+static TOKEN: OnceLock<String> = OnceLock::new();
+static CONFIG: OnceLock<String> = OnceLock::new();
+
+pub fn seed_through_a_binding() {
+    let token = std::env::var("API_TOKEN").unwrap_or_default();
+    TOKEN.set(token).unwrap();
+}
+
+pub fn seed_through_an_initializer() -> &'static String {
+    CONFIG.get_or_init(|| std::env::var("CONFIG").unwrap_or_default())
+}
+
+pub fn read_token() {
+    std::fs::write("/tmp/rusi-token", TOKEN.get().unwrap()).unwrap();
+}
+
+pub fn read_config() {
+    std::fs::write("/tmp/rusi-config", CONFIG.get().unwrap()).unwrap();
+}
+
+pub fn unrelated(value: u32) -> u32 {
+    value + 1
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let readers: BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            })
+            .map(|slice| slice.sink_function.rsplit("::").next().unwrap_or_default())
+            .collect();
+        assert_eq!(readers, BTreeSet::from(["read_config", "read_token"]));
+
+        let seed_nodes: Vec<(&str, usize, Option<&String>)> = data_flow
+            .nodes
+            .iter()
+            .filter(|node| node.name == "TOKEN.set" || node.name == "CONFIG.get_or_init")
+            .map(|node| {
+                (
+                    node.function.rsplit("::").next().unwrap_or_default(),
+                    node.position.line,
+                    node.properties.get("seededAt"),
+                )
+            })
+            .collect();
+        // One node per function that names the carrier, at its use, never one
+        // per function in the crate.
+        assert!(
+            seed_nodes
+                .iter()
+                .all(|(function, _, _)| *function != "unrelated"),
+            "{seed_nodes:?}"
+        );
+        let token_read = seed_nodes
+            .iter()
+            .find(|(function, _, _)| *function == "read_token")
+            .expect("a seed node in the reader");
+        assert_eq!(token_read.1, 17);
+        assert_eq!(
+            token_read.2.map(String::as_str),
+            Some("src/lib.rs:9:11"),
+            "the node records where the seed was stored"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn env_vars_iteration_and_file_open_reads_are_sources() {
+        let root = fixture_crate(
+            "env-vars-source",
+            r#"
+use std::fs::File;
+use std::io::Read;
+
+pub fn copy_env_to_file() {
+    for (name, value) in std::env::vars() {
+        if name == "COPY_ME" {
+            std::fs::write("/tmp/rusi-env-vars", value).unwrap();
+        }
+    }
+    let mut buffer = String::new();
+    File::open("/tmp/rusi-input").unwrap().read_to_string(&mut buffer).unwrap();
+    std::fs::write("/tmp/rusi-file-open", buffer).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let has_env = data_flow.slices.iter().any(|slice| {
+            slice.source_category == "env" && slice.sink_category == "filesystem-write"
+        });
+        let has_file = data_flow.slices.iter().any(|slice| {
+            slice.source_category == "file" && slice.sink_category == "filesystem-write"
+        });
+        assert!(
+            has_env && has_file,
+            "expected env and file sources through iteration and read_to_string, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn path_wrappers_and_tuple_destructuring_keep_taint() {
+        let root = fixture_crate(
+            "path-wrapper-tuple",
+            r#"
+pub fn write_tainted_path() {
+    let target = std::env::var("TARGET_PATH").unwrap_or_default();
+    std::fs::write(std::path::PathBuf::from(&target), "data").unwrap();
+}
+
+pub fn destructure_tainted() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let pair = (secret, "static".to_string());
+    let (first, _) = pair;
+    std::fs::write("/tmp/rusi-tuple", first).unwrap();
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow
+                .slices
+                .iter()
+                .any(|slice| slice.source_category == "env"
+                    && slice.sink_category == "filesystem-write"),
+            "expected env -> filesystem-write through PathBuf::from and tuple destructure, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn closure_bound_to_a_local_carries_taint() {
+        let root = fixture_crate(
+            "closure-binding",
+            r#"
+pub fn run_tainted() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let sink = move |value: String| {
+        std::fs::write("/tmp/rusi-closure", value).unwrap();
+    };
+    sink(secret);
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        assert!(
+            data_flow.slices.iter().any(|slice| {
+                slice.source_category == "env" && slice.sink_category == "filesystem-write"
+            }),
+            "expected env -> filesystem-write through the bound closure, got {:?}",
+            data_flow
+                .slices
+                .iter()
+                .map(|slice| (&slice.source_category, &slice.sink_category))
+                .collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bound_closures_are_scoped_to_their_function_and_see_captures() {
+        // Two functions bind a closure to the same local name, a third calls a
+        // free function of that name, and one closure reads a captured
+        // variable instead of a parameter.
+        let root = fixture_crate(
+            "closure-binding-scope",
+            r#"
+use std::process::Command;
+
+pub fn captured() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let run = || {
+        let _ = unsafe { std::ptr::null::<u8>().add(0) };
+        Command::new(&secret).status().unwrap();
+    };
+    run();
+}
+
+pub fn by_reference() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let run = |s: &str| {
+        Command::new(s).status().unwrap();
+    };
+    run(&secret);
+}
+
+pub fn through_return() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    let wrap = |s: &str| s.to_string();
+    let wrapped = wrap(&secret);
+    Command::new(wrapped).status().unwrap();
+}
+
+pub fn free_function_of_the_same_name() {
+    let secret = std::env::var("TOKEN").unwrap_or_default();
+    run(&secret);
+}
+
+pub fn run(s: &str) -> usize {
+    s.len()
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.as_ref().expect("dataflow emitted");
+        let env_exec_functions: BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .map(|slice| slice.sink_function.rsplit("::").next().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            env_exec_functions,
+            BTreeSet::from(["by_reference", "captured", "through_return"]),
+            "each bound closure's flow is reported at its own call site"
+        );
+
+        // The body is collected once, as the closure's record: the unsafe
+        // block inside it is one signal, not one per walk.
+        assert_eq!(
+            report
+                .security_signals
+                .iter()
+                .filter(|signal| signal.category == "unsafe-code")
+                .count(),
+            1
+        );
+
+        // `run(&secret)` in the last function names the free function, not
+        // either closure bound to `run` elsewhere.
+        let call_graph = report.call_graph.as_ref().expect("call graph emitted");
+        let names: HashMap<&str, &str> = call_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.name.as_str()))
+            .collect();
+        let callees: BTreeSet<&str> = call_graph
+            .edges
+            .iter()
+            .filter(|edge| names[edge.source_id.as_str()] == "free_function_of_the_same_name")
+            .map(|edge| names[edge.target_id.as_str()])
+            .filter(|name| *name == "run" || name.starts_with("closure_"))
+            .collect();
+        assert_eq!(callees, BTreeSet::from(["run"]));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn env_mutation_is_signalled() {
+        let root = fixture_crate(
+            "env-mutation-signal",
+            r#"
+pub fn mutate_env() {
+    std::env::set_var("RUSI_TEST_FLAG", "1");
+    std::env::remove_var("RUSI_TEST_FLAG");
+}
+"#,
+        );
+        let report = analyze(AnalyzeOptionsInput {
+            dir: root.clone(),
+            call_graph_mode: "none".to_string(),
+            data_flow_mode: "none".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        assert_eq!(
+            report
+                .security_signals
+                .iter()
+                .filter(|signal| signal.category == "env-mutation")
+                .count(),
+            2,
+            "expected set_var and remove_var each signalled, got {:?}",
+            report
+                .security_signals
+                .iter()
+                .map(|signal| &signal.category)
                 .collect::<Vec<_>>()
         );
         let _ = fs::remove_dir_all(&root);
