@@ -4,6 +4,8 @@ set -euo pipefail
 readonly OSQUERY_VERSION="5.23.1"
 readonly UPX_VERSION="5.2.1"
 readonly DOSAI_VERSION="4.1.0"
+THIRDPARTY_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly THIRDPARTY_SCRIPTS_DIR
 
 print_usage() {
   cat <<'EOF'
@@ -172,6 +174,10 @@ install_osquery() {
     darwin-arm64)
       tar -xf "$archive_path" -C "$tmpdir"
       copy_tree "$tmpdir/opt/osquery/lib/osquery.app" "$destination_path"
+      # The upstream app is universal, and its x86_64 half never runs from an
+      # arm64-only package. Each half carries its own signature, so the thinned
+      # bundle still verifies.
+      node "$THIRDPARTY_SCRIPTS_DIR/thin-macho.js" arm64 "$destination_path/Contents/MacOS/osqueryd"
       ;;
     windows-amd64)
       unzip -q "$archive_path" -d "$tmpdir"
