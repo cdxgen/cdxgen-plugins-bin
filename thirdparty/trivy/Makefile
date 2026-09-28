@@ -22,7 +22,17 @@ GOPIN := GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2
 overlay := .overlay/overlay.json
 slim := -mod=vendor -overlay=$(overlay)
 
-build = $(GOPIN) CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build $(slim) -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
+# `version` prints the Trivy release this wrapper is built from, with a -cdx
+# suffix: the binary is Trivy patched and slimmed, not Trivy itself. The
+# release comes from go.mod, the one place it is pinned; build.ps1 and
+# scripts/generate-metadata.js derive it the same way.
+trivy_version := $(shell awk '$$1 == "github.com/aquasecurity/trivy" { sub(/^v/, "", $$2); print $$2 "-cdx"; exit }' go.mod)
+ifeq ($(trivy_version),)
+$(error go.mod does not require github.com/aquasecurity/trivy)
+endif
+ldflags := -s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=$(trivy_version)
+
+build = $(GOPIN) CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build $(slim) -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
 sha = cd build && sha256sum $(appname)-$(1)-$(2)$(3) > $(appname)-$(1)-$(2)$(3).sha256
 generate_sbom = $(GOPIN) cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json
 
@@ -46,7 +56,7 @@ test: $(overlay)
 
 # A host binary for local checks, built exactly like the release binaries.
 local: $(overlay)
-	$(GOPIN) CGO_ENABLED=0 go build $(slim) -trimpath -buildvcs=false -ldflags "-s -w" -o build/$(appname)-local
+	$(GOPIN) CGO_ENABLED=0 go build $(slim) -trimpath -buildvcs=false -ldflags "$(ldflags)" -o build/$(appname)-local
 
 # Only the wrapper's own sources: vendor/ and .overlay/ hold third-party code.
 gofiles = *.go overlay
@@ -108,7 +118,7 @@ build/linuxmusl_%: $(sources) $(overlay)
 		-v "$(PWD)":/src \
 		-w /src \
 		golang:1.26-alpine \
-		sh -c 'GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build $(slim) -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
+		sh -c 'GOTOOLCHAIN=go1.26.8 GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=$* go build $(slim) -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-linuxmusl-$* && cd build && sha256sum $(appname)-linuxmusl-$* > $(appname)-linuxmusl-$*.sha256'
 
 build/linux_ppc64le: $(sources) $(overlay)
 	$(call build,linux,ppc64le,)

@@ -111,4 +111,26 @@ resolve_zig_download "$zig_index_fixture" linux-arm64 0.15.0
 [[ "$asset_url" == "https://ziglang.org/download/0.15.0/zig-aarch64-linux-0.15.0.tar.xz" ]]
 [[ "$asset_sha256" == "3333333333333333333333333333333333333333333333333333333333333333" ]]
 
+# build.ps1 downloads the same releases for the Windows CI build. Its pins
+# once fell behind these (dosai 4.0.0, upx 5.2.0), so that job tested an
+# older dosai than the packages shipped.
+ps1_value() {
+  sed -n "s/^\\\$$1 = \"\\(.*\\)\"\$/\\1/p" "$script_dir/../build.ps1"
+}
+expect_ps1() {
+  local actual
+  actual="$(ps1_value "$1")"
+  if [[ "$actual" != "$2" ]]; then
+    echo "build.ps1 sets \$$1 to '$actual', expected '$2' as in thirdparty-downloads.sh" >&2
+    exit 1
+  fi
+}
+expect_ps1 upxVersion "$UPX_VERSION"
+expect_ps1 osqueryVersion "$OSQUERY_VERSION"
+expect_ps1 dosaiVersion "$DOSAI_VERSION"
+resolve_asset osquery-windows-amd64
+expect_ps1 osqueryArchiveSha256 "$asset_sha256"
+resolve_asset dosai-windows-amd64
+expect_ps1 dosaiArchiveSha256 "$asset_sha256"
+
 echo "thirdparty-downloads helper test passed"

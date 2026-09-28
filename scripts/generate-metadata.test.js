@@ -10,9 +10,16 @@ import {
   computeHash,
   readHashFromFile,
   resolveBinaryHash,
+  trivyVersionFromGoMod,
 } from "./generate-metadata.js";
 
 const scriptPath = fileURLToPath(new URL("./generate-metadata.js", import.meta.url));
+
+test("trivyVersionFromGoMod takes the pinned Trivy release and adds -cdx", () => {
+  const goMod = "module example\n\ngo 1.26.8\n\nrequire (\n\tgithub.com/aquasecurity/trivy v0.74.0\n\tgithub.com/spf13/cobra v1.10.2\n)\n";
+  assert.equal(trivyVersionFromGoMod(goMod), "0.74.0-cdx");
+  assert.throws(() => trivyVersionFromGoMod("module example\n"), /does not require github.com\/aquasecurity\/trivy/);
+});
 
 test("readHashFromFile rejects invalid sidecar content", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-test-"));
@@ -59,6 +66,15 @@ test("generate-metadata writes the computed hash to the manifest when the sideca
     );
     const entry = manifest.plugins.find((plugin) => plugin.name === "trivy");
     assert.ok(entry, "expected trivy manifest entry");
+    const trivyVersion = trivyVersionFromGoMod(
+      fs.readFileSync(new URL("../thirdparty/trivy/go.mod", import.meta.url), "utf-8"),
+    );
+    assert.match(trivyVersion, /^\d+\.\d+\.\d+-cdx$/);
+    assert.equal(entry.component.version, trivyVersion);
+    assert.equal(
+      entry.component.purl,
+      `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/trivy-cdxgen@${trivyVersion}`,
+    );
     assert.equal(entry.sha256, computeHash(binaryFile));
     assert.deepEqual(entry.component.hashes, [
       { alg: "SHA-256", content: computeHash(binaryFile) },

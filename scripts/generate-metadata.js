@@ -8,7 +8,19 @@ const pluginsPackageJson = JSON.parse(
 );
 const osqueryVersion = "5.23.1";
 const sourcekittenVersion = "0.38.0";
-const trivyVersion = "v0.74.0";
+// trivy-cdxgen reports the Trivy release it wraps, as pinned in its go.mod,
+// with a -cdx suffix; thirdparty/trivy/Makefile and build.ps1 stamp the same
+// string into the binary.
+export function trivyVersionFromGoMod(goMod) {
+  const match = goMod.match(/^\s*github\.com\/aquasecurity\/trivy v(\S+)/m);
+  if (!match) {
+    throw new Error("thirdparty/trivy/go.mod does not require github.com/aquasecurity/trivy");
+  }
+  return `${match[1]}-cdx`;
+}
+const trivyVersion = trivyVersionFromGoMod(
+  fs.readFileSync(new URL("../thirdparty/trivy/go.mod", import.meta.url), "utf-8"),
+);
 const dosaiVersion = "v4.1.0";
 const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;

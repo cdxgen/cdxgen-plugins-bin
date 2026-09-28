@@ -48,7 +48,9 @@ has no findings for it to filter. Misconfiguration, secret, license and
 vulnerability scanning were already forced off, WASM modules in
 `~/.trivy/modules` are no longer loaded, and `version` reports only the Trivy
 version: the wrapper never reads the vulnerability DB, Java DB or checks
-bundle whose metadata upstream prints there.
+bundle whose metadata upstream prints there. That version is the Trivy release
+pinned in `go.mod` with a `-cdx` suffix (`0.74.0-cdx`), since the binary is
+this patched wrapper rather than Trivy itself.
 
 ### Default Output Format
 
