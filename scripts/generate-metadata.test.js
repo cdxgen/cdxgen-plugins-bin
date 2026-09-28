@@ -13,16 +13,24 @@ import {
   trivyVersionFromGoMod,
 } from "./generate-metadata.js";
 
-const scriptPath = fileURLToPath(new URL("./generate-metadata.js", import.meta.url));
+const scriptPath = fileURLToPath(
+  new URL("./generate-metadata.js", import.meta.url),
+);
 
 test("trivyVersionFromGoMod takes the pinned Trivy release and adds -cdx", () => {
-  const goMod = "module example\n\ngo 1.26.8\n\nrequire (\n\tgithub.com/aquasecurity/trivy v0.74.0\n\tgithub.com/spf13/cobra v1.10.2\n)\n";
+  const goMod =
+    "module example\n\ngo 1.26.8\n\nrequire (\n\tgithub.com/aquasecurity/trivy v0.74.0\n\tgithub.com/spf13/cobra v1.10.2\n)\n";
   assert.equal(trivyVersionFromGoMod(goMod), "0.74.0-cdx");
-  assert.throws(() => trivyVersionFromGoMod("module example\n"), /does not require github.com\/aquasecurity\/trivy/);
+  assert.throws(
+    () => trivyVersionFromGoMod("module example\n"),
+    /does not require github.com\/aquasecurity\/trivy/,
+  );
 });
 
 test("readHashFromFile rejects invalid sidecar content", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-test-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "generate-metadata-test-"),
+  );
   try {
     const hashFile = path.join(tempDir, "binary.sha256");
     fs.writeFileSync(hashFile, "definitely-not-a-sha256\n");
@@ -33,28 +41,38 @@ test("readHashFromFile rejects invalid sidecar content", () => {
 });
 
 test("resolveBinaryHash falls back to the computed hash when the sidecar mismatches", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-test-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "generate-metadata-test-"),
+  );
   try {
     const binaryFile = path.join(tempDir, "tool-linux-amd64");
     const hashFile = `${binaryFile}.sha256`;
     fs.writeFileSync(binaryFile, "trusted-binary");
     fs.writeFileSync(hashFile, `${"0".repeat(64)}  tool-linux-amd64\n`);
 
-    assert.equal(resolveBinaryHash(binaryFile, hashFile), computeHash(binaryFile));
+    assert.equal(
+      resolveBinaryHash(binaryFile, hashFile),
+      computeHash(binaryFile),
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
 test("generate-metadata writes the computed hash to the manifest when the sidecar is invalid", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-main-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "generate-metadata-main-"),
+  );
   try {
     const toolDir = path.join(tempDir, "trivy");
     fs.mkdirSync(toolDir, { recursive: true });
     const binaryName = "trivy-cdxgen-linux-amd64";
     const binaryFile = path.join(toolDir, binaryName);
     fs.writeFileSync(binaryFile, "binary-payload");
-    fs.writeFileSync(path.join(toolDir, `${binaryName}.sha256`), "invalid sha value\n");
+    fs.writeFileSync(
+      path.join(toolDir, `${binaryName}.sha256`),
+      "invalid sha value\n",
+    );
 
     const result = spawnSync(process.execPath, [scriptPath, tempDir], {
       encoding: "utf-8",
@@ -67,7 +85,10 @@ test("generate-metadata writes the computed hash to the manifest when the sideca
     const entry = manifest.plugins.find((plugin) => plugin.name === "trivy");
     assert.ok(entry, "expected trivy manifest entry");
     const trivyVersion = trivyVersionFromGoMod(
-      fs.readFileSync(new URL("../thirdparty/trivy/go.mod", import.meta.url), "utf-8"),
+      fs.readFileSync(
+        new URL("../thirdparty/trivy/go.mod", import.meta.url),
+        "utf-8",
+      ),
     );
     assert.match(trivyVersion, /^\d+\.\d+\.\d+-cdx$/);
     assert.equal(entry.component.version, trivyVersion);
@@ -85,7 +106,9 @@ test("generate-metadata writes the computed hash to the manifest when the sideca
 });
 
 test("generate-metadata records Rusi helper metadata", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "generate-metadata-rusi-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "generate-metadata-rusi-"),
+  );
   try {
     const toolDir = path.join(tempDir, "rusi");
     fs.mkdirSync(toolDir, { recursive: true });

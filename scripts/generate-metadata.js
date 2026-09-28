@@ -14,12 +14,17 @@ const sourcekittenVersion = "0.38.0";
 export function trivyVersionFromGoMod(goMod) {
   const match = goMod.match(/^\s*github\.com\/aquasecurity\/trivy v(\S+)/m);
   if (!match) {
-    throw new Error("thirdparty/trivy/go.mod does not require github.com/aquasecurity/trivy");
+    throw new Error(
+      "thirdparty/trivy/go.mod does not require github.com/aquasecurity/trivy",
+    );
   }
   return `${match[1]}-cdx`;
 }
 const trivyVersion = trivyVersionFromGoMod(
-  fs.readFileSync(new URL("../thirdparty/trivy/go.mod", import.meta.url), "utf-8"),
+  fs.readFileSync(
+    new URL("../thirdparty/trivy/go.mod", import.meta.url),
+    "utf-8",
+  ),
 );
 const dosaiVersion = "v4.1.0";
 const trustInspectorVersion = pluginsPackageJson.version;
@@ -37,7 +42,10 @@ function pluginComponentMetadata() {
       licenses: [{ expression: "Apache-2.0 OR GPL-2.0-only" }],
       externalReferences: [
         { url: "https://github.com/osquery/osquery", type: "vcs" },
-        { url: "https://github.com/osquery/osquery/releases", type: "distribution" },
+        {
+          url: "https://github.com/osquery/osquery/releases",
+          type: "distribution",
+        },
       ],
     },
     dosai: {
@@ -65,7 +73,10 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trivy",
           type: "vcs",
         },
-        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
       ],
     },
     sourcekitten: {
@@ -98,7 +109,10 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/golem",
           type: "vcs",
         },
-        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
       ],
     },
     rusi: {
@@ -112,7 +126,10 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/rusi",
           type: "vcs",
         },
-        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
       ],
     },
     kosi: {
@@ -126,7 +143,10 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/kosi",
           type: "vcs",
         },
-        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
       ],
     },
     trustinspector: {
@@ -140,7 +160,10 @@ function pluginComponentMetadata() {
           url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/trustinspector",
           type: "vcs",
         },
-        { url: "https://github.com/cdxgen/cdxgen/issues", type: "issue-tracker" },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
       ],
     },
   };
@@ -148,9 +171,9 @@ function pluginComponentMetadata() {
 
 export function computeHash(filePath) {
   const fileBuffer = fs.readFileSync(filePath);
-  const hashSum = crypto.createHash('sha256');
+  const hashSum = crypto.createHash("sha256");
   hashSum.update(fileBuffer);
-  return hashSum.digest('hex');
+  return hashSum.digest("hex");
 }
 
 function isSha256Hex(value) {
@@ -159,7 +182,7 @@ function isSha256Hex(value) {
 
 export function readHashFromFile(filePath) {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, "utf-8");
     const hashValue = content.split(/\s+/)[0].trim();
     if (!isSha256Hex(hashValue)) {
       console.warn(`Warning: Ignoring invalid SHA-256 content in ${filePath}`);
@@ -200,39 +223,50 @@ async function main() {
   const allDependencies = [];
   const toolMetadata = pluginComponentMetadata();
   const manifestPlugins = [];
-  const tools = ['trivy', 'osquery', 'dosai', 'sourcekitten', 'trustinspector', 'golem', 'rusi', 'kosi'];
+  const tools = [
+    "trivy",
+    "osquery",
+    "dosai",
+    "sourcekitten",
+    "trustinspector",
+    "golem",
+    "rusi",
+    "kosi",
+  ];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
     if (!fs.existsSync(toolDir)) {
       continue;
     }
     const files = fs.readdirSync(toolDir);
-    const shaFile = files.find(f => f.endsWith('.sha256'));
-    const sbomFile = files.find(f => f.endsWith('.cdx.json'));
-    const binaryFile = files.find(f => !f.endsWith('.sha256') && !f.endsWith('.json'));
+    const shaFile = files.find((f) => f.endsWith(".sha256"));
+    const sbomFile = files.find((f) => f.endsWith(".cdx.json"));
+    const binaryFile = files.find(
+      (f) => !f.endsWith(".sha256") && !f.endsWith(".json"),
+    );
     if (!binaryFile) {
       continue;
     }
     const toolInfo = toolMetadata[tool] || {};
-    let version = toolInfo.version || 'unknown';
+    let version = toolInfo.version || "unknown";
     let description = toolInfo.description || `${tool} binary`;
-    let purl = toolInfo.purl || '';
+    let purl = toolInfo.purl || "";
     let licenses = toolInfo.licenses || [];
     let externalReferences = toolInfo.externalReferences;
     const evidence = {
-      "identity": [
+      identity: [
         {
-          "field": "purl",
-          "confidence": 1,
-          "methods": [
+          field: "purl",
+          confidence: 1,
+          methods: [
             {
-              "technique": "attestation",
-              "confidence": 1
-            }
-          ]
-        }
-      ]
-    }
+              technique: "attestation",
+              confidence: 1,
+            },
+          ],
+        },
+      ],
+    };
     const component = {
       type: "application",
       name: tool,
@@ -246,13 +280,13 @@ async function main() {
       properties: [
         {
           name: "internal:binary_path",
-          value: `plugins/${tool}/${binaryFile}`
+          value: `plugins/${tool}/${binaryFile}`,
         },
         {
           name: "cdx:plugin:manifest:name",
           value: tool,
         },
-      ]
+      ],
     };
     let fileHash = null;
     if (shaFile) {
@@ -281,10 +315,16 @@ async function main() {
     });
     if (sbomFile) {
       try {
-        const sbomContent = JSON.parse(fs.readFileSync(path.join(toolDir, sbomFile), 'utf-8'));
+        const sbomContent = JSON.parse(
+          fs.readFileSync(path.join(toolDir, sbomFile), "utf-8"),
+        );
         const originalRootRef = sbomContent.metadata?.component?.["bom-ref"];
         if (sbomContent.components) {
-          allComponents.push(...sbomContent.components.filter((c) => c?.version !== "unspecified"));
+          allComponents.push(
+            ...sbomContent.components.filter(
+              (c) => c?.version !== "unspecified",
+            ),
+          );
         }
         if (sbomContent.dependencies) {
           for (const dep of sbomContent.dependencies) {
@@ -292,19 +332,37 @@ async function main() {
             if (originalRootRef && newDep.ref === originalRootRef) {
               newDep.ref = component["bom-ref"];
             }
-            if (originalRootRef && newDep.dependsOn && Array.isArray(newDep.dependsOn)) {
-              newDep.dependsOn = newDep.dependsOn.map(r => r === originalRootRef ? component["bom-ref"] : r);
+            if (
+              originalRootRef &&
+              newDep.dependsOn &&
+              Array.isArray(newDep.dependsOn)
+            ) {
+              newDep.dependsOn = newDep.dependsOn.map((r) =>
+                r === originalRootRef ? component["bom-ref"] : r,
+              );
             }
 
             allDependencies.push(newDep);
           }
         }
       } catch (err) {
-        console.warn(`Warning: Failed to parse/merge SBOM for ${tool} (${sbomFile}):`, err);
+        console.warn(
+          `Warning: Failed to parse/merge SBOM for ${tool} (${sbomFile}):`,
+          err,
+        );
       }
     }
   }
-  const outData = { bomFormat: "CycloneDX", specVersion: "1.7", version: 1, metadata: {timestamp: `${new Date().toISOString().split(".")[0]}Z`, lifecycles: [{phase: "post-build"}]}, components: allComponents };
+  const outData = {
+    bomFormat: "CycloneDX",
+    specVersion: "1.7",
+    version: 1,
+    metadata: {
+      timestamp: `${new Date().toISOString().split(".")[0]}Z`,
+      lifecycles: [{ phase: "post-build" }],
+    },
+    components: allComponents,
+  };
   if (allDependencies.length > 0) {
     // Fix the sourcekitten ref
     // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.38.0
@@ -316,9 +374,9 @@ async function main() {
     }
     outData.dependencies = allDependencies;
   }
-  const outFile = path.join(targetDir, 'sbom-postbuild.cdx.json');
+  const outFile = path.join(targetDir, "sbom-postbuild.cdx.json");
   fs.writeFileSync(outFile, JSON.stringify(outData, null, null));
-  const manifestFile = path.join(targetDir, 'plugins-manifest.json');
+  const manifestFile = path.join(targetDir, "plugins-manifest.json");
   fs.writeFileSync(
     manifestFile,
     JSON.stringify(
@@ -340,8 +398,9 @@ async function main() {
   console.log(`Successfully wrote metadata manifest to ${manifestFile}`);
 }
 
-const isDirectExecution = process.argv[1]
-  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isDirectExecution =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isDirectExecution) {
   main().catch((err) => {
