@@ -770,3 +770,75 @@ async fn loopback_cached_when_override_env_is_set() {
     assert_eq!(second.result("x")["fromCache"], true);
     assert_eq!(second.result("x")["body"]["v"], 1);
 }
+
+// -------------------------------------------------------------- output size
+
+/// Issue 4393 (cdxgen): a workspace-scale batch — many packages, fat
+/// packuments — produces an envelope far larger than anything else cdxrs
+/// emits. The Rust side must hand it back complete and intact; the ceiling
+/// that failed there was the JavaScript string limit, not this process.
+#[tokio::test]
+async fn large_bodies_round_trip_intact() {
+    let server = MockServer::start().await;
+    // ~2 MB of verifiable content per package: enough that a truncation,
+    // re-serialization, or size cap on this side would corrupt the payload,
+    // while staying cheap enough for CI.
+    let padding = "x".repeat(2 * 1024 * 1024);
+    let body = serde_json::json!({ "name": "pkg", "padding": padding });
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&body))
+        .mount(&server)
+        .await;
+
+    let requests: Vec<_> = (0..3)
+        .map(|i| request(&format!("big:{i}"), &format!("{}/pkg-{i}", server.uri())))
+        .collect();
+    let run = run_fetch(&batch(requests), &[]).expect_success();
+
+    assert_eq!(run.stats()["ok"], 3);
+    for i in 0..3 {
+        let result = run.result(&format!("big:{i}"));
+        assert_eq!(result["ok"], true);
+        // The body must arrive verbatim — the JS side derives every field
+        // from it, so any normalisation here would be a divergence.
+        assert_eq!(result["body"], body);
+    }
+}
+
+/// `--output <file>` is the protocol's escape hatch for envelopes that must
+/// not travel through a pipe (docs/CDXRS_PROTOCOL.md): the envelope has to
+/// land in the file, byte-complete, with stdout staying empty.
+#[tokio::test]
+async fn output_flag_writes_the_envelope_to_a_file() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/left-pad"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "name": "left-pad",
+            "dist-tags": {"latest": "1.3.0"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let out = TempDir::new().unwrap();
+    let path = out.path().join("envelope.json");
+    let input = batch(vec![request(
+        "npm:left-pad",
+        &format!("{}/left-pad", server.uri()),
+    )]);
+    let run = run_fetch(&input, &["--output", &path.to_string_lossy()]).expect_success();
+
+    assert!(
+        run.stdout.trim().is_empty(),
+        "stdout must stay empty when --output is a file, got {:?}",
+        run.stdout
+    );
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("failed to read {}: {e}", path.display())
+    });
+    let envelope: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("--output file is not valid JSON ({e}): {text}"));
+    assert_eq!(envelope["results"][0]["id"], "npm:left-pad");
+    assert_eq!(envelope["results"][0]["body"]["name"], "left-pad");
+}

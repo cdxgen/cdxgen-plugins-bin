@@ -68,6 +68,8 @@ The I/O path uses untyped JSON values, so unknown fields survive and key order s
 
 cdxgen pins cdxrs by major version. On a mismatch the bridge logs once and uses JavaScript; it does not error. Operationally that sets a release order: publish the plugins package before releasing a cdxgen version that expects a new cdxrs major, and nothing anywhere will complain.
 
+One fallback is size-driven rather than failure-driven: the bridge collects a subcommand's stdout into a single JavaScript string, and V8 strings cannot exceed 0x1fffffe8 (~512 MB) characters. A workspace-scale `fetch` batch can cross that line — cdxgen kills the child at the ceiling (lowerable via `CDXGEN_RS_MAX_STDOUT_BYTES`) and takes the JavaScript path instead of dying at the concat (issue 4393). `cdxrs fetch --output <file>` writes the envelope to a file for any consumer that wants to avoid the pipe entirely; that path is covered by an integration test in `thirdparty/cdxrs/tests/fetch.rs`.
+
 If you suspect the accelerator never ran, do not look for errors, look for the absence of speed:
 
 ```bash
