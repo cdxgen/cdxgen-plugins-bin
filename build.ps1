@@ -4,15 +4,15 @@ New-Item -ItemType Directory -Path plugins\trivy -Force
 New-Item -ItemType Directory -Path plugins\trustinspector -Force
 New-Item -ItemType Directory -Path plugins\golem -Force
 
-$upxVersion = "5.2.0"
+$upxVersion = "5.2.1"
 $upxArchive = "upx-$upxVersion-win64.zip"
-$upxArchiveSha256 = "b471ebf1b7f20f4a89150264ed9a008a2a5bfd247f3c6d1184a75bb59ca08f5d"
+$upxArchiveSha256 = "eabc6792a347d45e945be7748423e7868fd01b0d2bcaa2f4b1031fd71ff69bda"
 $osqueryVersion = "5.23.1"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
 $osqueryArchiveSha256 = "7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a6e1bdf30b"
-$dosaiVersion = "4.0.0"
+$dosaiVersion = "4.1.0"
 $dosaiArchive = "Dosai.exe"
-$dosaiArchiveSha256 = "8d4ed9585068cf2df6975e75fa981c39ea35a597e6b79572137dfa0dab28d31d"
+$dosaiArchiveSha256 = "c804961ed46675a43718553bee5cbf1b74dbe90c318658b6df75f6aedc6aa36c"
 # The version the Go tools stamp via -X main.version; the Makefiles read the
 # same file, so a Windows binary and a Make-built binary of one commit always
 # agree.
@@ -59,9 +59,14 @@ go mod vendor
 if ($LASTEXITCODE -ne 0) { throw "go mod vendor failed for trivy-cdxgen" }
 go run ./overlay
 if ($LASTEXITCODE -ne 0) { throw "overlay/patches no longer apply to the vendored Trivy" }
+# Mirror the Makefile's trivy_version: the Trivy release from go.mod, with a
+# -cdx suffix because this is the patched wrapper, not Trivy itself.
+$trivyRequire = Select-String -Path go.mod -Pattern '^\s*github\.com/aquasecurity/trivy v(\S+)' | Select-Object -First 1
+if (-not $trivyRequire) { throw "go.mod does not require github.com/aquasecurity/trivy" }
+$trivyVersion = $trivyRequire.Matches[0].Groups[1].Value + "-cdx"
 # Quoted: PowerShell splits an unquoted native argument at "=." and would
 # pass ".overlay/overlay.json" to go as a package path.
-go build -mod=vendor "-overlay=.overlay/overlay.json" -trimpath -buildvcs=false -ldflags "-s -w -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
+go build -mod=vendor "-overlay=.overlay/overlay.json" -trimpath -buildvcs=false -ldflags "-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=$trivyVersion -extldflags=-Wl,-z,now,-z,relro" -o build\trivy-windows-amd64.exe
 if ($LASTEXITCODE -ne 0) { throw "go build failed for trivy-cdxgen" }
 & "..\..\upx-$upxVersion-win64\upx.exe" -9 --lzma build\trivy-windows-amd64.exe
 copy build\* ..\..\plugins\trivy\
