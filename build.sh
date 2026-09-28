@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# The Rust tools take their version from Cargo.toml, not package.json; a
+# release bump that missed one fails here, before anything is built.
+node ./scripts/check-versions.js
+
 rm -rf plugins/trivy plugins/osquery plugins/dosai plugins/sourcekitten
 rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
