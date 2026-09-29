@@ -1,0 +1,23 @@
+scripts/prune-go-sbom.test.js
+  s_76558634133cc7::t_04b67cf3cd450b 110-121,129-132
+scripts/dotnet-bundle-sbom.test.js
+  s_76558634133cc7::t_04b67cf3cd450b 127-130,194-201
+scripts/generate-metadata.test.js
+  s_76558634133cc7::t_04b67cf3cd450b 171-175,182-185,213-216,249-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "46de080f79ecc399df21ad5625fecbf210e197cd",
+  "prompts": {},
+  "sessions": {
+    "s_76558634133cc7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "17870760-945c-4a77-be47-755092bc2f48",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
