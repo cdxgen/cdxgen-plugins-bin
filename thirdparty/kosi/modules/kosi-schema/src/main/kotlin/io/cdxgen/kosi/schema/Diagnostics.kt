@@ -156,6 +156,24 @@ object DiagnosticCodes {
     const val ANNOTATION_IMPORT_RESOLVED = "annotation-import-resolved"
 
     /**
+     * Calls the classpath could not resolve, read at the callee their file's
+     * imports name (the receiver's declared type, a constructor's or a
+     * qualifier's class) because the model pack has an entry for it. The
+     * flows through them are real; the run was classpath-degraded, and the
+     * message names each callee so the claim can be checked.
+     */
+    const val CALL_IMPORT_RESOLVED = "call-import-resolved"
+
+    /**
+     * Calls the classpath could not resolve and no pack entry names that
+     * carried taint by the unknown-call default: whatever their classes do
+     * with it (a sink, a sanitizer) is unexamined. The message names the
+     * classes by the FQN their file's imports give them, which is the blind
+     * spot a classpath-less run has.
+     */
+    const val TAINT_UNRESOLVED_CALL = "taint-unresolved-call"
+
+    /**
      * Discovery collected a small share of the source files
      * present under the analysed root. The threshold (half of ≥20 files) is
      * chosen so a dropped-module failure — which typically leaves under
@@ -275,6 +293,8 @@ object DiagnosticCodes {
         ENDPOINT_PATH_UNRESOLVED,
         REPOSITORY_CRUD_UNKNOWN,
         ANNOTATION_IMPORT_RESOLVED,
+        CALL_IMPORT_RESOLVED,
+        TAINT_UNRESOLVED_CALL,
         UNREADABLE_SOURCE,
         DEPS_BODYLESS,
         DEPS_CLASS_NOT_FOUND,

@@ -217,7 +217,53 @@ internal val ALL_PAYLOAD_SIMPLE_TYPES = setOf(
     "java.lang.Character",
 )
 
+/**
+ * The parse call a framework's conversion of a handler parameter to its
+ * declared type amounts to. Spring, Micronaut, Ktor and JAX-RS bind `id: Int`
+ * by parsing the request text and reject the request when it does not parse,
+ * so the handler receives exactly what `text.toInt()` would return. The
+ * security pack's sanitizer for that call — data, not this table — decides
+ * which categories such a value no longer carries; a type with no entry here,
+ * or a conversion the pack does not sanitize, is seeded as before.
+ *
+ * Keyed by the RESOLVED type, which drops nullability (`Int?` is
+ * `kotlin.Int`); the Java primitive spellings cover a Java handler.
+ */
+internal val PARAMETER_CONVERSIONS: Map<String, String> = mapOf(
+    "kotlin.Int" to "kotlin.text.toInt",
+    "kotlin.Long" to "kotlin.text.toLong",
+    "kotlin.Short" to "kotlin.text.toShort",
+    "kotlin.Byte" to "kotlin.text.toByte",
+    "kotlin.Double" to "kotlin.text.toDouble",
+    "kotlin.Float" to "kotlin.text.toFloat",
+    "kotlin.Boolean" to "kotlin.text.toBoolean",
+    "kotlin.UInt" to "kotlin.text.toUInt",
+    "kotlin.ULong" to "kotlin.text.toULong",
+    "kotlin.UShort" to "kotlin.text.toUShort",
+    "kotlin.UByte" to "kotlin.text.toUByte",
+    "java.lang.Integer" to "java.lang.Integer.parseInt",
+    "java.lang.Long" to "java.lang.Long.parseLong",
+    "java.lang.Short" to "java.lang.Short.parseShort",
+    "java.lang.Byte" to "java.lang.Byte.parseByte",
+    "java.lang.Double" to "java.lang.Double.parseDouble",
+    "java.lang.Float" to "java.lang.Float.parseFloat",
+    "java.lang.Boolean" to "java.lang.Boolean.parseBoolean",
+    "int" to "java.lang.Integer.parseInt",
+    "long" to "java.lang.Long.parseLong",
+    "short" to "java.lang.Short.parseShort",
+    "byte" to "java.lang.Byte.parseByte",
+    "double" to "java.lang.Double.parseDouble",
+    "float" to "java.lang.Float.parseFloat",
+    "boolean" to "java.lang.Boolean.parseBoolean",
+    "java.math.BigDecimal" to "kotlin.text.toBigDecimal",
+    "java.math.BigInteger" to "kotlin.text.toBigInteger",
+    "java.util.UUID" to "java.util.UUID.fromString",
+)
+
 object TaintEngine {
+
+    /** Analysis passes a run may take to carry static-field writes to their reads (see StaticSeeds). */
+    private const val STATIC_SEED_PASSES = 3
 
     /** File path -> (relativePath, modulePath), plus the module purl lookup. Same shape as the graph's attribution. */
     data class Attribution(
@@ -502,7 +548,12 @@ object TaintEngine {
          * unresolved lambdas, which is what they are.
          */
         val functionValues: Map<String, FunctionValueTarget> = emptyMap(),
+        /** What static fields carry into this pass, from the previous one (see [StaticSeeds]). */
+        val staticSeeds: StaticSeeds = StaticSeeds.NONE,
     ) {
+        /** The static writes this pass's reporting sweep makes: the next pass's seeds. */
+        val staticWrites = StaticSeedCollector()
+
         /**
          * The table's summaries by canonical name, in the table's own
          * iteration order (so the may-union joins in the order the scan it
@@ -598,6 +649,17 @@ object TaintEngine {
         }
         fun unnameableInvokeSummary(): String? =
             unnameableFunctions.joinToString("; ").ifEmpty { null }
+
+        /**
+         * Unresolved call sites that carried taint into the unknown-call
+         * default, one count per site, keyed by the class each is made on
+         * (see [ImportResolvedCalls.ownerOf]).
+         */
+        private val unresolvedTaintSites = HashSet<Int>()
+        val unresolvedTaintOwners = java.util.TreeMap<String, Int>()
+        fun recordUnresolvedTaintCall(owner: String, site: Int) = synchronized(lock) {
+            if (unresolvedTaintSites.add(site)) unresolvedTaintOwners.merge(owner, 1, Int::plus)
+        }
         fun recordBytecodeApplied(fqn: String) = synchronized(lock) { bytecodeAppliedFqns.add(fqn) }
 
         // ---- the per-site evidence the frames read ------------------
@@ -681,8 +743,26 @@ object TaintEngine {
         }
     }
 
-    fun analyze(module: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
+    fun analyze(input: KirModule, pack: ModelPack, attribution: Attribution, options: Options): Result {
         val diagnostics = mutableListOf<Diagnostic>()
+        // Classpath-degraded calls the pack names are read as the pack calls
+        // their imports spell (see ImportResolvedCalls).
+        val importResolution = ImportResolvedCalls.rewrite(input, pack)
+        val module = importResolution.module
+        if (importResolution.matched.isNotEmpty()) {
+            val sites = importResolution.matched.values.sum()
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.CALL_IMPORT_RESOLVED,
+                    severity = Severity.WARNING,
+                    message = "$sites call site(s) the classpath could not resolve were read at the callee their " +
+                        "file's imports name, because the model pack has an entry for it; pass the classpath to " +
+                        "confirm them: " +
+                        importResolution.matched.entries.joinToString(", ") { (fqn, count) -> "$fqn ($count)" },
+                    count = sites,
+                ),
+            )
+        }
         val truncations = java.util.TreeMap<String, Int>()
         val convergence = java.util.TreeMap<String, Int>()
         val skips = java.util.TreeMap<String, Int>()
@@ -784,15 +864,6 @@ object TaintEngine {
             }
         }
 
-        val summarizer = Summarizer(compiled, callIndex, pack, options, deps = depsTier)
-        val summaryResult = summarizer.compute()
-        for ((kind, count) in summaryResult.skipped) {
-            if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
-        }
-        if (summaryResult.composedPathDrops > 0) {
-            truncations.merge("composed-path-depth", summaryResult.composedPathDrops, Int::plus)
-        }
-        if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 
         // Keyed by FUNCTION: two overloads of one name each carrying
         // lambdas must not answer for each other's lambda bodies.
@@ -827,105 +898,141 @@ object TaintEngine {
             truncations.merge("access-path-collapse", accessPathCollapses, Int::plus)
         }
 
-        // Declared functions reachable as VALUES, by canonical name,
-        // and only where the name is unambiguous (see FunctionValueTarget).
-        val functionValues = buildMap {
-            val byCanonical = compiled.groupBy { it.function.canonicalName }
-            for ((canonical, functions) in byCanonical) {
-                val withBody = functions.filter { it.function.body != null }
-                val only = withBody.singleOrNull() ?: continue
-                val key = functionKey(only.function)
-                if (key !in summaryResult.table) continue
-                put(canonical, FunctionValueTarget(key, if (only.function.params.firstOrNull()?.receiver == true) 1 else 0))
-            }
-        }
-
-        val context = EngineContext(
-            pack = pack,
-            siteIndex = siteIndex,
-            callIndex = callIndex,
-            table = summaryResult.table,
-            lambdaDefs = lambdaDefs,
-            captures = captures,
-            options = options,
-            deps = depsTier,
-            functionValues = functionValues,
+        data class Slot(val cf: CompiledFunction, val outcome: FunctionOutcome?, val skippedKind: String?)
+        class Pass(
+            val seeds: StaticSeeds,
+            val summaryResult: Summarizer.Result,
+            val context: EngineContext,
+            val slots: List<Slot>,
         )
-        // The summary-missing set — compiled functions with no
-        // summary in the final table. A body-less function never compiles
-        // and owes nothing; a compiled one owes its summary to every caller.
-        // Names, not keys: call sites ask by FQN.
-        val summarisedNames = summaryResult.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
-        for (cf in compiled) {
-            if (cf.function.canonicalName !in summarisedNames) {
-                context.missingSummaries.add(cf.function.canonicalName)
+
+        // Summaries, then the per-function analysis. A pass whose sweep
+        // wrote taint into STATIC fields runs again with those writes seeded
+        // at every read of the field (StaticSeeds): a static has no scope, so
+        // what one handler stores there another reads. Bounded, because a
+        // seed can feed another static's write; a run the budget stopped
+        // does not start another pass.
+        fun analysisPass(seeds: StaticSeeds): Pass {
+            val summaryResult = Summarizer(compiled, callIndex, pack, options, deps = depsTier, staticSeeds = seeds).compute()
+            // Declared functions reachable as VALUES, by canonical name,
+            // and only where the name is unambiguous (see FunctionValueTarget).
+            val functionValues = buildMap {
+                val byCanonical = compiled.groupBy { it.function.canonicalName }
+                for ((canonical, functions) in byCanonical) {
+                    val withBody = functions.filter { it.function.body != null }
+                    val only = withBody.singleOrNull() ?: continue
+                    val key = functionKey(only.function)
+                    if (key !in summaryResult.table) continue
+                    put(canonical, FunctionValueTarget(key, if (only.function.params.firstOrNull()?.receiver == true) 1 else 0))
+                }
             }
-        }
-        if (depsTier != null) {
-            val depSummarisedNames = depsTier.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
-            for (cf in depsCompiled) {
-                if (cf.function.canonicalName !in depSummarisedNames) {
+
+            val context = EngineContext(
+                pack = pack,
+                siteIndex = siteIndex,
+                callIndex = callIndex,
+                table = summaryResult.table,
+                lambdaDefs = lambdaDefs,
+                captures = captures,
+                options = options,
+                deps = depsTier,
+                functionValues = functionValues,
+                staticSeeds = seeds,
+            )
+            // The summary-missing set — compiled functions with no
+            // summary in the final table. A body-less function never compiles
+            // and owes nothing; a compiled one owes its summary to every caller.
+            // Names, not keys: call sites ask by FQN.
+            val summarisedNames = summaryResult.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
+            for (cf in compiled) {
+                if (cf.function.canonicalName !in summarisedNames) {
                     context.missingSummaries.add(cf.function.canonicalName)
                 }
             }
+            if (depsTier != null) {
+                val depSummarisedNames = depsTier.table.keys.mapTo(HashSet()) { it.substringBefore('\u0000') }
+                for (cf in depsCompiled) {
+                    if (cf.function.canonicalName !in depSummarisedNames) {
+                        context.missingSummaries.add(cf.function.canonicalName)
+                    }
+                }
+            }
+
+            // ---- the per-function main analysis ----------------------------------
+            // the per-function work runs on [options.dataflowWorkers] workers
+            // and is folded back in COMPILED ORDER, so candidates, node ids and
+            // slice ids are identical at any worker width. The budget hook runs
+            // per function; a trip keeps everything already analysed, counts what
+            // is being dropped, and ships the partial result.
+            fun analyseSlot(cf: CompiledFunction): Slot {
+                val function = cf.function
+                if (options.skipGenerated && function.syntheticCause != null) {
+                    return Slot(cf, null, "generated-functions")
+                }
+                val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
+                if (instructionCount > options.maxFunctionInstructions) {
+                    return Slot(cf, null, "function-instructions")
+                }
+                options.shouldStop?.invoke()?.let { code ->
+                    return Slot(cf, null, code)
+                }
+                // The per-function boundary. The KIR this engine walks was
+                // produced under the front end's walk budget, so a stack
+                // overflow here should not happen — and if one ever does it
+                // degrades THIS function to a counted truncation named
+                // `stack-overflow` (merged on the collector thread, which is the
+                // only thread that touches the map), never the whole run.
+                val outcome = try {
+                    analyseFunction(cf, context)
+                } catch (e: StackOverflowError) {
+                    return Slot(cf, null, "stack-overflow")
+                }
+                return Slot(cf, outcome, null)
+            }
+
+            val passSlots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {            val width = minOf(options.dataflowWorkers, compiled.size)
+                // The workers carry the same explicit analysis stack as the
+                // front end's thread (kosi-front `WalkBudgets.ANALYSIS_STACK_BYTES`;
+                // duplicated here because this module deliberately does not see
+                // the front end) — default-sized stacks are the defect this
+                // phase removes, and a lazy-committed reservation costs nothing.
+                val pool = java.util.concurrent.Executors.newFixedThreadPool(width) { runnable ->
+                    Thread(null, runnable, "kosi-dataflow", 512L * 1024 * 1024)
+                }
+                try {
+                    val futures = compiled.map { cf -> pool.submit(java.util.concurrent.Callable { analyseSlot(cf) }) }
+                    futures.map { it.get() }
+                } finally {
+                    pool.shutdown()
+                }
+            } else {
+                compiled.map { analyseSlot(it) }
+            }
+            return Pass(seeds, summaryResult, context, passSlots)
         }
 
-        // ---- the per-function main analysis ----------------------------------
-        // the per-function work runs on [options.dataflowWorkers] workers
-        // and is folded back in COMPILED ORDER, so candidates, node ids and
-        // slice ids are identical at any worker width. The budget hook runs
-        // per function; a trip keeps everything already analysed, counts what
-        // is being dropped, and ships the partial result.
-        data class Slot(val cf: CompiledFunction, val outcome: FunctionOutcome?, val skippedKind: String?)
-
-        fun analyseSlot(cf: CompiledFunction): Slot {
-            val function = cf.function
-            if (options.skipGenerated && function.syntheticCause != null) {
-                return Slot(cf, null, "generated-functions")
-            }
-            val instructionCount = cf.sitesByBlock.values.sumOf { it.size }
-            if (instructionCount > options.maxFunctionInstructions) {
-                return Slot(cf, null, "function-instructions")
-            }
-            options.shouldStop?.invoke()?.let { code ->
-                return Slot(cf, null, code)
-            }
-            // The per-function boundary. The KIR this engine walks was
-            // produced under the front end's walk budget, so a stack
-            // overflow here should not happen — and if one ever does it
-            // degrades THIS function to a counted truncation named
-            // `stack-overflow` (merged on the collector thread, which is the
-            // only thread that touches the map), never the whole run.
-            val outcome = try {
-                analyseFunction(cf, context)
-            } catch (e: StackOverflowError) {
-                return Slot(cf, null, "stack-overflow")
-            }
-            return Slot(cf, outcome, null)
+        var pass = analysisPass(StaticSeeds.NONE)
+        var passes = 1
+        while (passes < STATIC_SEED_PASSES && options.shouldStop?.invoke() == null) {
+            val written = pass.context.staticWrites.seeds()
+            if (written.isEmpty() || written == pass.seeds) break
+            pass = analysisPass(written)
+            passes++
         }
+        val summaryResult = pass.summaryResult
+        val context = pass.context
+        val slots = pass.slots
+        for ((kind, count) in summaryResult.skipped) {
+            if (kind in CONVERGENCE_KINDS) convergence.merge(kind, count, Int::plus) else truncations.merge(kind, count, Int::plus)
+        }
+        if (summaryResult.composedPathDrops > 0) {
+            truncations.merge("composed-path-depth", summaryResult.composedPathDrops, Int::plus)
+        }
+        if (stopCode == null) summaryResult.stoppedBy?.let { stopCode = it }
 
         // Functions whose analysis hit StackOverflowError, collected on
         // this (collector) thread in compiled order.
         val stackOverflowFunctions = mutableListOf<String>()
-
-        val slots: List<Slot> = if (options.dataflowWorkers > 1 && compiled.size > 1) {            val width = minOf(options.dataflowWorkers, compiled.size)
-            // The workers carry the same explicit analysis stack as the
-            // front end's thread (kosi-front `WalkBudgets.ANALYSIS_STACK_BYTES`;
-            // duplicated here because this module deliberately does not see
-            // the front end) — default-sized stacks are the defect this
-            // phase removes, and a lazy-committed reservation costs nothing.
-            val pool = java.util.concurrent.Executors.newFixedThreadPool(width) { runnable ->
-                Thread(null, runnable, "kosi-dataflow", 512L * 1024 * 1024)
-            }
-            try {
-                val futures = compiled.map { cf -> pool.submit(java.util.concurrent.Callable { analyseSlot(cf) }) }
-                futures.map { it.get() }
-            } finally {
-                pool.shutdown()
-            }
-        } else {
-            compiled.map { analyseSlot(it) }
-        }
         for (slot in slots) {
             val outcome = slot.outcome
             if (outcome == null) {
@@ -1036,6 +1143,23 @@ object TaintEngine {
                         "unexamined, not clean" +
                         (where?.let { "; in: $it" } ?: ""),
                     count = context.unnameableInvokes,
+                ),
+            )
+        }
+        if (context.unresolvedTaintOwners.isNotEmpty()) {
+            val sites = context.unresolvedTaintOwners.values.sum()
+            val owners = context.unresolvedTaintOwners.entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            diagnostics.add(
+                Diagnostic(
+                    code = DiagnosticCodes.TAINT_UNRESOLVED_CALL,
+                    severity = Severity.INFO,
+                    message = "$sites call site(s) the classpath could not resolve carried taint by the " +
+                        "unknown-call default, so what their classes do with it (a sink, a sanitizer) is " +
+                        "unexamined; pass the classpath to see into them: " +
+                        owners.take(20).joinToString(", ") { (owner, count) -> "$owner ($count)" } +
+                        (if (owners.size > 20) ", and ${owners.size - 20} more" else ""),
+                    count = sites,
                 ),
             )
         }
@@ -1441,6 +1565,39 @@ object TaintEngine {
             collect?.sinkHits?.add(SinkHit(site, argIndex, argKey, facts))
         }
 
+        /**
+         * Registers this function loaded from a static field, with the field
+         * they read: an effect writing one of them writes the object the
+         * static field holds.
+         */
+        private val staticLoads: Map<String, Pair<String, String>> by lazy {
+            buildMap {
+                for (block in compiled.blocks) {
+                    for (ins in block.instructions) {
+                        if (ins is KirFieldGet && ins.result != null && ins.receiver.startsWith(STATIC_BASE_PREFIX)) {
+                            put(ins.result, ins.receiver to fieldSuffix(ins.path))
+                        }
+                    }
+                }
+            }
+        }
+
+        private fun fieldSuffix(path: io.cdxgen.kosi.kir.AccessPath): String =
+            if (!fieldSensitive) {
+                ""
+            } else {
+                path.elements.joinToString(".") { element ->
+                    when (element) {
+                        is io.cdxgen.kosi.kir.AccessPath.Element.Field -> element.name
+                        io.cdxgen.kosi.kir.AccessPath.Element.Index -> "[]"
+                        io.cdxgen.kosi.kir.AccessPath.Element.Star -> "*"
+                    }
+                }
+            }
+
+        override fun staticSeedsAt(base: String, suffix: String): List<Pair<String, String>> =
+            context.staticSeeds.birthsAt(base, suffix)
+
         override fun onEffectWritten(
             fqn: String,
             valueReg: String,
@@ -1448,13 +1605,30 @@ object TaintEngine {
             facts: Set<TaintFact>,
             site: Int,
             collect: TransferEvents?,
-        ) {}
+        ) {
+            if (collect == null || facts.isEmpty()) return
+            // `held.set(x)` on a static ThreadLocal writes the held object's
+            // element state: the static field's `<path>.[]`.
+            val (base, suffix) = staticLoads[receiverKey.base] ?: return
+            val element = if (suffix.isEmpty()) receiverKey.path else if (receiverKey.path.isEmpty()) suffix else "$suffix.${receiverKey.path}"
+            context.staticWrites.record(base, element, facts.map { it.category }, compiled.function.canonicalName)
+        }
 
-        override fun onFieldWriteEscape(receiver: String, valueReg: String, suffix: String, facts: Set<TaintFact>, collect: TransferEvents?) {}
+        override fun onFieldWriteEscape(receiver: String, valueReg: String, suffix: String, facts: Set<TaintFact>, collect: TransferEvents?) {
+            if (collect == null || facts.isEmpty() || !receiver.startsWith(STATIC_BASE_PREFIX)) return
+            context.staticWrites.record(receiver, suffix, facts.map { it.category }, compiled.function.canonicalName)
+        }
 
         override fun onReturn(ins: KirReturn, site: Int, state: FlowState<TaintFact>, collect: TransferEvents?) {}
 
         override fun onDynamicCall(ins: KirDynamicCall, site: Int, collect: TransferEvents?) {}
+
+        override fun onUnresolvedCallCarried(ins: KirDynamicCall, site: Int, collect: TransferEvents?) {
+            // `<thrown>` and the other angle-bracketed names are the lowering's
+            // own placeholders, not calls into a class.
+            if (ins.name.startsWith("<")) return
+            context.recordUnresolvedTaintCall(ImportResolvedCalls.ownerOf(ins), site)
+        }
 
         override fun onUnknownPropagation(collect: TransferEvents?) {
             collect?.let { it.unknownPropagations += 1 }
@@ -1474,6 +1648,21 @@ object TaintEngine {
          * (the receiver is not an input), matching the pack's argument
          * convention.
          */
+        /**
+         * The categories a handler parameter of type [resolved] cannot carry:
+         * what the pack's sanitizer for the framework's conversion to that
+         * type clears (see [PARAMETER_CONVERSIONS]).
+         */
+        private fun convertedClears(resolved: String?): Set<String> {
+            val conversion = PARAMETER_CONVERSIONS[resolved?.substringBefore('<') ?: return emptySet()]
+                ?: return emptySet()
+            return context.pack.sanitizers
+                .firstOrNull { PatternMatcher.matches(it.pattern, conversion) }
+                ?.clears
+                ?.toSet()
+                .orEmpty()
+        }
+
         private val seededEntryFacts: List<Pair<String, TaintFact>> by lazy {
             val handler = compiled.function.canonicalName
             val category = context.options.endpointSources[handler] ?: return@lazy emptyList()
@@ -1492,7 +1681,9 @@ object TaintEngine {
                             PatternMatcher.matches(pattern, annotation)
                         }?.value
                     }
-                    matched?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it.category, index) }
+                    matched
+                        ?.takeIf { it.category !in convertedClears(param.resolvedType) }
+                        ?.let { param.register to TaintFact(SummaryAnalysis.ENTRY_SITE, it.category, index) }
                 }
 
                 // The framework names SOME transports and binds
@@ -1521,7 +1712,13 @@ object TaintEngine {
                                 PatternMatcher.matches(pattern, annotation)
                             }?.value
                         }
+                        val cleared = convertedClears(param.resolvedType)
                         when {
+                            // A converted scalar (`@RequestParam n: Int`)
+                            // arrives already parsed: it carries what the
+                            // parse call's result would.
+                            matched != null && matched.category in cleared -> null
+
                             matched != null -> param.register to TaintFact(
                                 SummaryAnalysis.ENTRY_SITE,
                                 matched.category,
@@ -1540,6 +1737,8 @@ object TaintEngine {
                             } -> null
 
                             isContextType(param.resolvedType, contextTypes) -> null
+
+                            category in cleared -> null
 
                             // Spring's own fallback rule: "if it is
                             // a simple type it is resolved as a
@@ -1595,6 +1794,7 @@ object TaintEngine {
                     valueParams.mapIndexed { index, param ->
                         when {
                             isContextType(param.resolvedType, contextTypes) -> null
+                            category in convertedClears(param.resolvedType) -> null
                             else -> param.register to TaintFact(
                                 SummaryAnalysis.ENTRY_SITE,
                                 category,
@@ -2523,6 +2723,9 @@ object TaintEngine {
             pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, ins.callee.fqn) }
         }
         val literalBirth = !entryFact && sourceSite?.ins is KirStore
+        // A read of a static field another function wrote (StaticSeeds).
+        val staticRead = (sourceSite?.ins as? KirFieldGet)?.takeIf { !entryFact && it.receiver.startsWith(STATIC_BASE_PREFIX) }
+        val staticBirth = staticRead != null
         // A source-return birth from the --deps tier was born at a call
         // that RETURNED jar-sourced taint — the real source call sits at the
         // head of the recorded upstream path (inside the jar), so the birth
@@ -2532,11 +2735,14 @@ object TaintEngine {
         val upstreamBirth = upstreamSites.isNotEmpty() && sourcePattern == null
         if (upstreamBirth) {
             val head = siteIndex[upstreamSites.first()] ?: return null
-            val headIns = head.second.ins as? KirCall ?: return null
-            val headSource = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, headIns.callee.fqn) }
-            if (headSource == null || headSource.category != fact.category) return null
+            // A static field's read is a head too: the seed is the source.
+            if (!isStaticRead(head.second.ins)) {
+                val headIns = head.second.ins as? KirCall ?: return null
+                val headSource = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, headIns.callee.fqn) }
+                if (headSource == null || headSource.category != fact.category) return null
+            }
         }
-        if (!entryFact && !literalBirth && sourcePattern == null && !upstreamBirth) return null
+        if (!entryFact && !literalBirth && !staticBirth && sourcePattern == null && !upstreamBirth) return null
         if (sourceIns != null && sourcePattern != null && fact.category != sourcePattern.category) return null
         if (!entryFact && !literalBirth && sourceRef == null) return null
         // A hit whose callee has no pack row may be an
@@ -2651,7 +2857,7 @@ object TaintEngine {
                     is KirSuspendPoint -> "suspend"
                     is KirDynamicCall -> "propagate"
                     is KirStringConcat -> "concat"
-                    is KirFieldGet -> "field"
+                    is KirFieldGet -> if (siteId == sourceNodeSite) "source" else "field"
                     is KirFieldSet -> "field"
                     is KirIndexGet -> "index"
                     is KirIndexSet -> "index"
@@ -2693,6 +2899,7 @@ object TaintEngine {
             entryFact -> "endpoint-params " + compiled.function.canonicalName
             literalBirth -> (sourceSite?.ins as? KirStore)?.let { "literal " + it.target.removePrefix("v") }
                 ?: "literal"
+            staticRead != null -> context.staticSeeds.sourceName(staticRead)
             else -> sourceIns?.callee?.fqn ?: sourcePattern?.pattern ?: "source"
         }
         val entryParam = entryParameterInfo(context, compiled, fact)
@@ -2798,7 +3005,8 @@ object TaintEngine {
                 context.options.endpointSources.containsKey(compiled.function.canonicalName)
             val ref = siteIndex[fact.site]
             val literalBirth = ref?.second?.ins is KirStore
-            if (entryFact || literalBirth) {
+            val staticBirth = (ref?.second?.ins as? KirFieldGet)?.receiver?.startsWith(STATIC_BASE_PREFIX) == true
+            if (entryFact || literalBirth || staticBirth) {
                 return@mapNotNull SourceRef(fact, ref ?: Pair(compiled, compiled.sitesByBlock.values.first().first()), "", emptyList())
             }
             ref?.let { r ->
@@ -2814,6 +3022,7 @@ object TaintEngine {
                         // source-return birth is only as good as the real
                         // source call its path starts at.
                         val head = siteIndex[upstream.first()] ?: return@mapNotNull null
+                        if (isStaticRead(head.second.ins)) return@mapNotNull SourceRef(fact, r, "", upstream)
                         val headIns = head.second.ins as? KirCall ?: return@mapNotNull null
                         val headSource = pack.sources.firstOrNull { PatternMatcher.matches(it.pattern, headIns.callee.fqn) }
                         if (headSource != null && headSource.category == fact.category) {
@@ -2944,7 +3153,7 @@ object TaintEngine {
                     is KirSuspendPoint -> "suspend"
                     is KirDynamicCall -> "propagate"
                     is KirStringConcat -> "concat"
-                    is KirFieldGet -> "field"
+                    is KirFieldGet -> if (siteId == sourceNodeSite) "source" else "field"
                     is KirFieldSet -> "field"
                     is KirIndexGet -> "index"
                     is KirIndexSet -> "index"
@@ -3009,10 +3218,12 @@ object TaintEngine {
             severity = sinkPattern.severity,
             sourceName = (siteIndex[sourceNodeSite]?.second?.ins as? KirCall)?.callee?.fqn
                 ?: sourcePattern.pattern.ifEmpty {
-                    if (fact.site == SummaryAnalysis.ENTRY_SITE) {
-                        "endpoint-params " + compiled.function.canonicalName
-                    } else {
-                        "literal"
+                    val staticRead = (siteIndex[sourceNodeSite]?.second?.ins as? KirFieldGet)
+                        ?.takeIf { it.receiver.startsWith(STATIC_BASE_PREFIX) }
+                    when {
+                        fact.site == SummaryAnalysis.ENTRY_SITE -> "endpoint-params " + compiled.function.canonicalName
+                        staticRead != null -> context.staticSeeds.sourceName(staticRead)
+                        else -> "literal"
                     }
                 },
             sinkName = sinkIns.callee.fqn,

@@ -196,6 +196,17 @@ object KirLowering {
          */
         val isSamConstructor: Boolean = false,
         /**
+         * The lambda whose RECEIVER this call is made on implicitly —
+         * `append(raw)` inside `sb.apply { }`, `buildString { }` or
+         * `with(sb) { }`. The syntax has no receiver to lower, and the
+         * lowering used to emit the call with none, so a model keyed on the
+         * receiver (StringBuilder.append writing its builder) had nothing to
+         * write. Only resolution knows which enclosing receiver a bare call
+         * binds: a class member called from inside `apply { }` still goes to
+         * the class's `this`, and keeps the old shape.
+         */
+        val implicitLambdaReceiver: org.jetbrains.kotlin.psi.KtFunctionLiteral? = null,
+        /**
          * True when this call is an implicit `invoke` of a function value that
          * resolved against an EXTENSION receiver — `b.block()` inside
          * `fun build(block: Builder.() -> Unit)`, where `block` is the
@@ -404,6 +415,91 @@ object KirLowering {
                 null
             }
 
+            // The container-singleton classes, by PSI, computed once: a
+            // stereotype from DiStereotypes.SINGLETON_SCOPED and no scope of
+            // its own. Annotations are read at their resolved FQN, or at the
+            // FQN the file's imports give them when the classpath lacks them.
+            val singletonCache = HashMap<org.jetbrains.kotlin.psi.KtClassOrObject, Boolean>()
+            fun isContainerSingleton(owner: org.jetbrains.kotlin.psi.KtClassOrObject): Boolean =
+                singletonCache.getOrPut(owner) {
+                    val file = owner.containingKtFile
+                    val names = owner.annotationEntries.flatMap { entry ->
+                        val written = entry.typeReference?.text?.substringBefore('<')?.trim().orEmpty()
+                        val resolved = try {
+                            entry.typeReference?.type
+                                ?.let { (it as? org.jetbrains.kotlin.analysis.api.types.KaClassType)?.classId?.asSingleFqName()?.asString() }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        listOfNotNull(resolved) + importedClassNamesIn(file, written)
+                    }
+                    fun matches(list: List<String>) = names.any { name -> list.any { name == it || it.endsWith(".$name") && '.' in name } }
+                    matches(io.cdxgen.kosi.kir.DiStereotypes.SINGLETON_SCOPED) &&
+                        !matches(io.cdxgen.kosi.kir.DiStereotypes.SCOPE_ANNOTATIONS)
+                }
+
+            // A bare name that reads a STATIC field: a backing-field property
+            // of an `object`, a companion object, the file's top level, or a
+            // container singleton (see isContainerSingleton). Its owner's
+            // FQN, so every function names the one field alike — `last`
+            // inside the class, `H.last` outside it, `Holder.v` and a
+            // top-level `current` all read `vstatic:<owner>.<name>`.
+            fun resolveStaticOwner(psi: KtNameReferenceExpression): String? = try {
+                val symbol = psi.mainReference.resolveToSymbol()
+                    as? org.jetbrains.kotlin.analysis.api.symbols.KaKotlinPropertySymbol
+                if (symbol == null || !symbol.hasBackingField) {
+                    null
+                } else {
+                    val callableId = symbol.callableId
+                    val declaration = symbol.psi as? org.jetbrains.kotlin.psi.KtNamedDeclaration
+                    val property = declaration as? KtProperty
+                    when {
+                        callableId == null -> null
+                        property?.isTopLevel == true || (declaration == null && callableId.classId == null) ->
+                            callableId.packageName.asString()
+                        else -> {
+                            val owner = when (declaration) {
+                                is KtProperty -> (declaration.parent as? org.jetbrains.kotlin.psi.KtClassBody)?.parent
+                                // A constructor `val`/`var` is a member too.
+                                is org.jetbrains.kotlin.psi.KtParameter ->
+                                    declaration.takeIf { it.hasValOrVar() }?.let {
+                                        com.intellij.psi.util.PsiTreeUtil.getParentOfType(
+                                            it,
+                                            org.jetbrains.kotlin.psi.KtClassOrObject::class.java,
+                                        )
+                                    }
+                                else -> null
+                            }
+                            val static = owner is org.jetbrains.kotlin.psi.KtObjectDeclaration ||
+                                (owner is org.jetbrains.kotlin.psi.KtClassOrObject && isContainerSingleton(owner)) ||
+                                (declaration == null && callableId.classId?.shortClassName?.asString() == "Companion")
+                            if (static) callableId.classId?.asSingleFqName()?.asString() else null
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            fun implicitLambdaReceiverOf(call: Any): org.jetbrains.kotlin.psi.KtFunctionLiteral? = try {
+                val applied = (call as? org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall<*>)
+                    ?.partiallyAppliedSymbol
+                val implicit = (applied?.dispatchReceiver as? org.jetbrains.kotlin.analysis.api.resolution.KaImplicitReceiverValue)
+                    ?: (applied?.extensionReceiver as? org.jetbrains.kotlin.analysis.api.resolution.KaImplicitReceiverValue)
+                val owner = when (val receiverSymbol = implicit?.symbol) {
+                    is org.jetbrains.kotlin.analysis.api.symbols.KaReceiverParameterSymbol ->
+                        receiverSymbol.owningCallableSymbol
+                    else -> receiverSymbol
+                }
+                when (val ownerPsi = (owner as? org.jetbrains.kotlin.analysis.api.symbols.KaAnonymousFunctionSymbol)?.psi) {
+                    is org.jetbrains.kotlin.psi.KtFunctionLiteral -> ownerPsi
+                    is KtLambdaExpression -> ownerPsi.functionLiteral
+                    else -> null
+                }
+            } catch (_: Exception) {
+                null
+            }
+
             fun resolve(psi: KtCallExpression): CallInfo? = try {
                 val call = psi.resolveCall() ?: return null
                 val symbol = call.symbol as? KaCallableSymbol ?: return null
@@ -464,6 +560,7 @@ object KirLowering {
                         emptyMap()
                     },
                     valueParameterCount = (symbol as? KaFunctionSymbol)?.valueParameters?.size ?: 0,
+                    implicitLambdaReceiver = implicitLambdaReceiverOf(call),
                 )
             } catch (_: Exception) {
                 null
@@ -671,7 +768,15 @@ object KirLowering {
             }
 
             val lambdaContext =
-                LambdaContext(failures, ::resolve, ::resolveProperty, ::resolveReference, ::lambdaHasReceiver, ::resolveQualifier)
+                LambdaContext(
+                    failures,
+                    ::resolve,
+                    ::resolveProperty,
+                    ::resolveReference,
+                    ::lambdaHasReceiver,
+                    ::resolveQualifier,
+                    ::resolveStaticOwner,
+                )
             for (file in files) {
                 // The walk budget and the per-file boundary, exactly as
                 // in ResolvedAnalyzer — the same PSI trees are walked here,
@@ -1205,6 +1310,8 @@ object KirLowering {
         val lambdaHasReceiver: (KtLambdaExpression) -> Boolean = { false },
         /** The class, object or package FQN a bare name resolves to, or null (see [BodyLower.reference]). */
         val resolveQualifier: (KtNameReferenceExpression) -> String? = { null },
+        /** The owner FQN of the static field a name reads, or null (see [BodyLower.staticField]). */
+        val resolveStaticOwner: (KtNameReferenceExpression) -> String? = { null },
     ) {
         var ordinal = 0
         val functions = mutableListOf<KirFunction>()
@@ -1703,6 +1810,20 @@ object KirLowering {
          * outer binding when their body ends.
          */
         private val thisOverrides = ArrayDeque<String>()
+
+        /**
+         * The register each lambda's implicit receiver is bound to while its
+         * body is lowered: an inlined `apply`/`run`/`with` body's receiver,
+         * an inlined builder's builder, or `vthis` for an extracted
+         * extension lambda (renamed to its `%r0` afterwards). A bare call
+         * whose resolved implicit receiver is one of these lambdas is made
+         * on that register (see [CallInfo.implicitLambdaReceiver]).
+         */
+        private val lambdaReceivers = HashMap<org.jetbrains.kotlin.psi.KtFunctionLiteral, String>()
+
+        fun bindLambdaReceiver(literal: org.jetbrains.kotlin.psi.KtFunctionLiteral, register: String) {
+            lambdaReceivers[literal] = register
+        }
 
         // The implicit receiver register is the ENTRY PARAMETER STORE (`v$this`
         // from bindParameters) — not a distinct "v this" register nothing
@@ -2379,6 +2500,11 @@ object KirLowering {
             // qualifier per function, never stored, like `v super` (but spaceless: the KIR text form splits on spaces): a static
             // member read through it carries only what was written through
             // it in this function (a Kotlin `object`'s field).
+            staticField(psi)?.let { (base, path) ->
+                val reg = t()
+                emit(KirFieldGet(reg, base, path))
+                return reg
+            }
             lambdaContext?.resolveQualifier?.invoke(psi)?.let { return "vstatic:" + it.replace('.', '/') }
             // A stored field read, carried by the access path over the
             // CURRENT `this` (a scope function's receiver when inside an
@@ -2506,7 +2632,10 @@ object KirLowering {
             val value = psi.right?.let { lowerExpr(it, Pos.NESTED) } ?: unknown(psi)
             when (val target = psi.left) {
                 is KtNameReferenceExpression -> {
-                    if (!isLocalReference(target)) {
+                    val static = if (isLocalReference(target)) null else staticField(target)
+                    if (static != null) {
+                        emit(KirFieldSet(static.first, static.second, value))
+                    } else if (!isLocalReference(target)) {
                         // A member field of the enclosing receiver.
                         val receiver = target.receiverExpressionSafe()
                         emit(
@@ -2527,7 +2656,8 @@ object KirLowering {
                     } else {
                         // The whole qualifier chain, so the key this write
                         // lands on is the key the matching read looks at.
-                        val (base, path) = fieldAccess(target.receiverExpression, name)
+                        val selector = target.selectorExpression as KtNameReferenceExpression
+                        val (base, path) = staticField(selector) ?: fieldAccess(target.receiverExpression, name)
                         emit(KirFieldSet(base, path, value))
                     }
                 }
@@ -2805,12 +2935,34 @@ object KirLowering {
         private fun fieldChain(psi: KtExpression): Pair<String, List<AccessPath.Element>> {
             val names = ArrayDeque<String>()
             var current: KtExpression = psi
+            // A chain through a STATIC field (`H.shared.x`, or `shared.x`
+            // inside `H`) is rooted at that field's canonical base, so a
+            // write and a read spelled either way meet (see staticField).
+            fun rootedAtStatic(name: KtNameReferenceExpression): Pair<String, List<AccessPath.Element>>? =
+                staticField(name)?.let { (base, path) -> base to path.elements + names.map { AccessPath.Element.Field(it) } }
             while (current is KtDotQualifiedExpression) {
                 val selector = current.selectorExpression as? KtNameReferenceExpression ?: break
+                rootedAtStatic(selector)?.let { return it }
                 names.addFirst(selector.getReferencedName())
                 current = current.receiverExpression
             }
+            (current as? KtNameReferenceExpression)
+                ?.takeIf { !isLocalReference(it) }
+                ?.let { rootedAtStatic(it) }
+                ?.let { return it }
             return lowerExpr(current, Pos.NESTED) to names.map { AccessPath.Element.Field(it) }
+        }
+
+        /**
+         * The canonical key of a STATIC field [name] reads (see
+         * `resolveStaticOwner`): one base per owner, never stored, so the
+         * engine can carry what one function writes there to every function
+         * that reads it. Null for anything else.
+         */
+        private fun staticField(name: KtNameReferenceExpression): Pair<String, AccessPath>? {
+            val owner = lambdaContext?.resolveStaticOwner?.invoke(name) ?: return null
+            val base = "vstatic:" + owner.ifEmpty { "<root>" }.replace('.', '/')
+            return base to AccessPath.of(base, listOf(AccessPath.Element.Field(name.getReferencedName())))
         }
 
         /** The base register and full path for reading or writing `<receiver>.<name>`. */
@@ -2846,7 +2998,7 @@ object KirLowering {
                         return reg
                     }
                 }
-                val (base, path) = fieldAccess(psi.receiverExpression, selector.getReferencedName())
+                val (base, path) = staticField(selector) ?: fieldAccess(psi.receiverExpression, selector.getReferencedName())
                 val reg = t()
                 emit(KirFieldGet(reg, base, path))
                 return reg
@@ -2957,6 +3109,14 @@ object KirLowering {
                     }
                     return callWithReceiver(psi, receiver)
                 }
+            // `buildString { }` / `buildList { }` are, by the standard
+            // library's own definition, `StringBuilder().apply(action)
+            // .toString()` and `ArrayList().apply(action)`, and are inlined as
+            // that: the builder the lambda's bare `append`/`add` calls write is
+            // the value the call returns.
+            if (name in BUILDER_FUNCTION_NAMES && psi.hasLambdaArgument()) {
+                inlineBuilderFunction(psi)?.let { return it }
+            }
             // A receiver-less scope-function call (`with(x) { }`, `run { }`)
             // or a plain call that happens to carry a lambda.
             if (name in SCOPE_FUNCTIONS && psi.hasLambdaArgument()) {
@@ -3138,24 +3298,30 @@ object KirLowering {
                 arg.getArgumentExpression()?.let { it to lowerExpr(it, Pos.NESTED) }
             }
             val argRegs = leadingArgs + placeArguments(written, info, leading = leadingArgs.size)
+            // A bare call on an enclosing lambda's implicit receiver is a call
+            // ON that receiver.
+            val boundReceiver = receiver ?: info?.implicitLambdaReceiver?.let { lambdaReceivers[it] }
             val symbol = info?.symbol
             val simpleName = (psi.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: "<unknown>"
             if (symbol == null) {
                 val reg = t()
+                val imported = importNamedCallees(psi, simpleName)
                 emit(
                     KirDynamicCall(
-                        reg, simpleName, receiver, argRegs, line = psi.line(),
+                        reg, simpleName, boundReceiver, argRegs, line = psi.line(),
                         typeArguments = psi.typeArguments.mapNotNull { it.typeReference?.text?.substringBefore('<')?.trim() },
+                        importedCallees = imported.first,
+                        importedStatic = imported.second,
                     ),
                 )
-                hookEmitSink(receiver, simpleName, argRegs)
+                hookEmitSink(boundReceiver, simpleName, argRegs)
                 return reg
             }
             // A Java static method written with its class qualifier is NOT
             // a receiver call: drop the qualifier register so argument
             // indexes line up with the pack's convention (index 0 is the
             // first argument when there is no receiver).
-            val receiver = if (info.isStatic) null else receiver
+            val receiver = if (info.isStatic) null else boundReceiver
             val kind: CallKind
             val fqn: String
             when (symbol) {
@@ -3222,6 +3388,143 @@ object KirLowering {
          * value. `use` shapes the inlined body as try/finally with the close
          * call in the finally arm.
          */
+        /**
+         * The callee FQNs an UNRESOLVED call names through its file's
+         * imports (see [KirDynamicCall.importedCallees]). A qualified call is
+         * named by its qualifier's TYPE — the declared type of the parameter,
+         * property or local it reads, or the class a constructor call or a
+         * class-name qualifier spells — and a bare call by its own name (an
+         * unresolved constructor such as `HttpGet(url)`). Syntax only: the
+         * whole point is a run whose classpath lacks the class, so there is
+         * no symbol to ask.
+         */
+        private fun importNamedCallees(psi: KtCallExpression, name: String): Pair<List<String>, Boolean> {
+            if (name == "<unknown>") return emptyList<String>() to false
+            val file = psi.containingKtFile
+            val qualified = (psi.parent as? org.jetbrains.kotlin.psi.KtQualifiedExpression)
+                ?.takeIf { it.selectorExpression == psi }
+            if (qualified == null) return importedClassNames(file, name) to false
+            val (owner, static) = qualifierTypeName(qualified.receiverExpression) ?: return emptyList<String>() to false
+            return importedClassNames(file, owner).map { "$it.$name" } to static
+        }
+
+        /**
+         * The type name an expression's value has, as the source spells it,
+         * and whether the expression is a CLASS name rather than a value (the
+         * call on it is then static).
+         */
+        private fun qualifierTypeName(expression: KtExpression): Pair<String, Boolean>? {
+            fun clean(type: String?): String? =
+                type?.substringBefore('<')?.removeSuffix("?")?.trim()?.takeIf { it.isNotEmpty() }
+            return when (expression) {
+                is org.jetbrains.kotlin.psi.KtParenthesizedExpression ->
+                    expression.expression?.let { qualifierTypeName(it) }
+                // `JdbcTemplate(ds).queryForList(..)`: the constructor names the class.
+                is KtCallExpression -> clean(
+                    (expression.calleeExpression as? KtNameReferenceExpression)
+                        ?.getReferencedName()
+                        ?.takeIf { it.firstOrNull()?.isUpperCase() == true },
+                )?.let { it to false }
+                // `this.jdbc.queryForList(..)`: a member read off `this`.
+                is KtDotQualifiedExpression -> clean(
+                    (expression.selectorExpression as? KtNameReferenceExpression)
+                        ?.takeIf { expression.receiverExpression is KtThisExpression }
+                        ?.let { declaredTypeText(it) },
+                )?.let { it to false }
+                is KtNameReferenceExpression -> clean(declaredTypeText(expression))?.let { it to false }
+                    // `Jsoup.connect(url)`: a class name used as the qualifier.
+                    ?: expression.getReferencedName()
+                        .takeIf { it.firstOrNull()?.isUpperCase() == true }
+                        ?.let { it to true }
+                else -> null
+            }
+        }
+
+        /**
+         * The written type of the declaration a name reads, found by the
+         * language's own scoping walked outward over the syntax tree: a local
+         * declared earlier in an enclosing block, a lambda's or function's
+         * parameter, a constructor `val`/`var`, a class property, a top-level
+         * property. A property with no written type takes a constructor call
+         * initializer's class (`val jdbc = JdbcTemplate(ds)`).
+         */
+        private fun declaredTypeText(reference: KtNameReferenceExpression): String? {
+            val name = reference.getReferencedName()
+            fun propertyType(property: KtProperty): String? = property.typeReference?.text
+                ?: ((property.initializer as? KtCallExpression)?.calleeExpression as? KtNameReferenceExpression)
+                    ?.getReferencedName()
+                    ?.takeIf { it.firstOrNull()?.isUpperCase() == true }
+            var node: PsiElement? = reference.parent
+            while (node != null) {
+                when (node) {
+                    is KtBlockExpression -> node.statements
+                        .filterIsInstance<KtProperty>()
+                        .lastOrNull { it.name == name && it.textOffset < reference.textOffset }
+                        ?.let { return propertyType(it) }
+                    is org.jetbrains.kotlin.psi.KtFunctionLiteral -> node.valueParameters
+                        .firstOrNull { it.name == name }
+                        ?.let { return it.typeReference?.text }
+                    is KtNamedFunction -> node.valueParameters
+                        .firstOrNull { it.name == name }
+                        ?.let { return it.typeReference?.text }
+                    is org.jetbrains.kotlin.psi.KtClassOrObject -> {
+                        node.primaryConstructorParameters
+                            .firstOrNull { it.name == name && it.hasValOrVar() }
+                            ?.let { return it.typeReference?.text }
+                        node.declarations
+                            .filterIsInstance<KtProperty>()
+                            .firstOrNull { it.name == name }
+                            ?.let { return propertyType(it) }
+                    }
+                    is org.jetbrains.kotlin.psi.KtFile -> return node.declarations
+                        .filterIsInstance<KtProperty>()
+                        .firstOrNull { it.name == name }
+                        ?.let { propertyType(it) }
+                }
+                node = node.parent
+            }
+            return null
+        }
+
+        /**
+         * The FQNs a class name written in [file] can mean: itself when
+         * already qualified, the explicit import that names it (by alias or
+         * last segment), else one candidate per star import.
+         */
+        private fun importedClassNames(file: org.jetbrains.kotlin.psi.KtFile, written: String): List<String> =
+            importedClassNamesIn(file, written)
+
+        /**
+         * A standard-library builder call inlined as its definition (see
+         * [BUILDER_FUNCTIONS]), with the resolved call kept as the evidence
+         * edge. Null when the call is not one of them.
+         */
+        private fun inlineBuilderFunction(psi: KtCallExpression): String? {
+            val info = resolveCallInfo(psi) ?: return null
+            val fqn = info.symbol.callableId?.asSingleFqName()?.asString() ?: return null
+            val (builderType, finish) = BUILDER_FUNCTIONS[fqn] ?: return null
+            val lambdaPsi = psi.valueArguments
+                .mapNotNull { it.getArgumentExpression() as? KtLambdaExpression }
+                .firstOrNull() ?: return null
+            // A capacity argument is evaluated where the program evaluates it.
+            psi.valueArguments
+                .mapNotNull { it.getArgumentExpression() }
+                .filter { it !is KtLambdaExpression }
+                .forEach { lowerExpr(it, Pos.NESTED) }
+            val builder = t()
+            emit(KirCall(builder, KirCallee(builderType, null, CallKind.CONSTRUCTOR), null, emptyList(), line = psi.line()))
+            emit(KirCall(t(), KirCallee(fqn, info.descriptor, CallKind.STATIC), null, listOf(builder), line = psi.line()))
+            thisOverrides.addLast(builder)
+            lambdaReceivers[lambdaPsi.functionLiteral] = builder
+            lowerLambdaBody(lambdaPsi)
+            lambdaReceivers.remove(lambdaPsi.functionLiteral)
+            thisOverrides.removeLast()
+            if (finish == null) return builder
+            val result = t()
+            emit(KirCall(result, KirCallee(finish, null, CallKind.VIRTUAL), builder, emptyList(), line = psi.line()))
+            return result
+        }
+
         private fun inlineScopeFunction(psi: KtCallExpression, name: String, receiver: String): String {
             val lambdaPsi = psi.valueArguments
                 .mapNotNull { it.getArgumentExpression() as? KtLambdaExpression }
@@ -3241,7 +3544,10 @@ object KirLowering {
             val paramReg = "v${lambdaPsi.valueParameters.firstOrNull()?.name ?: "it"}"
             if (bindsParameter) emit(KirStore(paramReg, receiver))
             val rebindsThis = name == "apply" || name == "run" || name == "with"
-            if (rebindsThis) thisOverrides.addLast(receiver)
+            if (rebindsThis) {
+                thisOverrides.addLast(receiver)
+                lambdaReceivers[lambdaPsi.functionLiteral] = receiver
+            }
             val isUse = name == "use"
             val bodyResult = if (isUse) {
                 // use -> try/finally (§4): body in the try arm, close in the
@@ -3266,7 +3572,10 @@ object KirLowering {
             } else {
                 lowerLambdaBody(lambdaPsi)
             }
-            if (rebindsThis) thisOverrides.removeLast()
+            if (rebindsThis) {
+                thisOverrides.removeLast()
+                lambdaReceivers.remove(lambdaPsi.functionLiteral)
+            }
             // apply/also hand the receiver back; let/run/with/use the value.
             return if (name == "apply" || name == "also") receiver else bodyResult
         }
@@ -3571,6 +3880,9 @@ object KirLowering {
             }
             bodyLower.bindParameters(valueParams)
             bodyLower.bindDestructuredParameters(psi, valueParams)
+            // An extension lambda's bare calls on its receiver are made on
+            // `vthis`, which becomes `%r0` below.
+            if (context.lambdaHasReceiver(psi)) bodyLower.bindLambdaReceiver(psi.functionLiteral, "vthis")
             val statements = bodyPsi.statements
             for ((index, statement) in statements.withIndex()) {
                 if (index < statements.lastIndex) {
@@ -3593,10 +3905,16 @@ object KirLowering {
             val body = bodyLower.finish()
             val instructions = body.blocks.flatMap { it.instructions }
             val bodyDefs = instructions.flatMap { it.defs }.toHashSet() + valueParams.map { it.register }
+            // An extension lambda's `vthis` is its OWN receiver (renamed to
+            // `%r0` below), never the enclosing function's `this`: collected
+            // as a capture as well, it added a parameter nothing read and
+            // shifted every later parameter's index.
+            val ownReceiver = context.lambdaHasReceiver(psi)
             val captureRegs = instructions
                 .flatMap { it.uses }
                 .filter { it !in bodyDefs }
                 .filter { it in definedRegisters }
+                .filter { !(ownReceiver && it == "vthis") }
                 .distinct()
             val captureParams = captureRegs.mapIndexed { index, reg -> KirParam("%c$index", "capture$reg", null, receiver = false) }
             // An EXTENSION lambda's implicit `this`. `build { cmd = raw }` for
@@ -3665,10 +3983,47 @@ object KirLowering {
         }
     }
 
+    /**
+     * The FQNs a class name written in [file] can mean: itself when already
+     * qualified, the explicit import that names it (by alias or last
+     * segment), else one candidate per star import. Syntax only.
+     */
+    internal fun importedClassNamesIn(file: org.jetbrains.kotlin.psi.KtFile, written: String): List<String> {
+        if (written.isEmpty()) return emptyList()
+        val head = written.substringBefore('.')
+        val rest = written.removePrefix(head)
+        // `org.springframework.jdbc.core.JdbcTemplate` is already an FQN.
+        if (head.firstOrNull()?.isLowerCase() == true && rest.isNotEmpty()) return listOf(written)
+        val imports = file.importDirectives
+        imports.firstOrNull { directive ->
+            !directive.isAllUnder && (directive.aliasName ?: directive.importedFqName?.shortName()?.asString()) == head
+        }?.importedFqName?.asString()?.let { return listOf(it + rest) }
+        return imports
+            .filter { it.isAllUnder }
+            .mapNotNull { it.importedFqName?.asString() }
+            .map { "$it.$written" }
+            .distinct()
+    }
+
     /** `kotlin.Function0.invoke` .. `kotlin.FunctionN.invoke`: an invoke of a function VALUE. */
     private val FUNCTION_INVOKE = Regex("""kotlin\.Function\d+\.invoke""")
 
     private val SCOPE_FUNCTIONS = setOf("let", "run", "apply", "also", "with", "use")
+
+    /**
+     * Standard-library builders, by resolved FQN, with the builder each one's
+     * lambda receives and the call that turns it into the result (none: the
+     * builder is the result). `buildString(action)` is defined as
+     * `StringBuilder().apply(action).toString()`.
+     */
+    private val BUILDER_FUNCTIONS: Map<String, Pair<String, String?>> = mapOf(
+        "kotlin.text.buildString" to ("java.lang.StringBuilder" to "java.lang.StringBuilder.toString"),
+        "kotlin.collections.buildList" to ("java.util.ArrayList" to null),
+        "kotlin.collections.buildSet" to ("java.util.LinkedHashSet" to null),
+        "kotlin.collections.buildMap" to ("java.util.LinkedHashMap" to null),
+    )
+
+    private val BUILDER_FUNCTION_NAMES = BUILDER_FUNCTIONS.keys.map { it.substringAfterLast('.') }.toSet()
 
     /**
      * Coroutine builders whose trailing lambda produces the builder's own

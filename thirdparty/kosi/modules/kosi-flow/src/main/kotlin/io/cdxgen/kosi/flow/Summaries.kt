@@ -901,6 +901,8 @@ internal class Summarizer(
      * a workspace summary composes the effects of a call that enters a jar.
      */
     private val deps: TaintEngine.DepsTier? = null,
+    /** What static fields carry, from an earlier pass (see [StaticSeeds]). */
+    private val staticSeeds: StaticSeeds = StaticSeeds.NONE,
 ) {
     class Result(
         /** Keyed by [functionKey]: one summary per FUNCTION, never per name. */
@@ -1265,7 +1267,7 @@ internal class Summarizer(
     }
 
     private fun computeSummary(cf: CompiledFunction, table: Map<String, FunctionSummary>, widen: Boolean = options.pathWidening): SummaryOutcome {
-        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps, widen)
+        val analysis = SummaryAnalysis(cf, table, callIndex, pack, options, originLabel, deps, widen, staticSeeds)
         analysis.run()
         if (analysis.traceCosts.isNotEmpty()) {
             val top = analysis.traceCosts.entries.sortedByDescending { it.value[0] }.take(8)
@@ -1588,7 +1590,13 @@ internal class SummaryAnalysis(
     private val deps: TaintEngine.DepsTier? = null,
     /** Path widening for this analysis: the option, or the SCC's adaptive switch (see Summarizer). */
     private val widen: Boolean = options.pathWidening,
+    /** What static fields carry into this function (see [StaticSeeds]). */
+    private val staticSeeds: StaticSeeds = StaticSeeds.NONE,
 ) : TransferHost<SummaryFact, Boolean> {
+
+    override fun staticSeedsAt(base: String, suffix: String): List<Pair<String, String>> =
+        staticSeeds.birthsAt(base, suffix)
+
     /**
      * True once a key in THIS analysis passed [EXPLOSION_KEY_FACTS] facts
      * (atom-tools#95: http4k's ChaosTriggers held 1,034,543 on one key, a

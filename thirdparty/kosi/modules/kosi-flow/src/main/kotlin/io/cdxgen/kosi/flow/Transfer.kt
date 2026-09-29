@@ -327,6 +327,12 @@ internal interface TransferHost<F, C> {
     /** A dynamic call (the summary engine records function-valued parameter invocations). */
     fun onDynamicCall(ins: KirDynamicCall, site: Int, collect: C?)
 
+    /** An unresolved call carried taint into the unknown-call default (the reporting sweep). */
+    fun onUnresolvedCallCarried(ins: KirDynamicCall, site: Int, collect: C?) {}
+
+    /** The seeds a read of the static field [base] at [suffix] births (see [StaticSeeds.birthsAt]). */
+    fun staticSeedsAt(base: String, suffix: String): List<Pair<String, String>> = emptyList()
+
     /**
      * The category a string literal stored into the NAMED local [name]
      * births (the pack's `literalSources` name rule), or null when this
@@ -514,14 +520,20 @@ internal class FlowTransfer<F, C>(
          * Fixed at every merge of this shape: the joins, the index read,
          * the unknown call.
          */
-        fun joinInto(result: String, operands: List<String>, site: Int, kind: String) {
+        fun joinInto(result: String, operands: List<String>, site: Int, kind: String, withElements: Boolean = false) {
             val merged = java.util.TreeSet<F>()
             val blame = HashMap<F, TaintKey>()
             for (operand in operands) {
-                val operandKey = reg(operand)
-                for (fact in state.factsOf(operandKey)) {
-                    merged.add(fact)
-                    blame.putIfAbsent(fact, operandKey)
+                val operandKeys = if (withElements && fieldSensitive) {
+                    listOf(reg(operand)) + host.aliasClass(operand).sorted().map { TaintKey(it, "[]") }
+                } else {
+                    listOf(reg(operand))
+                }
+                for (operandKey in operandKeys) {
+                    for (fact in state.factsOf(operandKey)) {
+                        merged.add(fact)
+                        blame.putIfAbsent(fact, operandKey)
+                    }
                 }
             }
             val resultKey = reg(result)
@@ -563,7 +575,10 @@ internal class FlowTransfer<F, C>(
 
                 is KirLambda -> state.removeKey(reg(ins.result))
 
-                is KirStringConcat -> joinInto(ins.result, ins.parts, site.id, "concat")
+                // A template renders each part through its `toString`, and a
+                // builder's or a collection's text IS its contents: `"$sb"`
+                // after `sb.append(raw)` carries `raw`.
+                is KirStringConcat -> joinInto(ins.result, ins.parts, site.id, "concat", withElements = true)
 
                 is KirPhi -> joinInto(ins.result, ins.inputs.values.toList(), site.id, "phi")
 
@@ -596,6 +611,16 @@ internal class FlowTransfer<F, C>(
                     val resultKey = reg(ins.result)
                     state.setFacts(resultKey, merged)
                     for (fact in merged) chain[ChainKey(fact, resultKey)] = Move(site.id, blame[fact], "field")
+                    // A static field another function wrote with taint: the
+                    // read is where that taint enters this one (StaticSeeds).
+                    if (ins.receiver.startsWith(STATIC_BASE_PREFIX)) {
+                        for ((resultSuffix, category) in host.staticSeedsAt(ins.receiver, suffix)) {
+                            val fact = host.birthFact(site.id, category)
+                            val key = TaintKey(ins.result, resultSuffix)
+                            state.addFacts(key, listOf(fact))
+                            chain[ChainKey(fact, key)] = Move(site.id, null, "source", host.packMoveOrigin())
+                        }
+                    }
                     // Parameter-rooted facts derive along the read — the
                     // summary engine's field sensitivity AT THE FACT, so
                     // `fun sink(job: Job) = exec(job.command)` records the
@@ -674,6 +699,9 @@ internal class FlowTransfer<F, C>(
 
                 is KirDynamicCall -> {
                     host.onDynamicCall(ins, site.id, collect)
+                    if (collect != null && (listOfNotNull(ins.receiver) + ins.args).any { state.factsOf(reg(it)).isNotEmpty() }) {
+                        host.onUnresolvedCallCarried(ins, site.id, collect)
+                    }
                     handleUnknown(ins.result, ins.receiver, ins.args, site.id, state, chain, collect)
                 }
             }
@@ -722,6 +750,8 @@ internal class FlowTransfer<F, C>(
                 ins.args.getOrNull(index)
             }
         }
+        // The last position of that sequence, for a vararg entry's open tail.
+        val lastPosition = ins.args.size - (if (receiver != null) 0 else 1)
 
         var matched = false
 
@@ -736,7 +766,7 @@ internal class FlowTransfer<F, C>(
         if (sink != null) {
             matched = true
             host.onSinkMatched(collect)
-            for (argIndex in sink.relevantArguments.sorted()) {
+            for (argIndex in sink.argumentIndexes(lastPosition)) {
                 val register = registerAt(argIndex) ?: continue
                 val argKey = TaintKey(register, "")
                 val facts = state.factsOf(argKey)
@@ -792,20 +822,24 @@ internal class FlowTransfer<F, C>(
         if (passthrough != null) {
             matched = true
             var moved = false
-            for (flow in passthrough.flows) {
+            for (flow in passthrough.argumentFlows(lastPosition)) {
                 if (flow.size < 2) continue
                 val from = registerAt(flow[0])
                 val to = if (flow[1] == -1) result else registerAt(flow[1])
                 if (from == null || to == null) continue
                 moved = moveChain(state, chain, TaintKey(from, ""), TaintKey(to, ""), site, "call", host.packMoveOrigin()) || moved
             }
-            // Element flows: index 0 reads the receiver's ELEMENT state.
+            // Element flows: index 0 reads the receiver's ELEMENT state —
+            // the state of every alias of it, as an index read does
+            // (`sb.also { it.append(raw) }.toString()` wrote `it`'s).
             for (flow in passthrough.elementFlows) {
                 if (flow.size < 2) continue
                 val to = if (flow[1] == -1) result else registerAt(flow[1])
                 if (to == null) continue
-                val fromKey = TaintKey(receiver ?: continue, if (host.fieldSensitive) "[]" else "")
-                moved = moveChain(state, chain, fromKey, TaintKey(to, ""), site, "call", host.packMoveOrigin()) || moved
+                for (base in host.aliasClass(receiver ?: continue).sorted()) {
+                    val fromKey = TaintKey(base, if (host.fieldSensitive) "[]" else "")
+                    moved = moveChain(state, chain, fromKey, TaintKey(to, ""), site, "call", host.packMoveOrigin()) || moved
+                }
             }
             if (moved) host.onPackPassthroughApplied(fqn, collect)
         }
@@ -829,10 +863,14 @@ internal class FlowTransfer<F, C>(
                 if (writeIndex <= 0) continue
                 val register = registerAt(writeIndex) ?: continue
                 val facts = state.factsOf(TaintKey(register, ""))
-                val receiverKey = TaintKey(receiver, if (host.fieldSensitive) "[]" else "")
-                moveChain(state, chain, TaintKey(register, ""), receiverKey, site, "effect", host.packMoveOrigin())
-                if (facts.isNotEmpty()) {
-                    host.onEffectWritten(fqn, register, receiverKey, facts, site, collect)
+                // The write lands in the object, so in the element state of
+                // every register naming it, as an index write's does.
+                for (base in host.aliasClass(receiver).sorted()) {
+                    val receiverKey = TaintKey(base, if (host.fieldSensitive) "[]" else "")
+                    moveChain(state, chain, TaintKey(register, ""), receiverKey, site, "effect", host.packMoveOrigin())
+                    if (facts.isNotEmpty()) {
+                        host.onEffectWritten(fqn, register, receiverKey, facts, site, collect)
+                    }
                 }
             }
         }

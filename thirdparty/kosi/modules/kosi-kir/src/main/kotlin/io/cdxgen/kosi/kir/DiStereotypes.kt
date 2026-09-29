@@ -54,6 +54,39 @@ object DiStereotypes {
     )
 
     /**
+     * The stereotypes whose DEFAULT scope is one instance per container: a
+     * Spring bean, a JSR-330 or CDI application singleton, a Micronaut
+     * controller. Every request a singleton handler serves shares its
+     * fields, so a field one handler writes is a field another reads — state
+     * the flow engine carries like a static's. A class that also declares a
+     * scope (`@Scope("prototype")`, `@RequestScope`) is not one: see
+     * [SCOPE_ANNOTATIONS].
+     */
+    val SINGLETON_SCOPED: List<String> = listOf(
+        "org.springframework.stereotype.Component",
+        "org.springframework.stereotype.Service",
+        "org.springframework.stereotype.Repository",
+        "org.springframework.stereotype.Controller",
+        "org.springframework.web.bind.annotation.RestController",
+        "org.springframework.context.annotation.Configuration",
+        "jakarta.inject.Singleton",
+        "javax.inject.Singleton",
+        "jakarta.enterprise.context.ApplicationScoped",
+        "javax.enterprise.context.ApplicationScoped",
+        "io.micronaut.http.annotation.Controller",
+    )
+
+    /** Annotations that give a bean a scope other than the singleton default. */
+    val SCOPE_ANNOTATIONS: List<String> = listOf(
+        "org.springframework.context.annotation.Scope",
+        "org.springframework.web.context.annotation.RequestScope",
+        "org.springframework.web.context.annotation.SessionScope",
+        "io.micronaut.context.annotation.Prototype",
+        "jakarta.enterprise.context.RequestScoped",
+        "javax.enterprise.context.RequestScoped",
+    )
+
+    /**
      * the METHOD annotations whose signatures are BINDINGS — a
      * mapping from interface to implementation the container reads.
      *

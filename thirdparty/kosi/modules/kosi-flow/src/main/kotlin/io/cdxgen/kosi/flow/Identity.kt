@@ -54,7 +54,9 @@ private val COLLECTION_FACTORIES = setOf(
  *    load; per-site so two unknown values are not silently aliased;
  *  - `lambda:<canonical>` — a function value at its allocation site (the
  *    KirLambda instruction): an object whose target is KNOWN, which is what
- *    a call through it resolves to.
+ *    a call through it resolves to;
+ *  - `field:<owner>.<path>` — the object a field holds when this function
+ *    never stored one into it: every read of the field names it.
  *
  * A mini-heap rides along — `(register, path) -> tokens` — because the
  * deep tier must follow a value stored in another object's field back out:
@@ -268,8 +270,21 @@ internal class AliasAnalysis(
                 // A field read sees what every name of the object stored.
                 val suffix = pathSuffix(ins.path)
                 val tokens = sortedSetOf<String>()
-                for (base in classOf(ins.receiver)) {
+                val bases = classOf(ins.receiver)
+                for (base in bases) {
                     tokens.addAll(heapRead(base, suffix))
+                }
+                // A field this function never wrote still holds ONE object:
+                // `held.set(x); held.get()` reads `this.held` twice, and the
+                // two reads must name the same ThreadLocal, or what `set`
+                // wrote into it is lost to `get`. The object is named by the
+                // field's owner token (or the owner register, for a static
+                // owner no instruction defines) and the path, and stored in
+                // the heap so every later read of the field finds it.
+                if (tokens.isEmpty() && suffix.isNotEmpty()) {
+                    val owners = points[ins.receiver].orEmpty().ifEmpty { setOf(ins.receiver) }
+                    for (owner in owners) tokens.add("field:$owner.$suffix")
+                    for (base in bases) heapWrite(base, suffix, tokens)
                 }
                 val size = points[ins.result]?.size ?: 0
                 learnAll(ins.result, tokens)

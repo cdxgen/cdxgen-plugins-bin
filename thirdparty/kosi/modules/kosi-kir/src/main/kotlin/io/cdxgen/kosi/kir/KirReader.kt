@@ -158,7 +158,15 @@ object KirReader {
     }
 
     private fun parseDynamic(result: String?, text: String): KirDynamicCall {
-        val (rest, line) = splitLine(text)
+        val (withImported, line) = splitLine(text)
+        val importedStatic = " imported-static=" in withImported
+        val importedKey = if (importedStatic) " imported-static=" else " imported="
+        val rest = withImported.substringBefore(importedKey)
+        val imported = if (importedKey in withImported) {
+            withImported.substringAfter("$importedKey(").substringBefore(")").split(',').filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
         val body = rest.substringBefore(" typeargs=")
         val name = unq(body.substringBefore(" recv=").substringBefore(" args="))
         val recv = if (" recv=" in body) body.substringAfter(" recv=").substringBefore(" args=") else null
@@ -172,7 +180,7 @@ object KirReader {
         } else {
             emptyList()
         }
-        return KirDynamicCall(result, name, recv, args, line, typeArgs)
+        return KirDynamicCall(result, name, recv, args, line, typeArgs, imported, importedStatic)
     }
 
     private val NO_RESULT_OPS = setOf("store", "fieldset", "indexset", "branch", "return", "throw", "suspend")

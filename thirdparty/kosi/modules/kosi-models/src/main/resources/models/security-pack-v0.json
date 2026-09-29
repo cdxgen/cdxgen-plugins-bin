@@ -45,6 +45,30 @@
       ]
     },
     {
+      "pattern": "java.lang.StringBuilder.insert",
+      "writesToArguments": [
+        2
+      ]
+    },
+    {
+      "pattern": "kotlin.text.appendLine",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "java.lang.StringBuffer.append",
+      "writesToArguments": [
+        1
+      ]
+    },
+    {
+      "pattern": "java.lang.StringBuffer.insert",
+      "writesToArguments": [
+        2
+      ]
+    },
+    {
       "pattern": "java.lang.ThreadLocal.set",
       "writesToArguments": [
         1
@@ -832,7 +856,8 @@
           -1
         ]
       ],
-      "pattern": "java.lang.String.format"
+      "pattern": "java.lang.String.format",
+      "varargFrom": 1
     },
     {
       "category": "string-adapter",
@@ -934,6 +959,36 @@
     },
     {
       "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          2,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuffer.insert"
+    },
+    {
+      "category": "string-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "flows": [
+        [
+          0,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuffer.toString"
+    },
+    {
+      "category": "string-adapter",
       "elementFlows": [
         [
           0,
@@ -961,6 +1016,34 @@
         ]
       ],
       "pattern": "java.lang.StringBuilder.append"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          2,
+          -1
+        ]
+      ],
+      "pattern": "java.lang.StringBuilder.insert"
+    },
+    {
+      "category": "string-adapter",
+      "flows": [
+        [
+          0,
+          -1
+        ],
+        [
+          1,
+          -1
+        ]
+      ],
+      "pattern": "kotlin.text.appendLine"
     },
     {
       "category": "value-wrapper",
@@ -1000,6 +1083,12 @@
     },
     {
       "category": "string-adapter",
+      "elementFlows": [
+        [
+          0,
+          -1
+        ]
+      ],
       "flows": [
         [
           0,
@@ -1024,7 +1113,8 @@
           -1
         ]
       ],
-      "pattern": "kotlin.text.format"
+      "pattern": "kotlin.text.format",
+      "varargFrom": 1
     },
     {
       "category": "string-adapter",
@@ -1407,6 +1497,36 @@
         "untrusted-input"
       ],
       "pattern": "java.lang.Short.valueOf"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBoolean"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBooleanStrict"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "kotlin.text.toBooleanStrictOrNull"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Boolean.parseBoolean"
+    },
+    {
+      "clears": [
+        "untrusted-input"
+      ],
+      "pattern": "java.lang.Boolean.valueOf"
     },
     {
       "clears": [
@@ -1983,6 +2103,372 @@
     },
     {
       "category": "path-traversal",
+      "pattern": "java.io.FileInputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.FileReader",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.io.RandomAccessFile",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.readAllBytes",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.readAllLines",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.readString",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.lines",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.newInputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.newBufferedReader",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.newOutputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.newBufferedWriter",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.write",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.writeString",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.delete",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.deleteIfExists",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.createFile",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.createDirectory",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.createDirectories",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.newDirectoryStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.list",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.walk",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.copy",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.move",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.createLink",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "java.nio.file.Files.createSymbolicLink",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.readText",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.readBytes",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.readLines",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.writeText",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.writeBytes",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.appendText",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.inputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.outputStream",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.bufferedReader",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.bufferedWriter",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.deleteExisting",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.deleteIfExists",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.createDirectories",
+      "receiverType": null,
+      "relevantArguments": [
+        0
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.copyTo",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
+      "pattern": "kotlin.io.path.moveTo",
+      "receiverType": null,
+      "relevantArguments": [
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "path-traversal",
       "pattern": "java.io.FileOutputStream",
       "receiverType": null,
       "relevantArguments": [
@@ -2033,7 +2519,17 @@
       "relevantArguments": [
         0
       ],
-      "severity": "critical"
+      "severity": "critical",
+      "varargFrom": 0
+    },
+    {
+      "category": "process-exec",
+      "pattern": "java.lang.ProcessBuilder.command",
+      "relevantArguments": [
+        1
+      ],
+      "severity": "critical",
+      "varargFrom": 1
     },
     {
       "category": "process-exec",
@@ -2443,7 +2939,18 @@
       "category": "ssrf",
       "pattern": "java.net.URL",
       "relevantArguments": [
-        0
+        0,
+        1
+      ],
+      "severity": "high"
+    },
+    {
+      "category": "ssrf",
+      "pattern": "java.net.URI",
+      "relevantArguments": [
+        0,
+        1,
+        2
       ],
       "severity": "high"
     },
