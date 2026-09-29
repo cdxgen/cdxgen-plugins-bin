@@ -1,0 +1,19 @@
+thirdparty/rusi/scripts/eval/golden/mini-redis.stable.digest.json
+  s_fd07128e7dbdfd::t_0e1a92e65aef70 3-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "07f40f988bb7fc3fc545b8c394ddcd7207b41ba1",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
