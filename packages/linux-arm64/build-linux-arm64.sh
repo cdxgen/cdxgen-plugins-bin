@@ -10,6 +10,9 @@ rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/c
 mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 -o plugins/sourcekitten/
+# oras writes the files it pulls without an execute bit, and npm packs the
+# mode it finds.
+chmod +x plugins/sourcekitten/sourcekitten
 # kosi natives are staged into ../../plugins/kosi by build.sh, from
 # thirdparty/kosi/build - built there (test.yml's kosi_*_prebuild jobs) or
 # pulled from the ghcr cache (release.yml). This script no longer races a

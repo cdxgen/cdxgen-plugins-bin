@@ -438,6 +438,7 @@ jobs:
       run: |
         bash ./scripts/assert-trivy-cdxgen-sbom.test.sh
         bash ./scripts/check-package-size.test.sh
+        bash ./scripts/check-plugin-coverage.test.sh
         bash ./scripts/thirdparty-downloads.test.sh
         bash ./scripts/stage-built-plugins.test.sh
         bash ./scripts/publish-helper-oras.test.sh

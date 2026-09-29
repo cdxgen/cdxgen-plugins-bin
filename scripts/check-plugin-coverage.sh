@@ -78,13 +78,25 @@ main() {
         failures=$((failures + 1))
       fi
     done
+
+    # A helper cdxgen cannot execute is as absent as a missing one. oras and
+    # the download steps write files without an execute bit and npm packs the
+    # mode it finds, which is how sourcekitten shipped 0644 in every macOS and
+    # Linux package. Windows does not use the bit.
+    if [[ "$package_name" != windows-* && -d "$package_dir/plugins" ]]; then
+      while IFS= read -r -d '' file_path; do
+        echo "Error: $package_name ships ${file_path#"$package_dir"/} without an execute bit" >&2
+        failures=$((failures + 1))
+      done < <(find "$package_dir/plugins" -mindepth 2 -maxdepth 2 -type f \
+        ! -name '*.sha256' ! -name '*.json' ! -name '.*' ! -perm -u+x -print0 2>/dev/null || true)
+    fi
   done
 
   if [[ "$failures" -gt 0 ]]; then
     echo "" >&2
-    echo "$failures missing plugin binary/binaries. A package that ships without a" >&2
-    echo "plugin looks identical to one where the plugin is merely optional, so" >&2
-    echo "this fails the release rather than letting it out." >&2
+    echo "$failures missing or non-executable plugin binary/binaries. A package that" >&2
+    echo "ships without a working plugin looks identical to one where the plugin is" >&2
+    echo "merely optional, so this fails the release rather than letting it out." >&2
     exit 1
   fi
 
