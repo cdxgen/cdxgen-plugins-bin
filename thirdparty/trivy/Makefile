@@ -34,7 +34,12 @@ ldflags := -s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=$(trivy_ve
 
 build = $(GOPIN) CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build $(slim) -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(1)-$(2)$(3)
 sha = cd build && sha256sum $(appname)-$(1)-$(2)$(3) > $(appname)-$(1)-$(2)$(3).sha256
-generate_sbom = $(GOPIN) cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json
+# go.mod names every module Trivy's build graph reaches, about four times what
+# the slim binary links. prune-go-sbom.js keeps the modules the built binaries
+# record in their build info, so the SBOM has to be generated before any of
+# them is UPX-packed.
+generate_sbom = $(GOPIN) cdxgen -t go -o build/sbom-trivy-postbuild.cdx.json && \
+	node ../../scripts/prune-go-sbom.js build/sbom-trivy-postbuild.cdx.json build/$(appname)-*
 
 .PHONY: all windows darwin linux linuxmusl sbom clean test fmt fmt-check lint local
 

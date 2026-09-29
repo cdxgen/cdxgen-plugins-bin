@@ -53,7 +53,7 @@ Look inside a staged directory after a build:
 
 ```bash
 ls plugins/golem/
-cat plugins/plugins-manifest.json | jq '.components[0]'
+cat plugins/plugins-manifest.json | jq '.plugins[0]'
 ```
 
 Alongside the binaries, `scripts/generate-metadata.js` produces the provenance bundle. `sbom-postbuild.cdx.json` is a CycloneDX inventory of the helpers. `plugins-manifest.json` records the generated-at timestamp, package identity, and per-helper purl, version, hash, binary path, and SBOM reference. cdxgen reads this manifest to attribute helper identity precisely under `metadata.tools` in the BOMs it generates.
@@ -61,7 +61,7 @@ Alongside the binaries, `scripts/generate-metadata.js` produces the provenance b
 The manifest is data only. cdxgen parses it, never executes from it. Regenerate it without a rebuild:
 
 ```bash
-node scripts/generate-metadata.js
+node scripts/generate-metadata.js ./plugins
 ```
 
 ## The gates

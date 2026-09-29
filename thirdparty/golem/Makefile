@@ -6,7 +6,10 @@ ldflags := -s -w -X main.version=$(version)
 
 build = CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) go build -trimpath -buildvcs=false -ldflags "$(ldflags) -extldflags=-Wl,-z,now,-z,relro" -o build/$(appname)-$(3)$(4) ./cmd/golem
 sha = cd build && sha256sum $(appname)-$(1)$(2) > $(appname)-$(1)$(2).sha256
-generate_sbom = cdxgen -t go -o build/sbom-golem-postbuild.cdx.json
+# testdata holds fixture modules, not dependencies. prune-go-sbom.js keeps the
+# modules the built binaries link, so the binaries must be built first.
+generate_sbom = cdxgen -t go --exclude "testdata/**" -o build/sbom-golem-postbuild.cdx.json && \
+	node ../../scripts/prune-go-sbom.js build/sbom-golem-postbuild.cdx.json build/$(appname)-*
 
 .PHONY: all windows darwin linux linuxmusl test fmt fmt-check lint sbom clean
 all: test windows linux darwin sbom

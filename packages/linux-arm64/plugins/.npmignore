@@ -1,2 +1,3 @@
-trivy/sbom-*-postbuild.cdx.json
-sourcekitten/sbom-*-postbuild.cdx.json
+# Kept, though empty, because without it npm falls back to .gitignore, which
+# lists plugin directories that must ship. Every helper's SBOM ships next to
+# its binary, where plugins-manifest.json points.

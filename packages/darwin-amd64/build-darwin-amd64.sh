@@ -10,6 +10,9 @@ rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/c
 mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:darwin-amd64 -o plugins/sourcekitten/
+# oras writes the files it pulls without an execute bit, and npm packs the
+# mode it finds.
+chmod +x plugins/sourcekitten/sourcekitten
 
 bash ../../scripts/thirdparty-downloads.sh install-dosai darwin-amd64 plugins/dosai/dosai-darwin-amd64
 sha256sum plugins/dosai/dosai-darwin-amd64 > plugins/dosai/dosai-darwin-amd64.sha256

@@ -85,7 +85,7 @@ jobs:
     - run: oras version
     - name: Build
       run: |
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         bash thirdparty/sourcekitten/build.sh
         ls -l thirdparty/sourcekitten/SourceKitten/.build/release
         echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
@@ -110,7 +110,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         pushd thirdparty/rusi
         make bootstrap-linux
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         make linux linuxmusl windows sbom
         popd
 
@@ -121,7 +121,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         pushd thirdparty/rusi
         make bootstrap-darwin
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         make darwin sbom
         popd
 
@@ -202,10 +202,12 @@ jobs:
       run: |
         pushd thirdparty/trivy
         make build/linuxmusl_amd64
-        sudo chown -R $USER:$USER build/        
+        sudo chown -R $USER:$USER build/
+        # The SBOM is pruned to the modules the binary's build info names,
+        # which UPX packing hides.
+        make sbom
         upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-amd64
         sha256sum ./build/trivy-cdxgen-linuxmusl-amd64 > ./build/trivy-cdxgen-linuxmusl-amd64.sha256
-        make sbom
         popd
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/
@@ -258,9 +260,11 @@ jobs:
         pushd thirdparty/trivy
         make build/linuxmusl_arm64
         sudo chown -R $USER:$USER build/
+        # The SBOM is pruned to the modules the binary's build info names,
+        # which UPX packing hides.
+        make sbom
         upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-arm64
         sha256sum ./build/trivy-cdxgen-linuxmusl-arm64 > ./build/trivy-cdxgen-linuxmusl-arm64.sha256
-        make sbom
         popd
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/

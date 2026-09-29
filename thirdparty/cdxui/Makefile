@@ -152,7 +152,7 @@ sbom: | $(build_dir)
 		echo "cdxgen is required to generate the SBOM; install it and rerun make sbom." >&2; \
 		exit 1; \
 	fi
-	cdxgen -t rust -o "$(build_dir)/sbom-$(appname)-postbuild.cdx.json"
+	cdxgen -t rust --required-only -o "$(build_dir)/sbom-$(appname)-postbuild.cdx.json"
 
 test:
 	cargo test
