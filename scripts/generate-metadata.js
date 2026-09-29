@@ -2,6 +2,7 @@ import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { depsJsonToBom, readBundledDepsJson } from "./dotnet-bundle-sbom.js";
 
 const pluginsPackageJson = JSON.parse(
   fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -31,6 +32,8 @@ const trustInspectorVersion = pluginsPackageJson.version;
 const golemVersion = pluginsPackageJson.version;
 const rusiVersion = pluginsPackageJson.version;
 const kosiVersion = pluginsPackageJson.version;
+const cdxrsVersion = pluginsPackageJson.version;
+const cdxuiVersion = pluginsPackageJson.version;
 
 function pluginComponentMetadata() {
   return {
@@ -149,6 +152,40 @@ function pluginComponentMetadata() {
         },
       ],
     },
+    cdxrs: {
+      version: cdxrsVersion,
+      description:
+        "Rust-native CycloneDX BOM tooling that cdxgen invokes as an optional accelerator.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/cdxrs@${cdxrsVersion}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/cdxrs",
+          type: "vcs",
+        },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
+      ],
+    },
+    cdxui: {
+      version: cdxuiVersion,
+      description:
+        "Terminal user interface for exploring CycloneDX BOM files, or a BOM cdxgen generates live.",
+      purl: `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/cdxui@${cdxuiVersion}`,
+      licenses: [{ license: { id: "MIT" } }],
+      externalReferences: [
+        {
+          url: "https://github.com/cdxgen/cdxgen-plugins-bin/tree/main/thirdparty/cdxui",
+          type: "vcs",
+        },
+        {
+          url: "https://github.com/cdxgen/cdxgen/issues",
+          type: "issue-tracker",
+        },
+      ],
+    },
     trustinspector: {
       version: trustInspectorVersion,
       description:
@@ -166,6 +203,101 @@ function pluginComponentMetadata() {
         },
       ],
     },
+  };
+}
+
+// dosai is downloaded as a published binary whose release ships no SBOM. The
+// binary is a .NET single-file bundle, and the deps.json it carries lists the
+// NuGet packages inside it, so its SBOM is written from that. Returns the
+// file name written, or undefined.
+export function writeDosaiSbom(toolDir, binaryFile, component) {
+  let depsJson;
+  try {
+    depsJson = readBundledDepsJson(
+      fs.readFileSync(path.join(toolDir, binaryFile)),
+    );
+  } catch (err) {
+    console.warn(
+      `Warning: Could not read the bundled deps.json of ${binaryFile}: ${err.message}`,
+    );
+    return undefined;
+  }
+  if (!depsJson) {
+    console.warn(
+      `Warning: ${binaryFile} is not a .NET single-file bundle; no dosai SBOM was written`,
+    );
+    return undefined;
+  }
+  const root = {
+    type: component.type,
+    name: component.name,
+    version: component.version,
+    purl: component.purl,
+    "bom-ref": component["bom-ref"],
+  };
+  const sbomFile = "sbom-dosai-postbuild.cdx.json";
+  fs.writeFileSync(
+    path.join(toolDir, sbomFile),
+    JSON.stringify(depsJsonToBom(depsJson, root), null, 2),
+  );
+  return sbomFile;
+}
+
+// A multi-module build (Gradle subprojects, Cargo workspace members) lists
+// its modules under metadata.component.components, and the dependency graph
+// points at them. They are part of the tool, so they join its components.
+export function sbomComponents(sbomContent) {
+  const components = [...(sbomContent.components || [])];
+  const refs = new Set(components.map((c) => c?.["bom-ref"]));
+  const stack = [...(sbomContent.metadata?.component?.components || [])];
+  while (stack.length) {
+    const nested = stack.shift();
+    if (!nested || typeof nested !== "object") {
+      continue;
+    }
+    const { components: children, ...component } = nested;
+    if (!refs.has(component["bom-ref"])) {
+      refs.add(component["bom-ref"]);
+      components.push(component);
+    }
+    stack.push(...(children || []));
+  }
+  return components;
+}
+
+// Helpers built from the same ecosystem share packages (rusi, cdxrs and cdxui
+// link many of the same crates), and a BOM may list each bom-ref only once.
+// The first component wins; dependency entries for one ref are united, and
+// edges to a component that was left out (an `unspecified` version) go.
+export function mergeByRef(components, dependencies) {
+  const seen = new Set();
+  const uniqueComponents = [];
+  for (const component of components) {
+    const ref = component?.["bom-ref"];
+    if (ref && seen.has(ref)) {
+      continue;
+    }
+    if (ref) {
+      seen.add(ref);
+    }
+    uniqueComponents.push(component);
+  }
+  const edges = new Map();
+  for (const dependency of dependencies) {
+    const dependsOn = edges.get(dependency.ref) || new Set();
+    for (const target of dependency.dependsOn || []) {
+      dependsOn.add(target);
+    }
+    edges.set(dependency.ref, dependsOn);
+  }
+  return {
+    components: uniqueComponents,
+    dependencies: [...edges]
+      .filter(([ref]) => seen.has(ref))
+      .map(([ref, dependsOn]) => ({
+        ref,
+        dependsOn: [...dependsOn].filter((target) => seen.has(target)),
+      })),
   };
 }
 
@@ -232,6 +364,8 @@ async function main() {
     "golem",
     "rusi",
     "kosi",
+    "cdxrs",
+    "cdxui",
   ];
   for (const tool of tools) {
     const toolDir = path.join(targetDir, tool);
@@ -240,7 +374,7 @@ async function main() {
     }
     const files = fs.readdirSync(toolDir);
     const shaFile = files.find((f) => f.endsWith(".sha256"));
-    const sbomFile = files.find((f) => f.endsWith(".cdx.json"));
+    let sbomFile = files.find((f) => f.endsWith(".cdx.json"));
     const binaryFile = files.find(
       (f) => !f.endsWith(".sha256") && !f.endsWith(".json"),
     );
@@ -305,6 +439,9 @@ async function main() {
       component.hashes = [{ alg: "SHA-256", content: fileHash }];
     }
     allComponents.push(component);
+    if (!sbomFile && tool === "dosai") {
+      sbomFile = writeDosaiSbom(toolDir, binaryFile, component);
+    }
     manifestPlugins.push({
       name: tool,
       version,
@@ -319,13 +456,15 @@ async function main() {
           fs.readFileSync(path.join(toolDir, sbomFile), "utf-8"),
         );
         const originalRootRef = sbomContent.metadata?.component?.["bom-ref"];
-        if (sbomContent.components) {
-          allComponents.push(
-            ...sbomContent.components.filter(
-              (c) => c?.version !== "unspecified",
-            ),
-          );
-        }
+        // The SBOM's root is the tool, which the manifest component above
+        // already stands for; cargo also lists it as a component.
+        allComponents.push(
+          ...sbomComponents(sbomContent).filter(
+            (c) =>
+              c?.version !== "unspecified" &&
+              (!originalRootRef || c?.["bom-ref"] !== originalRootRef),
+          ),
+        );
         if (sbomContent.dependencies) {
           for (const dep of sbomContent.dependencies) {
             const newDep = { ...dep };
@@ -361,18 +500,19 @@ async function main() {
       timestamp: `${new Date().toISOString().split(".")[0]}Z`,
       lifecycles: [{ phase: "post-build" }],
     },
-    components: allComponents,
   };
-  if (allDependencies.length > 0) {
-    // Fix the sourcekitten ref
-    // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.38.0
-    for (const d of allDependencies) {
-      if (d.ref === "pkg:swift/SourceKitten@unspecified") {
-        d.ref = `pkg:github/jpsim/sourcekitten@${sourcekittenVersion}`;
-        break;
-      }
+  // Fix the sourcekitten ref
+  // pkg:swift/SourceKitten@unspecified => pkg:github/jpsim/sourcekitten@0.38.0
+  for (const d of allDependencies) {
+    if (d.ref === "pkg:swift/SourceKitten@unspecified") {
+      d.ref = `pkg:github/jpsim/sourcekitten@${sourcekittenVersion}`;
+      break;
     }
-    outData.dependencies = allDependencies;
+  }
+  const merged = mergeByRef(allComponents, allDependencies);
+  outData.components = merged.components;
+  if (merged.dependencies.length > 0) {
+    outData.dependencies = merged.dependencies;
   }
   const outFile = path.join(targetDir, "sbom-postbuild.cdx.json");
   fs.writeFileSync(outFile, JSON.stringify(outData, null, null));
