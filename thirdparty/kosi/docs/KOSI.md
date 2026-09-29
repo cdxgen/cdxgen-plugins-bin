@@ -189,6 +189,29 @@ the device can call a provider). Property initializers are lowered as the
 executable code they are, so a Koin module at top level — the framework's
 own idiom — is visible to the whole engine.
 
+State that outlives a call is followed too. A static field — an
+`object`'s or a companion's property, a top-level property — has no scope,
+so what one function stores there reaches every function that reads it: a
+first pass collects those stores and a second births them at the reads,
+named `static <field> written in <function>`. A container singleton's
+fields (a Spring stereotype, `@Singleton`, `@ApplicationScoped`, a Micronaut
+controller, and no `@Scope` of its own) are shared by every request it
+serves, and are carried the same way; a plain class's field stays with its
+instance. A `ThreadLocal` or a builder is one object however many times its
+field is read, so `held.set(x)` then `held.get()` and `sb.append(x)` then
+`sb.toString()` carry through a member property as through a local.
+
+Builders are followed through the scope functions and the standard-library
+builders: a bare `append(raw)` inside `apply { }`, `with(sb) { }`,
+`buildString { }` or `buildList { }` is a call on the lambda's receiver
+(resolution says which receiver, so a class member called from inside the
+lambda keeps its own), a template renders a builder's or a collection's
+contents, and a vararg sink or passthrough watches every argument of its
+vararg (`ProcessBuilder("sh", "-c", cmd)`). A handler parameter the
+framework converted to a scalar (`@RequestParam n: Int`, `id: UUID`)
+arrives parsed, and the pack's sanitizer for that conversion clears it as it
+clears `text.toInt()`.
+
 Function VALUES are followed in every spelling the language offers: a
 lambda (trailing, named-argument, implicit `it`, multi-parameter), a
 callable reference (`::top`, `obj::method`, a local `fun`), an anonymous
@@ -258,12 +281,21 @@ read a result:
 - **Reflection, dynamic loading and generated code** are reported as
   conditions (`dynamic-code-load`, `generated-functions`,
   `dataflow-skip-generated`), not silently followed.
-- **Function values kosi cannot name.** A call site that invokes a value the
-  engine could not resolve stops taint; the `taint-unnameable-invoke`
-  diagnostic counts the sites AND names the enclosing functions, so a
-  classpath-less run can see that a framework sink (a `JdbcTemplate` the jars
-  never arrived for) was unexamined rather than clean. Framework sinks
-  resolve when the project classpath is passed (`--classpath-file`).
+- **Function values kosi cannot name.** A call site that invokes a function
+  value the engine could not resolve, or a library interface nothing models,
+  is examined no further; the `taint-unnameable-invoke` diagnostic counts the
+  sites and names the enclosing functions.
+- **Classes the classpath did not hold.** Without the project's jars a
+  framework call does not resolve. kosi then reads it at the callee its
+  file's imports name — the receiver's declared type, a constructor's or a
+  qualifier's class — and when the model pack has an entry for that callee
+  the call is that entry: `jdbc.queryForList(sql)` on a `JdbcTemplate` is
+  the SQL sink with or without the Spring jar, and `call-import-resolved`
+  lists every callee read that way. An unresolved class the pack does not
+  name moves taint by the unknown-call default, and `taint-unresolved-call`
+  names each such class (MyBatis's `SqlSession`, say), so the blind spot is
+  in the report rather than behind a silence. Passing the project classpath
+  (`--classpath-file`) resolves both.
 
 ## How cdxgen consumes it
 
