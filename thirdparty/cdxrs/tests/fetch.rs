@@ -834,9 +834,8 @@ async fn output_flag_writes_the_envelope_to_a_file() {
         "stdout must stay empty when --output is a file, got {:?}",
         run.stdout
     );
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!("failed to read {}: {e}", path.display())
-    });
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     let envelope: serde_json::Value = serde_json::from_str(&text)
         .unwrap_or_else(|e| panic!("--output file is not valid JSON ({e}): {text}"));
     assert_eq!(envelope["results"][0]["id"], "npm:left-pad");
