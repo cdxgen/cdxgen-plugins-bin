@@ -1,0 +1,122 @@
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirWriter.kt
+  s_fd07128e7dbdfd::t_3f25705c5c93af 73,115-116
+  s_fd07128e7dbdfd::t_8a15ccb629142a 117
+thirdparty/kosi/fixtures/scalar-handler-params/src/main/kotlin/org/springframework/web/bind/annotation/Annotations.kt
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1-6
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  s_fd07128e7dbdfd::t_4ce68d080a24fe 2105-2277,2282,2286,2291,2295,2298,2305,2308,2315,2318-2319,2321,2325,2335,2344,2353-2389,2393-2463
+  s_fd07128e7dbdfd::t_15d38297ff452e 1502-1529
+  s_fd07128e7dbdfd::t_5131c8971224ea 47,859-860,1116-1117,1501,1530,2104,2278-2281,2283-2285,2287-2290,2292-2294,2296-2297,2299-2304,2306-2307,2309-2314,2316-2317,2320,2322-2324,2326-2334,2336-2343,2345-2352,2390-2392,2464-2469,2522-2532,2942-2953
+  s_fd07128e7dbdfd::t_5082861621a4de 48-70,960-989,1020-1047,1086-1091
+thirdparty/kosi/fixtures/builder-scopes/src/main/kotlin/fixtures/builders/Builders.kt
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1-133
+thirdparty/kosi/corpus.toml
+  s_fd07128e7dbdfd::t_e0b4d88d5e2f3a 23-71
+thirdparty/kosi/fixtures/static-state-carriers/build.gradle.kts
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1
+thirdparty/kosi/fixtures/static-state-carriers/src/main/kotlin/org/springframework/context/annotation/Scope.kt
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 1-3
+thirdparty/kosi/fixtures/classpathless-sinks/build.gradle.kts
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1
+thirdparty/kosi/fixtures/url-multi-arg/src/main/kotlin/fixtures/urls/MultiArg.kt
+  s_fd07128e7dbdfd::t_933d47d7e28798 1-40
+thirdparty/kosi/fixtures/static-state-carriers/src/main/kotlin/fixtures/statics/Statics.kt
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 1-15,17-20,23-56,58-160,163-171
+  s_fd07128e7dbdfd::t_e0b4d88d5e2f3a 16,21,57,161-162
+  s_fd07128e7dbdfd::t_c9e611b16644ed 22
+thirdparty/kosi/fixtures/scalar-handler-params/build.gradle.kts
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1
+thirdparty/kosi/fixtures/threadlocal-carrier/src/main/kotlin/fixtures/tl/ThreadLocalCarrier.kt
+  s_fd07128e7dbdfd::t_006ffc239b6c4a 2-3
+thirdparty/kosi/fixtures/scalar-handler-params/src/main/kotlin/fixtures/scalars/Scalars.kt
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1-104
+thirdparty/kosi/modules/kosi-kir/src/test/kotlin/io/cdxgen/kosi/kir/KirRoundTripTest.kt
+  s_fd07128e7dbdfd::t_5dd9421fbedbbd 59-78
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Diagnostics.kt
+  s_fd07128e7dbdfd::t_6473de63ae8a4d 158-175,296-297
+thirdparty/kosi/fixtures/url-multi-arg/build.gradle.kts
+  s_fd07128e7dbdfd::t_933d47d7e28798 1
+thirdparty/kosi/modules/kosi-flow/src/test/kotlin/io/cdxgen/kosi/flow/CarriersAndImportsTest.kt
+  s_fd07128e7dbdfd::t_8e3bc764def13e 1-160
+thirdparty/kosi/fixtures/classpathless-sinks/src/main/kotlin/fixtures/nocp/Repository.kt
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1-19,23-93
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 20
+  s_fd07128e7dbdfd::t_b64acf1431ac58 21-22
+thirdparty/kosi/fixtures/static-state-carriers/src/main/kotlin/org/springframework/web/bind/annotation/Annotations.kt
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 1-5
+thirdparty/kosi/fixtures/nio-path-sinks/src/main/kotlin/fixtures/nio/NioPaths.kt
+  s_fd07128e7dbdfd::t_e07dbfc05916ff 1-8,10-49,59-65,67-71,73-74,76,78-79,82,84-85,88,90-91,94,96-97,100,102-103,106,108-109,112-297,313,316-321
+  s_fd07128e7dbdfd::t_933d47d7e28798 9,50-58,66,72,75,77,80-81,83,86-87,89,92-93,95,98-99,101,104-105,107,110-111,298-312,314-315,322
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  s_fd07128e7dbdfd::t_fac9875f0ad60a 904-905,1270,1593-1594,1596-1599
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Transfer.kt
+  s_fd07128e7dbdfd::t_6473de63ae8a4d 330-332,702-704
+  s_fd07128e7dbdfd::t_bd88f484d18c2d 523,527-536,578-581,832-834,839-842,866-873
+  s_fd07128e7dbdfd::t_fac9875f0ad60a 333-335,614-623
+  s_fd07128e7dbdfd::t_2f9ea04f62f4c4 753-754,769,825
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirInstructions.kt
+  s_fd07128e7dbdfd::t_349230f0f1c8db 68-78
+  s_fd07128e7dbdfd::t_3f25705c5c93af 79-83
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/ImportResolvedCalls.kt
+  s_fd07128e7dbdfd::t_6473de63ae8a4d 1-94
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  s_fd07128e7dbdfd::t_213a9ba075abf6 198,1814-1826,3112-3119,3301-3302,3497-3527,3547-3550,3575-3578,3883-3885
+  s_fd07128e7dbdfd::t_ac39ada52d9ab0 441,447-453,456-457,459-460,473,475-483,771-779,1313-1314,2503-2507,2635-2638,2659-2660,2956-2967,3001
+  s_fd07128e7dbdfd::t_9cd5cab2eeb7b5 199-208,485-502,563
+  s_fd07128e7dbdfd::t_3f25705c5c93af 3308,3311,3313-3314,3401-3402,3406-3408,3411-3419,3421,3423-3427,3429-3434,3436-3438,3440
+  s_fd07128e7dbdfd::t_23e7b72e05d4e9 4014-4026
+  s_fd07128e7dbdfd::t_627048cd20d512 484
+  s_fd07128e7dbdfd::t_8aea0d88505651 418-440,442-446,454-455,458,461-472,474,3494-3495,3986-4005,4013
+  s_fd07128e7dbdfd::t_49aa93625ddcb5 2938-2942,2945,2949-2952
+  s_fd07128e7dbdfd::t_8c9c2e0005a6cb 3391-3400,3403-3405,3409-3410,3420,3422,3428,3435,3439,3441-3493,3496
+  s_fd07128e7dbdfd::t_2b6989643f0abb 1827,3303,3317,3324,3908-3912,3917,4006-4007,4027
+thirdparty/kosi/fixtures/process-builder-varargs/src/main/kotlin/fixtures/pbv/Varargs.kt
+  s_fd07128e7dbdfd::t_933d47d7e28798 1-39
+thirdparty/kosi/fixtures/process-builder-varargs/build.gradle.kts
+  s_fd07128e7dbdfd::t_933d47d7e28798 1
+thirdparty/kosi/fixtures/classpathless-sinks/src/main/kotlin/fixtures/nocp/starred/Starred.kt
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 1-11
+thirdparty/kosi/fixtures/builder-scopes/build.gradle.kts
+  s_fd07128e7dbdfd::t_33b2be67dfb78a 1
+thirdparty/kosi/fixtures/nio-path-sinks/build.gradle.kts
+  s_fd07128e7dbdfd::t_933d47d7e28798 1
+thirdparty/kosi/fixtures/classpathless-sinks/src/main/kotlin/fixtures/nocp/local/JdbcTemplate.kt
+  s_fd07128e7dbdfd::t_44e86a4b5a4ed4 1-6
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/DiStereotypes.kt
+  s_fd07128e7dbdfd::t_8aea0d88505651 57-88
+  s_fd07128e7dbdfd::t_acc886792e48ba 56
+thirdparty/kosi/modules/kosi-models/src/main/kotlin/io/cdxgen/kosi/models/ModelPack.kt
+  s_fd07128e7dbdfd::t_5131c8971224ea 42-48,50-54,64,80-85,87-94,106
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  s_fd07128e7dbdfd::t_d56459c7a3854a 220-262,1165,1651-1665,1684-1686,1715,1717-1721,1741-1742,1797
+  s_fd07128e7dbdfd::t_6473de63ae8a4d 652-662,746,748-765,1149-1163,1626,1630-1631
+  s_fd07128e7dbdfd::t_adf6af6025c6d3 265-266,901-906,908-926,930-950,952-958,960-990,992-1009,1011,1014,1017-1019,1021-1031,1164,1612
+  s_fd07128e7dbdfd::t_567bd01fd60aa1 1627-1629
+  s_fd07128e7dbdfd::t_a4e3a4fc0bc85b 1015-1016,1020,2726-2728,2738-2743,2745,2860,2902,3008-3009,3025,3156,3221-3226
+  s_fd07128e7dbdfd::t_c79bb2cfbd5071 551-552,554-556,1568-1600,1608-1611,1613-1615,1617-1620
+  s_fd07128e7dbdfd::t_8a9d4fae44b728 267,1032,1632
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirReader.kt
+  s_fd07128e7dbdfd::t_3f25705c5c93af 162-166,183
+  s_fd07128e7dbdfd::t_22e968fedfe94b 161,167-169
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/StaticCarriers.kt
+  s_fd07128e7dbdfd::t_fac9875f0ad60a 1-79,89,91
+  s_fd07128e7dbdfd::t_545cc7c2de8d80 80-88,90
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Identity.kt
+  s_fd07128e7dbdfd::t_073d9673fb262b 57-59,273-274,277-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fb5a668ad02f916e9f95393f8207e836da56e654",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
