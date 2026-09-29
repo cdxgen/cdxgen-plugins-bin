@@ -1,0 +1,21 @@
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_fd07128e7dbdfd::t_409219136150c1 245-246,474
+thirdparty/kosi/docs/KOSI.md
+  s_fd07128e7dbdfd::t_b72554f7ac6ae7 192-214,284-298
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bc8f52620382318aca512c02a8c7a05030c2d4d2",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
