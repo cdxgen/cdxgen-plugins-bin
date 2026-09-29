@@ -68,6 +68,8 @@ The I/O path uses untyped JSON values, so unknown fields survive and key order s
 
 cdxgen pins cdxrs by major version. On a mismatch the bridge logs once and uses JavaScript; it does not error. Operationally that sets a release order: publish the plugins package before releasing a cdxgen version that expects a new cdxrs major, and nothing anywhere will complain.
 
+Output size has a limit too. The bridge collects a subcommand's stdout into a single JavaScript string, and V8 strings cannot exceed 0x1fffffe8 (~512 MB) characters, so cdxgen stops a child whose stdout passes that ceiling (lowerable via `CDXGEN_RS_MAX_STDOUT_BYTES`) instead of dying at the concat (cdxgen issue 4393). A workspace-scale `fetch` batch of full npm packuments crossed it, so cdxgen sends `fetch` at most 250 URLs per run and splits a run that still overflows in half; only a single URL that is too large on its own falls back to JavaScript. `cdxrs fetch --output <file>` writes the envelope to a file instead of stdout, which `thirdparty/cdxrs/tests/fetch.rs` covers.
+
 If you suspect the accelerator never ran, do not look for errors, look for the absence of speed:
 
 ```bash
