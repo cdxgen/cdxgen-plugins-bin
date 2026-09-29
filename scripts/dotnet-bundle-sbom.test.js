@@ -124,7 +124,10 @@ test("readBundledDepsJson finds the deps.json of a single-file bundle", () => {
     readBundledDepsJson(buildBundle(depsJson, { majorVersion: 2 })),
     depsJson,
   );
-  assert.equal(readBundledDepsJson(Buffer.from("\x7fELF plain binary")), undefined);
+  assert.equal(
+    readBundledDepsJson(Buffer.from("\x7fELF plain binary")),
+    undefined,
+  );
 });
 
 test("depsJsonToBom lists the packages with their hashes and edges", () => {
@@ -188,9 +191,15 @@ test("generate-metadata writes dosai's SBOM from the bundled deps.json", () => {
     const entry = manifest.plugins.find((plugin) => plugin.name === "dosai");
     assert.equal(entry.sbomFile, "plugins/dosai/sbom-dosai-postbuild.cdx.json");
     const sbom = JSON.parse(
-      fs.readFileSync(path.join(toolDir, "sbom-dosai-postbuild.cdx.json"), "utf-8"),
+      fs.readFileSync(
+        path.join(toolDir, "sbom-dosai-postbuild.cdx.json"),
+        "utf-8",
+      ),
     );
-    assert.equal(sbom.metadata.component["bom-ref"], entry.component["bom-ref"]);
+    assert.equal(
+      sbom.metadata.component["bom-ref"],
+      entry.component["bom-ref"],
+    );
     const aggregate = JSON.parse(
       fs.readFileSync(path.join(tempDir, "sbom-postbuild.cdx.json"), "utf-8"),
     );

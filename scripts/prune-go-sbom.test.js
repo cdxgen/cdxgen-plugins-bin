@@ -107,15 +107,18 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
     },
   ]);
   assert.deepEqual(result, { dropped: 2, added: 2, skipped: [] });
-  assert.deepEqual(bom.components.map((component) => component["bom-ref"]), [
-    linked["bom-ref"],
-    behindUnlinked["bom-ref"],
-    orphan["bom-ref"],
-    fork["bom-ref"],
-    notGo["bom-ref"],
-    "pkg:golang/github.com/example/missing@v2.0.0",
-    "pkg:golang/stdlib@v1.26.8",
-  ]);
+  assert.deepEqual(
+    bom.components.map((component) => component["bom-ref"]),
+    [
+      linked["bom-ref"],
+      behindUnlinked["bom-ref"],
+      orphan["bom-ref"],
+      fork["bom-ref"],
+      notGo["bom-ref"],
+      "pkg:golang/github.com/example/missing@v2.0.0",
+      "pkg:golang/stdlib@v1.26.8",
+    ],
+  );
   const missing = bom.components.find(
     (component) => component.name === "github.com/example/missing",
   );
@@ -123,7 +126,10 @@ test("pruneGoSbom keeps the linked modules and rewires the graph around the rest
     { alg: "SHA-256", content: Buffer.alloc(32, 7).toString("hex") },
   ]);
   const edges = Object.fromEntries(
-    bom.dependencies.map((dependency) => [dependency.ref, dependency.dependsOn]),
+    bom.dependencies.map((dependency) => [
+      dependency.ref,
+      dependency.dependsOn,
+    ]),
   );
   // x/sys stays reachable through the storage module it was reached by; the
   // modules nothing reaches hang off the root. The file is not a module the

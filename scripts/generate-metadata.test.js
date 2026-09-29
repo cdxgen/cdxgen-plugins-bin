@@ -168,14 +168,21 @@ test("sbomComponents adds the modules listed under metadata.component", () => {
 test("mergeByRef keeps one component per bom-ref and drops edges to missing ones", () => {
   const merged = mergeByRef(
     [
-      { name: "serde", "bom-ref": "pkg:cargo/serde@1.0.228", scope: "required" },
+      {
+        name: "serde",
+        "bom-ref": "pkg:cargo/serde@1.0.228",
+        scope: "required",
+      },
       { name: "serde", "bom-ref": "pkg:cargo/serde@1.0.228" },
       { name: "rusi", "bom-ref": "rusi" },
       { name: "cdxrs", "bom-ref": "cdxrs" },
     ],
     [
       { ref: "rusi", dependsOn: ["pkg:cargo/serde@1.0.228"] },
-      { ref: "cdxrs", dependsOn: ["pkg:cargo/serde@1.0.228", "pkg:swift/X@unspecified"] },
+      {
+        ref: "cdxrs",
+        dependsOn: ["pkg:cargo/serde@1.0.228", "pkg:swift/X@unspecified"],
+      },
       { ref: "cdxrs", dependsOn: ["pkg:cargo/serde@1.0.228"] },
       { ref: "pkg:swift/X@unspecified", dependsOn: ["rusi"] },
     ],
@@ -203,7 +210,10 @@ test("generate-metadata records cdxrs and cdxui and merges their SBOMs", () => {
     for (const tool of ["cdxrs", "cdxui"]) {
       const toolDir = path.join(tempDir, tool);
       fs.mkdirSync(toolDir, { recursive: true });
-      fs.writeFileSync(path.join(toolDir, `${tool}-linux-amd64`), `${tool}-binary`);
+      fs.writeFileSync(
+        path.join(toolDir, `${tool}-linux-amd64`),
+        `${tool}-binary`,
+      );
       const rootRef = `pkg:cargo/${tool}@4.0.4`;
       fs.writeFileSync(
         path.join(toolDir, `sbom-${tool}-postbuild.cdx.json`),
@@ -236,7 +246,10 @@ test("generate-metadata records cdxrs and cdxui and merges their SBOMs", () => {
         entry.component.purl,
         `pkg:generic/github.com/cdxgen/cdxgen-plugins-bin/${tool}@${manifest.package.version}`,
       );
-      assert.equal(entry.sbomFile, `plugins/${tool}/sbom-${tool}-postbuild.cdx.json`);
+      assert.equal(
+        entry.sbomFile,
+        `plugins/${tool}/sbom-${tool}-postbuild.cdx.json`,
+      );
       assert.ok(!refs.includes(`pkg:cargo/${tool}@4.0.4`));
       assert.deepEqual(
         aggregate.dependencies.find(
