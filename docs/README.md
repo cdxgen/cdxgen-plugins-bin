@@ -23,7 +23,7 @@ Nine helpers, one contract: take a project directory, an archive, or host state;
 You normally never install this package directly. Install cdxgen, and it pulls in the platform package as an optional dependency:
 
 ```bash
-npm install -g @cyclonedx/cdxgen
+npm install -g @cdxgen/cdxgen
 ```
 
 When a scan reaches a project type that needs a helper, cdxgen resolves the binary and merges its output into the BOM. To use your own build of any helper, point its environment variable at it, for example `GOLEM_CMD`, `RUSI_CMD`, `CDXRS_CMD`, or `TRUSTINSPECTOR_CMD`. The full list is on the [architecture page](ARCHITECTURE.md).

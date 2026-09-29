@@ -240,7 +240,7 @@ surface, the protocol and exit codes.
 The package is consumed indirectly by cdxgen. Install cdxgen, which installs this plugin as an optional dependency:
 
 ```bash
-npm install -g @cyclonedx/cdxgen
+npm install -g @cdxgen/cdxgen
 ```
 
 cdxgen automatically uses the plugins from the global node_modules path to enrich the SBOM output for certain project types such as Docker containers, Swift projects, Go projects, Rust projects, and host-level scans.
@@ -251,6 +251,8 @@ Each packaged `plugins/` directory includes:
 
 - `sbom-postbuild.cdx.json` - a post-build CycloneDX inventory of the bundled helpers
 - `plugins-manifest.json` - a lightweight provenance bundle containing the generated-at timestamp, package identity, and per-plugin component metadata (purl, version, hash, binary path, and merged SBOM reference)
+
+Every helper except osquery also ships its own `sbom-<helper>-postbuild.cdx.json` next to its binary, which the manifest's `sbomFile` names and the post-build inventory merges. The Go helpers' SBOMs keep only the modules their binaries' build info lists, plus the Go standard library they were built with. dosai's is read from the `deps.json` inside its .NET single-file binary. The Rust and Kotlin ones leave out development and test dependencies, and no helper's SBOM includes its test fixtures. osquery has none: its release publishes no SBOM, and which of its bundled libraries a platform's build contains depends on osquery's CMake options.
 
 cdxgen reads `plugins-manifest.json` automatically when present so the generated BOM can record more precise helper-tool identity/version data under `metadata.tools`.
 

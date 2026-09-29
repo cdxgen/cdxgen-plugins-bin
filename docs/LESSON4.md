@@ -10,7 +10,7 @@ Use cdxui to inspect an existing CycloneDX BOM, then generate a new one from ins
 - a BOM file; generate one first if you do not have a spare:
 
 ```bash
-npm install -g @cyclonedx/cdxgen
+npm install -g @cdxgen/cdxgen
 cdxgen -t nodejs -o /tmp/bom.json /path/to/any/js/project
 ```
 

@@ -64,7 +64,7 @@ cd thirdparty/rusi && make sbom
 Regenerate metadata alone with:
 
 ```bash
-node scripts/generate-metadata.js
+node scripts/generate-metadata.js ./plugins
 ```
 
 The manifest is data only. cdxgen parses it to attribute helper identity in `metadata.tools`; it never executes anything the manifest names beyond the binaries it would have resolved anyway.

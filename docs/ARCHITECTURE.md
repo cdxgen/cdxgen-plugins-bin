@@ -61,6 +61,8 @@ cdxgen-plugins-bin/
     ├── check-plugin-coverage.sh
     ├── check-package-size.sh
     ├── generate-metadata.js
+    ├── prune-go-sbom.js      # Go helper SBOMs, cut to the modules the binaries link
+    ├── dotnet-bundle-sbom.js # dosai's SBOM, from the deps.json its binary bundles
     └── publish-helper-oras.sh
 ```
 
@@ -98,6 +100,8 @@ Each staged `plugins/` directory ships with two metadata files produced by `scri
 
 - `sbom-postbuild.cdx.json`, a post-build CycloneDX inventory of the bundled helpers
 - `plugins-manifest.json`, a provenance bundle with the generated-at timestamp, package identity, and per-helper component metadata: purl, version, hash, binary path, and SBOM reference
+
+The SBOM reference is the helper's own `sbom-<helper>-postbuild.cdx.json`, which every helper except osquery ships. `scripts/prune-go-sbom.js` restricts the Go helpers' SBOMs to the modules their build info lists, and `scripts/dotnet-bundle-sbom.js` writes dosai's from the `deps.json` its single-file binary bundles. The post-build inventory lists each shared package once, along with the modules a multi-module helper such as kosi declares.
 
 cdxgen reads the manifest when present so the generated BOM can record precise helper identity under `metadata.tools`. The manifest is data only. Nothing in it is executed; cdxgen parses it as JSON and uses it to tighten attribution.
 
