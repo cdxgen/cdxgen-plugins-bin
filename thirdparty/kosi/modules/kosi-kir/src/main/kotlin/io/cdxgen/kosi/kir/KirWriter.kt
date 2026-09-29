@@ -70,7 +70,7 @@ object KirWriter {
                 writeTypeArgs(ins.typeArguments) + lineSuffix(ins.line)
         is KirDynamicCall ->
             lhs(ins.result) + "dynamic " + q(ins.name) + writeRecvArgs(ins.receiver, ins.args) +
-                writeTypeArgs(ins.typeArguments) + lineSuffix(ins.line)
+                writeTypeArgs(ins.typeArguments) + writeImported(ins.importedCallees, ins.importedStatic) + lineSuffix(ins.line)
         is KirNew -> "${ins.result} = new ${qn(ins.type)}${writeArgs(ins.args)}${lineSuffix(ins.line)}"
         is KirPhi ->
             "${ins.result} = phi [" + ins.inputs.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}=${it.value}" } + "]"
@@ -111,6 +111,9 @@ object KirWriter {
     /** Emitted only when present, so every call without one is unchanged. */
     private fun writeTypeArgs(typeArguments: List<String>): String =
         if (typeArguments.isEmpty()) "" else " typeargs=(" + typeArguments.joinToString(",") + ")"
+
+    private fun writeImported(callees: List<String>, static: Boolean): String =
+        if (callees.isEmpty()) "" else (if (static) " imported-static=(" else " imported=(") + callees.joinToString(",") + ")"
 
     private fun writePath(path: AccessPath): String =
         path.base + path.elements.joinToString("") { element ->

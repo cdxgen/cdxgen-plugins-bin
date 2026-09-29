@@ -65,6 +65,22 @@ data class KirDynamicCall(
      * path only on the type.
      */
     val typeArguments: List<String> = emptyList(),
+    /**
+     * The callee FQNs this call names through its file's IMPORTS, for a run
+     * whose classpath did not hold the called class:
+     * `jdbc.queryForList(sql)` with `jdbc: JdbcTemplate` under
+     * `import org.springframework.jdbc.core.JdbcTemplate` names
+     * `org.springframework.jdbc.core.JdbcTemplate.queryForList`, and an
+     * unresolved `HttpGet(url)` names the constructor's class. An explicit
+     * import gives one candidate; a star import gives one per starred
+     * package, and only a model pack's match makes any of them a claim.
+     */
+    val importedCallees: List<String> = emptyList(),
+    /**
+     * The [importedCallees] name STATIC calls: the qualifier was a class name
+     * (`Jsoup.connect(url)`), not a value, so its register is not a receiver.
+     */
+    val importedStatic: Boolean = false,
 ) : KirIns
 
 /** An object creation with constructor arguments. */

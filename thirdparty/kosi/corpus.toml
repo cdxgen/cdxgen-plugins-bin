@@ -21,6 +21,55 @@
 # under partial classpaths resolves legitimately imperfectly).
 
 [[fixtures]]
+slug = "nio-path-sinks"
+tier = "fixtures"
+path = "fixtures/nio-path-sinks"
+capabilities = ["path-traversal", "nio"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "process-builder-varargs"
+tier = "fixtures"
+path = "fixtures/process-builder-varargs"
+capabilities = ["process-exec", "vararg-sink"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "url-multi-arg"
+tier = "fixtures"
+path = "fixtures/url-multi-arg"
+capabilities = ["ssrf", "multi-arg-ctor"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "builder-scopes"
+tier = "fixtures"
+path = "fixtures/builder-scopes"
+capabilities = ["receiver-state-carrier", "scope-function", "stringbuilder"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "scalar-handler-params"
+tier = "fixtures"
+path = "fixtures/scalar-handler-params"
+capabilities = ["sanitizer", "endpoint-sources", "spring-mvc"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
+slug = "classpathless-sinks"
+tier = "fixtures"
+path = "fixtures/classpathless-sinks"
+capabilities = ["classpath-partial", "import-resolved-call"]
+tolerated_resolution_errors = ["UNRESOLVED_IMPORT", "UNRESOLVED_REFERENCE"]
+
+[[fixtures]]
+slug = "static-state-carriers"
+tier = "fixtures"
+path = "fixtures/static-state-carriers"
+capabilities = ["static-carrier", "threadlocal", "spring-mvc"]
+tolerated_resolution_errors = []
+
+[[fixtures]]
 slug = "stringbuilder-carrier"
 tier = "fixtures"
 path = "fixtures/stringbuilder-carrier"

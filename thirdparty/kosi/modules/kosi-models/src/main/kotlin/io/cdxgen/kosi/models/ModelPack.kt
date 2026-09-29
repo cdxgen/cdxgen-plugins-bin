@@ -39,7 +39,19 @@ data class SinkPattern(
      * get "high" — the honest default for an unnamed risk.
      */
     val severity: String = "high",
+    /**
+     * The position of a VARARG parameter: every argument from here on is
+     * relevant too. A vararg's written arguments occupy adjacent positions
+     * (`ProcessBuilder("sh", "-c", cmd)` puts `cmd` at 2), so an index list
+     * alone watches only the first of them.
+     */
+    val varargFrom: Int? = null,
 ) {
+    /** [relevantArguments] plus every vararg position up to [lastIndex]. */
+    fun argumentIndexes(lastIndex: Int): List<Int> = (
+        relevantArguments + (varargFrom?.let { from -> (from..lastIndex).toList() } ?: emptyList())
+        ).distinct().sorted()
+
     fun writeJson(w: io.cdxgen.kosi.schema.JsonWriter) {
         w.beginObject()
         w.str("category", category)
@@ -49,6 +61,7 @@ data class SinkPattern(
         w.str("pattern", pattern)
         w.str("receiverType", receiverType)
         w.str("severity", severity)
+        if (varargFrom != null) w.num("varargFrom", varargFrom.toLong())
         w.endObject()
     }
 }
@@ -64,7 +77,21 @@ data class PassthroughPattern(
      * delivered.
      */
     val elementFlows: List<List<Int>> = emptyList(),
+    /**
+     * The position of a VARARG parameter: a flow out of this position is also
+     * a flow out of every later argument (`String.format(fmt, a, b)` puts `b`
+     * at 2). See [SinkPattern.varargFrom].
+     */
+    val varargFrom: Int? = null,
 ) {
+    /** [flows] with the vararg position's flows repeated for every later argument up to [lastIndex]. */
+    fun argumentFlows(lastIndex: Int): List<List<Int>> {
+        val from = varargFrom ?: return flows
+        val extra = flows.filter { it.size >= 2 && it[0] == from }
+            .flatMap { flow -> ((from + 1)..lastIndex).map { index -> listOf(index) + flow.drop(1) } }
+        return (flows + extra).distinct()
+    }
+
     fun writeJson(w: io.cdxgen.kosi.schema.JsonWriter) {
         w.beginObject()
         w.str("category", category)
@@ -76,6 +103,7 @@ data class PassthroughPattern(
         }
         w.endArray()
         w.str("pattern", pattern)
+        if (varargFrom != null) w.num("varargFrom", varargFrom.toLong())
         w.endObject()
     }
 }

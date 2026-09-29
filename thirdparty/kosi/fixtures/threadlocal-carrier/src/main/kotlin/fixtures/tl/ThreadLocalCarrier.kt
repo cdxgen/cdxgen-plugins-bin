@@ -1,6 +1,6 @@
 // A local ThreadLocal is a carrier within its function: set writes the
-// receiver's element state, get carries it out. (A member-property
-// ThreadLocal reloads the field per access and stays a documented gap.)
+// receiver's element state, get carries it out. (Member and static ones:
+// fixtures/static-state-carriers, where each field read names one object.)
 // kosi:want flow source=untrusted-input sink=process-exec fn=~viaThreadLocal mode=endpoint
 // kosi:want-not flow source=untrusted-input sink=process-exec fn=~cleanThread mode=endpoint
 // kosi:want-not diagnostic code=parse-error
