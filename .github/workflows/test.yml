@@ -37,7 +37,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         pushd thirdparty/rusi
         make bootstrap-linux
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         make linux linuxmusl windows sbom
         popd
     - name: Upload Rusi Linux helper artifacts
@@ -101,7 +101,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         pushd thirdparty/cdxui
         make bootstrap-linux
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         make linux linuxmusl windows sbom
         popd
     - name: Upload cdxui Linux helper artifacts
@@ -166,7 +166,7 @@ jobs:
         export PATH="$HOME/.cargo/bin:$PATH"
         pushd thirdparty/cdxrs
         make bootstrap-linux
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         make linux linuxmusl windows sbom
         popd
     - name: Upload cdxrs Linux helper artifacts
@@ -442,7 +442,7 @@ jobs:
         bash ./scripts/stage-built-plugins.test.sh
         bash ./scripts/publish-helper-oras.test.sh
         bash ./scripts/root-package-publish.test.sh
-        node --test ./scripts/generate-metadata.test.js ./scripts/thin-macho.test.js ./scripts/check-versions.test.js
+        node --test ./scripts/generate-metadata.test.js ./scripts/dotnet-bundle-sbom.test.js ./scripts/prune-go-sbom.test.js ./scripts/thin-macho.test.js ./scripts/check-versions.test.js
     - name: Download Rusi helper artifacts
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
       with:
@@ -490,7 +490,7 @@ jobs:
         path: thirdparty/kosi/build
     - name: Build
       run: |
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         bash ./scripts/thirdparty-downloads.sh install-upx linux-amd64 ./upx
         sudo install -m 0755 ./upx /usr/local/bin/upx
         rm -f ./upx
@@ -640,7 +640,7 @@ jobs:
         python-version: '3.13'
     - name: Build
       run: |
-        npm install -g @cyclonedx/cdxgen
+        npm install -g @cdxgen/cdxgen
         .\build.ps1
     - name: Windows trustinspector E2E smoke
       shell: pwsh

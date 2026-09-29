@@ -4,6 +4,9 @@ SHELL := /bin/bash
 appname := kosi
 build_dir := build
 package_name := kosi-cli
+# The cdxgen-plugins-bin release, which modules/kosi-front also stamps into the
+# binary from the same file.
+kosi_version := $(shell node -p "require('../../package.json').version")
 
 host_os_raw := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 host_arch_raw := $(shell uname -m | tr '[:upper:]' '[:lower:]')
@@ -410,9 +413,13 @@ golden:
 goldenUpdate:
 	$(gradle) goldenUpdate
 
-## sbom: post-build CycloneDX SBOM of the kosi workspace.
+## sbom: post-build CycloneDX SBOM of the kosi workspace. The modules set no
+## Gradle version, so -Pversion gives them the release's; fixtures/ and
+## examples/ hold test projects, not dependencies.
 sbom:
-	cdxgen -t kotlin -o $(build_dir)/sbom-kosi-postbuild.cdx.json
+	GRADLE_ARGS="-Pversion=$(kosi_version)" cdxgen -t kotlin --required-only \
+	  --exclude "fixtures/**" --exclude "examples/**" \
+	  -o $(build_dir)/sbom-kosi-postbuild.cdx.json
 
 ## size: staged native binaries and jars.
 size:

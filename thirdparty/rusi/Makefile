@@ -166,7 +166,7 @@ sbom: | $(build_dir)
 		echo "cdxgen is required to generate the Rusi SBOM; install it and rerun make sbom." >&2; \
 		exit 1; \
 	fi
-	cdxgen -t rust -o "$(build_dir)/sbom-rusi-postbuild.cdx.json"
+	cdxgen -t rust --required-only --exclude "fixtures/**" -o "$(build_dir)/sbom-rusi-postbuild.cdx.json"
 
 size:
 	@find "$(build_dir)" -maxdepth 1 -type f -name '$(appname)-*' -print0 2>/dev/null | \
