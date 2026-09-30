@@ -240,7 +240,7 @@ struct EmbeddedCollector {
     diagnostics: Vec<Diagnostic>,
     function_decls: HashMap<LocalDefId, Declaration>,
     function_ids: HashMap<LocalDefId, String>,
-    callsites: HashMap<(LocalDefId, String), ResolvedCall>,
+    callsites: HashMap<CallsiteKey, ResolvedCall>,
     hir_calls: Vec<HirCallRecord>,
     functions: Vec<MirFunction>,
 }
@@ -521,16 +521,21 @@ impl EmbeddedCollector {
             let callsites = self
                 .callsites
                 .iter()
-                .filter(|((call_owner, _), _)| *call_owner == owner)
-                .map(|((_, key), value)| (key.clone(), value.clone()))
+                .filter(|((call_owner, _, _), _)| *call_owner == owner)
+                .map(|((_, span, callee), value)| ((span.clone(), *callee), value.clone()))
                 .collect::<HashMap<_, _>>();
+            let resolutions = CallResolutions {
+                callsites,
+                by_name: &local_resolutions,
+                closures: &closure_candidates,
+                function_ids: &self.function_ids,
+            };
             self.functions.push(MirFunction::from_mir(
+                tcx,
                 &self.package,
                 declaration,
                 body,
-                callsites,
-                &local_resolutions,
-                &closure_candidates,
+                &resolutions,
             ));
         }
         Ok(())
@@ -639,9 +644,10 @@ impl EmbeddedCollector {
             // devirtualized concrete impls the emitted targets; any duplicate or
             // superseded MIR-side edge is then dropped by `reconcile_edges`. The
             // MIR-side `callsites` map is deliberately NOT rewritten: it drives
-            // the interprocedural dataflow summaries, and forcing concrete
-            // targets onto ubiquitous trait methods (`clone`, `borrow`) there
-            // would disturb passthrough/summary matching.
+            // the interprocedural dataflow summaries, and the union over every
+            // instantiation would give a generic body's `clone` or `borrow`
+            // every impl at once. MIR settles a trait call's impl per body
+            // instead, from the body's own types (`trait_call_local_impl`).
             for record in &mut self.hir_calls {
                 if record.source_id != source_id {
                     continue;
@@ -934,7 +940,7 @@ struct BodyVisitor<'tcx, 'a> {
     caller: LocalDefId,
     caller_decl: &'a Declaration,
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    callsites: &'a mut HashMap<(LocalDefId, String), ResolvedCall>,
+    callsites: &'a mut HashMap<CallsiteKey, ResolvedCall>,
     hir_calls: &'a mut Vec<HirCallRecord>,
     usages: &'a mut Vec<LibraryUsage>,
     security_signals: &'a mut Vec<SecuritySignal>,
@@ -942,6 +948,16 @@ struct BodyVisitor<'tcx, 'a> {
     crypto: &'a mut CryptoEvidence,
     function_ids: &'a HashMap<LocalDefId, String>,
 }
+
+/// A call as both HIR and MIR name it, so that MIR's data flow can take the
+/// resolution typeck gave the call: the body it is in, the span of the whole
+/// call (MIR's `fn_span`: `f(x)`, or `m(x)` in `r.m(x)`) and the function it
+/// calls. Desugaring can put several calls at one span, as `for` does with
+/// `into_iter` and `next`, and a proc macro puts every call it generates at
+/// its own invocation's span, so a span alone once handed each call in a
+/// `#[derive]` the resolution of whichever call there was recorded last. Calls
+/// of one function at one span take the first one's resolution.
+type CallsiteKey = (LocalDefId, String, DefId);
 
 #[derive(Debug, Clone)]
 struct HirCallRecord {
@@ -974,13 +990,14 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
         match expr.kind {
-            ExprKind::MethodCall(segment, receiver, _args, _) => {
+            ExprKind::MethodCall(segment, receiver, _args, fn_span) => {
                 let def_id = self.typeck.type_dependent_def_id(expr.hir_id);
                 let receiver_ty = self.typeck.expr_ty(receiver);
                 let resolved =
                     resolve_method_call(self.tcx, receiver_ty, def_id, self.function_ids);
                 self.record_call(
                     segment.ident.span,
+                    def_id.map(|callee| (fn_span, callee)),
                     "method-call",
                     resolved.unwrap_or_else(|| {
                         ResolvedCall::unresolved(segment.ident.as_str().to_string())
@@ -991,6 +1008,7 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
                 let resolved = resolve_expr_call(self.tcx, self.typeck, func, self.function_ids);
                 self.record_call(
                     func.span,
+                    hir_call_callee(self.typeck, func).map(|callee| (expr.span, callee)),
                     "call",
                     resolved.unwrap_or_else(|| {
                         ResolvedCall::unresolved(
@@ -1062,7 +1080,16 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 }
 
 impl<'tcx> BodyVisitor<'tcx, '_> {
-    fn record_call(&mut self, span: Span, usage_kind: &str, resolved: ResolvedCall) {
+    /// Records the call at `span`. `callsite` is the whole call's span and
+    /// the function it calls, when typeck knows one, which is what MIR's
+    /// data flow finds the resolution by (see [`CallsiteKey`]).
+    fn record_call(
+        &mut self,
+        span: Span,
+        callsite: Option<(Span, DefId)>,
+        usage_kind: &str,
+        resolved: ResolvedCall,
+    ) {
         let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
         let position = position_from_span(self.tcx, self.analysis_root, span);
         let mut properties = IndexMap::new();
@@ -1128,8 +1155,11 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         if !file.usages.iter().any(|existing| existing.id == usage.id) {
             file.usages.push(usage);
         }
-        self.callsites
-            .insert((self.caller, span_key_simple(span)), resolved.clone());
+        if let Some((call_span, callee)) = callsite {
+            self.callsites
+                .entry((self.caller, span_key_simple(call_span), callee))
+                .or_insert_with(|| resolved.clone());
+        }
         self.hir_calls.push(HirCallRecord {
             source_id: self.caller_decl.id.clone(),
             file_path: file_path.clone(),
@@ -1425,14 +1455,26 @@ struct MirFunction {
     blocks: Vec<MirBlock>,
 }
 
+/// What MIR lowering resolves one body's calls against.
+struct CallResolutions<'a> {
+    /// typeck's resolution of each call in the body, by the call's span and
+    /// callee (see [`CallsiteKey`]).
+    callsites: HashMap<(String, DefId), ResolvedCall>,
+    /// Local functions by name, for the calls typeck never saw, such as the
+    /// `Deref::deref` of an auto-deref.
+    by_name: &'a HashMap<String, ResolvedCall>,
+    /// Closures by arity, for a call of a callable held in a local.
+    closures: &'a HashMap<usize, Vec<ResolvedCall>>,
+    function_ids: &'a HashMap<LocalDefId, String>,
+}
+
 impl MirFunction {
-    fn from_mir(
+    fn from_mir<'tcx>(
+        tcx: TyCtxt<'tcx>,
         package: &str,
         declaration: Declaration,
-        body: &MirBody<'_>,
-        callsites: HashMap<String, ResolvedCall>,
-        local_resolutions: &HashMap<String, ResolvedCall>,
-        closure_candidates: &HashMap<usize, Vec<ResolvedCall>>,
+        body: &MirBody<'tcx>,
+        resolutions: &CallResolutions<'_>,
     ) -> Self {
         let debug_names = debug_local_names(body);
         let param_names = (1..=body.arg_count)
@@ -1449,17 +1491,7 @@ impl MirFunction {
         let blocks = body
             .basic_blocks
             .iter_enumerated()
-            .map(|(bb, data)| {
-                MirBlock::from_block(
-                    body,
-                    &debug_names,
-                    bb,
-                    data,
-                    &callsites,
-                    local_resolutions,
-                    closure_candidates,
-                )
-            })
+            .map(|(bb, data)| MirBlock::from_block(tcx, body, &debug_names, bb, data, resolutions))
             .collect::<Vec<_>>();
         Self {
             id: declaration.id.clone(),
@@ -1486,14 +1518,13 @@ struct MirBlock {
 }
 
 impl MirBlock {
-    fn from_block(
-        body: &MirBody<'_>,
+    fn from_block<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        body: &MirBody<'tcx>,
         debug_names: &HashMap<Local, String>,
         bb: BasicBlock,
-        data: &mir::BasicBlockData<'_>,
-        callsites: &HashMap<String, ResolvedCall>,
-        local_resolutions: &HashMap<String, ResolvedCall>,
-        closure_candidates: &HashMap<usize, Vec<ResolvedCall>>,
+        data: &mir::BasicBlockData<'tcx>,
+        resolutions: &CallResolutions<'_>,
     ) -> Self {
         let mut ops = Vec::new();
         for statement in &data.statements {
@@ -1568,28 +1599,45 @@ impl MirBlock {
                     let unresolved_display = operand_display(func, body);
                     let normalized_unresolved = normalize_symbol(&unresolved_display);
                     let normalized_last = normalize_symbol(last_segment(&unresolved_display));
-                    // A foreign callee is known from the call itself, and no
+                    // typeck's resolution of this very call comes first. A
+                    // foreign callee is known from the call itself, and no
                     // name lookup may take it for a Rust function.
-                    let foreign = operand_foreign_symbol(func);
-                    let resolved = foreign
-                        .map(|symbol| ResolvedCall::foreign(unresolved_display.clone(), symbol))
-                        .or_else(|| callsites.get(&span_key_simple(*fn_span)).cloned())
-                        .or_else(|| local_resolutions.get(&unresolved_display).cloned())
-                        .or_else(|| local_resolutions.get(&normalized_unresolved).cloned())
-                        .or_else(|| {
-                            local_resolutions
-                                .get(last_segment(&unresolved_display))
+                    let by_name = resolutions.by_name;
+                    let mut resolved = func
+                        .const_fn_def()
+                        .and_then(|(callee, _)| {
+                            resolutions
+                                .callsites
+                                .get(&(span_key_simple(*fn_span), callee))
                                 .cloned()
                         })
-                        .or_else(|| local_resolutions.get(&normalized_last).cloned())
+                        .or_else(|| {
+                            operand_foreign_symbol(tcx, func).map(|symbol| {
+                                ResolvedCall::foreign(unresolved_display.clone(), symbol)
+                            })
+                        })
+                        .or_else(|| by_name.get(&unresolved_display).cloned())
+                        .or_else(|| by_name.get(&normalized_unresolved).cloned())
+                        .or_else(|| by_name.get(last_segment(&unresolved_display)).cloned())
+                        .or_else(|| by_name.get(&normalized_last).cloned())
                         .or_else(|| {
                             callable_candidate_resolution(
                                 &unresolved_display,
                                 args.len(),
-                                closure_candidates,
+                                resolutions.closures,
                             )
                         })
-                        .unwrap_or_else(|| ResolvedCall::unresolved(unresolved_display));
+                        .unwrap_or_else(|| ResolvedCall::unresolved(unresolved_display.clone()));
+                    // typeck names the trait's method for `Self::m(..)` in an
+                    // impl or `value.clone()` on a local type; the body's own
+                    // types settle which impl that is.
+                    if let Some(target) = trait_call_local_impl(tcx, body, func)
+                        && let Some(id) = resolutions.function_ids.get(&target)
+                    {
+                        resolved.target_ids = vec![id.clone()];
+                        resolved.target_names = vec![def_path(tcx, target.to_def_id())];
+                        resolved.dispatch_confidence = "high".to_string();
+                    }
                     ops.push(MirOp::Call(Box::new(MirCall {
                         dest: place_to_path(debug_names, *destination),
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
@@ -1606,6 +1654,7 @@ impl MirBlock {
                         async_boundary: resolved.async_boundary,
                         task_boundary: resolved.task_boundary,
                         native_symbol: resolved.native_symbol,
+                        operand_display: unresolved_display,
                         args: args
                             .iter()
                             .map(|arg| CallArg::from_operand(body, debug_names, arg.node.clone()))
@@ -1785,6 +1834,12 @@ struct MirCall {
     /// no Rust path is one, so only this name matches them. `None` for a Rust
     /// function.
     native_symbol: Option<String>,
+    /// The callee as MIR prints it, with this call's generic arguments:
+    /// `<Hmac<Sha256> as KeyInit>::new_from_slice` where typeck names only
+    /// the trait's method, `KeyInit::new_from_slice`. `callee_display` is
+    /// typeck's name whenever the call has a HIR resolution, and a model may
+    /// name either.
+    operand_display: String,
     args: Vec<CallArg>,
 }
 
@@ -1792,15 +1847,9 @@ impl MirCall {
     /// The names this call's flow models are looked up by.
     fn model_symbols(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.callee_display.as_str())
+            .chain(std::iter::once(self.operand_display.as_str()))
             .chain(self.target_names.iter().map(String::as_str))
             .chain(self.native_symbol.as_deref())
-    }
-
-    /// The name that stands for this call's callee among its flow models.
-    fn model_symbol(&self) -> &str {
-        self.native_symbol
-            .as_deref()
-            .unwrap_or(&self.callee_display)
     }
 }
 
@@ -1994,11 +2043,47 @@ fn operand_display(operand: &Operand<'_>, _body: &MirBody<'_>) -> String {
     }
 }
 
+/// The function a HIR call expression calls, as MIR's call terminator names
+/// it. A call of a closure or a fn pointer held in a local has none: MIR calls
+/// `Fn::call` or the pointer instead.
+fn hir_call_callee(typeck: &ty::TypeckResults<'_>, func: &Expr<'_>) -> Option<DefId> {
+    match func.kind {
+        ExprKind::Path(qpath) => typeck.qpath_res(&qpath, func.hir_id).opt_def_id(),
+        _ => match typeck.expr_ty(func).kind() {
+            ty::FnDef(def_id, _) => Some(*def_id),
+            _ => None,
+        },
+    }
+}
+
 /// The symbol a call's callee links against, when the callee is a function
 /// declared in an `extern` block (see [`foreign_link_symbol`]).
-fn operand_foreign_symbol(operand: &Operand<'_>) -> Option<String> {
+fn operand_foreign_symbol(tcx: TyCtxt<'_>, operand: &Operand<'_>) -> Option<String> {
     let (def_id, _) = operand.const_fn_def()?;
-    ty::tls::with(|tcx| foreign_link_symbol(tcx, def_id))
+    foreign_link_symbol(tcx, def_id)
+}
+
+/// The local impl method a call of a trait method reaches when the calling
+/// body's types settle the impl, the way `collect_mono_devirtualization`
+/// settles it for each instantiation of a generic body. A call whose `Self`
+/// is still generic, or a `dyn` one, settles none.
+fn trait_call_local_impl<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &MirBody<'tcx>,
+    func: &Operand<'tcx>,
+) -> Option<LocalDefId> {
+    let ty::TyKind::FnDef(callee, args) = func.ty(&body.local_decls, tcx).kind() else {
+        return None;
+    };
+    tcx.opt_associated_item(*callee)?.trait_container(tcx)?;
+    let instance =
+        ty::Instance::try_resolve(tcx, body.typing_env(tcx), *callee, args.fn_def_args()?)
+            .ok()??;
+    let target = instance.def_id();
+    if target == *callee {
+        return None;
+    }
+    target.as_local()
 }
 
 fn push_unwind_successor(unwind: &UnwindAction, successors: &mut Vec<String>) {
@@ -3075,6 +3160,12 @@ fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> Fun
     if !summary.param_to_return.is_empty() && summary.field_to_return.is_empty() {
         summary.field_to_return.extend(observed_param_projections);
     }
+    // A builder call writes into its receiver, which is as often a temporary
+    // of this body (`Command::new(x).arg(y)`) as a parameter; only a place
+    // under a parameter is one a caller can see.
+    summary
+        .param_to_field_write
+        .retain(|place, _| function.param_names.contains(&place.base));
     if !summary.field_to_return.is_empty() {
         summary.effect_shapes.insert("field-return".to_string());
     }
@@ -3600,7 +3691,7 @@ impl<'a> DataFlowBuilder<'a> {
                         self.new_source_path(
                             function,
                             &call.callee_display,
-                            call.model_symbol(),
+                            &call.model_symbols().collect::<Vec<_>>(),
                             category,
                             call.dest_type.clone(),
                             None,
@@ -3617,7 +3708,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     function,
                                     &taint,
                                     &call.callee_display,
-                                    call.model_symbol(),
+                                    &call.model_symbols().collect::<Vec<_>>(),
                                     sink_category,
                                     arg_index,
                                     call.args.get(arg_index).and_then(|a| a.type_name.clone()),
@@ -3687,7 +3778,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     paths.push(self.new_source_path(
                                         function,
                                         &callee_name,
-                                        &callee_name,
+                                        &[callee_name.as_str()],
                                         &category,
                                         call.dest_type.clone(),
                                         None,
@@ -3699,7 +3790,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     let path = self.new_source_path(
                                         function,
                                         &callee_name,
-                                        &callee_name,
+                                        &[callee_name.as_str()],
                                         &source_category,
                                         call.dest_type.clone(),
                                         None,
@@ -3708,7 +3799,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         function,
                                         &ConcreteTaint { paths: vec![path] },
                                         &callee_name,
-                                        &callee_name,
+                                        &[callee_name.as_str()],
                                         &sink_category,
                                         0,
                                         None,
@@ -3792,7 +3883,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             function,
                                             &taint,
                                             &callee_name,
-                                            &callee_name,
+                                            &[callee_name.as_str()],
                                             &sink_category,
                                             parameter_index,
                                             call.args
@@ -3867,12 +3958,12 @@ impl<'a> DataFlowBuilder<'a> {
     }
 
     /// Starts a taint path at a source named `name`, whose flow models are
-    /// looked up by `model_symbol` (see [`MirCall::model_symbol`]).
+    /// looked up by `model_symbols` (see [`MirCall::model_symbols`]).
     fn new_source_path(
         &mut self,
         function: &MirFunction,
         name: &str,
-        model_symbol: &str,
+        model_symbols: &[&str],
         category: &str,
         type_name: Option<String>,
         parameter_index: Option<usize>,
@@ -3898,7 +3989,7 @@ impl<'a> DataFlowBuilder<'a> {
                 ),
                 ("analysisBackend".to_string(), "embedded-mir".to_string()),
             ]);
-            add_model_properties(&mut properties, model_symbol);
+            add_model_properties(&mut properties, model_symbols);
             DataFlowNode {
                 id: node_id.clone(),
                 kind: "source".to_string(),
@@ -3944,7 +4035,7 @@ impl<'a> DataFlowBuilder<'a> {
                     let path = self.new_source_path(
                         function,
                         &call.callee_display,
-                        call.model_symbol(),
+                        &call.model_symbols().collect::<Vec<_>>(),
                         category,
                         call.args
                             .get(arg_index)
@@ -3959,14 +4050,14 @@ impl<'a> DataFlowBuilder<'a> {
     }
 
     /// Ends every path in `taint` at a sink named `sink_name`, whose flow
-    /// models are looked up by `model_symbol` (see [`MirCall::model_symbol`]).
+    /// models are looked up by `model_symbols` (see [`MirCall::model_symbols`]).
     #[allow(clippy::too_many_arguments)]
     fn emit_sink(
         &mut self,
         function: &MirFunction,
         taint: &ConcreteTaint,
         sink_name: &str,
-        model_symbol: &str,
+        model_symbols: &[&str],
         sink_category: &str,
         parameter_index: usize,
         sink_type: Option<String>,
@@ -3995,7 +4086,7 @@ impl<'a> DataFlowBuilder<'a> {
             ),
             ("analysisBackend".to_string(), "embedded-mir".to_string()),
         ]);
-        add_model_properties(&mut properties, model_symbol);
+        add_model_properties(&mut properties, model_symbols);
         let sink_node = DataFlowNode {
             id: sink_node_id.clone(),
             kind: "sink".to_string(),
@@ -4064,10 +4155,12 @@ impl<'a> DataFlowBuilder<'a> {
                 taint_dispatch_confidence(taint),
             );
             slice_properties.insert("analysisBackend".to_string(), "embedded-mir".to_string());
-            add_model_properties(&mut slice_properties, model_symbol);
+            add_model_properties(&mut slice_properties, model_symbols);
             // Every path starts at a node `new_source_path` built, which
             // records whether its source's models cross the native boundary.
-            if modeled_native_boundary(model_symbol)
+            if model_symbols
+                .iter()
+                .any(|symbol| modeled_native_boundary(symbol))
                 || final_path.steps[0]
                     .node
                     .properties
@@ -5121,7 +5214,7 @@ fn sink_matches(
     }
     // Every argument of a native call crosses into code nothing analyzes,
     // unless a model says which ones reach a sink there.
-    if call.call_type == "native" && results.is_empty() {
+    if call.native_symbol.is_some() && results.is_empty() {
         results.push(("native-call".to_string(), (0..call.args.len()).collect()));
     }
     if results.is_empty() {
@@ -5131,7 +5224,7 @@ fn sink_matches(
             if !candidate.contains("::") && normalized.contains("::") {
                 continue;
             }
-            if call.call_type != "native"
+            if call.native_symbol.is_none()
                 && !call.target_ids.is_empty()
                 && matching_flow_models(&pattern.pattern)
                     .into_iter()
@@ -5156,12 +5249,15 @@ fn sink_matches(
     }
 }
 
+/// A model that names a C function by bare symbol applies only to a call
+/// into foreign code. typeck also types a call `native` when it prepares data
+/// for one, such as `CString::new`, and that is still a Rust function.
 fn model_allowed_for_call(call: &MirCall, model: &FlowModel) -> bool {
     if matches!(
         model.kind,
         FlowModelKind::NativeSource | FlowModelKind::NativeSink
     ) && !model.symbol.contains("::")
-        && call.call_type != "native"
+        && call.native_symbol.is_none()
     {
         return false;
     }
@@ -6789,8 +6885,17 @@ fn flow_model_matches(symbol: &str, model: &FlowModel) -> bool {
     }
 }
 
-fn add_model_properties(properties: &mut IndexMap<String, String>, symbol: &str) {
-    let models = matching_flow_models(symbol);
+/// Records the flow models that any of `symbols` names, each once.
+fn add_model_properties(properties: &mut IndexMap<String, String>, symbols: &[&str]) {
+    let mut models = Vec::<&FlowModel>::new();
+    for model in symbols
+        .iter()
+        .flat_map(|symbol| matching_flow_models(symbol))
+    {
+        if !models.iter().any(|seen| std::ptr::eq(*seen, model)) {
+            models.push(model);
+        }
+    }
     if models.is_empty() {
         return;
     }
@@ -7829,6 +7934,7 @@ mod tests {
             async_boundary: false,
             task_boundary: false,
             native_symbol: None,
+            operand_display: callee.to_string(),
             args: args
                 .iter()
                 .map(|arg| CallArg {
@@ -8181,7 +8287,6 @@ mod tests {
         let MirOp::Call(mut foreign) = call("_2", "ffi_app::puts", &[], &[local("message")]) else {
             unreachable!()
         };
-        foreign.call_type = "native".to_string();
         foreign.native_symbol = Some("puts".to_string());
         assert_eq!(
             sink_matches(&foreign, &patterns),
@@ -8200,7 +8305,20 @@ mod tests {
             unreachable!()
         };
         assert_eq!(sink_matches(&rust, &patterns), None);
-        assert!(!modeled_native_boundary(rust.model_symbol()));
+        assert!(!rust.model_symbols().any(modeled_native_boundary));
+
+        // typeck types `CString::new` a native call, since it prepares data
+        // for one, but its arguments reach no foreign code.
+        let MirOp::Call(mut helper) = call(
+            "_3",
+            "std::ffi::CString::new",
+            &["external"],
+            &[local("message")],
+        ) else {
+            unreachable!()
+        };
+        helper.call_type = "native".to_string();
+        assert_eq!(sink_matches(&helper, &patterns), None);
     }
 
     #[test]

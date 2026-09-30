@@ -3415,6 +3415,19 @@ mod tests {
                 ),
             "a dyn call its candidates resolve is not reported unresolved"
         );
+        // Every call in the fixture is one its source writes, `String::len`
+        // and the `vec!` expansion's included, so typeck resolved each one, and
+        // MIR's data flow finds that resolution by the call's span and callee.
+        // When the two sides key calls apart, each call MIR cannot name
+        // exactly is reported unresolved here.
+        let unresolved = flow
+            .diagnostics
+            .iter()
+            .chain(&envelope.payload.diagnostics)
+            .filter(|diagnostic| diagnostic.kind == "resolution")
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(unresolved, Vec::<&str>::new());
 
         let first_helper = flow
             .summaries

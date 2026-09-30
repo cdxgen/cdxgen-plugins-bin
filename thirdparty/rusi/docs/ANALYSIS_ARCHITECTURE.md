@@ -225,7 +225,14 @@ material is recognized by binding name.
 
 MIR provides the control flow and the operational detail. The wrapper lowers each MIR
 body into a compact custom representation of basic blocks, assignments with their place
-projections, and call terminators with their resolved targets and arguments. Working from
+projections, and call terminators with their resolved targets and arguments. A call
+terminator takes the resolution HIR gave the same call, found by the span of the whole call
+and the function it calls; the function is part of the key because desugaring can put
+several calls at one span, as a `for` loop does with `into_iter` and `next`. When the
+calling body's own types settle which impl a trait method call reaches, as `Self::m(..)`
+does inside an impl, the call targets that impl method, the way the monomorphization pass
+settles it for each instantiation of a generic body. Only calls HIR never sees, such as the
+`Deref::deref` of an auto-deref, fall back to finding a local function by name. Working from
 MIR rather than from source means the analysis sees the program after desugaring, so
 patterns that are implicit in source, such as the operations behind operators and the
 control flow behind combinators, are explicit.
