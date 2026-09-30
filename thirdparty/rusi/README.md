@@ -118,7 +118,7 @@ When embedded compiler collection is available, Rusi builds its local `rusi-rust
 cargo +<resolved-toolchain> check
 ```
 
-The wrapper sources are embedded in the `rusi` binary, so a released binary does not need a rusi checkout. On first use they are written to `$RUSI_CACHE_DIR` (default `$XDG_CACHE_HOME/rusi`, `~/.cache/rusi`, or `%LOCALAPPDATA%\rusi` on Windows) and the wrapper is built there. There is no fallback to the system temp directory, because the tree is compiled and run; with none of those variables set the compiler backend reports a `backend-error` and the stable analysis is used. Set `RUSI_WRAPPER_SOURCE` to a rusi workspace to build from a different source tree instead.
+The wrapper is built with the `rusi-wrapper` cargo profile (optimized, without the size-first settings and LTO of the release profile), since it runs the MIR data-flow passes; the build happens once per toolchain and is reused. The wrapper sources are embedded in the `rusi` binary, so a released binary does not need a rusi checkout. On first use they are written to `$RUSI_CACHE_DIR` (default `$XDG_CACHE_HOME/rusi`, `~/.cache/rusi`, or `%LOCALAPPDATA%\rusi` on Windows) and the wrapper is built there. There is no fallback to the system temp directory, because the tree is compiled and run; with none of those variables set the compiler backend reports a `backend-error` and the stable analysis is used. Set `RUSI_WRAPPER_SOURCE` to a rusi workspace to build from a different source tree instead.
 
 under a Rusi `RUSTC_WRAPPER`. This is where most compiler-mode time is spent on real repositories. Test targets are skipped by default. Add `--tests` to opt into test/example/bench target analysis, which makes compiler mode run:
 
@@ -231,7 +231,8 @@ Rusi's data-flow engine is intentionally pragmatic.
 The stable engine uses:
 
 - syntax-level source/sink/passthrough pattern packs
-- per-function summaries computed via fixpoint interprocedural analysis
+- per-function summaries computed via fixpoint interprocedural analysis, evaluated callees first and run to convergence with no round limit (see `docs/ANALYSIS_ARCHITECTURE.md`, section 5)
+- loop bodies iterated to a fixpoint, so a value assigned late in a loop reaches earlier uses on the next trip
 - simple interprocedural replay
 - concrete slice materialization for reviewable source-to-sink traces
 - **automatic passthrough discovery** from workspace methods with accessor-like signatures (e.g. `fn get(&self) -> &T`)
@@ -482,6 +483,8 @@ cargo build --release -p rusi-cli
 ## Benchmarking
 
 The stable analysis path parallelizes file analysis, summary inference, and per-function materialization. Set `RUSI_THREADS=<n>` to override automatic worker selection during benchmarking.
+
+Analysis threads run with a 16 MiB stack, the size rustc uses for its own compiler threads, so deeply nested expressions that rustc accepts (generated tables and parsers) do not overflow rusi. Set `RUST_MIN_STACK=<bytes>` to change it.
 
 Example benchmark commands:
 
