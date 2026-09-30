@@ -697,6 +697,10 @@ const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
         "crates/rusi-schema/src/lib.rs",
         include_str!("../../rusi-schema/src/lib.rs"),
     ),
+    (
+        "crates/rusi-schema/src/fixpoint.rs",
+        include_str!("../../rusi-schema/src/fixpoint.rs"),
+    ),
 ];
 
 /// Workspace manifest for the materialized wrapper sources. Mirrors the

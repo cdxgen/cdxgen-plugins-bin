@@ -1,3 +1,5 @@
+pub mod fixpoint;
+
 use std::ops::Range;
 use std::path::Path;
 
