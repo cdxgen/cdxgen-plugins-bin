@@ -234,12 +234,12 @@ jobs:
         mkdir -p /tmp/zlibsrc
         tar xzf /tmp/zlib.tar.gz -C /tmp/zlibsrc --strip-components=1
         pushd /tmp/zlibsrc
-        objs=''
+        objs=()
         for src in adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback inffast inflate inftrees trees uncompr zutil; do
           musl-gcc -O2 -D_LARGEFILE64_SOURCE=1 -c "$src.c"
-          objs="$objs $src.o"
+          objs+=("$src.o")
         done
-        ar rc libz.a $objs
+        ar rc libz.a "${objs[@]}"
         mkdir -p "$HOME/musl-zlib/lib"
         cp libz.a "$HOME/musl-zlib/lib/"
         popd
