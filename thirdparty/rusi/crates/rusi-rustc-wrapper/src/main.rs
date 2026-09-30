@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
+use rusi_schema::fixpoint::{
+    Dependents, MinRankWorklist, TrackedReads, callee_first_order, join_map, join_set,
+    weak_topological_order,
+};
 use rusi_schema::{
     CallGraph, CallGraphEdge, CallGraphNode, CompilerEvidence, CryptoComponent, CryptoEvidence,
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
@@ -94,10 +98,6 @@ impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, ty::GenericArgsRef<'tcx>> {
         self.no_bound_vars()
     }
 }
-
-const MAX_DATAFLOW_FIXPOINT_ITERS: usize = 64;
-const MAX_DATAFLOW_CANDIDATE_TARGETS: usize = 32;
-const MAX_BARE_METHOD_CANDIDATES: usize = 8;
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -1981,6 +1981,288 @@ impl FunctionSummary {
             ..Self::default()
         }
     }
+
+    /// Unions `other` into this summary and reports whether anything was
+    /// added. The summary fixpoint only ever joins, so a summary grows until
+    /// nothing new is learned and the iteration ends by itself.
+    fn join(&mut self, other: Self) -> bool {
+        let mut changed = false;
+        changed |= join_set(
+            &mut self.returns_source_categories,
+            other.returns_source_categories,
+        );
+        changed |= join_set(
+            &mut self.observed_source_categories,
+            other.observed_source_categories,
+        );
+        changed |= join_set(&mut self.param_to_return, other.param_to_return);
+        changed |= join_map(&mut self.param_to_sink, other.param_to_sink);
+        changed |= join_map(&mut self.source_to_sink, other.source_to_sink);
+        changed |= join_map(&mut self.param_to_field_write, other.param_to_field_write);
+        changed |= join_set(&mut self.field_to_return, other.field_to_return);
+        changed |= join_set(&mut self.effect_shapes, other.effect_shapes);
+        changed |= join_set(&mut self.semantic_tags, other.semantic_tags);
+        if self.receiver_type.is_none() && other.receiver_type.is_some() {
+            self.receiver_type = other.receiver_type;
+            changed = true;
+        }
+        if self.specialization_key.is_empty() && !other.specialization_key.is_empty() {
+            self.specialization_key = other.specialization_key;
+            changed = true;
+        }
+        changed
+    }
+}
+
+/// What the data-flow passes consult besides the summaries, built once per
+/// crate so that no pass rescans every function for every call it meets.
+struct FlowContext<'a> {
+    patterns: &'a DataFlowPatternSet,
+    local_ids: &'a HashSet<String>,
+    function_map: &'a HashMap<String, &'a MirFunction>,
+    /// Trait impl methods by `(trait's last path segment, method name)`, in
+    /// id order.
+    trait_impls: HashMap<(String, String), Vec<String>>,
+    /// Trait impl methods of any trait by method name, in id order.
+    impl_methods: HashMap<String, Vec<String>>,
+    /// Closure and async bodies nested anywhere under a function, keyed by
+    /// the enclosing function's qualified name, in id order.
+    nested_bodies: HashMap<String, Vec<String>>,
+    /// Each function's control-flow graph, by function id.
+    block_graphs: HashMap<String, BlockGraph>,
+    /// What every call in the crate's bodies amounts to, by function id,
+    /// then block and operation index (see [`FlowContext::call_facts`]).
+    call_facts: HashMap<String, Vec<Vec<Option<CallFacts>>>>,
+}
+
+/// What the data-flow passes derive from a call on its own, whatever state
+/// it is reached in. None of it changes between visits, so it is worked out
+/// once per call when the context is built rather than on every trip through
+/// the fixpoints; rustc hoists loop-invariant work out of its hot paths the
+/// same way (rust-lang/rust#160605).
+struct CallFacts {
+    source_category: Option<String>,
+    sinks: Vec<(String, Vec<usize>)>,
+    source_arguments: Vec<(String, Vec<usize>)>,
+    effect_shape: String,
+    model_tags: BTreeSet<&'static str>,
+    /// A modeled or conventionally named passthrough (`clone`, `unwrap`).
+    passthrough: bool,
+    /// Passes data through by its semantic tags (a combinator, a callable).
+    semantic_passthrough: bool,
+    /// The local functions the call may reach ([`candidate_dataflow_targets`]).
+    targets: Vec<String>,
+}
+
+impl CallFacts {
+    fn of(call: &MirCall, ctx: &FlowContext<'_>) -> Self {
+        let source_category = source_category(call);
+        let sinks = sink_matches(call, ctx.patterns).unwrap_or_default();
+        let passthrough = passthrough(call);
+        let semantic_passthrough = semantic_passthrough(call);
+        let mut shapes = Vec::new();
+        if source_category.is_some() {
+            shapes.push("source-return");
+        }
+        if !sinks.is_empty() {
+            shapes.push("sink-call");
+        }
+        if passthrough || semantic_passthrough {
+            shapes.push("param-return");
+        }
+        if call.semantic_tags.iter().any(|tag| tag == "builder") {
+            shapes.push("param-field-write");
+        }
+        if is_channel_send(call) {
+            shapes.push("channel-send");
+        }
+        if is_channel_recv(call) {
+            shapes.push("channel-recv");
+        }
+        if shapes.is_empty() {
+            shapes.push("opaque");
+        }
+        Self {
+            source_category,
+            sinks,
+            source_arguments: source_argument_matches(call),
+            effect_shape: shapes.join("+"),
+            model_tags: model_tags_for_call(call),
+            passthrough,
+            semantic_passthrough,
+            targets: candidate_dataflow_targets(call, ctx),
+        }
+    }
+}
+
+impl<'a> FlowContext<'a> {
+    fn new(
+        functions: &[MirFunction],
+        patterns: &'a DataFlowPatternSet,
+        local_ids: &'a HashSet<String>,
+        function_map: &'a HashMap<String, &'a MirFunction>,
+    ) -> Self {
+        let mut trait_impls: HashMap<(String, String), Vec<String>> = HashMap::new();
+        let mut impl_methods: HashMap<String, Vec<String>> = HashMap::new();
+        let mut nested_bodies: HashMap<String, Vec<String>> = HashMap::new();
+        for function in functions {
+            if let Some((trait_name, method)) = impl_trait_method_parts(&function.qualified_name) {
+                impl_methods
+                    .entry(method.clone())
+                    .or_default()
+                    .push(function.id.clone());
+                trait_impls
+                    .entry((trait_name, method))
+                    .or_default()
+                    .push(function.id.clone());
+            }
+            // Every prefix that ends right before a `::{closure#` is an
+            // enclosing function of this body.
+            let name = function.qualified_name.as_str();
+            for (at, _) in name.match_indices("::{closure#") {
+                nested_bodies
+                    .entry(name[..at].to_string())
+                    .or_default()
+                    .push(function.id.clone());
+            }
+        }
+        for ids in trait_impls
+            .values_mut()
+            .chain(impl_methods.values_mut())
+            .chain(nested_bodies.values_mut())
+        {
+            ids.sort();
+            ids.dedup();
+        }
+        let block_graphs = functions
+            .iter()
+            .map(|function| (function.id.clone(), BlockGraph::new(function)))
+            .collect();
+        let mut ctx = Self {
+            patterns,
+            local_ids,
+            function_map,
+            trait_impls,
+            impl_methods,
+            nested_bodies,
+            block_graphs,
+            call_facts: HashMap::new(),
+        };
+        let call_facts = functions
+            .iter()
+            .map(|function| {
+                let blocks = function
+                    .blocks
+                    .iter()
+                    .map(|block| {
+                        block
+                            .ops
+                            .iter()
+                            .map(|op| match op {
+                                MirOp::Call(call) => Some(CallFacts::of(call, &ctx)),
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                    .collect();
+                (function.id.clone(), blocks)
+            })
+            .collect();
+        ctx.call_facts = call_facts;
+        ctx
+    }
+
+    /// The facts of the call at operation `op` of block `block` in
+    /// `function`, one of the bodies this context was built from. A call is
+    /// named by where it sits rather than by its address, so a copy of a
+    /// body finds the same facts.
+    fn call_facts(&self, function: &MirFunction, block: usize, op: usize) -> &CallFacts {
+        self.call_facts
+            .get(function.id.as_str())
+            .and_then(|blocks| blocks.get(block))
+            .and_then(|ops| ops.get(op))
+            .and_then(Option::as_ref)
+            .expect("a call in a body this context was built from")
+    }
+
+    fn block_graph(&self, function: &MirFunction) -> &BlockGraph {
+        self.block_graphs
+            .get(&function.id)
+            .expect("every function has a block graph")
+    }
+
+    /// Impl methods `<T as Trait>::method` of a trait whose last path
+    /// segment is `trait_name`.
+    fn trait_method_impls(&self, trait_name: &str, method: &str) -> &[String] {
+        self.trait_impls
+            .get(&(last_segment(trait_name).to_string(), method.to_string()))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Trait impl methods named `method`, of any trait.
+    fn method_impls(&self, method: &str) -> &[String] {
+        self.impl_methods
+            .get(method)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+/// A function's blocks as successor indexes, with the order the fixpoint
+/// visits them in.
+struct BlockGraph {
+    successors: Vec<Vec<usize>>,
+    /// Blocks reachable from the entry block in weak topological order: each
+    /// loop's blocks together, right after its head (see
+    /// `rusi_schema::fixpoint`).
+    order: Vec<usize>,
+}
+
+impl BlockGraph {
+    fn new(function: &MirFunction) -> Self {
+        let index: HashMap<&str, usize> = function
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(position, block)| (block.label.as_str(), position))
+            .collect();
+        let successors: Vec<Vec<usize>> = function
+            .blocks
+            .iter()
+            .map(|block| {
+                block
+                    .successors
+                    .iter()
+                    .filter_map(|label| index.get(label.as_str()).copied())
+                    .collect()
+            })
+            .collect();
+        let order = weak_topological_order(successors.len(), 0, |block| {
+            successors[block].iter().copied()
+        });
+        Self { successors, order }
+    }
+}
+
+/// One evaluation of a function's summary: the summaries it may read, which
+/// are recorded as it reads them, and the recursion cycle it sits in.
+struct SummaryPass<'p, 'a> {
+    ctx: &'p FlowContext<'a>,
+    summaries: &'p TrackedReads<'p, FunctionSummary>,
+    component_of: &'p HashMap<&'p str, usize>,
+    component: usize,
+}
+
+impl SummaryPass<'_, '_> {
+    /// Whether `callee` is in the recursion cycle being summarized. Places
+    /// taken from such a callee's summary are widened when rebased: a
+    /// recursive call on a projection of its own parameter (`walk(&n.next)`)
+    /// would otherwise grow `n.next.val`, `n.next.next.val`, and so on
+    /// without end.
+    fn in_cycle(&self, callee: &str) -> bool {
+        self.component_of.get(callee) == Some(&self.component)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2465,6 +2747,7 @@ fn build_data_flow(
         .iter()
         .map(|f| (f.id.clone(), f))
         .collect::<HashMap<_, _>>();
+    let ctx = FlowContext::new(functions, &patterns, &local_ids, &function_map);
     debug_log(
         debug,
         format_args!(
@@ -2472,13 +2755,8 @@ fn build_data_flow(
             functions.len()
         ),
     );
-    let summaries = infer_summaries(functions, &patterns, &local_ids, &function_map, debug);
-    let mut builder = DataFlowBuilder::new(
-        patterns.clone(),
-        summaries.clone(),
-        &function_map,
-        &local_ids,
-    );
+    let summaries = infer_summaries(functions, &ctx, debug);
+    let mut builder = DataFlowBuilder::new(patterns.clone(), summaries.clone(), &ctx);
     debug_log(
         debug,
         format_args!(
@@ -2491,49 +2769,125 @@ fn build_data_flow(
     builder.finish()
 }
 
+/// Summarizes every function to a fixpoint over the call graph.
+///
+/// Functions are evaluated callees first, with the min-rank worklist from
+/// `rusi_schema::fixpoint`: a call chain of any depth settles in one pass,
+/// and only recursion cycles are revisited. Each evaluation records the
+/// summaries it read; when a summary grows, exactly those readers are marked
+/// dirty again. Summaries only ever grow and draw from finite domains, so no
+/// round limit is needed (see [`FunctionSummary::join`] and
+/// [`SummaryPass::in_cycle`]).
 fn infer_summaries(
     functions: &[MirFunction],
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    ctx: &FlowContext<'_>,
     debug: bool,
 ) -> BTreeMap<String, FunctionSummary> {
+    let (summaries, evaluations) = summary_fixpoint(functions, ctx, debug);
+    debug_log(
+        debug,
+        format_args!(
+            "pass=compiler-dataflow-summary-fixpoint functions={} evaluations={evaluations}",
+            functions.len()
+        ),
+    );
+    summaries
+}
+
+/// [`infer_summaries`], returning how many evaluations the fixpoint took.
+fn summary_fixpoint(
+    functions: &[MirFunction],
+    ctx: &FlowContext<'_>,
+    debug: bool,
+) -> (BTreeMap<String, FunctionSummary>, usize) {
+    let position: HashMap<String, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.id.clone(), index))
+        .collect();
     let mut summaries = functions
         .iter()
         .map(|f| (f.id.clone(), FunctionSummary::with_context(f)))
         .collect::<BTreeMap<_, _>>();
-    for iteration in 0..8 {
-        debug_log(
-            debug,
-            format_args!("pass=compiler-dataflow-summary-iteration index={iteration}"),
-        );
-        let mut changed = false;
-        for function in functions {
-            let next = summarize_function(function, &summaries, patterns, local_ids, function_map);
-            let entry = summaries.entry(function.id.clone()).or_default();
-            if *entry != next {
-                *entry = next;
-                changed = true;
+    let call_order = callee_first_order(functions.len(), |index| {
+        summary_dependencies(&functions[index], ctx)
+            .into_iter()
+            .filter_map(|id| position.get(&id).copied())
+            .collect::<Vec<_>>()
+    });
+    let component_of: HashMap<&str, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.id.as_str(), call_order.component[index]))
+        .collect();
+    let mut worklist = MinRankWorklist::new(functions.len(), call_order.order.clone());
+    let mut dependents = Dependents::new(functions.len());
+    while let Some(index) = worklist.pop() {
+        let function = &functions[index];
+        let reads = TrackedReads::new(&summaries, &position);
+        let pass = SummaryPass {
+            ctx,
+            summaries: &reads,
+            component_of: &component_of,
+            component: call_order.component[index],
+        };
+        let next = summarize_function(function, &pass);
+        if debug && worklist.evaluations().is_multiple_of(1_000) {
+            debug_log(
+                debug,
+                format_args!(
+                    "pass=compiler-dataflow-summary-progress evaluations={} function={} fields={} writes={}",
+                    worklist.evaluations(),
+                    function.qualified_name,
+                    next.field_to_return.len(),
+                    next.param_to_field_write.len(),
+                ),
+            );
+        }
+        dependents.record(index, reads.into_reads());
+        let entry = summaries
+            .get_mut(&function.id)
+            .expect("every function has a summary");
+        if entry.join(next) {
+            for reader in dependents.readers(index) {
+                worklist.mark_dirty(reader);
             }
         }
-        if !changed {
-            break;
-        }
     }
-    summaries
+    let evaluations = worklist.evaluations();
+    (summaries, evaluations)
 }
 
-fn summarize_function(
-    function: &MirFunction,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
-) -> FunctionSummary {
+/// The functions whose summaries `function`'s summary may read: the local
+/// targets of its calls and the closure bodies nested in it. Only the order
+/// of evaluation depends on this; the reads themselves are recorded.
+fn summary_dependencies(function: &MirFunction, ctx: &FlowContext<'_>) -> BTreeSet<String> {
+    let mut dependencies = BTreeSet::new();
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        for (op_index, op) in block.ops.iter().enumerate() {
+            if let MirOp::Call(_) = op {
+                dependencies.extend(
+                    ctx.call_facts(function, block_index, op_index)
+                        .targets
+                        .iter()
+                        .filter(|target| ctx.local_ids.contains(*target))
+                        .cloned(),
+                );
+            }
+        }
+    }
+    if let Some(nested) = ctx.nested_bodies.get(&function.qualified_name) {
+        dependencies.extend(nested.iter().cloned());
+    }
+    dependencies
+}
+
+fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> FunctionSummary {
     let mut summary = FunctionSummary::with_context(function);
     let mut observed_param_projections = BTreeSet::new();
-    let mut in_states = HashMap::<String, AbstractState>::new();
-    if let Some(entry) = function.blocks.first() {
+    let graph = pass.ctx.block_graph(function);
+    let mut in_states: Vec<Option<AbstractState>> = vec![None; function.blocks.len()];
+    if let Some(entry) = in_states.first_mut() {
         let mut state = AbstractState::default();
         for (idx, name) in function.param_names.iter().enumerate() {
             state.taints.insert(
@@ -2544,39 +2898,29 @@ fn summarize_function(
                 BTreeSet::from([AbstractOrigin::Param(idx)]),
             );
         }
-        in_states.insert(entry.label.clone(), state);
+        *entry = Some(state);
     }
-    let block_map = function
-        .blocks
-        .iter()
-        .map(|b| (b.label.clone(), b))
-        .collect::<HashMap<_, _>>();
-    let mut changed = true;
-    let mut iteration = 0usize;
-    while changed && iteration < MAX_DATAFLOW_FIXPOINT_ITERS {
-        iteration += 1;
-        changed = false;
-        for block in &function.blocks {
-            let Some(state) = in_states.get(&block.label).cloned() else {
-                continue;
-            };
-            let out = transfer_abstract(block, state, summaries, patterns, local_ids, function_map);
-            for successor in &block.successors {
-                if !block_map.contains_key(successor) {
-                    continue;
-                }
-                let entry = in_states.entry(successor.clone()).or_default();
-                if merge_abstract(entry, &out) {
-                    changed = true;
-                }
+    // Entry states only grow, over places and origins drawn from this body,
+    // so the worklist empties without an iteration limit.
+    let mut worklist = MinRankWorklist::new(function.blocks.len(), graph.order.clone());
+    while let Some(block) = worklist.pop() {
+        let Some(state) = in_states[block].clone() else {
+            continue;
+        };
+        let out = transfer_abstract(function, block, state, pass);
+        for &successor in &graph.successors[block] {
+            let first_visit = in_states[successor].is_none();
+            let entry = in_states[successor].get_or_insert_with(AbstractState::default);
+            if merge_abstract(entry, &out) || first_visit {
+                worklist.mark_dirty(successor);
             }
         }
     }
-    for block in &function.blocks {
-        let Some(mut state) = in_states.get(&block.label).cloned() else {
+    for (block_index, (block, state)) in function.blocks.iter().zip(in_states).enumerate() {
+        let Some(mut state) = state else {
             continue;
         };
-        for op in &block.ops {
+        for (op_index, op) in block.ops.iter().enumerate() {
             match op {
                 MirOp::Assign(assign) => {
                     if assign.dest.base == "_0" {
@@ -2621,16 +2965,9 @@ fn summarize_function(
                             observed_param_projections.insert(field);
                         }
                     }
-                    let out = eval_call_abstract(
-                        call,
-                        &state,
-                        summaries,
-                        patterns,
-                        local_ids,
-                        function_map,
-                        &mut summary,
-                    );
-                    apply_source_arguments_abstract(call, &mut state, &mut summary);
+                    let facts = pass.ctx.call_facts(function, block_index, op_index);
+                    let out = eval_call_abstract(call, facts, &state, pass, &mut summary);
+                    apply_source_arguments_abstract(call, facts, &mut state, &mut summary);
                     if call.semantic_tags.iter().any(|tag| tag == "builder")
                         && let Some(receiver_place) =
                             call.args.first().and_then(|arg| arg.place.as_ref())
@@ -2674,7 +3011,7 @@ fn summarize_function(
             .returns_source_categories
             .extend(summary.observed_source_categories.iter().cloned());
     }
-    lift_async_body_summary(function, summaries, function_map, &mut summary);
+    lift_async_body_summary(function, pass, &mut summary);
     derive_builder_execution_summary(&mut summary);
     derive_observed_source_to_sink_summary(&mut summary);
     summary
@@ -2717,29 +3054,20 @@ fn derive_observed_source_to_sink_summary(summary: &mut FunctionSummary) {
 }
 
 fn transfer_abstract(
-    block: &MirBlock,
+    function: &MirFunction,
+    block: usize,
     mut state: AbstractState,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
 ) -> AbstractState {
-    for op in &block.ops {
+    for (op_index, op) in function.blocks[block].ops.iter().enumerate() {
         match op {
             MirOp::Assign(assign) => apply_assign_abstract(assign, &mut state),
             MirOp::Kill(place) => kill_abstract(&mut state, place),
             MirOp::Call(call) => {
+                let facts = pass.ctx.call_facts(function, block, op_index);
                 let mut scratch = FunctionSummary::default();
-                let mut out = eval_call_abstract(
-                    call,
-                    &state,
-                    summaries,
-                    patterns,
-                    local_ids,
-                    function_map,
-                    &mut scratch,
-                );
-                apply_source_arguments_abstract(call, &mut state, &mut scratch);
+                let mut out = eval_call_abstract(call, facts, &state, pass, &mut scratch);
+                apply_source_arguments_abstract(call, facts, &mut state, &mut scratch);
                 if call.semantic_tags.iter().any(|tag| tag == "builder")
                     && let Some(receiver_place) =
                         call.args.first().and_then(|arg| arg.place.as_ref())
@@ -2766,30 +3094,26 @@ fn transfer_abstract(
 
 fn eval_call_abstract(
     call: &MirCall,
+    facts: &CallFacts,
     state: &AbstractState,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
     summary_out: &mut FunctionSummary,
 ) -> BTreeSet<AbstractOrigin> {
-    summary_out
-        .effect_shapes
-        .insert(effect_shape_for_call(call));
+    summary_out.effect_shapes.insert(facts.effect_shape.clone());
     for tag in &call.semantic_tags {
         summary_out.semantic_tags.insert(tag.clone());
     }
-    for tag in model_tags_for_call(call) {
+    for tag in &facts.model_tags {
         summary_out.semantic_tags.insert(tag.to_string());
     }
     let mut out = BTreeSet::new();
-    if let Some(source_category) = source_category(call) {
+    if let Some(source_category) = &facts.source_category {
         summary_out
             .observed_source_categories
             .insert(source_category.clone());
-        out.insert(AbstractOrigin::Source(source_category));
+        out.insert(AbstractOrigin::Source(source_category.clone()));
     }
-    if passthrough(call) || semantic_passthrough(call) {
+    if facts.passthrough || facts.semantic_passthrough {
         for arg in &call.args {
             if let Some(place) = &arg.place {
                 out.extend(read_abstract(state, place));
@@ -2806,26 +3130,24 @@ fn eval_call_abstract(
             }
         }
     }
-    if let Some(sinks) = sink_matches(call, patterns) {
-        for (sink_category, args) in sinks {
-            for arg_index in args {
-                if let Some(place) = call.args.get(arg_index).and_then(|a| a.place.as_ref()) {
-                    for origin in read_abstract(state, place) {
-                        match origin {
-                            AbstractOrigin::Param(index) => {
-                                summary_out
-                                    .param_to_sink
-                                    .entry(sink_category.clone())
-                                    .or_default()
-                                    .insert(index);
-                            }
-                            AbstractOrigin::Source(source_category) => {
-                                summary_out
-                                    .source_to_sink
-                                    .entry(sink_category.clone())
-                                    .or_default()
-                                    .insert(source_category);
-                            }
+    for (sink_category, args) in &facts.sinks {
+        for &arg_index in args {
+            if let Some(place) = call.args.get(arg_index).and_then(|a| a.place.as_ref()) {
+                for origin in read_abstract(state, place) {
+                    match origin {
+                        AbstractOrigin::Param(index) => {
+                            summary_out
+                                .param_to_sink
+                                .entry(sink_category.clone())
+                                .or_default()
+                                .insert(index);
+                        }
+                        AbstractOrigin::Source(source_category) => {
+                            summary_out
+                                .source_to_sink
+                                .entry(sink_category.clone())
+                                .or_default()
+                                .insert(source_category);
                         }
                     }
                 }
@@ -2849,11 +3171,12 @@ fn eval_call_abstract(
             }
         }
     }
-    for target in candidate_dataflow_targets(call, local_ids, function_map) {
-        if local_ids.contains(&target)
-            && let Some(summary) = summaries.get(&target).cloned()
-            && let Some(callee) = function_map.get(&target)
+    for target in &facts.targets {
+        if pass.ctx.local_ids.contains(target)
+            && let Some(summary) = pass.summaries.get(target)
+            && let Some(callee) = pass.ctx.function_map.get(target)
         {
+            let widen = pass.in_cycle(target);
             summary_out
                 .effect_shapes
                 .extend(summary.effect_shapes.iter().cloned());
@@ -2881,9 +3204,13 @@ fn eval_call_abstract(
                 }
             }
             for field in &summary.field_to_return {
-                if let Some(rebased) =
-                    rebase_summary_place(call.args.as_slice(), callee, field, Some(&state.aliases))
-                {
+                if let Some(rebased) = rebase_summary_place(
+                    call.args.as_slice(),
+                    callee,
+                    field,
+                    Some(&state.aliases),
+                    widen,
+                ) {
                     summary_out.field_to_return.insert(rebased);
                 }
             }
@@ -2916,9 +3243,13 @@ fn eval_call_abstract(
                 }
             }
             for (field, parameter_indexes) in &summary.param_to_field_write {
-                let Some(rebased_field) =
-                    rebase_summary_place(call.args.as_slice(), callee, field, Some(&state.aliases))
-                else {
+                let Some(rebased_field) = rebase_summary_place(
+                    call.args.as_slice(),
+                    callee,
+                    field,
+                    Some(&state.aliases),
+                    widen,
+                ) else {
                     continue;
                 };
                 for parameter_index in parameter_indexes {
@@ -2967,14 +3298,15 @@ fn eval_call_abstract(
 
 fn apply_source_arguments_abstract(
     call: &MirCall,
+    facts: &CallFacts,
     state: &mut AbstractState,
     summary_out: &mut FunctionSummary,
 ) {
-    for (category, arg_indexes) in source_argument_matches(call) {
+    for (category, arg_indexes) in &facts.source_arguments {
         summary_out
             .observed_source_categories
             .insert(category.clone());
-        for arg_index in arg_indexes {
+        for &arg_index in arg_indexes {
             if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
                 let place = resolve_aliases(&state.aliases, place);
                 write_abstract(
@@ -3091,28 +3423,31 @@ fn merge_abstract(target: &mut AbstractState, incoming: &AbstractState) -> bool 
 struct DataFlowBuilder<'a> {
     patterns: DataFlowPatternSet,
     summaries: BTreeMap<String, FunctionSummary>,
-    function_map: &'a HashMap<String, &'a MirFunction>,
-    local_ids: &'a HashSet<String>,
+    ctx: &'a FlowContext<'a>,
     nodes: IndexMap<String, DataFlowNode>,
     edges: IndexMap<String, DataFlowEdge>,
     slices: IndexMap<String, DataFlowSlice>,
+    /// Whether blocks are transferred to emit (see
+    /// [`DataFlowBuilder::materialize_function`]). While a function's
+    /// fixpoint is computed, transfers record no node, edge, slice or
+    /// diagnostic.
+    emitting: bool,
 }
 
 impl<'a> DataFlowBuilder<'a> {
     fn new(
         patterns: DataFlowPatternSet,
         summaries: BTreeMap<String, FunctionSummary>,
-        function_map: &'a HashMap<String, &'a MirFunction>,
-        local_ids: &'a HashSet<String>,
+        ctx: &'a FlowContext<'a>,
     ) -> Self {
         Self {
             patterns,
             summaries,
-            function_map,
-            local_ids,
+            ctx,
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
             slices: IndexMap::new(),
+            emitting: true,
         }
     }
 
@@ -3134,35 +3469,38 @@ impl<'a> DataFlowBuilder<'a> {
         }
     }
 
+    /// Brings a function's block entry states to a fixpoint, then emits
+    /// what its sinks witness from the fixpoint alone, the way
+    /// [`summarize_function`] collects a summary. The worklist only computes
+    /// states; one last pass over the reachable blocks, each from its
+    /// settled entry state, records every node, edge, slice and diagnostic.
+    /// Each call is reported once, from the state the fixpoint holds there,
+    /// whatever order or number of visits the worklist took.
     fn materialize_function(&mut self, function: &MirFunction, diagnostics: &mut Vec<Diagnostic>) {
-        let mut in_states = HashMap::<String, ConcreteState>::new();
-        if let Some(entry) = function.blocks.first() {
-            in_states.insert(entry.label.clone(), ConcreteState::default());
+        let graph = self.ctx.block_graph(function);
+        let mut in_states: Vec<Option<ConcreteState>> = vec![None; function.blocks.len()];
+        if let Some(entry) = in_states.first_mut() {
+            *entry = Some(ConcreteState::default());
         }
-        let block_map = function
-            .blocks
-            .iter()
-            .map(|b| (b.label.clone(), b))
-            .collect::<HashMap<_, _>>();
-        let mut changed = true;
-        let mut iteration = 0usize;
-        while changed && iteration < MAX_DATAFLOW_FIXPOINT_ITERS {
-            iteration += 1;
-            changed = false;
-            for block in &function.blocks {
-                let Some(state) = in_states.get(&block.label).cloned() else {
-                    continue;
-                };
-                let out = self.transfer_concrete(function, block, state, diagnostics);
-                for successor in &block.successors {
-                    if !block_map.contains_key(successor) {
-                        continue;
-                    }
-                    let entry = in_states.entry(successor.clone()).or_default();
-                    if merge_concrete(entry, &out) {
-                        changed = true;
-                    }
+        self.emitting = false;
+        let mut worklist = MinRankWorklist::new(function.blocks.len(), graph.order.clone());
+        while let Some(block) = worklist.pop() {
+            let Some(state) = in_states[block].clone() else {
+                continue;
+            };
+            let out = self.transfer_concrete(function, block, state, diagnostics);
+            for &successor in &graph.successors[block] {
+                let first_visit = in_states[successor].is_none();
+                let entry = in_states[successor].get_or_insert_with(ConcreteState::default);
+                if merge_concrete(entry, &out) || first_visit {
+                    worklist.mark_dirty(successor);
                 }
+            }
+        }
+        self.emitting = true;
+        for &block in &graph.order {
+            if let Some(state) = in_states[block].take() {
+                self.transfer_concrete(function, block, state, diagnostics);
             }
         }
     }
@@ -3170,49 +3508,46 @@ impl<'a> DataFlowBuilder<'a> {
     fn transfer_concrete(
         &mut self,
         function: &MirFunction,
-        block: &MirBlock,
+        block: usize,
         mut state: ConcreteState,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> ConcreteState {
-        for op in &block.ops {
+        for (op_index, op) in function.blocks[block].ops.iter().enumerate() {
             match op {
                 MirOp::Assign(assign) => apply_assign_concrete(function, assign, &mut state),
                 MirOp::Kill(place) => kill_concrete(&mut state, place),
                 MirOp::Call(call) => {
-                    let direct_source_path = if let Some(category) = source_category(call) {
-                        let path = self.new_source_path(
+                    let ctx = self.ctx;
+                    let facts = ctx.call_facts(function, block, op_index);
+                    let direct_source_path = facts.source_category.as_ref().map(|category| {
+                        self.new_source_path(
                             function,
                             &call.callee_display,
-                            &category,
+                            category,
                             call.dest_type.clone(),
                             None,
-                        );
-                        Some(path)
-                    } else {
-                        None
-                    };
-                    self.apply_source_arguments(function, call, &mut state);
-                    if let Some(matches) = sink_matches(call, &self.patterns) {
-                        for (sink_category, args) in matches {
-                            for arg_index in args {
-                                if let Some(place) =
-                                    call.args.get(arg_index).and_then(|a| a.place.as_ref())
-                                {
-                                    let taint = read_concrete(&state, place);
-                                    self.emit_sink(
-                                        function,
-                                        &taint,
-                                        &call.callee_display,
-                                        &sink_category,
-                                        arg_index,
-                                        call.args.get(arg_index).and_then(|a| a.type_name.clone()),
-                                    );
-                                }
+                        )
+                    });
+                    self.apply_source_arguments(function, call, facts, &mut state);
+                    for (sink_category, args) in &facts.sinks {
+                        for &arg_index in args {
+                            if let Some(place) =
+                                call.args.get(arg_index).and_then(|a| a.place.as_ref())
+                            {
+                                let taint = read_concrete(&state, place);
+                                self.emit_sink(
+                                    function,
+                                    &taint,
+                                    &call.callee_display,
+                                    sink_category,
+                                    arg_index,
+                                    call.args.get(arg_index).and_then(|a| a.type_name.clone()),
+                                );
                             }
                         }
                     }
                     let mut paths = direct_source_path.into_iter().collect::<Vec<_>>();
-                    if passthrough(call) || semantic_passthrough(call) {
+                    if facts.passthrough || facts.semantic_passthrough {
                         for arg in &call.args {
                             if let Some(place) = &arg.place {
                                 paths.extend(read_concrete(&state, place).paths);
@@ -3256,16 +3591,16 @@ impl<'a> DataFlowBuilder<'a> {
                             paths.extend(read_concrete(&state, &slot).paths);
                         }
                     }
-                    for target in
-                        candidate_dataflow_targets(call, self.local_ids, self.function_map)
-                    {
-                        if self.local_ids.contains(&target)
-                            && let Some(summary) = self.summaries.get(&target).cloned()
+                    let mut reached_local_target = false;
+                    for target in &facts.targets {
+                        if ctx.local_ids.contains(target)
+                            && let Some(summary) = self.summaries.get(target).cloned()
                         {
-                            let callee = self.function_map.get(&target).copied();
-                            let callee_name = self
+                            reached_local_target = true;
+                            let callee = ctx.function_map.get(target).copied();
+                            let callee_name = ctx
                                 .function_map
-                                .get(&target)
+                                .get(target)
                                 .map(|f| f.qualified_name.clone())
                                 .unwrap_or_else(|| call.callee_display.clone());
                             if should_propagate_candidate_source_returns(call) {
@@ -3357,6 +3692,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         callee,
                                         field,
                                         Some(&state.aliases),
+                                        false,
                                     )
                                 }) {
                                     paths.extend(read_concrete(&state, &rebased).paths);
@@ -3390,6 +3726,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         callee,
                                         &field,
                                         Some(&state.aliases),
+                                        false,
                                     )
                                 }) else {
                                     continue;
@@ -3421,10 +3758,14 @@ impl<'a> DataFlowBuilder<'a> {
                             }
                         }
                     }
-                    if call.target_ids.is_empty()
-                        && source_category(call).is_none()
-                        && !passthrough(call)
-                        && model_tags_for_call(call).is_empty()
+                    // A call with no resolved target is only unresolved for
+                    // data flow when no candidate stood in for one either.
+                    if self.emitting
+                        && call.target_ids.is_empty()
+                        && !reached_local_target
+                        && facts.source_category.is_none()
+                        && !facts.passthrough
+                        && facts.model_tags.is_empty()
                         && should_emit_unresolved_dataflow_diagnostic(&call.callee_display)
                     {
                         diagnostics.push(Diagnostic {
@@ -3459,7 +3800,7 @@ impl<'a> DataFlowBuilder<'a> {
                 type_name.as_deref().unwrap_or("_"),
             ],
         );
-        let node = self.nodes.entry(node_id.clone()).or_insert_with(|| {
+        let build = || {
             let mut properties = IndexMap::from([
                 (
                     "specializationKey".to_string(),
@@ -3487,14 +3828,20 @@ impl<'a> DataFlowBuilder<'a> {
                 type_name: type_name.clone(),
                 properties,
             }
-        });
+        };
+        let node = match self.nodes.get(&node_id) {
+            Some(node) => node.clone(),
+            None if self.emitting => self
+                .nodes
+                .entry(node_id.clone())
+                .or_insert_with(build)
+                .clone(),
+            None => build(),
+        };
         TaintPath {
             origin_key: format!("{}:{}:{}", function.id, name, category),
             category: category.to_string(),
-            steps: vec![TaintStep {
-                node: node.clone(),
-                edge: None,
-            }],
+            steps: vec![TaintStep { node, edge: None }],
         }
     }
 
@@ -3502,15 +3849,16 @@ impl<'a> DataFlowBuilder<'a> {
         &mut self,
         function: &MirFunction,
         call: &MirCall,
+        facts: &CallFacts,
         state: &mut ConcreteState,
     ) {
-        for (category, arg_indexes) in source_argument_matches(call) {
-            for arg_index in arg_indexes {
+        for (category, arg_indexes) in &facts.source_arguments {
+            for &arg_index in arg_indexes {
                 if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
                     let path = self.new_source_path(
                         function,
                         &call.callee_display,
-                        &category,
+                        category,
                         call.args
                             .get(arg_index)
                             .and_then(|arg| arg.type_name.clone()),
@@ -3532,7 +3880,7 @@ impl<'a> DataFlowBuilder<'a> {
         parameter_index: usize,
         sink_type: Option<String>,
     ) {
-        if taint.paths.is_empty() {
+        if taint.paths.is_empty() || !self.emitting {
             return;
         }
         let sink_node_id = stable_id(
@@ -3685,6 +4033,7 @@ impl<'a> DataFlowBuilder<'a> {
             .into_iter()
             .map(|(function_id, summary)| {
                 let function = self
+                    .ctx
                     .function_map
                     .get(&function_id)
                     .expect("function exists");
@@ -3989,45 +4338,20 @@ fn specialization_key_for_function(function: &MirFunction) -> String {
     )
 }
 
-fn effect_shape_for_call(call: &MirCall) -> String {
-    let mut shapes = Vec::new();
-    if source_category(call).is_some() {
-        shapes.push("source-return");
-    }
-    if sink_matches(call, &built_in_patterns()).is_some() {
-        shapes.push("sink-call");
-    }
-    if passthrough(call) || semantic_passthrough(call) {
-        shapes.push("param-return");
-    }
-    if call.semantic_tags.iter().any(|tag| tag == "builder") {
-        shapes.push("param-field-write");
-    }
-    if is_channel_send(call) {
-        shapes.push("channel-send");
-    }
-    if is_channel_recv(call) {
-        shapes.push("channel-recv");
-    }
-    if shapes.is_empty() {
-        shapes.push("opaque");
-    }
-    shapes.join("+")
-}
-
 fn lift_async_body_summary(
     function: &MirFunction,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
     summary_out: &mut FunctionSummary,
 ) {
-    let prefix = format!("{}::{{closure#", function.qualified_name);
     let mut lifted_descendant_sink = false;
-    for (function_id, child) in function_map {
-        if !child.qualified_name.starts_with(&prefix) {
-            continue;
-        }
-        let Some(child_summary) = summaries.get(function_id) else {
+    let nested = pass
+        .ctx
+        .nested_bodies
+        .get(&function.qualified_name)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    for function_id in nested {
+        let Some(child_summary) = pass.summaries.get(function_id) else {
             continue;
         };
         summary_out
@@ -4160,11 +4484,21 @@ fn projected_param_place(function: &MirFunction, place: &PlacePath) -> Option<Pl
         .then(|| place.clone())
 }
 
+/// Maps a place in `callee`'s summary, rooted at one of its parameters, onto
+/// the argument the call passes for that parameter.
+///
+/// With `widen`, the result stops at the argument itself instead of
+/// descending into the callee's projections. Callers widen for a callee in
+/// their own recursion cycle: the argument places are drawn from the caller's
+/// body, so the places a cycle can accumulate stay finite, where appending
+/// the callee's projections on every trip around the cycle would not. The
+/// argument covers every place under it, so widening only coarsens.
 fn rebase_summary_place(
     args: &[CallArg],
     callee: &MirFunction,
     place: &PlacePath,
     aliases: Option<&HashMap<PlacePath, PlacePath>>,
+    widen: bool,
 ) -> Option<PlacePath> {
     let parameter_index = callee
         .param_names
@@ -4175,91 +4509,85 @@ fn rebase_summary_place(
         .map(|aliases| resolve_aliases(aliases, actual))
         .unwrap_or_else(|| actual.clone());
     let mut rebased = actual;
-    rebased
-        .projections
-        .extend(place.projections.iter().cloned());
+    if !widen {
+        rebased
+            .projections
+            .extend(place.projections.iter().cloned());
+    }
     Some(rebased)
 }
 
-fn candidate_dataflow_targets(
-    call: &MirCall,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
-) -> Vec<String> {
+/// The local functions a call may reach, for the data-flow passes: its
+/// resolved targets plus, for a trait or unresolved call, every impl method
+/// its name can denote. The set is not truncated; an ambiguous call reaches
+/// all of its candidates, in id order.
+fn candidate_dataflow_targets(call: &MirCall, ctx: &FlowContext<'_>) -> Vec<String> {
     let mut targets = BTreeSet::new();
     for target in &call.target_ids {
-        if local_ids.contains(target) {
+        if ctx.local_ids.contains(target) {
             targets.insert(target.clone());
         }
-    }
-    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-        return targets
-            .into_iter()
-            .take(MAX_DATAFLOW_CANDIDATE_TARGETS)
-            .collect();
     }
     for symbol in std::iter::once(call.callee_display.as_str())
         .chain(call.target_names.iter().map(String::as_str))
     {
-        let impl_qualified_symbol = symbol.replace(' ', "");
         let normalized = canonical_call_symbol(symbol);
-        if let Some((trait_name, method_name)) = impl_trait_method_parts(&impl_qualified_symbol) {
-            for (function_id, function) in function_map {
-                if impl_method_matches_trait_method(
-                    &function.qualified_name,
-                    &trait_name,
-                    &method_name,
-                ) {
-                    targets.insert(function_id.clone());
-                    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-                        return targets.into_iter().collect();
-                    }
-                }
-            }
+        if let Some((trait_name, method_name)) = impl_trait_method_parts(symbol) {
+            targets.extend(
+                ctx.trait_method_impls(&trait_name, &method_name)
+                    .iter()
+                    .cloned(),
+            );
         } else if let Some((trait_name, method_name)) = trait_method_parts(&normalized) {
-            for (function_id, function) in function_map {
-                if impl_method_matches_trait_method(
-                    &function.qualified_name,
-                    trait_name,
-                    method_name,
-                ) {
-                    targets.insert(function_id.clone());
-                    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-                        return targets.into_iter().collect();
-                    }
-                }
-            }
+            targets.extend(
+                ctx.trait_method_impls(trait_name, method_name)
+                    .iter()
+                    .cloned(),
+            );
         } else {
             let method_name = last_segment(&normalized);
             if should_expand_bare_method_candidate(call, method_name) {
-                let mut bare_matches = 0usize;
-                for (function_id, function) in function_map {
-                    if impl_method_matches_method_name(&function.qualified_name, method_name) {
-                        targets.insert(function_id.clone());
-                        bare_matches += 1;
-                        if bare_matches >= MAX_BARE_METHOD_CANDIDATES
-                            || targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS
-                        {
-                            return targets.into_iter().collect();
-                        }
-                    }
-                }
+                targets.extend(ctx.method_impls(method_name).iter().cloned());
             }
         }
     }
     targets.into_iter().collect()
 }
 
+/// Splits `<Type as Trait>::method` into the trait's last path segment and
+/// the method name.
+///
+/// The `as` is the one at the top nesting level of the leading angle
+/// brackets, read with its surrounding spaces, so neither a generic argument
+/// (`<Vec<T> as Trait>`), a qualified self type (`<<T as A>::Out as B>`), nor
+/// a name that merely contains the letters (`Database`, `Class`) is taken for
+/// it.
 fn impl_trait_method_parts(symbol: &str) -> Option<(String, String)> {
-    let (owner, method) = symbol.rsplit_once("::")?;
-    if method.is_empty() || !owner.starts_with('<') {
-        return None;
+    let inner = symbol.trim().strip_prefix('<')?;
+    let mut depth = 0usize;
+    let mut previous = '\0';
+    let mut split = None;
+    let mut close = None;
+    for (index, ch) in inner.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            // The arrow of a function type (`<fn() -> T as Trait>`).
+            '>' if previous == '-' => {}
+            '>' if depth == 0 => {
+                close = Some(index);
+                break;
+            }
+            '>' => depth -= 1,
+            ' ' if depth == 0 && inner[index..].starts_with(" as ") => split = Some(index),
+            _ => {}
+        }
+        previous = ch;
     }
-    let owner = owner.strip_circumfix('<', '>')?;
-    let (_, trait_name) = owner.rsplit_once("as")?;
-    let trait_name = last_segment(&strip_generic_arguments(trait_name)).to_string();
-    let method = normalize_symbol(method);
-    if trait_name.is_empty() {
+    let (split, close) = (split?, close?);
+    let trait_path = inner[split + " as ".len()..close].trim();
+    let trait_name = last_segment(&strip_generic_arguments(trait_path)).to_string();
+    let method = normalize_symbol(inner[close + 1..].strip_prefix("::")?);
+    if trait_name.is_empty() || method.is_empty() {
         return None;
     }
     Some((trait_name, method))
@@ -4302,24 +4630,6 @@ fn trait_method_parts(symbol: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((last_segment(owner), method))
-}
-
-fn impl_method_matches_trait_method(
-    qualified_name: &str,
-    trait_name: &str,
-    method_name: &str,
-) -> bool {
-    let normalized = qualified_name.replace(' ', "");
-    normalized.starts_with('<')
-        && normalized.contains(&format!("as{}", normalize_symbol(trait_name)))
-        && last_segment(&normalized) == method_name
-}
-
-fn impl_method_matches_method_name(qualified_name: &str, method_name: &str) -> bool {
-    let normalized = qualified_name.replace(' ', "");
-    normalized.starts_with('<')
-        && normalized.contains("as")
-        && last_segment(&normalized) == method_name
 }
 
 fn semantic_passthrough(call: &MirCall) -> bool {
@@ -4390,6 +4700,15 @@ fn read_concrete(state: &ConcreteState, place: &PlacePath) -> ConcreteTaint {
     ConcreteTaint { paths }
 }
 
+/// Joins `incoming` into a block's entry state and reports whether it grew.
+///
+/// A place keeps the witness it holds for an origin and gains only origins
+/// it did not carry, and an alias keeps the first place it was given, so the
+/// state grows only by new place and origin pairs and new alias entries.
+/// The places are the body's own MIR places and summary places rebased onto
+/// its arguments, resolved through those first aliases, and the summaries
+/// are already fixed when a body is materialized, so the pairs are finite:
+/// that, and not any bound on witnesses, is why the concrete fixpoint ends.
 fn merge_concrete(target: &mut ConcreteState, incoming: &ConcreteState) -> bool {
     let mut changed = false;
     for (place, taint) in &incoming.taints {
@@ -4417,43 +4736,31 @@ fn merge_concrete(target: &mut ConcreteState, incoming: &ConcreteState) -> bool 
     changed
 }
 
+/// Follows alias entries from `place` until none applies, longest matching
+/// prefix first. Every hop consumes a distinct entry, and a chain that comes
+/// back to an entry it already used is a cycle, so the chase ends after at
+/// most one hop per entry.
 fn resolve_aliases(aliases: &HashMap<PlacePath, PlacePath>, place: &PlacePath) -> PlacePath {
     let mut current = place.clone();
-    for _ in 0..8 {
-        if let Some(alias) = aliases.get(&current) {
-            current = alias.clone();
-            continue;
-        }
-        let mut resolved = None;
+    let mut used: Vec<PlacePath> = Vec::new();
+    'chase: loop {
         for prefix_len in (0..=current.projections.len()).rev() {
             let prefix = PlacePath {
                 base: current.base.clone(),
                 projections: current.projections[..prefix_len].to_vec(),
             };
-            if let Some(alias) = aliases.get(&prefix) {
-                let mut next = alias.clone();
-                next.projections
-                    .extend(current.projections[prefix_len..].iter().cloned());
-                resolved = Some(next);
-                break;
-            }
-        }
-        if let Some(next) = resolved {
-            current = next;
-            continue;
-        }
-        if current.projections.first() == Some(&PlaceProjection::Deref) {
-            let base = PlacePath {
-                base: current.base.clone(),
-                projections: Vec::new(),
-            };
-            if let Some(alias) = aliases.get(&base) {
-                let mut next = alias.clone();
-                next.projections
-                    .extend(current.projections.iter().skip(1).cloned());
-                current = next;
+            let Some(alias) = aliases.get(&prefix) else {
                 continue;
+            };
+            if used.contains(&prefix) {
+                break 'chase;
             }
+            let mut next = alias.clone();
+            next.projections
+                .extend(current.projections[prefix_len..].iter().cloned());
+            used.push(prefix);
+            current = next;
+            continue 'chase;
         }
         break;
     }
@@ -6374,7 +6681,7 @@ fn flow_model_matches(symbol: &str, model: &FlowModel) -> bool {
     {
         return false;
     }
-    if let Some((trait_name, method_name)) = impl_trait_method_parts(&symbol.replace(' ', "")) {
+    if let Some((trait_name, method_name)) = impl_trait_method_parts(symbol) {
         let trait_method = format!("{}::{}", normalize_symbol(&trait_name), method_name);
         if pattern == trait_method || pattern.ends_with(&format!("::{trait_method}")) {
             return true;
@@ -7279,4 +7586,572 @@ fn strip_generic_arguments(value: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(base: &str, projections: &[PlaceProjection]) -> PlacePath {
+        PlacePath {
+            base: base.to_string(),
+            projections: projections.to_vec(),
+        }
+    }
+
+    fn local(base: &str) -> PlacePath {
+        place(base, &[])
+    }
+
+    fn field(name: &str) -> PlaceProjection {
+        PlaceProjection::Field(name.to_string())
+    }
+
+    fn assign(dest: &str, sources: &[PlacePath]) -> MirOp {
+        MirOp::Assign(AssignAction {
+            dest: local(dest),
+            sources: sources.to_vec(),
+            alias: None,
+            field_sources: Vec::new(),
+        })
+    }
+
+    fn call(dest: &str, callee: &str, target_ids: &[&str], args: &[PlacePath]) -> MirOp {
+        MirOp::Call(MirCall {
+            dest: local(dest),
+            dest_type: None,
+            callee_display: callee.to_string(),
+            call_type: if target_ids.is_empty() {
+                "static".to_string()
+            } else {
+                "local".to_string()
+            },
+            dispatch_confidence: "high".to_string(),
+            target_ids: target_ids.iter().map(|id| id.to_string()).collect(),
+            target_names: Vec::new(),
+            candidate_receivers: Vec::new(),
+            receiver_type: None,
+            dispatch_trait: None,
+            specialization_key: String::new(),
+            semantic_tags: Vec::new(),
+            async_boundary: false,
+            task_boundary: false,
+            args: args
+                .iter()
+                .map(|arg| CallArg {
+                    place: Some(arg.clone()),
+                    type_name: None,
+                })
+                .collect(),
+        })
+    }
+
+    fn block(label: usize, ops: Vec<MirOp>, successors: &[usize], returns: bool) -> MirBlock {
+        MirBlock {
+            label: format!("bb{label}"),
+            ops,
+            successors: successors.iter().map(|next| format!("bb{next}")).collect(),
+            returns,
+        }
+    }
+
+    fn function(name: &str, params: &[&str], blocks: Vec<MirBlock>) -> MirFunction {
+        MirFunction {
+            id: format!("fn-{name}"),
+            name: last_segment(name).to_string(),
+            qualified_name: name.to_string(),
+            kind: "function".to_string(),
+            package_path: "probe".to_string(),
+            file_path: "src/main.rs".to_string(),
+            position: Position::default(),
+            param_names: params.iter().map(|param| param.to_string()).collect(),
+            param_types: params
+                .iter()
+                .map(|_| "std::string::String".to_string())
+                .collect(),
+            return_type: "()".to_string(),
+            blocks,
+        }
+    }
+
+    fn summaries_of(functions: &[MirFunction]) -> (BTreeMap<String, FunctionSummary>, usize) {
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(functions, &patterns, &local_ids, &function_map);
+        summary_fixpoint(functions, &ctx, false)
+    }
+
+    /// `f00(p)` calls `f01(p)` and so on down to a process spawn, written
+    /// callers first: the old pass learned one level per round and stopped
+    /// after eight.
+    fn call_chain(depth: usize) -> Vec<MirFunction> {
+        (0..depth)
+            .map(|level| {
+                let name = format!("probe::f{level:02}");
+                let op = if level + 1 < depth {
+                    let callee = format!("probe::f{:02}", level + 1);
+                    let callee_id = format!("fn-{callee}");
+                    call("_2", &callee, &[callee_id.as_str()], &[local("p")])
+                } else {
+                    call("_2", "std::process::Command::new", &[], &[local("p")])
+                };
+                function(&name, &["p"], vec![block(0, vec![op], &[], true)])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_call_chain_of_any_depth_settles_in_one_pass() {
+        let functions = call_chain(30);
+        let (summaries, evaluations) = summaries_of(&functions);
+        assert_eq!(evaluations, functions.len(), "one evaluation per function");
+        for function in &functions {
+            assert_eq!(
+                summaries[&function.id].param_to_sink.get("process-exec"),
+                Some(&BTreeSet::from([0])),
+                "{}",
+                function.qualified_name
+            );
+        }
+    }
+
+    #[test]
+    fn mutual_recursion_settles_without_a_round_limit() {
+        // even(p) -> odd(p) -> even(p), and odd also spawns p.
+        let even = function(
+            "probe::even",
+            &["p"],
+            vec![block(
+                0,
+                vec![call("_2", "probe::odd", &["fn-probe::odd"], &[local("p")])],
+                &[],
+                true,
+            )],
+        );
+        let odd = function(
+            "probe::odd",
+            &["p"],
+            vec![block(
+                0,
+                vec![
+                    call("_2", "probe::even", &["fn-probe::even"], &[local("p")]),
+                    call("_3", "std::process::Command::new", &[], &[local("p")]),
+                ],
+                &[],
+                true,
+            )],
+        );
+        let (summaries, evaluations) = summaries_of(&[even, odd]);
+        assert_eq!(
+            summaries["fn-probe::even"]
+                .param_to_sink
+                .get("process-exec"),
+            Some(&BTreeSet::from([0]))
+        );
+        assert!((2..=6).contains(&evaluations), "{evaluations}");
+    }
+
+    /// A function recursing on a field of its own parameter, returning a
+    /// field: without widening, each round would add `n.next.val`,
+    /// `n.next.next.val`, and so on forever.
+    #[test]
+    fn recursion_on_a_projection_of_a_parameter_terminates() {
+        let next = place("n", &[PlaceProjection::Deref, field("next")]);
+        let val = place("n", &[PlaceProjection::Deref, field("val")]);
+        let walk = function(
+            "probe::walk",
+            &["n"],
+            vec![
+                block(0, vec![], &[1, 2], false),
+                block(
+                    1,
+                    vec![
+                        call(
+                            "_3",
+                            "probe::walk",
+                            &["fn-probe::walk"],
+                            std::slice::from_ref(&next),
+                        ),
+                        assign("_0", &[local("_3")]),
+                    ],
+                    &[3],
+                    false,
+                ),
+                block(
+                    2,
+                    vec![assign("_0", std::slice::from_ref(&val))],
+                    &[3],
+                    false,
+                ),
+                block(3, vec![], &[], true),
+            ],
+        );
+        let (summaries, _) = summaries_of(&[walk]);
+        let summary = &summaries["fn-probe::walk"];
+        assert!(summary.field_to_return.contains(&val));
+        assert!(
+            summary.field_to_return.contains(&next),
+            "widened to the argument"
+        );
+        assert!(
+            summary
+                .field_to_return
+                .iter()
+                .all(|place| place.projections.len() <= 2),
+            "{:?}",
+            summary.field_to_return
+        );
+    }
+
+    /// A loop body of seventy links, each copied from the next, with the
+    /// source stored in the last: the source needs seventy trips to reach
+    /// `x00`, past the 64 whole-function passes the old fixpoint allowed.
+    fn seventy_step_loop() -> MirFunction {
+        let links = 70;
+        let head = 1;
+        let first_body = 2;
+        let last_body = first_body + links - 1;
+        let exit = last_body + 1;
+        // The head lists its exit first, the order under which reverse
+        // postorder alone would rank the exit ahead of the body.
+        let mut blocks = vec![
+            block(0, vec![], &[head], false),
+            block(head, vec![], &[exit, first_body], false),
+        ];
+        for link in 0..links {
+            let label = first_body + link;
+            let mut ops = vec![assign(
+                &format!("x{link:02}"),
+                &[local(&format!("x{:02}", link + 1))],
+            )];
+            let next = if label == last_body {
+                ops.push(call(
+                    &format!("x{links:02}"),
+                    "std::env::var",
+                    &[],
+                    &[local("key")],
+                ));
+                head
+            } else {
+                label + 1
+            };
+            blocks.push(block(label, ops, &[next], false));
+        }
+        blocks.push(block(
+            exit,
+            vec![call(
+                "_9",
+                "std::process::Command::new",
+                &[],
+                &[local("x00")],
+            )],
+            &[],
+            true,
+        ));
+        function("probe::seventy", &["key"], blocks)
+    }
+
+    #[test]
+    fn a_loop_carried_chain_longer_than_the_old_pass_limit_settles() {
+        let seventy = seventy_step_loop();
+        let (summaries, _) = summaries_of(std::slice::from_ref(&seventy));
+        assert_eq!(
+            summaries[&seventy.id].source_to_sink.get("process-exec"),
+            Some(&BTreeSet::from(["env".to_string()]))
+        );
+
+        let mut diagnostics = Vec::new();
+        let evidence = build_data_flow(std::slice::from_ref(&seventy), &mut diagnostics, false);
+        let slice = evidence
+            .slices
+            .iter()
+            .find(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .expect("env reaches the spawn after seventy trips");
+        // The witness walks every link: source, seventy copies, the spawn.
+        assert_eq!(slice.path_length, 71);
+    }
+
+    /// A spawn in a loop body that sees the source only from the second trip
+    /// on, next to a call nothing resolves. The fixpoint transfers the body
+    /// more than once; emitting from the settled states reports each once.
+    #[test]
+    fn loop_bodies_emit_once_from_the_settled_state() {
+        let carried = function(
+            "probe::carried",
+            &["key"],
+            vec![
+                block(0, vec![], &[1], false),
+                block(1, vec![], &[3, 2], false),
+                block(
+                    2,
+                    vec![
+                        assign("x", &[local("y")]),
+                        call("y", "std::env::var", &[], &[local("key")]),
+                        call("_5", "probe::mystery", &[], &[local("x")]),
+                        call("_6", "std::process::Command::new", &[], &[local("x")]),
+                    ],
+                    &[1],
+                    false,
+                ),
+                block(3, vec![], &[], true),
+            ],
+        );
+        let mut diagnostics = Vec::new();
+        let evidence = build_data_flow(std::slice::from_ref(&carried), &mut diagnostics, false);
+        let spawns: Vec<_> = evidence
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .collect();
+        assert_eq!(spawns.len(), 1, "{spawns:#?}");
+        // Source, the copy into `x`, the spawn.
+        assert_eq!(spawns[0].path_length, 2);
+        let unresolved = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message.ends_with(": probe::mystery"))
+            .count();
+        assert_eq!(unresolved, 1, "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn loop_bodies_rank_before_their_exit_whatever_the_successor_order() {
+        let seventy = seventy_step_loop();
+        let graph = BlockGraph::new(&seventy);
+        let position = |block: usize| graph.order.iter().position(|b| *b == block).unwrap();
+        let exit = seventy.blocks.len() - 1;
+        assert_eq!(graph.order.len(), seventy.blocks.len());
+        for body in 2..exit {
+            assert!(position(body) < position(exit), "bb{body} before the exit");
+        }
+    }
+
+    #[test]
+    fn alias_chains_resolve_fully_and_stop_at_cycles() {
+        // a00 -> a01 -> ... -> a20: the old chase stopped after eight hops.
+        let mut aliases = HashMap::new();
+        for hop in 0..20 {
+            aliases.insert(
+                local(&format!("a{hop:02}")),
+                local(&format!("a{:02}", hop + 1)),
+            );
+        }
+        assert_eq!(resolve_aliases(&aliases, &local("a00")), local("a20"));
+        // A projection rides along a prefix alias.
+        let projected = place("a00", &[field("f")]);
+        assert_eq!(
+            resolve_aliases(&aliases, &projected),
+            place("a20", &[field("f")])
+        );
+
+        let cycle = HashMap::from([(local("x"), local("y")), (local("y"), local("x"))]);
+        let resolved = resolve_aliases(&cycle, &local("x"));
+        assert!(resolved == local("x") || resolved == local("y"));
+        // A cycle that grows the place each time around still ends.
+        let growing = HashMap::from([(local("g"), place("g", &[field("next")]))]);
+        assert_eq!(
+            resolve_aliases(&growing, &local("g")),
+            place("g", &[field("next")])
+        );
+    }
+
+    #[test]
+    fn rebasing_widens_only_inside_a_recursion_cycle() {
+        let callee = function("probe::callee", &["q"], Vec::new());
+        let args = [CallArg {
+            place: Some(place("a", &[field("b")])),
+            type_name: None,
+        }];
+        let field_place = place("q", &[field("c")]);
+        assert_eq!(
+            rebase_summary_place(&args, &callee, &field_place, None, false),
+            Some(place("a", &[field("b"), field("c")]))
+        );
+        assert_eq!(
+            rebase_summary_place(&args, &callee, &field_place, None, true),
+            Some(place("a", &[field("b")]))
+        );
+    }
+
+    #[test]
+    fn impl_trait_method_parts_reads_the_top_level_as() {
+        let parts = |symbol: &str| impl_trait_method_parts(symbol);
+        let pair =
+            |trait_name: &str, method: &str| Some((trait_name.to_string(), method.to_string()));
+        assert_eq!(
+            parts("<dispatch::Stage01 as dispatch::Stage>::apply"),
+            pair("Stage", "apply")
+        );
+        assert_eq!(
+            parts("<dyn dispatch::Stage as dispatch::Stage>::apply"),
+            pair("Stage", "apply")
+        );
+        assert_eq!(parts("<Store as Database>::get"), pair("Database", "get"));
+        assert_eq!(parts("<Database as Class>::load"), pair("Class", "load"));
+        assert_eq!(
+            parts("<Vec<Alias> as Handler<Base>>::call"),
+            pair("Handler", "call")
+        );
+        assert_eq!(
+            parts("<<T as Source>::Item as Sink>::put"),
+            pair("Sink", "put")
+        );
+        assert_eq!(
+            parts("<fn() -> Cast as Callable>::invoke"),
+            pair("Callable", "invoke")
+        );
+        assert_eq!(parts("<X as Y>::method::<u8>"), pair("Y", "method"));
+        assert_eq!(parts("probe::free_function"), None);
+        assert_eq!(parts("<Inherent>::method"), None);
+    }
+
+    #[test]
+    fn candidate_targets_reach_every_impl_of_the_trait_in_id_order() {
+        let impls: Vec<MirFunction> = (0..40)
+            .map(|index| {
+                function(
+                    &format!("<dispatch::Stage{index:02} as dispatch::Stage>::apply"),
+                    &["self", "input"],
+                    Vec::new(),
+                )
+            })
+            .chain(std::iter::once(function(
+                "<dispatch::Other as dispatch::Unrelated>::apply",
+                &["self", "input"],
+                Vec::new(),
+            )))
+            .collect();
+        let patterns = built_in_patterns();
+        let local_ids = impls.iter().map(|f| f.id.clone()).collect::<HashSet<_>>();
+        let function_map = impls
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&impls, &patterns, &local_ids, &function_map);
+        let MirOp::Call(mut dyn_call) = call(
+            "_4",
+            "<dyn dispatch::Stage as dispatch::Stage>::apply",
+            &[],
+            &[local("stage"), local("input")],
+        ) else {
+            unreachable!()
+        };
+        dyn_call.call_type = "dyn-dispatch".to_string();
+        let targets = candidate_dataflow_targets(&dyn_call, &ctx);
+        assert_eq!(targets.len(), 40, "every Stage impl, and only those");
+        assert!(targets.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(!targets.iter().any(|id| id.contains("Unrelated")));
+    }
+
+    /// Rust resolves a call to an inherent method statically, so the call
+    /// carries it as its own target, and a trait-object, trait or
+    /// unresolved call can never land on one. The candidate indexes hold
+    /// trait impl methods only, so no inherent method stands in for such a
+    /// call, whatever it is called and whatever its type is called
+    /// (`Database` contains the letters of " as ").
+    #[test]
+    fn inherent_methods_are_reached_only_through_their_own_targets() {
+        let functions = vec![
+            function("probe::Database::get", &["self", "key"], Vec::new()),
+            function("<probe::Wrapper<T>>::get", &["self", "key"], Vec::new()),
+            function(
+                "<probe::Memory as probe::Store>::get",
+                &["self", "key"],
+                Vec::new(),
+            ),
+        ];
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&functions, &patterns, &local_ids, &function_map);
+        let targets = |callee: &str, call_type: &str, target_ids: &[&str]| {
+            let MirOp::Call(mut call) =
+                call("_3", callee, target_ids, &[local("store"), local("key")])
+            else {
+                unreachable!()
+            };
+            call.call_type = call_type.to_string();
+            candidate_dataflow_targets(&call, &ctx)
+        };
+        let memory = vec!["fn-<probe::Memory as probe::Store>::get".to_string()];
+        assert_eq!(
+            targets(
+                "<dyn probe::Store as probe::Store>::get",
+                "dyn-dispatch",
+                &[]
+            ),
+            memory
+        );
+        assert_eq!(targets("probe::Store::get", "trait-static", &[]), memory);
+        assert_eq!(targets("get", "unresolved", &[]), memory);
+        assert_eq!(
+            targets(
+                "probe::Database::get",
+                "static",
+                &["fn-probe::Database::get"]
+            ),
+            vec!["fn-probe::Database::get".to_string()]
+        );
+    }
+
+    #[test]
+    fn nested_bodies_are_indexed_under_every_enclosing_function() {
+        let functions = vec![
+            function("probe::outer", &[], Vec::new()),
+            function("probe::outer::{closure#0}", &[], Vec::new()),
+            function("probe::outer::{closure#0}::{closure#1}", &[], Vec::new()),
+            function("probe::outer_twin::{closure#0}", &[], Vec::new()),
+        ];
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&functions, &patterns, &local_ids, &function_map);
+        assert_eq!(
+            ctx.nested_bodies["probe::outer"],
+            vec![
+                "fn-probe::outer::{closure#0}".to_string(),
+                "fn-probe::outer::{closure#0}::{closure#1}".to_string()
+            ]
+        );
+        assert_eq!(
+            ctx.nested_bodies["probe::outer::{closure#0}"],
+            vec!["fn-probe::outer::{closure#0}::{closure#1}".to_string()]
+        );
+    }
+
+    #[test]
+    fn summaries_join_by_union_and_report_growth() {
+        let mut summary = FunctionSummary::default();
+        let mut next = FunctionSummary::default();
+        next.param_to_sink
+            .insert("process-exec".to_string(), BTreeSet::from([0]));
+        assert!(summary.join(next.clone()));
+        assert!(!summary.join(next));
+        let mut more = FunctionSummary::default();
+        more.param_to_sink
+            .insert("process-exec".to_string(), BTreeSet::from([1]));
+        assert!(summary.join(more));
+        assert_eq!(
+            summary.param_to_sink["process-exec"],
+            BTreeSet::from([0, 1])
+        );
+    }
 }
