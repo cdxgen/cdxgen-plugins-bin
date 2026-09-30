@@ -3044,8 +3044,14 @@ mod tests {
                 .get("candidateTargets")
                 .cloned()
                 .unwrap_or_default();
-            assert!(candidates.contains("<FileStore as Store>::persist"));
-            assert!(candidates.contains("<NetStore as Store>::persist"));
+            assert!(
+                candidates
+                    .contains("<dyn_dispatch_app::FileStore as dyn_dispatch_app::Store>::persist")
+            );
+            assert!(
+                candidates
+                    .contains("<dyn_dispatch_app::NetStore as dyn_dispatch_app::Store>::persist")
+            );
         }
     }
 
@@ -3231,8 +3237,10 @@ mod tests {
             // parameter now that devirtualization succeeded.
             assert!(graph.edges.iter().all(|edge| {
                 !(graph.source_name(edge).ends_with("run_specific")
-                    && (graph.target_name(edge).contains("<S as Sink")
-                        || graph.target_name(edge) == "Sink::submit"))
+                    && (graph
+                        .target_name(edge)
+                        .contains("<S as generic_specialization_app::Sink")
+                        || graph.target_name(edge) == "generic_specialization_app::Sink::submit"))
             }));
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
@@ -3268,7 +3276,8 @@ mod tests {
             .data_flow
             .as_ref()
             .expect("dataflow emitted");
-        // Every environment flow the backend reports, exactly. A flow is
+        // Every environment flow the backend reports, exactly, named from the
+        // package the way the stable backend names them. A flow is
         // reported in the function that reads the source and again in each
         // caller whose summary carries it to a sink (`loops::run`, `main`),
         // so one gained or lost anywhere in the fixpoints changes a count
@@ -3285,30 +3294,62 @@ mod tests {
                 .or_default() += 1;
         }
         let expected: BTreeMap<(String, String), usize> = [
-            ("chains::fetch_chain", "filesystem-write", 1),
-            ("chains::pass_chain", "network-connect", 1),
-            ("chains::run", "filesystem-write", 1),
-            ("chains::run", "network-connect", 1),
-            ("chains::run", "process-exec", 1),
-            ("chains::sink_chain", "process-exec", 1),
-            ("dispatch::run", "process-exec", 40),
-            ("dispatch::run_inherent", "process-exec", 1),
-            ("loops::carried_by_for", "process-exec", 2),
-            ("loops::carried_by_loop", "process-exec", 2),
-            ("loops::carried_by_while", "filesystem-delete", 1),
-            ("loops::carried_seventy_steps", "process-exec", 2),
-            ("loops::carried_through_nested_loops", "network-connect", 1),
-            ("loops::run", "filesystem-delete", 1),
-            ("loops::run", "filesystem-write", 1),
-            ("loops::run", "network-connect", 1),
-            ("loops::run", "process-exec", 3),
-            ("main", "filesystem-delete", 2),
-            ("main", "filesystem-write", 2),
-            ("main", "network-connect", 3),
-            ("main", "process-exec", 5),
-            ("recursion::run", "filesystem-delete", 1),
-            ("recursion::run", "network-connect", 1),
-            ("recursion::run", "process-exec", 1),
+            (
+                "fixpoint_flow_app::chains::fetch_chain",
+                "filesystem-write",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::chains::pass_chain",
+                "network-connect",
+                1,
+            ),
+            ("fixpoint_flow_app::chains::run", "filesystem-write", 1),
+            ("fixpoint_flow_app::chains::run", "network-connect", 1),
+            ("fixpoint_flow_app::chains::run", "process-exec", 1),
+            ("fixpoint_flow_app::chains::sink_chain", "process-exec", 1),
+            ("fixpoint_flow_app::dispatch::run", "process-exec", 40),
+            (
+                "fixpoint_flow_app::dispatch::run_inherent",
+                "process-exec",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_for",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_loop",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_while",
+                "filesystem-delete",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_seventy_steps",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_through_nested_loops",
+                "network-connect",
+                1,
+            ),
+            ("fixpoint_flow_app::loops::run", "filesystem-delete", 1),
+            ("fixpoint_flow_app::loops::run", "filesystem-write", 1),
+            ("fixpoint_flow_app::loops::run", "network-connect", 1),
+            ("fixpoint_flow_app::loops::run", "process-exec", 3),
+            ("fixpoint_flow_app::main", "filesystem-delete", 2),
+            ("fixpoint_flow_app::main", "filesystem-write", 2),
+            ("fixpoint_flow_app::main", "network-connect", 3),
+            ("fixpoint_flow_app::main", "process-exec", 5),
+            ("fixpoint_flow_app::recursion::run", "filesystem-delete", 1),
+            ("fixpoint_flow_app::recursion::run", "network-connect", 1),
+            ("fixpoint_flow_app::recursion::run", "process-exec", 1),
         ]
         .into_iter()
         .map(|(function, sink, count)| ((function.to_string(), sink.to_string()), count))
@@ -3677,7 +3718,7 @@ mod tests {
                 .expect("dataflow emitted")
                 .summaries
                 .iter()
-                .find(|summary| summary.function == "dispatch::{closure#0}")
+                .find(|summary| summary.function == "async_semantic_app::dispatch::{closure#0}")
                 .expect("dispatch async body summary exists");
             assert!(
                 dispatch_async_body_summary
@@ -3727,7 +3768,7 @@ mod tests {
                         .is_some_and(|value| value == "true")
             }));
             assert!(graph.edges.iter().any(|edge| {
-                graph.target_name(edge) == "block_on"
+                graph.target_name(edge) == "async_semantic_app::block_on"
                     && edge.call_type == "async-logical"
                     && edge
                         .properties

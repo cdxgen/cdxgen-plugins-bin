@@ -1220,7 +1220,7 @@ fn analyze_on_this_thread(
         debug_log(options.debug, format_args!("pass=compiler-payload-merge"));
         merge_file_evidence(&mut report.files, payload.files);
         extend_unique_imports(&mut report.imports, payload.imports);
-        extend_unique_declarations(&mut report.declarations, payload.declarations);
+        merge_compiler_declarations(&mut report.declarations, payload.declarations);
         extend_unique_usages(&mut report.usages, payload.usages);
         extend_unique_security_signals(&mut report.security_signals, payload.security_signals);
         merge_crypto_evidence(&mut report.crypto, payload.crypto);
@@ -1277,7 +1277,7 @@ fn merge_file_evidence(target: &mut Vec<FileEvidence>, incoming: Vec<FileEvidenc
     for file in incoming {
         if let Some(existing) = target.iter_mut().find(|entry| entry.path == file.path) {
             extend_unique_imports(&mut existing.imports, file.imports);
-            extend_unique_declarations(&mut existing.declarations, file.declarations);
+            merge_compiler_declarations(&mut existing.declarations, file.declarations);
             extend_unique_usages(&mut existing.usages, file.usages);
             extend_unique_security_signals(&mut existing.security_signals, file.security_signals);
             merge_crypto_evidence(&mut existing.crypto, file.crypto);
@@ -1362,10 +1362,40 @@ fn extend_unique_imports(target: &mut Vec<ImportUsage>, incoming: Vec<ImportUsag
     }
 }
 
-fn extend_unique_declarations(target: &mut Vec<Declaration>, incoming: Vec<Declaration>) {
-    for declaration in incoming {
-        if !target.iter().any(|existing| existing.id == declaration.id) {
-            target.push(declaration);
+/// Adds the compiler backend's declarations to the stable backend's, one
+/// per item.
+///
+/// Both backends name an item alike, so a compiler declaration with the
+/// package, file, canonical name and line of a stable one is the same item,
+/// and it takes that one's place: in compiler mode the report carries the
+/// compiler's call graph, whose nodes are named by the compiler's ids, and the
+/// compiler knows the item's resolved signature. The stable declaration's cfg
+/// gate carries over, since the compiler only sees code that survived cfg
+/// expansion. Items only one backend saw are kept as they are.
+fn merge_compiler_declarations(target: &mut Vec<Declaration>, incoming: Vec<Declaration>) {
+    fn same_item(left: &Declaration, right: &Declaration) -> bool {
+        left.package_path == right.package_path
+            && left.file_path == right.file_path
+            && left.canonical_name == right.canonical_name
+            && left.position.line == right.position.line
+    }
+    let stable = target.len();
+    let mut replaced = vec![false; stable];
+    for mut declaration in incoming {
+        if target.iter().any(|existing| existing.id == declaration.id) {
+            continue;
+        }
+        let twin =
+            (0..stable).find(|&index| !replaced[index] && same_item(&target[index], &declaration));
+        match twin {
+            Some(index) => {
+                if declaration.cfg_gate.is_none() {
+                    declaration.cfg_gate = target[index].cfg_gate.take();
+                }
+                replaced[index] = true;
+                target[index] = declaration;
+            }
+            None => target.push(declaration),
         }
     }
 }
@@ -15615,6 +15645,73 @@ impl ComponentSection for Holder {
         );
         assert!(report.call_graph.is_some());
         assert!(report.data_flow.is_some());
+    }
+
+    #[test]
+    fn compiler_declarations_take_the_place_of_their_stable_twins() {
+        fn declaration(
+            id: &str,
+            canonical: &str,
+            line: usize,
+            cfg_gate: Option<&str>,
+        ) -> Declaration {
+            Declaration {
+                cfg_gate: cfg_gate.map(str::to_string),
+                id: id.to_string(),
+                name: canonical
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                qualified_name: canonical.to_string(),
+                canonical_name: canonical.to_string(),
+                kind: "function".to_string(),
+                package_path: "app".to_string(),
+                purl: String::new(),
+                file_path: "src/lib.rs".to_string(),
+                signature: String::new(),
+                receiver: None,
+                position: Position {
+                    filename: "src/lib.rs".to_string(),
+                    line,
+                    column: 1,
+                },
+            }
+        }
+        let mut declarations = vec![
+            declaration("stable-run", "app::run", 3, Some("feature = \"cli\"")),
+            declaration("stable-only", "app::gated_out", 9, Some("windows")),
+            declaration("stable-from", "app::Text::from", 20, None),
+        ];
+        super::merge_compiler_declarations(
+            &mut declarations,
+            vec![
+                declaration("compiler-run", "app::run", 3, None),
+                declaration("compiler-run", "app::run", 3, None),
+                declaration("compiler-only", "app::helper", 14, None),
+                // Two impls of `From` on one type share a canonical name, and
+                // only the one on the stable declaration's line is its twin.
+                declaration("compiler-from-a", "app::Text::from", 20, None),
+                declaration("compiler-from-b", "app::Text::from", 24, None),
+            ],
+        );
+        let ids: Vec<&str> = declarations.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "compiler-run",
+                "stable-only",
+                "compiler-from-a",
+                "compiler-only",
+                "compiler-from-b"
+            ]
+        );
+        // The compiler only sees code that survived cfg expansion, so the
+        // gate comes from the stable twin.
+        assert_eq!(
+            declarations[0].cfg_gate.as_deref(),
+            Some("feature = \"cli\"")
+        );
     }
 
     #[test]

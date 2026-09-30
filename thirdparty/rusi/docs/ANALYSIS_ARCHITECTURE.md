@@ -69,6 +69,19 @@ normalization. This is what makes Rusi useful beyond a single repository, and it
 the normalization logic is part of the authoritative schema crate rather than a private
 detail of either backend.
 
+Both backends spell a path the same way, from the package's name, as
+`package::module::item`, whichever target of the package the item sits in, so a binary
+target `rusi` of the package `rusi-cli` is `rusi_cli::...` in either, and `package_path`
+is that name too. rustc prints paths into the crate it is compiling with no crate segment
+at all, so the compiler backend spells each such path from the package, including the ones
+inside `<Type as Trait>`. Its `qualified_name` keeps the trait an impl method implements
+(`<pkg::Stage01 as pkg::Stage>::apply`) where the stable backend writes
+`pkg::Stage01::apply`, and the two agree on `canonical_name`. When both backends report,
+the compiler's declaration of an item takes the place of the stable one with the same
+package, file, canonical name and line, since the call graph the report then carries is
+the compiler's and names its nodes by the compiler's ids; it keeps the stable
+declaration's cfg gate, because the compiler only sees code that survived cfg expansion.
+
 ## 3. The stable backend
 
 ### 3.1 Parsing and the simplified IR
@@ -296,7 +309,12 @@ two backends.
 Foreign function interfaces are recognized at two levels. Declarations of external
 functions and statics are recorded as evidence with a native interop signal, and a set of
 models describes the taint behavior of well known C library entry points so that a call
-crossing into foreign code can still be reasoned about at the boundary. The foreign code
+crossing into foreign code can still be reasoned about at the boundary. A function declared
+in an `extern` block is named by its Rust path like any other item (`pkg::puts`), while
+the models name C functions by the symbol they link against (`puts`, or whatever
+`#[link_name]` gives). The compiler backend therefore matches them only against the linked
+symbol of a call it knows to be foreign, so a Rust function that happens to be called `open`
+is never taken for the C one. The foreign code
 itself is not analyzed, so taint through a C body is modeled rather than proven, and this
 is stated in the evidence confidence. Deeper cross language tracking, including parsing of
 generated bindings and of native build inputs, is identified as future work rather than

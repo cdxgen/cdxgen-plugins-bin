@@ -10,6 +10,7 @@ extern crate rustc_span;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
@@ -39,6 +40,7 @@ use rustc_middle::mir::{
     StatementKind, TerminatorKind, UnwindAction,
 };
 use rustc_middle::mono::MonoItem;
+use rustc_middle::ty::print::with_crate_prefix;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
 
@@ -221,7 +223,12 @@ fn collect_and_write_artifact(
 
 #[derive(Debug, Default)]
 struct EmbeddedCollector {
+    /// rustc's name for the crate being compiled, which tells a package's
+    /// targets apart in ids.
     crate_name: String,
+    /// The package's name as a path segment (see [`local_package`]), which
+    /// every local path and every `package_path` is spelled from.
+    package: String,
     analysis_root: PathBuf,
     debug: bool,
     files: BTreeMap<String, FileEvidence>,
@@ -242,6 +249,7 @@ impl EmbeddedCollector {
     fn collect(tcx: TyCtxt<'_>, analysis_root: &Path, debug: bool) -> Result<CompilerEvidence> {
         let mut collector = Self {
             crate_name: tcx.crate_name(LOCAL_CRATE).to_string(),
+            package: init_local_package(tcx).to_string(),
             analysis_root: analysis_root.to_path_buf(),
             debug,
             ..Self::default()
@@ -468,7 +476,7 @@ impl EmbeddedCollector {
             let mut visitor = BodyVisitor {
                 tcx,
                 analysis_root: &self.analysis_root,
-                crate_name: &self.crate_name,
+                package: &self.package,
                 caller: owner,
                 caller_decl: &declaration,
                 typeck,
@@ -517,7 +525,7 @@ impl EmbeddedCollector {
                 .map(|((_, key), value)| (key.clone(), value.clone()))
                 .collect::<HashMap<_, _>>();
             self.functions.push(MirFunction::from_mir(
-                &self.crate_name,
+                &self.package,
                 declaration,
                 body,
                 callsites,
@@ -600,7 +608,7 @@ impl EmbeddedCollector {
                     if callee_def_id == *callee_def {
                         continue;
                     }
-                    let symbol = canonical_call_symbol(&tcx.def_path_str(*callee_def));
+                    let symbol = canonical_call_symbol(&def_path(tcx, *callee_def));
                     let bucket = resolved.entry((owner, symbol)).or_default();
                     if !bucket.contains(&callee_def_id) {
                         bucket.push(callee_def_id);
@@ -610,7 +618,7 @@ impl EmbeddedCollector {
         }
 
         for ((owner, symbol), mut def_ids) in resolved {
-            def_ids.sort_by_key(|def_id| tcx.def_path_str(*def_id));
+            def_ids.sort_by_key(|def_id| def_path(tcx, *def_id));
             let mut target_ids = Vec::new();
             let mut target_names = Vec::new();
             for def_id in &def_ids {
@@ -693,11 +701,13 @@ impl EmbeddedCollector {
                 semantic_tags: semantic_tags_for_call(
                     &declaration.qualified_name,
                     std::slice::from_ref(&declaration.qualified_name),
+                    None,
                     "static",
                     declaration.receiver.as_deref(),
                 ),
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             };
             if !ambiguous.contains(&declaration.name) {
                 index
@@ -749,6 +759,7 @@ impl EmbeddedCollector {
                 semantic_tags,
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             });
         }
         Ok(index)
@@ -795,7 +806,7 @@ impl EmbeddedCollector {
         let import = ImportUsage {
             path: path.clone(),
             alias,
-            package_path: self.crate_name.clone(),
+            package_path: self.package.clone(),
             purl: String::new(),
             position: position_from_span(tcx, &self.analysis_root, span),
         };
@@ -827,7 +838,7 @@ impl EmbeddedCollector {
         receiver: Option<String>,
     ) -> Result<Declaration> {
         let def_id = owner.to_def_id();
-        let qualified_name = tcx.def_path_str(def_id);
+        let qualified_name = def_path(tcx, def_id);
         let file_path = file_path_from_span(tcx, &self.analysis_root, tcx.def_span(def_id));
         let name = tcx
             .opt_item_name(def_id)
@@ -841,7 +852,7 @@ impl EmbeddedCollector {
             canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
             kind: kind.to_string(),
-            package_path: self.crate_name.clone(),
+            package_path: self.package.clone(),
             purl: String::new(),
             file_path: file_path.clone(),
             signature: declaration_signature(tcx, def_id),
@@ -904,8 +915,8 @@ impl EmbeddedCollector {
             .entry(path.to_string())
             .or_insert_with(|| FileEvidence {
                 path: path.to_string(),
-                package_name: self.crate_name.clone(),
-                package_path: self.crate_name.clone(),
+                package_name: self.package.clone(),
+                package_path: self.package.clone(),
                 purl: String::new(),
                 imports: Vec::new(),
                 declarations: Vec::new(),
@@ -919,7 +930,7 @@ impl EmbeddedCollector {
 struct BodyVisitor<'tcx, 'a> {
     tcx: TyCtxt<'tcx>,
     analysis_root: &'a Path,
-    crate_name: &'a str,
+    package: &'a str,
     caller: LocalDefId,
     caller_decl: &'a Declaration,
     typeck: &'tcx ty::TypeckResults<'tcx>,
@@ -1104,7 +1115,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             ),
             kind: usage_kind.to_string(),
             name: resolved.callee_display.clone(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             purl: String::new(),
             enclosing_declaration: Some(self.caller_decl.id.clone()),
             position: position.clone(),
@@ -1149,7 +1160,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             severity: "medium".to_string(),
             confidence: "high".to_string(),
             description: description.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             purl: String::new(),
             file_path: file_path.clone(),
             position: position_from_span(self.tcx, self.analysis_root, span),
@@ -1178,7 +1189,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             id: stable_id("crypto-library", &[rule.provider, &file_path]),
             path: rule.provider.to_string(),
             family: rule.kind.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             position: position.clone(),
             properties: IndexMap::new(),
@@ -1201,7 +1212,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             provider: rule.provider.to_string(),
             operation: rule.operation.to_string(),
             symbol: rule.symbol.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             position: position.clone(),
             properties: IndexMap::new(),
@@ -1224,7 +1235,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
                 severity: severity.to_string(),
                 confidence: "high".to_string(),
                 summary: summary.to_string(),
-                package_path: self.crate_name.to_string(),
+                package_path: self.package.to_string(),
                 file_path: file_path.clone(),
                 position,
                 properties: IndexMap::new(),
@@ -1292,7 +1303,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             ),
             kind: kind.to_string(),
             name: name.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             function: self.caller_decl.qualified_name.clone(),
             confidence: confidence.to_string(),
@@ -1323,8 +1334,8 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             .entry(path.to_string())
             .or_insert_with(|| FileEvidence {
                 path: path.to_string(),
-                package_name: self.crate_name.to_string(),
-                package_path: self.crate_name.to_string(),
+                package_name: self.package.to_string(),
+                package_path: self.package.to_string(),
                 purl: String::new(),
                 imports: Vec::new(),
                 declarations: Vec::new(),
@@ -1352,6 +1363,8 @@ struct ResolvedCall {
     semantic_tags: Vec<String>,
     async_boundary: bool,
     task_boundary: bool,
+    /// See [`MirCall::native_symbol`].
+    native_symbol: Option<String>,
 }
 
 impl ResolvedCall {
@@ -1369,6 +1382,30 @@ impl ResolvedCall {
             semantic_tags: Vec::new(),
             async_boundary: false,
             task_boundary: false,
+            native_symbol: None,
+        }
+    }
+
+    /// A call into a function declared in an `extern` block. It has no body
+    /// to resolve to, and its models are looked up by the symbol it links
+    /// against.
+    fn foreign(name: String, native_symbol: String) -> Self {
+        let call_type = if modeled_native_boundary(&native_symbol) {
+            "native"
+        } else {
+            "unresolved"
+        };
+        Self {
+            call_type: call_type.to_string(),
+            semantic_tags: semantic_tags_for_call(
+                &name,
+                &[],
+                Some(&native_symbol),
+                call_type,
+                None,
+            ),
+            native_symbol: Some(native_symbol),
+            ..Self::unresolved(name)
         }
     }
 }
@@ -1390,7 +1427,7 @@ struct MirFunction {
 
 impl MirFunction {
     fn from_mir(
-        crate_name: &str,
+        package: &str,
         declaration: Declaration,
         body: &MirBody<'_>,
         callsites: HashMap<String, ResolvedCall>,
@@ -1429,7 +1466,7 @@ impl MirFunction {
             name: declaration.name.clone(),
             qualified_name: declaration.qualified_name,
             kind: declaration.kind,
-            package_path: crate_name.to_string(),
+            package_path: package.to_string(),
             file_path: declaration.file_path,
             position: declaration.position,
             param_names,
@@ -1531,9 +1568,12 @@ impl MirBlock {
                     let unresolved_display = operand_display(func, body);
                     let normalized_unresolved = normalize_symbol(&unresolved_display);
                     let normalized_last = normalize_symbol(last_segment(&unresolved_display));
-                    let resolved = callsites
-                        .get(&span_key_simple(*fn_span))
-                        .cloned()
+                    // A foreign callee is known from the call itself, and no
+                    // name lookup may take it for a Rust function.
+                    let foreign = operand_foreign_symbol(func);
+                    let resolved = foreign
+                        .map(|symbol| ResolvedCall::foreign(unresolved_display.clone(), symbol))
+                        .or_else(|| callsites.get(&span_key_simple(*fn_span)).cloned())
                         .or_else(|| local_resolutions.get(&unresolved_display).cloned())
                         .or_else(|| local_resolutions.get(&normalized_unresolved).cloned())
                         .or_else(|| {
@@ -1550,7 +1590,7 @@ impl MirBlock {
                             )
                         })
                         .unwrap_or_else(|| ResolvedCall::unresolved(unresolved_display));
-                    ops.push(MirOp::Call(MirCall {
+                    ops.push(MirOp::Call(Box::new(MirCall {
                         dest: place_to_path(debug_names, *destination),
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
                         callee_display: resolved.callee_display,
@@ -1565,11 +1605,12 @@ impl MirBlock {
                         semantic_tags: resolved.semantic_tags,
                         async_boundary: resolved.async_boundary,
                         task_boundary: resolved.task_boundary,
+                        native_symbol: resolved.native_symbol,
                         args: args
                             .iter()
                             .map(|arg| CallArg::from_operand(body, debug_names, arg.node.clone()))
                             .collect(),
-                    }));
+                    })));
                     if let Some(target) = target {
                         successors.push(label_for(*target));
                     }
@@ -1631,6 +1672,7 @@ fn callable_candidate_resolution(
         semantic_tags,
         async_boundary: false,
         task_boundary: false,
+        native_symbol: None,
     })
 }
 
@@ -1638,7 +1680,7 @@ fn callable_candidate_resolution(
 enum MirOp {
     Assign(AssignAction),
     Kill(PlacePath),
-    Call(MirCall),
+    Call(Box<MirCall>),
 }
 
 #[derive(Debug, Clone)]
@@ -1737,7 +1779,29 @@ struct MirCall {
     semantic_tags: Vec<String>,
     async_boundary: bool,
     task_boundary: bool,
+    /// The symbol a foreign function links against: `puts` for a call to
+    /// `pkg::puts` declared in an `extern` block, or the name its
+    /// `#[link_name]` gives. The native models name C functions this way, and
+    /// no Rust path is one, so only this name matches them. `None` for a Rust
+    /// function.
+    native_symbol: Option<String>,
     args: Vec<CallArg>,
+}
+
+impl MirCall {
+    /// The names this call's flow models are looked up by.
+    fn model_symbols(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.callee_display.as_str())
+            .chain(self.target_names.iter().map(String::as_str))
+            .chain(self.native_symbol.as_deref())
+    }
+
+    /// The name that stands for this call's callee among its flow models.
+    fn model_symbol(&self) -> &str {
+        self.native_symbol
+            .as_deref()
+            .unwrap_or(&self.callee_display)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1918,10 +1982,23 @@ fn operand_places(
 
 fn operand_display(operand: &Operand<'_>, _body: &MirBody<'_>) -> String {
     match operand {
-        Operand::Constant(constant) => format!("{:?}", constant),
+        // Spelled the way `def_path` names the function it calls, so a local
+        // callee reads the same here as in the declarations it is looked up
+        // among.
+        Operand::Constant(constant) => spell_local_paths(
+            &with_crate_prefix!(format!("{constant:?}")),
+            local_package(),
+        ),
         Operand::Copy(place) | Operand::Move(place) => format!("{:?}", place),
         Operand::RuntimeChecks(_) => "runtime-checks".to_string(),
     }
+}
+
+/// The symbol a call's callee links against, when the callee is a function
+/// declared in an `extern` block (see [`foreign_link_symbol`]).
+fn operand_foreign_symbol(operand: &Operand<'_>) -> Option<String> {
+    let (def_id, _) = operand.const_fn_def()?;
+    ty::tls::with(|tcx| foreign_link_symbol(tcx, def_id))
 }
 
 fn push_unwind_successor(unwind: &UnwindAction, successors: &mut Vec<String>) {
@@ -3523,6 +3600,7 @@ impl<'a> DataFlowBuilder<'a> {
                         self.new_source_path(
                             function,
                             &call.callee_display,
+                            call.model_symbol(),
                             category,
                             call.dest_type.clone(),
                             None,
@@ -3539,6 +3617,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     function,
                                     &taint,
                                     &call.callee_display,
+                                    call.model_symbol(),
                                     sink_category,
                                     arg_index,
                                     call.args.get(arg_index).and_then(|a| a.type_name.clone()),
@@ -3608,6 +3687,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     paths.push(self.new_source_path(
                                         function,
                                         &callee_name,
+                                        &callee_name,
                                         &category,
                                         call.dest_type.clone(),
                                         None,
@@ -3619,6 +3699,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     let path = self.new_source_path(
                                         function,
                                         &callee_name,
+                                        &callee_name,
                                         &source_category,
                                         call.dest_type.clone(),
                                         None,
@@ -3626,6 +3707,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     self.emit_sink(
                                         function,
                                         &ConcreteTaint { paths: vec![path] },
+                                        &callee_name,
                                         &callee_name,
                                         &sink_category,
                                         0,
@@ -3710,6 +3792,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             function,
                                             &taint,
                                             &callee_name,
+                                            &callee_name,
                                             &sink_category,
                                             parameter_index,
                                             call.args
@@ -3783,10 +3866,13 @@ impl<'a> DataFlowBuilder<'a> {
         state
     }
 
+    /// Starts a taint path at a source named `name`, whose flow models are
+    /// looked up by `model_symbol` (see [`MirCall::model_symbol`]).
     fn new_source_path(
         &mut self,
         function: &MirFunction,
         name: &str,
+        model_symbol: &str,
         category: &str,
         type_name: Option<String>,
         parameter_index: Option<usize>,
@@ -3812,7 +3898,7 @@ impl<'a> DataFlowBuilder<'a> {
                 ),
                 ("analysisBackend".to_string(), "embedded-mir".to_string()),
             ]);
-            add_model_properties(&mut properties, name);
+            add_model_properties(&mut properties, model_symbol);
             DataFlowNode {
                 id: node_id.clone(),
                 kind: "source".to_string(),
@@ -3858,6 +3944,7 @@ impl<'a> DataFlowBuilder<'a> {
                     let path = self.new_source_path(
                         function,
                         &call.callee_display,
+                        call.model_symbol(),
                         category,
                         call.args
                             .get(arg_index)
@@ -3871,11 +3958,15 @@ impl<'a> DataFlowBuilder<'a> {
         }
     }
 
+    /// Ends every path in `taint` at a sink named `sink_name`, whose flow
+    /// models are looked up by `model_symbol` (see [`MirCall::model_symbol`]).
+    #[allow(clippy::too_many_arguments)]
     fn emit_sink(
         &mut self,
         function: &MirFunction,
         taint: &ConcreteTaint,
         sink_name: &str,
+        model_symbol: &str,
         sink_category: &str,
         parameter_index: usize,
         sink_type: Option<String>,
@@ -3904,7 +3995,7 @@ impl<'a> DataFlowBuilder<'a> {
             ),
             ("analysisBackend".to_string(), "embedded-mir".to_string()),
         ]);
-        add_model_properties(&mut properties, sink_name);
+        add_model_properties(&mut properties, model_symbol);
         let sink_node = DataFlowNode {
             id: sink_node_id.clone(),
             kind: "sink".to_string(),
@@ -3973,9 +4064,15 @@ impl<'a> DataFlowBuilder<'a> {
                 taint_dispatch_confidence(taint),
             );
             slice_properties.insert("analysisBackend".to_string(), "embedded-mir".to_string());
-            add_model_properties(&mut slice_properties, sink_name);
-            if modeled_native_boundary(sink_name)
-                || modeled_native_boundary(&final_path.steps[0].node.name)
+            add_model_properties(&mut slice_properties, model_symbol);
+            // Every path starts at a node `new_source_path` built, which
+            // records whether its source's models cross the native boundary.
+            if modeled_native_boundary(model_symbol)
+                || final_path.steps[0]
+                    .node
+                    .properties
+                    .get("nativeBoundary")
+                    .is_some_and(|value| value == "true")
             {
                 slice_properties.insert("nativeBoundary".to_string(), "true".to_string());
             }
@@ -4974,27 +5071,23 @@ fn classify_crypto_symbol(symbol: &str) -> Option<CryptoRule> {
 }
 
 fn source_category(call: &MirCall) -> Option<String> {
-    std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-        .find_map(|symbol| {
-            matching_flow_models(symbol)
-                .into_iter()
-                .find(|model| {
-                    model_allowed_for_call(call, model)
-                        && matches!(
-                            model.kind,
-                            FlowModelKind::Source | FlowModelKind::NativeSource
-                        )
-                })
-                .map(|model| model.category.to_string())
-        })
+    call.model_symbols().find_map(|symbol| {
+        matching_flow_models(symbol)
+            .into_iter()
+            .find(|model| {
+                model_allowed_for_call(call, model)
+                    && matches!(
+                        model.kind,
+                        FlowModelKind::Source | FlowModelKind::NativeSource
+                    )
+            })
+            .map(|model| model.category.to_string())
+    })
 }
 
 fn source_argument_matches(call: &MirCall) -> Vec<(String, Vec<usize>)> {
     let mut results = Vec::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model)
                 && matches!(model.kind, FlowModelKind::SourceArgument)
@@ -5014,9 +5107,7 @@ fn sink_matches(
     patterns: &DataFlowPatternSet,
 ) -> Option<Vec<(String, Vec<usize>)>> {
     let mut results = Vec::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model)
                 && matches!(model.kind, FlowModelKind::Sink | FlowModelKind::NativeSink)
@@ -5027,9 +5118,11 @@ fn sink_matches(
                 ));
             }
         }
-        if call.call_type == "native" {
-            results.push(("native-call".to_string(), (0..call.args.len()).collect()));
-        }
+    }
+    // Every argument of a native call crosses into code nothing analyzes,
+    // unless a model says which ones reach a sink there.
+    if call.call_type == "native" && results.is_empty() {
+        results.push(("native-call".to_string(), (0..call.args.len()).collect()));
     }
     if results.is_empty() {
         let normalized = normalize_symbol(&call.callee_display);
@@ -5077,9 +5170,7 @@ fn model_allowed_for_call(call: &MirCall, model: &FlowModel) -> bool {
 
 fn model_tags_for_call(call: &MirCall) -> BTreeSet<&'static str> {
     let mut tags = BTreeSet::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model) {
                 tags.extend(model.tags.iter().copied());
@@ -5090,35 +5181,33 @@ fn model_tags_for_call(call: &MirCall) -> BTreeSet<&'static str> {
 }
 
 fn passthrough(call: &MirCall) -> bool {
-    std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-        .any(|symbol| {
-            if matching_flow_models(symbol).into_iter().any(|model| {
-                matches!(
-                    model.kind,
-                    FlowModelKind::Passthrough | FlowModelKind::Builder
-                )
-            }) {
-                return true;
-            }
-            let normalized = normalize_symbol(symbol);
+    call.model_symbols().any(|symbol| {
+        if matching_flow_models(symbol).into_iter().any(|model| {
             matches!(
-                last_segment(&normalized),
-                "unwrap_or_else"
-                    | "unwrap"
-                    | "unwrap_or_default"
-                    | "to_string"
-                    | "to_owned"
-                    | "into_owned"
-                    | "clone"
-                    | "deref"
-                    | "new"
-                    | "block_on"
-                    | "as_ptr"
-                    | "Ok"
-                    | "Some"
-            ) || normalized.ends_with("std::ffi::CString::new")
-        })
+                model.kind,
+                FlowModelKind::Passthrough | FlowModelKind::Builder
+            )
+        }) {
+            return true;
+        }
+        let normalized = normalize_symbol(symbol);
+        matches!(
+            last_segment(&normalized),
+            "unwrap_or_else"
+                | "unwrap"
+                | "unwrap_or_default"
+                | "to_string"
+                | "to_owned"
+                | "into_owned"
+                | "clone"
+                | "deref"
+                | "new"
+                | "block_on"
+                | "as_ptr"
+                | "Ok"
+                | "Some"
+        ) || normalized.ends_with("std::ffi::CString::new")
+    })
 }
 
 fn built_in_patterns() -> DataFlowPatternSet {
@@ -6777,7 +6866,7 @@ fn resolve_method_call(
     function_ids: &HashMap<LocalDefId, String>,
 ) -> Option<ResolvedCall> {
     let def_id = def_id?;
-    let symbol = tcx.def_path_str(def_id);
+    let symbol = def_path(tcx, def_id);
     let receiver_ty = receiver_ty.peel_refs();
     let receiver_type = Some(normalize_type_name(receiver_ty.to_string()));
     let call_type = if matches!(receiver_ty.kind(), ty::Dynamic(..)) {
@@ -6816,8 +6905,13 @@ fn resolve_method_call(
         || target_names
             .iter()
             .any(|target| modeled_native_boundary(target));
-    let semantic_tags =
-        semantic_tags_for_call(&symbol, &target_names, call_type, receiver_type.as_deref());
+    let semantic_tags = semantic_tags_for_call(
+        &symbol,
+        &target_names,
+        None,
+        call_type,
+        receiver_type.as_deref(),
+    );
     let async_boundary = semantic_tags.iter().any(|tag| tag == "async-boundary");
     let task_boundary = semantic_tags.iter().any(|tag| tag == "task-boundary");
     let dispatch_confidence = dispatch_confidence_for(call_type, target_ids.len());
@@ -6844,6 +6938,7 @@ fn resolve_method_call(
         semantic_tags,
         async_boundary,
         task_boundary,
+        native_symbol: None,
     })
 }
 
@@ -6858,12 +6953,20 @@ fn resolve_expr_call(
             let res = typeck.qpath_res(&qpath, func.hir_id);
             let def_id = res.opt_def_id()?;
             let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
-            let symbol = tcx.def_path_str(def_id);
+            let symbol = def_path(tcx, def_id);
+            let native_symbol = foreign_link_symbol(tcx, def_id);
             let native_boundary = modeled_native_boundary(&symbol)
                 || target_names
                     .iter()
+                    .chain(&native_symbol)
                     .any(|target| modeled_native_boundary(target));
-            let semantic_tags = semantic_tags_for_call(&symbol, &target_names, "static", None);
+            let semantic_tags = semantic_tags_for_call(
+                &symbol,
+                &target_names,
+                native_symbol.as_deref(),
+                "static",
+                None,
+            );
             Some(ResolvedCall {
                 callee_display: symbol,
                 call_type: if native_boundary {
@@ -6883,6 +6986,7 @@ fn resolve_expr_call(
                 semantic_tags: semantic_tags.clone(),
                 async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                 task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                native_symbol,
             })
         }
         _ => match typeck.expr_ty(func).kind() {
@@ -6890,13 +6994,14 @@ fn resolve_expr_call(
                 let def_id = *def_id;
                 let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
                 let semantic_tags = semantic_tags_for_call(
-                    &tcx.def_path_str(def_id),
+                    &def_path(tcx, def_id),
                     &target_names,
+                    None,
                     "closure",
                     None,
                 );
                 Some(ResolvedCall {
-                    callee_display: tcx.def_path_str(def_id),
+                    callee_display: def_path(tcx, def_id),
                     call_type: "closure".to_string(),
                     dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
                     target_ids,
@@ -6908,20 +7013,26 @@ fn resolve_expr_call(
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                     task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                    native_symbol: None,
                 })
             }
             ty::FnDef(def_id, _) => {
                 let def_id = *def_id;
                 let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
+                let native_symbol = foreign_link_symbol(tcx, def_id);
                 let semantic_tags = semantic_tags_for_call(
-                    &tcx.def_path_str(def_id),
+                    &def_path(tcx, def_id),
                     &target_names,
+                    native_symbol.as_deref(),
                     "static",
                     None,
                 );
+                let native_boundary = native_symbol
+                    .as_deref()
+                    .is_some_and(modeled_native_boundary);
                 Some(ResolvedCall {
-                    callee_display: tcx.def_path_str(def_id),
-                    call_type: "static".to_string(),
+                    callee_display: def_path(tcx, def_id),
+                    call_type: if native_boundary { "native" } else { "static" }.to_string(),
                     dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                     target_ids,
                     target_names,
@@ -6932,6 +7043,7 @@ fn resolve_expr_call(
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                     task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                    native_symbol,
                 })
             }
             ty::FnPtr(..) => Some(ResolvedCall {
@@ -6947,10 +7059,88 @@ fn resolve_expr_call(
                 semantic_tags: vec!["fn-pointer".to_string()],
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             }),
             _ => None,
         },
     }
+}
+
+static LOCAL_PACKAGE: OnceLock<String> = OnceLock::new();
+
+/// Records the package whose crate this wrapper process compiles, as a path
+/// segment (`my-app` is `my_app`), and returns it. The stable backend names
+/// items from the package rather than from the target, so a binary target
+/// `rusi` in the package `rusi-cli` is `rusi_cli::...` in both backends.
+/// Cargo sets `CARGO_PKG_NAME` for every rustc it runs; outside cargo the
+/// crate's own name stands in.
+fn init_local_package(tcx: TyCtxt<'_>) -> &'static str {
+    LOCAL_PACKAGE.get_or_init(|| {
+        std::env::var("CARGO_PKG_NAME")
+            .map(|name| name.replace('-', "_"))
+            .unwrap_or_else(|_| tcx.crate_name(LOCAL_CRATE).to_string())
+    })
+}
+
+/// The package recorded by [`init_local_package`]. A wrapper process
+/// compiles one crate, so it never changes once set.
+fn local_package() -> &'static str {
+    LOCAL_PACKAGE.get().map_or("crate", String::as_str)
+}
+
+/// `def_id`'s path as both backends name it. rustc prints a path into the
+/// local crate with no crate segment at all (`chains::run`), which reads as
+/// a different function from the stable backend's `pkg::chains::run`, so
+/// every local path, including each one inside `<T as Trait>`, is spelled
+/// from the package instead. Paths into other crates keep their crate name.
+fn def_path(tcx: TyCtxt<'_>, def_id: DefId) -> String {
+    let spelled = spell_local_paths(
+        &with_crate_prefix!(tcx.def_path_str(def_id)),
+        local_package(),
+    );
+    // Before the 2018 edition rustc prints no `crate::` even when asked, but
+    // a plain local path still starts inside the local crate.
+    if def_id.is_local() && !tcx.sess.at_least_rust_2018() && !spelled.starts_with('<') {
+        format!("{}::{spelled}", local_package())
+    } else {
+        spelled
+    }
+}
+
+/// The symbol `def_id` links against when it is declared in an `extern`
+/// block: the name its `#[link_name]` gives, or else its own.
+fn foreign_link_symbol(tcx: TyCtxt<'_>, def_id: DefId) -> Option<String> {
+    tcx.is_foreign_item(def_id).then(|| {
+        tcx.codegen_fn_attrs(def_id)
+            .symbol_name
+            .unwrap_or_else(|| tcx.item_name(def_id))
+            .to_string()
+    })
+}
+
+/// Replaces each `crate::` that starts a path in `printed` with
+/// `package::`. `crate` is a keyword and never names a segment of its own;
+/// a match right after an identifier character or a `:` is inside a longer
+/// name and stays.
+fn spell_local_paths(printed: &str, package: &str) -> String {
+    const PREFIX: &str = "crate::";
+    let mut spelled = String::with_capacity(printed.len());
+    let mut rest = printed;
+    let mut before = None;
+    while let Some(at) = rest.find(PREFIX) {
+        spelled.push_str(&rest[..at]);
+        let previous = rest[..at].chars().next_back().or(before);
+        if previous.is_some_and(|ch: char| ch.is_alphanumeric() || ch == '_' || ch == ':') {
+            spelled.push_str(PREFIX);
+        } else {
+            spelled.push_str(package);
+            spelled.push_str("::");
+        }
+        before = Some(':');
+        rest = &rest[at + PREFIX.len()..];
+    }
+    spelled.push_str(rest);
+    spelled
 }
 
 fn target_for_def_id(
@@ -6958,7 +7148,7 @@ fn target_for_def_id(
     def_id: DefId,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> (Vec<String>, Vec<String>) {
-    let symbol = tcx.def_path_str(def_id);
+    let symbol = def_path(tcx, def_id);
     if def_id.is_local()
         && let Some(id) = function_ids.get(&def_id.expect_local())
     {
@@ -7032,7 +7222,7 @@ fn enumerate_dyn_candidates(
                 .in_definition_order()
             {
                 if candidate.is_fn() && candidate.name() == method_name {
-                    names.push(tcx.def_path_str(candidate.def_id));
+                    names.push(def_path(tcx, candidate.def_id));
                     receivers.push(impl_ty.clone());
                     if let Some(id) = candidate
                         .def_id
@@ -7108,12 +7298,14 @@ fn normalize_type_name(value: String) -> String {
 fn semantic_tags_for_call(
     symbol: &str,
     target_names: &[String],
+    native_symbol: Option<&str>,
     call_type: &str,
     receiver_type: Option<&str>,
 ) -> Vec<String> {
     let mut tags = BTreeSet::new();
     let mut inspect = vec![symbol.to_string()];
     inspect.extend(target_names.iter().cloned());
+    inspect.extend(native_symbol.map(str::to_string));
     for candidate in inspect {
         let normalized = normalize_symbol(&candidate);
         let last = last_segment(&normalized);
@@ -7364,7 +7556,7 @@ fn declaration_signature(tcx: TyCtxt<'_>, def_id: DefId) -> String {
             .instantiate_identity()
             .skip_binder()
             .to_string(),
-        _ => tcx.def_path_str(def_id),
+        _ => def_path(tcx, def_id),
     }
 }
 
@@ -7617,7 +7809,7 @@ mod tests {
     }
 
     fn call(dest: &str, callee: &str, target_ids: &[&str], args: &[PlacePath]) -> MirOp {
-        MirOp::Call(MirCall {
+        MirOp::Call(Box::new(MirCall {
             dest: local(dest),
             dest_type: None,
             callee_display: callee.to_string(),
@@ -7636,6 +7828,7 @@ mod tests {
             semantic_tags: Vec::new(),
             async_boundary: false,
             task_boundary: false,
+            native_symbol: None,
             args: args
                 .iter()
                 .map(|arg| CallArg {
@@ -7643,7 +7836,7 @@ mod tests {
                     type_name: None,
                 })
                 .collect(),
-        })
+        }))
     }
 
     fn block(label: usize, ops: Vec<MirOp>, successors: &[usize], returns: bool) -> MirBlock {
@@ -7977,6 +8170,67 @@ mod tests {
             rebase_summary_place(&args, &callee, &field_place, None, true),
             Some(place("a", &[field("b")]))
         );
+    }
+
+    /// A C function declared in the crate has a Rust path like any local item,
+    /// but the native models name it by the symbol it links against, and a
+    /// Rust function with that last segment is no C function at all.
+    #[test]
+    fn native_models_match_the_symbol_a_foreign_function_links_against() {
+        let patterns = built_in_patterns();
+        let MirOp::Call(mut foreign) = call("_2", "ffi_app::puts", &[], &[local("message")]) else {
+            unreachable!()
+        };
+        foreign.call_type = "native".to_string();
+        foreign.native_symbol = Some("puts".to_string());
+        assert_eq!(
+            sink_matches(&foreign, &patterns),
+            Some(vec![("native-output".to_string(), vec![0])])
+        );
+        assert!(model_tags_for_call(&foreign).contains("native-boundary"));
+        // `getenv` is modeled as a source only, so nothing says which of its
+        // arguments reach a sink.
+        foreign.native_symbol = Some("getenv".to_string());
+        assert_eq!(
+            sink_matches(&foreign, &patterns),
+            Some(vec![("native-call".to_string(), vec![0])])
+        );
+
+        let MirOp::Call(rust) = call("_2", "ffi_app::puts", &[], &[local("message")]) else {
+            unreachable!()
+        };
+        assert_eq!(sink_matches(&rust, &patterns), None);
+        assert!(!modeled_native_boundary(rust.model_symbol()));
+    }
+
+    #[test]
+    fn local_paths_are_spelled_from_the_package() {
+        let spell = |printed: &str| spell_local_paths(printed, "my_app");
+        assert_eq!(spell("crate::chains::run"), "my_app::chains::run");
+        assert_eq!(spell("crate::main"), "my_app::main");
+        assert_eq!(
+            spell("<crate::dispatch::Stage01 as crate::dispatch::Stage>::apply"),
+            "<my_app::dispatch::Stage01 as my_app::dispatch::Stage>::apply"
+        );
+        assert_eq!(
+            spell("<crate::Store as std::fmt::Display>::fmt"),
+            "<my_app::Store as std::fmt::Display>::fmt"
+        );
+        assert_eq!(
+            spell("crate::Wrapper::<crate::Inner>::get"),
+            "my_app::Wrapper::<my_app::Inner>::get"
+        );
+        assert_eq!(
+            spell("crate::main::{closure#0}"),
+            "my_app::main::{closure#0}"
+        );
+        // Paths into other crates, and names that merely end in "crate".
+        assert_eq!(
+            spell("std::process::Command::new"),
+            "std::process::Command::new"
+        );
+        assert_eq!(spell("subcrate::run"), "subcrate::run");
+        assert_eq!(spell("my_crate::run"), "my_crate::run");
     }
 
     #[test]
