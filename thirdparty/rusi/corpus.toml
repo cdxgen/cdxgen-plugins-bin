@@ -105,6 +105,13 @@ tier = "fixtures"
 path = "fixtures/dyn-object-unsafe-app"
 capabilities = ["traits", "dyn-dispatch", "object-safety", "dispatch-gate"]
 
+[[fixtures]]
+slug = "fixpoint-flow-app"
+tier = "fixtures"
+path = "fixtures/fixpoint-flow-app"
+capabilities = ["fixpoint", "deep-call-chains", "loop-carried", "recursion", "dyn-dispatch"]
+expected_flows = "expected.jsonl"
+
 # ---------------------------------------------------------------------------
 # Small tier - cloned once, cached, run on every change.
 # ---------------------------------------------------------------------------

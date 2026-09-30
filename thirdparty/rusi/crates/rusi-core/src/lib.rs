@@ -8,6 +8,9 @@ use cargo_metadata::{Metadata, MetadataCommand, Package};
 use indexmap::IndexMap;
 use proc_macro2::Span;
 use quote::ToTokens;
+use rusi_schema::fixpoint::{
+    Dependents, KeyedTable, TrackedReads, WaveWorklist, callee_first_order, join_map, join_set,
+};
 use rusi_schema::{
     AnalysisOptions, CallGraph, CallGraphEdge, CallGraphNode, CryptoComponent, CryptoEvidence,
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
@@ -214,9 +217,10 @@ struct FunctionRecord {
     /// endpoints (P4.2) so an unrelated channel doesn't inherit another
     /// channel's taint via a shared global slot.
     channel_pairs: Vec<(String, String)>,
-    // Reserved for loop-aware analysis; populated but not yet consumed.
-    #[allow(dead_code)]
-    is_loop_body: bool,
+    /// The operation ranges of this function's `for`, `while` and `loop`
+    /// bodies. The data-flow passes run each one to a fixpoint (see
+    /// [`run_operations`]); everything else reads the operations in order.
+    loop_regions: Vec<LoopRegion>,
     /// Types written explicitly on `let` bindings, which outrank anything
     /// inferred.
     declared_types: BTreeMap<String, String>,
@@ -256,10 +260,165 @@ enum Operation {
     },
     Expr(SimpleExpr),
     Return(SimpleExpr),
-    // Matched where loop operations are walked, but not yet emitted by the
-    // source collector.
-    #[allow(dead_code)]
-    LoopBody(Vec<Operation>),
+}
+
+/// The operations `start..end` of a function, recorded while walking one
+/// loop: the loop header's own operations (a `for` pattern's binding, a
+/// `while` condition) and its body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct LoopRegion {
+    start: usize,
+    end: usize,
+}
+
+/// A loop region with the loops nested in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoopNode {
+    /// The loop's position among all the loops of its function, outer
+    /// before inner and in operation order.
+    index: usize,
+    start: usize,
+    end: usize,
+    children: Vec<LoopNode>,
+}
+
+/// Arranges a function's loop regions into their nesting forest, outermost
+/// first and in operation order, numbering the loops as it goes. Regions
+/// come from nested syntax, so they nest; one that would straddle its
+/// parent's end is clipped to it.
+fn loop_forest(regions: &[LoopRegion]) -> Vec<LoopNode> {
+    fn attach(node: LoopNode, stack: &mut [LoopNode], roots: &mut Vec<LoopNode>) {
+        match stack.last_mut() {
+            Some(parent) => parent.children.push(node),
+            None => roots.push(node),
+        }
+    }
+    let mut sorted: Vec<LoopRegion> = regions
+        .iter()
+        .copied()
+        .filter(|region| region.start < region.end)
+        .collect();
+    sorted.sort_by_key(|region| (region.start, std::cmp::Reverse(region.end)));
+    sorted.dedup();
+    let mut roots = Vec::new();
+    let mut stack: Vec<LoopNode> = Vec::new();
+    for (index, region) in sorted.into_iter().enumerate() {
+        while stack.last().is_some_and(|top| region.start >= top.end) {
+            let done = stack.pop().expect("checked non-empty");
+            attach(done, &mut stack, &mut roots);
+        }
+        let end = stack
+            .last()
+            .map_or(region.end, |parent| region.end.min(parent.end));
+        stack.push(LoopNode {
+            index,
+            start: region.start,
+            end,
+            children: Vec::new(),
+        });
+    }
+    while let Some(done) = stack.pop() {
+        attach(done, &mut stack, &mut roots);
+    }
+    roots
+}
+
+/// Runs `visit` over `operations` in order, iterating every loop to a
+/// fixpoint, and then once more over the fixpoint to emit what it finds.
+///
+/// A loop is walked from the state at its head; `join` then folds the state
+/// the walk ends in back into the head and reports whether that added
+/// anything, and if it did the loop is walked again from the grown head.
+/// Once a walk adds nothing, the head is also the state after the loop: a
+/// loop may run any number of times, so what holds after it is what holds at
+/// its head.
+///
+/// `visit` is told whether its walk emits. The walks that bring a loop to its
+/// fixpoint do not; once it settles, the body is walked one last time from
+/// the settled head, and that walk emits if the code around the loop does.
+/// Every operation is therefore visited exactly once with `emit` set, and in
+/// the state the fixpoint holds there, so what a pass reports does not depend
+/// on how many trips the fixpoint took or on what an early trip saw.
+///
+/// A loop also keeps its settled head between entries. When an enclosing
+/// loop walks its body again, an inner loop resumes from the head it settled
+/// on the last time, joined with the new entry state, and if that entry adds
+/// nothing it is not walked again at all. The enclosing loop's head only
+/// grows, so the inner loop's entry does too, and its fixpoint for the new
+/// entry is at least the old one; resuming reaches the same fixpoint as
+/// starting over. It does not repeat the climb, so nested loops cost the sum
+/// of their fixpoints rather than their product.
+///
+/// There is no trip limit, and none is needed. Each walk of a loop either
+/// grows its head, finds the head settled, or emits. The head only grows,
+/// over a function's finite names and origins; a settling walk happens once
+/// for the first entry and once for each later entry that grew the head; and
+/// the emitting walk happens once. A loop whose head can hold `F`
+/// name–origin pairs is therefore walked at most `F + 2` times, however
+/// deeply it is nested.
+fn run_operations<S: Clone>(
+    operations: &[Operation],
+    loops: &[LoopNode],
+    state: &mut S,
+    visit: &mut dyn FnMut(&Operation, &mut S, bool),
+    join: fn(&mut S, &S) -> bool,
+) {
+    fn count(loops: &[LoopNode]) -> usize {
+        loops.iter().map(|node| 1 + count(&node.children)).sum()
+    }
+    OperationWalk {
+        operations,
+        visit,
+        join,
+        settled: (0..count(loops)).map(|_| None).collect(),
+    }
+    .run(0, operations.len(), loops, state, true);
+}
+
+struct OperationWalk<'o, 'v, S> {
+    operations: &'o [Operation],
+    visit: &'v mut dyn FnMut(&Operation, &mut S, bool),
+    join: fn(&mut S, &S) -> bool,
+    /// Each loop's settled head, by [`LoopNode::index`], once it has one.
+    settled: Vec<Option<S>>,
+}
+
+impl<S: Clone> OperationWalk<'_, '_, S> {
+    fn run(&mut self, start: usize, end: usize, loops: &[LoopNode], state: &mut S, emit: bool) {
+        let mut next = start;
+        for node in loops {
+            for operation in &self.operations[next..node.start] {
+                (self.visit)(operation, state, emit);
+            }
+            self.run_loop(node, state, emit);
+            next = node.end;
+        }
+        for operation in &self.operations[next..end] {
+            (self.visit)(operation, state, emit);
+        }
+    }
+
+    /// Takes `state` from `node`'s entry to its settled head, which is what
+    /// holds after the loop, and walks the body once more to emit if `emit`.
+    fn run_loop(&mut self, node: &LoopNode, state: &mut S, emit: bool) {
+        // Only a settled head is stored, so an entry that adds nothing to it
+        // leaves it settled.
+        let mut settled = false;
+        if let Some(mut head) = self.settled[node.index].take() {
+            settled = !(self.join)(&mut head, state);
+            *state = head;
+        }
+        while !settled {
+            let mut body = state.clone();
+            self.run(node.start, node.end, &node.children, &mut body, false);
+            settled = !(self.join)(state, &body);
+        }
+        if emit {
+            let mut body = state.clone();
+            self.run(node.start, node.end, &node.children, &mut body, true);
+        }
+        self.settled[node.index] = Some(state.clone());
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +477,39 @@ struct FunctionSummary {
     self_receiver: bool,
 }
 
+impl FunctionSummary {
+    /// Unions `other` into this summary and reports whether anything was
+    /// added. The summary fixpoint only ever joins, so a summary grows until
+    /// nothing new is learned, over parameter indexes, category names and
+    /// field names that are all finite, and the iteration ends by itself.
+    fn join(&mut self, other: Self) -> bool {
+        let mut changed = false;
+        changed |= join_set(
+            &mut self.returns_source_categories,
+            other.returns_source_categories,
+        );
+        changed |= join_set(&mut self.param_to_return, other.param_to_return);
+        changed |= join_map(&mut self.param_to_sink, other.param_to_sink);
+        changed |= join_map(&mut self.param_to_field_sink, other.param_to_field_sink);
+        changed |= join_set(&mut self.field_to_return, other.field_to_return);
+        changed |= join_map(&mut self.param_written_sources, other.param_written_sources);
+        changed |= join_map(&mut self.param_written_params, other.param_written_params);
+        changed |= join_map(
+            &mut self.param_field_written_sources,
+            other.param_field_written_sources,
+        );
+        changed |= join_map(
+            &mut self.param_field_written_params,
+            other.param_field_written_params,
+        );
+        if other.self_receiver && !self.self_receiver {
+            self.self_receiver = true;
+            changed = true;
+        }
+        changed
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TaintStep {
     node: DataFlowNode,
@@ -336,50 +528,51 @@ struct ConcreteTaint {
     paths: Vec<TaintPath>,
 }
 
-/// Maximum number of distinct taint witnesses retained for a single value.
+/// How many witnesses a value keeps beyond the first one of each origin.
 ///
 /// Interprocedural propagation unions argument taint at every call, copy, and
 /// channel hop, so the number of source→value paths grows combinatorially with
 /// branching. Because every [`TaintStep`] carries a fully cloned
 /// [`DataFlowNode`], an unbounded path set was the dominant whole-program OOM
-/// contributor (RC-1). One witness is enough to prove a flow; this cap keeps
-/// memory linear in program size while preserving every distinct source.
+/// contributor (RC-1). One witness is enough to prove a flow, so every origin
+/// keeps its first witness whatever its length and however many origins a
+/// value carries; only the alternative routes of an origin that already has
+/// one are bounded, by this count and by [`MAX_ALTERNATE_WITNESS_STEPS`].
 const MAX_TAINT_PATHS: usize = 32;
 
-/// Maximum number of steps in a retained taint witness. Pathologically deep
-/// chains (long passthrough/assignment cascades) are dropped rather than stored;
-/// real findings are short.
-const MAX_TAINT_PATH_STEPS: usize = 64;
+/// Longest alternative witness kept for an origin that already has one.
+/// Pathologically deep alternatives (long passthrough/assignment cascades)
+/// cost memory without proving anything new.
+const MAX_ALTERNATE_WITNESS_STEPS: usize = 64;
 
 impl ConcreteTaint {
-    /// Bound the in-flight path set (RC-1): drop pathologically long witnesses,
-    /// deduplicate witnesses that share an origin and node sequence, and cap the
-    /// number retained. Cheap no-op for the common single-path case.
+    /// Bound the in-flight path set (RC-1): deduplicate witnesses that share
+    /// an origin and node sequence, keep the first witness of every origin,
+    /// and bound the alternative witnesses. Cheap no-op for the common
+    /// single-path case. No origin is ever dropped, so a flow that reaches a
+    /// value is never lost here.
     fn bounded(mut self) -> Self {
-        let within_step_limit = self
-            .paths
-            .first()
-            .is_none_or(|path| path.steps.len() <= MAX_TAINT_PATH_STEPS);
-        if self.paths.len() <= 1 && within_step_limit {
+        if self.paths.len() <= 1 {
             return self;
         }
         let mut seen = HashSet::with_capacity(self.paths.len());
+        let mut origins: HashSet<String> = HashSet::with_capacity(self.paths.len());
         let mut kept = Vec::with_capacity(self.paths.len().min(MAX_TAINT_PATHS));
         for path in self.paths.drain(..) {
-            if path.steps.len() > MAX_TAINT_PATH_STEPS {
-                continue;
-            }
             let mut signature = String::with_capacity(path.origin_key.len() + path.steps.len() * 8);
             signature.push_str(&path.origin_key);
             for step in &path.steps {
                 signature.push('\u{1}');
                 signature.push_str(&step.node.id);
             }
-            if seen.insert(signature) {
+            if !seen.insert(signature) {
+                continue;
+            }
+            let first_of_its_origin = origins.insert(path.origin_key.clone());
+            if first_of_its_origin
+                || (kept.len() < MAX_TAINT_PATHS && path.steps.len() <= MAX_ALTERNATE_WITNESS_STEPS)
+            {
                 kept.push(path);
-                if kept.len() >= MAX_TAINT_PATHS {
-                    break;
-                }
             }
         }
         self.paths = kept;
@@ -1476,11 +1669,6 @@ fn rewrite_operation_paths(
         | Operation::AssignDeref { value, .. }
         | Operation::Expr(value)
         | Operation::Return(value) => rewrite_expr_paths(value, resolution, module_path),
-        Operation::LoopBody(operations) => {
-            for nested in operations {
-                rewrite_operation_paths(nested, resolution, module_path);
-            }
-        }
     }
 }
 
@@ -1936,8 +2124,10 @@ struct FunctionFrame {
     // separately, so they are not read back off the frame yet.
     #[allow(dead_code)]
     receiver_type: Option<String>,
-    #[allow(dead_code)]
-    is_loop_body: bool,
+    /// Loop regions closed so far in this frame.
+    loop_regions: Vec<LoopRegion>,
+    /// Where each loop still being walked started, innermost last.
+    open_loops: Vec<usize>,
     /// Channel transmitter/receiver pairs declared inside this frame.
     /// Populated by visit_stmt when it sees `let (tx, rx) = ... channel()`.
     channel_pairs: Vec<(String, String)>,
@@ -2020,6 +2210,21 @@ impl FunctionFrame {
         }
     }
 
+    fn open_loop(&mut self) {
+        if self.collect_bodies {
+            self.open_loops.push(self.operations.len());
+        }
+    }
+
+    fn close_loop(&mut self) {
+        if let Some(start) = self.open_loops.pop() {
+            let end = self.operations.len();
+            if end > start {
+                self.loop_regions.push(LoopRegion { start, end });
+            }
+        }
+    }
+
     fn record_call(&mut self, call: SimplifiedCall) {
         if self.collect_bodies {
             self.direct_calls.push(call);
@@ -2034,6 +2239,61 @@ impl FunctionFrame {
 }
 
 impl SourceCollector {
+    /// Starts a loop region in the current function's frame.
+    fn open_loop(&mut self) {
+        if let Some(frame) = self.current_function.as_mut() {
+            frame.open_loop();
+        }
+    }
+
+    /// Ends the innermost open loop region in the current function's frame.
+    fn close_loop(&mut self) {
+        if let Some(frame) = self.current_function.as_mut() {
+            frame.close_loop();
+        }
+    }
+
+    /// Everything a `for` loop records, walked inside its loop region.
+    fn visit_for_loop_parts<'ast>(&mut self, node: &'ast syn::ExprForLoop)
+    where
+        Self: Visit<'ast>,
+    {
+        // Record (loop variable, iterable) so typing can bind the variable to
+        // the iterable's element type: `for s in &shapes` over a
+        // `Vec<Box<dyn Store>>` makes `s` a `Store` receiver. Only the last
+        // binding-level variable is kept for tuple patterns — a map yields its
+        // values, which are the dispatching half.
+        if let Some(frame) = self.current_function.as_mut() {
+            // Every loop variable is bound from the iterable each iteration;
+            // recording the assignment carries the iterable's taint to it
+            // (`for a in env::args()` yields a tainted `a`, a call iterable
+            // included, and `for (k, v) in env::vars()` taints both halves).
+            let iterable_value = simple_expr(&node.expr);
+            let dispatching = loop_pattern_ident(&node.pat);
+            for name in pattern_bindings(&node.pat) {
+                // Only the dispatching name keeps the plain record typing
+                // reads; the others carry the data alone.
+                let value = if dispatching.as_ref() == Some(&name) {
+                    iterable_value.clone()
+                } else {
+                    destructured_value(iterable_value.clone())
+                };
+                frame.record_operation(Operation::Assign {
+                    target: name,
+                    value,
+                });
+            }
+            // Typing binds only the dispatching half: a map/tuple pattern's
+            // last name, the values.
+            if let Some(var) = dispatching
+                && let Some(iterable) = for_loop_iterable_path(&node.expr)
+            {
+                frame.loop_iterables.push((var, iterable));
+            }
+        }
+        syn::visit::visit_expr_for_loop(self, node);
+    }
+
     fn new(file_ctx: FileContext, evaluator: CfgEvaluator, collect_bodies: bool) -> Self {
         Self {
             file_ctx,
@@ -2387,7 +2647,8 @@ impl SourceCollector {
             operations: parameter_pattern_bindings(closure.inputs.iter().map(Some)),
             direct_calls: Vec::new(),
             receiver_type: None,
-            is_loop_body: false,
+            loop_regions: Vec::new(),
+            open_loops: Vec::new(),
             channel_pairs: Vec::new(),
             declared_types: BTreeMap::new(),
             declared_type_texts: BTreeMap::new(),
@@ -2427,7 +2688,7 @@ impl SourceCollector {
             operations: finished.operations.clone(),
             direct_calls: finished.direct_calls,
             receiver_type: None,
-            is_loop_body: false,
+            loop_regions: finished.loop_regions.clone(),
             channel_pairs: finished.channel_pairs.clone(),
             declared_types: finished.declared_types.clone(),
             declared_type_texts: finished.declared_type_texts.clone(),
@@ -2496,7 +2757,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
             operations: parameter_pattern_bindings(signature_patterns(&node.sig)),
             direct_calls: Vec::new(),
             receiver_type: None,
-            is_loop_body: false,
+            loop_regions: Vec::new(),
+            open_loops: Vec::new(),
             channel_pairs: Vec::new(),
             declared_types: BTreeMap::new(),
             declared_type_texts: BTreeMap::new(),
@@ -2526,7 +2788,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
             operations: finished.operations.clone(),
             direct_calls: finished.direct_calls,
             receiver_type: None,
-            is_loop_body: false,
+            loop_regions: finished.loop_regions.clone(),
             channel_pairs: finished.channel_pairs.clone(),
             declared_types: finished.declared_types.clone(),
             declared_type_texts: finished.declared_type_texts.clone(),
@@ -2574,7 +2836,8 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     operations: parameter_pattern_bindings(signature_patterns(&method.sig)),
                     direct_calls: Vec::new(),
                     receiver_type: Some(receiver.clone()),
-                    is_loop_body: false,
+                    loop_regions: Vec::new(),
+                    open_loops: Vec::new(),
                     channel_pairs: Vec::new(),
                     declared_types: BTreeMap::new(),
                     declared_type_texts: BTreeMap::new(),
@@ -2604,7 +2867,7 @@ impl<'ast> Visit<'ast> for SourceCollector {
                     operations: finished.operations.clone(),
                     direct_calls: finished.direct_calls,
                     receiver_type: Some(receiver.clone()),
-                    is_loop_body: false,
+                    loop_regions: finished.loop_regions.clone(),
                     channel_pairs: finished.channel_pairs.clone(),
                     declared_types: finished.declared_types.clone(),
                     declared_type_texts: finished.declared_type_texts.clone(),
@@ -2952,41 +3215,26 @@ impl<'ast> Visit<'ast> for SourceCollector {
         self.visit_macro_body(&node.mac);
     }
 
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        // The condition is re-evaluated on every trip, so it belongs to the
+        // region (`while let Some(x) = rx.recv()` rebinds `x` each time).
+        self.open_loop();
+        syn::visit::visit_expr_while(self, node);
+        self.close_loop();
+    }
+
+    fn visit_expr_loop(&mut self, node: &'ast syn::ExprLoop) {
+        self.open_loop();
+        syn::visit::visit_expr_loop(self, node);
+        self.close_loop();
+    }
+
     fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
-        // Record (loop variable, iterable) so typing can bind the variable to
-        // the iterable's element type: `for s in &shapes` over a
-        // `Vec<Box<dyn Store>>` makes `s` a `Store` receiver. Only the last
-        // binding-level variable is kept for tuple patterns — a map yields its
-        // values, which are the dispatching half.
-        if let Some(frame) = self.current_function.as_mut() {
-            // Every loop variable is bound from the iterable each iteration;
-            // recording the assignment carries the iterable's taint to it
-            // (`for a in env::args()` yields a tainted `a`, a call iterable
-            // included, and `for (k, v) in env::vars()` taints both halves).
-            let iterable_value = simple_expr(&node.expr);
-            let dispatching = loop_pattern_ident(&node.pat);
-            for name in pattern_bindings(&node.pat) {
-                // Only the dispatching name keeps the plain record typing
-                // reads; the others carry the data alone.
-                let value = if dispatching.as_ref() == Some(&name) {
-                    iterable_value.clone()
-                } else {
-                    destructured_value(iterable_value.clone())
-                };
-                frame.record_operation(Operation::Assign {
-                    target: name,
-                    value,
-                });
-            }
-            // Typing binds only the dispatching half: a map/tuple pattern's
-            // last name, the values.
-            if let Some(var) = dispatching
-                && let Some(iterable) = for_loop_iterable_path(&node.expr)
-            {
-                frame.loop_iterables.push((var, iterable));
-            }
-        }
-        syn::visit::visit_expr_for_loop(self, node);
+        // The pattern's binding is re-made on every trip, so it belongs to
+        // the region along with the body.
+        self.open_loop();
+        self.visit_for_loop_parts(node);
+        self.close_loop();
     }
 
     fn visit_expr_let(&mut self, node: &'ast syn::ExprLet) {
@@ -3346,11 +3594,6 @@ fn rename_binding_in_operation(operation: &mut Operation, from: &str, to: &str) 
         Operation::Expr(value) | Operation::Return(value) => {
             rename_binding_in_expr(value, from, to)
         }
-        Operation::LoopBody(operations) => {
-            for nested in operations {
-                rename_binding_in_operation(nested, from, to);
-            }
-        }
     }
 }
 
@@ -3404,7 +3647,6 @@ fn closure_captures(record: &FunctionRecord) -> Vec<String> {
                 Operation::Expr(value) | Operation::Return(value) => {
                     collect_expr_vars(value, referenced);
                 }
-                Operation::LoopBody(inner) => walk_operations(inner, referenced, assigned),
             }
         }
     }
@@ -3475,11 +3717,6 @@ fn rewrite_bound_closure_operation(
         | Operation::AssignDeref { value, .. }
         | Operation::Expr(value)
         | Operation::Return(value) => rewrite_bound_closure_expr(value, binding_in_effect),
-        Operation::LoopBody(inner) => {
-            for operation in inner {
-                rewrite_bound_closure_operation(operation, binding_in_effect);
-            }
-        }
     }
 }
 
@@ -6154,14 +6391,21 @@ fn infer_type_bindings(
     // Walk assignments to harvest `let x: T = ...`, `let x = T::new(...)`, and
     // — via the return-type index — `let x = f()` and `let x = a.b().c()`.
     //
-    // Repeated because a binding can depend on an earlier one that is itself
-    // inferred (`let a = make(); let b = a.next();`), and the operations are in
-    // source order but a type can also flow backwards through a later
-    // reassignment. Three passes settle every chain we can type at all; a
-    // longer chain gains nothing from more passes because each pass resolves at
-    // least one more hop.
-    for _ in 0..3 {
-        let mut changed = false;
+    // Repeated because a binding can depend on one that is itself inferred
+    // (`let a = make(); let b = a.next();`), and although the operations are in
+    // source order a type can also flow backwards through a later reassignment
+    // or around a loop. Each pass settles at least one more link of every chain
+    // of dependent assignments, so `n` assignments reach the fixpoint within
+    // `n` passes, and a pass that changes nothing ends the walk at once. The
+    // bound only matters when reassignments feed types around a cycle that has
+    // no fixpoint, where further passes would repeat themselves forever.
+    let assignments = function
+        .operations
+        .iter()
+        .filter(|op| matches!(op, Operation::Assign { .. }))
+        .count();
+    for _ in 0..=assignments {
+        let before = bindings.clone();
         for op in &function.operations {
             let Operation::Assign { target, value } = op else {
                 continue;
@@ -6179,14 +6423,11 @@ fn infer_type_bindings(
             let inferred = binding_from_simple_expr(target, value)
                 .map(|(_, ty)| ty)
                 .or_else(|| infer_expr_type(value, &bindings, field_types, return_types));
-            if let Some(ty) = inferred
-                && bindings.get(&var) != Some(&ty)
-            {
+            if let Some(ty) = inferred {
                 bindings.insert(var, ty);
-                changed = true;
             }
         }
-        if !changed {
+        if bindings == before {
             break;
         }
     }
@@ -9434,7 +9675,6 @@ fn infer_static_source_seeds(
                     env.insert(format!("{target}.{field}"), taint);
                     continue;
                 }
-                Operation::LoopBody(_) => continue,
                 Operation::Expr(expr) | Operation::Return(expr) => expr,
             };
             let Some((name, method, value, position)) = static_store(expr) else {
@@ -9591,64 +9831,176 @@ fn first_named_use(operations: &[Operation], name: &str) -> Option<Position> {
         | Operation::AssignDeref { value, .. }
         | Operation::Expr(value)
         | Operation::Return(value) => in_expr(value, name),
-        Operation::LoopBody(inner) => first_named_use(inner, name),
     })
 }
 
+/// Summarizes every function to a fixpoint over the call graph.
+///
+/// Functions are evaluated callees first, a whole call-graph level at a time
+/// and in parallel within a level (`WaveWorklist`): a call chain of any
+/// depth settles in one pass, and only recursion cycles are revisited. Each
+/// evaluation records the summaries it read; when a summary grows, exactly
+/// those readers are marked dirty again. Summaries only ever grow (see
+/// [`FunctionSummary::join`]), so no round limit is needed.
 fn infer_summaries(
     functions: &[FunctionRecord],
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
     indexes: &TypeIndexes<'_>,
 ) -> BTreeMap<String, FunctionSummary> {
-    let mut summaries = BTreeMap::<String, FunctionSummary>::new();
-    for function in functions {
-        summaries.insert(function.declaration.id.clone(), FunctionSummary::default());
-    }
+    infer_summaries_counted(functions, local_index, patterns, indexes).0
+}
 
-    let mut dirty: HashSet<String> = functions.iter().map(|f| f.declaration.id.clone()).collect();
-    let mut callee_map: HashMap<String, Vec<String>> = HashMap::new();
-    for function in functions {
-        for call in &function.direct_calls {
-            if let Some(resolved) =
-                resolve_call_target(&call.callee_text, &function.package_path, local_index, None)
-            {
-                callee_map
-                    .entry(resolved.clone())
-                    .or_default()
-                    .push(function.declaration.id.clone());
-            }
-        }
-    }
-
-    for _ in 0..6 {
-        if dirty.is_empty() {
-            break;
-        }
-        let current_dirty: Vec<String> = dirty.drain().collect();
-        let funcs_to_update: Vec<&FunctionRecord> = functions
-            .iter()
-            .filter(|f| current_dirty.contains(&f.declaration.id))
-            .collect();
-        let next_entries = parallel_map_collect(&funcs_to_update, |function| {
-            (
-                function.declaration.id.clone(),
-                summarize_function(function, &summaries, local_index, patterns, indexes),
-            )
+/// [`infer_summaries`], also returning how many function evaluations the
+/// fixpoint took.
+fn infer_summaries_counted(
+    functions: &[FunctionRecord],
+    local_index: &HashMap<String, Vec<String>>,
+    patterns: &DataFlowPatternSet,
+    indexes: &TypeIndexes<'_>,
+) -> (BTreeMap<String, FunctionSummary>, usize) {
+    let position: HashMap<String, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.declaration.id.clone(), index))
+        .collect();
+    let mut summaries: BTreeMap<String, FunctionSummary> = functions
+        .iter()
+        .map(|function| (function.declaration.id.clone(), FunctionSummary::default()))
+        .collect();
+    let call_order = callee_first_order(functions.len(), |index| {
+        summary_dependencies(&functions[index], local_index)
+            .into_iter()
+            .filter_map(|id| position.get(&id).copied())
+            .collect::<Vec<_>>()
+    });
+    let mut waves = WaveWorklist::new(&call_order);
+    let mut dependents = Dependents::new(functions.len());
+    while let Some(wave) = waves.pop_wave() {
+        let evaluated = parallel_map_collect(&wave, |&index| {
+            let reads = TrackedReads::new(&summaries, &position);
+            let summary =
+                summarize_function(&functions[index], &reads, local_index, patterns, indexes);
+            (index, summary, reads.into_reads())
         });
-        for (function_id, next) in next_entries {
-            let entry = summaries.entry(function_id.clone()).or_default();
-            if *entry != next {
-                *entry = next;
-                if let Some(callers) = callee_map.get(&function_id) {
-                    for caller in callers {
-                        dirty.insert(caller.clone());
-                    }
+        for (index, summary, reads) in evaluated {
+            dependents.record(index, reads);
+            let entry = summaries
+                .get_mut(&functions[index].declaration.id)
+                .expect("every function has a summary");
+            if entry.join(summary) {
+                for reader in dependents.readers(index) {
+                    waves.mark_dirty(reader);
                 }
             }
         }
     }
-    summaries
+    let evaluations = waves.evaluations();
+    (summaries, evaluations)
+}
+
+/// The functions whose summaries `function`'s summary may read: every call
+/// target its operations name. Only the order of evaluation depends on
+/// this; the reads themselves are recorded.
+fn summary_dependencies(
+    function: &FunctionRecord,
+    local_index: &HashMap<String, Vec<String>>,
+) -> BTreeSet<String> {
+    fn visit(
+        expr: &SimpleExpr,
+        package_path: &str,
+        local_index: &HashMap<String, Vec<String>>,
+        out: &mut BTreeSet<String>,
+    ) {
+        match expr {
+            SimpleExpr::Call { callee, args, .. } => {
+                out.extend(resolve_call_target(callee, package_path, local_index, None));
+                for arg in args {
+                    visit(arg, package_path, local_index, out);
+                }
+            }
+            SimpleExpr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                out.extend(resolve_call_target(method, package_path, local_index, None));
+                visit(receiver, package_path, local_index, out);
+                for arg in args {
+                    visit(arg, package_path, local_index, out);
+                }
+            }
+            SimpleExpr::Compose(items) => {
+                for item in items {
+                    visit(item, package_path, local_index, out);
+                }
+            }
+            SimpleExpr::Field { base, .. } | SimpleExpr::Reference { expr: base, .. } => {
+                visit(base, package_path, local_index, out)
+            }
+            SimpleExpr::Var(_) | SimpleExpr::Literal | SimpleExpr::Unknown => {}
+        }
+    }
+    let mut dependencies = BTreeSet::new();
+    for operation in &function.operations {
+        match operation {
+            Operation::Assign { value, .. }
+            | Operation::AssignField { value, .. }
+            | Operation::AssignDeref { value, .. }
+            | Operation::Expr(value)
+            | Operation::Return(value) => visit(
+                value,
+                &function.package_path,
+                local_index,
+                &mut dependencies,
+            ),
+        }
+    }
+    dependencies
+}
+
+/// Loop-head join for the summary pass: unions each name's origins.
+fn join_abstract_env(
+    head: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
+    body: &HashMap<String, BTreeSet<AbstractOrigin>>,
+) -> bool {
+    let mut changed = false;
+    for (name, origins) in body {
+        if origins.is_empty() {
+            continue;
+        }
+        let entry = head.entry(name.clone()).or_default();
+        let before = entry.len();
+        entry.extend(origins.iter().cloned());
+        changed |= entry.len() != before;
+    }
+    changed
+}
+
+/// Loop-head join for the concrete pass: adds the witnesses of origins a
+/// name did not carry yet. A name keeps the witness it already holds for an
+/// origin, so another trip around the loop never trades it for a longer one,
+/// and the join only grows while new origins arrive.
+fn join_concrete_env(
+    head: &mut HashMap<String, ConcreteTaint>,
+    body: &HashMap<String, ConcreteTaint>,
+) -> bool {
+    let mut changed = false;
+    for (name, taint) in body {
+        for path in &taint.paths {
+            let entry = head.entry(name.clone()).or_default();
+            if !entry
+                .paths
+                .iter()
+                .any(|existing| existing.origin_key == path.origin_key)
+            {
+                entry.paths.push(path.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -9659,7 +10011,7 @@ enum AbstractOrigin {
 
 fn summarize_function(
     function: &FunctionRecord,
-    summaries: &BTreeMap<String, FunctionSummary>,
+    summaries: &impl KeyedTable<FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
     indexes: &TypeIndexes<'_>,
@@ -9687,12 +10039,19 @@ fn summarize_function(
         self_receiver: function.params.first().is_some_and(|param| param == "self"),
         ..FunctionSummary::default()
     };
-    for operation in &function.operations {
-        match operation {
+    let loops = loop_forest(&function.loop_regions);
+    // The summary only ever collects, and each state a fixpoint walk sees is
+    // contained in the one the emitting walk sees at the same operation, so
+    // collecting on every walk adds nothing the emitting walk would not.
+    run_operations(
+        &function.operations,
+        &loops,
+        &mut env,
+        &mut |operation, env, _emit| match operation {
             Operation::Assign { target, value } => {
                 let value_taint = eval_abstract_expr(
                     value,
-                    &env,
+                    env,
                     summaries,
                     &function.package_path,
                     local_index,
@@ -9707,7 +10066,7 @@ fn summarize_function(
             } => {
                 let value_taint = eval_abstract_expr(
                     value,
-                    &env,
+                    env,
                     summaries,
                     &function.package_path,
                     local_index,
@@ -9720,7 +10079,7 @@ fn summarize_function(
             Operation::AssignDeref { target, value } => {
                 let value_taint = eval_abstract_expr(
                     value,
-                    &env,
+                    env,
                     summaries,
                     &function.package_path,
                     local_index,
@@ -9751,59 +10110,10 @@ fn summarize_function(
                     }
                 }
             }
-            Operation::LoopBody(loop_ops) => {
-                let mut loop_env = env.clone();
-                for _iter in 0..3 {
-                    let mut changed = false;
-                    for op in loop_ops {
-                        match op {
-                            Operation::Assign { target, value } => {
-                                let value_taint = eval_abstract_expr(
-                                    value,
-                                    &loop_env,
-                                    summaries,
-                                    &function.package_path,
-                                    local_index,
-                                    patterns,
-                                );
-                                if loop_env.get(target) != Some(&value_taint) {
-                                    changed = true;
-                                }
-                                loop_env.insert(target.clone(), value_taint);
-                            }
-                            Operation::AssignField {
-                                target,
-                                field,
-                                value,
-                            } => {
-                                let value_taint = eval_abstract_expr(
-                                    value,
-                                    &loop_env,
-                                    summaries,
-                                    &function.package_path,
-                                    local_index,
-                                    patterns,
-                                );
-                                let key = format!("{}.{}", target, field);
-                                loop_env.insert(key, value_taint);
-                            }
-                            _ => {}
-                        }
-                    }
-                    if !changed {
-                        break;
-                    }
-                }
-                for (key, taint) in loop_env {
-                    if key.starts_with(&format!("{}.", "")) || !key.contains('.') {
-                        env.entry(key).or_insert(taint);
-                    }
-                }
-            }
             Operation::Expr(expr) | Operation::Return(expr) => {
                 let value_taint = eval_abstract_expr(
                     expr,
-                    &env,
+                    env,
                     summaries,
                     &function.package_path,
                     local_index,
@@ -9875,7 +10185,7 @@ fn summarize_function(
                             if let Some(arg) = args.get(*index) {
                                 let arg_taint = eval_abstract_expr(
                                     arg,
-                                    &env,
+                                    env,
                                     summaries,
                                     &function.package_path,
                                     local_index,
@@ -9904,7 +10214,7 @@ fn summarize_function(
                             function,
                             callee,
                             args,
-                            &mut env,
+                            env,
                             &mut summary,
                             summaries,
                             local_index,
@@ -9918,14 +10228,14 @@ fn summarize_function(
                     if matches!(expr, SimpleExpr::Call { .. })
                         && let Some(resolved) =
                             resolve_call_target(callee, &function.package_path, local_index, None)
-                        && let Some(callee_summary) = summaries.get(&resolved).cloned()
+                        && let Some(callee_summary) = summaries.lookup(&resolved).cloned()
                     {
                         for (sink_category, parameter_indexes) in callee_summary.param_to_sink {
                             for parameter_index in parameter_indexes {
                                 if let Some(arg) = args.get(parameter_index) {
                                     let arg_taint = eval_abstract_expr(
                                         arg,
-                                        &env,
+                                        env,
                                         summaries,
                                         &function.package_path,
                                         local_index,
@@ -9946,8 +10256,9 @@ fn summarize_function(
                     }
                 }
             }
-        }
-    }
+        },
+        join_abstract_env,
+    );
     summary
 }
 
@@ -10109,7 +10420,7 @@ fn apply_summary_call_writes(
     args: &[SimpleExpr],
     env: &mut HashMap<String, BTreeSet<AbstractOrigin>>,
     summary: &mut FunctionSummary,
-    summaries: &BTreeMap<String, FunctionSummary>,
+    summaries: &impl KeyedTable<FunctionSummary>,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
 ) {
@@ -10152,7 +10463,7 @@ fn apply_summary_call_writes(
     }
     let Some(callee_summary) =
         resolve_call_target(callee, &function.package_path, local_index, None)
-            .and_then(|resolved| summaries.get(&resolved))
+            .and_then(|resolved| summaries.lookup(&resolved))
     else {
         return;
     };
@@ -10217,7 +10528,7 @@ fn apply_summary_call_writes(
 fn eval_abstract_expr(
     expr: &SimpleExpr,
     env: &HashMap<String, BTreeSet<AbstractOrigin>>,
-    summaries: &BTreeMap<String, FunctionSummary>,
+    summaries: &impl KeyedTable<FunctionSummary>,
     package_path: &str,
     local_index: &HashMap<String, Vec<String>>,
     patterns: &DataFlowPatternSet,
@@ -10263,7 +10574,7 @@ fn eval_abstract_expr(
 
             let mut taint = BTreeSet::new();
             if let Some(resolved) = resolve_call_target(callee, package_path, local_index, None)
-                && let Some(summary) = summaries.get(&resolved).cloned()
+                && let Some(summary) = summaries.lookup(&resolved).cloned()
             {
                 for category in summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(category.clone()));
@@ -10352,7 +10663,7 @@ fn eval_abstract_expr(
             }
             let mut taint = BTreeSet::new();
             if let Some(resolved) = resolve_call_target(&callee, package_path, local_index, None)
-                && let Some(summary) = summaries.get(&resolved).cloned()
+                && let Some(summary) = summaries.lookup(&resolved).cloned()
             {
                 for category in summary.returns_source_categories {
                     taint.insert(AbstractOrigin::Source(category.clone()));
@@ -10418,6 +10729,11 @@ struct DataFlowBuilder<'a> {
     edges: IndexMap<String, DataFlowEdge>,
     slices: IndexMap<String, DataFlowSlice>,
     missing_passthrough_call_counts: HashMap<String, usize>,
+    /// Whether the operation being materialized is on the walk that emits
+    /// (see [`run_operations`]). The walks that bring a loop to its fixpoint
+    /// only compute states: they record no node, edge, slice or count, so
+    /// every one of those comes from the fixpoint, once per operation.
+    emitting: bool,
 }
 
 impl<'a> DataFlowBuilder<'a> {
@@ -10443,6 +10759,19 @@ impl<'a> DataFlowBuilder<'a> {
             edges: IndexMap::new(),
             slices: IndexMap::new(),
             missing_passthrough_call_counts: HashMap::new(),
+            emitting: true,
+        }
+    }
+
+    fn record_node(&mut self, node: &DataFlowNode) {
+        if self.emitting {
+            self.nodes.insert(node.id.clone(), node.clone());
+        }
+    }
+
+    fn record_edge(&mut self, edge: &DataFlowEdge) {
+        if self.emitting {
+            self.edges.insert(edge.id.clone(), edge.clone());
         }
     }
 
@@ -10512,462 +10841,436 @@ impl<'a> DataFlowBuilder<'a> {
                 env.insert(name.clone(), bounded);
             }
         }
-        for operation in &function.operations {
-            match operation {
-                Operation::Assign { target, value } => {
-                    let mut taint = self.eval_concrete_expr(function, value, &env);
-                    if !taint.paths.is_empty() {
-                        let mut pos = function.declaration.position.clone();
-                        if pos.filename.is_empty() {
-                            pos.filename = function.file_path.clone();
-                        }
-                        let node_id = stable_id(
-                            "df-node",
-                            &[
-                                &function.declaration.id,
-                                target,
-                                "local",
-                                &pos.line.to_string(),
-                                &pos.column.to_string(),
-                            ],
-                        );
-                        let target_node = DataFlowNode {
-                            id: node_id.clone(),
-                            kind: "local".to_string(),
-                            name: target.clone(),
-                            package_path: function.package_path.clone(),
-                            purl: String::new(),
-                            function: function.declaration.qualified_name.clone(),
-                            position: pos.clone(),
-                            source: false,
-                            sink: false,
-                            category: String::new(),
-                            parameter_index: None,
-                            type_name: None,
-                            properties: IndexMap::new(),
-                        };
-                        self.nodes.insert(node_id.clone(), target_node.clone());
-                        for path in &mut taint.paths {
-                            if let Some(last_step) = path.steps.last() {
-                                let edge_id =
-                                    stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
-                                let edge = DataFlowEdge {
-                                    id: edge_id.clone(),
-                                    source_id: last_step.node.id.clone(),
-                                    target_id: node_id.clone(),
-                                    kind: "assign".to_string(),
-                                    properties: IndexMap::new(),
-                                };
-                                self.edges.insert(edge_id.clone(), edge.clone());
-                                path.steps.push(TaintStep {
-                                    node: target_node.clone(),
-                                    edge: Some(edge),
-                                });
-                            } else {
-                                path.steps.push(TaintStep {
-                                    node: target_node.clone(),
-                                    edge: None,
-                                });
-                            }
-                        }
-                        env.insert(target.clone(), taint);
+        let loops = loop_forest(&function.loop_regions);
+        run_operations(
+            &function.operations,
+            &loops,
+            &mut env,
+            &mut |operation, env, emit| self.materialize_operation(function, operation, env, emit),
+            join_concrete_env,
+        );
+        self.emitting = true;
+    }
+
+    /// One operation of the concrete pass. `emit` is unset on the walks that
+    /// only bring a loop to its fixpoint.
+    fn materialize_operation(
+        &mut self,
+        function: &FunctionRecord,
+        operation: &Operation,
+        env: &mut HashMap<String, ConcreteTaint>,
+        emit: bool,
+    ) {
+        self.emitting = emit;
+        match operation {
+            Operation::Assign { target, value } => {
+                let mut taint = self.eval_concrete_expr(function, value, env);
+                if !taint.paths.is_empty() {
+                    let mut pos = function.declaration.position.clone();
+                    if pos.filename.is_empty() {
+                        pos.filename = function.file_path.clone();
                     }
-                }
-                Operation::AssignField {
-                    target,
-                    field,
-                    value,
-                } => {
-                    let taint = self.eval_concrete_expr(function, value, &env);
-                    if !taint.paths.is_empty() {
-                        let key = format!("{}.{}", target, field);
-                        env.insert(key, taint);
-                    }
-                }
-                Operation::AssignDeref { target, value } => {
-                    let taint = self.eval_concrete_expr(function, value, &env);
-                    if !taint.paths.is_empty() {
-                        env.insert(target.clone(), taint);
-                    }
-                }
-                Operation::LoopBody(loop_ops) => {
-                    let mut loop_env = env.clone();
-                    for _iter in 0..4 {
-                        let mut changed = false;
-                        for op in loop_ops {
-                            match op {
-                                Operation::Assign { target, value } => {
-                                    let taint = self.eval_concrete_expr(function, value, &loop_env);
-                                    if !taint.paths.is_empty() {
-                                        if loop_env.get(target).is_none_or(|prev| {
-                                            prev.paths.len() != taint.paths.len()
-                                        }) {
-                                            changed = true;
-                                        }
-                                        loop_env.insert(target.clone(), taint);
-                                    }
-                                }
-                                Operation::AssignField {
-                                    target,
-                                    field,
-                                    value,
-                                } => {
-                                    let taint = self.eval_concrete_expr(function, value, &loop_env);
-                                    if !taint.paths.is_empty() {
-                                        let key = format!("{}.{}", target, field);
-                                        loop_env.insert(key, taint);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        if !changed {
-                            break;
-                        }
-                    }
-                    for (key, taint) in loop_env {
-                        env.entry(key).or_insert(taint);
-                    }
-                }
-                Operation::Expr(expr) | Operation::Return(expr) => {
-                    let (callee, args, position, receiver_type) = match expr {
-                        SimpleExpr::Call {
-                            callee,
-                            args,
-                            position,
-                        } => {
-                            // See the abstract pass: a bare callee is a
-                            // method call recorded in call form, its receiver
-                            // sitting at argument 0.
-                            let receiver_type = if !callee.contains("::") && !args.is_empty() {
-                                infer_expr_type(
-                                    &args[0],
-                                    &self.current_bindings,
-                                    self.indexes.field_types,
-                                    self.indexes.return_types,
-                                )
-                            } else {
-                                None
+                    let node_id = stable_id(
+                        "df-node",
+                        &[
+                            &function.declaration.id,
+                            target,
+                            "local",
+                            &pos.line.to_string(),
+                            &pos.column.to_string(),
+                        ],
+                    );
+                    let target_node = DataFlowNode {
+                        id: node_id.clone(),
+                        kind: "local".to_string(),
+                        name: target.clone(),
+                        package_path: function.package_path.clone(),
+                        purl: String::new(),
+                        function: function.declaration.qualified_name.clone(),
+                        position: pos.clone(),
+                        source: false,
+                        sink: false,
+                        category: String::new(),
+                        parameter_index: None,
+                        type_name: None,
+                        properties: IndexMap::new(),
+                    };
+                    self.record_node(&target_node);
+                    for path in &mut taint.paths {
+                        if let Some(last_step) = path.steps.last() {
+                            let edge_id =
+                                stable_id("df-edge", &[&last_step.node.id, &node_id, "assign"]);
+                            let edge = DataFlowEdge {
+                                id: edge_id.clone(),
+                                source_id: last_step.node.id.clone(),
+                                target_id: node_id.clone(),
+                                kind: "assign".to_string(),
+                                properties: IndexMap::new(),
                             };
-                            (
-                                callee.clone(),
-                                args.clone(),
-                                position.clone(),
-                                receiver_type,
-                            )
+                            self.record_edge(&edge);
+                            path.steps.push(TaintStep {
+                                node: target_node.clone(),
+                                edge: Some(edge),
+                            });
+                        } else {
+                            path.steps.push(TaintStep {
+                                node: target_node.clone(),
+                                edge: None,
+                            });
                         }
-                        SimpleExpr::MethodCall {
-                            method,
-                            receiver,
-                            args,
-                            position,
-                        } => {
-                            let all_args = std::iter::once(receiver.as_ref())
-                                .chain(args.iter())
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            let receiver_type = infer_expr_type(
-                                receiver,
+                    }
+                    env.insert(target.clone(), taint);
+                }
+            }
+            Operation::AssignField {
+                target,
+                field,
+                value,
+            } => {
+                let taint = self.eval_concrete_expr(function, value, env);
+                if !taint.paths.is_empty() {
+                    let key = format!("{}.{}", target, field);
+                    env.insert(key, taint);
+                }
+            }
+            Operation::AssignDeref { target, value } => {
+                let taint = self.eval_concrete_expr(function, value, env);
+                if !taint.paths.is_empty() {
+                    env.insert(target.clone(), taint);
+                }
+            }
+            Operation::Expr(expr) | Operation::Return(expr) => {
+                let (callee, args, position, receiver_type) = match expr {
+                    SimpleExpr::Call {
+                        callee,
+                        args,
+                        position,
+                    } => {
+                        // See the abstract pass: a bare callee is a
+                        // method call recorded in call form, its receiver
+                        // sitting at argument 0.
+                        let receiver_type = if !callee.contains("::") && !args.is_empty() {
+                            infer_expr_type(
+                                &args[0],
                                 &self.current_bindings,
                                 self.indexes.field_types,
                                 self.indexes.return_types,
-                            );
-                            (method.clone(), all_args, position.clone(), receiver_type)
+                            )
+                        } else {
+                            None
+                        };
+                        (
+                            callee.clone(),
+                            args.clone(),
+                            position.clone(),
+                            receiver_type,
+                        )
+                    }
+                    SimpleExpr::MethodCall {
+                        method,
+                        receiver,
+                        args,
+                        position,
+                    } => {
+                        let all_args = std::iter::once(receiver.as_ref())
+                            .chain(args.iter())
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let receiver_type = infer_expr_type(
+                            receiver,
+                            &self.current_bindings,
+                            self.indexes.field_types,
+                            self.indexes.return_types,
+                        );
+                        (method.clone(), all_args, position.clone(), receiver_type)
+                    }
+                    _ => return,
+                };
+                let callee = &callee;
+                let args = &args;
+                let position = &position;
+                {
+                    if let Some(sink_match) = find_sink_pattern(
+                        callee,
+                        args,
+                        receiver_type.as_deref(),
+                        &self.patterns.sinks,
+                    ) {
+                        for index in &sink_match.relevant_arguments {
+                            if let Some(arg) = args.get(*index) {
+                                let taint = self.eval_concrete_expr(function, arg, env);
+                                self.emit_sink_slices(
+                                    function,
+                                    &taint,
+                                    callee,
+                                    &sink_match.category,
+                                    position,
+                                );
+                            }
                         }
-                        _ => continue,
-                    };
-                    let callee = &callee;
-                    let args = &args;
-                    let position = &position;
+                    } else if let Some(sink_match) = find_unconfident_sql_sink_pattern(
+                        callee,
+                        receiver_type.as_deref(),
+                        &self.patterns.sinks,
+                    ) {
+                        // No syntax says SQL; the value may: only
+                        // witnesses built from a SQL-looking template
+                        // count (`let q = format!("DELETE .. {}", t);
+                        // conn.query_drop(q)`).
+                        for index in &sink_match.relevant_arguments {
+                            if let Some(arg) = args.get(*index) {
+                                let mut taint = self.eval_concrete_expr(function, arg, env);
+                                taint.paths.retain(|path| {
+                                    path.steps
+                                        .iter()
+                                        .any(|step| step.node.name == SQL_TEMPLATE_CALLEE)
+                                });
+                                self.emit_sink_slices(
+                                    function,
+                                    &taint,
+                                    callee,
+                                    &sink_match.category,
+                                    position,
+                                );
+                            }
+                        }
+                    }
+                    // A source-pattern call that fills a `&mut`
+                    // out-parameter (`handle.read_to_string(&mut buf)`)
+                    // seeds that parameter with the source's taint: the
+                    // value the callee read is the untrusted input and it
+                    // lands in the caller's variable, not in the call's
+                    // (discarded) result.
+                    if let Some(source_match) = find_source_pattern(callee, &self.patterns.sources)
                     {
-                        if let Some(sink_match) = find_sink_pattern(
-                            callee,
-                            args,
-                            receiver_type.as_deref(),
-                            &self.patterns.sinks,
-                        ) {
-                            for index in &sink_match.relevant_arguments {
-                                if let Some(arg) = args.get(*index) {
-                                    let taint = self.eval_concrete_expr(function, arg, &env);
-                                    self.emit_sink_slices(
-                                        function,
-                                        &taint,
-                                        callee,
-                                        &sink_match.category,
-                                        position,
-                                    );
-                                }
-                            }
-                        } else if let Some(sink_match) = find_unconfident_sql_sink_pattern(
-                            callee,
-                            receiver_type.as_deref(),
-                            &self.patterns.sinks,
-                        ) {
-                            // No syntax says SQL; the value may: only
-                            // witnesses built from a SQL-looking template
-                            // count (`let q = format!("DELETE .. {}", t);
-                            // conn.query_drop(q)`).
-                            for index in &sink_match.relevant_arguments {
-                                if let Some(arg) = args.get(*index) {
-                                    let mut taint = self.eval_concrete_expr(function, arg, &env);
-                                    taint.paths.retain(|path| {
-                                        path.steps
-                                            .iter()
-                                            .any(|step| step.node.name == SQL_TEMPLATE_CALLEE)
-                                    });
-                                    self.emit_sink_slices(
-                                        function,
-                                        &taint,
-                                        callee,
-                                        &sink_match.category,
-                                        position,
-                                    );
-                                }
-                            }
-                        }
-                        // A source-pattern call that fills a `&mut`
-                        // out-parameter (`handle.read_to_string(&mut buf)`)
-                        // seeds that parameter with the source's taint: the
-                        // value the callee read is the untrusted input and it
-                        // lands in the caller's variable, not in the call's
-                        // (discarded) result.
-                        if let Some(source_match) =
-                            find_source_pattern(callee, &self.patterns.sources)
-                        {
-                            for arg in args {
-                                if let SimpleExpr::Reference {
-                                    expr,
-                                    mutable: true,
-                                } = arg
-                                    && let SimpleExpr::Var(var_name) = expr.as_ref()
-                                {
-                                    let path = self.new_source_path(
-                                        function,
-                                        callee,
-                                        &source_match.category,
-                                        position.clone(),
-                                        None,
-                                    );
-                                    let mut taint = env.get(var_name).cloned().unwrap_or_default();
-                                    taint.paths.push(path);
-                                    env.insert(var_name.clone(), taint.bounded());
-                                }
-                            }
-                        }
-                        // A receiver-mutating container method
-                        // (`v.push(x)`, `m.insert(k, x)`) stores its
-                        // arguments INTO the receiver: the stored value is
-                        // reachable through later reads of the container, so
-                        // the receiver binding carries the stored taint.
-                        if RECEIVER_MUTATING_METHODS.contains(&callee.as_str())
-                            && let Some((name, field)) =
-                                args.first().and_then(container_write_receiver)
-                        {
-                            let mut stored = ConcreteTaint::default();
-                            for arg in args.iter().skip(1) {
-                                stored
-                                    .paths
-                                    .extend(self.eval_concrete_expr(function, arg, &env).paths);
-                            }
-                            if !stored.paths.is_empty() {
-                                // `self.items.push(v)` writes the `self.items`
-                                // access path, the key a later field read
-                                // consults.
-                                let key = match field {
-                                    Some(field) => format!("{name}.{field}"),
-                                    None => name.to_string(),
-                                };
-                                let mut taint = env.get(&key).cloned().unwrap_or_default();
-                                taint.paths.extend(stored.paths);
-                                env.insert(key, taint.bounded());
-                            }
-                        }
-                        // P4.1 out-parameter mutation: only propagate
-                        // taint into arguments that are *mutable
-                        // references* (`&mut x`). The previous heuristic
-                        // unioned every call's taint onto every Var arg,
-                        // which manufactured cross-arg FPs whenever a
-                        // tainted value happened to share a callsite
-                        // with an unrelated sink-shaped argument.
-                        // Mutability is detected via the preserved
-                        // SimpleExpr::Reference{mutable:true} marker.
-                        let mut union_taint = ConcreteTaint::default();
                         for arg in args {
-                            union_taint
+                            if let SimpleExpr::Reference {
+                                expr,
+                                mutable: true,
+                            } = arg
+                                && let SimpleExpr::Var(var_name) = expr.as_ref()
+                            {
+                                let path = self.new_source_path(
+                                    function,
+                                    callee,
+                                    &source_match.category,
+                                    position.clone(),
+                                    None,
+                                );
+                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                                taint.paths.push(path);
+                                env.insert(var_name.clone(), taint.bounded());
+                            }
+                        }
+                    }
+                    // A receiver-mutating container method
+                    // (`v.push(x)`, `m.insert(k, x)`) stores its
+                    // arguments INTO the receiver: the stored value is
+                    // reachable through later reads of the container, so
+                    // the receiver binding carries the stored taint.
+                    if RECEIVER_MUTATING_METHODS.contains(&callee.as_str())
+                        && let Some((name, field)) = args.first().and_then(container_write_receiver)
+                    {
+                        let mut stored = ConcreteTaint::default();
+                        for arg in args.iter().skip(1) {
+                            stored
                                 .paths
-                                .extend(self.eval_concrete_expr(function, arg, &env).paths);
+                                .extend(self.eval_concrete_expr(function, arg, env).paths);
                         }
-                        let union_taint = union_taint.bounded();
-                        if !union_taint.paths.is_empty() {
-                            for arg in args {
-                                if let SimpleExpr::Reference {
-                                    expr,
-                                    mutable: true,
-                                } = arg
-                                    && let SimpleExpr::Var(var_name) = expr.as_ref()
-                                {
-                                    // Confirmed &mut arg: the callee may
-                                    // write into it. Conservative union.
-                                    if var_name != "tx" && var_name != "rx" {
-                                        let mut target_taint =
-                                            env.get(var_name).cloned().unwrap_or_default();
-                                        target_taint.paths.extend(union_taint.paths.clone());
-                                        env.insert(var_name.clone(), target_taint.bounded());
-                                    }
+                        if !stored.paths.is_empty() {
+                            // `self.items.push(v)` writes the `self.items`
+                            // access path, the key a later field read
+                            // consults.
+                            let key = match field {
+                                Some(field) => format!("{name}.{field}"),
+                                None => name.to_string(),
+                            };
+                            let mut taint = env.get(&key).cloned().unwrap_or_default();
+                            taint.paths.extend(stored.paths);
+                            env.insert(key, taint.bounded());
+                        }
+                    }
+                    // P4.1 out-parameter mutation: only propagate
+                    // taint into arguments that are *mutable
+                    // references* (`&mut x`). The previous heuristic
+                    // unioned every call's taint onto every Var arg,
+                    // which manufactured cross-arg FPs whenever a
+                    // tainted value happened to share a callsite
+                    // with an unrelated sink-shaped argument.
+                    // Mutability is detected via the preserved
+                    // SimpleExpr::Reference{mutable:true} marker.
+                    let mut union_taint = ConcreteTaint::default();
+                    for arg in args {
+                        union_taint
+                            .paths
+                            .extend(self.eval_concrete_expr(function, arg, env).paths);
+                    }
+                    let union_taint = union_taint.bounded();
+                    if !union_taint.paths.is_empty() {
+                        for arg in args {
+                            if let SimpleExpr::Reference {
+                                expr,
+                                mutable: true,
+                            } = arg
+                                && let SimpleExpr::Var(var_name) = expr.as_ref()
+                            {
+                                // Confirmed &mut arg: the callee may
+                                // write into it. Conservative union.
+                                if var_name != "tx" && var_name != "rx" {
+                                    let mut target_taint =
+                                        env.get(var_name).cloned().unwrap_or_default();
+                                    target_taint.paths.extend(union_taint.paths.clone());
+                                    env.insert(var_name.clone(), target_taint.bounded());
                                 }
                             }
                         }
+                    }
 
-                        // P4.2 channel send/recv: per-channel taint slot
-                        // keyed by the paired receiver identity. Falls
-                        // back to a global slot only when no pairing is
-                        // known (e.g. channel constructed outside this
-                        // function). The previous global `__channel_taint`
-                        // slot let an unrelated `rx.recv()` pick up taint
-                        // from a different channel's `tx.send()`.
-                        if callee.ends_with("send")
-                            && let Some(val_arg) = args.get(1)
-                        {
-                            let val_taint = self.eval_concrete_expr(function, val_arg, &env);
-                            if !val_taint.paths.is_empty() {
-                                // Channel identity: prefer the paired
-                                // receiver name when we know it, so
-                                // `rx.recv()` can find this taint
-                                // without consulting the global slot.
-                                let channel_key = match args.first() {
-                                    Some(SimpleExpr::Var(tx_name)) => {
-                                        match function
-                                            .channel_pairs
-                                            .iter()
-                                            .find(|(tx, _)| tx == tx_name)
-                                        {
-                                            Some((_, rx_name)) => {
-                                                format!("__channel:{rx_name}")
-                                            }
-                                            None => format!("__channel:{tx_name}"),
+                    // P4.2 channel send/recv: per-channel taint slot
+                    // keyed by the paired receiver identity. Falls
+                    // back to a global slot only when no pairing is
+                    // known (e.g. channel constructed outside this
+                    // function). The previous global `__channel_taint`
+                    // slot let an unrelated `rx.recv()` pick up taint
+                    // from a different channel's `tx.send()`.
+                    if callee.ends_with("send")
+                        && let Some(val_arg) = args.get(1)
+                    {
+                        let val_taint = self.eval_concrete_expr(function, val_arg, env);
+                        if !val_taint.paths.is_empty() {
+                            // Channel identity: prefer the paired
+                            // receiver name when we know it, so
+                            // `rx.recv()` can find this taint
+                            // without consulting the global slot.
+                            let channel_key = match args.first() {
+                                Some(SimpleExpr::Var(tx_name)) => {
+                                    match function
+                                        .channel_pairs
+                                        .iter()
+                                        .find(|(tx, _)| tx == tx_name)
+                                    {
+                                        Some((_, rx_name)) => {
+                                            format!("__channel:{rx_name}")
                                         }
+                                        None => format!("__channel:{tx_name}"),
                                     }
-                                    _ => "__channel_taint".to_string(),
-                                };
-                                let mut channel_taint =
-                                    env.get(&channel_key).cloned().unwrap_or_default();
-                                channel_taint.paths.extend(val_taint.paths);
-                                env.insert(channel_key, channel_taint.bounded());
+                                }
+                                _ => "__channel_taint".to_string(),
+                            };
+                            let mut channel_taint =
+                                env.get(&channel_key).cloned().unwrap_or_default();
+                            channel_taint.paths.extend(val_taint.paths);
+                            env.insert(channel_key, channel_taint.bounded());
+                        }
+                    }
+
+                    if let Some(resolved) =
+                        resolve_call_target(callee, &function.package_path, self.local_index, None)
+                        && let Some(summary) = self.summaries.get(&resolved).cloned()
+                    {
+                        for (sink_category, parameter_indexes) in &summary.param_to_sink {
+                            for parameter_index in parameter_indexes {
+                                if let Some(arg) = args.get(*parameter_index) {
+                                    let taint = self.eval_concrete_expr(function, arg, env);
+                                    self.emit_sink_slices(
+                                        function,
+                                        &taint,
+                                        callee,
+                                        sink_category,
+                                        position,
+                                    );
+                                }
                             }
                         }
-
-                        if let Some(resolved) = resolve_call_target(
-                            callee,
-                            &function.package_path,
-                            self.local_index,
-                            None,
-                        ) && let Some(summary) = self.summaries.get(&resolved).cloned()
+                        // The callee writes through a `&mut` parameter
+                        // (`fn load(v: &mut String) { *v = env::var(..)
+                        // }`): the caller's variable at that position
+                        // carries what the summary says was poured in.
+                        let callee_name = self
+                            .function_map
+                            .get(&resolved)
+                            .map(|f| f.declaration.qualified_name.clone())
+                            .unwrap_or_else(|| callee.to_string());
+                        let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
+                        for (param_index, categories) in &summary.param_written_sources {
+                            let Some(var_name) = args
+                                .get(*param_index)
+                                .and_then(|arg| written_binding(arg, function))
+                            else {
+                                continue;
+                            };
+                            let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                            for category in categories {
+                                taint.paths.push(self.new_source_path(
+                                    function,
+                                    &callee_name,
+                                    category,
+                                    position.clone(),
+                                    None,
+                                ));
+                            }
+                            out_param_writes.push((var_name.to_string(), taint.bounded()));
+                        }
+                        for (writee, sources) in &summary.param_written_params {
+                            let Some(var_name) = args
+                                .get(*writee)
+                                .and_then(|arg| written_binding(arg, function))
+                            else {
+                                continue;
+                            };
+                            let mut taint = env.get(var_name).cloned().unwrap_or_default();
+                            for from in sources {
+                                if let Some(arg) = args.get(*from) {
+                                    taint
+                                        .paths
+                                        .extend(self.eval_concrete_expr(function, arg, env).paths);
+                                }
+                            }
+                            out_param_writes.push((var_name.to_string(), taint.bounded()));
+                        }
+                        // Field writes through a `&mut` parameter or the
+                        // `self` receiver (`c.load()` filling `c.path`).
+                        for ((param_index, field), categories) in
+                            &summary.param_field_written_sources
                         {
-                            for (sink_category, parameter_indexes) in &summary.param_to_sink {
-                                for parameter_index in parameter_indexes {
-                                    if let Some(arg) = args.get(*parameter_index) {
-                                        let taint = self.eval_concrete_expr(function, arg, &env);
-                                        self.emit_sink_slices(
-                                            function,
-                                            &taint,
-                                            callee,
-                                            sink_category,
-                                            position,
-                                        );
-                                    }
+                            let Some(var_name) =
+                                summary_write_binding(args, *param_index, &summary, function)
+                            else {
+                                continue;
+                            };
+                            let key = format!("{var_name}.{field}");
+                            let mut taint = env.get(&key).cloned().unwrap_or_default();
+                            for category in categories {
+                                taint.paths.push(self.new_source_path(
+                                    function,
+                                    &callee_name,
+                                    category,
+                                    position.clone(),
+                                    None,
+                                ));
+                            }
+                            out_param_writes.push((key, taint.bounded()));
+                        }
+                        for ((param_index, field), froms) in &summary.param_field_written_params {
+                            let Some(var_name) =
+                                summary_write_binding(args, *param_index, &summary, function)
+                            else {
+                                continue;
+                            };
+                            let key = format!("{var_name}.{field}");
+                            let mut taint = env.get(&key).cloned().unwrap_or_default();
+                            for from in froms {
+                                if let Some(arg) = args.get(*from) {
+                                    taint
+                                        .paths
+                                        .extend(self.eval_concrete_expr(function, arg, env).paths);
                                 }
                             }
-                            // The callee writes through a `&mut` parameter
-                            // (`fn load(v: &mut String) { *v = env::var(..)
-                            // }`): the caller's variable at that position
-                            // carries what the summary says was poured in.
-                            let callee_name = self
-                                .function_map
-                                .get(&resolved)
-                                .map(|f| f.declaration.qualified_name.clone())
-                                .unwrap_or_else(|| callee.to_string());
-                            let mut out_param_writes: Vec<(String, ConcreteTaint)> = Vec::new();
-                            for (param_index, categories) in &summary.param_written_sources {
-                                let Some(var_name) = args
-                                    .get(*param_index)
-                                    .and_then(|arg| written_binding(arg, function))
-                                else {
-                                    continue;
-                                };
-                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
-                                for category in categories {
-                                    taint.paths.push(self.new_source_path(
-                                        function,
-                                        &callee_name,
-                                        category,
-                                        position.clone(),
-                                        None,
-                                    ));
-                                }
-                                out_param_writes.push((var_name.to_string(), taint.bounded()));
-                            }
-                            for (writee, sources) in &summary.param_written_params {
-                                let Some(var_name) = args
-                                    .get(*writee)
-                                    .and_then(|arg| written_binding(arg, function))
-                                else {
-                                    continue;
-                                };
-                                let mut taint = env.get(var_name).cloned().unwrap_or_default();
-                                for from in sources {
-                                    if let Some(arg) = args.get(*from) {
-                                        taint.paths.extend(
-                                            self.eval_concrete_expr(function, arg, &env).paths,
-                                        );
-                                    }
-                                }
-                                out_param_writes.push((var_name.to_string(), taint.bounded()));
-                            }
-                            // Field writes through a `&mut` parameter or the
-                            // `self` receiver (`c.load()` filling `c.path`).
-                            for ((param_index, field), categories) in
-                                &summary.param_field_written_sources
-                            {
-                                let Some(var_name) =
-                                    summary_write_binding(args, *param_index, &summary, function)
-                                else {
-                                    continue;
-                                };
-                                let key = format!("{var_name}.{field}");
-                                let mut taint = env.get(&key).cloned().unwrap_or_default();
-                                for category in categories {
-                                    taint.paths.push(self.new_source_path(
-                                        function,
-                                        &callee_name,
-                                        category,
-                                        position.clone(),
-                                        None,
-                                    ));
-                                }
-                                out_param_writes.push((key, taint.bounded()));
-                            }
-                            for ((param_index, field), froms) in &summary.param_field_written_params
-                            {
-                                let Some(var_name) =
-                                    summary_write_binding(args, *param_index, &summary, function)
-                                else {
-                                    continue;
-                                };
-                                let key = format!("{var_name}.{field}");
-                                let mut taint = env.get(&key).cloned().unwrap_or_default();
-                                for from in froms {
-                                    if let Some(arg) = args.get(*from) {
-                                        taint.paths.extend(
-                                            self.eval_concrete_expr(function, arg, &env).paths,
-                                        );
-                                    }
-                                }
-                                out_param_writes.push((key, taint.bounded()));
-                            }
-                            for (var_name, taint) in out_param_writes {
-                                if !taint.paths.is_empty() {
-                                    env.insert(var_name, taint);
-                                }
+                            out_param_writes.push((key, taint.bounded()));
+                        }
+                        for (var_name, taint) in out_param_writes {
+                            if !taint.paths.is_empty() {
+                                env.insert(var_name, taint);
                             }
                         }
                     }
@@ -11067,7 +11370,7 @@ impl<'a> DataFlowBuilder<'a> {
                                 type_name: None,
                                 properties: IndexMap::new(),
                             };
-                            self.nodes.insert(node_id.clone(), passthrough_node.clone());
+                            self.record_node(&passthrough_node);
                             if let Some(last_step) = path.steps.last() {
                                 let edge_id = stable_id(
                                     "df-edge",
@@ -11080,7 +11383,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     kind: "passthrough".to_string(),
                                     properties: IndexMap::new(),
                                 };
-                                self.edges.insert(edge_id, edge.clone());
+                                self.record_edge(&edge);
                                 path.steps.push(TaintStep {
                                     node: passthrough_node,
                                     edge: Some(edge),
@@ -11148,7 +11451,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     type_name: None,
                                     properties: IndexMap::new(),
                                 };
-                                self.nodes.insert(node_id.clone(), call_node.clone());
+                                self.record_node(&call_node);
                                 if let Some(last_step) = path.steps.last() {
                                     let edge_id = stable_id(
                                         "df-edge",
@@ -11161,7 +11464,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         kind: "call_return".to_string(),
                                         properties: IndexMap::new(),
                                     };
-                                    self.edges.insert(edge_id, edge.clone());
+                                    self.record_edge(&edge);
                                     path.steps.push(TaintStep {
                                         node: call_node,
                                         edge: Some(edge),
@@ -11179,7 +11482,7 @@ impl<'a> DataFlowBuilder<'a> {
                     let arg_paths = self.eval_concrete_expr(function, arg, env).paths;
                     arg_taint_count += arg_paths.len();
                 }
-                if arg_taint_count > 0 {
+                if arg_taint_count > 0 && self.emitting {
                     let entry = self
                         .missing_passthrough_call_counts
                         .entry(callee.clone())
@@ -11265,7 +11568,7 @@ impl<'a> DataFlowBuilder<'a> {
                     let arg_paths = self.eval_concrete_expr(function, arg, env).paths;
                     arg_taint_count += arg_paths.len();
                 }
-                if arg_taint_count > 0 {
+                if arg_taint_count > 0 && self.emitting {
                     let entry = self
                         .missing_passthrough_call_counts
                         .entry(method.clone())
@@ -11342,7 +11645,7 @@ impl<'a> DataFlowBuilder<'a> {
             type_name: None,
             properties: IndexMap::new(),
         };
-        self.nodes.insert(node_id.clone(), node.clone());
+        self.record_node(&node);
         TaintPath {
             origin_key: format!("{}:{}:{}", function.declaration.id, name, category),
             category: category.to_string(),
@@ -11358,7 +11661,7 @@ impl<'a> DataFlowBuilder<'a> {
         sink_category: &str,
         position: &Position,
     ) {
-        if taint.paths.is_empty() {
+        if taint.paths.is_empty() || !self.emitting {
             return;
         }
         let mut pos = position.clone();
@@ -11390,7 +11693,7 @@ impl<'a> DataFlowBuilder<'a> {
             type_name: None,
             properties: IndexMap::new(),
         };
-        self.nodes.insert(sink_node_id.clone(), sink_node.clone());
+        self.record_node(&sink_node);
 
         for path in &taint.paths {
             let mut final_path = path.clone();
@@ -11419,9 +11722,9 @@ impl<'a> DataFlowBuilder<'a> {
 
             // Register all nodes and edges in the final path to self.nodes and self.edges
             for step in &final_path.steps {
-                self.nodes.insert(step.node.id.clone(), step.node.clone());
+                self.record_node(&step.node);
                 if let Some(edge) = &step.edge {
-                    self.edges.insert(edge.id.clone(), edge.clone());
+                    self.record_edge(edge);
                 }
             }
 
@@ -15900,6 +16203,132 @@ impl ComponentSection for Holder {
         );
     }
 
+    /// Every flow in the fixture needs a fixpoint that runs to convergence:
+    /// call chains twelve deep (the summary pass used to stop after six
+    /// rounds), values carried around loops (loops used to be read as
+    /// straight-line code), and recursion.
+    #[test]
+    fn fixpoint_flow_app_finds_every_deep_and_loop_carried_flow() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("fixpoint-flow-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let found: BTreeSet<(String, String)> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env")
+            .map(|slice| (slice.source_function.clone(), slice.sink_category.clone()))
+            .collect();
+        let expected = [
+            ("chains::sink_chain", "process-exec"),
+            ("chains::fetch_chain", "filesystem-write"),
+            ("chains::pass_chain", "network-connect"),
+            ("loops::carried_by_for", "process-exec"),
+            ("loops::carried_by_while", "filesystem-delete"),
+            ("loops::carried_by_loop", "process-exec"),
+            ("loops::carried_through_nested_loops", "network-connect"),
+            ("loops::carried_seventy_steps", "process-exec"),
+            ("loops::run", "filesystem-write"),
+            ("recursion::run", "process-exec"),
+            ("recursion::run", "filesystem-delete"),
+            ("recursion::run", "network-connect"),
+            ("dispatch::run_inherent", "process-exec"),
+        ];
+        for (function, sink) in expected {
+            let key = (format!("fixpoint_flow_app::{function}"), sink.to_string());
+            assert!(found.contains(&key), "missing {key:?}; found {found:#?}");
+        }
+
+        // `black_box` sees the source only once it has gone around the loop.
+        // It is counted from the fixpoint, once for its one call site; the
+        // first trip, which had not seen the source yet, used to be all that
+        // was counted, and the loss went unreported.
+        let black_box: Vec<&str> = data_flow
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message.contains("'std::hint::black_box'"))
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(
+            black_box,
+            [
+                "taint may be lost at 'std::hint::black_box' (observed 1 times); consider adding it as a passthrough pattern"
+            ]
+        );
+
+        // The seventy-step witness is kept whole: it is the only one its
+        // source has, so its length is no reason to drop it.
+        let seventy = data_flow
+            .slices
+            .iter()
+            .find(|slice| {
+                slice.source_function == "fixpoint_flow_app::loops::carried_seventy_steps"
+            })
+            .expect("seventy-step slice");
+        assert!(seventy.path_length > 64, "{}", seventy.path_length);
+
+        // Loop-carried slices are emitted once, from the fixpoint, so their
+        // witnesses are the route the value takes around the loop: one node
+        // per variable it passes through, however many trips that took.
+        let witness = |function: &str| -> Vec<String> {
+            let slice = data_flow
+                .slices
+                .iter()
+                .find(|slice| {
+                    slice.source_function == format!("fixpoint_flow_app::loops::{function}")
+                })
+                .unwrap_or_else(|| panic!("slice for {function}"));
+            slice
+                .node_ids
+                .iter()
+                .map(|id| {
+                    let node = data_flow.nodes.iter().find(|node| &node.id == id);
+                    node.expect("every slice node is in the graph").name.clone()
+                })
+                .collect()
+        };
+        assert_eq!(
+            witness("carried_by_for"),
+            [
+                "std::env::var",
+                "next",
+                "current",
+                "std::process::Command::new"
+            ]
+        );
+        assert_eq!(
+            witness("carried_through_nested_loops"),
+            [
+                "std::env::var",
+                "staged",
+                "outer",
+                "inner",
+                "std::net::TcpStream::connect"
+            ]
+        );
+
+        // A chain's summaries reach all the way down: the first helper of
+        // each chain is summarized as carrying its parameter to the sink, or
+        // the source to its return.
+        let summary = |name: &str| {
+            data_flow
+                .summaries
+                .iter()
+                .find(|summary| summary.function == format!("fixpoint_flow_app::chains::{name}"))
+                .unwrap_or_else(|| panic!("summary for {name}"))
+        };
+        assert_eq!(
+            summary("sink_01").param_to_sink.get("process-exec"),
+            Some(&vec![0])
+        );
+        assert_eq!(summary("fetch_01").source_returns, vec!["env".to_string()]);
+        assert_eq!(summary("pass_01").param_to_return, vec![0]);
+    }
+
     #[test]
     fn chain_flow_app_emits_flow_through_method_chain() {
         let report = analyze(AnalyzeOptionsInput {
@@ -17270,7 +17699,9 @@ mod dyn_dispatch_helper_tests {
 mod taint_bound_tests {
     use rusi_schema::DataFlowNode;
 
-    use super::{ConcreteTaint, MAX_TAINT_PATH_STEPS, MAX_TAINT_PATHS, TaintPath, TaintStep};
+    use super::{
+        ConcreteTaint, MAX_ALTERNATE_WITNESS_STEPS, MAX_TAINT_PATHS, TaintPath, TaintStep,
+    };
 
     fn step(node_id: &str) -> TaintStep {
         TaintStep {
@@ -17324,17 +17755,35 @@ mod taint_bound_tests {
     }
 
     #[test]
-    fn caps_total_number_of_witnesses() {
+    fn keeps_every_origin_however_many() {
+        // Each origin is a distinct flow; dropping one would lose a finding.
         let paths = (0..(MAX_TAINT_PATHS * 4))
             .map(|i| path(&format!("env:{i}"), &["n1"]))
             .collect::<Vec<_>>();
         let taint = ConcreteTaint { paths }.bounded();
-        assert_eq!(taint.paths.len(), MAX_TAINT_PATHS);
+        assert_eq!(taint.paths.len(), MAX_TAINT_PATHS * 4);
     }
 
     #[test]
-    fn drops_pathologically_long_witnesses() {
-        let long_nodes: Vec<String> = (0..(MAX_TAINT_PATH_STEPS + 5))
+    fn caps_the_alternative_witnesses_of_one_origin() {
+        let nodes: Vec<String> = (0..(MAX_TAINT_PATHS * 4))
+            .map(|i| format!("n{i}"))
+            .collect();
+        let paths = nodes
+            .iter()
+            .map(|node| path("env:a", &["start", node]))
+            .chain(std::iter::once(path("cli:b", &["late"])))
+            .collect::<Vec<_>>();
+        let taint = ConcreteTaint { paths }.bounded();
+        assert_eq!(taint.paths.len(), MAX_TAINT_PATHS + 1);
+        assert_eq!(taint.paths[0].steps[1].node.id, "n0");
+        // An origin first seen after the alternatives filled up still counts.
+        assert!(taint.paths.iter().any(|path| path.origin_key == "cli:b"));
+    }
+
+    #[test]
+    fn keeps_a_long_witness_when_it_is_its_origins_only_one() {
+        let long_nodes: Vec<String> = (0..(MAX_ALTERNATE_WITNESS_STEPS + 5))
             .map(|i| format!("n{i}"))
             .collect();
         let long_refs: Vec<&str> = long_nodes.iter().map(String::as_str).collect();
@@ -17342,9 +17791,22 @@ mod taint_bound_tests {
             paths: vec![path("env:a", &["short"]), path("env:b", &long_refs)],
         }
         .bounded();
-        // The over-length witness is dropped; the short one is retained.
+        assert_eq!(taint.paths.len(), 2);
+        assert_eq!(taint.paths[1].steps.len(), MAX_ALTERNATE_WITNESS_STEPS + 5);
+    }
+
+    #[test]
+    fn drops_a_long_alternative_to_a_witness_already_held() {
+        let long_nodes: Vec<String> = (0..(MAX_ALTERNATE_WITNESS_STEPS + 5))
+            .map(|i| format!("n{i}"))
+            .collect();
+        let long_refs: Vec<&str> = long_nodes.iter().map(String::as_str).collect();
+        let taint = ConcreteTaint {
+            paths: vec![path("env:a", &["short"]), path("env:a", &long_refs)],
+        }
+        .bounded();
         assert_eq!(taint.paths.len(), 1);
-        assert_eq!(taint.paths[0].origin_key, "env:a");
+        assert_eq!(taint.paths[0].steps.len(), 1);
     }
 }
 
@@ -17531,5 +17993,525 @@ mod passthrough_catalog_tests {
                 pattern.pattern
             );
         }
+    }
+}
+
+/// The fixpoints of the stable backend: loop regions and the walk over them,
+/// type bindings that settle over more than a few passes, and the summary
+/// schedule over the call graph.
+#[cfg(test)]
+mod fixpoint_tests {
+    use std::collections::{BTreeSet, HashMap};
+
+    use syn::visit::Visit;
+
+    use super::{
+        AbstractOrigin, CfgEvaluator, FileContext, FunctionRecord, LoopNode, LoopRegion, Operation,
+        ReturnTypeIndex, SimpleExpr, SourceCollector, TypeIndexes, build_local_function_index,
+        built_in_dataflow_patterns, infer_summaries_counted, infer_type_bindings,
+        join_abstract_env, loop_forest, run_operations,
+    };
+
+    fn records_from(source: &str) -> Vec<FunctionRecord> {
+        let syntax = syn::parse_file(source).expect("snippet parses");
+        let file_ctx = FileContext {
+            package_name: "probe".to_string(),
+            package_path: "probe".to_string(),
+            crate_path: "probe".to_string(),
+            relative_file_path: "src/lib.rs".to_string(),
+            module_path: Vec::new(),
+        };
+        let mut collector = SourceCollector::new(file_ctx, CfgEvaluator::permissive(), true);
+        collector.visit_file(&syntax);
+        collector.functions
+    }
+
+    fn record<'r>(records: &'r [FunctionRecord], name: &str) -> &'r FunctionRecord {
+        records
+            .iter()
+            .find(|record| record.declaration.name == name)
+            .unwrap_or_else(|| panic!("no record for {name}"))
+    }
+
+    /// The assignment targets inside a region, in order.
+    fn targets(record: &FunctionRecord, region: LoopRegion) -> Vec<String> {
+        record.operations[region.start..region.end]
+            .iter()
+            .filter_map(|operation| match operation {
+                Operation::Assign { target, .. } => Some(target.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_loop_kind_records_its_region() {
+        let records = records_from(
+            r#"
+pub fn run(items: Vec<String>, rx: std::sync::mpsc::Receiver<String>) {
+    let before = String::new();
+    for item in items {
+        let copied = item;
+    }
+    while let Ok(message) = rx.recv() {
+        let seen = message;
+    }
+    loop {
+        let spun = before.clone();
+        break;
+    }
+    let after = before;
+}
+"#,
+        );
+        let run = record(&records, "run");
+        let mut regions = run.loop_regions.clone();
+        regions.sort();
+        assert_eq!(regions.len(), 3, "{regions:?}");
+        assert_eq!(targets(run, regions[0]), vec!["item", "copied"]);
+        assert_eq!(targets(run, regions[1]), vec!["message", "seen"]);
+        assert_eq!(targets(run, regions[2]), vec!["spun"]);
+        // Nothing outside the loops is in a region.
+        let inside: BTreeSet<usize> = regions
+            .iter()
+            .flat_map(|region| region.start..region.end)
+            .collect();
+        for (index, operation) in run.operations.iter().enumerate() {
+            if let Operation::Assign { target, .. } = operation
+                && (target == "before" || target == "after")
+            {
+                assert!(!inside.contains(&index), "{target} is outside every loop");
+            }
+        }
+    }
+
+    #[test]
+    fn nested_loops_nest_and_closures_keep_their_own_regions() {
+        let records = records_from(
+            r#"
+pub fn run(rows: Vec<Vec<String>>) {
+    for row in rows {
+        let mut index = 0;
+        while index < row.len() {
+            let cell = row[index].clone();
+            index += 1;
+        }
+        let each = |value: String| {
+            for part in value.split(',') {
+                let piece = part;
+            }
+        };
+    }
+}
+"#,
+        );
+        let run = record(&records, "run");
+        let forest = loop_forest(&run.loop_regions);
+        assert_eq!(forest.len(), 1, "one outer loop");
+        assert_eq!(forest[0].children.len(), 1, "the while inside the for");
+        let closure = records
+            .iter()
+            .find(|record| record.declaration.qualified_name.contains("closure"))
+            .expect("closure record");
+        assert_eq!(closure.loop_regions.len(), 1, "the closure's own for");
+        assert!(targets(closure, closure.loop_regions[0]).contains(&"piece".to_string()));
+    }
+
+    #[test]
+    fn loop_forest_nests_dedupes_and_clips() {
+        let region = |start, end| LoopRegion { start, end };
+        let forest = loop_forest(&[
+            region(2, 4),
+            region(0, 6),
+            region(0, 6),
+            region(7, 9),
+            region(5, 8),
+            region(3, 3),
+        ]);
+        let node = |index, start, end, children| LoopNode {
+            index,
+            start,
+            end,
+            children,
+        };
+        assert_eq!(
+            forest,
+            vec![
+                node(
+                    0,
+                    0,
+                    6,
+                    vec![node(1, 2, 4, Vec::new()), node(2, 5, 6, Vec::new())]
+                ),
+                node(3, 7, 9, Vec::new()),
+            ]
+        );
+    }
+
+    /// `x0 = x1; x1 = x2; ...; x{n} = source()` inside one loop: the source
+    /// needs `n` trips to reach `x0`. The walk keeps going until a trip adds
+    /// nothing, then walks once more to emit, from the settled head.
+    #[test]
+    fn run_operations_iterates_a_loop_until_nothing_is_added() {
+        let links = 12;
+        let mut operations: Vec<Operation> = (0..links)
+            .map(|link| Operation::Assign {
+                target: format!("x{link}"),
+                value: SimpleExpr::Var(format!("x{}", link + 1)),
+            })
+            .collect();
+        operations.push(Operation::Assign {
+            target: format!("x{links}"),
+            value: SimpleExpr::Literal,
+        });
+        let loops = loop_forest(&[LoopRegion {
+            start: 0,
+            end: operations.len(),
+        }]);
+        let source = AbstractOrigin::Source("env".to_string());
+        let mut env: HashMap<String, BTreeSet<AbstractOrigin>> = HashMap::new();
+        let mut silent = 0;
+        let mut emitted = 0;
+        let mut emitted_untainted = 0;
+        run_operations(
+            &operations,
+            &loops,
+            &mut env,
+            &mut |operation, env, emit| {
+                let Operation::Assign { target, value } = operation else {
+                    return;
+                };
+                let origins = match value {
+                    SimpleExpr::Var(name) => env.get(name).cloned().unwrap_or_default(),
+                    _ => BTreeSet::from([source.clone()]),
+                };
+                if emit {
+                    emitted += 1;
+                    emitted_untainted += usize::from(!origins.contains(&source));
+                } else {
+                    silent += 1;
+                }
+                env.insert(target.clone(), origins);
+            },
+            join_abstract_env,
+        );
+        assert!(env["x0"].contains(&source));
+        // The first trip reads the source into `x{links}`; one more trip per
+        // link carries it down to `x0`, and a last one sees nothing change.
+        assert_eq!(silent, operations.len() * (links + 2));
+        // The emitting walk starts from the settled head, so every
+        // assignment it sees already carries the source.
+        assert_eq!(emitted, operations.len());
+        assert_eq!(emitted_untainted, 0);
+    }
+
+    /// The state the loop tests walk: the names that carry taint.
+    type Tainted = BTreeSet<String>;
+
+    fn join_tainted(head: &mut Tainted, body: &Tainted) -> bool {
+        let before = head.len();
+        head.extend(body.iter().cloned());
+        head.len() != before
+    }
+
+    /// `target = name` copies taint, `target = <literal>` is a source and
+    /// `target = <unknown>` clears the name.
+    fn step_tainted(operation: &Operation, state: &mut Tainted) {
+        let Operation::Assign { target, value } = operation else {
+            return;
+        };
+        let tainted = match value {
+            SimpleExpr::Var(name) => state.contains(name),
+            SimpleExpr::Literal => true,
+            _ => false,
+        };
+        if tainted {
+            state.insert(target.clone());
+        } else {
+            state.remove(target);
+        }
+    }
+
+    fn assign(target: &str, value: SimpleExpr) -> Operation {
+        Operation::Assign {
+            target: target.to_string(),
+            value,
+        }
+    }
+
+    /// `depth` loops nested in each other, each clearing `a` and `b` before
+    /// entering the next; the innermost runs `a = b; b = <source>`, which
+    /// takes two trips to reach `a`. Starting every inner loop over on each
+    /// trip of its parent walked the innermost body `3 * 2^(depth - 1)`
+    /// times; resuming from the settled heads walks it four times, three to
+    /// settle and one to emit, however deep the nest.
+    #[test]
+    fn nested_loops_cost_the_sum_of_their_fixpoints_not_the_product() {
+        let depth = 16;
+        let mut operations = Vec::new();
+        let mut regions = Vec::new();
+        let mut starts = Vec::new();
+        for _ in 0..depth {
+            starts.push(operations.len());
+            operations.push(assign("a", SimpleExpr::Unknown));
+            operations.push(assign("b", SimpleExpr::Unknown));
+        }
+        starts.push(operations.len());
+        operations.push(assign("a", SimpleExpr::Var("b".to_string())));
+        operations.push(assign("b", SimpleExpr::Literal));
+        let end = operations.len();
+        for start in starts {
+            regions.push(LoopRegion { start, end });
+        }
+        let loops = loop_forest(&regions);
+        let innermost = end - 2;
+        let mut visits = vec![(0usize, 0usize); end];
+        let mut state = Tainted::new();
+        run_operations(
+            &operations,
+            &loops,
+            &mut state,
+            &mut |operation, state, emit| {
+                let index = operations
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, operation))
+                    .expect("an operation of this function");
+                if emit {
+                    visits[index].1 += 1;
+                } else {
+                    visits[index].0 += 1;
+                }
+                step_tainted(operation, state);
+            },
+            join_tainted,
+        );
+        assert_eq!(state, Tainted::from(["a".to_string(), "b".to_string()]));
+        assert_eq!(visits[innermost], (3, 1));
+        for (index, &(silent, emitted)) in visits.iter().enumerate() {
+            assert_eq!(emitted, 1, "operation {index} emits once");
+            // Two names can reach every head, so no walk count passes the
+            // documented bound of F + 2 with F = 2.
+            assert!(
+                silent + emitted <= 4,
+                "operation {index}: {silent} + {emitted}"
+            );
+        }
+    }
+
+    /// A tiny deterministic generator, so a failing case can be replayed.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % bound
+        }
+    }
+
+    /// Random straight-line code with loops nested up to three deep.
+    fn random_body(
+        rng: &mut Lcg,
+        depth: usize,
+        operations: &mut Vec<Operation>,
+        regions: &mut Vec<LoopRegion>,
+    ) {
+        let names = ["a", "b", "c", "d", "e"];
+        for _ in 0..1 + rng.below(5) {
+            if depth < 3 && rng.below(3) == 0 {
+                let start = operations.len();
+                random_body(rng, depth + 1, operations, regions);
+                regions.push(LoopRegion {
+                    start,
+                    end: operations.len(),
+                });
+                continue;
+            }
+            let target = names[rng.below(names.len())];
+            let value = match rng.below(6) {
+                0 => SimpleExpr::Literal,
+                1 => SimpleExpr::Unknown,
+                _ => SimpleExpr::Var(names[rng.below(names.len())].to_string()),
+            };
+            operations.push(assign(target, value));
+        }
+    }
+
+    /// The walk this module replaced: every loop starts over from its entry
+    /// on each trip of its parent, and every trip is visited alike.
+    fn restarting_walk(
+        operations: &[Operation],
+        start: usize,
+        end: usize,
+        loops: &[LoopNode],
+        state: &mut Tainted,
+        seen: &mut [Tainted],
+    ) {
+        fn visit(operation: &Operation, state: &mut Tainted, seen: &mut Tainted) {
+            seen.extend(state.iter().cloned());
+            step_tainted(operation, state);
+        }
+        let mut next = start;
+        for node in loops {
+            for index in next..node.start {
+                visit(&operations[index], state, &mut seen[index]);
+            }
+            loop {
+                let mut body = state.clone();
+                restarting_walk(
+                    operations,
+                    node.start,
+                    node.end,
+                    &node.children,
+                    &mut body,
+                    seen,
+                );
+                if !join_tainted(state, &body) {
+                    break;
+                }
+            }
+            next = node.end;
+        }
+        for index in next..end {
+            visit(&operations[index], state, &mut seen[index]);
+        }
+    }
+
+    /// On random nests, resuming loops from their settled heads ends in the
+    /// same state as starting them over, emits every operation exactly once,
+    /// and emits it in the state the old walk reached there last: the union
+    /// of every state it saw there, since states only grow toward the
+    /// fixpoint.
+    #[test]
+    fn resuming_loops_matches_restarting_them() {
+        let mut rng = Lcg(0x5eed);
+        for case in 0..400 {
+            let mut operations = Vec::new();
+            let mut regions = Vec::new();
+            random_body(&mut rng, 0, &mut operations, &mut regions);
+            let loops = loop_forest(&regions);
+
+            let mut expected_state = Tainted::new();
+            let mut expected_seen = vec![Tainted::new(); operations.len()];
+            restarting_walk(
+                &operations,
+                0,
+                operations.len(),
+                &loops,
+                &mut expected_state,
+                &mut expected_seen,
+            );
+
+            let mut state = Tainted::new();
+            let mut emitted: Vec<Vec<Tainted>> = vec![Vec::new(); operations.len()];
+            let mut visits = vec![0usize; operations.len()];
+            run_operations(
+                &operations,
+                &loops,
+                &mut state,
+                &mut |operation, state, emit| {
+                    let index = operations
+                        .iter()
+                        .position(|candidate| std::ptr::eq(candidate, operation))
+                        .expect("an operation of this function");
+                    visits[index] += 1;
+                    if emit {
+                        emitted[index].push(state.clone());
+                    }
+                    step_tainted(operation, state);
+                },
+                join_tainted,
+            );
+            assert_eq!(state, expected_state, "case {case}: final state");
+            for (index, states) in emitted.iter().enumerate() {
+                assert_eq!(
+                    states,
+                    &vec![expected_seen[index].clone()],
+                    "case {case}: operation {index}"
+                );
+                // Five names, one origin: no operation is walked more than
+                // F + 2 = 7 times.
+                assert!(visits[index] <= 7, "case {case}: operation {index}");
+            }
+        }
+    }
+
+    /// `c` is typed only after four passes: each assignment reads a variable
+    /// the loop body only types further down. Three passes used to be all
+    /// the typing got.
+    #[test]
+    fn type_bindings_settle_chains_longer_than_three_passes() {
+        let records = records_from(
+            r#"
+pub struct A;
+pub struct B;
+pub struct C;
+pub struct D;
+pub struct E;
+impl A { pub fn new() -> A { A } pub fn step(&self) -> B { B } }
+impl B { pub fn step(&self) -> C { C } }
+impl C { pub fn step(&self) -> D { D } }
+impl D { pub fn step(&self) -> E { E } }
+
+pub fn run() {
+    let a = A::new();
+    loop {
+        let e = d.step();
+        let d = c.step();
+        let c = b.step();
+        let b = a.step();
+    }
+}
+"#,
+        );
+        let return_types = ReturnTypeIndex::build(&records);
+        let bindings = infer_type_bindings(
+            record(&records, "run"),
+            &HashMap::new(),
+            &HashMap::new(),
+            &return_types,
+        );
+        assert_eq!(bindings.get("b").map(String::as_str), Some("B"));
+        assert_eq!(bindings.get("e").map(String::as_str), Some("E"));
+    }
+
+    #[test]
+    fn summaries_of_a_deep_chain_take_one_evaluation_per_function() {
+        let depth = 24;
+        let mut source = String::from("use std::process::Command;\n");
+        for level in 0..depth {
+            if level + 1 < depth {
+                source.push_str(&format!(
+                    "pub fn f{level:02}(v: String) {{ f{:02}(v); }}\n",
+                    level + 1
+                ));
+            } else {
+                source.push_str(&format!(
+                    "pub fn f{level:02}(v: String) {{ Command::new(v); }}\n"
+                ));
+            }
+        }
+        let records = records_from(&source);
+        let local_index = build_local_function_index(&records);
+        let patterns = built_in_dataflow_patterns();
+        let return_types = ReturnTypeIndex::build(&records);
+        let empty = HashMap::new();
+        let indexes = TypeIndexes {
+            field_types: &empty,
+            field_element_types: &empty,
+            return_types: &return_types,
+        };
+        let (summaries, evaluations) =
+            infer_summaries_counted(&records, &local_index, &patterns, &indexes);
+        assert_eq!(evaluations, depth);
+        let top = record(&records, "f00");
+        assert_eq!(
+            summaries[&top.declaration.id]
+                .param_to_sink
+                .get("process-exec"),
+            Some(&BTreeSet::from([0]))
+        );
     }
 }
