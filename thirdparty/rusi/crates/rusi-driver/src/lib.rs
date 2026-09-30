@@ -703,9 +703,31 @@ const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
     ),
 ];
 
+/// The cargo profile the embedded wrapper is built with.
+const WRAPPER_PROFILE: &str = "rusi-wrapper";
+
+/// The `[profile.rusi-wrapper]` table, shared by the materialized manifest and
+/// the real workspace manifest (a test holds the two together).
+///
+/// The wrapper is the MIR data-flow engine the compiler backend runs, so it is
+/// built optimized; cargo's default dev profile left every analysis running
+/// unoptimized code. The release profile's size-first `opt-level`, LTO and
+/// single codegen unit would only make the one-time build on a user's machine
+/// slower, and the wrapper keeps unwinding like the rustc it is linked into.
+macro_rules! wrapper_profile_toml {
+    () => {
+        "[profile.rusi-wrapper]\n\
+         inherits = \"release\"\n\
+         opt-level = 2\n\
+         lto = false\n\
+         codegen-units = 16\n\
+         panic = \"unwind\"\n"
+    };
+}
+
 /// Workspace manifest for the materialized wrapper sources. Mirrors the
 /// `[workspace.package]` and dependency versions of the real workspace that the
-/// member manifests inherit from.
+/// member manifests inherit from, and its wrapper profile.
 const EMBEDDED_WRAPPER_WORKSPACE_MANIFEST: &str = concat!(
     "[workspace]\n",
     "members = [\"crates/rusi-schema\", \"crates/rusi-rustc-wrapper\"]\n",
@@ -721,7 +743,8 @@ const EMBEDDED_WRAPPER_WORKSPACE_MANIFEST: &str = concat!(
     "indexmap = { version = \"2\", features = [\"serde\"] }\n",
     "serde = { version = \"1\", features = [\"derive\"] }\n",
     "serde_json = \"1\"\n",
-    "sha2 = \"0.11\"\n",
+    "sha2 = \"0.11\"\n\n",
+    wrapper_profile_toml!(),
 );
 
 fn has_wrapper_sources(root: &Path) -> bool {
@@ -932,7 +955,7 @@ fn ensure_embedded_wrapper_built(
     if capabilities.rustup_available && !capabilities.resolved_toolchain.is_empty() {
         command.arg(format!("+{}", capabilities.resolved_toolchain));
     }
-    command.args(["build", "--manifest-path"]);
+    command.args(["build", "--profile", WRAPPER_PROFILE, "--manifest-path"]);
     command.arg(&manifest_path);
     command.args(["-p", "rusi-rustc-wrapper"]);
     if !capabilities.nightly_toolchain {
@@ -984,7 +1007,7 @@ fn ensure_embedded_wrapper_built(
     }
     // `EXE_SUFFIX` is empty everywhere except Windows, where the binary cargo
     // produced is `rusi-rustc-wrapper.exe`.
-    let wrapper = wrapper_target_dir.join("debug").join(format!(
+    let wrapper = wrapper_target_dir.join(WRAPPER_PROFILE).join(format!(
         "rusi-rustc-wrapper{}",
         std::env::consts::EXE_SUFFIX
     ));
@@ -2403,6 +2426,7 @@ fn span_key(span: Span) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -2506,6 +2530,31 @@ mod tests {
             "staging dirs left behind: {leftovers:?}"
         );
         fs::remove_dir_all(&base).ok();
+    }
+
+    /// The wrapper is built with the same profile from the checkout and from
+    /// the materialized sources, so a released binary analyzes as fast as CI.
+    #[test]
+    fn embedded_wrapper_profile_matches_the_real_workspace() {
+        // The whole table, from its header to the next one: a key added to
+        // either copy alone is drift too.
+        fn profile_table(manifest: &str) -> &str {
+            let header = format!("[profile.{}]\n", super::WRAPPER_PROFILE);
+            let start = manifest
+                .find(&header)
+                .unwrap_or_else(|| panic!("no {header:?} table"));
+            let rest = &manifest[start..];
+            let end = rest[header.len()..]
+                .find("\n[")
+                .map_or(rest.len(), |at| header.len() + at + 1);
+            rest[..end].trim_end()
+        }
+        let embedded = wrapper_profile_toml!().trim_end();
+        assert_eq!(profile_table(include_str!("../../../Cargo.toml")), embedded);
+        assert_eq!(
+            profile_table(super::EMBEDDED_WRAPPER_WORKSPACE_MANIFEST),
+            embedded
+        );
     }
 
     /// The generated workspace manifest hand-copies versions and features from
@@ -3161,6 +3210,122 @@ mod tests {
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
         }
+    }
+
+    /// The compiler backend's fixpoints run to convergence: twelve-deep
+    /// call chains (summaries used to stop after eight rounds), loop-carried
+    /// values including a seventy-step chain (blocks used to stop after 64
+    /// passes), recursion, a trait object with forty implementations
+    /// (candidate targets used to stop at 32, and a trait declared in a
+    /// module matched none of them), and an inherent method reached through
+    /// its own call target.
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_backend_follows_every_flow_in_fixpoint_flow_app() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("fixpoint-flow-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+            return;
+        }
+        let flow = envelope
+            .payload
+            .data_flow
+            .as_ref()
+            .expect("dataflow emitted");
+        // Every environment flow the backend reports, exactly. A flow is
+        // reported in the function that reads the source and again in each
+        // caller whose summary carries it to a sink (`loops::run`, `main`),
+        // so one gained or lost anywhere in the fixpoints changes a count
+        // here. `dispatch::run` has one slice per Stage implementation.
+        let mut env_flows = BTreeMap::<(String, String), usize>::new();
+        for slice in flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env")
+        {
+            assert_eq!(slice.source_function, slice.sink_function, "{slice:?}");
+            *env_flows
+                .entry((slice.source_function.clone(), slice.sink_category.clone()))
+                .or_default() += 1;
+        }
+        let expected: BTreeMap<(String, String), usize> = [
+            ("chains::fetch_chain", "filesystem-write", 1),
+            ("chains::pass_chain", "network-connect", 1),
+            ("chains::run", "filesystem-write", 1),
+            ("chains::run", "network-connect", 1),
+            ("chains::run", "process-exec", 1),
+            ("chains::sink_chain", "process-exec", 1),
+            ("dispatch::run", "process-exec", 40),
+            ("dispatch::run_inherent", "process-exec", 1),
+            ("loops::carried_by_for", "process-exec", 2),
+            ("loops::carried_by_loop", "process-exec", 2),
+            ("loops::carried_by_while", "filesystem-delete", 1),
+            ("loops::carried_seventy_steps", "process-exec", 2),
+            ("loops::carried_through_nested_loops", "network-connect", 1),
+            ("loops::run", "filesystem-delete", 1),
+            ("loops::run", "filesystem-write", 1),
+            ("loops::run", "network-connect", 1),
+            ("loops::run", "process-exec", 3),
+            ("main", "filesystem-delete", 2),
+            ("main", "filesystem-write", 2),
+            ("main", "network-connect", 3),
+            ("main", "process-exec", 5),
+            ("recursion::run", "filesystem-delete", 1),
+            ("recursion::run", "network-connect", 1),
+            ("recursion::run", "process-exec", 1),
+        ]
+        .into_iter()
+        .map(|(function, sink, count)| ((function.to_string(), sink.to_string()), count))
+        .collect();
+        assert_eq!(env_flows, expected);
+        assert!(
+            !flow
+                .diagnostics
+                .iter()
+                .chain(&envelope.payload.diagnostics)
+                .any(
+                    |diagnostic| diagnostic.message.contains("dispatch::Stage>::apply")
+                        && diagnostic.message.contains("unresolved")
+                ),
+            "a dyn call its candidates resolve is not reported unresolved"
+        );
+
+        let first_helper = flow
+            .summaries
+            .iter()
+            .find(|summary| summary.function.ends_with("chains::sink_01"))
+            .expect("summary for the chain's first helper");
+        assert_eq!(
+            first_helper.param_to_sink.get("process-exec"),
+            Some(&vec![0])
+        );
+
+        // The same slices on a second run: with no candidate truncation left,
+        // no hash order can pick a different subset.
+        let again = run_driver(&options).expect("second driver run succeeds");
+        let slice_ids = |envelope: &DriverProtocolEnvelope| {
+            envelope
+                .payload
+                .data_flow
+                .as_ref()
+                .map(|flow| {
+                    flow.slices
+                        .iter()
+                        .map(|slice| slice.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(slice_ids(&envelope), slice_ids(&again));
     }
 
     #[test]
