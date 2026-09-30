@@ -144,7 +144,7 @@ test("sbomComponents adds the modules listed under metadata.component", () => {
   const module = (name) => ({
     type: "application",
     name,
-    "bom-ref": `pkg:maven/kosi/${name}@4.0.4?type=jar`,
+    "bom-ref": `pkg:maven/kosi/${name}@4.1.0?type=jar`,
   });
   const components = sbomComponents({
     metadata: {
@@ -214,7 +214,7 @@ test("generate-metadata records cdxrs and cdxui and merges their SBOMs", () => {
         path.join(toolDir, `${tool}-linux-amd64`),
         `${tool}-binary`,
       );
-      const rootRef = `pkg:cargo/${tool}@4.0.4`;
+      const rootRef = `pkg:cargo/${tool}@4.1.0`;
       fs.writeFileSync(
         path.join(toolDir, `sbom-${tool}-postbuild.cdx.json`),
         JSON.stringify({
@@ -250,7 +250,7 @@ test("generate-metadata records cdxrs and cdxui and merges their SBOMs", () => {
         entry.sbomFile,
         `plugins/${tool}/sbom-${tool}-postbuild.cdx.json`,
       );
-      assert.ok(!refs.includes(`pkg:cargo/${tool}@4.0.4`));
+      assert.ok(!refs.includes(`pkg:cargo/${tool}@4.1.0`));
       assert.deepEqual(
         aggregate.dependencies.find(
           (dependency) => dependency.ref === entry.component["bom-ref"],
