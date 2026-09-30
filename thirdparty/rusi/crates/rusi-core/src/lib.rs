@@ -872,7 +872,49 @@ pub fn analyze(options: AnalyzeOptionsInput) -> Result<Report> {
 
 /// Analyze a directory while allowing a compiler backend to contribute callgraph,
 /// data-flow, and diagnostic information through a stable intermediate payload.
+///
+/// The analysis runs on its own thread with [`analysis_stack_size`] bytes of
+/// stack, whatever thread calls this.
 pub fn analyze_with_optional_compiler(
+    options: AnalyzeOptionsInput,
+    compiler_payload: Option<CompilerBackendPayload>,
+) -> Result<Report> {
+    on_analysis_stack(move || analyze_on_this_thread(options, compiler_payload))?
+}
+
+/// Stack size, in bytes, for every thread that parses or analyzes source.
+///
+/// `syn` parses, and rusi lowers and evaluates, expressions recursively, so
+/// the stack decides how deeply nested an expression rusi can take. rustc runs
+/// its compiler on 16 MiB (rust-lang/rust#160535), and rusi does the same, so
+/// source that rustc accepts does not overflow rusi. The 2 MiB Rust gives a
+/// spawned thread by default gave out on a 1,000-deep expression, and the main
+/// thread's 8 MiB (1 MiB on Windows) was not much better. `RUST_MIN_STACK`
+/// overrides the size, as it does for rustc.
+pub fn analysis_stack_size() -> usize {
+    const DEFAULT_STACK_SIZE: usize = 16 * 1024 * 1024;
+    std::env::var("RUST_MIN_STACK")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|size| *size > 0)
+        .unwrap_or(DEFAULT_STACK_SIZE)
+}
+
+/// Runs `work` on a scoped thread with [`analysis_stack_size`] bytes of stack.
+fn on_analysis_stack<T: Send>(work: impl FnOnce() -> T + Send) -> Result<T> {
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("rusi-analysis".to_string())
+            .stack_size(analysis_stack_size())
+            .spawn_scoped(scope, work)
+            .context("failed to start the analysis thread")?;
+        Ok(handle
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+    })
+}
+
+fn analyze_on_this_thread(
     options: AnalyzeOptionsInput,
     compiler_payload: Option<CompilerBackendPayload>,
 ) -> Result<Report> {
@@ -1472,11 +1514,20 @@ where
 
     let chunk_size = items.len().div_ceil(workers);
     let mut flattened = Vec::with_capacity(items.len());
+    let stack_size = analysis_stack_size();
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for chunk in items.chunks(chunk_size) {
             let func_ref = &func;
-            handles.push(scope.spawn(move || chunk.iter().map(func_ref).collect::<Vec<U>>()));
+            handles.push(
+                std::thread::Builder::new()
+                    .name("rusi-worker".to_string())
+                    .stack_size(stack_size)
+                    .spawn_scoped(scope, move || {
+                        chunk.iter().map(func_ref).collect::<Vec<U>>()
+                    })
+                    .expect("failed to spawn an analysis worker"),
+            );
         }
         for handle in handles {
             flattened.extend(handle.join().expect("parallel worker panicked"));
@@ -16327,6 +16378,33 @@ impl ComponentSection for Holder {
         );
         assert_eq!(summary("fetch_01").source_returns, vec!["env".to_string()]);
         assert_eq!(summary("pass_01").param_to_return, vec![0]);
+    }
+
+    /// 800 levels of nesting, which rustc compiles on its default stack: the
+    /// parse workers used to run on Rust's 2 MiB thread default and abort.
+    #[test]
+    fn deep_nesting_app_is_analyzed_without_overflowing_the_stack() {
+        let report = analyze(AnalyzeOptionsInput {
+            dir: fixture_path("deep-nesting-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            ..AnalyzeOptionsInput::default()
+        })
+        .expect("analysis succeeds");
+        let data_flow = report.data_flow.expect("dataflow emitted");
+        let sources: BTreeSet<&str> = data_flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .map(|slice| slice.source_function.as_str())
+            .collect();
+        assert_eq!(
+            sources,
+            BTreeSet::from([
+                "deep_nesting_app::nested::run",
+                "deep_nesting_app::nested_twin::run"
+            ])
+        );
     }
 
     #[test]

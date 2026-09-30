@@ -112,6 +112,13 @@ path = "fixtures/fixpoint-flow-app"
 capabilities = ["fixpoint", "deep-call-chains", "loop-carried", "recursion", "dyn-dispatch"]
 expected_flows = "expected.jsonl"
 
+[[fixtures]]
+slug = "deep-nesting-app"
+tier = "fixtures"
+path = "fixtures/deep-nesting-app"
+capabilities = ["deep-nesting", "stack-depth"]
+expected_flows = "expected.jsonl"
+
 # ---------------------------------------------------------------------------
 # Small tier - cloned once, cached, run on every change.
 # ---------------------------------------------------------------------------
