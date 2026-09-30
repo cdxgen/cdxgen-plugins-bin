@@ -79,6 +79,16 @@ main() {
       fi
     done
 
+    # sourcekitten is macOS-only. It links the Swift runtime of the toolchain
+    # that built it and Linux Swift has no stable ABI, so a Linux build only
+    # runs next to that exact toolchain and cdxgen could never use it
+    # (cdxgen-plugins-bin#119).
+    if [[ "$package_name" != darwin-* && -d "$package_dir/plugins/sourcekitten" ]] &&
+      [[ -n "$(find "$package_dir/plugins/sourcekitten" -maxdepth 1 -type f ! -name '.*' -print -quit 2>/dev/null || true)" ]]; then
+      echo "Error: $package_name ships sourcekitten, which is built for macOS only" >&2
+      failures=$((failures + 1))
+    fi
+
     # A helper cdxgen cannot execute is as absent as a missing one. oras and
     # the download steps write files without an execute bit and npm packs the
     # mode it finds, which is how sourcekitten shipped 0644 in every macOS and

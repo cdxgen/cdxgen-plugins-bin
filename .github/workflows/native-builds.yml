@@ -66,14 +66,6 @@ jobs:
         rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15'
     - name: Setup swift
-      if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
-      run: |
-        curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
-        tar zxf swiftly-$(uname -m).tar.gz && \
-        ./swiftly init --quiet-shell-followup && \
-        . ~/.local/share/swiftly/env.sh && \
-        hash -r
-    - name: Setup swift
       if: matrix.os == 'macos-15'
       run: |
         curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg && \
@@ -86,8 +78,13 @@ jobs:
     - name: Build
       run: |
         npm install -g @cdxgen/cdxgen
-        bash thirdparty/sourcekitten/build.sh
-        ls -l thirdparty/sourcekitten/SourceKitten/.build/release
+        # sourcekitten ships for macOS only. Linux Swift has no stable ABI, so a
+        # prebuilt Linux binary only runs next to the toolchain that built it
+        # (cdxgen-plugins-bin#119); cdxgen's images build their own.
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          bash thirdparty/sourcekitten/build.sh
+          ls -l thirdparty/sourcekitten/SourceKitten/.build/release
+        fi
         echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
       env:
         GITHUB_USERNAME: ${{ github.actor }}
@@ -212,18 +209,12 @@ jobs:
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/
         cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 \
           --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
           ./trivy-cdxgen-linuxmusl-amd64:application/octet-stream \
           ./trivy-cdxgen-linuxmusl-amd64.sha256:text/plain \
-          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sourcekitten:application/octet-stream \
-          ./sourcekitten.sha256:text/plain
+          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json
       if: matrix.os == 'ubuntu-24.04'
     - name: Set up JDK 21
       uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
@@ -269,18 +260,12 @@ jobs:
         mkdir -p uploads
         cp thirdparty/trivy/build/trivy* uploads/
         cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
         cd uploads
         oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 \
           --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
           ./trivy-cdxgen-linuxmusl-arm64:application/octet-stream \
           ./trivy-cdxgen-linuxmusl-arm64.sha256:text/plain \
-          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sourcekitten:application/octet-stream \
-          ./sourcekitten.sha256:text/plain
+          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json
       if: matrix.os == 'ubuntu-24.04-arm'
     # There is no kosi darwin-amd64 native. GraalVM publishes no macOS x64
     # build for JDK 25 — neither Community (the graal-25.3.4.1 release has

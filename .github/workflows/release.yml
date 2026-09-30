@@ -235,12 +235,6 @@ jobs:
       with:
         go-version: '^1.27.0'
         cache: false
-    - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
-      with:
-        # Pinned to what the action already defaulted to (6.1.0): the action's
-        # default moves with its releases, and SourceKitten must not silently
-        # start building under a different toolchain.
-        swift-version: '6.1.0'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
     - name: Set up Docker Buildx

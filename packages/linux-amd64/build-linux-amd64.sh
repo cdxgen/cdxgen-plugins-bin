@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Remove old plugin directories to ensure a clean build
+# Remove old plugin directories to ensure a clean build. There is no
+# sourcekitten on Linux: SourceKitten links the Swift runtime of the
+# toolchain that built it, and Linux Swift has no stable ABI, so a prebuilt
+# binary only runs next to that exact toolchain (cdxgen-plugins-bin#119).
+# cdxgen's container images build it against their own Swift instead.
 rm -rf plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
-mkdir -p plugins/trivy plugins/osquery plugins/sourcekitten plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+mkdir -p plugins/trivy plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-oras pull ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 -o plugins/sourcekitten/
-# oras writes the files it pulls without an execute bit, and npm packs the
-# mode it finds.
-chmod +x plugins/sourcekitten/sourcekitten
 # kosi natives are staged into ../../plugins/kosi by build.sh, from
 # thirdparty/kosi/build - built there (test.yml's kosi_*_prebuild jobs) or
 # pulled from the ghcr cache (release.yml). This script no longer races a
@@ -18,9 +18,6 @@ chmod +x plugins/sourcekitten/sourcekitten
   echo "kosi-linux-amd64 missing from plugins/kosi; the caller must stage it first" >&2
   exit 1
 }
-sha256sum plugins/sourcekitten/sourcekitten > plugins/sourcekitten/sourcekitten.sha256
-rm -f plugins/sourcekitten/trivy-cdxgen-*
-ls -l plugins/sourcekitten/
 
 bash ../../scripts/thirdparty-downloads.sh install-osquery linux-amd64 plugins/osquery/osqueryi-linux-amd64
 upx -9 --lzma plugins/osquery/osqueryi-linux-amd64

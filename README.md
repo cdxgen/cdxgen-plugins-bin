@@ -68,9 +68,9 @@ A Swift source analysis tool built from [SourceKitten](https://github.com/jpsim/
 - Provides Swift source code parsing and semantic analysis
 - Enables cdxgen to discover Swift package dependencies through SourceKit
 - Extracts module and framework information from Swift projects
-- Supports both macOS and Linux environments
+- Ships for macOS only: Linux Swift has no stable ABI, so a prebuilt Linux binary cannot load the SourceKit of another toolchain ([docs/SOURCEKITTEN.md](docs/SOURCEKITTEN.md))
 
-**Supported platforms:** darwin-arm64, darwin-amd64, linux-amd64, linux-arm64
+**Supported platforms:** darwin-arm64, darwin-amd64
 
 ### dosai
 

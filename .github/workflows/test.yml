@@ -418,12 +418,6 @@ jobs:
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: '3.13'
-    - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a  # v2.4.0
-      with:
-        # Pinned to what the action already defaulted to (6.1.0): the action's
-        # default moves with its releases, and SourceKitten must not silently
-        # start building under a different toolchain.
-        swift-version: '6.1.0'
     - name: Set up QEMU
       uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
     - name: Set up Docker Buildx
