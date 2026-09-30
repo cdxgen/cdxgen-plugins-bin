@@ -189,7 +189,17 @@ struct NativeFileContext {
     module_path: Vec<String>,
 }
 
+/// Runs the compiler backend over `options.analysis_root`.
+///
+/// It runs on its own thread with [`rusi_core::analysis_stack_size`] bytes of
+/// stack, whatever thread calls it, because it parses every source file with
+/// `syn` to find native interop, and a deeply nested expression that rustc
+/// accepts overflowed the main thread's stack there.
 pub fn run_driver(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
+    rusi_core::on_analysis_stack(|| run_driver_on_this_thread(options))?
+}
+
+fn run_driver_on_this_thread(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
     let analysis_root = fs::canonicalize(&options.analysis_root).with_context(|| {
         format!(
             "failed to resolve compiler backend root {}",
@@ -2453,7 +2463,7 @@ fn span_key(span: Span) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -3245,6 +3255,45 @@ mod tests {
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
         }
+    }
+
+    /// 800 levels of nesting, which rustc compiles: the driver parses every
+    /// source file for native interop, and did so on the calling thread,
+    /// whose stack (2 MiB for a test, 8 MiB for `main`) gave out.
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_backend_takes_deeply_nested_expressions() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("deep-nesting-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+            return;
+        }
+        let flow = envelope.payload.data_flow.expect("dataflow emitted");
+        // Each flow is reported where the source is read and again in
+        // `main`, whose call carries it through the callee's summary.
+        let sources = flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .map(|slice| slice.source_function.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            sources,
+            BTreeSet::from([
+                "deep_nesting_app::main",
+                "deep_nesting_app::nested::run",
+                "deep_nesting_app::nested_twin::run"
+            ])
+        );
     }
 
     /// The compiler backend's fixpoints run to convergence: twelve-deep

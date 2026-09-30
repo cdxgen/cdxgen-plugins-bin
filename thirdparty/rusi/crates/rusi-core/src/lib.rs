@@ -901,7 +901,7 @@ pub fn analysis_stack_size() -> usize {
 }
 
 /// Runs `work` on a scoped thread with [`analysis_stack_size`] bytes of stack.
-fn on_analysis_stack<T: Send>(work: impl FnOnce() -> T + Send) -> Result<T> {
+pub fn on_analysis_stack<T: Send>(work: impl FnOnce() -> T + Send) -> Result<T> {
     std::thread::scope(|scope| {
         let handle = std::thread::Builder::new()
             .name("rusi-analysis".to_string())
