@@ -23,7 +23,7 @@ The customizations are intentionally minimal and focused: the wrapper exposes on
 
 ## sourcekitten
 
-SourceKitten binaries are built from [https://github.com/jpsim/SourceKitten](https://github.com/jpsim/SourceKitten). The build script downloads the release tarball, compiles with `swift build -c release`, and packages the resulting binary alongside a CycloneDX SBOM of the Swift dependencies.
+SourceKitten binaries are built from [https://github.com/jpsim/SourceKitten](https://github.com/jpsim/SourceKitten). The build script downloads the release tarball, compiles with `swift build -c release`, and packages the resulting binary alongside a CycloneDX SBOM of the Swift dependencies. It ships in the macOS packages only; see [../docs/SOURCEKITTEN.md](../docs/SOURCEKITTEN.md) for why there is no Linux build.
 
 ## trustinspector
 

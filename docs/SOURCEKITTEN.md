@@ -4,7 +4,7 @@ Swift projects declare dependencies in `Package.swift`, but knowing what the cod
 
 The binary is built from the pinned upstream release with `swift build -c release` by the script in `thirdparty/sourcekitten`. It is not forked. The packaging step also attaches a CycloneDX SBOM of the Swift dependencies used to build it.
 
-cdxgen invokes sourcekitten for Swift project scans when the binary is present. A custom build can be wired in with `SOURCEKITTEN_CMD`.
+cdxgen invokes sourcekitten for Swift evidence (`cdxgen -t swift --evidence`, `evinse -l swift`) when the binary is present. A custom build can be wired in with `SOURCEKITTEN_CMD`.
 
 ## What it gives cdxgen
 
@@ -23,7 +23,9 @@ sourcekitten syntax --file Sources/App/Main.swift
 
 ## Platforms
 
-darwin-arm64, darwin-amd64, linux-amd64, and linux-arm64. The macOS builds use Apple's SourceKit; the Linux builds use SourceKit-LSP's toolchain, which is why Linux coverage tracks the Swift versions the build image carries.
+darwin-arm64 and darwin-amd64 only. The macOS builds load SourceKit from Xcode or from an installed `.xctoolchain`, and macOS Swift has a stable ABI.
+
+There is no Linux build ([#119](https://github.com/cdxgen/cdxgen-plugins-bin/issues/119)). SourceKitten links the Swift runtime of the toolchain that built it, and Linux Swift has no stable ABI, so a prebuilt Linux binary only runs next to that exact toolchain. Elsewhere it either cannot find `libswiftCore.so` or crashes inside it. cdxgen's container images build sourcekitten against their own Swift toolchain instead. On other Linux hosts, build it from `thirdparty/sourcekitten` with the Swift toolchain you use for your projects and set `SOURCEKITTEN_CMD`. Without sourcekitten, cdxgen limits Swift evidence to import declarations.
 
 ## Limits
 

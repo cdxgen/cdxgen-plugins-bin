@@ -7,7 +7,7 @@ node ./scripts/check-versions.js
 
 rm -rf plugins/trivy plugins/osquery plugins/dosai plugins/sourcekitten
 rm -rf plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
-mkdir -p plugins/osquery plugins/dosai plugins/sourcekitten plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
+mkdir -p plugins/osquery plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
 for plug in trivy trustinspector golem rusi kosi cdxui cdxrs
 do

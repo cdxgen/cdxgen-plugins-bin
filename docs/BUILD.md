@@ -4,13 +4,13 @@ This page is the reference for the build system. For a guided walkthrough with e
 
 ## Prerequisites
 
-| Tool                     | Needed for                            |
-| ------------------------ | ------------------------------------- |
-| Go 1.27+                 | golem, trustinspector, trivy-cdxgen   |
-| Rust stable toolchain    | rusi, cdxui, cdxrs                    |
-| Swift 5.9+ (macOS/Linux) | sourcekitten                          |
-| Node.js 20+              | metadata generation and check scripts |
-| upx                      | optional compression in `build.sh`    |
+| Tool                  | Needed for                            |
+| --------------------- | ------------------------------------- |
+| Go 1.27+              | golem, trustinspector, trivy-cdxgen   |
+| Rust stable toolchain | rusi, cdxui, cdxrs                    |
+| Swift 5.9+ (macOS)    | sourcekitten (macOS packages only)    |
+| Node.js 20+           | metadata generation and check scripts |
+| upx                   | optional compression in `build.sh`    |
 
 ## Full local build
 

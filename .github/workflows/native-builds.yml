@@ -38,24 +38,12 @@ jobs:
       with:
         go-version: '^1.27.0'
         cache: false
-    - name: setup upx
-      run: |
-        bash ./scripts/thirdparty-downloads.sh install-upx linux-amd64 ./upx
-        sudo install -m 0755 ./upx /usr/local/bin/upx
-        rm -f ./upx
-      if: matrix.os == 'ubuntu-24.04'
     - name: Install Zig
       run: |
         bash ./scripts/thirdparty-downloads.sh install-zig linux-amd64 "$HOME/.local/zig"
         echo "$HOME/.local/zig" >> "$GITHUB_PATH"
         "$HOME/.local/zig/zig" version
       if: matrix.os == 'ubuntu-24.04'
-    - name: setup upx
-      run: |
-        bash ./scripts/thirdparty-downloads.sh install-upx linux-arm64 ./upx
-        sudo install -m 0755 ./upx /usr/local/bin/upx
-        rm -f ./upx
-      if: matrix.os == 'ubuntu-24.04-arm'
     - name: Setup Rust stable
       run: |
         if ! command -v rustup >/dev/null 2>&1; then
@@ -66,29 +54,28 @@ jobs:
         rustup toolchain install stable --profile minimal --component rust-src --component llvm-tools --component rustc-dev
       if: matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15'
     - name: Setup swift
-      if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
-      run: |
-        curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
-        tar zxf swiftly-$(uname -m).tar.gz && \
-        ./swiftly init --quiet-shell-followup && \
-        . ~/.local/share/swiftly/env.sh && \
-        hash -r
-    - name: Setup swift
       if: matrix.os == 'macos-15'
       run: |
-        curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg && \
-        installer -pkg swiftly.pkg -target CurrentUserHomeDirectory && \
-        ~/.swiftly/bin/swiftly init --quiet-shell-followup && \
-        . ~/.swiftly/env.sh && \
+        set -e
+        curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+        installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+        ~/.swiftly/bin/swiftly init --quiet-shell-followup
+        # shellcheck source=/dev/null
+        . ~/.swiftly/env.sh
         hash -r
     - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
     - run: oras version
     - name: Build
       run: |
         npm install -g @cdxgen/cdxgen
-        bash thirdparty/sourcekitten/build.sh
-        ls -l thirdparty/sourcekitten/SourceKitten/.build/release
-        echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
+        # sourcekitten ships for macOS only. Linux Swift has no stable ABI, so a
+        # prebuilt Linux binary only runs next to the toolchain that built it
+        # (cdxgen-plugins-bin#119); cdxgen's images build their own.
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          bash thirdparty/sourcekitten/build.sh
+          ls -l thirdparty/sourcekitten/SourceKitten/.build/release
+        fi
+        echo "$GITHUB_TOKEN" | oras login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
       env:
         GITHUB_USERNAME: ${{ github.actor }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,12 +125,12 @@ jobs:
         mkdir -p /tmp/zlibsrc
         tar xzf /tmp/zlib.tar.gz -C /tmp/zlibsrc --strip-components=1
         pushd /tmp/zlibsrc
-        objs=''
+        objs=()
         for src in adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback inffast inflate inftrees trees uncompr zutil; do
           musl-gcc -O2 -D_LARGEFILE64_SOURCE=1 -c "$src.c"
-          objs="$objs $src.o"
+          objs+=("$src.o")
         done
-        ar rc libz.a $objs
+        ar rc libz.a "${objs[@]}"
         mkdir -p "$HOME/musl-zlib/lib"
         cp libz.a "$HOME/musl-zlib/lib/"
         popd
@@ -198,33 +185,6 @@ jobs:
           ./kosi-portable.jar:application/java-archive \
           ./kosi-portable.jar.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    - name: Upload linux amd64
-      run: |
-        pushd thirdparty/trivy
-        make build/linuxmusl_amd64
-        sudo chown -R $USER:$USER build/
-        # The SBOM is pruned to the modules the binary's build info names,
-        # which UPX packing hides.
-        make sbom
-        upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-amd64
-        sha256sum ./build/trivy-cdxgen-linuxmusl-amd64 > ./build/trivy-cdxgen-linuxmusl-amd64.sha256
-        popd
-        mkdir -p uploads
-        cp thirdparty/trivy/build/trivy* uploads/
-        cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
-        cd uploads
-        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-amd64 \
-          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
-          ./trivy-cdxgen-linuxmusl-amd64:application/octet-stream \
-          ./trivy-cdxgen-linuxmusl-amd64.sha256:text/plain \
-          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sourcekitten:application/octet-stream \
-          ./sourcekitten.sha256:text/plain
-      if: matrix.os == 'ubuntu-24.04'
     - name: Set up JDK 21
       uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
@@ -255,33 +215,6 @@ jobs:
           ./kosi-linux-arm64:application/octet-stream \
           ./kosi-linux-arm64.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04-arm' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    - name: Upload linux arm64
-      run: |
-        pushd thirdparty/trivy
-        make build/linuxmusl_arm64
-        sudo chown -R $USER:$USER build/
-        # The SBOM is pruned to the modules the binary's build info names,
-        # which UPX packing hides.
-        make sbom
-        upx -9 --lzma ./build/trivy-cdxgen-linuxmusl-arm64
-        sha256sum ./build/trivy-cdxgen-linuxmusl-arm64 > ./build/trivy-cdxgen-linuxmusl-arm64.sha256
-        popd
-        mkdir -p uploads
-        cp thirdparty/trivy/build/trivy* uploads/
-        cp thirdparty/trivy/build/sbom-trivy-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sbom-sourcekitten-postbuild.cdx.json uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten uploads/
-        cp thirdparty/sourcekitten/SourceKitten/.build/release/sourcekitten.sha256 uploads/
-        cd uploads
-        oras push ghcr.io/cdxgen/cdxgen-plugins-bin:linux-arm64 \
-          --artifact-type application/vnd.cdxgen.plugins.platform-bundle.v1 \
-          ./trivy-cdxgen-linuxmusl-arm64:application/octet-stream \
-          ./trivy-cdxgen-linuxmusl-arm64.sha256:text/plain \
-          ./sbom-trivy-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sbom-sourcekitten-postbuild.cdx.json:application/vnd.cyclonedx+json \
-          ./sourcekitten:application/octet-stream \
-          ./sourcekitten.sha256:text/plain
-      if: matrix.os == 'ubuntu-24.04-arm'
     # There is no kosi darwin-amd64 native. GraalVM publishes no macOS x64
     # build for JDK 25 — neither Community (the graal-25.3.4.1 release has
     # linux-x64, linux-aarch64, macos-aarch64 and windows-x64 assets and
