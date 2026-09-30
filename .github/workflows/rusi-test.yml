@@ -62,17 +62,28 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # Pinned, so that neither a rustc-internals change nor a new clippy
+      # lint fails this job on its own; move it forward deliberately. It is
+      # the only nightly installed, and the driver's `auto` toolchain picks a
+      # lone dated nightly by its full name.
+      NIGHTLY: nightly-2026-08-21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Install nightly toolchain with rustc-dev and rust-src
-        # Pin a specific nightly here (for example nightly-2025-06-01) if a
-        # future rustc-internal API change breaks the wrapper build.
+      - name: Install nightly toolchain with rustc-dev, rust-src and clippy
         run: |
-          rustup toolchain install nightly --profile minimal \
+          rustup toolchain install "$NIGHTLY" --profile minimal \
             --component rustc-dev --component rust-src --component llvm-tools \
-            --no-self-update
-          rustup run nightly rustc --version
+            --component clippy --no-self-update
+          rustup run "$NIGHTLY" rustc --version
+      # The wrapper is outside the default members, so the other steps never
+      # lint or unit-test it. Its tests drive the MIR data-flow fixpoints on
+      # hand-built bodies and need no nested cargo, so they run first.
+      - name: cargo +nightly clippy (rustc-wrapper)
+        run: cargo "+$NIGHTLY" clippy --locked -p rusi-rustc-wrapper --all-targets -- -D warnings
+      - name: cargo +nightly test (rustc-wrapper)
+        run: cargo "+$NIGHTLY" test --locked -p rusi-rustc-wrapper
       - name: cargo +nightly test -- --ignored --test-threads=1
-        run: cargo +nightly test -- --ignored --test-threads=1
+        run: cargo "+$NIGHTLY" test -- --ignored --test-threads=1
