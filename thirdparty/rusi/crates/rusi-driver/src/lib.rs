@@ -600,15 +600,27 @@ fn toolchain_floor_diagnostic(
     })
 }
 
+/// The toolchain `auto` stands for: the rolling nightly when it is
+/// installed, else the newest dated nightly, else stable.
+///
+/// A dated nightly (`nightly-2026-08-21-<host>`) is returned by its full
+/// name, because `cargo +nightly` and `rustup run nightly` reach only the
+/// rolling one: a machine or CI job that installs just a pinned nightly would
+/// otherwise be sent to a toolchain it does not have.
 fn resolve_toolchain(requested: &str, available_toolchains: &[String]) -> String {
     if requested != "auto" {
         return requested.to_string();
     }
-    if available_toolchains
+    let (dated, rolling): (Vec<&String>, Vec<&String>) = available_toolchains
         .iter()
-        .any(|toolchain| toolchain.starts_with("nightly"))
-    {
+        .filter(|toolchain| toolchain.starts_with("nightly"))
+        .partition(|toolchain| is_dated_nightly(toolchain));
+    if !rolling.is_empty() {
         return "nightly".to_string();
+    }
+    // Dated names order by their date.
+    if let Some(newest) = dated.into_iter().max() {
+        return newest.clone();
     }
     if available_toolchains
         .iter()
@@ -617,6 +629,21 @@ fn resolve_toolchain(requested: &str, available_toolchains: &[String]) -> String
         return "stable".to_string();
     }
     "stable".to_string()
+}
+
+/// Whether `toolchain` names a nightly of a given date, `nightly-YYYY-MM-DD`
+/// with or without a host triple after it.
+fn is_dated_nightly(toolchain: &str) -> bool {
+    let Some(date) = toolchain
+        .strip_prefix("nightly-")
+        .and_then(|rest| rest.get(..10))
+    else {
+        return false;
+    };
+    date.bytes().enumerate().all(|(index, byte)| match index {
+        4 | 7 => byte == b'-',
+        _ => byte.is_ascii_digit(),
+    })
 }
 
 fn capture_toolchain_rustc_version(toolchain: &str, rustup_available: bool) -> String {
@@ -4019,8 +4046,40 @@ mod toolchain_gate_tests {
 
     use super::{
         BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
-        format_rustc_release, parse_rustc_release, toolchain_floor_diagnostic,
+        format_rustc_release, parse_rustc_release, resolve_toolchain, toolchain_floor_diagnostic,
     };
+
+    /// `rustup toolchain list` names, the way the driver reads them.
+    fn names(toolchains: &[&str]) -> Vec<String> {
+        toolchains.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn auto_names_a_pinned_nightly_in_full() {
+        let host = "x86_64-unknown-linux-gnu";
+        let pinned = format!("nightly-2026-08-21-{host}");
+        let older = format!("nightly-2026-07-01-{host}");
+        let stable = format!("stable-{host}");
+        let rolling = format!("nightly-{host}");
+        assert_eq!(
+            resolve_toolchain("auto", &names(&[&stable, &older, &pinned])),
+            pinned
+        );
+        assert_eq!(
+            resolve_toolchain("auto", &names(&["nightly-2026-08-21"])),
+            "nightly-2026-08-21"
+        );
+        assert_eq!(
+            resolve_toolchain("auto", &names(&[&stable, &pinned, &rolling])),
+            "nightly"
+        );
+        assert_eq!(resolve_toolchain("auto", &names(&[&stable])), "stable");
+        assert_eq!(resolve_toolchain("auto", &[]), "stable");
+        assert_eq!(
+            resolve_toolchain("nightly-2026-08-21", &names(&[&rolling])),
+            "nightly-2026-08-21"
+        );
+    }
 
     /// Verbose `rustc -Vv` output, as the driver actually captures it.
     const VERBOSE_VERSION: &str = "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 21.1.4";

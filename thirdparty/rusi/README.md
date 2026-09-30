@@ -96,7 +96,7 @@ This backend is higher fidelity, but it runs Cargo/rustc for the target reposito
 
 `--toolchain` selects the Rust toolchain used for compiler-backed analysis. It is only meaningful with `--backend compiler`.
 
-- `--toolchain auto` is the default. Rusi asks `rustup` for installed toolchains, prefers a nightly toolchain when one is available, and otherwise falls back to stable capability checks.
+- `--toolchain auto` is the default. Rusi asks `rustup` for installed toolchains and prefers the rolling nightly when it is installed, else the newest dated nightly, named in full (`nightly-2026-08-21-x86_64-unknown-linux-gnu`) because `cargo +nightly` reaches only the rolling one; otherwise it falls back to stable capability checks.
 - `--toolchain nightly` runs the compiler backend through `cargo +nightly ...`.
 - A fully named toolchain such as `--toolchain nightly-2026-06-01` or `--toolchain stable` is passed through to Cargo/rustup in the same way.
 
