@@ -10,9 +10,14 @@ extern crate rustc_span;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
+use rusi_schema::fixpoint::{
+    Dependents, MinRankWorklist, TrackedReads, callee_first_order, join_map, join_set,
+    weak_topological_order,
+};
 use rusi_schema::{
     CallGraph, CallGraphEdge, CallGraphNode, CompilerEvidence, CryptoComponent, CryptoEvidence,
     CryptoFinding, CryptoLibrary, CryptoMaterial, DataFlowEdge, DataFlowEvidence,
@@ -35,6 +40,7 @@ use rustc_middle::mir::{
     StatementKind, TerminatorKind, UnwindAction,
 };
 use rustc_middle::mono::MonoItem;
+use rustc_middle::ty::print::with_crate_prefix;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
 
@@ -94,10 +100,6 @@ impl<'tcx> FnDefArgs<'tcx> for ty::Binder<'tcx, ty::GenericArgsRef<'tcx>> {
         self.no_bound_vars()
     }
 }
-
-const MAX_DATAFLOW_FIXPOINT_ITERS: usize = 64;
-const MAX_DATAFLOW_CANDIDATE_TARGETS: usize = 32;
-const MAX_BARE_METHOD_CANDIDATES: usize = 8;
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -221,7 +223,12 @@ fn collect_and_write_artifact(
 
 #[derive(Debug, Default)]
 struct EmbeddedCollector {
+    /// rustc's name for the crate being compiled, which tells a package's
+    /// targets apart in ids.
     crate_name: String,
+    /// The package's name as a path segment (see [`local_package`]), which
+    /// every local path and every `package_path` is spelled from.
+    package: String,
     analysis_root: PathBuf,
     debug: bool,
     files: BTreeMap<String, FileEvidence>,
@@ -233,7 +240,7 @@ struct EmbeddedCollector {
     diagnostics: Vec<Diagnostic>,
     function_decls: HashMap<LocalDefId, Declaration>,
     function_ids: HashMap<LocalDefId, String>,
-    callsites: HashMap<(LocalDefId, String), ResolvedCall>,
+    callsites: HashMap<CallsiteKey, ResolvedCall>,
     hir_calls: Vec<HirCallRecord>,
     functions: Vec<MirFunction>,
 }
@@ -242,6 +249,7 @@ impl EmbeddedCollector {
     fn collect(tcx: TyCtxt<'_>, analysis_root: &Path, debug: bool) -> Result<CompilerEvidence> {
         let mut collector = Self {
             crate_name: tcx.crate_name(LOCAL_CRATE).to_string(),
+            package: init_local_package(tcx).to_string(),
             analysis_root: analysis_root.to_path_buf(),
             debug,
             ..Self::default()
@@ -468,7 +476,7 @@ impl EmbeddedCollector {
             let mut visitor = BodyVisitor {
                 tcx,
                 analysis_root: &self.analysis_root,
-                crate_name: &self.crate_name,
+                package: &self.package,
                 caller: owner,
                 caller_decl: &declaration,
                 typeck,
@@ -513,16 +521,21 @@ impl EmbeddedCollector {
             let callsites = self
                 .callsites
                 .iter()
-                .filter(|((call_owner, _), _)| *call_owner == owner)
-                .map(|((_, key), value)| (key.clone(), value.clone()))
+                .filter(|((call_owner, _, _), _)| *call_owner == owner)
+                .map(|((_, span, callee), value)| ((span.clone(), *callee), value.clone()))
                 .collect::<HashMap<_, _>>();
+            let resolutions = CallResolutions {
+                callsites,
+                by_name: &local_resolutions,
+                closures: &closure_candidates,
+                function_ids: &self.function_ids,
+            };
             self.functions.push(MirFunction::from_mir(
-                &self.crate_name,
+                tcx,
+                &self.package,
                 declaration,
                 body,
-                callsites,
-                &local_resolutions,
-                &closure_candidates,
+                &resolutions,
             ));
         }
         Ok(())
@@ -600,7 +613,7 @@ impl EmbeddedCollector {
                     if callee_def_id == *callee_def {
                         continue;
                     }
-                    let symbol = canonical_call_symbol(&tcx.def_path_str(*callee_def));
+                    let symbol = canonical_call_symbol(&def_path(tcx, *callee_def));
                     let bucket = resolved.entry((owner, symbol)).or_default();
                     if !bucket.contains(&callee_def_id) {
                         bucket.push(callee_def_id);
@@ -610,7 +623,7 @@ impl EmbeddedCollector {
         }
 
         for ((owner, symbol), mut def_ids) in resolved {
-            def_ids.sort_by_key(|def_id| tcx.def_path_str(*def_id));
+            def_ids.sort_by_key(|def_id| def_path(tcx, *def_id));
             let mut target_ids = Vec::new();
             let mut target_names = Vec::new();
             for def_id in &def_ids {
@@ -631,9 +644,10 @@ impl EmbeddedCollector {
             // devirtualized concrete impls the emitted targets; any duplicate or
             // superseded MIR-side edge is then dropped by `reconcile_edges`. The
             // MIR-side `callsites` map is deliberately NOT rewritten: it drives
-            // the interprocedural dataflow summaries, and forcing concrete
-            // targets onto ubiquitous trait methods (`clone`, `borrow`) there
-            // would disturb passthrough/summary matching.
+            // the interprocedural dataflow summaries, and the union over every
+            // instantiation would give a generic body's `clone` or `borrow`
+            // every impl at once. MIR settles a trait call's impl per body
+            // instead, from the body's own types (`trait_call_local_impl`).
             for record in &mut self.hir_calls {
                 if record.source_id != source_id {
                     continue;
@@ -693,11 +707,13 @@ impl EmbeddedCollector {
                 semantic_tags: semantic_tags_for_call(
                     &declaration.qualified_name,
                     std::slice::from_ref(&declaration.qualified_name),
+                    None,
                     "static",
                     declaration.receiver.as_deref(),
                 ),
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             };
             if !ambiguous.contains(&declaration.name) {
                 index
@@ -749,6 +765,7 @@ impl EmbeddedCollector {
                 semantic_tags,
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             });
         }
         Ok(index)
@@ -795,7 +812,7 @@ impl EmbeddedCollector {
         let import = ImportUsage {
             path: path.clone(),
             alias,
-            package_path: self.crate_name.clone(),
+            package_path: self.package.clone(),
             purl: String::new(),
             position: position_from_span(tcx, &self.analysis_root, span),
         };
@@ -827,7 +844,7 @@ impl EmbeddedCollector {
         receiver: Option<String>,
     ) -> Result<Declaration> {
         let def_id = owner.to_def_id();
-        let qualified_name = tcx.def_path_str(def_id);
+        let qualified_name = def_path(tcx, def_id);
         let file_path = file_path_from_span(tcx, &self.analysis_root, tcx.def_span(def_id));
         let name = tcx
             .opt_item_name(def_id)
@@ -841,7 +858,7 @@ impl EmbeddedCollector {
             canonical_name: rusi_schema::canonical_name(&qualified_name),
             qualified_name,
             kind: kind.to_string(),
-            package_path: self.crate_name.clone(),
+            package_path: self.package.clone(),
             purl: String::new(),
             file_path: file_path.clone(),
             signature: declaration_signature(tcx, def_id),
@@ -904,8 +921,8 @@ impl EmbeddedCollector {
             .entry(path.to_string())
             .or_insert_with(|| FileEvidence {
                 path: path.to_string(),
-                package_name: self.crate_name.clone(),
-                package_path: self.crate_name.clone(),
+                package_name: self.package.clone(),
+                package_path: self.package.clone(),
                 purl: String::new(),
                 imports: Vec::new(),
                 declarations: Vec::new(),
@@ -919,11 +936,11 @@ impl EmbeddedCollector {
 struct BodyVisitor<'tcx, 'a> {
     tcx: TyCtxt<'tcx>,
     analysis_root: &'a Path,
-    crate_name: &'a str,
+    package: &'a str,
     caller: LocalDefId,
     caller_decl: &'a Declaration,
     typeck: &'tcx ty::TypeckResults<'tcx>,
-    callsites: &'a mut HashMap<(LocalDefId, String), ResolvedCall>,
+    callsites: &'a mut HashMap<CallsiteKey, ResolvedCall>,
     hir_calls: &'a mut Vec<HirCallRecord>,
     usages: &'a mut Vec<LibraryUsage>,
     security_signals: &'a mut Vec<SecuritySignal>,
@@ -931,6 +948,16 @@ struct BodyVisitor<'tcx, 'a> {
     crypto: &'a mut CryptoEvidence,
     function_ids: &'a HashMap<LocalDefId, String>,
 }
+
+/// A call as both HIR and MIR name it, so that MIR's data flow can take the
+/// resolution typeck gave the call: the body it is in, the span of the whole
+/// call (MIR's `fn_span`: `f(x)`, or `m(x)` in `r.m(x)`) and the function it
+/// calls. Desugaring can put several calls at one span, as `for` does with
+/// `into_iter` and `next`, and a proc macro puts every call it generates at
+/// its own invocation's span, so a span alone once handed each call in a
+/// `#[derive]` the resolution of whichever call there was recorded last. Calls
+/// of one function at one span take the first one's resolution.
+type CallsiteKey = (LocalDefId, String, DefId);
 
 #[derive(Debug, Clone)]
 struct HirCallRecord {
@@ -963,13 +990,14 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
         match expr.kind {
-            ExprKind::MethodCall(segment, receiver, _args, _) => {
+            ExprKind::MethodCall(segment, receiver, _args, fn_span) => {
                 let def_id = self.typeck.type_dependent_def_id(expr.hir_id);
                 let receiver_ty = self.typeck.expr_ty(receiver);
                 let resolved =
                     resolve_method_call(self.tcx, receiver_ty, def_id, self.function_ids);
                 self.record_call(
                     segment.ident.span,
+                    def_id.map(|callee| (fn_span, callee)),
                     "method-call",
                     resolved.unwrap_or_else(|| {
                         ResolvedCall::unresolved(segment.ident.as_str().to_string())
@@ -980,6 +1008,7 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
                 let resolved = resolve_expr_call(self.tcx, self.typeck, func, self.function_ids);
                 self.record_call(
                     func.span,
+                    hir_call_callee(self.typeck, func).map(|callee| (expr.span, callee)),
                     "call",
                     resolved.unwrap_or_else(|| {
                         ResolvedCall::unresolved(
@@ -1051,7 +1080,16 @@ impl<'tcx> Visitor<'tcx> for BodyVisitor<'tcx, '_> {
 }
 
 impl<'tcx> BodyVisitor<'tcx, '_> {
-    fn record_call(&mut self, span: Span, usage_kind: &str, resolved: ResolvedCall) {
+    /// Records the call at `span`. `callsite` is the whole call's span and
+    /// the function it calls, when typeck knows one, which is what MIR's
+    /// data flow finds the resolution by (see [`CallsiteKey`]).
+    fn record_call(
+        &mut self,
+        span: Span,
+        callsite: Option<(Span, DefId)>,
+        usage_kind: &str,
+        resolved: ResolvedCall,
+    ) {
         let file_path = file_path_from_span(self.tcx, self.analysis_root, span);
         let position = position_from_span(self.tcx, self.analysis_root, span);
         let mut properties = IndexMap::new();
@@ -1104,7 +1142,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             ),
             kind: usage_kind.to_string(),
             name: resolved.callee_display.clone(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             purl: String::new(),
             enclosing_declaration: Some(self.caller_decl.id.clone()),
             position: position.clone(),
@@ -1117,8 +1155,11 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
         if !file.usages.iter().any(|existing| existing.id == usage.id) {
             file.usages.push(usage);
         }
-        self.callsites
-            .insert((self.caller, span_key_simple(span)), resolved.clone());
+        if let Some((call_span, callee)) = callsite {
+            self.callsites
+                .entry((self.caller, span_key_simple(call_span), callee))
+                .or_insert_with(|| resolved.clone());
+        }
         self.hir_calls.push(HirCallRecord {
             source_id: self.caller_decl.id.clone(),
             file_path: file_path.clone(),
@@ -1149,7 +1190,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             severity: "medium".to_string(),
             confidence: "high".to_string(),
             description: description.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             purl: String::new(),
             file_path: file_path.clone(),
             position: position_from_span(self.tcx, self.analysis_root, span),
@@ -1178,7 +1219,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             id: stable_id("crypto-library", &[rule.provider, &file_path]),
             path: rule.provider.to_string(),
             family: rule.kind.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             position: position.clone(),
             properties: IndexMap::new(),
@@ -1201,7 +1242,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             provider: rule.provider.to_string(),
             operation: rule.operation.to_string(),
             symbol: rule.symbol.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             position: position.clone(),
             properties: IndexMap::new(),
@@ -1224,7 +1265,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
                 severity: severity.to_string(),
                 confidence: "high".to_string(),
                 summary: summary.to_string(),
-                package_path: self.crate_name.to_string(),
+                package_path: self.package.to_string(),
                 file_path: file_path.clone(),
                 position,
                 properties: IndexMap::new(),
@@ -1292,7 +1333,7 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             ),
             kind: kind.to_string(),
             name: name.to_string(),
-            package_path: self.crate_name.to_string(),
+            package_path: self.package.to_string(),
             file_path: file_path.clone(),
             function: self.caller_decl.qualified_name.clone(),
             confidence: confidence.to_string(),
@@ -1323,8 +1364,8 @@ impl<'tcx> BodyVisitor<'tcx, '_> {
             .entry(path.to_string())
             .or_insert_with(|| FileEvidence {
                 path: path.to_string(),
-                package_name: self.crate_name.to_string(),
-                package_path: self.crate_name.to_string(),
+                package_name: self.package.to_string(),
+                package_path: self.package.to_string(),
                 purl: String::new(),
                 imports: Vec::new(),
                 declarations: Vec::new(),
@@ -1352,6 +1393,8 @@ struct ResolvedCall {
     semantic_tags: Vec<String>,
     async_boundary: bool,
     task_boundary: bool,
+    /// See [`MirCall::native_symbol`].
+    native_symbol: Option<String>,
 }
 
 impl ResolvedCall {
@@ -1369,6 +1412,30 @@ impl ResolvedCall {
             semantic_tags: Vec::new(),
             async_boundary: false,
             task_boundary: false,
+            native_symbol: None,
+        }
+    }
+
+    /// A call into a function declared in an `extern` block. It has no body
+    /// to resolve to, and its models are looked up by the symbol it links
+    /// against.
+    fn foreign(name: String, native_symbol: String) -> Self {
+        let call_type = if modeled_native_boundary(&native_symbol) {
+            "native"
+        } else {
+            "unresolved"
+        };
+        Self {
+            call_type: call_type.to_string(),
+            semantic_tags: semantic_tags_for_call(
+                &name,
+                &[],
+                Some(&native_symbol),
+                call_type,
+                None,
+            ),
+            native_symbol: Some(native_symbol),
+            ..Self::unresolved(name)
         }
     }
 }
@@ -1388,14 +1455,26 @@ struct MirFunction {
     blocks: Vec<MirBlock>,
 }
 
+/// What MIR lowering resolves one body's calls against.
+struct CallResolutions<'a> {
+    /// typeck's resolution of each call in the body, by the call's span and
+    /// callee (see [`CallsiteKey`]).
+    callsites: HashMap<(String, DefId), ResolvedCall>,
+    /// Local functions by name, for the calls typeck never saw, such as the
+    /// `Deref::deref` of an auto-deref.
+    by_name: &'a HashMap<String, ResolvedCall>,
+    /// Closures by arity, for a call of a callable held in a local.
+    closures: &'a HashMap<usize, Vec<ResolvedCall>>,
+    function_ids: &'a HashMap<LocalDefId, String>,
+}
+
 impl MirFunction {
-    fn from_mir(
-        crate_name: &str,
+    fn from_mir<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        package: &str,
         declaration: Declaration,
-        body: &MirBody<'_>,
-        callsites: HashMap<String, ResolvedCall>,
-        local_resolutions: &HashMap<String, ResolvedCall>,
-        closure_candidates: &HashMap<usize, Vec<ResolvedCall>>,
+        body: &MirBody<'tcx>,
+        resolutions: &CallResolutions<'_>,
     ) -> Self {
         let debug_names = debug_local_names(body);
         let param_names = (1..=body.arg_count)
@@ -1412,24 +1491,14 @@ impl MirFunction {
         let blocks = body
             .basic_blocks
             .iter_enumerated()
-            .map(|(bb, data)| {
-                MirBlock::from_block(
-                    body,
-                    &debug_names,
-                    bb,
-                    data,
-                    &callsites,
-                    local_resolutions,
-                    closure_candidates,
-                )
-            })
+            .map(|(bb, data)| MirBlock::from_block(tcx, body, &debug_names, bb, data, resolutions))
             .collect::<Vec<_>>();
         Self {
             id: declaration.id.clone(),
             name: declaration.name.clone(),
             qualified_name: declaration.qualified_name,
             kind: declaration.kind,
-            package_path: crate_name.to_string(),
+            package_path: package.to_string(),
             file_path: declaration.file_path,
             position: declaration.position,
             param_names,
@@ -1449,14 +1518,13 @@ struct MirBlock {
 }
 
 impl MirBlock {
-    fn from_block(
-        body: &MirBody<'_>,
+    fn from_block<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        body: &MirBody<'tcx>,
         debug_names: &HashMap<Local, String>,
         bb: BasicBlock,
-        data: &mir::BasicBlockData<'_>,
-        callsites: &HashMap<String, ResolvedCall>,
-        local_resolutions: &HashMap<String, ResolvedCall>,
-        closure_candidates: &HashMap<usize, Vec<ResolvedCall>>,
+        data: &mir::BasicBlockData<'tcx>,
+        resolutions: &CallResolutions<'_>,
     ) -> Self {
         let mut ops = Vec::new();
         for statement in &data.statements {
@@ -1531,26 +1599,46 @@ impl MirBlock {
                     let unresolved_display = operand_display(func, body);
                     let normalized_unresolved = normalize_symbol(&unresolved_display);
                     let normalized_last = normalize_symbol(last_segment(&unresolved_display));
-                    let resolved = callsites
-                        .get(&span_key_simple(*fn_span))
-                        .cloned()
-                        .or_else(|| local_resolutions.get(&unresolved_display).cloned())
-                        .or_else(|| local_resolutions.get(&normalized_unresolved).cloned())
-                        .or_else(|| {
-                            local_resolutions
-                                .get(last_segment(&unresolved_display))
+                    // typeck's resolution of this very call comes first. A
+                    // foreign callee is known from the call itself, and no
+                    // name lookup may take it for a Rust function.
+                    let by_name = resolutions.by_name;
+                    let mut resolved = func
+                        .const_fn_def()
+                        .and_then(|(callee, _)| {
+                            resolutions
+                                .callsites
+                                .get(&(span_key_simple(*fn_span), callee))
                                 .cloned()
                         })
-                        .or_else(|| local_resolutions.get(&normalized_last).cloned())
+                        .or_else(|| {
+                            operand_foreign_symbol(tcx, func).map(|symbol| {
+                                ResolvedCall::foreign(unresolved_display.clone(), symbol)
+                            })
+                        })
+                        .or_else(|| by_name.get(&unresolved_display).cloned())
+                        .or_else(|| by_name.get(&normalized_unresolved).cloned())
+                        .or_else(|| by_name.get(last_segment(&unresolved_display)).cloned())
+                        .or_else(|| by_name.get(&normalized_last).cloned())
                         .or_else(|| {
                             callable_candidate_resolution(
                                 &unresolved_display,
                                 args.len(),
-                                closure_candidates,
+                                resolutions.closures,
                             )
                         })
-                        .unwrap_or_else(|| ResolvedCall::unresolved(unresolved_display));
-                    ops.push(MirOp::Call(MirCall {
+                        .unwrap_or_else(|| ResolvedCall::unresolved(unresolved_display.clone()));
+                    // typeck names the trait's method for `Self::m(..)` in an
+                    // impl or `value.clone()` on a local type; the body's own
+                    // types settle which impl that is.
+                    if let Some(target) = trait_call_local_impl(tcx, body, func)
+                        && let Some(id) = resolutions.function_ids.get(&target)
+                    {
+                        resolved.target_ids = vec![id.clone()];
+                        resolved.target_names = vec![def_path(tcx, target.to_def_id())];
+                        resolved.dispatch_confidence = "high".to_string();
+                    }
+                    ops.push(MirOp::Call(Box::new(MirCall {
                         dest: place_to_path(debug_names, *destination),
                         dest_type: Some(body.local_decls[destination.local].ty.to_string()),
                         callee_display: resolved.callee_display,
@@ -1565,11 +1653,13 @@ impl MirBlock {
                         semantic_tags: resolved.semantic_tags,
                         async_boundary: resolved.async_boundary,
                         task_boundary: resolved.task_boundary,
+                        native_symbol: resolved.native_symbol,
+                        operand_display: unresolved_display,
                         args: args
                             .iter()
                             .map(|arg| CallArg::from_operand(body, debug_names, arg.node.clone()))
                             .collect(),
-                    }));
+                    })));
                     if let Some(target) = target {
                         successors.push(label_for(*target));
                     }
@@ -1631,6 +1721,7 @@ fn callable_candidate_resolution(
         semantic_tags,
         async_boundary: false,
         task_boundary: false,
+        native_symbol: None,
     })
 }
 
@@ -1638,7 +1729,7 @@ fn callable_candidate_resolution(
 enum MirOp {
     Assign(AssignAction),
     Kill(PlacePath),
-    Call(MirCall),
+    Call(Box<MirCall>),
 }
 
 #[derive(Debug, Clone)]
@@ -1737,7 +1828,29 @@ struct MirCall {
     semantic_tags: Vec<String>,
     async_boundary: bool,
     task_boundary: bool,
+    /// The symbol a foreign function links against: `puts` for a call to
+    /// `pkg::puts` declared in an `extern` block, or the name its
+    /// `#[link_name]` gives. The native models name C functions this way, and
+    /// no Rust path is one, so only this name matches them. `None` for a Rust
+    /// function.
+    native_symbol: Option<String>,
+    /// The callee as MIR prints it, with this call's generic arguments:
+    /// `<Hmac<Sha256> as KeyInit>::new_from_slice` where typeck names only
+    /// the trait's method, `KeyInit::new_from_slice`. `callee_display` is
+    /// typeck's name whenever the call has a HIR resolution, and a model may
+    /// name either.
+    operand_display: String,
     args: Vec<CallArg>,
+}
+
+impl MirCall {
+    /// The names this call's flow models are looked up by.
+    fn model_symbols(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.callee_display.as_str())
+            .chain(std::iter::once(self.operand_display.as_str()))
+            .chain(self.target_names.iter().map(String::as_str))
+            .chain(self.native_symbol.as_deref())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1918,10 +2031,59 @@ fn operand_places(
 
 fn operand_display(operand: &Operand<'_>, _body: &MirBody<'_>) -> String {
     match operand {
-        Operand::Constant(constant) => format!("{:?}", constant),
+        // Spelled the way `def_path` names the function it calls, so a local
+        // callee reads the same here as in the declarations it is looked up
+        // among.
+        Operand::Constant(constant) => spell_local_paths(
+            &with_crate_prefix!(format!("{constant:?}")),
+            local_package(),
+        ),
         Operand::Copy(place) | Operand::Move(place) => format!("{:?}", place),
         Operand::RuntimeChecks(_) => "runtime-checks".to_string(),
     }
+}
+
+/// The function a HIR call expression calls, as MIR's call terminator names
+/// it. A call of a closure or a fn pointer held in a local has none: MIR calls
+/// `Fn::call` or the pointer instead.
+fn hir_call_callee(typeck: &ty::TypeckResults<'_>, func: &Expr<'_>) -> Option<DefId> {
+    match func.kind {
+        ExprKind::Path(qpath) => typeck.qpath_res(&qpath, func.hir_id).opt_def_id(),
+        _ => match typeck.expr_ty(func).kind() {
+            ty::FnDef(def_id, _) => Some(*def_id),
+            _ => None,
+        },
+    }
+}
+
+/// The symbol a call's callee links against, when the callee is a function
+/// declared in an `extern` block (see [`foreign_link_symbol`]).
+fn operand_foreign_symbol(tcx: TyCtxt<'_>, operand: &Operand<'_>) -> Option<String> {
+    let (def_id, _) = operand.const_fn_def()?;
+    foreign_link_symbol(tcx, def_id)
+}
+
+/// The local impl method a call of a trait method reaches when the calling
+/// body's types settle the impl, the way `collect_mono_devirtualization`
+/// settles it for each instantiation of a generic body. A call whose `Self`
+/// is still generic, or a `dyn` one, settles none.
+fn trait_call_local_impl<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &MirBody<'tcx>,
+    func: &Operand<'tcx>,
+) -> Option<LocalDefId> {
+    let ty::TyKind::FnDef(callee, args) = func.ty(&body.local_decls, tcx).kind() else {
+        return None;
+    };
+    tcx.opt_associated_item(*callee)?.trait_container(tcx)?;
+    let instance =
+        ty::Instance::try_resolve(tcx, body.typing_env(tcx), *callee, args.fn_def_args()?)
+            .ok()??;
+    let target = instance.def_id();
+    if target == *callee {
+        return None;
+    }
+    target.as_local()
 }
 
 fn push_unwind_successor(unwind: &UnwindAction, successors: &mut Vec<String>) {
@@ -1980,6 +2142,288 @@ impl FunctionSummary {
             specialization_key: specialization_key_for_function(function),
             ..Self::default()
         }
+    }
+
+    /// Unions `other` into this summary and reports whether anything was
+    /// added. The summary fixpoint only ever joins, so a summary grows until
+    /// nothing new is learned and the iteration ends by itself.
+    fn join(&mut self, other: Self) -> bool {
+        let mut changed = false;
+        changed |= join_set(
+            &mut self.returns_source_categories,
+            other.returns_source_categories,
+        );
+        changed |= join_set(
+            &mut self.observed_source_categories,
+            other.observed_source_categories,
+        );
+        changed |= join_set(&mut self.param_to_return, other.param_to_return);
+        changed |= join_map(&mut self.param_to_sink, other.param_to_sink);
+        changed |= join_map(&mut self.source_to_sink, other.source_to_sink);
+        changed |= join_map(&mut self.param_to_field_write, other.param_to_field_write);
+        changed |= join_set(&mut self.field_to_return, other.field_to_return);
+        changed |= join_set(&mut self.effect_shapes, other.effect_shapes);
+        changed |= join_set(&mut self.semantic_tags, other.semantic_tags);
+        if self.receiver_type.is_none() && other.receiver_type.is_some() {
+            self.receiver_type = other.receiver_type;
+            changed = true;
+        }
+        if self.specialization_key.is_empty() && !other.specialization_key.is_empty() {
+            self.specialization_key = other.specialization_key;
+            changed = true;
+        }
+        changed
+    }
+}
+
+/// What the data-flow passes consult besides the summaries, built once per
+/// crate so that no pass rescans every function for every call it meets.
+struct FlowContext<'a> {
+    patterns: &'a DataFlowPatternSet,
+    local_ids: &'a HashSet<String>,
+    function_map: &'a HashMap<String, &'a MirFunction>,
+    /// Trait impl methods by `(trait's last path segment, method name)`, in
+    /// id order.
+    trait_impls: HashMap<(String, String), Vec<String>>,
+    /// Trait impl methods of any trait by method name, in id order.
+    impl_methods: HashMap<String, Vec<String>>,
+    /// Closure and async bodies nested anywhere under a function, keyed by
+    /// the enclosing function's qualified name, in id order.
+    nested_bodies: HashMap<String, Vec<String>>,
+    /// Each function's control-flow graph, by function id.
+    block_graphs: HashMap<String, BlockGraph>,
+    /// What every call in the crate's bodies amounts to, by function id,
+    /// then block and operation index (see [`FlowContext::call_facts`]).
+    call_facts: HashMap<String, Vec<Vec<Option<CallFacts>>>>,
+}
+
+/// What the data-flow passes derive from a call on its own, whatever state
+/// it is reached in. None of it changes between visits, so it is worked out
+/// once per call when the context is built rather than on every trip through
+/// the fixpoints; rustc hoists loop-invariant work out of its hot paths the
+/// same way (rust-lang/rust#160605).
+struct CallFacts {
+    source_category: Option<String>,
+    sinks: Vec<(String, Vec<usize>)>,
+    source_arguments: Vec<(String, Vec<usize>)>,
+    effect_shape: String,
+    model_tags: BTreeSet<&'static str>,
+    /// A modeled or conventionally named passthrough (`clone`, `unwrap`).
+    passthrough: bool,
+    /// Passes data through by its semantic tags (a combinator, a callable).
+    semantic_passthrough: bool,
+    /// The local functions the call may reach ([`candidate_dataflow_targets`]).
+    targets: Vec<String>,
+}
+
+impl CallFacts {
+    fn of(call: &MirCall, ctx: &FlowContext<'_>) -> Self {
+        let source_category = source_category(call);
+        let sinks = sink_matches(call, ctx.patterns).unwrap_or_default();
+        let passthrough = passthrough(call);
+        let semantic_passthrough = semantic_passthrough(call);
+        let mut shapes = Vec::new();
+        if source_category.is_some() {
+            shapes.push("source-return");
+        }
+        if !sinks.is_empty() {
+            shapes.push("sink-call");
+        }
+        if passthrough || semantic_passthrough {
+            shapes.push("param-return");
+        }
+        if call.semantic_tags.iter().any(|tag| tag == "builder") {
+            shapes.push("param-field-write");
+        }
+        if is_channel_send(call) {
+            shapes.push("channel-send");
+        }
+        if is_channel_recv(call) {
+            shapes.push("channel-recv");
+        }
+        if shapes.is_empty() {
+            shapes.push("opaque");
+        }
+        Self {
+            source_category,
+            sinks,
+            source_arguments: source_argument_matches(call),
+            effect_shape: shapes.join("+"),
+            model_tags: model_tags_for_call(call),
+            passthrough,
+            semantic_passthrough,
+            targets: candidate_dataflow_targets(call, ctx),
+        }
+    }
+}
+
+impl<'a> FlowContext<'a> {
+    fn new(
+        functions: &[MirFunction],
+        patterns: &'a DataFlowPatternSet,
+        local_ids: &'a HashSet<String>,
+        function_map: &'a HashMap<String, &'a MirFunction>,
+    ) -> Self {
+        let mut trait_impls: HashMap<(String, String), Vec<String>> = HashMap::new();
+        let mut impl_methods: HashMap<String, Vec<String>> = HashMap::new();
+        let mut nested_bodies: HashMap<String, Vec<String>> = HashMap::new();
+        for function in functions {
+            if let Some((trait_name, method)) = impl_trait_method_parts(&function.qualified_name) {
+                impl_methods
+                    .entry(method.clone())
+                    .or_default()
+                    .push(function.id.clone());
+                trait_impls
+                    .entry((trait_name, method))
+                    .or_default()
+                    .push(function.id.clone());
+            }
+            // Every prefix that ends right before a `::{closure#` is an
+            // enclosing function of this body.
+            let name = function.qualified_name.as_str();
+            for (at, _) in name.match_indices("::{closure#") {
+                nested_bodies
+                    .entry(name[..at].to_string())
+                    .or_default()
+                    .push(function.id.clone());
+            }
+        }
+        for ids in trait_impls
+            .values_mut()
+            .chain(impl_methods.values_mut())
+            .chain(nested_bodies.values_mut())
+        {
+            ids.sort();
+            ids.dedup();
+        }
+        let block_graphs = functions
+            .iter()
+            .map(|function| (function.id.clone(), BlockGraph::new(function)))
+            .collect();
+        let mut ctx = Self {
+            patterns,
+            local_ids,
+            function_map,
+            trait_impls,
+            impl_methods,
+            nested_bodies,
+            block_graphs,
+            call_facts: HashMap::new(),
+        };
+        let call_facts = functions
+            .iter()
+            .map(|function| {
+                let blocks = function
+                    .blocks
+                    .iter()
+                    .map(|block| {
+                        block
+                            .ops
+                            .iter()
+                            .map(|op| match op {
+                                MirOp::Call(call) => Some(CallFacts::of(call, &ctx)),
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                    .collect();
+                (function.id.clone(), blocks)
+            })
+            .collect();
+        ctx.call_facts = call_facts;
+        ctx
+    }
+
+    /// The facts of the call at operation `op` of block `block` in
+    /// `function`, one of the bodies this context was built from. A call is
+    /// named by where it sits rather than by its address, so a copy of a
+    /// body finds the same facts.
+    fn call_facts(&self, function: &MirFunction, block: usize, op: usize) -> &CallFacts {
+        self.call_facts
+            .get(function.id.as_str())
+            .and_then(|blocks| blocks.get(block))
+            .and_then(|ops| ops.get(op))
+            .and_then(Option::as_ref)
+            .expect("a call in a body this context was built from")
+    }
+
+    fn block_graph(&self, function: &MirFunction) -> &BlockGraph {
+        self.block_graphs
+            .get(&function.id)
+            .expect("every function has a block graph")
+    }
+
+    /// Impl methods `<T as Trait>::method` of a trait whose last path
+    /// segment is `trait_name`.
+    fn trait_method_impls(&self, trait_name: &str, method: &str) -> &[String] {
+        self.trait_impls
+            .get(&(last_segment(trait_name).to_string(), method.to_string()))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Trait impl methods named `method`, of any trait.
+    fn method_impls(&self, method: &str) -> &[String] {
+        self.impl_methods
+            .get(method)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+/// A function's blocks as successor indexes, with the order the fixpoint
+/// visits them in.
+struct BlockGraph {
+    successors: Vec<Vec<usize>>,
+    /// Blocks reachable from the entry block in weak topological order: each
+    /// loop's blocks together, right after its head (see
+    /// `rusi_schema::fixpoint`).
+    order: Vec<usize>,
+}
+
+impl BlockGraph {
+    fn new(function: &MirFunction) -> Self {
+        let index: HashMap<&str, usize> = function
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(position, block)| (block.label.as_str(), position))
+            .collect();
+        let successors: Vec<Vec<usize>> = function
+            .blocks
+            .iter()
+            .map(|block| {
+                block
+                    .successors
+                    .iter()
+                    .filter_map(|label| index.get(label.as_str()).copied())
+                    .collect()
+            })
+            .collect();
+        let order = weak_topological_order(successors.len(), 0, |block| {
+            successors[block].iter().copied()
+        });
+        Self { successors, order }
+    }
+}
+
+/// One evaluation of a function's summary: the summaries it may read, which
+/// are recorded as it reads them, and the recursion cycle it sits in.
+struct SummaryPass<'p, 'a> {
+    ctx: &'p FlowContext<'a>,
+    summaries: &'p TrackedReads<'p, FunctionSummary>,
+    component_of: &'p HashMap<&'p str, usize>,
+    component: usize,
+}
+
+impl SummaryPass<'_, '_> {
+    /// Whether `callee` is in the recursion cycle being summarized. Places
+    /// taken from such a callee's summary are widened when rebased: a
+    /// recursive call on a projection of its own parameter (`walk(&n.next)`)
+    /// would otherwise grow `n.next.val`, `n.next.next.val`, and so on
+    /// without end.
+    fn in_cycle(&self, callee: &str) -> bool {
+        self.component_of.get(callee) == Some(&self.component)
     }
 }
 
@@ -2465,6 +2909,7 @@ fn build_data_flow(
         .iter()
         .map(|f| (f.id.clone(), f))
         .collect::<HashMap<_, _>>();
+    let ctx = FlowContext::new(functions, &patterns, &local_ids, &function_map);
     debug_log(
         debug,
         format_args!(
@@ -2472,13 +2917,8 @@ fn build_data_flow(
             functions.len()
         ),
     );
-    let summaries = infer_summaries(functions, &patterns, &local_ids, &function_map, debug);
-    let mut builder = DataFlowBuilder::new(
-        patterns.clone(),
-        summaries.clone(),
-        &function_map,
-        &local_ids,
-    );
+    let summaries = infer_summaries(functions, &ctx, debug);
+    let mut builder = DataFlowBuilder::new(patterns.clone(), summaries.clone(), &ctx);
     debug_log(
         debug,
         format_args!(
@@ -2491,49 +2931,125 @@ fn build_data_flow(
     builder.finish()
 }
 
+/// Summarizes every function to a fixpoint over the call graph.
+///
+/// Functions are evaluated callees first, with the min-rank worklist from
+/// `rusi_schema::fixpoint`: a call chain of any depth settles in one pass,
+/// and only recursion cycles are revisited. Each evaluation records the
+/// summaries it read; when a summary grows, exactly those readers are marked
+/// dirty again. Summaries only ever grow and draw from finite domains, so no
+/// round limit is needed (see [`FunctionSummary::join`] and
+/// [`SummaryPass::in_cycle`]).
 fn infer_summaries(
     functions: &[MirFunction],
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    ctx: &FlowContext<'_>,
     debug: bool,
 ) -> BTreeMap<String, FunctionSummary> {
+    let (summaries, evaluations) = summary_fixpoint(functions, ctx, debug);
+    debug_log(
+        debug,
+        format_args!(
+            "pass=compiler-dataflow-summary-fixpoint functions={} evaluations={evaluations}",
+            functions.len()
+        ),
+    );
+    summaries
+}
+
+/// [`infer_summaries`], returning how many evaluations the fixpoint took.
+fn summary_fixpoint(
+    functions: &[MirFunction],
+    ctx: &FlowContext<'_>,
+    debug: bool,
+) -> (BTreeMap<String, FunctionSummary>, usize) {
+    let position: HashMap<String, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.id.clone(), index))
+        .collect();
     let mut summaries = functions
         .iter()
         .map(|f| (f.id.clone(), FunctionSummary::with_context(f)))
         .collect::<BTreeMap<_, _>>();
-    for iteration in 0..8 {
-        debug_log(
-            debug,
-            format_args!("pass=compiler-dataflow-summary-iteration index={iteration}"),
-        );
-        let mut changed = false;
-        for function in functions {
-            let next = summarize_function(function, &summaries, patterns, local_ids, function_map);
-            let entry = summaries.entry(function.id.clone()).or_default();
-            if *entry != next {
-                *entry = next;
-                changed = true;
+    let call_order = callee_first_order(functions.len(), |index| {
+        summary_dependencies(&functions[index], ctx)
+            .into_iter()
+            .filter_map(|id| position.get(&id).copied())
+            .collect::<Vec<_>>()
+    });
+    let component_of: HashMap<&str, usize> = functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.id.as_str(), call_order.component[index]))
+        .collect();
+    let mut worklist = MinRankWorklist::new(functions.len(), call_order.order.clone());
+    let mut dependents = Dependents::new(functions.len());
+    while let Some(index) = worklist.pop() {
+        let function = &functions[index];
+        let reads = TrackedReads::new(&summaries, &position);
+        let pass = SummaryPass {
+            ctx,
+            summaries: &reads,
+            component_of: &component_of,
+            component: call_order.component[index],
+        };
+        let next = summarize_function(function, &pass);
+        if debug && worklist.evaluations().is_multiple_of(1_000) {
+            debug_log(
+                debug,
+                format_args!(
+                    "pass=compiler-dataflow-summary-progress evaluations={} function={} fields={} writes={}",
+                    worklist.evaluations(),
+                    function.qualified_name,
+                    next.field_to_return.len(),
+                    next.param_to_field_write.len(),
+                ),
+            );
+        }
+        dependents.record(index, reads.into_reads());
+        let entry = summaries
+            .get_mut(&function.id)
+            .expect("every function has a summary");
+        if entry.join(next) {
+            for reader in dependents.readers(index) {
+                worklist.mark_dirty(reader);
             }
         }
-        if !changed {
-            break;
-        }
     }
-    summaries
+    let evaluations = worklist.evaluations();
+    (summaries, evaluations)
 }
 
-fn summarize_function(
-    function: &MirFunction,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
-) -> FunctionSummary {
+/// The functions whose summaries `function`'s summary may read: the local
+/// targets of its calls and the closure bodies nested in it. Only the order
+/// of evaluation depends on this; the reads themselves are recorded.
+fn summary_dependencies(function: &MirFunction, ctx: &FlowContext<'_>) -> BTreeSet<String> {
+    let mut dependencies = BTreeSet::new();
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        for (op_index, op) in block.ops.iter().enumerate() {
+            if let MirOp::Call(_) = op {
+                dependencies.extend(
+                    ctx.call_facts(function, block_index, op_index)
+                        .targets
+                        .iter()
+                        .filter(|target| ctx.local_ids.contains(*target))
+                        .cloned(),
+                );
+            }
+        }
+    }
+    if let Some(nested) = ctx.nested_bodies.get(&function.qualified_name) {
+        dependencies.extend(nested.iter().cloned());
+    }
+    dependencies
+}
+
+fn summarize_function(function: &MirFunction, pass: &SummaryPass<'_, '_>) -> FunctionSummary {
     let mut summary = FunctionSummary::with_context(function);
     let mut observed_param_projections = BTreeSet::new();
-    let mut in_states = HashMap::<String, AbstractState>::new();
-    if let Some(entry) = function.blocks.first() {
+    let graph = pass.ctx.block_graph(function);
+    let mut in_states: Vec<Option<AbstractState>> = vec![None; function.blocks.len()];
+    if let Some(entry) = in_states.first_mut() {
         let mut state = AbstractState::default();
         for (idx, name) in function.param_names.iter().enumerate() {
             state.taints.insert(
@@ -2544,39 +3060,29 @@ fn summarize_function(
                 BTreeSet::from([AbstractOrigin::Param(idx)]),
             );
         }
-        in_states.insert(entry.label.clone(), state);
+        *entry = Some(state);
     }
-    let block_map = function
-        .blocks
-        .iter()
-        .map(|b| (b.label.clone(), b))
-        .collect::<HashMap<_, _>>();
-    let mut changed = true;
-    let mut iteration = 0usize;
-    while changed && iteration < MAX_DATAFLOW_FIXPOINT_ITERS {
-        iteration += 1;
-        changed = false;
-        for block in &function.blocks {
-            let Some(state) = in_states.get(&block.label).cloned() else {
-                continue;
-            };
-            let out = transfer_abstract(block, state, summaries, patterns, local_ids, function_map);
-            for successor in &block.successors {
-                if !block_map.contains_key(successor) {
-                    continue;
-                }
-                let entry = in_states.entry(successor.clone()).or_default();
-                if merge_abstract(entry, &out) {
-                    changed = true;
-                }
+    // Entry states only grow, over places and origins drawn from this body,
+    // so the worklist empties without an iteration limit.
+    let mut worklist = MinRankWorklist::new(function.blocks.len(), graph.order.clone());
+    while let Some(block) = worklist.pop() {
+        let Some(state) = in_states[block].clone() else {
+            continue;
+        };
+        let out = transfer_abstract(function, block, state, pass);
+        for &successor in &graph.successors[block] {
+            let first_visit = in_states[successor].is_none();
+            let entry = in_states[successor].get_or_insert_with(AbstractState::default);
+            if merge_abstract(entry, &out) || first_visit {
+                worklist.mark_dirty(successor);
             }
         }
     }
-    for block in &function.blocks {
-        let Some(mut state) = in_states.get(&block.label).cloned() else {
+    for (block_index, (block, state)) in function.blocks.iter().zip(in_states).enumerate() {
+        let Some(mut state) = state else {
             continue;
         };
-        for op in &block.ops {
+        for (op_index, op) in block.ops.iter().enumerate() {
             match op {
                 MirOp::Assign(assign) => {
                     if assign.dest.base == "_0" {
@@ -2621,16 +3127,9 @@ fn summarize_function(
                             observed_param_projections.insert(field);
                         }
                     }
-                    let out = eval_call_abstract(
-                        call,
-                        &state,
-                        summaries,
-                        patterns,
-                        local_ids,
-                        function_map,
-                        &mut summary,
-                    );
-                    apply_source_arguments_abstract(call, &mut state, &mut summary);
+                    let facts = pass.ctx.call_facts(function, block_index, op_index);
+                    let out = eval_call_abstract(call, facts, &state, pass, &mut summary);
+                    apply_source_arguments_abstract(call, facts, &mut state, &mut summary);
                     if call.semantic_tags.iter().any(|tag| tag == "builder")
                         && let Some(receiver_place) =
                             call.args.first().and_then(|arg| arg.place.as_ref())
@@ -2661,6 +3160,12 @@ fn summarize_function(
     if !summary.param_to_return.is_empty() && summary.field_to_return.is_empty() {
         summary.field_to_return.extend(observed_param_projections);
     }
+    // A builder call writes into its receiver, which is as often a temporary
+    // of this body (`Command::new(x).arg(y)`) as a parameter; only a place
+    // under a parameter is one a caller can see.
+    summary
+        .param_to_field_write
+        .retain(|place, _| function.param_names.contains(&place.base));
     if !summary.field_to_return.is_empty() {
         summary.effect_shapes.insert("field-return".to_string());
     }
@@ -2674,7 +3179,7 @@ fn summarize_function(
             .returns_source_categories
             .extend(summary.observed_source_categories.iter().cloned());
     }
-    lift_async_body_summary(function, summaries, function_map, &mut summary);
+    lift_async_body_summary(function, pass, &mut summary);
     derive_builder_execution_summary(&mut summary);
     derive_observed_source_to_sink_summary(&mut summary);
     summary
@@ -2717,29 +3222,20 @@ fn derive_observed_source_to_sink_summary(summary: &mut FunctionSummary) {
 }
 
 fn transfer_abstract(
-    block: &MirBlock,
+    function: &MirFunction,
+    block: usize,
     mut state: AbstractState,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
 ) -> AbstractState {
-    for op in &block.ops {
+    for (op_index, op) in function.blocks[block].ops.iter().enumerate() {
         match op {
             MirOp::Assign(assign) => apply_assign_abstract(assign, &mut state),
             MirOp::Kill(place) => kill_abstract(&mut state, place),
             MirOp::Call(call) => {
+                let facts = pass.ctx.call_facts(function, block, op_index);
                 let mut scratch = FunctionSummary::default();
-                let mut out = eval_call_abstract(
-                    call,
-                    &state,
-                    summaries,
-                    patterns,
-                    local_ids,
-                    function_map,
-                    &mut scratch,
-                );
-                apply_source_arguments_abstract(call, &mut state, &mut scratch);
+                let mut out = eval_call_abstract(call, facts, &state, pass, &mut scratch);
+                apply_source_arguments_abstract(call, facts, &mut state, &mut scratch);
                 if call.semantic_tags.iter().any(|tag| tag == "builder")
                     && let Some(receiver_place) =
                         call.args.first().and_then(|arg| arg.place.as_ref())
@@ -2766,30 +3262,26 @@ fn transfer_abstract(
 
 fn eval_call_abstract(
     call: &MirCall,
+    facts: &CallFacts,
     state: &AbstractState,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    patterns: &DataFlowPatternSet,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
     summary_out: &mut FunctionSummary,
 ) -> BTreeSet<AbstractOrigin> {
-    summary_out
-        .effect_shapes
-        .insert(effect_shape_for_call(call));
+    summary_out.effect_shapes.insert(facts.effect_shape.clone());
     for tag in &call.semantic_tags {
         summary_out.semantic_tags.insert(tag.clone());
     }
-    for tag in model_tags_for_call(call) {
+    for tag in &facts.model_tags {
         summary_out.semantic_tags.insert(tag.to_string());
     }
     let mut out = BTreeSet::new();
-    if let Some(source_category) = source_category(call) {
+    if let Some(source_category) = &facts.source_category {
         summary_out
             .observed_source_categories
             .insert(source_category.clone());
-        out.insert(AbstractOrigin::Source(source_category));
+        out.insert(AbstractOrigin::Source(source_category.clone()));
     }
-    if passthrough(call) || semantic_passthrough(call) {
+    if facts.passthrough || facts.semantic_passthrough {
         for arg in &call.args {
             if let Some(place) = &arg.place {
                 out.extend(read_abstract(state, place));
@@ -2806,26 +3298,24 @@ fn eval_call_abstract(
             }
         }
     }
-    if let Some(sinks) = sink_matches(call, patterns) {
-        for (sink_category, args) in sinks {
-            for arg_index in args {
-                if let Some(place) = call.args.get(arg_index).and_then(|a| a.place.as_ref()) {
-                    for origin in read_abstract(state, place) {
-                        match origin {
-                            AbstractOrigin::Param(index) => {
-                                summary_out
-                                    .param_to_sink
-                                    .entry(sink_category.clone())
-                                    .or_default()
-                                    .insert(index);
-                            }
-                            AbstractOrigin::Source(source_category) => {
-                                summary_out
-                                    .source_to_sink
-                                    .entry(sink_category.clone())
-                                    .or_default()
-                                    .insert(source_category);
-                            }
+    for (sink_category, args) in &facts.sinks {
+        for &arg_index in args {
+            if let Some(place) = call.args.get(arg_index).and_then(|a| a.place.as_ref()) {
+                for origin in read_abstract(state, place) {
+                    match origin {
+                        AbstractOrigin::Param(index) => {
+                            summary_out
+                                .param_to_sink
+                                .entry(sink_category.clone())
+                                .or_default()
+                                .insert(index);
+                        }
+                        AbstractOrigin::Source(source_category) => {
+                            summary_out
+                                .source_to_sink
+                                .entry(sink_category.clone())
+                                .or_default()
+                                .insert(source_category);
                         }
                     }
                 }
@@ -2849,11 +3339,12 @@ fn eval_call_abstract(
             }
         }
     }
-    for target in candidate_dataflow_targets(call, local_ids, function_map) {
-        if local_ids.contains(&target)
-            && let Some(summary) = summaries.get(&target).cloned()
-            && let Some(callee) = function_map.get(&target)
+    for target in &facts.targets {
+        if pass.ctx.local_ids.contains(target)
+            && let Some(summary) = pass.summaries.get(target)
+            && let Some(callee) = pass.ctx.function_map.get(target)
         {
+            let widen = pass.in_cycle(target);
             summary_out
                 .effect_shapes
                 .extend(summary.effect_shapes.iter().cloned());
@@ -2881,9 +3372,13 @@ fn eval_call_abstract(
                 }
             }
             for field in &summary.field_to_return {
-                if let Some(rebased) =
-                    rebase_summary_place(call.args.as_slice(), callee, field, Some(&state.aliases))
-                {
+                if let Some(rebased) = rebase_summary_place(
+                    call.args.as_slice(),
+                    callee,
+                    field,
+                    Some(&state.aliases),
+                    widen,
+                ) {
                     summary_out.field_to_return.insert(rebased);
                 }
             }
@@ -2916,9 +3411,13 @@ fn eval_call_abstract(
                 }
             }
             for (field, parameter_indexes) in &summary.param_to_field_write {
-                let Some(rebased_field) =
-                    rebase_summary_place(call.args.as_slice(), callee, field, Some(&state.aliases))
-                else {
+                let Some(rebased_field) = rebase_summary_place(
+                    call.args.as_slice(),
+                    callee,
+                    field,
+                    Some(&state.aliases),
+                    widen,
+                ) else {
                     continue;
                 };
                 for parameter_index in parameter_indexes {
@@ -2967,14 +3466,15 @@ fn eval_call_abstract(
 
 fn apply_source_arguments_abstract(
     call: &MirCall,
+    facts: &CallFacts,
     state: &mut AbstractState,
     summary_out: &mut FunctionSummary,
 ) {
-    for (category, arg_indexes) in source_argument_matches(call) {
+    for (category, arg_indexes) in &facts.source_arguments {
         summary_out
             .observed_source_categories
             .insert(category.clone());
-        for arg_index in arg_indexes {
+        for &arg_index in arg_indexes {
             if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
                 let place = resolve_aliases(&state.aliases, place);
                 write_abstract(
@@ -3091,28 +3591,31 @@ fn merge_abstract(target: &mut AbstractState, incoming: &AbstractState) -> bool 
 struct DataFlowBuilder<'a> {
     patterns: DataFlowPatternSet,
     summaries: BTreeMap<String, FunctionSummary>,
-    function_map: &'a HashMap<String, &'a MirFunction>,
-    local_ids: &'a HashSet<String>,
+    ctx: &'a FlowContext<'a>,
     nodes: IndexMap<String, DataFlowNode>,
     edges: IndexMap<String, DataFlowEdge>,
     slices: IndexMap<String, DataFlowSlice>,
+    /// Whether blocks are transferred to emit (see
+    /// [`DataFlowBuilder::materialize_function`]). While a function's
+    /// fixpoint is computed, transfers record no node, edge, slice or
+    /// diagnostic.
+    emitting: bool,
 }
 
 impl<'a> DataFlowBuilder<'a> {
     fn new(
         patterns: DataFlowPatternSet,
         summaries: BTreeMap<String, FunctionSummary>,
-        function_map: &'a HashMap<String, &'a MirFunction>,
-        local_ids: &'a HashSet<String>,
+        ctx: &'a FlowContext<'a>,
     ) -> Self {
         Self {
             patterns,
             summaries,
-            function_map,
-            local_ids,
+            ctx,
             nodes: IndexMap::new(),
             edges: IndexMap::new(),
             slices: IndexMap::new(),
+            emitting: true,
         }
     }
 
@@ -3134,35 +3637,38 @@ impl<'a> DataFlowBuilder<'a> {
         }
     }
 
+    /// Brings a function's block entry states to a fixpoint, then emits
+    /// what its sinks witness from the fixpoint alone, the way
+    /// [`summarize_function`] collects a summary. The worklist only computes
+    /// states; one last pass over the reachable blocks, each from its
+    /// settled entry state, records every node, edge, slice and diagnostic.
+    /// Each call is reported once, from the state the fixpoint holds there,
+    /// whatever order or number of visits the worklist took.
     fn materialize_function(&mut self, function: &MirFunction, diagnostics: &mut Vec<Diagnostic>) {
-        let mut in_states = HashMap::<String, ConcreteState>::new();
-        if let Some(entry) = function.blocks.first() {
-            in_states.insert(entry.label.clone(), ConcreteState::default());
+        let graph = self.ctx.block_graph(function);
+        let mut in_states: Vec<Option<ConcreteState>> = vec![None; function.blocks.len()];
+        if let Some(entry) = in_states.first_mut() {
+            *entry = Some(ConcreteState::default());
         }
-        let block_map = function
-            .blocks
-            .iter()
-            .map(|b| (b.label.clone(), b))
-            .collect::<HashMap<_, _>>();
-        let mut changed = true;
-        let mut iteration = 0usize;
-        while changed && iteration < MAX_DATAFLOW_FIXPOINT_ITERS {
-            iteration += 1;
-            changed = false;
-            for block in &function.blocks {
-                let Some(state) = in_states.get(&block.label).cloned() else {
-                    continue;
-                };
-                let out = self.transfer_concrete(function, block, state, diagnostics);
-                for successor in &block.successors {
-                    if !block_map.contains_key(successor) {
-                        continue;
-                    }
-                    let entry = in_states.entry(successor.clone()).or_default();
-                    if merge_concrete(entry, &out) {
-                        changed = true;
-                    }
+        self.emitting = false;
+        let mut worklist = MinRankWorklist::new(function.blocks.len(), graph.order.clone());
+        while let Some(block) = worklist.pop() {
+            let Some(state) = in_states[block].clone() else {
+                continue;
+            };
+            let out = self.transfer_concrete(function, block, state, diagnostics);
+            for &successor in &graph.successors[block] {
+                let first_visit = in_states[successor].is_none();
+                let entry = in_states[successor].get_or_insert_with(ConcreteState::default);
+                if merge_concrete(entry, &out) || first_visit {
+                    worklist.mark_dirty(successor);
                 }
+            }
+        }
+        self.emitting = true;
+        for &block in &graph.order {
+            if let Some(state) = in_states[block].take() {
+                self.transfer_concrete(function, block, state, diagnostics);
             }
         }
     }
@@ -3170,49 +3676,48 @@ impl<'a> DataFlowBuilder<'a> {
     fn transfer_concrete(
         &mut self,
         function: &MirFunction,
-        block: &MirBlock,
+        block: usize,
         mut state: ConcreteState,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> ConcreteState {
-        for op in &block.ops {
+        for (op_index, op) in function.blocks[block].ops.iter().enumerate() {
             match op {
                 MirOp::Assign(assign) => apply_assign_concrete(function, assign, &mut state),
                 MirOp::Kill(place) => kill_concrete(&mut state, place),
                 MirOp::Call(call) => {
-                    let direct_source_path = if let Some(category) = source_category(call) {
-                        let path = self.new_source_path(
+                    let ctx = self.ctx;
+                    let facts = ctx.call_facts(function, block, op_index);
+                    let direct_source_path = facts.source_category.as_ref().map(|category| {
+                        self.new_source_path(
                             function,
                             &call.callee_display,
-                            &category,
+                            &call.model_symbols().collect::<Vec<_>>(),
+                            category,
                             call.dest_type.clone(),
                             None,
-                        );
-                        Some(path)
-                    } else {
-                        None
-                    };
-                    self.apply_source_arguments(function, call, &mut state);
-                    if let Some(matches) = sink_matches(call, &self.patterns) {
-                        for (sink_category, args) in matches {
-                            for arg_index in args {
-                                if let Some(place) =
-                                    call.args.get(arg_index).and_then(|a| a.place.as_ref())
-                                {
-                                    let taint = read_concrete(&state, place);
-                                    self.emit_sink(
-                                        function,
-                                        &taint,
-                                        &call.callee_display,
-                                        &sink_category,
-                                        arg_index,
-                                        call.args.get(arg_index).and_then(|a| a.type_name.clone()),
-                                    );
-                                }
+                        )
+                    });
+                    self.apply_source_arguments(function, call, facts, &mut state);
+                    for (sink_category, args) in &facts.sinks {
+                        for &arg_index in args {
+                            if let Some(place) =
+                                call.args.get(arg_index).and_then(|a| a.place.as_ref())
+                            {
+                                let taint = read_concrete(&state, place);
+                                self.emit_sink(
+                                    function,
+                                    &taint,
+                                    &call.callee_display,
+                                    &call.model_symbols().collect::<Vec<_>>(),
+                                    sink_category,
+                                    arg_index,
+                                    call.args.get(arg_index).and_then(|a| a.type_name.clone()),
+                                );
                             }
                         }
                     }
                     let mut paths = direct_source_path.into_iter().collect::<Vec<_>>();
-                    if passthrough(call) || semantic_passthrough(call) {
+                    if facts.passthrough || facts.semantic_passthrough {
                         for arg in &call.args {
                             if let Some(place) = &arg.place {
                                 paths.extend(read_concrete(&state, place).paths);
@@ -3256,16 +3761,16 @@ impl<'a> DataFlowBuilder<'a> {
                             paths.extend(read_concrete(&state, &slot).paths);
                         }
                     }
-                    for target in
-                        candidate_dataflow_targets(call, self.local_ids, self.function_map)
-                    {
-                        if self.local_ids.contains(&target)
-                            && let Some(summary) = self.summaries.get(&target).cloned()
+                    let mut reached_local_target = false;
+                    for target in &facts.targets {
+                        if ctx.local_ids.contains(target)
+                            && let Some(summary) = self.summaries.get(target).cloned()
                         {
-                            let callee = self.function_map.get(&target).copied();
-                            let callee_name = self
+                            reached_local_target = true;
+                            let callee = ctx.function_map.get(target).copied();
+                            let callee_name = ctx
                                 .function_map
-                                .get(&target)
+                                .get(target)
                                 .map(|f| f.qualified_name.clone())
                                 .unwrap_or_else(|| call.callee_display.clone());
                             if should_propagate_candidate_source_returns(call) {
@@ -3273,6 +3778,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     paths.push(self.new_source_path(
                                         function,
                                         &callee_name,
+                                        &[callee_name.as_str()],
                                         &category,
                                         call.dest_type.clone(),
                                         None,
@@ -3284,6 +3790,7 @@ impl<'a> DataFlowBuilder<'a> {
                                     let path = self.new_source_path(
                                         function,
                                         &callee_name,
+                                        &[callee_name.as_str()],
                                         &source_category,
                                         call.dest_type.clone(),
                                         None,
@@ -3292,6 +3799,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         function,
                                         &ConcreteTaint { paths: vec![path] },
                                         &callee_name,
+                                        &[callee_name.as_str()],
                                         &sink_category,
                                         0,
                                         None,
@@ -3357,6 +3865,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         callee,
                                         field,
                                         Some(&state.aliases),
+                                        false,
                                     )
                                 }) {
                                     paths.extend(read_concrete(&state, &rebased).paths);
@@ -3374,6 +3883,7 @@ impl<'a> DataFlowBuilder<'a> {
                                             function,
                                             &taint,
                                             &callee_name,
+                                            &[callee_name.as_str()],
                                             &sink_category,
                                             parameter_index,
                                             call.args
@@ -3390,6 +3900,7 @@ impl<'a> DataFlowBuilder<'a> {
                                         callee,
                                         &field,
                                         Some(&state.aliases),
+                                        false,
                                     )
                                 }) else {
                                     continue;
@@ -3421,10 +3932,14 @@ impl<'a> DataFlowBuilder<'a> {
                             }
                         }
                     }
-                    if call.target_ids.is_empty()
-                        && source_category(call).is_none()
-                        && !passthrough(call)
-                        && model_tags_for_call(call).is_empty()
+                    // A call with no resolved target is only unresolved for
+                    // data flow when no candidate stood in for one either.
+                    if self.emitting
+                        && call.target_ids.is_empty()
+                        && !reached_local_target
+                        && facts.source_category.is_none()
+                        && !facts.passthrough
+                        && facts.model_tags.is_empty()
                         && should_emit_unresolved_dataflow_diagnostic(&call.callee_display)
                     {
                         diagnostics.push(Diagnostic {
@@ -3442,10 +3957,13 @@ impl<'a> DataFlowBuilder<'a> {
         state
     }
 
+    /// Starts a taint path at a source named `name`, whose flow models are
+    /// looked up by `model_symbols` (see [`MirCall::model_symbols`]).
     fn new_source_path(
         &mut self,
         function: &MirFunction,
         name: &str,
+        model_symbols: &[&str],
         category: &str,
         type_name: Option<String>,
         parameter_index: Option<usize>,
@@ -3459,7 +3977,7 @@ impl<'a> DataFlowBuilder<'a> {
                 type_name.as_deref().unwrap_or("_"),
             ],
         );
-        let node = self.nodes.entry(node_id.clone()).or_insert_with(|| {
+        let build = || {
             let mut properties = IndexMap::from([
                 (
                     "specializationKey".to_string(),
@@ -3471,7 +3989,7 @@ impl<'a> DataFlowBuilder<'a> {
                 ),
                 ("analysisBackend".to_string(), "embedded-mir".to_string()),
             ]);
-            add_model_properties(&mut properties, name);
+            add_model_properties(&mut properties, model_symbols);
             DataFlowNode {
                 id: node_id.clone(),
                 kind: "source".to_string(),
@@ -3487,14 +4005,20 @@ impl<'a> DataFlowBuilder<'a> {
                 type_name: type_name.clone(),
                 properties,
             }
-        });
+        };
+        let node = match self.nodes.get(&node_id) {
+            Some(node) => node.clone(),
+            None if self.emitting => self
+                .nodes
+                .entry(node_id.clone())
+                .or_insert_with(build)
+                .clone(),
+            None => build(),
+        };
         TaintPath {
             origin_key: format!("{}:{}:{}", function.id, name, category),
             category: category.to_string(),
-            steps: vec![TaintStep {
-                node: node.clone(),
-                edge: None,
-            }],
+            steps: vec![TaintStep { node, edge: None }],
         }
     }
 
@@ -3502,15 +4026,17 @@ impl<'a> DataFlowBuilder<'a> {
         &mut self,
         function: &MirFunction,
         call: &MirCall,
+        facts: &CallFacts,
         state: &mut ConcreteState,
     ) {
-        for (category, arg_indexes) in source_argument_matches(call) {
-            for arg_index in arg_indexes {
+        for (category, arg_indexes) in &facts.source_arguments {
+            for &arg_index in arg_indexes {
                 if let Some(place) = call.args.get(arg_index).and_then(|arg| arg.place.as_ref()) {
                     let path = self.new_source_path(
                         function,
                         &call.callee_display,
-                        &category,
+                        &call.model_symbols().collect::<Vec<_>>(),
+                        category,
                         call.args
                             .get(arg_index)
                             .and_then(|arg| arg.type_name.clone()),
@@ -3523,16 +4049,20 @@ impl<'a> DataFlowBuilder<'a> {
         }
     }
 
+    /// Ends every path in `taint` at a sink named `sink_name`, whose flow
+    /// models are looked up by `model_symbols` (see [`MirCall::model_symbols`]).
+    #[allow(clippy::too_many_arguments)]
     fn emit_sink(
         &mut self,
         function: &MirFunction,
         taint: &ConcreteTaint,
         sink_name: &str,
+        model_symbols: &[&str],
         sink_category: &str,
         parameter_index: usize,
         sink_type: Option<String>,
     ) {
-        if taint.paths.is_empty() {
+        if taint.paths.is_empty() || !self.emitting {
             return;
         }
         let sink_node_id = stable_id(
@@ -3556,7 +4086,7 @@ impl<'a> DataFlowBuilder<'a> {
             ),
             ("analysisBackend".to_string(), "embedded-mir".to_string()),
         ]);
-        add_model_properties(&mut properties, sink_name);
+        add_model_properties(&mut properties, model_symbols);
         let sink_node = DataFlowNode {
             id: sink_node_id.clone(),
             kind: "sink".to_string(),
@@ -3625,9 +4155,17 @@ impl<'a> DataFlowBuilder<'a> {
                 taint_dispatch_confidence(taint),
             );
             slice_properties.insert("analysisBackend".to_string(), "embedded-mir".to_string());
-            add_model_properties(&mut slice_properties, sink_name);
-            if modeled_native_boundary(sink_name)
-                || modeled_native_boundary(&final_path.steps[0].node.name)
+            add_model_properties(&mut slice_properties, model_symbols);
+            // Every path starts at a node `new_source_path` built, which
+            // records whether its source's models cross the native boundary.
+            if model_symbols
+                .iter()
+                .any(|symbol| modeled_native_boundary(symbol))
+                || final_path.steps[0]
+                    .node
+                    .properties
+                    .get("nativeBoundary")
+                    .is_some_and(|value| value == "true")
             {
                 slice_properties.insert("nativeBoundary".to_string(), "true".to_string());
             }
@@ -3685,6 +4223,7 @@ impl<'a> DataFlowBuilder<'a> {
             .into_iter()
             .map(|(function_id, summary)| {
                 let function = self
+                    .ctx
                     .function_map
                     .get(&function_id)
                     .expect("function exists");
@@ -3989,45 +4528,20 @@ fn specialization_key_for_function(function: &MirFunction) -> String {
     )
 }
 
-fn effect_shape_for_call(call: &MirCall) -> String {
-    let mut shapes = Vec::new();
-    if source_category(call).is_some() {
-        shapes.push("source-return");
-    }
-    if sink_matches(call, &built_in_patterns()).is_some() {
-        shapes.push("sink-call");
-    }
-    if passthrough(call) || semantic_passthrough(call) {
-        shapes.push("param-return");
-    }
-    if call.semantic_tags.iter().any(|tag| tag == "builder") {
-        shapes.push("param-field-write");
-    }
-    if is_channel_send(call) {
-        shapes.push("channel-send");
-    }
-    if is_channel_recv(call) {
-        shapes.push("channel-recv");
-    }
-    if shapes.is_empty() {
-        shapes.push("opaque");
-    }
-    shapes.join("+")
-}
-
 fn lift_async_body_summary(
     function: &MirFunction,
-    summaries: &BTreeMap<String, FunctionSummary>,
-    function_map: &HashMap<String, &MirFunction>,
+    pass: &SummaryPass<'_, '_>,
     summary_out: &mut FunctionSummary,
 ) {
-    let prefix = format!("{}::{{closure#", function.qualified_name);
     let mut lifted_descendant_sink = false;
-    for (function_id, child) in function_map {
-        if !child.qualified_name.starts_with(&prefix) {
-            continue;
-        }
-        let Some(child_summary) = summaries.get(function_id) else {
+    let nested = pass
+        .ctx
+        .nested_bodies
+        .get(&function.qualified_name)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    for function_id in nested {
+        let Some(child_summary) = pass.summaries.get(function_id) else {
             continue;
         };
         summary_out
@@ -4160,11 +4674,21 @@ fn projected_param_place(function: &MirFunction, place: &PlacePath) -> Option<Pl
         .then(|| place.clone())
 }
 
+/// Maps a place in `callee`'s summary, rooted at one of its parameters, onto
+/// the argument the call passes for that parameter.
+///
+/// With `widen`, the result stops at the argument itself instead of
+/// descending into the callee's projections. Callers widen for a callee in
+/// their own recursion cycle: the argument places are drawn from the caller's
+/// body, so the places a cycle can accumulate stay finite, where appending
+/// the callee's projections on every trip around the cycle would not. The
+/// argument covers every place under it, so widening only coarsens.
 fn rebase_summary_place(
     args: &[CallArg],
     callee: &MirFunction,
     place: &PlacePath,
     aliases: Option<&HashMap<PlacePath, PlacePath>>,
+    widen: bool,
 ) -> Option<PlacePath> {
     let parameter_index = callee
         .param_names
@@ -4175,91 +4699,85 @@ fn rebase_summary_place(
         .map(|aliases| resolve_aliases(aliases, actual))
         .unwrap_or_else(|| actual.clone());
     let mut rebased = actual;
-    rebased
-        .projections
-        .extend(place.projections.iter().cloned());
+    if !widen {
+        rebased
+            .projections
+            .extend(place.projections.iter().cloned());
+    }
     Some(rebased)
 }
 
-fn candidate_dataflow_targets(
-    call: &MirCall,
-    local_ids: &HashSet<String>,
-    function_map: &HashMap<String, &MirFunction>,
-) -> Vec<String> {
+/// The local functions a call may reach, for the data-flow passes: its
+/// resolved targets plus, for a trait or unresolved call, every impl method
+/// its name can denote. The set is not truncated; an ambiguous call reaches
+/// all of its candidates, in id order.
+fn candidate_dataflow_targets(call: &MirCall, ctx: &FlowContext<'_>) -> Vec<String> {
     let mut targets = BTreeSet::new();
     for target in &call.target_ids {
-        if local_ids.contains(target) {
+        if ctx.local_ids.contains(target) {
             targets.insert(target.clone());
         }
-    }
-    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-        return targets
-            .into_iter()
-            .take(MAX_DATAFLOW_CANDIDATE_TARGETS)
-            .collect();
     }
     for symbol in std::iter::once(call.callee_display.as_str())
         .chain(call.target_names.iter().map(String::as_str))
     {
-        let impl_qualified_symbol = symbol.replace(' ', "");
         let normalized = canonical_call_symbol(symbol);
-        if let Some((trait_name, method_name)) = impl_trait_method_parts(&impl_qualified_symbol) {
-            for (function_id, function) in function_map {
-                if impl_method_matches_trait_method(
-                    &function.qualified_name,
-                    &trait_name,
-                    &method_name,
-                ) {
-                    targets.insert(function_id.clone());
-                    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-                        return targets.into_iter().collect();
-                    }
-                }
-            }
+        if let Some((trait_name, method_name)) = impl_trait_method_parts(symbol) {
+            targets.extend(
+                ctx.trait_method_impls(&trait_name, &method_name)
+                    .iter()
+                    .cloned(),
+            );
         } else if let Some((trait_name, method_name)) = trait_method_parts(&normalized) {
-            for (function_id, function) in function_map {
-                if impl_method_matches_trait_method(
-                    &function.qualified_name,
-                    trait_name,
-                    method_name,
-                ) {
-                    targets.insert(function_id.clone());
-                    if targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS {
-                        return targets.into_iter().collect();
-                    }
-                }
-            }
+            targets.extend(
+                ctx.trait_method_impls(trait_name, method_name)
+                    .iter()
+                    .cloned(),
+            );
         } else {
             let method_name = last_segment(&normalized);
             if should_expand_bare_method_candidate(call, method_name) {
-                let mut bare_matches = 0usize;
-                for (function_id, function) in function_map {
-                    if impl_method_matches_method_name(&function.qualified_name, method_name) {
-                        targets.insert(function_id.clone());
-                        bare_matches += 1;
-                        if bare_matches >= MAX_BARE_METHOD_CANDIDATES
-                            || targets.len() >= MAX_DATAFLOW_CANDIDATE_TARGETS
-                        {
-                            return targets.into_iter().collect();
-                        }
-                    }
-                }
+                targets.extend(ctx.method_impls(method_name).iter().cloned());
             }
         }
     }
     targets.into_iter().collect()
 }
 
+/// Splits `<Type as Trait>::method` into the trait's last path segment and
+/// the method name.
+///
+/// The `as` is the one at the top nesting level of the leading angle
+/// brackets, read with its surrounding spaces, so neither a generic argument
+/// (`<Vec<T> as Trait>`), a qualified self type (`<<T as A>::Out as B>`), nor
+/// a name that merely contains the letters (`Database`, `Class`) is taken for
+/// it.
 fn impl_trait_method_parts(symbol: &str) -> Option<(String, String)> {
-    let (owner, method) = symbol.rsplit_once("::")?;
-    if method.is_empty() || !owner.starts_with('<') {
-        return None;
+    let inner = symbol.trim().strip_prefix('<')?;
+    let mut depth = 0usize;
+    let mut previous = '\0';
+    let mut split = None;
+    let mut close = None;
+    for (index, ch) in inner.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            // The arrow of a function type (`<fn() -> T as Trait>`).
+            '>' if previous == '-' => {}
+            '>' if depth == 0 => {
+                close = Some(index);
+                break;
+            }
+            '>' => depth -= 1,
+            ' ' if depth == 0 && inner[index..].starts_with(" as ") => split = Some(index),
+            _ => {}
+        }
+        previous = ch;
     }
-    let owner = owner.strip_circumfix('<', '>')?;
-    let (_, trait_name) = owner.rsplit_once("as")?;
-    let trait_name = last_segment(&strip_generic_arguments(trait_name)).to_string();
-    let method = normalize_symbol(method);
-    if trait_name.is_empty() {
+    let (split, close) = (split?, close?);
+    let trait_path = inner[split + " as ".len()..close].trim();
+    let trait_name = last_segment(&strip_generic_arguments(trait_path)).to_string();
+    let method = normalize_symbol(inner[close + 1..].strip_prefix("::")?);
+    if trait_name.is_empty() || method.is_empty() {
         return None;
     }
     Some((trait_name, method))
@@ -4302,24 +4820,6 @@ fn trait_method_parts(symbol: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((last_segment(owner), method))
-}
-
-fn impl_method_matches_trait_method(
-    qualified_name: &str,
-    trait_name: &str,
-    method_name: &str,
-) -> bool {
-    let normalized = qualified_name.replace(' ', "");
-    normalized.starts_with('<')
-        && normalized.contains(&format!("as{}", normalize_symbol(trait_name)))
-        && last_segment(&normalized) == method_name
-}
-
-fn impl_method_matches_method_name(qualified_name: &str, method_name: &str) -> bool {
-    let normalized = qualified_name.replace(' ', "");
-    normalized.starts_with('<')
-        && normalized.contains("as")
-        && last_segment(&normalized) == method_name
 }
 
 fn semantic_passthrough(call: &MirCall) -> bool {
@@ -4390,6 +4890,15 @@ fn read_concrete(state: &ConcreteState, place: &PlacePath) -> ConcreteTaint {
     ConcreteTaint { paths }
 }
 
+/// Joins `incoming` into a block's entry state and reports whether it grew.
+///
+/// A place keeps the witness it holds for an origin and gains only origins
+/// it did not carry, and an alias keeps the first place it was given, so the
+/// state grows only by new place and origin pairs and new alias entries.
+/// The places are the body's own MIR places and summary places rebased onto
+/// its arguments, resolved through those first aliases, and the summaries
+/// are already fixed when a body is materialized, so the pairs are finite:
+/// that, and not any bound on witnesses, is why the concrete fixpoint ends.
 fn merge_concrete(target: &mut ConcreteState, incoming: &ConcreteState) -> bool {
     let mut changed = false;
     for (place, taint) in &incoming.taints {
@@ -4417,43 +4926,31 @@ fn merge_concrete(target: &mut ConcreteState, incoming: &ConcreteState) -> bool 
     changed
 }
 
+/// Follows alias entries from `place` until none applies, longest matching
+/// prefix first. Every hop consumes a distinct entry, and a chain that comes
+/// back to an entry it already used is a cycle, so the chase ends after at
+/// most one hop per entry.
 fn resolve_aliases(aliases: &HashMap<PlacePath, PlacePath>, place: &PlacePath) -> PlacePath {
     let mut current = place.clone();
-    for _ in 0..8 {
-        if let Some(alias) = aliases.get(&current) {
-            current = alias.clone();
-            continue;
-        }
-        let mut resolved = None;
+    let mut used: Vec<PlacePath> = Vec::new();
+    'chase: loop {
         for prefix_len in (0..=current.projections.len()).rev() {
             let prefix = PlacePath {
                 base: current.base.clone(),
                 projections: current.projections[..prefix_len].to_vec(),
             };
-            if let Some(alias) = aliases.get(&prefix) {
-                let mut next = alias.clone();
-                next.projections
-                    .extend(current.projections[prefix_len..].iter().cloned());
-                resolved = Some(next);
-                break;
-            }
-        }
-        if let Some(next) = resolved {
-            current = next;
-            continue;
-        }
-        if current.projections.first() == Some(&PlaceProjection::Deref) {
-            let base = PlacePath {
-                base: current.base.clone(),
-                projections: Vec::new(),
-            };
-            if let Some(alias) = aliases.get(&base) {
-                let mut next = alias.clone();
-                next.projections
-                    .extend(current.projections.iter().skip(1).cloned());
-                current = next;
+            let Some(alias) = aliases.get(&prefix) else {
                 continue;
+            };
+            if used.contains(&prefix) {
+                break 'chase;
             }
+            let mut next = alias.clone();
+            next.projections
+                .extend(current.projections[prefix_len..].iter().cloned());
+            used.push(prefix);
+            current = next;
+            continue 'chase;
         }
         break;
     }
@@ -4667,27 +5164,23 @@ fn classify_crypto_symbol(symbol: &str) -> Option<CryptoRule> {
 }
 
 fn source_category(call: &MirCall) -> Option<String> {
-    std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-        .find_map(|symbol| {
-            matching_flow_models(symbol)
-                .into_iter()
-                .find(|model| {
-                    model_allowed_for_call(call, model)
-                        && matches!(
-                            model.kind,
-                            FlowModelKind::Source | FlowModelKind::NativeSource
-                        )
-                })
-                .map(|model| model.category.to_string())
-        })
+    call.model_symbols().find_map(|symbol| {
+        matching_flow_models(symbol)
+            .into_iter()
+            .find(|model| {
+                model_allowed_for_call(call, model)
+                    && matches!(
+                        model.kind,
+                        FlowModelKind::Source | FlowModelKind::NativeSource
+                    )
+            })
+            .map(|model| model.category.to_string())
+    })
 }
 
 fn source_argument_matches(call: &MirCall) -> Vec<(String, Vec<usize>)> {
     let mut results = Vec::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model)
                 && matches!(model.kind, FlowModelKind::SourceArgument)
@@ -4707,9 +5200,7 @@ fn sink_matches(
     patterns: &DataFlowPatternSet,
 ) -> Option<Vec<(String, Vec<usize>)>> {
     let mut results = Vec::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model)
                 && matches!(model.kind, FlowModelKind::Sink | FlowModelKind::NativeSink)
@@ -4720,9 +5211,11 @@ fn sink_matches(
                 ));
             }
         }
-        if call.call_type == "native" {
-            results.push(("native-call".to_string(), (0..call.args.len()).collect()));
-        }
+    }
+    // Every argument of a native call crosses into code nothing analyzes,
+    // unless a model says which ones reach a sink there.
+    if call.native_symbol.is_some() && results.is_empty() {
+        results.push(("native-call".to_string(), (0..call.args.len()).collect()));
     }
     if results.is_empty() {
         let normalized = normalize_symbol(&call.callee_display);
@@ -4731,7 +5224,7 @@ fn sink_matches(
             if !candidate.contains("::") && normalized.contains("::") {
                 continue;
             }
-            if call.call_type != "native"
+            if call.native_symbol.is_none()
                 && !call.target_ids.is_empty()
                 && matching_flow_models(&pattern.pattern)
                     .into_iter()
@@ -4756,12 +5249,15 @@ fn sink_matches(
     }
 }
 
+/// A model that names a C function by bare symbol applies only to a call
+/// into foreign code. typeck also types a call `native` when it prepares data
+/// for one, such as `CString::new`, and that is still a Rust function.
 fn model_allowed_for_call(call: &MirCall, model: &FlowModel) -> bool {
     if matches!(
         model.kind,
         FlowModelKind::NativeSource | FlowModelKind::NativeSink
     ) && !model.symbol.contains("::")
-        && call.call_type != "native"
+        && call.native_symbol.is_none()
     {
         return false;
     }
@@ -4770,9 +5266,7 @@ fn model_allowed_for_call(call: &MirCall, model: &FlowModel) -> bool {
 
 fn model_tags_for_call(call: &MirCall) -> BTreeSet<&'static str> {
     let mut tags = BTreeSet::new();
-    for symbol in std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-    {
+    for symbol in call.model_symbols() {
         for model in matching_flow_models(symbol) {
             if model_allowed_for_call(call, model) {
                 tags.extend(model.tags.iter().copied());
@@ -4783,35 +5277,33 @@ fn model_tags_for_call(call: &MirCall) -> BTreeSet<&'static str> {
 }
 
 fn passthrough(call: &MirCall) -> bool {
-    std::iter::once(call.callee_display.as_str())
-        .chain(call.target_names.iter().map(String::as_str))
-        .any(|symbol| {
-            if matching_flow_models(symbol).into_iter().any(|model| {
-                matches!(
-                    model.kind,
-                    FlowModelKind::Passthrough | FlowModelKind::Builder
-                )
-            }) {
-                return true;
-            }
-            let normalized = normalize_symbol(symbol);
+    call.model_symbols().any(|symbol| {
+        if matching_flow_models(symbol).into_iter().any(|model| {
             matches!(
-                last_segment(&normalized),
-                "unwrap_or_else"
-                    | "unwrap"
-                    | "unwrap_or_default"
-                    | "to_string"
-                    | "to_owned"
-                    | "into_owned"
-                    | "clone"
-                    | "deref"
-                    | "new"
-                    | "block_on"
-                    | "as_ptr"
-                    | "Ok"
-                    | "Some"
-            ) || normalized.ends_with("std::ffi::CString::new")
-        })
+                model.kind,
+                FlowModelKind::Passthrough | FlowModelKind::Builder
+            )
+        }) {
+            return true;
+        }
+        let normalized = normalize_symbol(symbol);
+        matches!(
+            last_segment(&normalized),
+            "unwrap_or_else"
+                | "unwrap"
+                | "unwrap_or_default"
+                | "to_string"
+                | "to_owned"
+                | "into_owned"
+                | "clone"
+                | "deref"
+                | "new"
+                | "block_on"
+                | "as_ptr"
+                | "Ok"
+                | "Some"
+        ) || normalized.ends_with("std::ffi::CString::new")
+    })
 }
 
 fn built_in_patterns() -> DataFlowPatternSet {
@@ -6374,7 +6866,7 @@ fn flow_model_matches(symbol: &str, model: &FlowModel) -> bool {
     {
         return false;
     }
-    if let Some((trait_name, method_name)) = impl_trait_method_parts(&symbol.replace(' ', "")) {
+    if let Some((trait_name, method_name)) = impl_trait_method_parts(symbol) {
         let trait_method = format!("{}::{}", normalize_symbol(&trait_name), method_name);
         if pattern == trait_method || pattern.ends_with(&format!("::{trait_method}")) {
             return true;
@@ -6393,8 +6885,17 @@ fn flow_model_matches(symbol: &str, model: &FlowModel) -> bool {
     }
 }
 
-fn add_model_properties(properties: &mut IndexMap<String, String>, symbol: &str) {
-    let models = matching_flow_models(symbol);
+/// Records the flow models that any of `symbols` names, each once.
+fn add_model_properties(properties: &mut IndexMap<String, String>, symbols: &[&str]) {
+    let mut models = Vec::<&FlowModel>::new();
+    for model in symbols
+        .iter()
+        .flat_map(|symbol| matching_flow_models(symbol))
+    {
+        if !models.iter().any(|seen| std::ptr::eq(*seen, model)) {
+            models.push(model);
+        }
+    }
     if models.is_empty() {
         return;
     }
@@ -6470,7 +6971,7 @@ fn resolve_method_call(
     function_ids: &HashMap<LocalDefId, String>,
 ) -> Option<ResolvedCall> {
     let def_id = def_id?;
-    let symbol = tcx.def_path_str(def_id);
+    let symbol = def_path(tcx, def_id);
     let receiver_ty = receiver_ty.peel_refs();
     let receiver_type = Some(normalize_type_name(receiver_ty.to_string()));
     let call_type = if matches!(receiver_ty.kind(), ty::Dynamic(..)) {
@@ -6509,8 +7010,13 @@ fn resolve_method_call(
         || target_names
             .iter()
             .any(|target| modeled_native_boundary(target));
-    let semantic_tags =
-        semantic_tags_for_call(&symbol, &target_names, call_type, receiver_type.as_deref());
+    let semantic_tags = semantic_tags_for_call(
+        &symbol,
+        &target_names,
+        None,
+        call_type,
+        receiver_type.as_deref(),
+    );
     let async_boundary = semantic_tags.iter().any(|tag| tag == "async-boundary");
     let task_boundary = semantic_tags.iter().any(|tag| tag == "task-boundary");
     let dispatch_confidence = dispatch_confidence_for(call_type, target_ids.len());
@@ -6537,6 +7043,7 @@ fn resolve_method_call(
         semantic_tags,
         async_boundary,
         task_boundary,
+        native_symbol: None,
     })
 }
 
@@ -6551,12 +7058,20 @@ fn resolve_expr_call(
             let res = typeck.qpath_res(&qpath, func.hir_id);
             let def_id = res.opt_def_id()?;
             let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
-            let symbol = tcx.def_path_str(def_id);
+            let symbol = def_path(tcx, def_id);
+            let native_symbol = foreign_link_symbol(tcx, def_id);
             let native_boundary = modeled_native_boundary(&symbol)
                 || target_names
                     .iter()
+                    .chain(&native_symbol)
                     .any(|target| modeled_native_boundary(target));
-            let semantic_tags = semantic_tags_for_call(&symbol, &target_names, "static", None);
+            let semantic_tags = semantic_tags_for_call(
+                &symbol,
+                &target_names,
+                native_symbol.as_deref(),
+                "static",
+                None,
+            );
             Some(ResolvedCall {
                 callee_display: symbol,
                 call_type: if native_boundary {
@@ -6576,6 +7091,7 @@ fn resolve_expr_call(
                 semantic_tags: semantic_tags.clone(),
                 async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                 task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                native_symbol,
             })
         }
         _ => match typeck.expr_ty(func).kind() {
@@ -6583,13 +7099,14 @@ fn resolve_expr_call(
                 let def_id = *def_id;
                 let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
                 let semantic_tags = semantic_tags_for_call(
-                    &tcx.def_path_str(def_id),
+                    &def_path(tcx, def_id),
                     &target_names,
+                    None,
                     "closure",
                     None,
                 );
                 Some(ResolvedCall {
-                    callee_display: tcx.def_path_str(def_id),
+                    callee_display: def_path(tcx, def_id),
                     call_type: "closure".to_string(),
                     dispatch_confidence: dispatch_confidence_for("closure", target_ids.len()),
                     target_ids,
@@ -6601,20 +7118,26 @@ fn resolve_expr_call(
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                     task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                    native_symbol: None,
                 })
             }
             ty::FnDef(def_id, _) => {
                 let def_id = *def_id;
                 let (target_ids, target_names) = target_for_def_id(tcx, def_id, function_ids);
+                let native_symbol = foreign_link_symbol(tcx, def_id);
                 let semantic_tags = semantic_tags_for_call(
-                    &tcx.def_path_str(def_id),
+                    &def_path(tcx, def_id),
                     &target_names,
+                    native_symbol.as_deref(),
                     "static",
                     None,
                 );
+                let native_boundary = native_symbol
+                    .as_deref()
+                    .is_some_and(modeled_native_boundary);
                 Some(ResolvedCall {
-                    callee_display: tcx.def_path_str(def_id),
-                    call_type: "static".to_string(),
+                    callee_display: def_path(tcx, def_id),
+                    call_type: if native_boundary { "native" } else { "static" }.to_string(),
                     dispatch_confidence: dispatch_confidence_for("static", target_ids.len()),
                     target_ids,
                     target_names,
@@ -6625,6 +7148,7 @@ fn resolve_expr_call(
                     semantic_tags: semantic_tags.clone(),
                     async_boundary: semantic_tags.iter().any(|tag| tag == "async-boundary"),
                     task_boundary: semantic_tags.iter().any(|tag| tag == "task-boundary"),
+                    native_symbol,
                 })
             }
             ty::FnPtr(..) => Some(ResolvedCall {
@@ -6640,10 +7164,88 @@ fn resolve_expr_call(
                 semantic_tags: vec!["fn-pointer".to_string()],
                 async_boundary: false,
                 task_boundary: false,
+                native_symbol: None,
             }),
             _ => None,
         },
     }
+}
+
+static LOCAL_PACKAGE: OnceLock<String> = OnceLock::new();
+
+/// Records the package whose crate this wrapper process compiles, as a path
+/// segment (`my-app` is `my_app`), and returns it. The stable backend names
+/// items from the package rather than from the target, so a binary target
+/// `rusi` in the package `rusi-cli` is `rusi_cli::...` in both backends.
+/// Cargo sets `CARGO_PKG_NAME` for every rustc it runs; outside cargo the
+/// crate's own name stands in.
+fn init_local_package(tcx: TyCtxt<'_>) -> &'static str {
+    LOCAL_PACKAGE.get_or_init(|| {
+        std::env::var("CARGO_PKG_NAME")
+            .map(|name| name.replace('-', "_"))
+            .unwrap_or_else(|_| tcx.crate_name(LOCAL_CRATE).to_string())
+    })
+}
+
+/// The package recorded by [`init_local_package`]. A wrapper process
+/// compiles one crate, so it never changes once set.
+fn local_package() -> &'static str {
+    LOCAL_PACKAGE.get().map_or("crate", String::as_str)
+}
+
+/// `def_id`'s path as both backends name it. rustc prints a path into the
+/// local crate with no crate segment at all (`chains::run`), which reads as
+/// a different function from the stable backend's `pkg::chains::run`, so
+/// every local path, including each one inside `<T as Trait>`, is spelled
+/// from the package instead. Paths into other crates keep their crate name.
+fn def_path(tcx: TyCtxt<'_>, def_id: DefId) -> String {
+    let spelled = spell_local_paths(
+        &with_crate_prefix!(tcx.def_path_str(def_id)),
+        local_package(),
+    );
+    // Before the 2018 edition rustc prints no `crate::` even when asked, but
+    // a plain local path still starts inside the local crate.
+    if def_id.is_local() && !tcx.sess.at_least_rust_2018() && !spelled.starts_with('<') {
+        format!("{}::{spelled}", local_package())
+    } else {
+        spelled
+    }
+}
+
+/// The symbol `def_id` links against when it is declared in an `extern`
+/// block: the name its `#[link_name]` gives, or else its own.
+fn foreign_link_symbol(tcx: TyCtxt<'_>, def_id: DefId) -> Option<String> {
+    tcx.is_foreign_item(def_id).then(|| {
+        tcx.codegen_fn_attrs(def_id)
+            .symbol_name
+            .unwrap_or_else(|| tcx.item_name(def_id))
+            .to_string()
+    })
+}
+
+/// Replaces each `crate::` that starts a path in `printed` with
+/// `package::`. `crate` is a keyword and never names a segment of its own;
+/// a match right after an identifier character or a `:` is inside a longer
+/// name and stays.
+fn spell_local_paths(printed: &str, package: &str) -> String {
+    const PREFIX: &str = "crate::";
+    let mut spelled = String::with_capacity(printed.len());
+    let mut rest = printed;
+    let mut before = None;
+    while let Some(at) = rest.find(PREFIX) {
+        spelled.push_str(&rest[..at]);
+        let previous = rest[..at].chars().next_back().or(before);
+        if previous.is_some_and(|ch: char| ch.is_alphanumeric() || ch == '_' || ch == ':') {
+            spelled.push_str(PREFIX);
+        } else {
+            spelled.push_str(package);
+            spelled.push_str("::");
+        }
+        before = Some(':');
+        rest = &rest[at + PREFIX.len()..];
+    }
+    spelled.push_str(rest);
+    spelled
 }
 
 fn target_for_def_id(
@@ -6651,7 +7253,7 @@ fn target_for_def_id(
     def_id: DefId,
     function_ids: &HashMap<LocalDefId, String>,
 ) -> (Vec<String>, Vec<String>) {
-    let symbol = tcx.def_path_str(def_id);
+    let symbol = def_path(tcx, def_id);
     if def_id.is_local()
         && let Some(id) = function_ids.get(&def_id.expect_local())
     {
@@ -6725,7 +7327,7 @@ fn enumerate_dyn_candidates(
                 .in_definition_order()
             {
                 if candidate.is_fn() && candidate.name() == method_name {
-                    names.push(tcx.def_path_str(candidate.def_id));
+                    names.push(def_path(tcx, candidate.def_id));
                     receivers.push(impl_ty.clone());
                     if let Some(id) = candidate
                         .def_id
@@ -6801,12 +7403,14 @@ fn normalize_type_name(value: String) -> String {
 fn semantic_tags_for_call(
     symbol: &str,
     target_names: &[String],
+    native_symbol: Option<&str>,
     call_type: &str,
     receiver_type: Option<&str>,
 ) -> Vec<String> {
     let mut tags = BTreeSet::new();
     let mut inspect = vec![symbol.to_string()];
     inspect.extend(target_names.iter().cloned());
+    inspect.extend(native_symbol.map(str::to_string));
     for candidate in inspect {
         let normalized = normalize_symbol(&candidate);
         let last = last_segment(&normalized);
@@ -7057,7 +7661,7 @@ fn declaration_signature(tcx: TyCtxt<'_>, def_id: DefId) -> String {
             .instantiate_identity()
             .skip_binder()
             .to_string(),
-        _ => tcx.def_path_str(def_id),
+        _ => def_path(tcx, def_id),
     }
 }
 
@@ -7279,4 +7883,647 @@ fn strip_generic_arguments(value: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(base: &str, projections: &[PlaceProjection]) -> PlacePath {
+        PlacePath {
+            base: base.to_string(),
+            projections: projections.to_vec(),
+        }
+    }
+
+    fn local(base: &str) -> PlacePath {
+        place(base, &[])
+    }
+
+    fn field(name: &str) -> PlaceProjection {
+        PlaceProjection::Field(name.to_string())
+    }
+
+    fn assign(dest: &str, sources: &[PlacePath]) -> MirOp {
+        MirOp::Assign(AssignAction {
+            dest: local(dest),
+            sources: sources.to_vec(),
+            alias: None,
+            field_sources: Vec::new(),
+        })
+    }
+
+    fn call(dest: &str, callee: &str, target_ids: &[&str], args: &[PlacePath]) -> MirOp {
+        MirOp::Call(Box::new(MirCall {
+            dest: local(dest),
+            dest_type: None,
+            callee_display: callee.to_string(),
+            call_type: if target_ids.is_empty() {
+                "static".to_string()
+            } else {
+                "local".to_string()
+            },
+            dispatch_confidence: "high".to_string(),
+            target_ids: target_ids.iter().map(|id| id.to_string()).collect(),
+            target_names: Vec::new(),
+            candidate_receivers: Vec::new(),
+            receiver_type: None,
+            dispatch_trait: None,
+            specialization_key: String::new(),
+            semantic_tags: Vec::new(),
+            async_boundary: false,
+            task_boundary: false,
+            native_symbol: None,
+            operand_display: callee.to_string(),
+            args: args
+                .iter()
+                .map(|arg| CallArg {
+                    place: Some(arg.clone()),
+                    type_name: None,
+                })
+                .collect(),
+        }))
+    }
+
+    fn block(label: usize, ops: Vec<MirOp>, successors: &[usize], returns: bool) -> MirBlock {
+        MirBlock {
+            label: format!("bb{label}"),
+            ops,
+            successors: successors.iter().map(|next| format!("bb{next}")).collect(),
+            returns,
+        }
+    }
+
+    fn function(name: &str, params: &[&str], blocks: Vec<MirBlock>) -> MirFunction {
+        MirFunction {
+            id: format!("fn-{name}"),
+            name: last_segment(name).to_string(),
+            qualified_name: name.to_string(),
+            kind: "function".to_string(),
+            package_path: "probe".to_string(),
+            file_path: "src/main.rs".to_string(),
+            position: Position::default(),
+            param_names: params.iter().map(|param| param.to_string()).collect(),
+            param_types: params
+                .iter()
+                .map(|_| "std::string::String".to_string())
+                .collect(),
+            return_type: "()".to_string(),
+            blocks,
+        }
+    }
+
+    fn summaries_of(functions: &[MirFunction]) -> (BTreeMap<String, FunctionSummary>, usize) {
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(functions, &patterns, &local_ids, &function_map);
+        summary_fixpoint(functions, &ctx, false)
+    }
+
+    /// `f00(p)` calls `f01(p)` and so on down to a process spawn, written
+    /// callers first: the old pass learned one level per round and stopped
+    /// after eight.
+    fn call_chain(depth: usize) -> Vec<MirFunction> {
+        (0..depth)
+            .map(|level| {
+                let name = format!("probe::f{level:02}");
+                let op = if level + 1 < depth {
+                    let callee = format!("probe::f{:02}", level + 1);
+                    let callee_id = format!("fn-{callee}");
+                    call("_2", &callee, &[callee_id.as_str()], &[local("p")])
+                } else {
+                    call("_2", "std::process::Command::new", &[], &[local("p")])
+                };
+                function(&name, &["p"], vec![block(0, vec![op], &[], true)])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_call_chain_of_any_depth_settles_in_one_pass() {
+        let functions = call_chain(30);
+        let (summaries, evaluations) = summaries_of(&functions);
+        assert_eq!(evaluations, functions.len(), "one evaluation per function");
+        for function in &functions {
+            assert_eq!(
+                summaries[&function.id].param_to_sink.get("process-exec"),
+                Some(&BTreeSet::from([0])),
+                "{}",
+                function.qualified_name
+            );
+        }
+    }
+
+    #[test]
+    fn mutual_recursion_settles_without_a_round_limit() {
+        // even(p) -> odd(p) -> even(p), and odd also spawns p.
+        let even = function(
+            "probe::even",
+            &["p"],
+            vec![block(
+                0,
+                vec![call("_2", "probe::odd", &["fn-probe::odd"], &[local("p")])],
+                &[],
+                true,
+            )],
+        );
+        let odd = function(
+            "probe::odd",
+            &["p"],
+            vec![block(
+                0,
+                vec![
+                    call("_2", "probe::even", &["fn-probe::even"], &[local("p")]),
+                    call("_3", "std::process::Command::new", &[], &[local("p")]),
+                ],
+                &[],
+                true,
+            )],
+        );
+        let (summaries, evaluations) = summaries_of(&[even, odd]);
+        assert_eq!(
+            summaries["fn-probe::even"]
+                .param_to_sink
+                .get("process-exec"),
+            Some(&BTreeSet::from([0]))
+        );
+        assert!((2..=6).contains(&evaluations), "{evaluations}");
+    }
+
+    /// A function recursing on a field of its own parameter, returning a
+    /// field: without widening, each round would add `n.next.val`,
+    /// `n.next.next.val`, and so on forever.
+    #[test]
+    fn recursion_on_a_projection_of_a_parameter_terminates() {
+        let next = place("n", &[PlaceProjection::Deref, field("next")]);
+        let val = place("n", &[PlaceProjection::Deref, field("val")]);
+        let walk = function(
+            "probe::walk",
+            &["n"],
+            vec![
+                block(0, vec![], &[1, 2], false),
+                block(
+                    1,
+                    vec![
+                        call(
+                            "_3",
+                            "probe::walk",
+                            &["fn-probe::walk"],
+                            std::slice::from_ref(&next),
+                        ),
+                        assign("_0", &[local("_3")]),
+                    ],
+                    &[3],
+                    false,
+                ),
+                block(
+                    2,
+                    vec![assign("_0", std::slice::from_ref(&val))],
+                    &[3],
+                    false,
+                ),
+                block(3, vec![], &[], true),
+            ],
+        );
+        let (summaries, _) = summaries_of(&[walk]);
+        let summary = &summaries["fn-probe::walk"];
+        assert!(summary.field_to_return.contains(&val));
+        assert!(
+            summary.field_to_return.contains(&next),
+            "widened to the argument"
+        );
+        assert!(
+            summary
+                .field_to_return
+                .iter()
+                .all(|place| place.projections.len() <= 2),
+            "{:?}",
+            summary.field_to_return
+        );
+    }
+
+    /// A loop body of seventy links, each copied from the next, with the
+    /// source stored in the last: the source needs seventy trips to reach
+    /// `x00`, past the 64 whole-function passes the old fixpoint allowed.
+    fn seventy_step_loop() -> MirFunction {
+        let links = 70;
+        let head = 1;
+        let first_body = 2;
+        let last_body = first_body + links - 1;
+        let exit = last_body + 1;
+        // The head lists its exit first, the order under which reverse
+        // postorder alone would rank the exit ahead of the body.
+        let mut blocks = vec![
+            block(0, vec![], &[head], false),
+            block(head, vec![], &[exit, first_body], false),
+        ];
+        for link in 0..links {
+            let label = first_body + link;
+            let mut ops = vec![assign(
+                &format!("x{link:02}"),
+                &[local(&format!("x{:02}", link + 1))],
+            )];
+            let next = if label == last_body {
+                ops.push(call(
+                    &format!("x{links:02}"),
+                    "std::env::var",
+                    &[],
+                    &[local("key")],
+                ));
+                head
+            } else {
+                label + 1
+            };
+            blocks.push(block(label, ops, &[next], false));
+        }
+        blocks.push(block(
+            exit,
+            vec![call(
+                "_9",
+                "std::process::Command::new",
+                &[],
+                &[local("x00")],
+            )],
+            &[],
+            true,
+        ));
+        function("probe::seventy", &["key"], blocks)
+    }
+
+    #[test]
+    fn a_loop_carried_chain_longer_than_the_old_pass_limit_settles() {
+        let seventy = seventy_step_loop();
+        let (summaries, _) = summaries_of(std::slice::from_ref(&seventy));
+        assert_eq!(
+            summaries[&seventy.id].source_to_sink.get("process-exec"),
+            Some(&BTreeSet::from(["env".to_string()]))
+        );
+
+        let mut diagnostics = Vec::new();
+        let evidence = build_data_flow(std::slice::from_ref(&seventy), &mut diagnostics, false);
+        let slice = evidence
+            .slices
+            .iter()
+            .find(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .expect("env reaches the spawn after seventy trips");
+        // The witness walks every link: source, seventy copies, the spawn.
+        assert_eq!(slice.path_length, 71);
+    }
+
+    /// A spawn in a loop body that sees the source only from the second trip
+    /// on, next to a call nothing resolves. The fixpoint transfers the body
+    /// more than once; emitting from the settled states reports each once.
+    #[test]
+    fn loop_bodies_emit_once_from_the_settled_state() {
+        let carried = function(
+            "probe::carried",
+            &["key"],
+            vec![
+                block(0, vec![], &[1], false),
+                block(1, vec![], &[3, 2], false),
+                block(
+                    2,
+                    vec![
+                        assign("x", &[local("y")]),
+                        call("y", "std::env::var", &[], &[local("key")]),
+                        call("_5", "probe::mystery", &[], &[local("x")]),
+                        call("_6", "std::process::Command::new", &[], &[local("x")]),
+                    ],
+                    &[1],
+                    false,
+                ),
+                block(3, vec![], &[], true),
+            ],
+        );
+        let mut diagnostics = Vec::new();
+        let evidence = build_data_flow(std::slice::from_ref(&carried), &mut diagnostics, false);
+        let spawns: Vec<_> = evidence
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .collect();
+        assert_eq!(spawns.len(), 1, "{spawns:#?}");
+        // Source, the copy into `x`, the spawn.
+        assert_eq!(spawns[0].path_length, 2);
+        let unresolved = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message.ends_with(": probe::mystery"))
+            .count();
+        assert_eq!(unresolved, 1, "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn loop_bodies_rank_before_their_exit_whatever_the_successor_order() {
+        let seventy = seventy_step_loop();
+        let graph = BlockGraph::new(&seventy);
+        let position = |block: usize| graph.order.iter().position(|b| *b == block).unwrap();
+        let exit = seventy.blocks.len() - 1;
+        assert_eq!(graph.order.len(), seventy.blocks.len());
+        for body in 2..exit {
+            assert!(position(body) < position(exit), "bb{body} before the exit");
+        }
+    }
+
+    #[test]
+    fn alias_chains_resolve_fully_and_stop_at_cycles() {
+        // a00 -> a01 -> ... -> a20: the old chase stopped after eight hops.
+        let mut aliases = HashMap::new();
+        for hop in 0..20 {
+            aliases.insert(
+                local(&format!("a{hop:02}")),
+                local(&format!("a{:02}", hop + 1)),
+            );
+        }
+        assert_eq!(resolve_aliases(&aliases, &local("a00")), local("a20"));
+        // A projection rides along a prefix alias.
+        let projected = place("a00", &[field("f")]);
+        assert_eq!(
+            resolve_aliases(&aliases, &projected),
+            place("a20", &[field("f")])
+        );
+
+        let cycle = HashMap::from([(local("x"), local("y")), (local("y"), local("x"))]);
+        let resolved = resolve_aliases(&cycle, &local("x"));
+        assert!(resolved == local("x") || resolved == local("y"));
+        // A cycle that grows the place each time around still ends.
+        let growing = HashMap::from([(local("g"), place("g", &[field("next")]))]);
+        assert_eq!(
+            resolve_aliases(&growing, &local("g")),
+            place("g", &[field("next")])
+        );
+    }
+
+    #[test]
+    fn rebasing_widens_only_inside_a_recursion_cycle() {
+        let callee = function("probe::callee", &["q"], Vec::new());
+        let args = [CallArg {
+            place: Some(place("a", &[field("b")])),
+            type_name: None,
+        }];
+        let field_place = place("q", &[field("c")]);
+        assert_eq!(
+            rebase_summary_place(&args, &callee, &field_place, None, false),
+            Some(place("a", &[field("b"), field("c")]))
+        );
+        assert_eq!(
+            rebase_summary_place(&args, &callee, &field_place, None, true),
+            Some(place("a", &[field("b")]))
+        );
+    }
+
+    /// A C function declared in the crate has a Rust path like any local item,
+    /// but the native models name it by the symbol it links against, and a
+    /// Rust function with that last segment is no C function at all.
+    #[test]
+    fn native_models_match_the_symbol_a_foreign_function_links_against() {
+        let patterns = built_in_patterns();
+        let MirOp::Call(mut foreign) = call("_2", "ffi_app::puts", &[], &[local("message")]) else {
+            unreachable!()
+        };
+        foreign.native_symbol = Some("puts".to_string());
+        assert_eq!(
+            sink_matches(&foreign, &patterns),
+            Some(vec![("native-output".to_string(), vec![0])])
+        );
+        assert!(model_tags_for_call(&foreign).contains("native-boundary"));
+        // `getenv` is modeled as a source only, so nothing says which of its
+        // arguments reach a sink.
+        foreign.native_symbol = Some("getenv".to_string());
+        assert_eq!(
+            sink_matches(&foreign, &patterns),
+            Some(vec![("native-call".to_string(), vec![0])])
+        );
+
+        let MirOp::Call(rust) = call("_2", "ffi_app::puts", &[], &[local("message")]) else {
+            unreachable!()
+        };
+        assert_eq!(sink_matches(&rust, &patterns), None);
+        assert!(!rust.model_symbols().any(modeled_native_boundary));
+
+        // typeck types `CString::new` a native call, since it prepares data
+        // for one, but its arguments reach no foreign code.
+        let MirOp::Call(mut helper) = call(
+            "_3",
+            "std::ffi::CString::new",
+            &["external"],
+            &[local("message")],
+        ) else {
+            unreachable!()
+        };
+        helper.call_type = "native".to_string();
+        assert_eq!(sink_matches(&helper, &patterns), None);
+    }
+
+    #[test]
+    fn local_paths_are_spelled_from_the_package() {
+        let spell = |printed: &str| spell_local_paths(printed, "my_app");
+        assert_eq!(spell("crate::chains::run"), "my_app::chains::run");
+        assert_eq!(spell("crate::main"), "my_app::main");
+        assert_eq!(
+            spell("<crate::dispatch::Stage01 as crate::dispatch::Stage>::apply"),
+            "<my_app::dispatch::Stage01 as my_app::dispatch::Stage>::apply"
+        );
+        assert_eq!(
+            spell("<crate::Store as std::fmt::Display>::fmt"),
+            "<my_app::Store as std::fmt::Display>::fmt"
+        );
+        assert_eq!(
+            spell("crate::Wrapper::<crate::Inner>::get"),
+            "my_app::Wrapper::<my_app::Inner>::get"
+        );
+        assert_eq!(
+            spell("crate::main::{closure#0}"),
+            "my_app::main::{closure#0}"
+        );
+        // Paths into other crates, and names that merely end in "crate".
+        assert_eq!(
+            spell("std::process::Command::new"),
+            "std::process::Command::new"
+        );
+        assert_eq!(spell("subcrate::run"), "subcrate::run");
+        assert_eq!(spell("my_crate::run"), "my_crate::run");
+    }
+
+    #[test]
+    fn impl_trait_method_parts_reads_the_top_level_as() {
+        let parts = |symbol: &str| impl_trait_method_parts(symbol);
+        let pair =
+            |trait_name: &str, method: &str| Some((trait_name.to_string(), method.to_string()));
+        assert_eq!(
+            parts("<dispatch::Stage01 as dispatch::Stage>::apply"),
+            pair("Stage", "apply")
+        );
+        assert_eq!(
+            parts("<dyn dispatch::Stage as dispatch::Stage>::apply"),
+            pair("Stage", "apply")
+        );
+        assert_eq!(parts("<Store as Database>::get"), pair("Database", "get"));
+        assert_eq!(parts("<Database as Class>::load"), pair("Class", "load"));
+        assert_eq!(
+            parts("<Vec<Alias> as Handler<Base>>::call"),
+            pair("Handler", "call")
+        );
+        assert_eq!(
+            parts("<<T as Source>::Item as Sink>::put"),
+            pair("Sink", "put")
+        );
+        assert_eq!(
+            parts("<fn() -> Cast as Callable>::invoke"),
+            pair("Callable", "invoke")
+        );
+        assert_eq!(parts("<X as Y>::method::<u8>"), pair("Y", "method"));
+        assert_eq!(parts("probe::free_function"), None);
+        assert_eq!(parts("<Inherent>::method"), None);
+    }
+
+    #[test]
+    fn candidate_targets_reach_every_impl_of_the_trait_in_id_order() {
+        let impls: Vec<MirFunction> = (0..40)
+            .map(|index| {
+                function(
+                    &format!("<dispatch::Stage{index:02} as dispatch::Stage>::apply"),
+                    &["self", "input"],
+                    Vec::new(),
+                )
+            })
+            .chain(std::iter::once(function(
+                "<dispatch::Other as dispatch::Unrelated>::apply",
+                &["self", "input"],
+                Vec::new(),
+            )))
+            .collect();
+        let patterns = built_in_patterns();
+        let local_ids = impls.iter().map(|f| f.id.clone()).collect::<HashSet<_>>();
+        let function_map = impls
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&impls, &patterns, &local_ids, &function_map);
+        let MirOp::Call(mut dyn_call) = call(
+            "_4",
+            "<dyn dispatch::Stage as dispatch::Stage>::apply",
+            &[],
+            &[local("stage"), local("input")],
+        ) else {
+            unreachable!()
+        };
+        dyn_call.call_type = "dyn-dispatch".to_string();
+        let targets = candidate_dataflow_targets(&dyn_call, &ctx);
+        assert_eq!(targets.len(), 40, "every Stage impl, and only those");
+        assert!(targets.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(!targets.iter().any(|id| id.contains("Unrelated")));
+    }
+
+    /// Rust resolves a call to an inherent method statically, so the call
+    /// carries it as its own target, and a trait-object, trait or
+    /// unresolved call can never land on one. The candidate indexes hold
+    /// trait impl methods only, so no inherent method stands in for such a
+    /// call, whatever it is called and whatever its type is called
+    /// (`Database` contains the letters of " as ").
+    #[test]
+    fn inherent_methods_are_reached_only_through_their_own_targets() {
+        let functions = vec![
+            function("probe::Database::get", &["self", "key"], Vec::new()),
+            function("<probe::Wrapper<T>>::get", &["self", "key"], Vec::new()),
+            function(
+                "<probe::Memory as probe::Store>::get",
+                &["self", "key"],
+                Vec::new(),
+            ),
+        ];
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&functions, &patterns, &local_ids, &function_map);
+        let targets = |callee: &str, call_type: &str, target_ids: &[&str]| {
+            let MirOp::Call(mut call) =
+                call("_3", callee, target_ids, &[local("store"), local("key")])
+            else {
+                unreachable!()
+            };
+            call.call_type = call_type.to_string();
+            candidate_dataflow_targets(&call, &ctx)
+        };
+        let memory = vec!["fn-<probe::Memory as probe::Store>::get".to_string()];
+        assert_eq!(
+            targets(
+                "<dyn probe::Store as probe::Store>::get",
+                "dyn-dispatch",
+                &[]
+            ),
+            memory
+        );
+        assert_eq!(targets("probe::Store::get", "trait-static", &[]), memory);
+        assert_eq!(targets("get", "unresolved", &[]), memory);
+        assert_eq!(
+            targets(
+                "probe::Database::get",
+                "static",
+                &["fn-probe::Database::get"]
+            ),
+            vec!["fn-probe::Database::get".to_string()]
+        );
+    }
+
+    #[test]
+    fn nested_bodies_are_indexed_under_every_enclosing_function() {
+        let functions = vec![
+            function("probe::outer", &[], Vec::new()),
+            function("probe::outer::{closure#0}", &[], Vec::new()),
+            function("probe::outer::{closure#0}::{closure#1}", &[], Vec::new()),
+            function("probe::outer_twin::{closure#0}", &[], Vec::new()),
+        ];
+        let patterns = built_in_patterns();
+        let local_ids = functions
+            .iter()
+            .map(|f| f.id.clone())
+            .collect::<HashSet<_>>();
+        let function_map = functions
+            .iter()
+            .map(|f| (f.id.clone(), f))
+            .collect::<HashMap<_, _>>();
+        let ctx = FlowContext::new(&functions, &patterns, &local_ids, &function_map);
+        assert_eq!(
+            ctx.nested_bodies["probe::outer"],
+            vec![
+                "fn-probe::outer::{closure#0}".to_string(),
+                "fn-probe::outer::{closure#0}::{closure#1}".to_string()
+            ]
+        );
+        assert_eq!(
+            ctx.nested_bodies["probe::outer::{closure#0}"],
+            vec!["fn-probe::outer::{closure#0}::{closure#1}".to_string()]
+        );
+    }
+
+    #[test]
+    fn summaries_join_by_union_and_report_growth() {
+        let mut summary = FunctionSummary::default();
+        let mut next = FunctionSummary::default();
+        next.param_to_sink
+            .insert("process-exec".to_string(), BTreeSet::from([0]));
+        assert!(summary.join(next.clone()));
+        assert!(!summary.join(next));
+        let mut more = FunctionSummary::default();
+        more.param_to_sink
+            .insert("process-exec".to_string(), BTreeSet::from([1]));
+        assert!(summary.join(more));
+        assert_eq!(
+            summary.param_to_sink["process-exec"],
+            BTreeSet::from([0, 1])
+        );
+    }
 }

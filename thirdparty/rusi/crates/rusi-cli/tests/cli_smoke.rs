@@ -279,7 +279,7 @@ fn compiler_backend_lifts_async_task_closure_flow() -> Result<()> {
             && slice.sink_name.contains("dispatch")
     }));
     assert!(data_flow.summaries.iter().any(|summary| {
-        summary.function == "dispatch"
+        summary.function == "async_semantic_app::dispatch"
             && summary
                 .param_to_sink
                 .get("process-exec")

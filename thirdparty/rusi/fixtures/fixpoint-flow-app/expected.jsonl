@@ -1,0 +1,84 @@
+# Expected source->sink flows in fixpoint-flow-app (stable backend names).
+#
+# One JSON object per line; see fixtures/vulnerable-web-app/expected.jsonl for
+# the format. Every flow here needs a fixpoint run to convergence:
+#   - chains.rs: call chains twelve functions deep, callers first
+#   - loops.rs: values carried from one trip around a loop to the next,
+#     including a seventy-step chain
+#   - recursion.rs: self and mutual recursion, and a recursive field walk
+#   - dispatch.rs: each Stage implementation spawns its own parameter, and
+#     so does an inherent method, reached through its own call target
+
+
+# Environment values reaching sinks through the fixpoints.
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_chain", "sink_function": "fixpoint_flow_app::chains::sink_chain", "expected": true}
+{"source_category": "env", "sink_category": "filesystem-write", "source_function": "fixpoint_flow_app::chains::fetch_chain", "sink_function": "fixpoint_flow_app::chains::fetch_chain", "expected": true}
+{"source_category": "env", "sink_category": "network-connect", "source_function": "fixpoint_flow_app::chains::pass_chain", "sink_function": "fixpoint_flow_app::chains::pass_chain", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::loops::carried_by_for", "sink_function": "fixpoint_flow_app::loops::carried_by_for", "expected": true}
+{"source_category": "env", "sink_category": "filesystem-delete", "source_function": "fixpoint_flow_app::loops::carried_by_while", "sink_function": "fixpoint_flow_app::loops::carried_by_while", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::loops::carried_by_loop", "sink_function": "fixpoint_flow_app::loops::carried_by_loop", "expected": true}
+{"source_category": "env", "sink_category": "network-connect", "source_function": "fixpoint_flow_app::loops::carried_through_nested_loops", "sink_function": "fixpoint_flow_app::loops::carried_through_nested_loops", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::loops::carried_seventy_steps", "sink_function": "fixpoint_flow_app::loops::carried_seventy_steps", "expected": true}
+{"source_category": "env", "sink_category": "filesystem-write", "source_function": "fixpoint_flow_app::loops::run", "sink_function": "fixpoint_flow_app::loops::run", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::recursion::run", "sink_function": "fixpoint_flow_app::recursion::run", "expected": true}
+{"source_category": "env", "sink_category": "filesystem-delete", "source_function": "fixpoint_flow_app::recursion::run", "sink_function": "fixpoint_flow_app::recursion::run", "expected": true}
+{"source_category": "env", "sink_category": "network-connect", "source_function": "fixpoint_flow_app::recursion::run", "sink_function": "fixpoint_flow_app::recursion::run", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::run_inherent", "sink_function": "fixpoint_flow_app::dispatch::run_inherent", "expected": true}
+
+# Each helper that spawns or deletes its own parameter.
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_01", "sink_function": "fixpoint_flow_app::chains::sink_01", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_02", "sink_function": "fixpoint_flow_app::chains::sink_02", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_03", "sink_function": "fixpoint_flow_app::chains::sink_03", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_04", "sink_function": "fixpoint_flow_app::chains::sink_04", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_05", "sink_function": "fixpoint_flow_app::chains::sink_05", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_06", "sink_function": "fixpoint_flow_app::chains::sink_06", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_07", "sink_function": "fixpoint_flow_app::chains::sink_07", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_08", "sink_function": "fixpoint_flow_app::chains::sink_08", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_09", "sink_function": "fixpoint_flow_app::chains::sink_09", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_10", "sink_function": "fixpoint_flow_app::chains::sink_10", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_11", "sink_function": "fixpoint_flow_app::chains::sink_11", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::chains::sink_12", "sink_function": "fixpoint_flow_app::chains::sink_12", "expected": true}
+{"source_category": "param-0", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::recursion::countdown", "sink_function": "fixpoint_flow_app::recursion::countdown", "expected": true}
+{"source_category": "param-0", "sink_category": "filesystem-delete", "source_function": "fixpoint_flow_app::recursion::is_even", "sink_function": "fixpoint_flow_app::recursion::is_even", "expected": true}
+{"source_category": "param-0", "sink_category": "filesystem-delete", "source_function": "fixpoint_flow_app::recursion::is_odd", "sink_function": "fixpoint_flow_app::recursion::is_odd", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage01::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage01::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage02::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage02::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage03::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage03::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage04::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage04::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage05::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage05::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage06::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage06::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage07::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage07::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage08::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage08::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage09::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage09::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage10::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage10::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage11::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage11::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage12::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage12::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage13::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage13::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage14::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage14::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage15::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage15::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage16::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage16::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage17::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage17::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage18::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage18::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage19::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage19::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage20::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage20::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage21::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage21::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage22::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage22::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage23::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage23::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage24::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage24::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage25::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage25::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage26::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage26::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage27::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage27::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage28::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage28::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage29::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage29::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage30::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage30::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage31::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage31::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage32::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage32::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage33::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage33::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage34::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage34::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage35::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage35::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage36::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage36::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage37::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage37::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage38::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage38::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage39::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage39::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Stage40::apply", "sink_function": "fixpoint_flow_app::dispatch::Stage40::apply", "expected": true}
+{"source_category": "param-1", "sink_category": "process-exec", "source_function": "fixpoint_flow_app::dispatch::Database::perform", "sink_function": "fixpoint_flow_app::dispatch::Database::perform", "expected": true}

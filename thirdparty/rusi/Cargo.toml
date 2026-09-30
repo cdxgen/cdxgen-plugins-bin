@@ -50,3 +50,15 @@ lto = "thin"
 opt-level = "z"
 panic = "abort"
 strip = "symbols"
+
+# The compiler backend's wrapper, built on the user's machine the first time
+# that backend runs (see WRAPPER_PROFILE in crates/rusi-driver). It is the MIR
+# data-flow engine, so it is optimized for speed, without the size-first
+# settings and LTO above that would only slow that one-time build. The driver
+# embeds this exact table in the manifest it materializes; a test compares.
+[profile.rusi-wrapper]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 16
+panic = "unwind"

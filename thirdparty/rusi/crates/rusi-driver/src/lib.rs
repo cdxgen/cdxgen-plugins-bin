@@ -189,7 +189,17 @@ struct NativeFileContext {
     module_path: Vec<String>,
 }
 
+/// Runs the compiler backend over `options.analysis_root`.
+///
+/// It runs on its own thread with [`rusi_core::analysis_stack_size`] bytes of
+/// stack, whatever thread calls it, because it parses every source file with
+/// `syn` to find native interop, and a deeply nested expression that rustc
+/// accepts overflowed the main thread's stack there.
 pub fn run_driver(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
+    rusi_core::on_analysis_stack(|| run_driver_on_this_thread(options))?
+}
+
+fn run_driver_on_this_thread(options: &DriverOptions) -> Result<DriverProtocolEnvelope> {
     let analysis_root = fs::canonicalize(&options.analysis_root).with_context(|| {
         format!(
             "failed to resolve compiler backend root {}",
@@ -600,15 +610,27 @@ fn toolchain_floor_diagnostic(
     })
 }
 
+/// The toolchain `auto` stands for: the rolling nightly when it is
+/// installed, else the newest dated nightly, else stable.
+///
+/// A dated nightly (`nightly-2026-08-21-<host>`) is returned by its full
+/// name, because `cargo +nightly` and `rustup run nightly` reach only the
+/// rolling one: a machine or CI job that installs just a pinned nightly would
+/// otherwise be sent to a toolchain it does not have.
 fn resolve_toolchain(requested: &str, available_toolchains: &[String]) -> String {
     if requested != "auto" {
         return requested.to_string();
     }
-    if available_toolchains
+    let (dated, rolling): (Vec<&String>, Vec<&String>) = available_toolchains
         .iter()
-        .any(|toolchain| toolchain.starts_with("nightly"))
-    {
+        .filter(|toolchain| toolchain.starts_with("nightly"))
+        .partition(|toolchain| is_dated_nightly(toolchain));
+    if !rolling.is_empty() {
         return "nightly".to_string();
+    }
+    // Dated names order by their date.
+    if let Some(newest) = dated.into_iter().max() {
+        return newest.clone();
     }
     if available_toolchains
         .iter()
@@ -617,6 +639,21 @@ fn resolve_toolchain(requested: &str, available_toolchains: &[String]) -> String
         return "stable".to_string();
     }
     "stable".to_string()
+}
+
+/// Whether `toolchain` names a nightly of a given date, `nightly-YYYY-MM-DD`
+/// with or without a host triple after it.
+fn is_dated_nightly(toolchain: &str) -> bool {
+    let Some(date) = toolchain
+        .strip_prefix("nightly-")
+        .and_then(|rest| rest.get(..10))
+    else {
+        return false;
+    };
+    date.bytes().enumerate().all(|(index, byte)| match index {
+        4 | 7 => byte == b'-',
+        _ => byte.is_ascii_digit(),
+    })
 }
 
 fn capture_toolchain_rustc_version(toolchain: &str, rustup_available: bool) -> String {
@@ -697,11 +734,37 @@ const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
         "crates/rusi-schema/src/lib.rs",
         include_str!("../../rusi-schema/src/lib.rs"),
     ),
+    (
+        "crates/rusi-schema/src/fixpoint.rs",
+        include_str!("../../rusi-schema/src/fixpoint.rs"),
+    ),
 ];
+
+/// The cargo profile the embedded wrapper is built with.
+const WRAPPER_PROFILE: &str = "rusi-wrapper";
+
+/// The `[profile.rusi-wrapper]` table, shared by the materialized manifest and
+/// the real workspace manifest (a test holds the two together).
+///
+/// The wrapper is the MIR data-flow engine the compiler backend runs, so it is
+/// built optimized; cargo's default dev profile left every analysis running
+/// unoptimized code. The release profile's size-first `opt-level`, LTO and
+/// single codegen unit would only make the one-time build on a user's machine
+/// slower, and the wrapper keeps unwinding like the rustc it is linked into.
+macro_rules! wrapper_profile_toml {
+    () => {
+        "[profile.rusi-wrapper]\n\
+         inherits = \"release\"\n\
+         opt-level = 2\n\
+         lto = false\n\
+         codegen-units = 16\n\
+         panic = \"unwind\"\n"
+    };
+}
 
 /// Workspace manifest for the materialized wrapper sources. Mirrors the
 /// `[workspace.package]` and dependency versions of the real workspace that the
-/// member manifests inherit from.
+/// member manifests inherit from, and its wrapper profile.
 const EMBEDDED_WRAPPER_WORKSPACE_MANIFEST: &str = concat!(
     "[workspace]\n",
     "members = [\"crates/rusi-schema\", \"crates/rusi-rustc-wrapper\"]\n",
@@ -717,7 +780,8 @@ const EMBEDDED_WRAPPER_WORKSPACE_MANIFEST: &str = concat!(
     "indexmap = { version = \"2\", features = [\"serde\"] }\n",
     "serde = { version = \"1\", features = [\"derive\"] }\n",
     "serde_json = \"1\"\n",
-    "sha2 = \"0.11\"\n",
+    "sha2 = \"0.11\"\n\n",
+    wrapper_profile_toml!(),
 );
 
 fn has_wrapper_sources(root: &Path) -> bool {
@@ -928,7 +992,7 @@ fn ensure_embedded_wrapper_built(
     if capabilities.rustup_available && !capabilities.resolved_toolchain.is_empty() {
         command.arg(format!("+{}", capabilities.resolved_toolchain));
     }
-    command.args(["build", "--manifest-path"]);
+    command.args(["build", "--profile", WRAPPER_PROFILE, "--manifest-path"]);
     command.arg(&manifest_path);
     command.args(["-p", "rusi-rustc-wrapper"]);
     if !capabilities.nightly_toolchain {
@@ -980,7 +1044,7 @@ fn ensure_embedded_wrapper_built(
     }
     // `EXE_SUFFIX` is empty everywhere except Windows, where the binary cargo
     // produced is `rusi-rustc-wrapper.exe`.
-    let wrapper = wrapper_target_dir.join("debug").join(format!(
+    let wrapper = wrapper_target_dir.join(WRAPPER_PROFILE).join(format!(
         "rusi-rustc-wrapper{}",
         std::env::consts::EXE_SUFFIX
     ));
@@ -2399,6 +2463,7 @@ fn span_key(span: Span) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -2502,6 +2567,31 @@ mod tests {
             "staging dirs left behind: {leftovers:?}"
         );
         fs::remove_dir_all(&base).ok();
+    }
+
+    /// The wrapper is built with the same profile from the checkout and from
+    /// the materialized sources, so a released binary analyzes as fast as CI.
+    #[test]
+    fn embedded_wrapper_profile_matches_the_real_workspace() {
+        // The whole table, from its header to the next one: a key added to
+        // either copy alone is drift too.
+        fn profile_table(manifest: &str) -> &str {
+            let header = format!("[profile.{}]\n", super::WRAPPER_PROFILE);
+            let start = manifest
+                .find(&header)
+                .unwrap_or_else(|| panic!("no {header:?} table"));
+            let rest = &manifest[start..];
+            let end = rest[header.len()..]
+                .find("\n[")
+                .map_or(rest.len(), |at| header.len() + at + 1);
+            rest[..end].trim_end()
+        }
+        let embedded = wrapper_profile_toml!().trim_end();
+        assert_eq!(profile_table(include_str!("../../../Cargo.toml")), embedded);
+        assert_eq!(
+            profile_table(super::EMBEDDED_WRAPPER_WORKSPACE_MANIFEST),
+            embedded
+        );
     }
 
     /// The generated workspace manifest hand-copies versions and features from
@@ -2964,8 +3054,14 @@ mod tests {
                 .get("candidateTargets")
                 .cloned()
                 .unwrap_or_default();
-            assert!(candidates.contains("<FileStore as Store>::persist"));
-            assert!(candidates.contains("<NetStore as Store>::persist"));
+            assert!(
+                candidates
+                    .contains("<dyn_dispatch_app::FileStore as dyn_dispatch_app::Store>::persist")
+            );
+            assert!(
+                candidates
+                    .contains("<dyn_dispatch_app::NetStore as dyn_dispatch_app::Store>::persist")
+            );
         }
     }
 
@@ -3151,12 +3247,215 @@ mod tests {
             // parameter now that devirtualization succeeded.
             assert!(graph.edges.iter().all(|edge| {
                 !(graph.source_name(edge).ends_with("run_specific")
-                    && (graph.target_name(edge).contains("<S as Sink")
-                        || graph.target_name(edge) == "Sink::submit"))
+                    && (graph
+                        .target_name(edge)
+                        .contains("<S as generic_specialization_app::Sink")
+                        || graph.target_name(edge) == "generic_specialization_app::Sink::submit"))
             }));
         } else {
             assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
         }
+    }
+
+    /// 800 levels of nesting, which rustc compiles: the driver parses every
+    /// source file for native interop, and did so on the calling thread,
+    /// whose stack (2 MiB for a test, 8 MiB for `main`) gave out.
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_backend_takes_deeply_nested_expressions() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("deep-nesting-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+            return;
+        }
+        let flow = envelope.payload.data_flow.expect("dataflow emitted");
+        // Each flow is reported where the source is read and again in
+        // `main`, whose call carries it through the callee's summary.
+        let sources = flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env" && slice.sink_category == "process-exec")
+            .map(|slice| slice.source_function.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            sources,
+            BTreeSet::from([
+                "deep_nesting_app::main",
+                "deep_nesting_app::nested::run",
+                "deep_nesting_app::nested_twin::run"
+            ])
+        );
+    }
+
+    /// The compiler backend's fixpoints run to convergence: twelve-deep
+    /// call chains (summaries used to stop after eight rounds), loop-carried
+    /// values including a seventy-step chain (blocks used to stop after 64
+    /// passes), recursion, a trait object with forty implementations
+    /// (candidate targets used to stop at 32, and a trait declared in a
+    /// module matched none of them), and an inherent method reached through
+    /// its own call target.
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_backend_follows_every_flow_in_fixpoint_flow_app() {
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("fixpoint-flow-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+            return;
+        }
+        let flow = envelope
+            .payload
+            .data_flow
+            .as_ref()
+            .expect("dataflow emitted");
+        // Every environment flow the backend reports, exactly, named from the
+        // package the way the stable backend names them. A flow is
+        // reported in the function that reads the source and again in each
+        // caller whose summary carries it to a sink (`loops::run`, `main`),
+        // so one gained or lost anywhere in the fixpoints changes a count
+        // here. `dispatch::run` has one slice per Stage implementation.
+        let mut env_flows = BTreeMap::<(String, String), usize>::new();
+        for slice in flow
+            .slices
+            .iter()
+            .filter(|slice| slice.source_category == "env")
+        {
+            assert_eq!(slice.source_function, slice.sink_function, "{slice:?}");
+            *env_flows
+                .entry((slice.source_function.clone(), slice.sink_category.clone()))
+                .or_default() += 1;
+        }
+        let expected: BTreeMap<(String, String), usize> = [
+            (
+                "fixpoint_flow_app::chains::fetch_chain",
+                "filesystem-write",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::chains::pass_chain",
+                "network-connect",
+                1,
+            ),
+            ("fixpoint_flow_app::chains::run", "filesystem-write", 1),
+            ("fixpoint_flow_app::chains::run", "network-connect", 1),
+            ("fixpoint_flow_app::chains::run", "process-exec", 1),
+            ("fixpoint_flow_app::chains::sink_chain", "process-exec", 1),
+            ("fixpoint_flow_app::dispatch::run", "process-exec", 40),
+            (
+                "fixpoint_flow_app::dispatch::run_inherent",
+                "process-exec",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_for",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_loop",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_by_while",
+                "filesystem-delete",
+                1,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_seventy_steps",
+                "process-exec",
+                2,
+            ),
+            (
+                "fixpoint_flow_app::loops::carried_through_nested_loops",
+                "network-connect",
+                1,
+            ),
+            ("fixpoint_flow_app::loops::run", "filesystem-delete", 1),
+            ("fixpoint_flow_app::loops::run", "filesystem-write", 1),
+            ("fixpoint_flow_app::loops::run", "network-connect", 1),
+            ("fixpoint_flow_app::loops::run", "process-exec", 3),
+            ("fixpoint_flow_app::main", "filesystem-delete", 2),
+            ("fixpoint_flow_app::main", "filesystem-write", 2),
+            ("fixpoint_flow_app::main", "network-connect", 3),
+            ("fixpoint_flow_app::main", "process-exec", 5),
+            ("fixpoint_flow_app::recursion::run", "filesystem-delete", 1),
+            ("fixpoint_flow_app::recursion::run", "network-connect", 1),
+            ("fixpoint_flow_app::recursion::run", "process-exec", 1),
+        ]
+        .into_iter()
+        .map(|(function, sink, count)| ((function.to_string(), sink.to_string()), count))
+        .collect();
+        assert_eq!(env_flows, expected);
+        assert!(
+            !flow
+                .diagnostics
+                .iter()
+                .chain(&envelope.payload.diagnostics)
+                .any(
+                    |diagnostic| diagnostic.message.contains("dispatch::Stage>::apply")
+                        && diagnostic.message.contains("unresolved")
+                ),
+            "a dyn call its candidates resolve is not reported unresolved"
+        );
+        // Every call in the fixture is one its source writes, `String::len`
+        // and the `vec!` expansion's included, so typeck resolved each one, and
+        // MIR's data flow finds that resolution by the call's span and callee.
+        // When the two sides key calls apart, each call MIR cannot name
+        // exactly is reported unresolved here.
+        let unresolved = flow
+            .diagnostics
+            .iter()
+            .chain(&envelope.payload.diagnostics)
+            .filter(|diagnostic| diagnostic.kind == "resolution")
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(unresolved, Vec::<&str>::new());
+
+        let first_helper = flow
+            .summaries
+            .iter()
+            .find(|summary| summary.function.ends_with("chains::sink_01"))
+            .expect("summary for the chain's first helper");
+        assert_eq!(
+            first_helper.param_to_sink.get("process-exec"),
+            Some(&vec![0])
+        );
+
+        // The same slices on a second run: with no candidate truncation left,
+        // no hash order can pick a different subset.
+        let again = run_driver(&options).expect("second driver run succeeds");
+        let slice_ids = |envelope: &DriverProtocolEnvelope| {
+            envelope
+                .payload
+                .data_flow
+                .as_ref()
+                .map(|flow| {
+                    flow.slices
+                        .iter()
+                        .map(|slice| slice.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(slice_ids(&envelope), slice_ids(&again));
     }
 
     #[test]
@@ -3481,7 +3780,7 @@ mod tests {
                 .expect("dataflow emitted")
                 .summaries
                 .iter()
-                .find(|summary| summary.function == "dispatch::{closure#0}")
+                .find(|summary| summary.function == "async_semantic_app::dispatch::{closure#0}")
                 .expect("dispatch async body summary exists");
             assert!(
                 dispatch_async_body_summary
@@ -3531,7 +3830,7 @@ mod tests {
                         .is_some_and(|value| value == "true")
             }));
             assert!(graph.edges.iter().any(|edge| {
-                graph.target_name(edge) == "block_on"
+                graph.target_name(edge) == "async_semantic_app::block_on"
                     && edge.call_type == "async-logical"
                     && edge
                         .properties
@@ -3850,8 +4149,40 @@ mod toolchain_gate_tests {
 
     use super::{
         BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
-        format_rustc_release, parse_rustc_release, toolchain_floor_diagnostic,
+        format_rustc_release, parse_rustc_release, resolve_toolchain, toolchain_floor_diagnostic,
     };
+
+    /// `rustup toolchain list` names, the way the driver reads them.
+    fn names(toolchains: &[&str]) -> Vec<String> {
+        toolchains.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn auto_names_a_pinned_nightly_in_full() {
+        let host = "x86_64-unknown-linux-gnu";
+        let pinned = format!("nightly-2026-08-21-{host}");
+        let older = format!("nightly-2026-07-01-{host}");
+        let stable = format!("stable-{host}");
+        let rolling = format!("nightly-{host}");
+        assert_eq!(
+            resolve_toolchain("auto", &names(&[&stable, &older, &pinned])),
+            pinned
+        );
+        assert_eq!(
+            resolve_toolchain("auto", &names(&["nightly-2026-08-21"])),
+            "nightly-2026-08-21"
+        );
+        assert_eq!(
+            resolve_toolchain("auto", &names(&[&stable, &pinned, &rolling])),
+            "nightly"
+        );
+        assert_eq!(resolve_toolchain("auto", &names(&[&stable])), "stable");
+        assert_eq!(resolve_toolchain("auto", &[]), "stable");
+        assert_eq!(
+            resolve_toolchain("nightly-2026-08-21", &names(&[&rolling])),
+            "nightly-2026-08-21"
+        );
+    }
 
     /// Verbose `rustc -Vv` output, as the driver actually captures it.
     const VERBOSE_VERSION: &str = "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 21.1.4";

@@ -1,0 +1,5 @@
+# Expected source->sink flows in deep-nesting-app: one per module, each
+# through 800 levels of parentheses.
+
+{"source_category": "env", "sink_category": "process-exec", "source_function": "deep_nesting_app::nested::run", "sink_function": "deep_nesting_app::nested::run", "expected": true}
+{"source_category": "env", "sink_category": "process-exec", "source_function": "deep_nesting_app::nested_twin::run", "sink_function": "deep_nesting_app::nested_twin::run", "expected": true}
