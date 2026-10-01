@@ -24,3 +24,5 @@
 - [6. Trust posture with trustinspector](LESSON6.md)
 - [7. Build, package, and publish the binaries](LESSON7.md)
 - [8. Kotlin evidence with kosi](LESSON8.md)
+- [9. Flows that only a fixpoint finds, in rusi](LESSON9.md)
+- [10. Where each helper's own SBOM comes from](LESSON10.md)

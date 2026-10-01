@@ -7,6 +7,7 @@ graph LR
   A[cdxgen] --> B{Scan needs}
   B -->|Go source| C[golem]
   B -->|Rust source| D[rusi]
+  B -->|Kotlin source| N[kosi]
   B -->|container or rootfs| E[trivy-cdxgen]
   B -->|Swift| F[sourcekitten]
   B -->|.NET| G[dosai]
@@ -16,7 +17,7 @@ graph LR
   B -->|explore a BOM| K[cdxui]
 ```
 
-Nine helpers, one contract: take a project directory, an archive, or host state; return compact JSON or a CycloneDX document; exit. None of them open ports or daemonize. Every helper is optional at runtime, and cdxgen degrades gracefully when one is missing, disabled, or the wrong version. The [architecture page](ARCHITECTURE.md) describes the resolution order, the provenance manifest, and the packaging pipeline in detail.
+Ten helpers, one contract: take a project directory, an archive, or host state; return compact JSON or a CycloneDX document; exit. None of them open ports or daemonize. Every helper is optional at runtime, and cdxgen degrades gracefully when one is missing, disabled, or the wrong version. The [architecture page](ARCHITECTURE.md) describes the resolution order, the provenance manifest, and the packaging pipeline in detail.
 
 ## Installation
 
@@ -36,6 +37,7 @@ Every helper has its own page covering what it does, how cdxgen invokes it, dire
 | -------------------------------------------- | -------- | -------------------------------------- |
 | golem, the Go Library Evidence Mapper        | Go       | [GOLEM.md](GOLEM.md)                   |
 | rusi, the Rust Source Inspector              | Rust     | [RUSI.md](RUSI.md)                     |
+| kosi, the Kotlin source inspector            | Kotlin   | [KOSI.md](KOSI.md)                     |
 | cdxrs, BOM validation and registry fetch     | Rust     | [CDXRS.md](CDXRS.md)                   |
 | cdxui, the terminal BOM explorer             | Rust     | [CDXUI.md](CDXUI.md)                   |
 | trustinspector, trust posture inspection     | Go       | [TRUSTINSPECTOR.md](TRUSTINSPECTOR.md) |
@@ -50,7 +52,7 @@ The [upstream helpers overview](HELPERS.md) explains why trivy is a fork while s
 
 If you are deciding where to look first, the helpers fall into four groups.
 
-**Deep source analysis.** golem and rusi load a real toolchain or parser, resolve types, and report the kind of evidence a reviewer cannot get from a manifest file: type-resolved library usage, call graphs with reachability, source-to-sink data flows, HTTP endpoint tables, and a cryptographic inventory suitable for CBOM work.
+**Deep source analysis.** golem, rusi, and kosi load a real toolchain or parser, resolve types, and report the kind of evidence a reviewer cannot get from a manifest file: type-resolved library usage, call graphs with reachability, source-to-sink data flows, HTTP endpoint tables, and a cryptographic inventory suitable for CBOM work.
 
 **Fast paths on the BOM itself.** cdxrs accelerates BOM validation and registry metadata fetch inside cdxgen, and cdxui turns a finished BOM into something a human can browse, search, and present.
 
@@ -66,4 +68,4 @@ For regulatory work under NIST SSDF or the EU Cyber Resilience Act, trustinspect
 
 ## Learn more
 
-The [lessons](LESSON1.md) are hands-on and sequential: a first golem report, call graphs and data flow, Rust evidence with rusi, exploring BOMs in cdxui, validating with cdxrs, trust posture with trustinspector, and a full build-and-publish walkthrough. The [build reference](BUILD.md) covers prerequisites, per-helper builds, staging, and the three publishing channels.
+The [lessons](LESSON1.md) are hands-on and sequential: a first golem report, call graphs and data flow, Rust evidence with rusi, exploring BOMs in cdxui, validating with cdxrs, trust posture with trustinspector, a full build-and-publish walkthrough, Kotlin evidence with kosi, the fixpoint discipline behind rusi's deep flows, and the provenance bundle each helper ships. The [build reference](BUILD.md) covers prerequisites, per-helper builds, staging, and the three publishing channels.

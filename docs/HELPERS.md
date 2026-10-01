@@ -1,6 +1,6 @@
 # Upstream helpers: fork or repackage
 
-Five of the nine binaries are written and maintained in this repository: [golem](GOLEM.md), [rusi](RUSI.md), [cdxrs](CDXRS.md), [cdxui](CDXUI.md), and [trustinspector](TRUSTINSPECTOR.md). Each lives in full under `thirdparty/` with its own tests, docs, and threat model.
+Six of the ten binaries are written and maintained in this repository: [golem](GOLEM.md), [rusi](RUSI.md), [kosi](KOSI.md), [cdxrs](CDXRS.md), [cdxui](CDXUI.md), and [trustinspector](TRUSTINSPECTOR.md). Each lives in full under `thirdparty/` with its own tests, docs, and threat model.
 
 The other four come from upstream projects and have a dedicated page each: [trivy-cdxgen](TRIVY.md), [sourcekitten](SOURCEKITTEN.md), [dosai](DOSAI.md), and [osquery](OSQUERY.md). This page records why two of them are treated differently from the others, since the choice is deliberate and it affects provenance.
 

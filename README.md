@@ -2,7 +2,7 @@
 
 Binary plugins that extend the capabilities of [cdxgen](https://github.com/cdxgen/cdxgen), the open-source BOM (Bill of Materials) generator. This repository builds, packages, and distributes native helper binaries that cdxgen invokes to perform deep analysis tasks that require language-specific tooling, operating system instrumentation, or cryptographic inspection.
 
-> **Documentation**: the guides and tutorials in this README are expanded in the [documentation site](https://cdxgen.github.io/cdxgen-plugins-bin/), with a dedicated guide for each helper: golem, rusi, cdxrs, cdxui, trustinspector, trivy-cdxgen, sourcekitten, dosai, and osquery, plus an architecture overview, a build reference, and seven hands-on lessons. The site source lives in [docs/](./docs/).
+> **Documentation**: the guides and tutorials in this README are expanded in the [documentation site](https://cdxgen.github.io/cdxgen-plugins-bin/), with a dedicated guide for each helper: golem, rusi, kosi, cdxrs, cdxui, trustinspector, trivy-cdxgen, sourcekitten, dosai, and osquery, plus an architecture overview, a build reference, and ten hands-on lessons. The site source lives in [docs/](./docs/).
 
 ## Purpose
 
@@ -167,7 +167,7 @@ Rusi can merge custom JSON modeling with the built-in stable data-flow pack thro
 
 ### kosi
 
-Kotlin Source Inspector (kosi) is a Kotlin/JVM code analysis engine for evidence collection — the Kotlin sibling of golem (Go) and rusi (Rust). It answers, for a Kotlin project, which sources/modules/source sets exist (Gradle, Maven, Android variants, Kotlin Multiplatform — parsed as text, never executed), which imports, declarations and library calls occur, which functions call which, which untrusted data reaches dangerous calls, which endpoints the application exposes, and what crypto it uses. Two tiers — syntax and resolved — share one `kosi/1` report contract.
+Kotlin Source Inspector (kosi) is a Kotlin/JVM code analysis engine for evidence collection, the Kotlin sibling of golem (Go) and rusi (Rust). It answers, for a Kotlin project, which sources/modules/source sets exist (Gradle, Maven, Android variants, Kotlin Multiplatform, all parsed as text and never executed), which imports, declarations and library calls occur, which functions call which, which untrusted data reaches dangerous calls, which endpoints the application exposes, and what crypto it uses. Two tiers, syntax and resolved, share one `kosi/1` report contract.
 
 **What it does:**
 

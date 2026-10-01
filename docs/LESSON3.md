@@ -41,7 +41,7 @@ target/release/rusi analyze --dir . \
 jq '.dataFlow.flows | length' /tmp/rusi-full.json
 ```
 
-Flows run from environment, CLI, file, and HTTP sources into process execution, filesystem write or delete, network, SQL, and HTML-response sinks. Export the flow graph alongside the report when you want to render it:
+Flows run from environment, CLI, file, and HTTP sources into process execution, filesystem write or delete, network, SQL, and HTML-response sinks. Both phases of the analysis run to convergence with no round limit, so a flow through a deep call chain, around a loop, or through recursion is followed to the end rather than dropped after a fixed number of passes. Lesson 9 turns that property into an exercise you can run and verify. Export the flow graph alongside the report when you want to render it:
 
 ```bash
 target/release/rusi analyze --dir . --dataflow security \
@@ -94,7 +94,9 @@ target/release/rusi analyze --dir . --backend compiler --toolchain nightly \
   --callgraph static --dataflow security --out /tmp/rusi-compiler.json
 ```
 
-Use it when dispatch precision matters more than setup cost. A CBOM pass over a crypto-heavy crate is a good candidate; the `cryptos` subcommand filters everything else out:
+The first compiler-backend run builds the wrapper on your machine, optimized but tuned so that one-time build stays quick, so expect it to take longer than later runs. `--toolchain auto`, the default, works on a machine that has only a dated nightly installed (a CI pin, for instance): it names that nightly in full instead of reaching for a rolling channel you do not have. Analysis runs on threads with a 16 MiB stack, the size rustc gives its own compiler, so source that rustc accepts does not overflow rusi; `RUST_MIN_STACK` overrides it.
+
+Use the compiler backend when dispatch precision matters more than setup cost. A CBOM pass over a crypto-heavy crate is a good candidate; the `cryptos` subcommand filters everything else out:
 
 ```bash
 target/release/rusi cryptos --dir . --callgraph static --dataflow security --out /tmp/rusi-cryptos.json
@@ -104,5 +106,8 @@ target/release/rusi cryptos --dir . --callgraph static --dataflow security --out
 
 - the stable backend needs no toolchain and respects `cfg` gates, which keeps reports honest about the target
 - receiver-typed resolution means one method name produces one answer, not a fan-out
+- both backends spell local names the same way, `package::module::Type::method`, so a consumer can join their evidence on `canonical_name`
 - custom patterns let house frameworks participate in the same flow analysis as stdlib and popular crates
 - dependency taint and the compiler backend are escalation paths: reach for them when the stable answer is not enough
+
+Next: [Lesson 4, exploring BOMs with cdxui](LESSON4.md).

@@ -71,3 +71,5 @@ cdxui --generate
 ## When to reach for cdxui
 
 Reach for it during review, triage, and demos: any moment a human is asking questions of a BOM. Reach for `jq`, CycloneDX libraries, or dep-scan when a machine is asking. cdxui reads documents and shows you cdxgen at work; it does not edit BOMs or replace your pipeline.
+
+Next: [Lesson 5, BOM validation with cdxrs](LESSON5.md).

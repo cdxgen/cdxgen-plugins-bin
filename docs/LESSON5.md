@@ -83,3 +83,5 @@ The other routed stage is registry metadata fetch. `fetch` takes a batch of regi
 - two layers, schema and semantics, with a stable rule catalogue shared across implementations
 - round-trips are byte-identical, and the fallback guarantee is tested, not assumed
 - version pinning is by major, which sets a publish order rather than an error condition
+
+Next: [Lesson 6, trust posture with trustinspector](LESSON6.md).

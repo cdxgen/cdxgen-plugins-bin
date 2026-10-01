@@ -8,7 +8,7 @@ The deep operator's guide lives with the tool: [thirdparty/kosi/docs/KOSI.md](..
 
 Everything kosi reports is produced at one of two tiers, and the tier decides what is knowable:
 
-- **syntax** (the default) parses sources with the embedded Kotlin compiler's PSI. No classpath and no build execution — build files are read as text and never run. It yields modules, packages, files, imports, declarations and name-level usages, and reports rather than hides what it cannot resolve.
+- **syntax** (the default) parses sources with the embedded Kotlin compiler's PSI. No classpath and no build execution; build files are read as text and never run. It yields modules, packages, files, imports, declarations and name-level usages, and reports rather than hides what it cannot resolve.
 - **resolved** runs the Kotlin Analysis API in standalone mode against a real classpath. The call graph, reachability, taint, endpoints, services and crypto evidence come from this tier, and their quality is bounded by the classpath it is given.
 
 Both tiers emit the same report contract (`schemaVersion: kosi/1`), so a consumer can upgrade a run from syntax to resolved without changing how it reads the report.
@@ -34,8 +34,8 @@ Exit codes follow the suite convention: `0` success, `1` expectations failed (th
 
 ## Memory and stack
 
-The analysis holds the whole project's PSI, KIR and summaries in memory. A repository of a few thousand source files wants **16 GB of heap or more** (`-Xmx16g`); below that the JVM tends to die at whichever class it needed next, so a `NoClassDefFoundError` naming a kosi class is usually starvation rather than a corrupt build — kosi recognises that shape and says so. Deeply nested sources are a *stack* question: the analysis runs on a 512 MB stack and bounds every PSI walk per file (`psi-depth-cap`, `stack-overflow-skipped`), so an overflow that still reaches the CLI names the file that caused it.
+The analysis holds the whole project's PSI, KIR and summaries in memory. A repository of a few thousand source files wants **16 GB of heap or more** (`-Xmx16g`); below that the JVM tends to die at whichever class it needed next, so a `NoClassDefFoundError` naming a kosi class is usually starvation rather than a corrupt build, and kosi recognises that shape and says so. Deeply nested sources are a _stack_ question: the analysis runs on a 512 MB stack and bounds every PSI walk per file (`psi-depth-cap`, `stack-overflow-skipped`), so an overflow that still reaches the CLI names the file that caused it.
 
 ## Platforms
 
-kosi ships as a GraalVM native image for linux-amd64, linux-arm64, linuxmusl-amd64 and darwin-arm64. Where a native image cannot exist — 32-bit arm, and the architectures no longer packaged here — consumers get cdxgen's own JS-side structural Kotlin analysis and, with a JDK 21+ present, the `kosi-portable.jar` fallback. Windows is a declared exemption until a Windows runner job wires the MSVC-toolchain build; the jar fallback covers Windows consumers in the meantime.
+kosi ships as a GraalVM native image for linux-amd64, linux-arm64, linuxmusl-amd64 and darwin-arm64. Where a native image cannot exist, which covers 32-bit arm and the architectures no longer packaged here, consumers get cdxgen's own JS-side structural Kotlin analysis and, with a JDK 21+ present, the `kosi-portable.jar` fallback. Windows is a declared exemption until a Windows runner job wires the MSVC-toolchain build; the jar fallback covers Windows consumers in the meantime.

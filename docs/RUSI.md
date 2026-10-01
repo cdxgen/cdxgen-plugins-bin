@@ -90,7 +90,7 @@ rusi analyze --dir . --dataflow security --patterns ./rusi-patterns.json --out r
 
 ## Fan-out control
 
-Call graph construction caps per-call-site candidates to keep pathological dispatch sites from exploding the graph, and says so in a diagnostic. The cap only shapes the emitted call graph: data flow follows every candidate, and neither backend limits how many rounds its fixpoints run, so a flow through a deep call chain, around a loop, or through recursion is followed to the end. `--max-call-candidates 0` lifts the cap when you want the full fan-out and can afford it:
+Call graph construction caps per-call-site candidates to keep pathological dispatch sites from exploding the graph, and says so in a diagnostic. The cap only shapes the emitted call graph: data flow follows every candidate, and neither backend limits how many rounds its fixpoints run, so a flow through a deep call chain, around a loop, or through recursion is followed to the end. [Lesson 9](LESSON9.md) walks the fixtures that pin this, including the loop-carried and recursion-carried flows. `--max-call-candidates 0` lifts the cap when you want the full fan-out and can afford it:
 
 ```bash
 rusi analyze --dir . --callgraph static --max-call-candidates 0 --out rusi-full.json

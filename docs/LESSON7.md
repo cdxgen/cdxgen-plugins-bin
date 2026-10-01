@@ -56,7 +56,9 @@ ls plugins/golem/
 cat plugins/plugins-manifest.json | jq '.plugins[0]'
 ```
 
-Alongside the binaries, `scripts/generate-metadata.js` produces the provenance bundle. `sbom-postbuild.cdx.json` is a CycloneDX inventory of the helpers. `plugins-manifest.json` records the generated-at timestamp, package identity, and per-helper purl, version, hash, binary path, and SBOM reference. cdxgen reads this manifest to attribute helper identity precisely under `metadata.tools` in the BOMs it generates.
+Alongside the binaries, `scripts/generate-metadata.js` produces the provenance bundle. `sbom-postbuild.cdx.json` is a CycloneDX inventory of the helpers. `plugins-manifest.json` records the generated-at timestamp, package identity, and per-helper purl, version, hash, binary path, and SBOM reference. Every helper except osquery ships its own `sbom-<helper>-postbuild.cdx.json` next to its binary, and each one is derived differently, because what is honestly knowable about a binary differs by toolchain: the Go helpers' SBOMs are cut to the modules their build info lists, the Rust and Kotlin ones come from a scan that leaves out development dependencies, dosai's is read out of the .NET bundle it ships as. Lesson 10 walks each derivation and shows you how to read the result.
+
+cdxgen reads this manifest to attribute helper identity precisely under `metadata.tools` in the BOMs it generates.
 
 The manifest is data only. cdxgen parses it, never executes from it. Regenerate it without a rebuild:
 
@@ -72,6 +74,8 @@ Run them the way CI does, coverage first:
 bash scripts/check-plugin-coverage.sh packages/linux-amd64 packages/darwin-arm64
 bash scripts/check-package-size.sh packages/linux-amd64 packages/darwin-arm64
 ```
+
+Coverage asks more than "is every promised binary present". It fails a package that ships a helper without an execute bit, because a binary cdxgen cannot run is as absent as a missing one, and oras writes the files it pulls as 0644. It also fails any non-macOS package that ships sourcekitten: SourceKitten links the Swift runtime of the toolchain that built it, Linux Swift has no stable ABI, and a prebuilt Linux binary only runs next to that exact toolchain, so the macOS packages are the only ones that carry it. cdxgen's container images build their own sourcekitten against their own Swift instead.
 
 When size fails right after you added a helper, check coverage output first. New coverage often explains the delta, and the fix is usually a size ceiling bump with a link to the coverage change, not a smaller binary.
 
@@ -98,6 +102,8 @@ cdxgen pins cdxrs by major version. On a mismatch its bridge logs once and uses 
 ## What you learned
 
 - every helper follows the same build convention, so one staging script and one packaging loop serve all of them
-- coverage is checked before size because a complete-but-large package beats a small-but-hollow one
+- coverage is checked before size because a complete-but-large package beats a small-but-hollow one, and coverage also enforces the execute bit and the macOS-only rule for sourcekitten
 - the provenance bundle is data only, and cdxgen uses it for attribution, not execution
 - the only release-order constraint in the repository comes from the silent fallback contract
+
+Next: [Lesson 8, Kotlin evidence with kosi](LESSON8.md).
