@@ -5,8 +5,10 @@ set -e  # Exit on error
 rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-amd64 plugins/dosai/dosai
-sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
+# cdxgen resolves dosai as plugins/dosai/dosai-<platform>-<arch> and reports
+# linuxmusl as the platform on musl hosts, so an unsuffixed name is never found.
+bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-amd64 plugins/dosai/dosai-linuxmusl-amd64
+sha256sum plugins/dosai/dosai-linuxmusl-amd64 > plugins/dosai/dosai-linuxmusl-amd64.sha256
 
 # trivy stages from ../../plugins/trivy like every other plugin: the trivy
 # Makefile's `all` builds the linuxmusl flavours (CGO_ENABLED=0, static), so

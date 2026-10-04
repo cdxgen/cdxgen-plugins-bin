@@ -5,8 +5,10 @@ set -e  # Exit on error
 rm -rf plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 mkdir -p plugins/trivy plugins/dosai plugins/trustinspector plugins/golem plugins/rusi plugins/cdxui plugins/cdxrs plugins/kosi
 
-bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins/dosai/dosai
-sha256sum plugins/dosai/dosai > plugins/dosai/dosai.sha256
+# cdxgen resolves dosai as plugins/dosai/dosai-<platform>-<arch> and reports
+# linuxmusl as the platform on musl hosts, so an unsuffixed name is never found.
+bash ../../scripts/thirdparty-downloads.sh install-dosai linuxmusl-arm64 plugins/dosai/dosai-linuxmusl-arm64
+sha256sum plugins/dosai/dosai-linuxmusl-arm64 > plugins/dosai/dosai-linuxmusl-arm64.sha256
 
 # No kosi native here: GraalVM does not support musl static images on
 # linux-aarch64, a declared exemption in scripts/plugin-platform-support.sh;

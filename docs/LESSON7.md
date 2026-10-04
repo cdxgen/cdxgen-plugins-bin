@@ -44,7 +44,7 @@ From the repository root:
 
 This cleans `plugins/<helper>`, runs each helper's build, compresses the trivy amd64 binary, assembles every platform package under `packages/`, and then runs the two gates. Note the order the script enforces, because it is a statement about which failure is worse:
 
-1. `check-plugin-coverage.sh` verifies each platform package contains every binary that platform promises. A package can be perfectly sized and still be missing golem; that is the outcome this gate exists to catch.
+1. `check-plugin-coverage.sh` verifies each platform package contains every binary that platform promises, under the exact name cdxgen runs, and that `plugins-manifest.json` points at it. A package can be perfectly sized and still be missing golem; that is the outcome this gate exists to catch.
 2. `check-package-size.sh` enforces the npm size ceilings. It runs second because size failures are easy to reason about once you know the package is complete.
 
 ## Staging and provenance

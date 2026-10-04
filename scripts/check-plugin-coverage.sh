@@ -11,9 +11,17 @@
 # plugin dropped from a build script's plugin list, or a package directory that
 # was never staged at all.
 #
-# Only *built* plugins are checked. `dosai` and `osquery` are downloaded from
-# upstream projects that do not publish for every architecture, so their
-# absence on riscv64, ppc64le and arm is expected and not a build failure.
+# Every binary is checked under the exact name cdxgen executes
+# (plugin_binary_name in plugin-platform-support.sh). cdxgen builds that name
+# from the host and never lists the directory, so a binary under any other
+# name is as absent as a missing one; that is how the musl packages shipped
+# dosai as plugins/dosai/dosai, which cdxgen never found. Each package's
+# plugins-manifest.json must point at the same names.
+#
+# `dosai` and `osquery` are downloaded from upstream projects that do not
+# publish for every architecture. They are required wherever
+# thirdparty-downloads.sh pins a release asset for the platform, and their
+# absence elsewhere (riscv64, ppc64le, arm, ...) is expected.
 #
 # `kosi` is checked like every other built plugin, with per-platform
 # exemptions that are NAMED, never silent: where kosi cannot exist (ppc64le,
@@ -30,6 +38,10 @@ set -euo pipefail
 
 # Plugins built from source in this repository.
 readonly BUILT_PLUGINS=(trivy trustinspector golem rusi kosi cdxui cdxrs)
+# Plugins downloaded from upstream releases by thirdparty-downloads.sh.
+readonly DOWNLOADED_PLUGINS=(dosai osquery)
+THIRDPARTY_DOWNLOADS="$(dirname "$0")/thirdparty-downloads.sh"
+readonly THIRDPARTY_DOWNLOADS
 
 # Package directory name -> the filename fragment its binaries carry.
 platform_fragment() {
@@ -37,6 +49,32 @@ platform_fragment() {
     ppc64) echo "ppc64le" ;;
     *) echo "$1" ;;
   esac
+}
+
+# Package directory name -> the <platform>-<arch> cdxgen computes on the hosts
+# that install it.
+cdxgen_target() {
+  case "$1" in
+    ppc64) echo "linux-ppc64le" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Whether thirdparty-downloads.sh pins an upstream asset for this plugin and
+# platform. It runs in its own shell: resolve_asset exits on an unknown key.
+upstream_publishes() {
+  bash -c 'source "$1" && resolve_asset "$2"' _ "$THIRDPARTY_DOWNLOADS" "$1-$2" >/dev/null 2>&1
+}
+
+# Prints "<name>\t<binaryPath>" for each plugin in a plugins-manifest.json.
+manifest_binary_paths() {
+  # shellcheck disable=SC2016 # a JavaScript template literal, not shell
+  node -e '
+    const manifest = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    for (const plugin of manifest.plugins || []) {
+      console.log(`${plugin.name}\t${plugin.binaryPath}`);
+    }
+  ' "$1"
 }
 
 main() {
@@ -47,7 +85,8 @@ main() {
 
   local failures=0
   local exempt_notes=0
-  local package_dir package_name fragment plugin reason found
+  local package_dir package_name fragment target plugin reason binary_name
+  local manifest manifest_entries manifest_name binary_path expected_path
 
   for package_dir in "$@"; do
     if [[ ! -d "$package_dir" ]]; then
@@ -57,6 +96,7 @@ main() {
     fi
     package_name="$(basename "$package_dir")"
     fragment="$(platform_fragment "$package_name")"
+    target="$(cdxgen_target "$package_name")"
 
     for plugin in "${BUILT_PLUGINS[@]}"; do
       reason="$(plugin_platform_exemption "$plugin" "$fragment" || true)"
@@ -65,19 +105,44 @@ main() {
         exempt_notes=$((exempt_notes + 1))
         continue
       fi
-      # `|| true` matters: under `set -o pipefail` a find over a missing
-      # directory fails the pipeline and would abort the script before it can
-      # report which plugin is absent, which is the whole point of this check.
-      found=""
-      if [[ -d "$package_dir/plugins/$plugin" ]]; then
-        found="$(find "$package_dir/plugins/$plugin" -maxdepth 1 -type f \
-          -name "*${fragment}*" ! -name '*.sha256' 2>/dev/null | head -n 1 || true)"
-      fi
-      if [[ -z "$found" ]]; then
-        echo "Error: $package_name is missing a $plugin binary (looked for *${fragment}*)" >&2
+      binary_name="$(plugin_binary_name "$plugin" "$target")"
+      if [[ ! -f "$package_dir/plugins/$plugin/$binary_name" ]]; then
+        echo "Error: $package_name is missing a $plugin binary (cdxgen runs plugins/$plugin/$binary_name)" >&2
         failures=$((failures + 1))
       fi
     done
+
+    for plugin in "${DOWNLOADED_PLUGINS[@]}"; do
+      if ! upstream_publishes "$plugin" "$package_name"; then
+        continue
+      fi
+      binary_name="$(plugin_binary_name "$plugin" "$target")"
+      if [[ ! -f "$package_dir/plugins/$plugin/$binary_name" ]]; then
+        echo "Error: $package_name is missing a $plugin binary (cdxgen runs plugins/$plugin/$binary_name)" >&2
+        failures=$((failures + 1))
+      fi
+    done
+
+    # generate-metadata.js records whichever file it finds in each plugin
+    # directory, so the manifest is only as right as the package layout.
+    manifest="$package_dir/plugins/plugins-manifest.json"
+    if [[ ! -f "$manifest" ]]; then
+      echo "Error: $package_name has no plugins/plugins-manifest.json; generate-metadata.js did not run" >&2
+      failures=$((failures + 1))
+    elif ! manifest_entries="$(manifest_binary_paths "$manifest")"; then
+      echo "Error: $package_name's plugins/plugins-manifest.json is not readable JSON" >&2
+      failures=$((failures + 1))
+    else
+      while IFS=$'\t' read -r manifest_name binary_path; do
+        [[ -n "$manifest_name" ]] || continue
+        binary_name="$(plugin_binary_name "$manifest_name" "$target")"
+        expected_path="plugins/$manifest_name/${binary_name%%/*}"
+        if [[ "$binary_path" != "$expected_path" ]]; then
+          echo "Error: $package_name's manifest records $manifest_name at $binary_path, not $expected_path" >&2
+          failures=$((failures + 1))
+        fi
+      done <<<"$manifest_entries"
+    fi
 
     # sourcekitten is macOS-only. It links the Swift runtime of the toolchain
     # that built it and Linux Swift has no stable ABI, so a Linux build only
@@ -104,7 +169,7 @@ main() {
 
   if [[ "$failures" -gt 0 ]]; then
     echo "" >&2
-    echo "$failures missing or non-executable plugin binary/binaries. A package that" >&2
+    echo "$failures missing, misnamed or non-executable plugin binary/binaries. A package that" >&2
     echo "ships without a working plugin looks identical to one where the plugin is" >&2
     echo "merely optional, so this fails the release rather than letting it out." >&2
     exit 1
