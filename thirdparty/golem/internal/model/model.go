@@ -571,15 +571,18 @@ type DataFlowSlice struct {
 	// fails to attribute modules then reports zero crossings and looks correct.
 	CrossesDependency bool `json:"crossesDependency,omitempty"`
 	DependencyHops    int  `json:"dependencyHops,omitempty"`
-	// ReachableFromRoots states whether the call graph connects any function
-	// this slice traverses to the resolved roots. --include-all-flows keeps
-	// slices that live entirely inside a dependency the application never
-	// calls, because dropping them would lose the dependency-internal flows
-	// that flag exists to preserve; this field is what lets a consumer tell
-	// those apart from flows the application can actually drive. It is a
-	// pointer so absent means "not computed" — no call graph was available —
-	// and never "unreachable", the same tri-state SinkArgumentIndex uses for
-	// "no single argument".
+	// ReachableFromRoots states whether any function this slice traverses is
+	// reachable from the resolved entry roots in an RTA call graph, whatever
+	// --callgraph selected. --include-all-flows keeps slices that live
+	// entirely inside a dependency the application never calls, because
+	// dropping them would lose the dependency-internal flows that flag exists
+	// to preserve; this field is what lets a consumer tell those apart from
+	// flows the application can actually drive. It is a pointer so absent
+	// means "not computed" — no entry roots beyond package initializers (a
+	// library), or no graph could be built; DataFlowEvidence.SliceReachability
+	// says which — and never "unreachable". "Reachable" is function-level: a
+	// slice counts once one of its functions is reached, even if no reaching
+	// caller passes tainted data.
 	ReachableFromRoots *bool             `json:"reachableFromRoots,omitempty"`
 	RuleID             string            `json:"ruleId,omitempty"`
 	RuleName           string            `json:"ruleName,omitempty"`
@@ -632,10 +635,6 @@ type DataFlowStats struct {
 	MaxPathLength          int      `json:"maxPathLength,omitempty"`
 	AveragePathLength      float64  `json:"averagePathLength,omitempty"`
 	SanitizedSliceCount    int      `json:"sanitizedSliceCount,omitempty"`
-	// RootedSliceCount counts slices whose ReachableFromRoots is true, so a
-	// consumer can size the application-driven share of the slice list without
-	// walking every slice.
-	RootedSliceCount int `json:"rootedSliceCount,omitempty"`
 }
 type DataFlowEvidence struct {
 	Engine      string                  `json:"engine,omitempty"` // "legacy" or "seam"
@@ -647,6 +646,33 @@ type DataFlowEvidence struct {
 	Summaries   []DataFlowMethodSummary `json:"summaries,omitempty"`
 	Diagnostics []Diagnostic            `json:"diagnostics,omitempty"`
 	Stats       DataFlowStats           `json:"stats"`
+	// SliceReachability records how the per-slice reachableFromRoots verdicts
+	// were produced, so a consumer can decide whether a false is trustworthy
+	// enough to act on.
+	SliceReachability *DataFlowSliceReachability `json:"sliceReachability,omitempty"`
+}
+
+// DataFlowSliceReachability describes the computation behind every slice's
+// reachableFromRoots. The counts are never omitted: zero rooted slices is an
+// answer, and it must not read the same as "not computed".
+type DataFlowSliceReachability struct {
+	// Status is "computed" when every slice carries a verdict, "skipped" when
+	// none does, and "partial" when a multi-module run mixed the two.
+	Status string `json:"status"`
+	// Reason explains a skipped or partial status: "no-entry-roots" when the
+	// only roots are package initializers, "callgraph-unavailable" when no
+	// graph could be built.
+	Reason string `json:"reason,omitempty"`
+	// Algorithm is the call graph the verdicts were computed on: "rta", or
+	// "cha" when RTA panicked and the conservative fallback ran. Multi-module
+	// runs that used different algorithms list them comma-separated.
+	Algorithm string `json:"algorithm,omitempty"`
+	// RootKinds are the distinct reasons the resolved roots were selected
+	// (main, init, exported, handler, synthetic-registration, ...).
+	RootKinds          []string `json:"rootKinds,omitempty"`
+	RootCount          int      `json:"rootCount"`
+	RootedSliceCount   int      `json:"rootedSliceCount"`
+	UnrootedSliceCount int      `json:"unrootedSliceCount"`
 }
 type Stats struct {
 	PackageCount           int `json:"packageCount"`

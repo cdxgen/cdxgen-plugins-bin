@@ -263,7 +263,7 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 | `fieldPaths[]`                         | string array             | Aggregate field-level path context.            | Object-graph taint debugging.           |
 | `crossesDependency`                    | boolean                  | Taint left the module under analysis.          | Dependency risk and blast radius.       |
 | `dependencyHops`                       | integer                  | Dependency boundaries the flow crossed.        | Ranking flows by distance from the app. |
-| `reachableFromRoots`                   | boolean (optional)       | Whether a root-reachable function is on the path. Absent means no call graph was available, never "unreachable". | Separating application-driven flows from module-internal ones kept by `--include-all-flows`. |
+| `reachableFromRoots`                   | boolean (optional)       | Whether a function on the path is reachable from the entry roots in an RTA call graph, whatever `--callgraph` is. Function-level: a reached function does not prove a caller passes tainted data. Absent means not computed (see `dataFlow.sliceReachability`), never "unreachable". | Separating application-driven flows from module-internal ones kept by `--include-all-flows`. |
 | `ruleId`, `ruleName`                   | strings                  | Rule metadata from sink classification.        | Stable issue keys in ticketing systems. |
 | `severity`, `riskScore`                | string, integer          | Priority metadata.                             | Sorting and threshold gating.           |
 | `sourceScope`, `sinkScope`             | strings                  | Runtime/test/example scope context.            | Ignore test-only findings in CI.        |
@@ -303,7 +303,19 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 | `duplicateSliceCount`, `duplicateGroupCount` | integers       | Duplicate metrics.                           | UI collapse and dedupe tuning.      |
 | `maxPathLength`, `averagePathLength`         | integer, float | Path complexity metrics.                     | Risk heuristics and trend analysis. |
 | `sanitizedSliceCount`                        | integer        | Number of slices with sanitizer involvement. | Sanitizer effectiveness reporting.  |
-| `rootedSliceCount`                           | integer        | Slices whose `reachableFromRoots` is true.    | Application-driven share of flows.  |
+
+### `dataFlow.sliceReachability` fields
+
+Present whenever the report has slices. The counts are always serialized, so zero rooted slices reads differently from "not computed".
+
+| Field                                    | Type         | Purpose                                                                                                                          | Typical use case                                  |
+| ---------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `status`                                 | string       | `computed` (every slice has a verdict), `skipped` (none has), or `partial` (a multi-module run mixed the two).                   | Decide whether `reachableFromRoots` can be used. |
+| `reason`                                 | string       | Why the verdict was withheld: `no-entry-roots` (only package initializers, e.g. a library) or `callgraph-unavailable`.           | Explaining missing verdicts.                      |
+| `algorithm`                              | string       | Graph the verdicts came from: `rta`, or `cha` when RTA panicked. Multi-module runs list distinct values comma-separated.          | Only act on `false` from a dispatch-aware graph.  |
+| `rootKinds[]`                            | string array | Distinct reasons the roots were selected (`main`, `init`, `exported`, `handler`, `synthetic-registration`).                      | Judging what "reachable" was measured against.    |
+| `rootCount`                              | integer      | Resolved roots.                                                                                                                  | Sanity check.                                     |
+| `rootedSliceCount`, `unrootedSliceCount` | integers     | Slices whose `reachableFromRoots` is true / false.                                                                               | Application-driven share of flows.                |
 
 ## Crypto JSON reference
 

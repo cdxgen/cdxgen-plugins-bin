@@ -1,7 +1,9 @@
 package analyzer
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
@@ -37,71 +39,61 @@ func analyzeFlowRoot(t *testing.T, options Options) *model.Report {
 	return report
 }
 
-// sliceRootedStates asserts every slice carries a verdict, the called
-// library's slices are rooted, and the never-called library's are not, and
-// returns how many of each were seen. The match is on the exact package path:
-// "unusedlib" contains "usedlib" as a substring, so prefix matching would
-// classify both libraries into one bucket.
-func sliceRootedStates(t *testing.T, report *model.Report) (usedSlices, unusedSlices int) {
+// expectedRooted is the verdict each flowroot stub library's slices must
+// carry. Matching is on the exact package path: "unusedlib" contains
+// "usedlib" as a substring, so prefix matching would merge the two buckets.
+var expectedRooted = map[string]bool{
+	"example.com/usedlib":   true,  // direct call
+	"example.com/ifacelib":  true,  // interface dispatch only
+	"example.com/fnvallib":  true,  // func value from a map only
+	"example.com/drvlib":    true,  // blank import + database/sql registration
+	"example.com/unusedlib": false, // blank import and nothing else
+}
+
+// assertSliceVerdicts checks every slice against expectedRooted and that every
+// stub library contributed at least one slice, so a shape that silently stops
+// producing slices cannot pass.
+func assertSliceVerdicts(t *testing.T, report *model.Report) {
 	t.Helper()
+	seen := map[string]int{}
 	for _, slice := range report.DataFlow.Slices {
 		value, present := boolValue(slice.ReachableFromRoots)
 		if !present {
 			t.Fatalf("expected reachableFromRoots on every slice, got none on %#v", slice)
 		}
-		switch slice.SourcePackagePath {
-		case "example.com/usedlib":
-			if !value {
-				t.Fatalf("slice in the CALLED library must be rooted, got %#v", slice)
-			}
-			usedSlices++
-		case "example.com/unusedlib":
-			if value {
-				t.Fatalf("slice in the blank-imported, never-called library must not be rooted, got %#v", slice)
-			}
-			unusedSlices++
-		default:
+		want, known := expectedRooted[slice.SourcePackagePath]
+		if !known {
 			t.Fatalf("unexpected slice source package %q in flowroot fixture", slice.SourcePackagePath)
 		}
+		if value != want {
+			t.Fatalf("slice in %s: reachableFromRoots=%v, want %v", slice.SourcePackagePath, value, want)
+		}
+		seen[slice.SourcePackagePath]++
 	}
-	return usedSlices, unusedSlices
-}
-
-func TestAnalyzeDataFlowSliceReachabilityFromRoots(t *testing.T) {
-	report := analyzeFlowRoot(t, Options{CallGraphMode: "static", IncludeAllFlows: true})
-	if len(report.DataFlow.Slices) < 2 {
-		t.Fatalf("expected one slice per stub library, got %#v", report.DataFlow.Slices)
-	}
-	usedSlices, unusedSlices := sliceRootedStates(t, report)
-	if usedSlices == 0 {
-		t.Fatal("expected the called library's slice to be rooted")
-	}
-	if unusedSlices == 0 {
-		t.Fatal("expected the unused library's slice to be kept by --include-all-flows")
-	}
-	if report.DataFlow.Stats.RootedSliceCount != usedSlices {
-		t.Fatalf("expected rootedSliceCount=%d, got %d", usedSlices, report.DataFlow.Stats.RootedSliceCount)
-	}
-	// The slice flags must agree with the call-graph section they join
-	// against: the only unusedlib node the roots reach is its init (the blank
-	// import runs it), and no slice traverses init.
-	for _, node := range report.CallGraph.Reachability.Nodes {
-		if node.ReachableFromRoots && node.NodeID == "example.com/unusedlib.Run" {
-			t.Fatalf("unusedlib.Run must not be reachable from the roots")
+	for pkg := range expectedRooted {
+		if seen[pkg] == 0 {
+			t.Fatalf("expected at least one slice from %s, got %v", pkg, seen)
 		}
 	}
+	info := report.DataFlow.SliceReachability
+	if info == nil || info.Status != "computed" || info.Algorithm != "rta" {
+		t.Fatalf("expected computed rta sliceReachability, got %#v", info)
+	}
+	unrooted := seen["example.com/unusedlib"]
+	if info.UnrootedSliceCount != unrooted || info.RootedSliceCount != len(report.DataFlow.Slices)-unrooted {
+		t.Fatalf("sliceReachability counts disagree with the slices: %#v (unrooted=%d of %d)", info, unrooted, len(report.DataFlow.Slices))
+	}
 }
 
-func TestAnalyzeDataFlowSliceReachabilityWithoutCallGraph(t *testing.T) {
-	// --callgraph none must still annotate: the fallback computes root
-	// reachability on the static graph the taint engines already build.
-	report := analyzeFlowRoot(t, Options{CallGraphMode: "none", IncludeAllFlows: true})
-	if len(report.DataFlow.Slices) < 2 {
-		t.Fatalf("expected one slice per stub library, got %#v", report.DataFlow.Slices)
-	}
-	usedSlices, unusedSlices := sliceRootedStates(t, report)
-	if usedSlices == 0 || unusedSlices == 0 {
-		t.Fatalf("expected rooted and unrooted slices without a call graph, got used=%d unused=%d", usedSlices, unusedSlices)
+// TestAnalyzeDataFlowSliceReachabilityIndependentOfCallGraphMode pins the
+// verdict to RTA whatever --callgraph is: static and VTA miss interface and
+// func-value dispatch, CHA marks the blank-imported library reachable, and
+// none builds no report graph at all.
+func TestAnalyzeDataFlowSliceReachabilityIndependentOfCallGraphMode(t *testing.T) {
+	for _, mode := range []string{"none", "static", "cha", "rta", "vta"} {
+		t.Run(mode, func(t *testing.T) {
+			assertSliceVerdicts(t, analyzeFlowRoot(t, Options{CallGraphMode: mode, IncludeAllFlows: true}))
+		})
 	}
 }
 
@@ -109,13 +101,69 @@ func TestAnalyzeDataFlowSliceReachabilityDefaultView(t *testing.T) {
 	// The default (collapse) view applies after annotation; local replacement
 	// libraries are not module-cache paths, so their slices survive the view
 	// and keep the verdict computed on the full graph.
-	report := analyzeFlowRoot(t, Options{CallGraphMode: "static"})
-	if len(report.DataFlow.Slices) < 2 {
-		t.Fatalf("expected one slice per stub library under the default view, got %#v", report.DataFlow.Slices)
+	assertSliceVerdicts(t, analyzeFlowRoot(t, Options{CallGraphMode: "static"}))
+}
+
+// TestAnalyzeDataFlowSliceReachabilityLibraryWithheld covers a module with no
+// main: its only roots are initializers, so the verdict is withheld (absent)
+// rather than written as false for the whole exported API.
+func TestAnalyzeDataFlowSliceReachabilityLibraryWithheld(t *testing.T) {
+	report, err := Analyze(Options{
+		Dir:                   filepath.Join("..", "..", "testdata", "flowrootlib"),
+		IncludeLocal:          true,
+		DataFlowMode:          "all",
+		DataFlowCallGraphMode: "static",
+		DataFlowMax:           100,
+		CallGraphMode:         "static",
+		ToolVersion:           "test",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	usedSlices, unusedSlices := sliceRootedStates(t, report)
-	if usedSlices == 0 || unusedSlices == 0 {
-		t.Fatalf("expected annotated slices after the default view, got used=%d unused=%d", usedSlices, unusedSlices)
+	if report.DataFlow == nil || len(report.DataFlow.Slices) == 0 {
+		t.Fatal("expected the library's exported API to produce a slice")
+	}
+	for _, slice := range report.DataFlow.Slices {
+		if slice.ReachableFromRoots != nil {
+			t.Fatalf("library slice must carry no verdict, got %v on %#v", *slice.ReachableFromRoots, slice)
+		}
+	}
+	info := report.DataFlow.SliceReachability
+	if info == nil || info.Status != "skipped" || info.Reason != "no-entry-roots" {
+		t.Fatalf("expected skipped/no-entry-roots, got %#v", info)
+	}
+}
+
+// TestSliceReachabilityCountsSerializeZero guards the tri-state: zero rooted
+// slices is an answer and must appear in the JSON, not vanish like "not
+// computed" does.
+func TestSliceReachabilityCountsSerializeZero(t *testing.T) {
+	raw, err := json.Marshal(model.DataFlowSliceReachability{Status: "computed", Algorithm: "rta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"rootedSliceCount":0`, `"unrootedSliceCount":0`, `"rootCount":0`} {
+		if !strings.Contains(string(raw), key) {
+			t.Fatalf("expected %s in %s", key, raw)
+		}
+	}
+}
+
+func TestMergeSliceReachability(t *testing.T) {
+	a := &model.DataFlowSliceReachability{Status: "computed", Algorithm: "rta", RootKinds: []string{"main"}, RootCount: 2}
+	b := &model.DataFlowSliceReachability{Status: "skipped", Reason: "no-entry-roots", RootKinds: []string{"init"}, RootCount: 1}
+	c := &model.DataFlowSliceReachability{Status: "computed", Algorithm: "cha", RootCount: 1}
+	merged := mergeSliceReachability(nil, a)
+	merged = mergeSliceReachability(merged, b)
+	merged = mergeSliceReachability(merged, c)
+	if merged.Status != "partial" || merged.Reason != "no-entry-roots" || merged.Algorithm != "cha,rta" || merged.RootCount != 4 {
+		t.Fatalf("unexpected merge result %#v", merged)
+	}
+	if strings.Join(merged.RootKinds, ",") != "init,main" {
+		t.Fatalf("expected unioned root kinds, got %v", merged.RootKinds)
+	}
+	if a.Status != "computed" {
+		t.Fatal("merge must not mutate the first child's metadata")
 	}
 }
 
@@ -134,6 +182,7 @@ func TestAnnotateSliceReachability(t *testing.T) {
 			{ID: "s3", SourceID: "src-nofn", SinkID: "snk-unreached"},
 		},
 	}
+	df.SliceReachability = &model.DataFlowSliceReachability{Status: "computed"}
 	annotateSliceReachability(df, map[string]bool{"pkg.reached": true})
 	if value, present := boolValue(df.Slices[0].ReachableFromRoots); !present || !value {
 		t.Fatalf("expected s1 rooted, got present=%v value=%v", present, value)
@@ -144,8 +193,8 @@ func TestAnnotateSliceReachability(t *testing.T) {
 	if value, present := boolValue(df.Slices[2].ReachableFromRoots); !present || value {
 		t.Fatalf("expected s3 present and not rooted (no function attribution on the source), got present=%v value=%v", present, value)
 	}
-	if df.Stats.RootedSliceCount != 1 {
-		t.Fatalf("expected rootedSliceCount=1, got %d", df.Stats.RootedSliceCount)
+	if df.SliceReachability.RootedSliceCount != 1 || df.SliceReachability.UnrootedSliceCount != 2 {
+		t.Fatalf("expected rooted=1 unrooted=2, got %#v", df.SliceReachability)
 	}
 }
 

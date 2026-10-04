@@ -1,70 +1,124 @@
 package analyzer
 
 import (
+	"sort"
+	"strings"
+
 	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
 )
 
+// sliceReachabilityMode is the call graph every slice verdict is computed on,
+// independent of --callgraph. The verdict is consumed as "may this flow be
+// dropped", so the graph has to follow dynamic dispatch: static misses every
+// interface call, func value and struct-field callback, and VTA seeds itself
+// from the static graph's reachable set and inherits the same holes. RTA
+// starts from the roots and adds a method once a concrete type flowing into
+// an interface makes it callable, which is what registration patterns
+// (database/sql drivers, codecs, http.Handler values) need. CHA would also be
+// sound but marks every method of every type implementing a used interface
+// reachable, which is exactly the blank-import false positive the field
+// exists to remove; it is used only when RTA panics.
+const sliceReachabilityMode = "rta"
+
 // annotateDataFlowReachability states, on every data-flow slice, whether any
-// function the slice traverses is reachable from the resolved roots.
+// function the slice traverses is reachable from the resolved roots, and
+// records how that verdict was produced in dataFlow.sliceReachability.
 //
 // --include-all-flows deliberately keeps slices that live entirely inside a
 // dependency the application never calls — dropping them would lose the
 // dependency-internal flows that flag exists to preserve — so the report has
 // to carry the distinction instead of the filter making it. The join key is
-// the SSA function string: data-flow nodes record it as functionId and
-// call-graph nodes use it as their id, so no re-attribution is needed.
+// the SSA function string: data-flow nodes record it as functionId, and it is
+// what fn.String() yields for every call-graph node.
 //
-// The verdict comes from the report's own callGraph.reachability when one was
-// built, so the two sections always agree; a --callgraph none run computes it
-// here from the static graph the taint engines already build. Either way the
-// annotation runs before applyReportView, on the unfiltered graph, so a slice
-// the view later collapses or prunes still carries the verdict the full graph
-// supports.
+// The annotation runs before applyReportView, on the unfiltered program, so a
+// slice the view later collapses or prunes still carries the full verdict.
 func (a *Analyzer) annotateDataFlowReachability(report *model.Report, ctx *ssaContext) {
 	if report == nil || report.DataFlow == nil || len(report.DataFlow.Slices) == 0 {
 		return
 	}
-	reachable, ok := a.functionReachability(report, ctx)
-	if !ok {
+	df := report.DataFlow
+	info := &model.DataFlowSliceReachability{Status: "skipped"}
+	df.SliceReachability = info
+	if ctx == nil || ctx.program == nil {
+		info.Reason = "callgraph-unavailable"
 		return
 	}
-	annotateSliceReachability(report.DataFlow, reachable)
+	roots := a.resolveRoots(ctx)
+	info.RootCount = len(roots)
+	info.RootKinds = a.rootKinds(roots)
+	if !a.hasEntryRoots(roots) {
+		// A library has no main; its only roots are package initializers,
+		// so every exported API would read as unreachable. That would be a
+		// statement about the root heuristic, not about the code, so the
+		// verdict is withheld rather than written as false.
+		info.Reason = "no-entry-roots"
+		return
+	}
+	reachable, algorithm, ok := a.rootReachability(ctx, roots)
+	if !ok {
+		info.Reason = "callgraph-unavailable"
+		return
+	}
+	info.Status = "computed"
+	info.Algorithm = algorithm
+	annotateSliceReachability(df, reachable)
 }
 
-// functionReachability resolves the set of function ids reachable from the
-// roots. The report's reachability section wins whenever it holds nodes — it
-// is the same verdict a consumer can read per call-graph node — and the
-// static-graph worklist covers runs that asked for no call graph at all.
-func (a *Analyzer) functionReachability(report *model.Report, ctx *ssaContext) (map[string]bool, bool) {
-	if report != nil && report.CallGraph != nil && report.CallGraph.Reachability != nil && len(report.CallGraph.Reachability.Nodes) > 0 {
-		reachable := make(map[string]bool, len(report.CallGraph.Reachability.Nodes))
-		for _, node := range report.CallGraph.Reachability.Nodes {
-			if node.ReachableFromRoots {
-				reachable[node.NodeID] = true
-			}
+// hasEntryRoots reports whether the roots include a real entry point: a main
+// function, or any non-initializer root the user selected with --roots.
+// Synthetic registrations found from a library's init do not count — they
+// would make the library's own exported API look unreachable.
+func (a *Analyzer) hasEntryRoots(roots []*ssa.Function) bool {
+	for _, root := range roots {
+		if root == nil {
+			continue
 		}
-		return reachable, true
+		reason := a.rootReasonFor(root)
+		if reason == "main" {
+			return true
+		}
+		if len(a.options.Roots) > 0 && reason != "init" {
+			return true
+		}
 	}
-	return a.staticReachability(ctx)
+	return false
 }
 
-// staticReachability walks the static call graph from the resolved roots with
-// an explicit worklist, mirroring computeReachability's no-recursion rule:
-// deep graphs must not trade a stack overflow for a reachability answer.
-func (a *Analyzer) staticReachability(ctx *ssaContext) (map[string]bool, bool) {
-	if ctx == nil || ctx.program == nil {
-		return nil, false
+func (a *Analyzer) rootKinds(roots []*ssa.Function) []string {
+	seen := map[string]bool{}
+	var kinds []string
+	for _, root := range roots {
+		if root == nil {
+			continue
+		}
+		kind := a.rootReasonFor(root)
+		if !seen[kind] {
+			seen[kind] = true
+			kinds = append(kinds, kind)
+		}
 	}
-	graph, _, _ := a.buildRawCallGraph(ctx, "static")
+	sort.Strings(kinds)
+	return kinds
+}
+
+// rootReachability builds (or reuses) the RTA graph and walks it from the
+// roots with an explicit worklist, mirroring computeReachability's
+// no-recursion rule: deep graphs must not trade a stack overflow for a
+// reachability answer. The walk matters even on RTA, whose graph holds only
+// reachable functions, because a CHA fallback graph holds every function.
+func (a *Analyzer) rootReachability(ctx *ssaContext, roots []*ssa.Function) (map[string]bool, string, bool) {
+	graph, algorithm, _ := a.buildRawCallGraph(ctx, sliceReachabilityMode)
 	if graph == nil {
-		return nil, false
+		return nil, algorithm, false
 	}
 	adj := adjacencyByFunctionID(graph)
 	reachable := map[string]bool{}
-	queue := make([]string, 0, len(adj))
-	for _, root := range a.resolveRoots(ctx) {
+	queue := make([]string, 0, len(roots))
+	for _, root := range roots {
 		if root == nil {
 			continue
 		}
@@ -84,7 +138,7 @@ func (a *Analyzer) staticReachability(ctx *ssaContext) (map[string]bool, bool) {
 			}
 		}
 	}
-	return reachable, true
+	return reachable, algorithm, true
 }
 
 func adjacencyByFunctionID(graph *callgraph.Graph) map[string][]string {
@@ -112,16 +166,77 @@ func annotateSliceReachability(df *model.DataFlowEvidence, reachable map[string]
 	for _, node := range df.Nodes {
 		nodes[node.ID] = node
 	}
-	rooted := 0
 	for i := range df.Slices {
 		s := &df.Slices[i]
 		value := sliceTouchesReachableFunction(s, nodes, reachable)
 		s.ReachableFromRoots = &value
-		if value {
+	}
+	countSliceReachability(df)
+}
+
+// countSliceReachability refreshes the rooted/unrooted counts from the slices
+// currently in the report; the view and the multi-module merge both change
+// the slice list after annotation.
+func countSliceReachability(df *model.DataFlowEvidence) {
+	if df == nil || df.SliceReachability == nil {
+		return
+	}
+	rooted, unrooted := 0, 0
+	for _, s := range df.Slices {
+		if s.ReachableFromRoots == nil {
+			continue
+		}
+		if *s.ReachableFromRoots {
 			rooted++
+		} else {
+			unrooted++
 		}
 	}
-	df.Stats.RootedSliceCount = rooted
+	df.SliceReachability.RootedSliceCount = rooted
+	df.SliceReachability.UnrootedSliceCount = unrooted
+}
+
+// mergeSliceReachability folds a child module's sliceReachability into the
+// merged report's. Slices keep their own verdicts; this only keeps the
+// metadata honest about how they were produced.
+func mergeSliceReachability(dst, src *model.DataFlowSliceReachability) *model.DataFlowSliceReachability {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		copied := *src
+		copied.RootKinds = append([]string(nil), src.RootKinds...)
+		return &copied
+	}
+	if dst.Status != src.Status {
+		dst.Status = "partial"
+	}
+	if dst.Reason == "" {
+		dst.Reason = src.Reason
+	}
+	dst.Algorithm = joinUniqueSorted(dst.Algorithm, src.Algorithm)
+	dst.RootKinds = unionSorted(dst.RootKinds, src.RootKinds)
+	dst.RootCount += src.RootCount
+	return dst
+}
+
+func joinUniqueSorted(a, b string) string {
+	return strings.Join(unionSorted(strings.Split(a, ","), strings.Split(b, ",")), ",")
+}
+
+func unionSorted(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{a, b} {
+		for _, v := range list {
+			if v != "" && !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sliceTouchesReachableFunction(s *model.DataFlowSlice, nodes map[string]model.DataFlowNode, reachable map[string]bool) bool {
