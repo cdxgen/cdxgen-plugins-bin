@@ -569,19 +569,29 @@ type DataFlowSlice struct {
 	// module under analysis. They are first-class fields rather than something
 	// a consumer infers from node module attribution, because an engine that
 	// fails to attribute modules then reports zero crossings and looks correct.
-	CrossesDependency bool              `json:"crossesDependency,omitempty"`
-	DependencyHops    int               `json:"dependencyHops,omitempty"`
-	RuleID            string            `json:"ruleId,omitempty"`
-	RuleName          string            `json:"ruleName,omitempty"`
-	Severity          string            `json:"severity,omitempty"`
-	RiskScore         int               `json:"riskScore,omitempty"`
-	SourceScope       string            `json:"sourceScope,omitempty"`
-	SinkScope         string            `json:"sinkScope,omitempty"`
-	SourceCriticality string            `json:"sourceCriticality,omitempty"`
-	SinkCriticality   string            `json:"sinkCriticality,omitempty"`
-	Confidence        string            `json:"confidence,omitempty"`
-	Description       string            `json:"description,omitempty"`
-	Properties        map[string]string `json:"properties,omitempty"`
+	CrossesDependency bool `json:"crossesDependency,omitempty"`
+	DependencyHops    int  `json:"dependencyHops,omitempty"`
+	// ReachableFromRoots states whether the call graph connects any function
+	// this slice traverses to the resolved roots. --include-all-flows keeps
+	// slices that live entirely inside a dependency the application never
+	// calls, because dropping them would lose the dependency-internal flows
+	// that flag exists to preserve; this field is what lets a consumer tell
+	// those apart from flows the application can actually drive. It is a
+	// pointer so absent means "not computed" — no call graph was available —
+	// and never "unreachable", the same tri-state SinkArgumentIndex uses for
+	// "no single argument".
+	ReachableFromRoots *bool             `json:"reachableFromRoots,omitempty"`
+	RuleID             string            `json:"ruleId,omitempty"`
+	RuleName           string            `json:"ruleName,omitempty"`
+	Severity           string            `json:"severity,omitempty"`
+	RiskScore          int               `json:"riskScore,omitempty"`
+	SourceScope        string            `json:"sourceScope,omitempty"`
+	SinkScope          string            `json:"sinkScope,omitempty"`
+	SourceCriticality  string            `json:"sourceCriticality,omitempty"`
+	SinkCriticality    string            `json:"sinkCriticality,omitempty"`
+	Confidence         string            `json:"confidence,omitempty"`
+	Description        string            `json:"description,omitempty"`
+	Properties         map[string]string `json:"properties,omitempty"`
 }
 type DataFlowSummaryFlow struct {
 	ParameterIndex int      `json:"parameterIndex"`
@@ -622,6 +632,10 @@ type DataFlowStats struct {
 	MaxPathLength          int      `json:"maxPathLength,omitempty"`
 	AveragePathLength      float64  `json:"averagePathLength,omitempty"`
 	SanitizedSliceCount    int      `json:"sanitizedSliceCount,omitempty"`
+	// RootedSliceCount counts slices whose ReachableFromRoots is true, so a
+	// consumer can size the application-driven share of the slice list without
+	// walking every slice.
+	RootedSliceCount int `json:"rootedSliceCount,omitempty"`
 }
 type DataFlowEvidence struct {
 	Engine      string                  `json:"engine,omitempty"` // "legacy" or "seam"

@@ -115,6 +115,8 @@ A slice contains source and sink IDs, node and edge IDs, categories, taint kinds
 
 By default, Golem drops call graph edges and data-flow slices that are entirely rooted in external Go module cache paths (for example `/go/pkg/mod/...`) to reduce third-party-only noise in downstream evidence. Use `--include-all-flows` to keep those flows.
 
+Keeping dependency-internal flows raises the question a consumer actually asks: is this flow something the application can drive, or library code analyzing itself? Every slice answers it with `reachableFromRoots`, which is true when any function the slice traverses is reachable from the resolved roots in the call graph. The field is absent only when no call graph could be built at all — never as a synonym for "unreachable" — so a consumer can treat `true` as reached, `false` as dependency-internal, and absence as unknown. `dataFlow.stats.rootedSliceCount` sizes the application-driven share without walking the slices.
+
 ### Resource Limits
 
 Large repositories can be controlled with these limits:

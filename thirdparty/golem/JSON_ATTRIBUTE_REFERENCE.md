@@ -263,6 +263,7 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 | `fieldPaths[]`                         | string array             | Aggregate field-level path context.            | Object-graph taint debugging.           |
 | `crossesDependency`                    | boolean                  | Taint left the module under analysis.          | Dependency risk and blast radius.       |
 | `dependencyHops`                       | integer                  | Dependency boundaries the flow crossed.        | Ranking flows by distance from the app. |
+| `reachableFromRoots`                   | boolean (optional)       | Whether a root-reachable function is on the path. Absent means no call graph was available, never "unreachable". | Separating application-driven flows from module-internal ones kept by `--include-all-flows`. |
 | `ruleId`, `ruleName`                   | strings                  | Rule metadata from sink classification.        | Stable issue keys in ticketing systems. |
 | `severity`, `riskScore`                | string, integer          | Priority metadata.                             | Sorting and threshold gating.           |
 | `sourceScope`, `sinkScope`             | strings                  | Runtime/test/example scope context.            | Ignore test-only findings in CI.        |
@@ -302,6 +303,7 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 | `duplicateSliceCount`, `duplicateGroupCount` | integers       | Duplicate metrics.                           | UI collapse and dedupe tuning.      |
 | `maxPathLength`, `averagePathLength`         | integer, float | Path complexity metrics.                     | Risk heuristics and trend analysis. |
 | `sanitizedSliceCount`                        | integer        | Number of slices with sanitizer involvement. | Sanitizer effectiveness reporting.  |
+| `rootedSliceCount`                           | integer        | Slices whose `reachableFromRoots` is true.    | Application-driven share of flows.  |
 
 ## Crypto JSON reference
 

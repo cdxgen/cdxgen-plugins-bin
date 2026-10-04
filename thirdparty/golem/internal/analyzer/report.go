@@ -198,6 +198,10 @@ func Analyze(options Options) (*model.Report, error) {
 	if options.DataFlowMode != "none" {
 		report.DataFlow = a.buildDataFlow(pkgs, ssaCtx, progress)
 	}
+	// Runs before applyReportView: the verdict must reflect the full graph,
+	// not the view, and the view may prune the reachability entries it joins
+	// against.
+	a.annotateDataFlowReachability(report, ssaCtx)
 	applyReportView(report, options)
 	a.populateStats(report)
 	sortReport(report)

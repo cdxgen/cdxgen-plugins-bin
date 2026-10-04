@@ -444,6 +444,7 @@ func recomputeDataFlowStats(df *model.DataFlowEvidence) {
 	df.Stats.MaxPathLength = 0
 	df.Stats.AveragePathLength = 0
 	df.Stats.SanitizedSliceCount = 0
+	df.Stats.RootedSliceCount = 0
 	for _, node := range df.Nodes {
 		if node.Source {
 			df.Stats.SourceCount++
@@ -457,9 +458,13 @@ func recomputeDataFlowStats(df *model.DataFlowEvidence) {
 	}
 	countByFlow := map[string]int{}
 	totalPath := 0
+	rooted := 0
 	for _, slice := range df.Slices {
 		if slice.FlowKey != "" {
 			countByFlow[slice.FlowKey]++
+		}
+		if slice.ReachableFromRoots != nil && *slice.ReachableFromRoots {
+			rooted++
 		}
 		if slice.PathLength > df.Stats.MaxPathLength {
 			df.Stats.MaxPathLength = slice.PathLength
@@ -469,6 +474,7 @@ func recomputeDataFlowStats(df *model.DataFlowEvidence) {
 			df.Stats.SanitizedSliceCount++
 		}
 	}
+	df.Stats.RootedSliceCount = rooted
 	df.Stats.UniqueFlowCount = len(countByFlow)
 	for _, count := range countByFlow {
 		if count > 1 {

@@ -85,6 +85,8 @@ golem analyze --dir . --dataflow security --dataflow-graph-out flows.graphml --o
 
 Modes: `security` tracks input-to-execution and input-to-response style flows; `crypto` tracks key material into crypto APIs; `all` adds third-party module cache paths. Data flow uses the call graph when `--dataflow-callgraph` is not `none`, indexing dynamic callees by call site and replaying method summaries through them. Custom sources, sinks, passthroughs, and sanitizers merge with the built-in rules through `--dataflow-patterns <file>`, and `--dataflow-pattern-packs` selects among the built-in families (http, crypto, filesystem, process, and friends).
 
+Every slice carries `reachableFromRoots`: true when any function the slice traverses is reachable from the resolved roots, false for a flow that lives entirely in code the application never drives into, absent only when no call graph could be built. The verdict comes from the same reachability the call-graph section reports — computed on the full graph before any view is applied — and no slice is dropped to produce it, so `--include-all-flows` runs keep their dependency-internal flows while consumers gain the flag they need to filter them.
+
 ## API endpoints
 
 Endpoint detection walks registration calls, so a Gin, chi, Echo, fiber, iris, or net/http service yields `apiEndpoints[]` records with framework, method, composed path, handler, package, and usage scope. Group prefixes are composed the way the frameworks compose them, including the group-root idiom `users.GET("", listUsers)`, which resolves to `/api/v1/users` instead of being dropped as pathless. Listeners such as `http.ListenAndServe` are recorded separately as `http-listener` records, and gRPC-style registrations as `rpc-service`.

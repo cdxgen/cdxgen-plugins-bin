@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/packages"
 
 	"github.com/cdxgen/cdxgen-plugins-bin/thirdparty/golem/internal/model"
@@ -68,6 +69,18 @@ type Analyzer struct {
 	// goroot is the GOROOT of the go command the packages were loaded with,
 	// and standardByPath the standard-library classification of every loaded
 	// package. See isStandardPackage.
-	goroot         string
+	goroot string
+	// rawCallGraphs caches buildRawCallGraph results by requested mode. The
+	// report call graph and the taint engines each ask for a graph from the
+	// same program, and a static build is not cheap on a large one; the
+	// contents depend only on (ctx, mode), so the second ask reuses the first.
+	rawCallGraphs map[string]rawCallGraphResult
 	standardByPath map[string]bool
+}
+
+// rawCallGraphResult is the memoized outcome of one buildRawCallGraph call.
+type rawCallGraphResult struct {
+	graph       *callgraph.Graph
+	algorithm   string
+	diagnostics []model.Diagnostic
 }
