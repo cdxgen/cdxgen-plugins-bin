@@ -37,7 +37,7 @@ const sliceReachabilityMode = "rta"
 // The annotation runs before applyReportView, on the unfiltered program, so a
 // slice the view later collapses or prunes still carries the full verdict.
 func (a *Analyzer) annotateDataFlowReachability(report *model.Report, ctx *ssaContext) {
-	if report == nil || report.DataFlow == nil || len(report.DataFlow.Slices) == 0 {
+	if report == nil || report.DataFlow == nil {
 		return
 	}
 	df := report.DataFlow
@@ -58,13 +58,14 @@ func (a *Analyzer) annotateDataFlowReachability(report *model.Report, ctx *ssaCo
 		info.Reason = "no-entry-roots"
 		return
 	}
-	reachable, algorithm, ok := a.rootReachability(ctx, roots)
+	reachable, packages, algorithm, ok := a.rootReachability(ctx, roots)
 	if !ok {
 		info.Reason = "callgraph-unavailable"
 		return
 	}
 	info.Status = "computed"
 	info.Algorithm = algorithm
+	info.ReachablePackages = packages
 	annotateSliceReachability(df, reachable)
 }
 
@@ -110,10 +111,10 @@ func (a *Analyzer) rootKinds(roots []*ssa.Function) []string {
 // no-recursion rule: deep graphs must not trade a stack overflow for a
 // reachability answer. The walk matters even on RTA, whose graph holds only
 // reachable functions, because a CHA fallback graph holds every function.
-func (a *Analyzer) rootReachability(ctx *ssaContext, roots []*ssa.Function) (map[string]bool, string, bool) {
+func (a *Analyzer) rootReachability(ctx *ssaContext, roots []*ssa.Function) (map[string]bool, []string, string, bool) {
 	graph, algorithm, _ := a.buildRawCallGraph(ctx, sliceReachabilityMode)
 	if graph == nil {
-		return nil, algorithm, false
+		return nil, nil, algorithm, false
 	}
 	adj := adjacencyByFunctionID(graph)
 	reachable := map[string]bool{}
@@ -138,7 +139,45 @@ func (a *Analyzer) rootReachability(ctx *ssaContext, roots []*ssa.Function) (map
 			}
 		}
 	}
-	return reachable, algorithm, true
+	return reachable, a.reachablePackages(graph, reachable), algorithm, true
+}
+
+// reachablePackages collects the non-standard packages with a reached
+// function that is not a package initializer. Closures defined inside an init
+// count: they are code the init handed to someone else to call.
+func (a *Analyzer) reachablePackages(graph *callgraph.Graph, reachable map[string]bool) []string {
+	seen := map[string]bool{}
+	var out []string
+	for fn := range graph.Nodes {
+		if fn == nil || !reachable[fn.String()] || isPackageInitializer(fn) {
+			continue
+		}
+		pkg := fn.Pkg
+		if pkg == nil && fn.Origin() != nil {
+			pkg = fn.Origin().Pkg
+		}
+		if pkg == nil || pkg.Pkg == nil {
+			continue
+		}
+		path := pkg.Pkg.Path()
+		if seen[path] || a.isStandardPackage(path, nil) {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// isPackageInitializer matches a package's init and the numbered init#N
+// functions SSA creates for each init declared in its files.
+func isPackageInitializer(fn *ssa.Function) bool {
+	if fn.Parent() != nil || fn.Signature.Recv() != nil {
+		return false
+	}
+	name := fn.Name()
+	return name == "init" || strings.HasPrefix(name, "init#")
 }
 
 func adjacencyByFunctionID(graph *callgraph.Graph) map[string][]string {
@@ -206,6 +245,7 @@ func mergeSliceReachability(dst, src *model.DataFlowSliceReachability) *model.Da
 	if dst == nil {
 		copied := *src
 		copied.RootKinds = append([]string(nil), src.RootKinds...)
+		copied.ReachablePackages = append([]string(nil), src.ReachablePackages...)
 		return &copied
 	}
 	if dst.Status != src.Status {
@@ -216,6 +256,7 @@ func mergeSliceReachability(dst, src *model.DataFlowSliceReachability) *model.Da
 	}
 	dst.Algorithm = joinUniqueSorted(dst.Algorithm, src.Algorithm)
 	dst.RootKinds = unionSorted(dst.RootKinds, src.RootKinds)
+	dst.ReachablePackages = unionSorted(dst.ReachablePackages, src.ReachablePackages)
 	dst.RootCount += src.RootCount
 	return dst
 }

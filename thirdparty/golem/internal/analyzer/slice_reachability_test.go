@@ -79,6 +79,21 @@ func assertSliceVerdicts(t *testing.T, report *model.Report) {
 	if info == nil || info.Status != "computed" || info.Algorithm != "rta" {
 		t.Fatalf("expected computed rta sliceReachability, got %#v", info)
 	}
+	// Package-level view of the same graph: the driver counts as used through
+	// database/sql's dispatch into Open, the blank-imported library does not,
+	// and the standard library is never listed.
+	packages := map[string]bool{}
+	for _, p := range info.ReachablePackages {
+		packages[p] = true
+		if !strings.Contains(p, ".") {
+			t.Fatalf("standard package %q must not be listed in reachablePackages", p)
+		}
+	}
+	for pkg, want := range expectedRooted {
+		if packages[pkg] != want {
+			t.Fatalf("reachablePackages[%s]=%v, want %v (got %v)", pkg, packages[pkg], want, info.ReachablePackages)
+		}
+	}
 	unrooted := seen["example.com/unusedlib"]
 	if info.UnrootedSliceCount != unrooted || info.RootedSliceCount != len(report.DataFlow.Slices)-unrooted {
 		t.Fatalf("sliceReachability counts disagree with the slices: %#v (unrooted=%d of %d)", info, unrooted, len(report.DataFlow.Slices))
@@ -156,6 +171,9 @@ func TestMergeSliceReachability(t *testing.T) {
 	merged := mergeSliceReachability(nil, a)
 	merged = mergeSliceReachability(merged, b)
 	merged = mergeSliceReachability(merged, c)
+	if len(merged.ReachablePackages) != 0 {
+		t.Fatalf("no child listed packages, got %v", merged.ReachablePackages)
+	}
 	if merged.Status != "partial" || merged.Reason != "no-entry-roots" || merged.Algorithm != "cha,rta" || merged.RootCount != 4 {
 		t.Fatalf("unexpected merge result %#v", merged)
 	}

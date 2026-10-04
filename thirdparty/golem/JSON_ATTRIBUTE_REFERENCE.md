@@ -306,7 +306,7 @@ A slice is the key triage record. It points to source and sink nodes and preserv
 
 ### `dataFlow.sliceReachability` fields
 
-Present whenever the report has slices. The counts are always serialized, so zero rooted slices reads differently from "not computed".
+Present whenever data flow ran. The counts are always serialized, so zero rooted slices reads differently from "not computed".
 
 | Field                                    | Type         | Purpose                                                                                                                          | Typical use case                                  |
 | ---------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
@@ -314,6 +314,7 @@ Present whenever the report has slices. The counts are always serialized, so zer
 | `reason`                                 | string       | Why the verdict was withheld: `no-entry-roots` (only package initializers, e.g. a library) or `callgraph-unavailable`.           | Explaining missing verdicts.                      |
 | `algorithm`                              | string       | Graph the verdicts came from: `rta`, or `cha` when RTA panicked. Multi-module runs list distinct values comma-separated.          | Only act on `false` from a dispatch-aware graph.  |
 | `rootKinds[]`                            | string array | Distinct reasons the roots were selected (`main`, `init`, `exported`, `handler`, `synthetic-registration`).                      | Judging what "reachable" was measured against.    |
+| `reachablePackages[]`                   | string array | Non-standard packages with a reached function other than an initializer, on the same graph. A blank-imported package appears only if the program dispatches into it (e.g. a registered `database/sql` driver). | Gating call-graph usage evidence without depending on `--callgraph`. |
 | `rootCount`                              | integer      | Resolved roots.                                                                                                                  | Sanity check.                                     |
 | `rootedSliceCount`, `unrootedSliceCount` | integers     | Slices whose `reachableFromRoots` is true / false.                                                                               | Application-driven share of flows.                |
 

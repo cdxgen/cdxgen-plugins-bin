@@ -669,7 +669,15 @@ type DataFlowSliceReachability struct {
 	Algorithm string `json:"algorithm,omitempty"`
 	// RootKinds are the distinct reasons the resolved roots were selected
 	// (main, init, exported, handler, synthetic-registration, ...).
-	RootKinds          []string `json:"rootKinds,omitempty"`
+	RootKinds []string `json:"rootKinds,omitempty"`
+	// ReachablePackages lists the non-standard packages holding at least one
+	// function, other than a package initializer, that the roots reach in
+	// the same graph. A package whose only reached function is its init was
+	// merely imported (blank imports run init); one whose init registered a
+	// value the program later dispatches to — a database/sql driver — shows
+	// up through that dispatch. This lets a consumer gate call-graph usage
+	// evidence on the same sound graph without depending on --callgraph.
+	ReachablePackages  []string `json:"reachablePackages,omitempty"`
 	RootCount          int      `json:"rootCount"`
 	RootedSliceCount   int      `json:"rootedSliceCount"`
 	UnrootedSliceCount int      `json:"unrootedSliceCount"`
