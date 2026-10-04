@@ -74,7 +74,7 @@ type Analyzer struct {
 	// report call graph and the taint engines each ask for a graph from the
 	// same program, and a static build is not cheap on a large one; the
 	// contents depend only on (ctx, mode), so the second ask reuses the first.
-	rawCallGraphs map[string]rawCallGraphResult
+	rawCallGraphs  map[string]rawCallGraphResult
 	standardByPath map[string]bool
 }
 
