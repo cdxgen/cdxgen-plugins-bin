@@ -3,7 +3,8 @@
 # Shared, named per-platform plugin exemptions. Sourced by
 # stage-built-plugins.sh (skip staging, print the reason) and
 # check-plugin-coverage.sh (skip the coverage assertion, print the reason) so
-# the two scripts cannot drift apart.
+# the two scripts cannot drift apart. Also the binary name cdxgen resolves for
+# each plugin, which check-plugin-coverage.sh holds every package to.
 #
 # `kosi` is a GraalVM native image (thirdparty/kosi/docs/BUILD.md,
 # 05-BUILD-DIST.md §2). GraalVM does not build for every architecture this
@@ -73,6 +74,38 @@ plugin_platform_exemption() {
       ;;
     *)
       return 1
+      ;;
+  esac
+}
+
+# Usage: plugin_binary_name <plugin> <target>
+# Prints the path, relative to plugins/<plugin>/, that cdxgen executes for the
+# plugin. <target> is cdxgen's <platform>-<arch> for the host: linuxmusl on musl
+# hosts, linux-ppc64le for the ppc64 package. This mirrors
+# resolveBundledPluginBinary in cdxgen's lib/inventory/plugins.js, which builds
+# the name from the host and never lists the directory, so a binary under any
+# other name is never found.
+plugin_binary_name() {
+  local plugin="$1" target="$2" extn=""
+  if [[ "$target" == windows-* ]]; then
+    extn=".exe"
+  fi
+  case "$plugin" in
+    trivy|trustinspector)
+      echo "${plugin}-cdxgen-${target}${extn}"
+      ;;
+    osquery)
+      if [[ "$target" == darwin-* ]]; then
+        echo "osqueryi-${target}.app/Contents/MacOS/osqueryd"
+      else
+        echo "osqueryi-${target}${extn}"
+      fi
+      ;;
+    sourcekitten)
+      echo "sourcekitten"
+      ;;
+    *)
+      echo "${plugin}-${target}${extn}"
       ;;
   esac
 }

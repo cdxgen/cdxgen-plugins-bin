@@ -27,6 +27,8 @@ bash scripts/check-package-size.sh   packages/<platform> ...
 
 Coverage runs first on purpose. A package can be under its size limit and still be missing a plugin; shipping the package without golem is the worse outcome, so the gate that catches it runs before the one that measures bytes.
 
+Coverage looks for each binary under the exact name cdxgen runs (`plugin_binary_name` in `scripts/plugin-platform-support.sh`, which mirrors cdxgen's resolver) and checks that `plugins-manifest.json` points at the same file. cdxgen builds the name from the host and never lists the directory, so a binary under any other name is as good as missing: the musl packages once shipped dosai as `plugins/dosai/dosai`, which cdxgen never found.
+
 ## Per-helper builds
 
 Each custom helper builds from its own directory:
