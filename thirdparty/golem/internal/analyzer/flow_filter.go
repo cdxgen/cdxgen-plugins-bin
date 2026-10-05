@@ -469,6 +469,7 @@ func recomputeDataFlowStats(df *model.DataFlowEvidence) {
 			df.Stats.SanitizedSliceCount++
 		}
 	}
+	countSliceReachability(df)
 	df.Stats.UniqueFlowCount = len(countByFlow)
 	for _, count := range countByFlow {
 		if count > 1 {

@@ -164,6 +164,7 @@ func mergeReports(dst *model.Report, src *model.Report) {
 				dst.DataFlow.Patterns = src.DataFlow.Patterns
 			}
 			dst.DataFlow.Diagnostics = append(dst.DataFlow.Diagnostics, src.DataFlow.Diagnostics...)
+			dst.DataFlow.SliceReachability = mergeSliceReachability(dst.DataFlow.SliceReachability, src.DataFlow.SliceReachability)
 			recomputeDataFlowStats(dst.DataFlow)
 			dst.DataFlow.Stats.SummaryCount = len(dst.DataFlow.Summaries)
 			dst.DataFlow.Stats.TruncationReasons = dataFlowTruncationReasons(dst.DataFlow.Diagnostics)

@@ -67,6 +67,24 @@ func (a *Analyzer) buildRawCallGraph(ctx *ssaContext, mode string) (*callgraph.G
 	if ctx == nil || ctx.program == nil {
 		return nil, mode, []model.Diagnostic{{Kind: "callgraph", Message: "SSA context was not available"}}
 	}
+	if cached, ok := a.rawCallGraphs[mode]; ok {
+		// The diagnostics slice is copied because callers append to what they
+		// are handed (SEAM adds its override notice); on a shared backing
+		// array that write would sit just past every other reader's length.
+		return cached.graph, cached.algorithm, append([]model.Diagnostic(nil), cached.diagnostics...)
+	}
+	graph, algorithm, diagnostics := a.buildUncachedRawCallGraph(ctx, mode)
+	if a.rawCallGraphs == nil {
+		a.rawCallGraphs = map[string]rawCallGraphResult{}
+	}
+	a.rawCallGraphs[mode] = rawCallGraphResult{graph: graph, algorithm: algorithm, diagnostics: diagnostics}
+	return graph, algorithm, diagnostics
+}
+
+func (a *Analyzer) buildUncachedRawCallGraph(ctx *ssaContext, mode string) (*callgraph.Graph, string, []model.Diagnostic) {
+	if ctx == nil || ctx.program == nil {
+		return nil, mode, []model.Diagnostic{{Kind: "callgraph", Message: "SSA context was not available"}}
+	}
 	var graph *callgraph.Graph
 	algorithm := mode
 	var diagnostics []model.Diagnostic
