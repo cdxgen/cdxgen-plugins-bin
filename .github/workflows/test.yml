@@ -1,7 +1,11 @@
 name: Build npm package
 
+# merge_group lets the merge queue re-run the required checks (the linux
+# prebuilds for rusi, cdxui and kosi) on the speculative merge commit; the
+# darwin and windows packaging jobs skip those builds via their if:.
 on:
   pull_request:
+  merge_group:
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -48,6 +52,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   rusi_darwin_prebuild:
+    if: github.event_name != 'merge_group'
     runs-on: macos-15
     permissions:
       contents: read
@@ -112,6 +117,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   cdxui_darwin_prebuild:
+    if: github.event_name != 'merge_group'
     runs-on: macos-15
     permissions:
       contents: read
@@ -140,6 +146,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   cdxrs_linux_prebuild:
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -177,6 +184,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   cdxrs_darwin_prebuild:
+    if: github.event_name != 'merge_group'
     runs-on: macos-15
     permissions:
       contents: read
@@ -345,6 +353,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   kosi_darwin_prebuild:
+    if: github.event_name != 'merge_group'
     runs-on: macos-15
     permissions:
       contents: read
@@ -618,6 +627,7 @@ jobs:
         fi
         popd
   winpkg:
+    if: github.event_name != 'merge_group'
     runs-on: windows-latest
     permissions:
       contents: read
