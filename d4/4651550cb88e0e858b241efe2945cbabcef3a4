@@ -1,0 +1,16 @@
+thirdparty/golem/internal/analyzer/callgraph.go
+  h_6a4cc5cdf68def 71-74
+thirdparty/golem/internal/analyzer/options.go
+  h_6a4cc5cdf68def 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d44651550cb88e0e858b241efe2945cbabcef3a4",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
