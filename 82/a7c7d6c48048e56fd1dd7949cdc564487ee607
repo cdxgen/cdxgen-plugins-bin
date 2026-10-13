@@ -1,0 +1,392 @@
+thirdparty/kosi/build.gradle.kts
+  h_6a4cc5cdf68def 170-191
+thirdparty/kosi/corpus.toml
+  h_6a4cc5cdf68def 618-628
+thirdparty/kosi/docs/BUILD.md
+  h_6a4cc5cdf68def 173-207
+thirdparty/kosi/fixtures/parameter-taint-sources/build.gradle.kts
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/fixtures/parameter-taint-sources/src/main/kotlin/Api.kt
+  h_6a4cc5cdf68def 1-62
+thirdparty/kosi/fixtures/parameter-taint-sources/src/main/kotlin/org/springframework/web/bind/annotation/Annotations.kt
+  h_6a4cc5cdf68def 1-9
+thirdparty/kosi/fixtures/taint-sanitizer/src/main/kotlin/Sanitized.kt
+  h_6a4cc5cdf68def 10-20,22-24,26,36-43,52-62
+thirdparty/kosi/goldens/android-taint-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/android-taint-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-android-scopes-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-await-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-channel-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-flow-collect-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-launch-scope-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-stateflow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/async-withcontext-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/bare-accessor-source-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/bare-accessor-source-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/bare-accessor-source-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/bare-accessor-source-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-exception-taint-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-exception-taint-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-exception-taint-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-exception-taint-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/catch-handler-flow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/class-declarations-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/collection-passthrough-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/collection-passthrough-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/collection-passthrough-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/collection-passthrough-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/command-exec-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/dep-taint-through-lib-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/endpoint-parameter-semantics-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/endpoint-parameter-semantics-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/expressions-and-literals-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/field-sensitivity-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/field-sensitivity-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/field-sensitivity-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/field-sensitivity-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-generations-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-generations-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-generations-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/framework-generations-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/generic-shapes-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/handler-input-semantics-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/handler-input-semantics-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/handler-input-semantics-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/handler-input-semantics-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/loop-and-labels-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/nested-field-path-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/nested-field-path-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/nested-field-path-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/nested-field-path-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/old-language-version-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/old-language-version-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/parameter-taint-sources-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-function-flow-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-function-flow-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-function-flow-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/scope-function-flow-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/server-side-taint-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/server-side-taint-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/server-side-taint-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/server-side-taint-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/string-template-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-clean-sibling-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-clean-sibling-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-clean-sibling-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-clean-sibling-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-cross-module-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-cross-module-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-cross-module-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-cross-module-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-higher-order-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-higher-order-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-higher-order-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-higher-order-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-param-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-param-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-param-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-param-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-receiver-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-receiver-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-receiver-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-receiver-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-return-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-return-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-return-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-param-to-return-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-recursive-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-recursive-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-recursive-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-recursive-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-sanitized-callee-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-sanitized-callee-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-sanitized-callee-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-sanitized-callee-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-virtual-dispatch-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-virtual-dispatch-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-virtual-dispatch-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/summary-virtual-dispatch-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-loop-fixpoint-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-loop-fixpoint-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-loop-fixpoint-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-loop-fixpoint-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-all.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/taint-sanitizer-security.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/unresolved-constructor-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/unresolved-constructor-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/unresolved-constructor-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/unresolved-constructor-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-deps.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-endpoint.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-exported.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/goldens/weak-crypto-resolved.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-bench/build.gradle.kts
+  h_6a4cc5cdf68def 15-18
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DepthReportTest.kt
+  h_6a4cc5cdf68def 1-270
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/SecurityPackLivenessTest.kt
+  h_6a4cc5cdf68def 1-415
+thirdparty/kosi/modules/kosi-bench/src/test/resources/depth/depth-report.json
+  h_6a4cc5cdf68def 1
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Annotation.kt
+  h_6a4cc5cdf68def 16-17,82-85,185-194,222-225
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/AnnotationParser.kt
+  h_6a4cc5cdf68def 110-111,163-164,241-242
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/CorpusManifest.kt
+  h_6a4cc5cdf68def 97-100
+thirdparty/kosi/modules/kosi-corpus/src/main/kotlin/io/cdxgen/kosi/corpus/Evaluator.kt
+  h_6a4cc5cdf68def 113-117,154-155
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/Endpoints.kt
+  h_6a4cc5cdf68def 62-72,81-82
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Summaries.kt
+  h_6a4cc5cdf68def 760
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  h_6a4cc5cdf68def 106-115,214-216,219-220,228,297-330,367-395,568-582,632-634,650,664,771-779,931-933,982-992,994-996,999-1002,1004,1008,1015,1017-1022,1025-1026,1078-1090,1262-1264,1311-1326,1518,1529,1580-1581,1724,1790,1846-1847,1943-1944
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/Transfer.kt
+  h_6a4cc5cdf68def 154-159,586-591,598-602
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  h_6a4cc5cdf68def 82,87-103,615-621,639,700-704,707,736
+thirdparty/kosi/modules/kosi-graph/src/test/kotlin/io/cdxgen/kosi/graph/RootsVocabularyTest.kt
+  h_6a4cc5cdf68def 1-159
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirConstFold.kt
+  h_6a4cc5cdf68def 12-35,50-62,79-111,128-260,272-290,293-295,318,328,334-336,339-489,492,495-522,533-536,551
+thirdparty/kosi/modules/kosi-kir/src/test/kotlin/io/cdxgen/kosi/kir/KirValueFolderCrossBlockTest.kt
+  h_6a4cc5cdf68def 1-246
+thirdparty/kosi/modules/kosi-kir/src/test/kotlin/io/cdxgen/kosi/kir/KirValueFolderNullTest.kt
+  h_6a4cc5cdf68def 66-70,74-77
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/DataFlow.kt
+  h_6a4cc5cdf68def 89-99,142,144
+thirdparty/kosi/scripts/corpus-changed.sh
+  h_6a4cc5cdf68def 1-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "82a7c7d6c48048e56fd1dd7949cdc564487ee607",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
