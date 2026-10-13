@@ -1,0 +1,16 @@
+docs/CDXRS.md
+  h_6a4cc5cdf68def 71-72
+thirdparty/cdxrs/tests/fetch.rs
+  h_6a4cc5cdf68def 773-844
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7008c6de408354f050e7876d3a8e8d33b79e5c20",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
