@@ -81,8 +81,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Upload golem and trustinspector helper artifacts
       run: |
+        # Only the binaries and their SBOM: `make all` also runs golem's test
+        # suite, which go-test.yml runs with a 30-minute limit, and here it
+        # hit go test's 10-minute default.
         pushd thirdparty/golem
-        make all
+        make windows linux darwin sbom
         popd
 
         pushd thirdparty/trustinspector
