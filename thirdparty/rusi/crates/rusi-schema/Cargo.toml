@@ -2,6 +2,9 @@
 name = "rusi-schema"
 version.workspace = true
 edition.workspace = true
+# Built through the embedded wrapper path on the 1.98 rustc_private floor,
+# so this is a literal rather than the workspace inherit.
+rust-version = "1.98"
 license.workspace = true
 
 [dependencies]
