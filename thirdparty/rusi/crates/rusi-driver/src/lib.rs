@@ -949,6 +949,8 @@ fn materialize_embedded_wrapper(root: &Path) -> Result<()> {
         root.file_name().unwrap_or_default().to_string_lossy(),
         std::process::id()
     ));
+    // `mode` only exists on unix; on other hosts nothing mutates the builder.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
@@ -2530,9 +2532,11 @@ mod tests {
 
     use super::{
         BACKEND_KIND_EMBEDDED, BACKEND_KIND_STUB, DRIVER_PROTOCOL_VERSION, DriverOptions,
-        DriverProtocolEnvelope, PackageContext, cargo_check_target_args, detect_capabilities,
-        discover_rust_files, run_driver, scoped_child_dir,
+        DriverProtocolEnvelope, cargo_check_target_args, detect_capabilities, run_driver,
     };
+    // Used only by the symlink tests, which need directory symlinks.
+    #[cfg(unix)]
+    use super::{PackageContext, discover_rust_files, scoped_child_dir};
     use rusi_core::{AnalysisScope, AnalyzeOptionsInput};
 
     fn fixture_path(name: &str) -> PathBuf {
