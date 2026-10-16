@@ -31,9 +31,19 @@ jobs:
   # workspace default-members, so the whole default set builds and tests on
   # stable like any other project. Compiler-backend integration tests are
   # marked #[ignore] and are exercised in the nightly job below.
+  #
+  # Windows runs the same suite: unix-gated code paths compile out there, and
+  # that is exactly where the cross-host breakages have hidden (a cfg(windows)
+  # fixture gate flipping an asserted outcome, unused imports behind
+  # #[cfg(unix)], a temp path written into TOML where \U is an escape — all
+  # found by a Windows VM run).
   test:
-    name: cargo test (stable)
-    runs-on: ubuntu-latest
+    name: cargo test (stable, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     permissions:
       contents: read
     steps:
@@ -41,15 +51,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install stable toolchain
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
           rustup default stable
           rustc --version
       - name: cargo test
+        shell: bash
         run: cargo test
       - name: cargo clippy
+        shell: bash
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: cargo fmt
+        shell: bash
         run: cargo fmt --check
 
   # Compiler-backend integration tests. These require a nightly toolchain with
@@ -57,9 +71,19 @@ jobs:
   # internals via #![feature(rustc_private)]), and they shell out to a nested
   # cargo at runtime, so they are run single-threaded to avoid cargo lock
   # contention.
+  #
+  # Windows runs the same job: the wrapper links rustc_private on MSVC there,
+  # and the embedded backend materializes and builds it through a nested
+  # cargo — the whole path was validated on a Windows VM (both the pinned
+  # 1.100 API shape and 1.101's cfg-selected shape). `shell: bash` everywhere
+  # because the install step's line continuations are bash syntax.
   test-nightly:
-    name: cargo +nightly test -- --ignored (compiler backend)
-    runs-on: ubuntu-latest
+    name: cargo +nightly test -- --ignored (compiler backend, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     permissions:
       contents: read
     env:
@@ -71,14 +95,15 @@ jobs:
       # The wrapper's supported window extends past this pin through
       # nightly 1.101 via the `rusi_rustc_ge_1_101` cfg the driver sets from
       # the resolved toolchain (see the rusi README). 1.101 is verified on
-      # macOS; keep the pin here until a Linux run has confirmed 1.101's
-      # libLLVM placement links cleanly, then move it forward.
+      # macOS and Windows; keep the pin here until a Linux run has confirmed
+      # 1.101's libLLVM placement links cleanly, then move it forward.
       NIGHTLY: nightly-2026-08-21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install nightly toolchain with rustc-dev, rust-src and clippy
+        shell: bash
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal \
             --component rustc-dev --component rust-src --component llvm-tools \
@@ -88,8 +113,11 @@ jobs:
       # lint or unit-test it. Its tests drive the MIR data-flow fixpoints on
       # hand-built bodies and need no nested cargo, so they run first.
       - name: cargo +nightly clippy (rustc-wrapper)
+        shell: bash
         run: cargo "+$NIGHTLY" clippy --locked -p rusi-rustc-wrapper --all-targets -- -D warnings
       - name: cargo +nightly test (rustc-wrapper)
+        shell: bash
         run: cargo "+$NIGHTLY" test --locked -p rusi-rustc-wrapper
       - name: cargo +nightly test -- --ignored --test-threads=1
+        shell: bash
         run: cargo "+$NIGHTLY" test -- --ignored --test-threads=1

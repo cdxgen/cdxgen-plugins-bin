@@ -35,9 +35,19 @@ jobs:
   # tests/fetch.rs runs against a local mock server and makes no outbound
   # requests. tests/schema_drift.rs pins the vendored schema hashes: if it
   # fails, a CycloneDX schema changed underneath us and that is the finding.
+  #
+  # The suite runs on Windows too: host-dependent path rules have broken it
+  # there while staying green on Linux (an is_absolute() XDG check that
+  # rejects /var/cache without a drive prefix, and CRLF checkouts of the
+  # byte-compared golden fixtures — both found by a Windows VM run and fixed
+  # by 9aaa8629/e3607969).
   test:
-    name: cargo test (stable)
-    runs-on: ubuntu-latest
+    name: cargo test (stable, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     permissions:
       contents: read
     steps:
@@ -45,15 +55,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install stable toolchain
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
           rustup default stable
           rustc --version
       - name: cargo test
+        shell: bash
         run: cargo test
       - name: cargo clippy
+        shell: bash
         run: cargo clippy --all-targets -- -D warnings
       - name: cargo fmt
+        shell: bash
         run: cargo fmt --check
 
   # The binary is cross-built for eleven targets at release time. Building the
