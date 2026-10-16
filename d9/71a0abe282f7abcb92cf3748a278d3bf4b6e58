@@ -1,0 +1,40 @@
+thirdparty/golem/internal/seam/seam.go
+  s_0766c78faa0ee3::t_9cd1b76c7dd27f 270-277
+  s_0766c78faa0ee3::t_8a2218993164c5 278
+thirdparty/golem/internal/seam/intra.go
+  s_0766c78faa0ee3::t_d79501790f299c 616-623
+  s_0766c78faa0ee3::t_8a2218993164c5 587
+  s_0766c78faa0ee3::t_98bdf95008c5a7 995-1003
+thirdparty/golem/testdata/corpus/simd-vector/main.go
+  s_0766c78faa0ee3::t_f45cfcc91430e4 56-61,63-77
+  s_0766c78faa0ee3::t_c0f64f487a33f1 62
+thirdparty/golem/internal/seam/simd.go
+  s_0766c78faa0ee3::t_208fe34e741311 126-132
+  s_0766c78faa0ee3::t_8a2218993164c5 27-32,104-125
+thirdparty/golem/internal/seam/inter.go
+  s_0766c78faa0ee3::t_8a2218993164c5 633-645,648,696-707
+  s_0766c78faa0ee3::t_2ccf6370f13f09 708
+thirdparty/golem/testdata/corpus/copy-taint/main.go
+  s_0766c78faa0ee3::t_c0f64f487a33f1 47,59
+  s_0766c78faa0ee3::t_f45cfcc91430e4 40-46,48-58,60-64
+thirdparty/golem/testdata/seam-parity.json
+  s_0766c78faa0ee3::t_c0f64f487a33f1 5,32
+thirdparty/golem/internal/seam/simd_module_test.go
+  s_0766c78faa0ee3::t_0be16901370cb8 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d971a0abe282f7abcb92cf3748a278d3bf4b6e58",
+  "prompts": {},
+  "sessions": {
+    "s_0766c78faa0ee3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1854c4b8-e5fe-41f6-88b4-dd514033efc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

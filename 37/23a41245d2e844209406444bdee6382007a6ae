@@ -1,0 +1,28 @@
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/EndpointsPackLivenessTest.kt
+  s_9d783fb1e8d1fd::t_a1756bae148366 223-225
+  s_9d783fb1e8d1fd::t_32ec96cfc8b28d 298-299,305,415-417
+  s_9d783fb1e8d1fd::t_16032f5b3e5e04 118-123,127-147
+  s_9d783fb1e8d1fd::t_ba952eca283ab5 236-243
+  s_9d783fb1e8d1fd::t_680bb4eb24f9c9 23-26
+  s_9d783fb1e8d1fd::t_ffcf613ad58504 148-149
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  s_9d783fb1e8d1fd::t_9496b2f7001a76 365-369
+thirdparty/kosi/docs/BUILD.md
+  s_9d783fb1e8d1fd::t_02c598c1c727d2 164-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3723a41245d2e844209406444bdee6382007a6ae",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

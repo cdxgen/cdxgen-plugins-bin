@@ -1,0 +1,31 @@
+thirdparty/kosi/native-metadata/kosi-psi/reachability-metadata.json
+  s_9d783fb1e8d1fd::t_afa1dfbf25b472 4-129,135
+thirdparty/kosi/modules/kosi-bytecode/src/test/kotlin/io/cdxgen/kosi/bytecode/NativeServiceMetadataTest.kt
+  s_9d783fb1e8d1fd::t_b24efe3faa31f4 1-87
+.github/workflows/kosi-test.yml
+  s_9d783fb1e8d1fd::t_9fb3fa1b20fa3f 138-148
+  s_9d783fb1e8d1fd::t_c7f42f91096449 197-202
+thirdparty/kosi/scripts/GenPsiReflection.java
+  s_9d783fb1e8d1fd::t_b2c20d1eedc209 102-127
+  s_9d783fb1e8d1fd::t_d65a749a217c3a 65-70
+  s_9d783fb1e8d1fd::t_13e2e950e7078e 12-14,16-34,45-54
+  s_9d783fb1e8d1fd::t_3868579e30f20b 55
+thirdparty/kosi/Makefile
+  s_9d783fb1e8d1fd::t_6ecb952d0b505c 132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "69bc7358ce4c309e9eb8dcdd72a4f6e98342c0e5",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

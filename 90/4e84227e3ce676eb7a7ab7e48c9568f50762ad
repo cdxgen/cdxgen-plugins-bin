@@ -1,0 +1,49 @@
+thirdparty/golem/internal/analyzer/dataflow.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 382,2353-2357,3228
+thirdparty/golem/internal/seam/seam.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 7,74-79,93-96,122,161-164,440,1116,1167,1181-1240,1272-1276,1280-1281,1297-1299
+thirdparty/golem/internal/analyzer/callgraph.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 394,446,455,464,466-467,659
+  s_0766c78faa0ee3::t_e5b0a23402be87 465
+thirdparty/golem/testdata/corpus/dotless-module-subpackage/go.mod
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-3
+thirdparty/golem/internal/analyzer/options.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 68-72
+thirdparty/golem/internal/analyzer/stdlib_classification_test.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-70
+thirdparty/golem/testdata/corpus/dotless-module-subpackage/main.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-19
+thirdparty/golem/testdata/corpus/dotless-module-path/go.mod
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-3
+thirdparty/golem/testdata/corpus/dotless-module-subpackage/scrub/scrub.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-8
+thirdparty/golem/internal/seam/stdlib_test.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-57
+thirdparty/golem/internal/analyzer/util.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 120-125,129-131,147
+  s_0766c78faa0ee3::t_27f95b61759cd5 9,15,139-146,148-153
+thirdparty/golem/testdata/corpus/dotless-module-path/main.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 1-19
+thirdparty/golem/internal/analyzer/extract.go
+  s_0766c78faa0ee3::t_ca4f243b46961d 21,157,437
+thirdparty/golem/internal/analyzer/report.go
+  s_0766c78faa0ee3::t_e5b0a23402be87 101
+  s_0766c78faa0ee3::t_ca4f243b46961d 17,97-100,102
+  s_0766c78faa0ee3::t_858a606b2412ab 103,217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "904e84227e3ce676eb7a7ab7e48c9568f50762ad",
+  "prompts": {},
+  "sessions": {
+    "s_0766c78faa0ee3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1854c4b8-e5fe-41f6-88b4-dd514033efc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+thirdparty/kosi/fixtures/numeric-sanitizer/src/main/kotlin/fixtures/num/Numeric.kt
+  s_659a4b41ad2e7b::t_3b9db4c3281ab1 18-41,113-114,118-124,128-133,138-163,168-231
+  s_659a4b41ad2e7b::t_d04024e53cc424 232
+thirdparty/kosi/modules/kosi-bench/src/test/resources/depth/depth-report.json
+  s_659a4b41ad2e7b::t_c0f9764b89ef1c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8710e422a4096286c3d0b180203aeb6cebb8601a",
+  "prompts": {},
+  "sessions": {
+    "s_659a4b41ad2e7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07f55a35-593c-48fc-a9bb-2b3e3fe96970",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+thirdparty/kosi/goldens/dsl-media-auth-exported.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/modules/kosi-bytecode/src/test/kotlin/io/cdxgen/kosi/bytecode/EndpointsPackSymbolKindTest.kt
+  s_9d783fb1e8d1fd::t_3e0e1028720e4c 372-389
+  s_9d783fb1e8d1fd::t_810342bfc7688d 402-410
+  s_9d783fb1e8d1fd::t_6785f2ea95f6ec 80-85
+  s_9d783fb1e8d1fd::t_d8c619a8f44740 92
+  s_9d783fb1e8d1fd::t_ec3b30dc8704c0 258-265
+thirdparty/kosi/goldens/dsl-media-auth-security.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/goldens/dsl-media-auth-resolved.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_9d783fb1e8d1fd::t_1bef8d5db5fce9 529-533,538
+  s_9d783fb1e8d1fd::t_7c6e8dca320e10 550-551
+thirdparty/kosi/fixtures/dsl-media-auth/src/main/kotlin/fixtures/dslmedia/DslRoutes.kt
+  s_9d783fb1e8d1fd::t_c3bc63881c2056 90-98
+  s_9d783fb1e8d1fd::t_15f500c2ea05c3 196-198
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/endpoints-pack-v0.json
+  s_9d783fb1e8d1fd::t_6162021532622a 1855
+thirdparty/kosi/goldens/dsl-media-auth-all.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/goldens/dsl-media-auth-deps.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/goldens/dsl-media-auth-endpoint.json
+  s_9d783fb1e8d1fd::t_22497f16ee0893 1
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/KirConstFold.kt
+  s_9d783fb1e8d1fd::t_31ed218b49a189 79-86
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  s_9d783fb1e8d1fd::t_9ea25bc589e77a 45
+  s_9d783fb1e8d1fd::t_1759f237846755 1590-1600,1602,1604-1605
+  s_9d783fb1e8d1fd::t_f6d7a83723aa0c 1601
+  s_9d783fb1e8d1fd::t_a63c373783f046 1571-1587
+thirdparty/kosi/modules/kosi-endpoints/src/main/kotlin/io/cdxgen/kosi/endpoints/EndpointDetector.kt
+  s_9d783fb1e8d1fd::t_b2c11efb40e0cc 688-695
+  s_9d783fb1e8d1fd::t_ae1c536f085075 709
+  s_9d783fb1e8d1fd::t_20c87949a78594 649-660
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cadb4438536b917dbe3010a550836863853f17f2",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

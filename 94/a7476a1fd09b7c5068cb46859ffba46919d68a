@@ -1,0 +1,22 @@
+docs/RUSI.md
+  s_fd07128e7dbdfd::t_80caa4ee451ebe 52-60
+  s_fd07128e7dbdfd::t_4719dead109f4b 101
+thirdparty/rusi/JSON_ATTRIBUTE_REFERENCE.md
+  s_fd07128e7dbdfd::t_db0b0c8a5d455d 377
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "94a7476a1fd09b7c5068cb46859ffba46919d68a",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

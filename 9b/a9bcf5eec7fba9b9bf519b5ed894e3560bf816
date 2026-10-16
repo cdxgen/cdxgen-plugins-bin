@@ -1,0 +1,23 @@
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_9d783fb1e8d1fd::t_cee80531f5ce58 879-883
+  s_9d783fb1e8d1fd::t_8fd1b0e96ced79 868-878,885
+thirdparty/kosi/modules/kosi-cli/src/test/kotlin/io/cdxgen/kosi/cli/MemoryAdviceTest.kt
+  s_9d783fb1e8d1fd::t_cee80531f5ce58 45-46,53
+  s_9d783fb1e8d1fd::t_8fd1b0e96ced79 34-44,47-52,54-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9ba9bcf5eec7fba9b9bf519b5ed894e3560bf816",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

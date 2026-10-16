@@ -1,0 +1,53 @@
+thirdparty/kosi/modules/kosi-kir/src/main/kotlin/io/cdxgen/kosi/kir/DiStereotypes.kt
+  s_9d783fb1e8d1fd::t_60ca6ba15da983 191
+  s_9d783fb1e8d1fd::t_54e0a0901f13ca 135-142
+  s_9d783fb1e8d1fd::t_fe49a1aa681246 92-100
+  s_9d783fb1e8d1fd::t_cabad059082dab 160-163
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/DiBindingFormsTest.kt
+  s_9d783fb1e8d1fd::t_fd4b7ef5f2bdee 58-72,79-94
+  s_9d783fb1e8d1fd::t_50b109ab1af4ca 73-78
+thirdparty/kosi/goldens/di-module-bindings-deps.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/goldens/di-module-bindings-resolved.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/fixtures/persistence-sinks/src/main/kotlin/fixtures/persist/Repos.kt
+  s_9d783fb1e8d1fd::t_edb1ea7390843d 25-26,28,53-57,98-103
+thirdparty/kosi/goldens/di-module-bindings-endpoint.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/goldens/persistence-sinks-security.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/goldens/persistence-sinks-deps.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/goldens/di-module-bindings-exported.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/fixtures/persistence-sinks/src/main/kotlin/org/springframework/data/repository/Repository.kt
+  s_9d783fb1e8d1fd::t_fe2496f50a2c13 1-3,15
+thirdparty/kosi/modules/kosi-bench/src/test/resources/depth/depth-report.json
+  s_9d783fb1e8d1fd::t_638fe980deabe1 1
+thirdparty/kosi/goldens/persistence-sinks-endpoint.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/goldens/persistence-sinks-resolved.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+thirdparty/kosi/fixtures/persistence-sinks/src/main/kotlin/org/springframework/data/jpa/repository/JpaRepository.kt
+  s_9d783fb1e8d1fd::t_fe2496f50a2c13 1-13
+thirdparty/kosi/modules/kosi-models/src/main/resources/models/security-pack-v0.json
+  s_9d783fb1e8d1fd::t_5983b611a1549b 18,22-26
+thirdparty/kosi/goldens/persistence-sinks-exported.json
+  s_9d783fb1e8d1fd::t_5af21fca7811e8 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "af1db3b4cbe35e2964d83d219323eb6444f13ece",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

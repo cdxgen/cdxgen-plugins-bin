@@ -1,0 +1,176 @@
+thirdparty/kosi/scripts/native-subset.txt
+  s_5994d752519150::t_5c7b026fae80ad 53-54
+  s_5994d752519150::t_99e9bc82fc0955 29-35
+thirdparty/kosi/goldens/class-delegation-deps.json
+  s_5994d752519150::t_055ec35c84dd0e 1
+thirdparty/kosi/goldens/class-delegation-endpoint.json
+  s_5994d752519150::t_5b1687f17bbaf7 1
+thirdparty/kosi/goldens/class-delegation-exported.json
+  s_5994d752519150::t_f4d1323205f410 1
+thirdparty/kosi/goldens/class-delegation-resolved.json
+  s_5994d752519150::t_cae4bdecaf7465 1
+thirdparty/kosi/goldens/class-delegation-security.json
+  s_5994d752519150::t_f5738061156a41 1
+thirdparty/kosi/goldens/cross-block-values-deps.json
+  s_5994d752519150::t_f633d5c58f315a 1
+thirdparty/kosi/goldens/cross-block-values-endpoint.json
+  s_5994d752519150::t_89509eea1c516d 1
+thirdparty/kosi/goldens/cross-block-values-exported.json
+  s_5994d752519150::t_7c31a96e76c576 1
+thirdparty/kosi/goldens/cross-block-values-resolved.json
+  s_5994d752519150::t_9b710eff8626d4 1
+thirdparty/kosi/goldens/depth-cap-chain-deps.json
+  s_5994d752519150::t_e15e79577556c5 1
+thirdparty/kosi/goldens/depth-cap-chain-endpoint.json
+  s_5994d752519150::t_9d993480e8d29a 1
+thirdparty/kosi/goldens/depth-cap-chain-exported.json
+  s_5994d752519150::t_b4951f1a883930 1
+thirdparty/kosi/goldens/depth-cap-chain-resolved.json
+  s_5994d752519150::t_d65a683da0e3b5 1
+thirdparty/kosi/goldens/dsl-loop-scoping-deps.json
+  s_5994d752519150::t_ea9b82fa4c018e 1
+thirdparty/kosi/goldens/dsl-loop-scoping-endpoint.json
+  s_5994d752519150::t_49c30e3e2c8699 1
+thirdparty/kosi/goldens/dsl-loop-scoping-exported.json
+  s_5994d752519150::t_39ad3cf2b40d19 1
+thirdparty/kosi/goldens/dsl-loop-scoping-resolved.json
+  s_5994d752519150::t_21b6d76bf9be77 1
+thirdparty/kosi/goldens/dsl-loop-scoping-security.json
+  s_5994d752519150::t_0c9db854572e34 1
+thirdparty/kosi/goldens/dsl-loop-scoping-unresolved-deps.json
+  s_5994d752519150::t_f6c6f5e4c3c711 1
+thirdparty/kosi/goldens/dsl-loop-scoping-unresolved-endpoint.json
+  s_5994d752519150::t_2eee9c6d89e19a 1
+thirdparty/kosi/goldens/dsl-loop-scoping-unresolved-exported.json
+  s_5994d752519150::t_15c9a84780c6e6 1
+thirdparty/kosi/goldens/dsl-loop-scoping-unresolved-resolved.json
+  s_5994d752519150::t_325ffb6dae13ea 1
+thirdparty/kosi/goldens/dsl-loop-scoping-unresolved-security.json
+  s_5994d752519150::t_a6cfd336b87c7b 1
+thirdparty/kosi/goldens/flow-widened-paths-deps.json
+  s_5994d752519150::t_742d93fe7e6335 1
+thirdparty/kosi/goldens/flow-widened-paths-endpoint.json
+  s_5994d752519150::t_002ebd40c136ea 1
+thirdparty/kosi/goldens/flow-widened-paths-exported.json
+  s_5994d752519150::t_96710752385e2b 1
+thirdparty/kosi/goldens/flow-widened-paths-resolved.json
+  s_5994d752519150::t_907a0ddaf16df4 1
+thirdparty/kosi/goldens/flow-widened-paths-security.json
+  s_5994d752519150::t_bc248598b4b2a6 1
+thirdparty/kosi/goldens/framework-generations-deps.json
+  s_5994d752519150::t_653ea5ccbc563a 1
+thirdparty/kosi/goldens/framework-generations-endpoint.json
+  s_5994d752519150::t_ef7bea8493a953 1
+thirdparty/kosi/goldens/framework-generations-exported.json
+  s_5994d752519150::t_dd64103b8238ba 1
+thirdparty/kosi/goldens/framework-generations-resolved.json
+  s_5994d752519150::t_2aed35d8b80956 1
+thirdparty/kosi/goldens/kosi-vulnerable-service-deps.json
+  s_5994d752519150::t_0c1b41237a78ea 1
+thirdparty/kosi/goldens/layered-app-deps.json
+  s_5994d752519150::t_a8c60d5aa64816 1
+thirdparty/kosi/goldens/layered-app-endpoint.json
+  s_5994d752519150::t_809255aca53be5 1
+thirdparty/kosi/goldens/layered-app-exported.json
+  s_5994d752519150::t_702e83493c8723 1
+thirdparty/kosi/goldens/layered-app-resolved.json
+  s_5994d752519150::t_7cd3d9793b6344 1
+thirdparty/kosi/goldens/outbound-clients-deps.json
+  s_5994d752519150::t_c2bcaf20f52f95 1
+thirdparty/kosi/goldens/outbound-clients-endpoint.json
+  s_5994d752519150::t_65dbaa314e813f 1
+thirdparty/kosi/goldens/outbound-clients-exported.json
+  s_5994d752519150::t_29a31611df9ed0 1
+thirdparty/kosi/goldens/outbound-clients-resolved.json
+  s_5994d752519150::t_10b90db84f1a33 1
+thirdparty/kosi/goldens/parameter-provenance-deps.json
+  s_5994d752519150::t_e11b4406302ecb 1
+thirdparty/kosi/goldens/parameter-provenance-endpoint.json
+  s_5994d752519150::t_e03b2590d7d8ee 1
+thirdparty/kosi/goldens/parameter-provenance-exported.json
+  s_5994d752519150::t_b325fcb8ad0bf4 1
+thirdparty/kosi/goldens/parameter-provenance-resolved.json
+  s_5994d752519150::t_a8d0dcd0f7bee0 1
+thirdparty/kosi/goldens/producer-arms-deps.json
+  s_5994d752519150::t_088df2ad79fa3e 1
+thirdparty/kosi/goldens/producer-arms-endpoint.json
+  s_5994d752519150::t_004a819ba019f2 1
+thirdparty/kosi/goldens/producer-arms-exported.json
+  s_5994d752519150::t_3fc6d0f0991b37 1
+thirdparty/kosi/goldens/producer-arms-resolved.json
+  s_5994d752519150::t_e3dec2bd23fe60 1
+thirdparty/kosi/goldens/sanitizer-gallery-deps.json
+  s_5994d752519150::t_ba170506c204de 1
+thirdparty/kosi/goldens/sanitizer-gallery-endpoint.json
+  s_5994d752519150::t_fa766d1fbca221 1
+thirdparty/kosi/goldens/sanitizer-gallery-exported.json
+  s_5994d752519150::t_852cdbd5ccd420 1
+thirdparty/kosi/goldens/sanitizer-gallery-resolved.json
+  s_5994d752519150::t_a120a0efd6c01f 1
+thirdparty/kosi/goldens/server-side-taint-deps.json
+  s_5994d752519150::t_572a2f6b3efebf 1
+thirdparty/kosi/goldens/server-side-taint-endpoint.json
+  s_5994d752519150::t_84d09d61f7e6d5 1
+thirdparty/kosi/goldens/server-side-taint-exported.json
+  s_5994d752519150::t_7549e9a4f319d6 1
+thirdparty/kosi/goldens/server-side-taint-resolved.json
+  s_5994d752519150::t_7b34d203e103ea 1
+thirdparty/kosi/goldens/spring-const-scoping-deps.json
+  s_5994d752519150::t_9eeaee64f38be7 1
+thirdparty/kosi/goldens/spring-const-scoping-endpoint.json
+  s_5994d752519150::t_53e8bcad281cdb 1
+thirdparty/kosi/goldens/spring-const-scoping-exported.json
+  s_5994d752519150::t_6820fada2f9f7a 1
+thirdparty/kosi/goldens/spring-const-scoping-resolved.json
+  s_5994d752519150::t_81ba0282ee45c9 1
+thirdparty/kosi/goldens/spring-const-scoping-security.json
+  s_5994d752519150::t_9407baae8f0b51 1
+thirdparty/kosi/goldens/spring-const-scoping-unresolved-deps.json
+  s_5994d752519150::t_3b3756ce4b0733 1
+thirdparty/kosi/goldens/spring-const-scoping-unresolved-endpoint.json
+  s_5994d752519150::t_7674f340c76cec 1
+thirdparty/kosi/goldens/spring-const-scoping-unresolved-exported.json
+  s_5994d752519150::t_e92fb7480fd5fa 1
+thirdparty/kosi/goldens/spring-const-scoping-unresolved-resolved.json
+  s_5994d752519150::t_cb5590364dfe1f 1
+thirdparty/kosi/goldens/spring-const-scoping-unresolved-security.json
+  s_5994d752519150::t_7ef345bcd7296d 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-deps.json
+  s_5994d752519150::t_403837aeab031f 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-endpoint.json
+  s_5994d752519150::t_76081357ecb146 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-exported.json
+  s_5994d752519150::t_b005c0f21ddda4 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-resolved.json
+  s_5994d752519150::t_d740e9b86e9f4f 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-security.json
+  s_5994d752519150::t_53d922c713c146 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-unresolved-deps.json
+  s_5994d752519150::t_34f3e48a886abc 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-unresolved-endpoint.json
+  s_5994d752519150::t_51bac8cd8fa3a0 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-unresolved-exported.json
+  s_5994d752519150::t_9804def3401362 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-unresolved-resolved.json
+  s_5994d752519150::t_11781177ab78e8 1
+thirdparty/kosi/goldens/spring-inherited-hierarchy-unresolved-security.json
+  s_5994d752519150::t_6f30eff437d842 1
+thirdparty/kosi/modules/kosi-bench/src/test/resources/depth/depth-report.json
+  s_5994d752519150::t_31f0cdf83fcf64 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "74a82f7f2d899c7ecb9c919b5e58d7ae2a035550",
+  "prompts": {},
+  "sessions": {
+    "s_5994d752519150": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bc039659-1311-4f26-82f7-874e84df3812",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

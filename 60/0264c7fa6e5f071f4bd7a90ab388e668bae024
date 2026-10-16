@@ -1,0 +1,19 @@
+AI-DECLARATION.md
+  s_62e3583a1443aa::t_3b8046d208f8da 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "600264c7fa6e5f071f4bd7a90ab388e668bae024",
+  "prompts": {},
+  "sessions": {
+    "s_62e3583a1443aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "17483fce-fbe5-4123-9188-b2d3eecf0a1b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

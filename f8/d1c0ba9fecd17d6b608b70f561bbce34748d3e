@@ -1,0 +1,71 @@
+thirdparty/kosi/modules/kosi-bench/src/test/resources/depth/depth-report.json
+  s_9d783fb1e8d1fd::t_5a7c2239f49d9c 1
+thirdparty/kosi/modules/kosi-cli/src/test/kotlin/io/cdxgen/kosi/cli/MemoryAdviceTest.kt
+  s_9d783fb1e8d1fd::t_aabad2548f7c20 45-52,59-63
+thirdparty/kosi/modules/kosi-bench/src/test/kotlin/io/cdxgen/kosi/bench/DeepTierTest.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 83-88
+thirdparty/kosi/JSON_ATTRIBUTE_REFERENCE.md
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 202-204
+thirdparty/kosi/goldens/deep-nesting-endpoint.json
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirDumper.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 72-86,89-100
+thirdparty/kosi/modules/kosi-schema/src/main/kotlin/io/cdxgen/kosi/schema/Diagnostics.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 195-212,252-253
+thirdparty/kosi/fixtures/deep-nesting/src/main/kotlin/UnderBudget.kt
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1-5
+thirdparty/kosi/native-metadata/kosi/reachability-metadata.json
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 702-703
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/AnalysisEnvironment.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 60-77
+thirdparty/kosi/modules/kosi-cli/src/main/kotlin/io/cdxgen/kosi/cli/Main.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 117-120,883-888,893-900
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/SyntaxAnalyzer.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 5,83-97,115-125,533-537,542-557,559,561
+thirdparty/kosi/modules/kosi-project/src/main/kotlin/io/cdxgen/kosi/project/MavenDiscovery.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 28-36,38-45
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/WalkBudgets.kt
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1-101
+thirdparty/kosi/modules/kosi-front/src/test/kotlin/io/cdxgen/kosi/front/WalkBudgetTest.kt
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1-135
+thirdparty/kosi/fixtures/deep-nesting/src/main/kotlin/OverBudget.kt
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1-5
+thirdparty/kosi/docs/KOSI.md
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 295-323
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/ResolvedAnalyzer.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 152-188,190-193,195-200,202-211,214-240,243-265,268-277,280-288,290-329,331-337,339-361,363-367,369-419,421-432,434-445,447-517,529,551-554,560-582,584-586,590-626,628-649,656-657,661-663,667-690,693
+thirdparty/kosi/goldens/deep-nesting-deps.json
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1
+thirdparty/kosi/goldens/deep-nesting-security.json
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1
+thirdparty/kosi/goldens/deep-nesting-resolved.json
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1
+thirdparty/kosi/fixtures/deep-nesting/src/main/kotlin/Normal.kt
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1-5
+thirdparty/kosi/goldens/deep-nesting-exported.json
+  s_9d783fb1e8d1fd::t_99b1995baa1b74 1
+thirdparty/kosi/modules/kosi-flow/src/main/kotlin/io/cdxgen/kosi/flow/TaintEngine.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 845-856,859-871,896-901,1002-1010
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/Analyzer.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 122-126,277-313,566-591,1138
+thirdparty/kosi/modules/kosi-front/src/main/kotlin/io/cdxgen/kosi/front/KirLowering.kt
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 128-135,138-140,259,560-570,594-597,601
+thirdparty/kosi/corpus.toml
+  s_9d783fb1e8d1fd::t_e0b6ffb0164386 1275-1289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f8d1c0ba9fecd17d6b608b70f561bbce34748d3e",
+  "prompts": {},
+  "sessions": {
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
