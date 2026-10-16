@@ -381,6 +381,43 @@ fn load_metadata(dir: &Path) -> Result<Metadata> {
 /// Raise this whenever the wrapper adopts a newer `rustc_private` signature.
 pub const RUSTC_PRIVATE_VERSION_FLOOR: (u64, u64, u64) = (1, 98, 0);
 
+/// The rustc release whose `rustc_private` surface forked in ways that traits
+/// cannot bridge: 1.101 renamed `rustc_driver_impl::run_compiler` to
+/// `compiler_entrypoint`, folded `ItemKind::Use`'s `UseKind` into a `UseTree`
+/// payload, and added `ProjectionElem::PhantomDeref`. The wrapper compiles
+/// against either shape, selected by the `rusi_rustc_ge_1_101` cfg.
+const RUSTC_PRIVATE_CFG_FORK: (u64, u64, u64) = (1, 101, 0);
+
+/// Parse a dotted `major.minor.patch` release, as carried by
+/// [`DriverCapabilities::rustc_release`]. A missing patch reads as `.0`,
+/// matching [`parse_rustc_release`].
+fn parse_dotted_release(release: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = release.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = match parts.next() {
+        Some(value) => value.parse().ok()?,
+        None => 0,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// RUSTFLAGS that select the newer `rustc_private` shape when the resolved
+/// toolchain is at or past [`RUSTC_PRIVATE_CFG_FORK`], and `None` on the older
+/// shape. The paired `--check-cfg` keeps the `unexpected_cfgs` lint quiet for
+/// the crates built alongside the wrapper, which inherit the flag through
+/// RUSTFLAGS; an unknown version keeps the older shape so the wrapper build
+/// surfaces a real compiler error rather than a wrong-shape guess.
+fn wrapper_compatibility_rustflags(release: Option<&str>) -> Option<String> {
+    release
+        .and_then(parse_dotted_release)
+        .filter(|release| *release >= RUSTC_PRIVATE_CFG_FORK)
+        .map(|_| "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string())
+}
+
 fn default_true() -> bool {
     true
 }
@@ -1003,6 +1040,14 @@ fn ensure_embedded_wrapper_built(
         // installs on *stable* be useful. Nightly needs no such unlocking, so
         // the variable is only set when it is required.
         command.env("RUSTC_BOOTSTRAP", "1");
+    }
+    if let Some(flags) = wrapper_compatibility_rustflags(capabilities.rustc_release.as_deref()) {
+        // Appended to any inherited RUSTFLAGS so a user's own flags survive.
+        let merged = match std::env::var("RUSTFLAGS") {
+            Ok(existing) if !existing.trim().is_empty() => format!("{existing} {flags}"),
+            _ => flags,
+        };
+        command.env("RUSTFLAGS", merged);
     }
     debug_log(
         debug,
@@ -4207,7 +4252,8 @@ mod toolchain_gate_tests {
 
     use super::{
         BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
-        format_rustc_release, parse_rustc_release, resolve_toolchain, toolchain_floor_diagnostic,
+        format_rustc_release, parse_dotted_release, parse_rustc_release, resolve_toolchain,
+        toolchain_floor_diagnostic, wrapper_compatibility_rustflags,
     };
 
     /// `rustup toolchain list` names, the way the driver reads them.
@@ -4347,6 +4393,38 @@ mod toolchain_gate_tests {
         assert!(!support.embedded_backend_supported);
         // The version itself was fine; only the components were missing.
         assert!(support.rustc_version_supported);
+    }
+
+    #[test]
+    fn compatibility_rustflags_select_the_1_101_api_shape() {
+        let newer = wrapper_compatibility_rustflags(Some("1.101.0"))
+            .expect("1.101.0 takes the newer shape");
+        assert_eq!(
+            newer,
+            "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)"
+        );
+        // The fork release itself, and everything past it.
+        assert!(wrapper_compatibility_rustflags(Some("1.102.3")).is_some());
+        // One short of the fork keeps the older shape, as does the version
+        // the CI compiler-backend job pins.
+        assert!(wrapper_compatibility_rustflags(Some("1.100.0-nightly")).is_none());
+        assert!(wrapper_compatibility_rustflags(Some("1.100.0")).is_none());
+        // An unknown release keeps the older shape: the wrapper build then
+        // fails with the compiler's own error rather than a wrong-shape guess.
+        assert!(wrapper_compatibility_rustflags(None).is_none());
+        assert!(wrapper_compatibility_rustflags(Some("unknown")).is_none());
+    }
+
+    #[test]
+    fn dotted_releases_parse_like_rustc_output() {
+        assert_eq!(parse_dotted_release("1.101.0"), Some((1, 101, 0)));
+        // Two components read as `.0`, matching `parse_rustc_release`.
+        assert_eq!(parse_dotted_release("1.101"), Some((1, 101, 0)));
+        assert_eq!(parse_dotted_release("1.98"), Some((1, 98, 0)));
+        assert_eq!(parse_dotted_release("1.100.7"), Some((1, 100, 7)));
+        assert_eq!(parse_dotted_release(""), None);
+        assert_eq!(parse_dotted_release("1.x.0"), None);
+        assert_eq!(parse_dotted_release("1.101.0.1"), None);
     }
 
     #[test]

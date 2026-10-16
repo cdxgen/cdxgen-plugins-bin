@@ -67,6 +67,12 @@ jobs:
       # lint fails this job on its own; move it forward deliberately. It is
       # the only nightly installed, and the driver's `auto` toolchain picks a
       # lone dated nightly by its full name.
+      #
+      # The wrapper's supported window extends past this pin through
+      # nightly 1.101 via the `rusi_rustc_ge_1_101` cfg the driver sets from
+      # the resolved toolchain (see the rusi README). 1.101 is verified on
+      # macOS; keep the pin here until a Linux run has confirmed 1.101's
+      # libLLVM placement links cleanly, then move it forward.
       NIGHTLY: nightly-2026-08-21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

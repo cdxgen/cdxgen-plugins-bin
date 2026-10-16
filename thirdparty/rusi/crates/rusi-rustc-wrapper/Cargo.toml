@@ -2,12 +2,21 @@
 name = "rusi-rustc-wrapper"
 version.workspace = true
 edition.workspace = true
+# Built through the embedded wrapper path on the 1.98 rustc_private floor,
+# so this is a literal rather than the workspace inherit.
+rust-version = "1.98"
 license.workspace = true
 
 [[bin]]
 name = "rusi-rustc-wrapper"
 path = "src/main.rs"
 bench = false
+
+# The wrapper bridges 1.101+ rustc_private API forks behind this cfg (set by
+# the rusi driver via RUSTFLAGS, or manually for standalone builds); naming
+# it here keeps `unexpected_cfgs` quiet on toolchains where it is unset.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rusi_rustc_ge_1_101)'] }
 
 [dependencies]
 anyhow.workspace = true
