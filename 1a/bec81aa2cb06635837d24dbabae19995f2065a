@@ -1,0 +1,18 @@
+.github/workflows/cdxrs-test.yml
+  h_6a4cc5cdf68def 38-43,45-50,58,64,67,70
+.github/workflows/cdxui-test.yml
+  h_6a4cc5cdf68def 35-38,40-45,53,59,62,65
+.github/workflows/rusi-test.yml
+  h_6a4cc5cdf68def 34-39,41-46,54,60,63,66,74-79,81-86,98-99,106,116,119,122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1abec81aa2cb06635837d24dbabae19995f2065a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
