@@ -1,0 +1,14 @@
+.gitattributes
+  h_6a4cc5cdf68def 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3607969988a81932ea63a81ed30f3ff64c6f840",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
