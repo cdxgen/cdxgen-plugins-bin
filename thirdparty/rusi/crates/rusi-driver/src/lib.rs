@@ -2307,8 +2307,15 @@ fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
 /// Symbols the compiler and the C runtime assume it owns.
 ///
 /// Rust 1.98 added the deny-by-default `invalid_runtime_symbol_definitions`
-/// and warn-by-default `suspicious_runtime_symbol_definitions` lints for
-/// exactly these names. Defining one from Rust replaces the implementation the
+/// and warn-by-default `suspicious_runtime_symbol_definitions` lints for the
+/// six core memory/string symbols (`memcpy` through `strlen` below). Rust
+/// 1.99 extended both lints to the POSIX symbols the standard library
+/// declares in its own FFI blocks — `malloc`, `realloc`, `free`
+/// (`sys::alloc::unix`), `exit` (`sys::exit`), and `open`, `read`, `write`,
+/// `close` (`sys::fs::unix`) — driving the check from the new
+/// `#[rustc_canonical_symbol]` registry instead of a hardcoded list;
+/// `calloc` and `posix_memalign` stay in rusi's set as the C runtime's
+/// allocator family. Defining one from Rust replaces the implementation the
 /// compiler emits calls to — LLVM lowers `slice` comparisons to `bcmp`/`memcmp`
 /// and `[u8]` copies to `memcpy` without those calls appearing in the source —
 /// so a wrong or recursive definition miscompiles code far from the definition
@@ -2318,15 +2325,20 @@ fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
 const RUNTIME_SYMBOL_NAMES: &[&str] = &[
     "bcmp",
     "calloc",
+    "close",
+    "exit",
     "free",
     "malloc",
     "memcmp",
     "memcpy",
     "memmove",
     "memset",
+    "open",
     "posix_memalign",
+    "read",
     "realloc",
     "strlen",
+    "write",
 ];
 
 /// The linker symbol a function is exported under, if it is exported at all.
@@ -3018,6 +3030,52 @@ mod tests {
                 .any(|signal| signal.category == "native-interop")
         );
         let _ = envelope.payload.data_flow;
+    }
+
+    #[test]
+    fn driver_flags_posix_runtime_symbol_interposition() {
+        // Rust 1.99 extended the runtime-symbol lints to the POSIX symbols
+        // std declares in its own FFI blocks; the signal set follows. The
+        // fixture's exported definitions carry exact canonical signatures so
+        // the embedded backend's `cargo check` stays lint-clean while the
+        // syn-level scan still flags them.
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("runtime-symbol-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: "auto".to_string(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        let signals = &envelope.payload.security_signals;
+        // `close` exported under its own name via `#[unsafe(no_mangle)]`.
+        assert!(
+            signals
+                .iter()
+                .any(|signal| signal.category == "native-interop"
+                    && signal.description.contains("runtime symbol 'close'")),
+            "expected a runtime-symbol signal for 'close'; got {signals:?}"
+        );
+        // `read` reached through `#[unsafe(export_name)]` with an innocuous
+        // Rust identifier — matching on identifiers alone would miss it.
+        assert!(
+            signals
+                .iter()
+                .any(|signal| signal.category == "native-interop"
+                    && signal.description.contains("runtime symbol 'read'")
+                    && signal.description.contains("replacement_read")),
+            "expected a runtime-symbol signal for 'read' via export_name; got {signals:?}"
+        );
+        // The fixture's private `open` helper must not be flagged: not
+        // exported, so nothing can be interposed.
+        assert!(
+            !signals
+                .iter()
+                .any(|signal| signal.description.contains("runtime symbol 'open'")),
+            "private helper 'open' must not be flagged; got {signals:?}"
+        );
     }
 
     #[test]
@@ -4645,6 +4703,44 @@ mod native_lint_signal_tests {
         );
         assert_eq!(found.len(), 1);
         assert!(found[0].contains("'bcmp'"), "{}", found[0]);
+    }
+
+    #[test]
+    fn flags_the_posix_runtime_symbols_rust_1_99_lints() {
+        // Rust 1.99 extended the runtime-symbol lints from the six core
+        // memory/string names to the POSIX symbols std declares in its own
+        // FFI blocks. Each is reached through `export_name` so the Rust
+        // identifier cannot accidentally match on its own.
+        for symbol in ["open", "read", "write", "close", "exit"] {
+            let source = format!(
+                r#"
+                #[unsafe(export_name = "{symbol}")]
+                pub extern "C" fn replacement() -> i32 {{ todo!() }}
+                "#,
+            );
+            let found = descriptions_containing(&source, "runtime symbol");
+            // `contains` is a plain method call, so the quoted-symbol needle
+            // is built with `format!` — `contains("'{symbol}'")` would pass
+            // the literal braces through unmatched.
+            let needle = format!("'{symbol}'");
+            assert_eq!(found.len(), 1, "expected {symbol} to be flagged");
+            assert!(found[0].contains(&needle), "{symbol}: {}", found[0]);
+        }
+    }
+
+    #[test]
+    fn does_not_flag_private_helpers_named_after_posix_runtime_symbols() {
+        // `open`/`read`/`write`/`close` are ordinary Rust helper names; the
+        // 1.99 lint extension makes this false-positive guard matter more
+        // than it did for the memory symbols. Not exported, not interposed.
+        let source = r#"
+            fn open(path: &str) -> Option<u8> { let _ = path; None }
+            fn read(fd: u32) -> u8 { let _ = fd; 0 }
+            fn write(fd: u32, byte: u8) { let _ = fd; let _ = byte; }
+            fn close(fd: u32) { let _ = fd; }
+            fn exit(code: i32) -> ! { let _ = code; unreachable!() }
+            "#;
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
     }
 
     #[test]
