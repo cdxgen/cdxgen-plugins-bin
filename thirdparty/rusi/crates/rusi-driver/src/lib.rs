@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    Attribute, File, ForeignItem, ItemFn, ItemForeignMod, ItemMod, LitStr, ReturnType, Signature,
+    Attribute, File, ForeignItem, ItemFn, ItemForeignMod, ItemMod, ItemStatic, LitStr, ReturnType,
+    Signature,
 };
 
 pub const BACKEND_KIND_STUB: &str = "compiler-stub";
@@ -405,17 +406,44 @@ fn parse_dotted_release(release: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// RUSTFLAGS that select the newer `rustc_private` shape when the resolved
-/// toolchain is at or past [`RUSTC_PRIVATE_CFG_FORK`], and `None` on the older
-/// shape. The paired `--check-cfg` keeps the `unexpected_cfgs` lint quiet for
-/// the crates built alongside the wrapper, which inherit the flag through
-/// RUSTFLAGS; an unknown version keeps the older shape so the wrapper build
-/// surfaces a real compiler error rather than a wrong-shape guess.
-fn wrapper_compatibility_rustflags(release: Option<&str>) -> Option<String> {
-    release
+/// The RUSTFLAGS environment for the wrapper build: the 1.101+ compatibility
+/// cfg merged into whichever of cargo's two mutually exclusive flag forms the
+/// environment already uses. `RUSTFLAGS` is shell-ish and space-separated;
+/// `CARGO_ENCODED_RUSTFLAGS` carries one argument per `\x1f`-separated
+/// element — and cargo errors outright when both are set, so the injection
+/// must extend the form that is present rather than always writing the plain
+/// one. Returns `(variable, value)` to set, or `None` on the older API shape.
+/// When both variables are somehow set the environment was already broken for
+/// cargo; the merge keeps the plain form's flags rather than dropping them.
+fn wrapper_build_rustflags(
+    release: Option<&str>,
+    rustflags: Option<&str>,
+    encoded_rustflags: Option<&str>,
+) -> Option<(&'static str, String)> {
+    let takes_newer_shape = release
         .and_then(parse_dotted_release)
-        .filter(|release| *release >= RUSTC_PRIVATE_CFG_FORK)
-        .map(|_| "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string())
+        .is_some_and(|release| release >= RUSTC_PRIVATE_CFG_FORK);
+    if !takes_newer_shape {
+        return None;
+    }
+    // One element per argument: the encoded form must not carry spaces inside
+    // an element, and the cfg name pairs with `--cfg` as separate arguments.
+    const COMPAT_FLAGS: [&str; 3] = [
+        "--cfg",
+        "rusi_rustc_ge_1_101",
+        "--check-cfg=cfg(rusi_rustc_ge_1_101)",
+    ];
+    if let Some(existing) = rustflags.filter(|flags| !flags.trim().is_empty()) {
+        let mut flags: Vec<String> = existing.split_whitespace().map(str::to_string).collect();
+        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
+        Some(("RUSTFLAGS", flags.join(" ")))
+    } else if let Some(existing) = encoded_rustflags.filter(|flags| !flags.trim().is_empty()) {
+        let mut flags: Vec<String> = existing.split('\x1f').map(str::to_string).collect();
+        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
+        Some(("CARGO_ENCODED_RUSTFLAGS", flags.join("\x1f")))
+    } else {
+        Some(("RUSTFLAGS", COMPAT_FLAGS.join(" ")))
+    }
 }
 
 fn default_true() -> bool {
@@ -1043,13 +1071,12 @@ fn ensure_embedded_wrapper_built(
         // the variable is only set when it is required.
         command.env("RUSTC_BOOTSTRAP", "1");
     }
-    if let Some(flags) = wrapper_compatibility_rustflags(capabilities.rustc_release.as_deref()) {
-        // Appended to any inherited RUSTFLAGS so a user's own flags survive.
-        let merged = match std::env::var("RUSTFLAGS") {
-            Ok(existing) if !existing.trim().is_empty() => format!("{existing} {flags}"),
-            _ => flags,
-        };
-        command.env("RUSTFLAGS", merged);
+    if let Some((variable, value)) = wrapper_build_rustflags(
+        capabilities.rustc_release.as_deref(),
+        std::env::var("RUSTFLAGS").ok().as_deref(),
+        std::env::var("CARGO_ENCODED_RUSTFLAGS").ok().as_deref(),
+    ) {
+        command.env(variable, value);
     }
     debug_log(
         debug,
@@ -2331,6 +2358,30 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
         }
         syn::visit::visit_item_fn(self, node);
     }
+
+    fn visit_item_static(&mut self, node: &'ast ItemStatic) {
+        // The runtime-symbol lints check statics as well as functions —
+        // `check_static` in rustc's pass compares an exported static's type
+        // against the canonical symbol's signature (std's own `weak!` macro
+        // exports `Option<extern "C" fn(..)>` statics that way). A static
+        // exported under a runtime-symbol name is interposed exactly like a
+        // function definition is.
+        let ident = node.ident.to_string();
+        if let Some(symbol) = exported_symbol_name(&node.attrs, &ident)
+            && RUNTIME_SYMBOL_NAMES.contains(&symbol.as_str())
+        {
+            self.push_signal_with_severity(
+                "runtime-symbol-definition",
+                "high",
+                format!(
+                    "Rust static {} is exported as the core runtime symbol '{symbol}'; the symbol can be interposed at link time like a function definition, so a mismatched type miscompiles unrelated code (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
+                    self.qualify_name(&ident)
+                ),
+                node.ident.span(),
+            );
+        }
+        syn::visit::visit_item_static(self, node);
+    }
 }
 
 fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
@@ -2368,7 +2419,8 @@ fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
 /// so a wrong or recursive definition miscompiles code far from the definition
 /// site. Because the symbol is exported, it can also be interposed at link
 /// time by a dependency, which makes it a supply-chain concern and not only a
-/// correctness one.
+/// correctness one. Both exported functions and exported statics are scanned:
+/// rustc's lints check the two through `check_fn` and `check_static`.
 const RUNTIME_SYMBOL_NAMES: &[&str] = &[
     "bcmp",
     "calloc",
@@ -4257,7 +4309,7 @@ mod toolchain_gate_tests {
     use super::{
         BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
         format_rustc_release, parse_dotted_release, parse_rustc_release, resolve_toolchain,
-        toolchain_floor_diagnostic, wrapper_compatibility_rustflags,
+        toolchain_floor_diagnostic, wrapper_build_rustflags,
     };
 
     /// `rustup toolchain list` names, the way the driver reads them.
@@ -4401,22 +4453,66 @@ mod toolchain_gate_tests {
 
     #[test]
     fn compatibility_rustflags_select_the_1_101_api_shape() {
-        let newer = wrapper_compatibility_rustflags(Some("1.101.0"))
-            .expect("1.101.0 takes the newer shape");
+        // No inherited flags: the plain form, exactly the documented
+        // standalone-build command from the rusi README.
         assert_eq!(
-            newer,
-            "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)"
+            wrapper_build_rustflags(Some("1.101.0"), None, None),
+            Some((
+                "RUSTFLAGS",
+                "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string()
+            ))
         );
-        // The fork release itself, and everything past it.
-        assert!(wrapper_compatibility_rustflags(Some("1.102.3")).is_some());
+        // An inherited RUSTFLAGS survives, with the compatibility flags
+        // appended after it.
+        assert_eq!(
+            wrapper_build_rustflags(
+                Some("1.102.3"),
+                Some("-Ctarget-cpu=native"),
+                Some("-Cdebuginfo=0")
+            ),
+            Some((
+                "RUSTFLAGS",
+                "-Ctarget-cpu=native --cfg rusi_rustc_ge_1_101 \
+                 --check-cfg=cfg(rusi_rustc_ge_1_101)"
+                    .to_string()
+            ))
+        );
+        // Only the encoded form present: cargo treats the two forms as
+        // mutually exclusive, so the injection must extend that one — one
+        // argument per \x1f-separated element, never a space inside one.
+        assert_eq!(
+            wrapper_build_rustflags(
+                Some("1.101.0"),
+                None,
+                Some("-Ctarget-cpu=native\u{1f}-Cdebuginfo=0")
+            ),
+            Some((
+                "CARGO_ENCODED_RUSTFLAGS",
+                "-Ctarget-cpu=native\u{1f}-Cdebuginfo=0\u{1f}--cfg\u{1f}rusi_rustc_ge_1_101\
+                 \u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
+                    .to_string()
+            ))
+        );
+        // An empty RUSTFLAGS reads as unset, falling through to the encoded
+        // form when that is the one carrying flags.
+        assert_eq!(
+            wrapper_build_rustflags(Some("1.101.0"), Some("   "), Some("-Copt-level=3"))
+                .map(|(variable, _)| variable),
+            Some("CARGO_ENCODED_RUSTFLAGS")
+        );
         // One short of the fork keeps the older shape, as does the version
-        // the CI compiler-backend job pins.
-        assert!(wrapper_compatibility_rustflags(Some("1.100.0-nightly")).is_none());
-        assert!(wrapper_compatibility_rustflags(Some("1.100.0")).is_none());
+        // the CI compiler-backend job pins; so does the two-component
+        // spelling of it.
+        assert_eq!(wrapper_build_rustflags(Some("1.100.0"), None, None), None);
+        assert_eq!(
+            wrapper_build_rustflags(Some("1.100.0-nightly"), None, None),
+            None
+        );
         // An unknown release keeps the older shape: the wrapper build then
-        // fails with the compiler's own error rather than a wrong-shape guess.
-        assert!(wrapper_compatibility_rustflags(None).is_none());
-        assert!(wrapper_compatibility_rustflags(Some("unknown")).is_none());
+        // fails with the compiler's own error rather than a wrong-shape
+        // guess.
+        assert_eq!(wrapper_build_rustflags(None, None, None), None);
+        assert_eq!(wrapper_build_rustflags(Some("unknown"), None, None), None);
     }
 
     #[test]
@@ -4822,6 +4918,43 @@ mod native_lint_signal_tests {
             fn close(fd: u32) { let _ = fd; }
             fn exit(code: i32) -> ! { let _ = code; unreachable!() }
             "#;
+        assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    #[test]
+    fn flags_an_exported_static_named_after_a_runtime_symbol() {
+        // rustc's lints check statics as well as functions (`check_static`);
+        // a static exported under a runtime-symbol name interposes it just
+        // the same. std's own `weak!` macro exports Option<fn> statics.
+        let found = descriptions_containing(
+            r#"
+            #[unsafe(export_name = "malloc")]
+            pub static FAKE_ALLOC: Option<unsafe extern "C" fn(usize) -> *mut u8> = None;
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'malloc'"), "{}", found[0]);
+        assert!(found[0].contains("FAKE_ALLOC"), "{}", found[0]);
+        assert!(found[0].contains("static"), "{}", found[0]);
+    }
+
+    #[test]
+    fn flags_the_pre_2024_spelling_of_an_exported_static() {
+        let found = descriptions_containing(
+            r#"
+            #[no_mangle]
+            pub static exit: Option<unsafe extern "C" fn(i32) -> !> = None;
+            "#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("'exit'"), "{}", found[0]);
+    }
+
+    #[test]
+    fn does_not_flag_a_private_static_named_after_a_runtime_symbol() {
+        let source = r#"static memcpy: fn(*mut u8, *const u8, usize) = || todo!();"#;
         assert!(descriptions_containing(source, "runtime symbol").is_empty());
     }
 
