@@ -12879,13 +12879,31 @@ mod tests {
                 .any(|declaration| declaration.qualified_name.contains("handlers_v2"))
         );
 
-        // A file only a cfg-disabled `mod` declaration would have reached is
-        // still reported, but flagged as unreachable rather than silently
-        // attributed to an active module path.
-        assert!(report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.kind == "module-resolution"
-                && diagnostic.file_path.as_deref() == Some("src/platform.rs")
-        }));
+        // `#[cfg(windows)] mod platform;` is the one gate in the fixture that
+        // flips with the host. Off it (every non-Windows host), the file is
+        // reachable by no crate root and must be reported as an unreachable
+        // orphan rather than silently attributed to an active module path. On
+        // a Windows host the gate is enabled, so the module is claimed into
+        // the build: no orphan note may exist, and its function is declared
+        // under the `platform` module path.
+        if cfg!(windows) {
+            assert!(!report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.kind == "module-resolution"
+                    && diagnostic.file_path.as_deref() == Some("src/platform.rs")
+            }));
+            assert!(
+                report
+                    .declarations
+                    .iter()
+                    .any(|declaration| declaration.qualified_name
+                        == "cfg_modtree_app::platform::windows_only_sink")
+            );
+        } else {
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.kind == "module-resolution"
+                    && diagnostic.file_path.as_deref() == Some("src/platform.rs")
+            }));
+        }
     }
 
     /// Writes a fixture crate and returns its root.

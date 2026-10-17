@@ -244,7 +244,12 @@ impl HttpCache {
         }
         match platform {
             CachePlatform::Linux => xdg_cache_home
-                .filter(|s| !s.is_empty() && Path::new(s).is_absolute())
+                // XDG absoluteness is a POSIX rule (`/`-rooted), judged with
+                // `starts_with('/')` rather than `Path::is_absolute()`: the
+                // host's own rules must not apply — on Windows the latter
+                // rejects `/var/cache` for lacking a drive prefix, silently
+                // falling back to `$HOME/.cache`.
+                .filter(|s| !s.is_empty() && s.starts_with('/'))
                 .map(|d| PathBuf::from(d).join("cdxgen"))
                 .or_else(|| {
                     home.filter(|s| !s.is_empty())
@@ -1013,6 +1018,22 @@ mod tests {
             CachePlatform::Linux,
             None,
             Some("relative/path"),
+            Some("/home/user"),
+            None,
+            None,
+        );
+        assert_eq!(p, Some(PathBuf::from("/home/user/.cache/cdxgen")));
+    }
+
+    #[test]
+    fn linux_ignores_windows_style_xdg_cache_home() {
+        // A drive-prefixed path is not XDG-absolute: the Linux branch judges
+        // absoluteness by POSIX rules on every host, so this must fall back
+        // to `$HOME/.cache` rather than honor a Windows-style path.
+        let p = HttpCache::resolve_cache_for(
+            CachePlatform::Linux,
+            None,
+            Some("C:/cache"),
             Some("/home/user"),
             None,
             None,

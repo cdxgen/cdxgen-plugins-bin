@@ -25,7 +25,19 @@ use rusi_schema::{
     DataFlowStats, Declaration, Diagnostic, FileEvidence, GraphStats, ImportUsage, LibraryUsage,
     Position, SecuritySignal, relative_display_path, stable_id,
 };
-use rustc_driver_impl::{Callbacks, Compilation, run_compiler};
+use rustc_driver_impl::{Callbacks, Compilation};
+// Rust 1.101 renamed `rustc_driver_impl::run_compiler` to
+// `compiler_entrypoint`; the alias keeps the call site identical under either
+// name. Unlike the shims below, renames and variant-arity changes cannot be
+// bridged by traits, so they hang off the `rusi_rustc_ge_1_101` cfg: the rusi
+// driver sets it via RUSTFLAGS when the resolved toolchain is 1.101 or newer,
+// and standalone builds on such a toolchain pass
+// `RUSTFLAGS='--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)'`
+// (see the rusi README).
+#[cfg(rusi_rustc_ge_1_101)]
+use rustc_driver_impl::compiler_entrypoint as run_compiler;
+#[cfg(not(rusi_rustc_ge_1_101))]
+use rustc_driver_impl::run_compiler;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::intravisit::{self, Visitor};
@@ -44,9 +56,12 @@ use rustc_middle::ty::print::with_crate_prefix;
 use rustc_middle::ty::{self, AssocContainer, Ty, TyCtxt};
 use rustc_span::{FileName, Span};
 
-// rustc_private shims. The wrapper builds against both the pinned stable
-// toolchain and current nightly, so these paper over API changes between them
-// without per-version cfgs.
+// rustc_private shims. The wrapper builds against a window of compiler
+// versions (the pinned stable through current nightly), so these paper over
+// API changes between them without per-version cfgs wherever the change is
+// in types — the one thing traits can bridge. Changes to item names or
+// variant arity cannot be bridged that way and instead hang off the
+// `rusi_rustc_ge_1_101` cfg; see the import alias above for how it is set.
 
 /// `const { .. }` blocks. rustc 1.98 gives them `DefKind::InlineConst`; newer
 /// compilers fold them into `DefKind::AnonConst`, which also covers array
@@ -361,8 +376,15 @@ impl EmbeddedCollector {
         for item_id in items.free_items() {
             let item = tcx.hir_item(item_id);
             match item.kind {
+                // Rust 1.101 folds the `UseKind` into a `UseTree` payload;
+                // both spellings carry the same path segments and kind.
+                #[cfg(not(rusi_rustc_ge_1_101))]
                 ItemKind::Use(path, kind) => {
                     self.push_import(tcx, item.span, path.segments, kind);
+                }
+                #[cfg(rusi_rustc_ge_1_101)]
+                ItemKind::Use(tree) => {
+                    self.push_import(tcx, item.span, tree.prefix.segments, tree.kind);
                 }
                 ItemKind::Struct(..) => {
                     self.push_decl(tcx, item.owner_id.def_id, "struct", None)?;
@@ -807,7 +829,10 @@ impl EmbeddedCollector {
                     None
                 }
             }
-            UseKind::Glob | UseKind::ListStem => None,
+            // `_` rather than naming `Glob`/`ListStem`: 1.101 replaced
+            // `ListStem` with `Nested { .. }`, and only `Single` names an
+            // import anyway.
+            _ => None,
         };
         let import = ImportUsage {
             path: path.clone(),
@@ -1564,7 +1589,9 @@ impl MirBlock {
         if let Some(terminator) = &data.terminator {
             match &terminator.kind {
                 TerminatorKind::Return => returns = true,
-                TerminatorKind::Goto { target } => successors.push(label_for(*target)),
+                // Rust 1.101 added `loop_hint_attrs`; `..` keeps the pattern
+                // valid on both shapes.
+                TerminatorKind::Goto { target, .. } => successors.push(label_for(*target)),
                 TerminatorKind::SwitchInt { targets, .. } => {
                     successors.extend(targets.all_targets().iter().map(|bb| label_for(*bb)));
                 }
@@ -2001,6 +2028,11 @@ fn place_to_path(debug_names: &HashMap<Local, String>, place: Place<'_>) -> Plac
             ProjectionElem::UnwrapUnsafeBinder(ty) => current
                 .projections
                 .push(PlaceProjection::Opaque(ty.to_string())),
+            // Rust 1.101: a symbolic deref through a `Reborrow` type with no
+            // `&mut` fields, yielding an indeterminate indirect place; it
+            // walks like any other deref step in a place path.
+            #[cfg(rusi_rustc_ge_1_101)]
+            ProjectionElem::PhantomDeref => current.projections.push(PlaceProjection::Deref),
         }
     }
     current
@@ -5253,15 +5285,13 @@ fn sink_matches(
 /// into foreign code. typeck also types a call `native` when it prepares data
 /// for one, such as `CString::new`, and that is still a Rust function.
 fn model_allowed_for_call(call: &MirCall, model: &FlowModel) -> bool {
-    if matches!(
+    // Rust 1.101's clippy catches the `if .. { return false } true` shape
+    // (`needless_bool`); spelled as a negation it says the same thing.
+    !(matches!(
         model.kind,
         FlowModelKind::NativeSource | FlowModelKind::NativeSink
     ) && !model.symbol.contains("::")
-        && call.native_symbol.is_none()
-    {
-        return false;
-    }
-    true
+        && call.native_symbol.is_none())
 }
 
 fn model_tags_for_call(call: &MirCall) -> BTreeSet<&'static str> {

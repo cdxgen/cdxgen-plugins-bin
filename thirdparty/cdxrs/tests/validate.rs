@@ -379,6 +379,41 @@ fn test_valid_bom_has_zero_errors() {
 }
 
 #[test]
+fn test_schema_idn_email_contact_is_validated() {
+    // The CycloneDX schemas assert "format": "idn-email" on
+    // organizationalContact.email. jsonschema moved the idn-* formats behind
+    // an `idna` feature in 0.52 (a feature that did not exist in 0.50, where
+    // the formats validated under default-features = false), so a plain
+    // requirement bump silently stops checking contact addresses. This test
+    // is the pin against that recurring.
+    let mut bom = valid_bom_1_6();
+    bom["metadata"]["supplier"] = json!({
+        "name": "acme",
+        "contact": [{ "name": "ops", "email": "plainly not an email" }]
+    });
+    let f = validate_bom(&bom);
+    assert!(
+        f.findings
+            .iter()
+            .any(|finding| finding.id == "schema.invalid"
+                && finding.path.contains("/supplier/contact/0/email")),
+        "a non-email contact address must be a schema finding: {:?}",
+        f.findings
+    );
+
+    // Control: a valid email address stays silent.
+    bom["metadata"]["supplier"]["contact"][0]["email"] = json!("ops@acme.example");
+    let f = validate_bom(&bom);
+    assert!(
+        !f.findings
+            .iter()
+            .any(|finding| finding.path.contains("/supplier/contact/0/email")),
+        "a valid contact address must not be a finding: {:?}",
+        f.findings
+    );
+}
+
+#[test]
 fn test_invalid_bom_summary_counts() {
     let bom = json!({
         "bomFormat": "CycloneDX",

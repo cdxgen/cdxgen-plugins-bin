@@ -633,7 +633,10 @@ edition = "2021"
 [dependencies]
 external-dep = {{ path = "{}" }}
 "#,
-            dep_dir.display()
+            // TOML basic strings treat `\U` as a unicode escape, and a
+            // Windows temp path is full of them; forward slashes are valid
+            // path separators for cargo on every host.
+            dep_dir.display().to_string().replace('\\', "/")
         ),
     )?;
     fs::write(

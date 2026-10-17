@@ -32,9 +32,17 @@ jobs:
   # renames a trace field degrades this UI silently — no error, just an empty
   # panel — which is exactly how the v13 field rename reached a release. The
   # fixtures in src/trace.rs are verbatim cdxgen output for that reason.
+  #
+  # Runs on Windows as well so the suite cannot quietly rot on the other
+  # desktop platform; its sibling workflows have shipped exactly that kind of
+  # host-dependent breakage (found by a Windows VM run).
   test:
-    name: cargo test (stable)
-    runs-on: ubuntu-latest
+    name: cargo test (stable, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     permissions:
       contents: read
     steps:
@@ -42,15 +50,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install stable toolchain
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy --component rustfmt --no-self-update
           rustup default stable
           rustc --version
       - name: cargo test
+        shell: bash
         run: cargo test
       - name: cargo clippy
+        shell: bash
         run: cargo clippy --all-targets -- -D warnings
       - name: cargo fmt
+        shell: bash
         run: cargo fmt --check
 
   # The binary is cross-built for eleven targets at release time. Building the

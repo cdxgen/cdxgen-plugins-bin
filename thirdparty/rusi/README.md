@@ -110,7 +110,15 @@ rustup component add rustc-dev rust-src --toolchain stable
 rustup toolchain install nightly --component rustc-dev --component rust-src
 ```
 
-Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently the pinned stable (1.98) through nightly 1.100. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` rather than per-version `cfg`s. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
+Because the `rustc_private` APIs carry no stability guarantee, the wrapper compiles against one narrow window of compiler versions: currently 1.98 through nightly 1.101. API differences inside that window are bridged by small shims at the top of `crates/rusi-rustc-wrapper/src/main.rs` wherever the change is in types; changes to item names or variant arity cannot be bridged that way and instead hang off the `rusi_rustc_ge_1_101` cfg (Rust 1.101 renamed `rustc_driver_impl::run_compiler` to `compiler_entrypoint`, folded `ItemKind::Use`'s `UseKind` into a `UseTree`, and added `ProjectionElem::PhantomDeref`). The driver sets that cfg automatically — from the resolved toolchain — when it builds the wrapper; a standalone build on 1.101 or newer passes:
+
+```bash
+RUSTFLAGS='--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)' cargo +nightly test -p rusi-rustc-wrapper
+```
+
+On macOS, nightlies that ship `libLLVM.dylib` only under `$(rustc --print sysroot)/lib` (and not next to `librustc_driver.dylib` in the rustlib dir) also need that directory on the link path — add `-L$(rustc +nightly --print sysroot)/lib` to the same `RUSTFLAGS`, or export it when letting the driver build the wrapper; it merges inherited `RUSTFLAGS` with its own. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
+
+Because that build happens on the analyzing machine with the resolved toolchain — as old as the 1.98 floor — the wrapper's own manifest pins `rust-version = "1.98"` as a literal rather than inheriting the workspace's 1.99, and `rusi-schema` (the one crate embedded alongside it) does the same: a 1.99 requirement would make cargo reject exactly the toolchains the window promises to support. The same self-containment is why the materialized workspace manifest the driver writes for the embedded build carries only `version`, `edition`, and `license` under `[workspace.package]` — the embedded crates must resolve without inheriting anything that manifest does not define, so a new inheritable field added to the real workspace belongs to the materialized copy only if both crates can set it themselves.
 
 When embedded compiler collection is available, Rusi builds its local `rusi-rustc-wrapper` with the resolved toolchain and then runs the target repository with:
 

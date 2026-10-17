@@ -1,0 +1,9 @@
+# Normalize every text file to LF on checkout regardless of the platform's
+# git defaults — Windows Git's system-wide core.autocrlf=true otherwise
+# smudges fixtures to CRLF, which breaks the byte-identical round-trip tests
+# in thirdparty/cdxrs (found by running the suite on a Windows VM).
+# `text=auto` leaves the binary plugins and packages untouched.
+* text=auto eol=lf
+
+# Batch files are the one format that genuinely wants CRLF.
+*.bat text eol=crlf

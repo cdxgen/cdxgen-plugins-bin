@@ -6,7 +6,7 @@ Run rusi over a Rust workspace with both backends, write a custom source-to-sink
 
 ## Pre-requisites
 
-- Rust stable toolchain (and nightly for the compiler backend)
+- Rust stable toolchain (the compiler backend additionally needs the `rustc-dev` and `rust-src` components — on stable 1.98 or newer; nightly works too but is not required)
 - a Rust project; this lesson uses rusi's own workspace as the sample
 
 ## Build and take the default pass
@@ -86,7 +86,7 @@ This costs time on large dependency trees, so run it when a first-pass flow term
 
 ## The compiler backend
 
-The stable backend is syntax and receiver typing. The compiler backend embeds a nightly rustc wrapper and lifts MIR and HIR evidence: type-resolved call edges, trait and `dyn` dispatch metadata, native interop facts, richer crypto attribution, and MIR-informed flows.
+The stable backend is syntax and receiver typing. The compiler backend embeds a rustc wrapper and lifts MIR and HIR evidence: type-resolved call edges, trait and `dyn` dispatch metadata, native interop facts, richer crypto attribution, and MIR-informed flows.
 
 ```bash
 rustup toolchain install nightly
@@ -94,7 +94,7 @@ target/release/rusi analyze --dir . --backend compiler --toolchain nightly \
   --callgraph static --dataflow security --out /tmp/rusi-compiler.json
 ```
 
-The first compiler-backend run builds the wrapper on your machine, optimized but tuned so that one-time build stays quick, so expect it to take longer than later runs. `--toolchain auto`, the default, works on a machine that has only a dated nightly installed (a CI pin, for instance): it names that nightly in full instead of reaching for a rolling channel you do not have. Analysis runs on threads with a 16 MiB stack, the size rustc gives its own compiler, so source that rustc accepts does not overflow rusi; `RUST_MIN_STACK` overrides it.
+The first compiler-backend run builds the wrapper on your machine, optimized but tuned so that one-time build stays quick, so expect it to take longer than later runs. Nightly is one option; any toolchain from 1.98 up carrying the `rustc-dev` and `rust-src` components works, including stable — which is also why the wrapper's own manifest pins `rust-version = "1.98"` rather than inheriting the workspace's 1.99: the wrapper compiles on your machine with the resolved toolchain, so it must accept the oldest one supported. `--toolchain auto`, the default, works on a machine that has only a dated nightly installed (a CI pin, for instance): it names that nightly in full instead of reaching for a rolling channel you do not have. Analysis runs on threads with a 16 MiB stack, the size rustc gives its own compiler, so source that rustc accepts does not overflow rusi; `RUST_MIN_STACK` overrides it.
 
 Use the compiler backend when dispatch precision matters more than setup cost. A CBOM pass over a crypto-heavy crate is a good candidate; the `cryptos` subcommand filters everything else out:
 
