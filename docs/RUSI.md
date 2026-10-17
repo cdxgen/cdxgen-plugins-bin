@@ -49,7 +49,7 @@ The compiler backend adds an embedded rustc wrapper and MIR/HIR-derived evidence
 
 ### Toolchain requirements for the compiler backend
 
-The backend needs `rustc` 1.98 or newer with the `rustc-dev` and `rust-src` components. A nightly channel is *not* required — a stable toolchain carrying those components works, because the wrapper builds with `RUSTC_BOOTSTRAP=1` to unlock `#![feature(rustc_private)]`. The wrapper compiles against a narrow window of compiler versions, currently 1.98 through nightly 1.101; [the rusi README](../thirdparty/rusi/README.md) states the current window, the one-line `RUSTFLAGS` a standalone build on 1.101+ needs, and the macOS `libLLVM` caveat.
+The backend needs `rustc` 1.98 or newer with the `rustc-dev` and `rust-src` components. A nightly channel is _not_ required — a stable toolchain carrying those components works, because the wrapper builds with `RUSTC_BOOTSTRAP=1` to unlock `#![feature(rustc_private)]`. The wrapper compiles against a narrow window of compiler versions, currently 1.98 through nightly 1.101; [the rusi README](../thirdparty/rusi/README.md) states the current window, the one-line `RUSTFLAGS` a standalone build on 1.101+ needs, and the macOS `libLLVM` caveat.
 
 The first backend run compiles the embedded wrapper on your machine with the resolved toolchain — which is also why `rusi-rustc-wrapper` and `rusi-schema` pin `rust-version = "1.98"` in their manifests instead of inheriting the workspace's 1.99: the embedded build must keep working on the oldest toolchain the window supports.
 
