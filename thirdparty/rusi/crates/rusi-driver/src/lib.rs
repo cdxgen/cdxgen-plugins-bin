@@ -406,20 +406,35 @@ fn parse_dotted_release(release: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
-/// The RUSTFLAGS environment for the wrapper build: the 1.101+ compatibility
-/// cfg merged into whichever of cargo's two mutually exclusive flag forms the
-/// environment already uses. `RUSTFLAGS` is shell-ish and space-separated;
-/// `CARGO_ENCODED_RUSTFLAGS` carries one argument per `\x1f`-separated
-/// element — and cargo errors outright when both are set, so the injection
-/// must extend the form that is present rather than always writing the plain
-/// one. Returns `(variable, value)` to set, or `None` on the older API shape.
-/// When both variables are somehow set the environment was already broken for
-/// cargo; the merge keeps the plain form's flags rather than dropping them.
+/// The RUSTFLAGS environment for the wrapper build, as cargo will see it:
+/// the 1.101+ compatibility cfg merged into whichever flag source the
+/// environment already uses.
+///
+/// Cargo's four flag sources are "mutually exclusive... checked in order,
+/// with the first one being used" — `CARGO_ENCODED_RUSTFLAGS` before
+/// `RUSTFLAGS` — and an environment variable counts as present even when it
+/// is empty, so the encoded form wins by mere presence, not content. The
+/// injection therefore merges into the encoded form whenever that variable
+/// exists (one argument per `\x1f`-separated element, never a space inside
+/// one), and removes the plain form from the child environment so an
+/// un-merged `RUSTFLAGS` cannot linger. Writing the cfg into `RUSTFLAGS`
+/// while the child still inherits the encoded variable would let cargo
+/// silently prefer the encoded one and drop the cfg — exactly the failure
+/// the injection exists to prevent.
+#[derive(Debug, PartialEq, Eq)]
+struct WrapperRustflags {
+    variable: &'static str,
+    value: String,
+    /// The variable cargo would rank below `variable`; removed from the child
+    /// environment so it cannot win there instead.
+    superseded: Option<&'static str>,
+}
+
 fn wrapper_build_rustflags(
     release: Option<&str>,
     rustflags: Option<&str>,
     encoded_rustflags: Option<&str>,
-) -> Option<(&'static str, String)> {
+) -> Option<WrapperRustflags> {
     let takes_newer_shape = release
         .and_then(parse_dotted_release)
         .is_some_and(|release| release >= RUSTC_PRIVATE_CFG_FORK);
@@ -433,16 +448,35 @@ fn wrapper_build_rustflags(
         "rusi_rustc_ge_1_101",
         "--check-cfg=cfg(rusi_rustc_ge_1_101)",
     ];
-    if let Some(existing) = rustflags.filter(|flags| !flags.trim().is_empty()) {
+    if let Some(existing) = encoded_rustflags {
+        // Presence, not content: cargo picks the encoded form even when it is
+        // set to an empty string, so an empty value means the compat flags
+        // are the whole payload.
+        let mut flags: Vec<String> = existing
+            .split('\x1f')
+            .filter(|flag| !flag.is_empty())
+            .map(str::to_string)
+            .collect();
+        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
+        Some(WrapperRustflags {
+            variable: "CARGO_ENCODED_RUSTFLAGS",
+            value: flags.join("\x1f"),
+            superseded: rustflags.is_some().then_some("RUSTFLAGS"),
+        })
+    } else if let Some(existing) = rustflags {
         let mut flags: Vec<String> = existing.split_whitespace().map(str::to_string).collect();
         flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
-        Some(("RUSTFLAGS", flags.join(" ")))
-    } else if let Some(existing) = encoded_rustflags.filter(|flags| !flags.trim().is_empty()) {
-        let mut flags: Vec<String> = existing.split('\x1f').map(str::to_string).collect();
-        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
-        Some(("CARGO_ENCODED_RUSTFLAGS", flags.join("\x1f")))
+        Some(WrapperRustflags {
+            variable: "RUSTFLAGS",
+            value: flags.join(" "),
+            superseded: None,
+        })
     } else {
-        Some(("RUSTFLAGS", COMPAT_FLAGS.join(" ")))
+        Some(WrapperRustflags {
+            variable: "RUSTFLAGS",
+            value: COMPAT_FLAGS.join(" "),
+            superseded: None,
+        })
     }
 }
 
@@ -1071,12 +1105,15 @@ fn ensure_embedded_wrapper_built(
         // the variable is only set when it is required.
         command.env("RUSTC_BOOTSTRAP", "1");
     }
-    if let Some((variable, value)) = wrapper_build_rustflags(
+    if let Some(flags) = wrapper_build_rustflags(
         capabilities.rustc_release.as_deref(),
         std::env::var("RUSTFLAGS").ok().as_deref(),
         std::env::var("CARGO_ENCODED_RUSTFLAGS").ok().as_deref(),
     ) {
-        command.env(variable, value);
+        command.env(flags.variable, flags.value);
+        if let Some(superseded) = flags.superseded {
+            command.env_remove(superseded);
+        }
     }
     debug_log(
         debug,
@@ -4307,9 +4344,9 @@ mod toolchain_gate_tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
-        format_rustc_release, parse_dotted_release, parse_rustc_release, resolve_toolchain,
-        toolchain_floor_diagnostic, wrapper_build_rustflags,
+        BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, WrapperRustflags,
+        evaluate_backend_support, format_rustc_release, parse_dotted_release, parse_rustc_release,
+        resolve_toolchain, toolchain_floor_diagnostic, wrapper_build_rustflags,
     };
 
     /// `rustup toolchain list` names, the way the driver reads them.
@@ -4457,48 +4494,65 @@ mod toolchain_gate_tests {
         // standalone-build command from the rusi README.
         assert_eq!(
             wrapper_build_rustflags(Some("1.101.0"), None, None),
-            Some((
-                "RUSTFLAGS",
-                "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string()
-            ))
+            Some(WrapperRustflags {
+                variable: "RUSTFLAGS",
+                value: "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string(),
+                superseded: None,
+            })
         );
         // An inherited RUSTFLAGS survives, with the compatibility flags
         // appended after it.
         assert_eq!(
-            wrapper_build_rustflags(
-                Some("1.102.3"),
-                Some("-Ctarget-cpu=native"),
-                Some("-Cdebuginfo=0")
-            ),
-            Some((
-                "RUSTFLAGS",
-                "-Ctarget-cpu=native --cfg rusi_rustc_ge_1_101 \
-                 --check-cfg=cfg(rusi_rustc_ge_1_101)"
-                    .to_string()
-            ))
+            wrapper_build_rustflags(Some("1.102.3"), Some("-Ctarget-cpu=native"), None),
+            Some(WrapperRustflags {
+                variable: "RUSTFLAGS",
+                value: "-Ctarget-cpu=native --cfg rusi_rustc_ge_1_101 \
+                        --check-cfg=cfg(rusi_rustc_ge_1_101)"
+                    .to_string(),
+                superseded: None,
+            })
         );
-        // Only the encoded form present: cargo treats the two forms as
-        // mutually exclusive, so the injection must extend that one — one
-        // argument per \x1f-separated element, never a space inside one.
+        // The encoded form present: cargo checks it before RUSTFLAGS ("first
+        // one being used"), so the injection merges there — one argument per
+        // \x1f-separated element, never a space inside one — and the plain
+        // form is superseded so the caller removes it from the child
+        // environment. Its flags are not folded in: cargo itself would
+        // ignore them, and duplicating them would deviate from that.
         assert_eq!(
             wrapper_build_rustflags(
                 Some("1.101.0"),
-                None,
-                Some("-Ctarget-cpu=native\u{1f}-Cdebuginfo=0")
+                Some("-Ctarget-cpu=native"),
+                Some("-Cdebuginfo=0\u{1f}-Copt-level=3")
             ),
-            Some((
-                "CARGO_ENCODED_RUSTFLAGS",
-                "-Ctarget-cpu=native\u{1f}-Cdebuginfo=0\u{1f}--cfg\u{1f}rusi_rustc_ge_1_101\
-                 \u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
-                    .to_string()
-            ))
+            Some(WrapperRustflags {
+                variable: "CARGO_ENCODED_RUSTFLAGS",
+                value: "-Cdebuginfo=0\u{1f}-Copt-level=3\u{1f}--cfg\u{1f}rusi_rustc_ge_1_101\
+                        \u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
+                    .to_string(),
+                superseded: Some("RUSTFLAGS"),
+            })
         );
-        // An empty RUSTFLAGS reads as unset, falling through to the encoded
-        // form when that is the one carrying flags.
+        // Presence, not content: even an empty encoded variable wins for
+        // cargo, so the compat flags become the whole payload and the plain
+        // form is still superseded.
         assert_eq!(
-            wrapper_build_rustflags(Some("1.101.0"), Some("   "), Some("-Copt-level=3"))
-                .map(|(variable, _)| variable),
-            Some("CARGO_ENCODED_RUSTFLAGS")
+            wrapper_build_rustflags(Some("1.101.0"), Some("   "), Some("")),
+            Some(WrapperRustflags {
+                variable: "CARGO_ENCODED_RUSTFLAGS",
+                value: "--cfg\u{1f}rusi_rustc_ge_1_101\u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
+                    .to_string(),
+                superseded: Some("RUSTFLAGS"),
+            })
+        );
+        // An empty RUSTFLAGS with no encoded variable reads as no inherited
+        // flags — the value is replaced wholesale either way.
+        assert_eq!(
+            wrapper_build_rustflags(Some("1.101.0"), Some("   "), None),
+            Some(WrapperRustflags {
+                variable: "RUSTFLAGS",
+                value: "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string(),
+                superseded: None,
+            })
         );
         // One short of the fork keeps the older shape, as does the version
         // the CI compiler-backend job pins; so does the two-component
