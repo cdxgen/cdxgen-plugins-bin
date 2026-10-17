@@ -34,7 +34,7 @@ flowchart TB
   C1 --> R1[imports, decls, usage clues, security signals]
   R1 --> G1[receiver-typed call resolution, deterministic call graph]
   G1 --> D1[interprocedual data flow]
-  S -->|compiler| RC[embedded nightly rustc wrapper]
+  S -->|compiler| RC[embedded rustc wrapper]
   RC --> H[MIR and HIR evidence]
   H --> R2[type-resolved calls, trait and dyn dispatch metadata]
   R2 --> G2[native interop evidence, richer crypto]
@@ -45,7 +45,13 @@ The stable backend needs no toolchain beyond a checkout. It follows `mod` declar
 
 Its call resolution is receiver-typed. A call on a known receiver type with no matching local impl is treated as external rather than fanned out to every same-named method, and sink matching uses the receiver type where a bare method name would be ambiguous: `Command::new(..).arg(tainted)` is a process-execution sink, another builder's `arg` is not.
 
-The compiler backend adds an embedded nightly rustc wrapper and MIR/HIR-derived evidence: type-resolved call edges, dispatch metadata for traits and `dyn`, native interop evidence, richer crypto attribution, and MIR-informed flow facts. It trades setup cost for precision.
+The compiler backend adds an embedded rustc wrapper and MIR/HIR-derived evidence: type-resolved call edges, dispatch metadata for traits and `dyn`, native interop evidence, richer crypto attribution, and MIR-informed flow facts. It trades setup cost for precision.
+
+### Toolchain requirements for the compiler backend
+
+The backend needs `rustc` 1.98 or newer with the `rustc-dev` and `rust-src` components. A nightly channel is *not* required — a stable toolchain carrying those components works, because the wrapper builds with `RUSTC_BOOTSTRAP=1` to unlock `#![feature(rustc_private)]`. The wrapper compiles against a narrow window of compiler versions, currently 1.98 through nightly 1.101; [the rusi README](../thirdparty/rusi/README.md) states the current window, the one-line `RUSTFLAGS` a standalone build on 1.101+ needs, and the macOS `libLLVM` caveat.
+
+The first backend run compiles the embedded wrapper on your machine with the resolved toolchain — which is also why `rusi-rustc-wrapper` and `rusi-schema` pin `rust-version = "1.98"` in their manifests instead of inheriting the workspace's 1.99: the embedded build must keep working on the oldest toolchain the window supports.
 
 ## Data flow and custom patterns
 
@@ -98,4 +104,4 @@ rusi analyze --dir . --callgraph static --max-call-candidates 0 --out rusi-full.
 
 ## What rusi will not tell you
 
-The stable backend resolves calls by receiver type and syntax, not by borrow-checker-grade type inference, so heavily generic or macro-generated dispatch can resolve conservatively. Receiver-typed sinks match the receiver's type by name, not by crate, so a workspace type named `Client` with a `get` method reads as an HTTP client. It is also not path-sensitive: a validation guard (`if !is_valid(&raw) { return }` before a sink) does not suppress the slice, because whether the guard ran is a runtime fact; treat such findings as review candidates. `env::set_var`/`env::remove_var` are reported as `env-mutation` security signals. The compiler backend closes much of that gap but requires a nightly toolchain and speaks only where rustc itself succeeds. Neither backend executes your code, so dynamic dispatch through strings, `eval`-style builders, or process spawning of generated binaries is out of scope.
+The stable backend resolves calls by receiver type and syntax, not by borrow-checker-grade type inference, so heavily generic or macro-generated dispatch can resolve conservatively. Receiver-typed sinks match the receiver's type by name, not by crate, so a workspace type named `Client` with a `get` method reads as an HTTP client. It is also not path-sensitive: a validation guard (`if !is_valid(&raw) { return }` before a sink) does not suppress the slice, because whether the guard ran is a runtime fact; treat such findings as review candidates. `env::set_var`/`env::remove_var` are reported as `env-mutation` security signals. The compiler backend closes much of that gap but needs a toolchain meeting the requirements above and speaks only where rustc itself succeeds. Neither backend executes your code, so dynamic dispatch through strings, `eval`-style builders, or process spawning of generated binaries is out of scope.

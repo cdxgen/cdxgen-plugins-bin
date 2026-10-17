@@ -118,6 +118,8 @@ RUSTFLAGS='--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)' cargo
 
 On macOS, nightlies that ship `libLLVM.dylib` only under `$(rustc --print sysroot)/lib` (and not next to `librustc_driver.dylib` in the rustlib dir) also need that directory on the link path — add `-L$(rustc +nightly --print sysroot)/lib` to the same `RUSTFLAGS`, or export it when letting the driver build the wrapper; it merges inherited `RUSTFLAGS` with its own. When the resolved toolchain is too old, is missing a component, or is not installed, the report carries a `backend-unsupported` diagnostic naming the specific reason instead of silently degrading to a stable-only analysis.
 
+Because that build happens on the analyzing machine with the resolved toolchain — as old as the 1.98 floor — the wrapper's own manifest pins `rust-version = "1.98"` as a literal rather than inheriting the workspace's 1.99, and `rusi-schema` (the one crate embedded alongside it) does the same: a 1.99 requirement would make cargo reject exactly the toolchains the window promises to support. The same self-containment is why the materialized workspace manifest the driver writes for the embedded build carries only `version`, `edition`, and `license` under `[workspace.package]` — the embedded crates must resolve without inheriting anything that manifest does not define, so a new inheritable field added to the real workspace belongs to the materialized copy only if both crates can set it themselves.
+
 When embedded compiler collection is available, Rusi builds its local `rusi-rustc-wrapper` with the resolved toolchain and then runs the target repository with:
 
 ```bash
