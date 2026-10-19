@@ -26,17 +26,14 @@ use rusi_schema::{
     Position, SecuritySignal, relative_display_path, stable_id,
 };
 use rustc_driver_impl::{Callbacks, Compilation};
-// Rust 1.101 renamed `rustc_driver_impl::run_compiler` to
-// `compiler_entrypoint`; the alias keeps the call site identical under either
-// name. Unlike the shims below, renames and variant-arity changes cannot be
-// bridged by traits, so they hang off the `rusi_rustc_ge_1_101` cfg: the rusi
-// driver sets it via RUSTFLAGS when the resolved toolchain is 1.101 or newer,
-// and standalone builds on such a toolchain pass
-// `RUSTFLAGS='--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)'`
-// (see the rusi README).
-#[cfg(rusi_rustc_ge_1_101)]
+// `rustc_driver_impl::run_compiler` became `compiler_entrypoint` (same
+// signature); the alias keeps the call site identical under either name.
+// Unlike the shims below, renames and variant-arity changes cannot be bridged
+// by traits, so each hangs off its own `rusi_rustc_*` cfg, which build.rs sets
+// by compiling a probe against the toolchain building this crate.
+#[cfg(rusi_rustc_compiler_entrypoint)]
 use rustc_driver_impl::compiler_entrypoint as run_compiler;
-#[cfg(not(rusi_rustc_ge_1_101))]
+#[cfg(not(rusi_rustc_compiler_entrypoint))]
 use rustc_driver_impl::run_compiler;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
@@ -60,8 +57,8 @@ use rustc_span::{FileName, Span};
 // versions (the pinned stable through current nightly), so these paper over
 // API changes between them without per-version cfgs wherever the change is
 // in types — the one thing traits can bridge. Changes to item names or
-// variant arity cannot be bridged that way and instead hang off the
-// `rusi_rustc_ge_1_101` cfg; see the import alias above for how it is set.
+// variant arity cannot be bridged that way and instead hang off the probed
+// `rusi_rustc_*` cfgs; see build.rs.
 
 /// `const { .. }` blocks. rustc 1.98 gives them `DefKind::InlineConst`; newer
 /// compilers fold them into `DefKind::AnonConst`, which also covers array
@@ -376,15 +373,16 @@ impl EmbeddedCollector {
         for item_id in items.free_items() {
             let item = tcx.hir_item(item_id);
             match item.kind {
-                // Rust 1.101 folds the `UseKind` into a `UseTree` payload;
-                // both spellings carry the same path segments and kind.
-                #[cfg(not(rusi_rustc_ge_1_101))]
+                // Older compilers lower `use a::{b, c}` to one item per leaf
+                // plus a `ListStem` item for the braces; newer ones keep the
+                // whole tree in a single item (see `push_use_tree`).
+                #[cfg(not(rusi_rustc_hir_use_tree))]
                 ItemKind::Use(path, kind) => {
-                    self.push_import(tcx, item.span, path.segments, kind);
+                    self.push_lowered_use(tcx, item.span, path.segments, kind);
                 }
-                #[cfg(rusi_rustc_ge_1_101)]
+                #[cfg(rusi_rustc_hir_use_tree)]
                 ItemKind::Use(tree) => {
-                    self.push_import(tcx, item.span, tree.prefix.segments, tree.kind);
+                    self.push_use_tree(tcx, item.span, &[], &tree);
                 }
                 ItemKind::Struct(..) => {
                     self.push_decl(tcx, item.owner_id.def_id, "struct", None)?;
@@ -808,7 +806,11 @@ impl EmbeddedCollector {
         Ok(decl)
     }
 
-    fn push_import(
+    /// A `use` item as older compilers lower it: one item per leaf, so
+    /// `use a::{b, c}` arrives as `use a::b` and `use a::c`, plus a `ListStem`
+    /// item for the braces that names nothing and has an empty path.
+    #[cfg(not(rusi_rustc_hir_use_tree))]
+    fn push_lowered_use(
         &mut self,
         tcx: TyCtxt<'_>,
         span: Span,
@@ -818,22 +820,64 @@ impl EmbeddedCollector {
         let path = segments
             .iter()
             .map(|seg| seg.ident.as_str().to_string())
-            .collect::<Vec<_>>()
-            .join("::");
-        let alias = match kind {
-            UseKind::Single(ident) => {
-                let alias = ident.as_str().to_string();
-                if alias != last_segment(&path) {
-                    Some(alias)
-                } else {
-                    None
+            .collect();
+        match kind {
+            UseKind::Single(ident) => self.push_import(tcx, span, path, Some(ident.as_str())),
+            UseKind::Glob => self.push_import(tcx, span, path, None),
+            UseKind::ListStem => {}
+        }
+    }
+
+    /// A `use` tree as newer compilers lower it: the whole tree stays in one
+    /// item, each nested prefix is relative to its parent, and a nested
+    /// `self` keeps its `self` segment. Every leaf is recorded at its own
+    /// span, exactly as the per-leaf items of older compilers were, so the
+    /// imports reported do not depend on the toolchain; the braces themselves
+    /// name nothing.
+    #[cfg(rusi_rustc_hir_use_tree)]
+    fn push_use_tree(
+        &mut self,
+        tcx: TyCtxt<'_>,
+        span: Span,
+        parent: &[String],
+        tree: &rustc_hir::UseTree<'_>,
+    ) {
+        let mut path = parent.to_vec();
+        path.extend(
+            tree.prefix
+                .segments
+                .iter()
+                .map(|seg| seg.ident.as_str().to_string()),
+        );
+        match &tree.kind {
+            UseKind::Single(ident) => self.push_import(tcx, span, path, Some(ident.as_str())),
+            UseKind::Glob => self.push_import(tcx, span, path, None),
+            UseKind::Nested { items } => {
+                for (child, _, _) in items.iter() {
+                    self.push_use_tree(tcx, child.prefix.span, &path, child);
                 }
             }
-            // `_` rather than naming `Glob`/`ListStem`: 1.101 replaced
-            // `ListStem` with `Nested { .. }`, and only `Single` names an
-            // import anyway.
-            _ => None,
-        };
+        }
+    }
+
+    /// Record one import. `binding` is the name a `Single` import defines;
+    /// it becomes the alias when it differs from the path's last segment.
+    fn push_import(
+        &mut self,
+        tcx: TyCtxt<'_>,
+        span: Span,
+        mut segments: Vec<String>,
+        binding: Option<&str>,
+    ) {
+        // `use a::b::{self}` imports `a::b`. Older compilers drop the `self`
+        // while lowering; newer ones leave it, and bind the name `self`.
+        if segments.len() > 1 && segments.last().is_some_and(|last| last == "self") {
+            segments.pop();
+        }
+        let path = segments.join("::");
+        let alias = binding
+            .filter(|binding| *binding != "self" && *binding != last_segment(&path))
+            .map(str::to_string);
         let import = ImportUsage {
             path: path.clone(),
             alias,
@@ -2028,10 +2072,11 @@ fn place_to_path(debug_names: &HashMap<Local, String>, place: Place<'_>) -> Plac
             ProjectionElem::UnwrapUnsafeBinder(ty) => current
                 .projections
                 .push(PlaceProjection::Opaque(ty.to_string())),
-            // Rust 1.101: a symbolic deref through a `Reborrow` type with no
-            // `&mut` fields, yielding an indeterminate indirect place; it
-            // walks like any other deref step in a place path.
-            #[cfg(rusi_rustc_ge_1_101)]
+            // A symbolic deref through a `Reborrow` type with no `&mut`
+            // fields, yielding an indeterminate indirect place. It walks like
+            // any other deref step: both are indirect to the flow engine, and
+            // keeping the flow through it is the conservative choice.
+            #[cfg(rusi_rustc_mir_phantom_deref)]
             ProjectionElem::PhantomDeref => current.projections.push(PlaceProjection::Deref),
         }
     }

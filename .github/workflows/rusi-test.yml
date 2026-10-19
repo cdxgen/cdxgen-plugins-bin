@@ -66,58 +66,83 @@ jobs:
         shell: bash
         run: cargo fmt --check
 
-  # Compiler-backend integration tests. These require a nightly toolchain with
-  # the rustc-dev and rust-src components (the embedded backend links rustc
-  # internals via #![feature(rustc_private)]), and they shell out to a nested
-  # cargo at runtime, so they are run single-threaded to avoid cargo lock
-  # contention.
+  # Compiler-backend integration tests. These need a toolchain with the
+  # rustc-dev and rust-src components (the embedded backend links rustc
+  # internals via #![feature(rustc_private)]; RUSTC_BOOTSTRAP=1 unlocks that
+  # on a release channel and is a no-op on nightly), and they shell out to a
+  # nested cargo at runtime, so they are run single-threaded to avoid cargo
+  # lock contention.
   #
-  # Windows runs the same job: the wrapper links rustc_private on MSVC there,
-  # and the embedded backend materializes and builds it through a nested
-  # cargo — the whole path was validated on a Windows VM (both the pinned
-  # 1.100 API shape and 1.101's cfg-selected shape). `shell: bash` everywhere
-  # because the install step's line continuations are bash syntax.
+  # The rustc_private API shape differs inside the supported window, and the
+  # wrapper's build.rs probes for each fork. The legs cover the shapes:
+  #   - the pinned nightly: the shape before every probed fork. Pinned so that
+  #     neither a rustc-internals change nor a new clippy lint fails the job on
+  #     its own; move it forward deliberately. It is the only nightly
+  #     installed, so the driver's `auto` toolchain is exercised picking a lone
+  #     dated nightly by its full name.
+  #   - beta: the next stable release's shape, named explicitly through
+  #     RUSI_TEST_TOOLCHAIN because `auto` never prefers a beta. This is the
+  #     leg that would have caught 1.100 reshaping `use` items and MIR
+  #     projections before it reached stable.
+  #   - the rolling nightly: an early warning for forks still to come. Allowed
+  #     to fail, and not linted, since nightly clippy moves on its own.
+  #
+  # Windows runs the pinned leg too: the wrapper links rustc_private on MSVC
+  # there, and the embedded backend materializes and builds it through a
+  # nested cargo. `shell: bash` everywhere because the install step's line
+  # continuations are bash syntax.
   test-nightly:
-    name: cargo +nightly test -- --ignored (compiler backend, ${{ matrix.os }})
+    name: cargo +${{ matrix.toolchain }} test -- --ignored (compiler backend, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.canary }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            toolchain: nightly-2026-08-21
+            test-toolchain: ""
+            canary: false
+          - os: windows-latest
+            toolchain: nightly-2026-08-21
+            test-toolchain: ""
+            canary: false
+          - os: ubuntu-latest
+            toolchain: beta
+            test-toolchain: beta
+            canary: false
+          - os: ubuntu-latest
+            toolchain: nightly
+            test-toolchain: nightly
+            canary: true
     permissions:
       contents: read
     env:
-      # Pinned, so that neither a rustc-internals change nor a new clippy
-      # lint fails this job on its own; move it forward deliberately. It is
-      # the only nightly installed, and the driver's `auto` toolchain picks a
-      # lone dated nightly by its full name.
-      #
-      # The wrapper's supported window extends past this pin through
-      # nightly 1.101 via the `rusi_rustc_ge_1_101` cfg the driver sets from
-      # the resolved toolchain (see the rusi README). 1.101 is verified on
-      # macOS and Windows; keep the pin here until a Linux run has confirmed
-      # 1.101's libLLVM placement links cleanly, then move it forward.
-      NIGHTLY: nightly-2026-08-21
+      TOOLCHAIN: ${{ matrix.toolchain }}
+      RUSI_TEST_TOOLCHAIN: ${{ matrix.test-toolchain }}
+      RUSTC_BOOTSTRAP: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Install nightly toolchain with rustc-dev, rust-src and clippy
+      - name: Install toolchain with rustc-dev, rust-src and clippy
         shell: bash
         run: |
-          rustup toolchain install "$NIGHTLY" --profile minimal \
+          rustup toolchain install "$TOOLCHAIN" --profile minimal \
             --component rustc-dev --component rust-src --component llvm-tools \
             --component clippy --no-self-update
-          rustup run "$NIGHTLY" rustc --version
+          rustup run "$TOOLCHAIN" rustc --version
       # The wrapper is outside the default members, so the other steps never
       # lint or unit-test it. Its tests drive the MIR data-flow fixpoints on
-      # hand-built bodies and need no nested cargo, so they run first.
-      - name: cargo +nightly clippy (rustc-wrapper)
+      # hand-built bodies and need no nested cargo, so they run first. Its
+      # build script prints the rustc_private shape it detected.
+      - name: cargo clippy (rustc-wrapper)
+        if: ${{ !matrix.canary }}
         shell: bash
-        run: cargo "+$NIGHTLY" clippy --locked -p rusi-rustc-wrapper --all-targets -- -D warnings
-      - name: cargo +nightly test (rustc-wrapper)
+        run: cargo "+$TOOLCHAIN" clippy --locked -p rusi-rustc-wrapper --all-targets -- -D warnings
+      - name: cargo test (rustc-wrapper)
         shell: bash
-        run: cargo "+$NIGHTLY" test --locked -p rusi-rustc-wrapper
-      - name: cargo +nightly test -- --ignored --test-threads=1
+        run: cargo "+$TOOLCHAIN" test --locked -p rusi-rustc-wrapper
+      - name: cargo test -- --ignored --test-threads=1
         shell: bash
-        run: cargo "+$NIGHTLY" test -- --ignored --test-threads=1
+        run: cargo "+$TOOLCHAIN" test -- --ignored --test-threads=1

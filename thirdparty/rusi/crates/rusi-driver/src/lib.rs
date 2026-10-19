@@ -382,104 +382,6 @@ fn load_metadata(dir: &Path) -> Result<Metadata> {
 /// Raise this whenever the wrapper adopts a newer `rustc_private` signature.
 pub const RUSTC_PRIVATE_VERSION_FLOOR: (u64, u64, u64) = (1, 98, 0);
 
-/// The rustc release whose `rustc_private` surface forked in ways that traits
-/// cannot bridge: 1.101 renamed `rustc_driver_impl::run_compiler` to
-/// `compiler_entrypoint`, folded `ItemKind::Use`'s `UseKind` into a `UseTree`
-/// payload, and added `ProjectionElem::PhantomDeref`. The wrapper compiles
-/// against either shape, selected by the `rusi_rustc_ge_1_101` cfg.
-const RUSTC_PRIVATE_CFG_FORK: (u64, u64, u64) = (1, 101, 0);
-
-/// Parse a dotted `major.minor.patch` release, as carried by
-/// [`DriverCapabilities::rustc_release`]. A missing patch reads as `.0`,
-/// matching [`parse_rustc_release`].
-fn parse_dotted_release(release: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = release.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = match parts.next() {
-        Some(value) => value.parse().ok()?,
-        None => 0,
-    };
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((major, minor, patch))
-}
-
-/// The RUSTFLAGS environment for the wrapper build, as cargo will see it:
-/// the 1.101+ compatibility cfg merged into whichever flag source the
-/// environment already uses.
-///
-/// Cargo's four flag sources are "mutually exclusive... checked in order,
-/// with the first one being used" — `CARGO_ENCODED_RUSTFLAGS` before
-/// `RUSTFLAGS` — and an environment variable counts as present even when it
-/// is empty, so the encoded form wins by mere presence, not content. The
-/// injection therefore merges into the encoded form whenever that variable
-/// exists (one argument per `\x1f`-separated element, never a space inside
-/// one), and removes the plain form from the child environment so an
-/// un-merged `RUSTFLAGS` cannot linger. Writing the cfg into `RUSTFLAGS`
-/// while the child still inherits the encoded variable would let cargo
-/// silently prefer the encoded one and drop the cfg — exactly the failure
-/// the injection exists to prevent.
-#[derive(Debug, PartialEq, Eq)]
-struct WrapperRustflags {
-    variable: &'static str,
-    value: String,
-    /// The variable cargo would rank below `variable`; removed from the child
-    /// environment so it cannot win there instead.
-    superseded: Option<&'static str>,
-}
-
-fn wrapper_build_rustflags(
-    release: Option<&str>,
-    rustflags: Option<&str>,
-    encoded_rustflags: Option<&str>,
-) -> Option<WrapperRustflags> {
-    let takes_newer_shape = release
-        .and_then(parse_dotted_release)
-        .is_some_and(|release| release >= RUSTC_PRIVATE_CFG_FORK);
-    if !takes_newer_shape {
-        return None;
-    }
-    // One element per argument: the encoded form must not carry spaces inside
-    // an element, and the cfg name pairs with `--cfg` as separate arguments.
-    const COMPAT_FLAGS: [&str; 3] = [
-        "--cfg",
-        "rusi_rustc_ge_1_101",
-        "--check-cfg=cfg(rusi_rustc_ge_1_101)",
-    ];
-    if let Some(existing) = encoded_rustflags {
-        // Presence, not content: cargo picks the encoded form even when it is
-        // set to an empty string, so an empty value means the compat flags
-        // are the whole payload.
-        let mut flags: Vec<String> = existing
-            .split('\x1f')
-            .filter(|flag| !flag.is_empty())
-            .map(str::to_string)
-            .collect();
-        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
-        Some(WrapperRustflags {
-            variable: "CARGO_ENCODED_RUSTFLAGS",
-            value: flags.join("\x1f"),
-            superseded: rustflags.is_some().then_some("RUSTFLAGS"),
-        })
-    } else if let Some(existing) = rustflags {
-        let mut flags: Vec<String> = existing.split_whitespace().map(str::to_string).collect();
-        flags.extend(COMPAT_FLAGS.iter().map(|flag| flag.to_string()));
-        Some(WrapperRustflags {
-            variable: "RUSTFLAGS",
-            value: flags.join(" "),
-            superseded: None,
-        })
-    } else {
-        Some(WrapperRustflags {
-            variable: "RUSTFLAGS",
-            value: COMPAT_FLAGS.join(" "),
-            superseded: None,
-        })
-    }
-}
-
 fn default_true() -> bool {
     true
 }
@@ -821,6 +723,12 @@ const EMBEDDED_WRAPPER_FILES: &[(&str, &str)] = &[
         "crates/rusi-rustc-wrapper/Cargo.toml",
         include_str!("../../rusi-rustc-wrapper/Cargo.toml"),
     ),
+    // Probes the toolchain's `rustc_private` API shape; the wrapper does not
+    // compile on toolchains past an API fork without the cfgs it sets.
+    (
+        "crates/rusi-rustc-wrapper/build.rs",
+        include_str!("../../rusi-rustc-wrapper/build.rs"),
+    ),
     (
         "crates/rusi-rustc-wrapper/src/main.rs",
         include_str!("../../rusi-rustc-wrapper/src/main.rs"),
@@ -1104,16 +1012,6 @@ fn ensure_embedded_wrapper_built(
         // installs on *stable* be useful. Nightly needs no such unlocking, so
         // the variable is only set when it is required.
         command.env("RUSTC_BOOTSTRAP", "1");
-    }
-    if let Some(flags) = wrapper_build_rustflags(
-        capabilities.rustc_release.as_deref(),
-        std::env::var("RUSTFLAGS").ok().as_deref(),
-        std::env::var("CARGO_ENCODED_RUSTFLAGS").ok().as_deref(),
-    ) {
-        command.env(flags.variable, flags.value);
-        if let Some(superseded) = flags.superseded {
-            command.env_remove(superseded);
-        }
     }
     debug_log(
         debug,
@@ -2628,6 +2526,16 @@ mod tests {
     use super::{PackageContext, discover_rust_files, scoped_child_dir};
     use rusi_core::{AnalysisScope, AnalyzeOptionsInput};
 
+    /// The toolchain the compiler-backend tests analyze with: `auto`, or
+    /// `RUSI_TEST_TOOLCHAIN` when set, so CI can pin a channel (beta, say)
+    /// that `auto` would never pick over an installed nightly.
+    fn test_toolchain() -> String {
+        std::env::var("RUSI_TEST_TOOLCHAIN")
+            .ok()
+            .filter(|toolchain| !toolchain.is_empty())
+            .unwrap_or_else(|| "auto".to_string())
+    }
+
     fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures")
@@ -2695,17 +2603,25 @@ mod tests {
             "# trimmed by cargo\n"
         );
 
-        // A modified source or a stray file replaces the whole tree.
+        // A modified source replaces the whole tree, stray files included.
+        // The build script is embedded too, so tampering with it counts.
         let main_rs = root.join("crates/rusi-rustc-wrapper/src/main.rs");
         fs::write(&main_rs, "fn main() {}\n").expect("tamper");
+        let build_rs = root.join("crates/rusi-rustc-wrapper/build.rs");
+        fs::write(&build_rs, "fn main() {}\n").expect("tamper build script");
+        fs::create_dir_all(root.join(".cargo")).expect("create .cargo");
         fs::write(
-            root.join("crates/rusi-rustc-wrapper/build.rs"),
-            "fn main() {}\n",
+            root.join(".cargo/config.toml"),
+            "[build]\nrustc-wrapper = \"/bin/false\"\n",
         )
-        .expect("plant build script");
+        .expect("plant cargo config");
         super::materialize_embedded_wrapper(&root).expect("replace");
         assert!(super::embedded_sources_match(&root));
-        assert!(!root.join("crates/rusi-rustc-wrapper/build.rs").exists());
+        assert_ne!(
+            fs::read_to_string(&build_rs).expect("read build script"),
+            "fn main() {}\n"
+        );
+        assert!(!root.join(".cargo").exists());
         let leftovers: Vec<_> = fs::read_dir(&base)
             .expect("list cache base")
             .filter_map(|entry| entry.ok())
@@ -2978,7 +2894,7 @@ mod tests {
             call_graph_mode: "static".to_string(),
             data_flow_mode: "security".to_string(),
             include_tests: false,
-            rustc_toolchain: "auto".to_string(),
+            rustc_toolchain: test_toolchain(),
             debug: false,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
@@ -3037,7 +2953,7 @@ mod tests {
             call_graph_mode: "static".to_string(),
             data_flow_mode: "security".to_string(),
             include_tests: false,
-            rustc_toolchain: "auto".to_string(),
+            rustc_toolchain: test_toolchain(),
             debug: false,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
@@ -3095,7 +3011,7 @@ mod tests {
             call_graph_mode: "static".to_string(),
             data_flow_mode: "security".to_string(),
             include_tests: false,
-            rustc_toolchain: "auto".to_string(),
+            rustc_toolchain: test_toolchain(),
             debug: false,
         };
         // The phantom `Store::persist` node and the hash-order bare-name guess
@@ -3214,6 +3130,76 @@ mod tests {
                 .any(|signal| signal.description.contains("runtime symbol 'open'")),
             "private helper 'open' must not be flagged; got {signals:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "compiler backend: needs the rustc-dev and rust-src components and runs nested cargo. Run: RUSTC_BOOTSTRAP=1 cargo test -- --ignored --test-threads=1"]
+    fn compiler_imports_name_every_use_tree_leaf_on_every_hir_shape() {
+        // Older compilers lower `use a::{b, c}` to one HIR item per leaf plus
+        // a `ListStem` item; newer ones keep the tree in one item with
+        // relative nested prefixes. Both must yield the same leaf imports at
+        // the leaves' own positions, and never the braces themselves.
+        let _guard = test_guard();
+        let options = DriverOptions {
+            analysis_root: fixture_path("use-tree-app"),
+            call_graph_mode: "static".to_string(),
+            data_flow_mode: "security".to_string(),
+            include_tests: false,
+            rustc_toolchain: test_toolchain(),
+            debug: false,
+        };
+        let envelope = run_driver(&options).expect("driver run succeeds");
+        if envelope.backend_kind != BACKEND_KIND_EMBEDDED {
+            // A toolchain pinned through RUSI_TEST_TOOLCHAIN was installed
+            // with rustc-dev for this run; falling back to the stub there
+            // would hide exactly the regression this test exists for.
+            assert!(
+                std::env::var("RUSI_TEST_TOOLCHAIN").map_or(true, |toolchain| toolchain.is_empty()),
+                "embedded backend did not run on the pinned toolchain: {:#?}",
+                envelope.payload.diagnostics
+            );
+            assert_eq!(envelope.backend_kind, BACKEND_KIND_STUB);
+            return;
+        }
+        let imports = &envelope.payload.imports;
+        let found: BTreeSet<(String, Option<String>)> = imports
+            .iter()
+            .map(|import| (import.path.clone(), import.alias.clone()))
+            .collect();
+        let expected: BTreeSet<(String, Option<String>)> = [
+            ("std::collections::BTreeMap", None),
+            ("std::collections::HashMap", Some("Map")),
+            ("std::env", None),
+            ("std::fmt", None),
+            ("std::fs", None),
+            ("std::io", None),
+            ("std::io::Read", None),
+            ("std::io::Write", Some("_")),
+            ("std::path::Path", None),
+            ("std::path::PathBuf", None),
+            ("std::prelude::rust_2024", None),
+            ("std::sync::Arc", Some("Shared")),
+            ("std::sync::atomic::AtomicUsize", None),
+            ("std::sync::atomic::Ordering", None),
+        ]
+        .into_iter()
+        .map(|(path, alias)| (path.to_string(), alias.map(str::to_string)))
+        .collect();
+        assert_eq!(found, expected, "imports: {imports:#?}");
+
+        // Leaves sit at their own spans, as the per-leaf items of older
+        // compilers placed them, so positions do not depend on the toolchain.
+        let position = |path: &str| {
+            imports
+                .iter()
+                .find(|import| import.path == path)
+                .map(|import| (import.position.line, import.position.column))
+        };
+        assert_eq!(position("std::collections::BTreeMap"), Some((5, 24)));
+        assert_eq!(position("std::collections::HashMap"), Some((5, 34)));
+        assert_eq!(position("std::io"), Some((8, 15)));
+        assert_eq!(position("std::sync::atomic::Ordering"), Some((9, 54)));
+        assert_eq!(position("std::path::PathBuf"), Some((10, 28)));
     }
 
     #[test]
@@ -3465,7 +3451,7 @@ mod tests {
             call_graph_mode: "static".to_string(),
             data_flow_mode: "security".to_string(),
             include_tests: false,
-            rustc_toolchain: "auto".to_string(),
+            rustc_toolchain: test_toolchain(),
             debug: false,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
@@ -3508,7 +3494,7 @@ mod tests {
             call_graph_mode: "static".to_string(),
             data_flow_mode: "security".to_string(),
             include_tests: false,
-            rustc_toolchain: "auto".to_string(),
+            rustc_toolchain: test_toolchain(),
             debug: false,
         };
         let envelope = run_driver(&options).expect("driver run succeeds");
@@ -4344,9 +4330,8 @@ mod toolchain_gate_tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, WrapperRustflags,
-        evaluate_backend_support, format_rustc_release, parse_dotted_release, parse_rustc_release,
-        resolve_toolchain, toolchain_floor_diagnostic, wrapper_build_rustflags,
+        BackendSupport, DriverCapabilities, RUSTC_PRIVATE_VERSION_FLOOR, evaluate_backend_support,
+        format_rustc_release, parse_rustc_release, resolve_toolchain, toolchain_floor_diagnostic,
     };
 
     /// `rustup toolchain list` names, the way the driver reads them.
@@ -4486,99 +4471,6 @@ mod toolchain_gate_tests {
         assert!(!support.embedded_backend_supported);
         // The version itself was fine; only the components were missing.
         assert!(support.rustc_version_supported);
-    }
-
-    #[test]
-    fn compatibility_rustflags_select_the_1_101_api_shape() {
-        // No inherited flags: the plain form, exactly the documented
-        // standalone-build command from the rusi README.
-        assert_eq!(
-            wrapper_build_rustflags(Some("1.101.0"), None, None),
-            Some(WrapperRustflags {
-                variable: "RUSTFLAGS",
-                value: "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string(),
-                superseded: None,
-            })
-        );
-        // An inherited RUSTFLAGS survives, with the compatibility flags
-        // appended after it.
-        assert_eq!(
-            wrapper_build_rustflags(Some("1.102.3"), Some("-Ctarget-cpu=native"), None),
-            Some(WrapperRustflags {
-                variable: "RUSTFLAGS",
-                value: "-Ctarget-cpu=native --cfg rusi_rustc_ge_1_101 \
-                        --check-cfg=cfg(rusi_rustc_ge_1_101)"
-                    .to_string(),
-                superseded: None,
-            })
-        );
-        // The encoded form present: cargo checks it before RUSTFLAGS ("first
-        // one being used"), so the injection merges there — one argument per
-        // \x1f-separated element, never a space inside one — and the plain
-        // form is superseded so the caller removes it from the child
-        // environment. Its flags are not folded in: cargo itself would
-        // ignore them, and duplicating them would deviate from that.
-        assert_eq!(
-            wrapper_build_rustflags(
-                Some("1.101.0"),
-                Some("-Ctarget-cpu=native"),
-                Some("-Cdebuginfo=0\u{1f}-Copt-level=3")
-            ),
-            Some(WrapperRustflags {
-                variable: "CARGO_ENCODED_RUSTFLAGS",
-                value: "-Cdebuginfo=0\u{1f}-Copt-level=3\u{1f}--cfg\u{1f}rusi_rustc_ge_1_101\
-                        \u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
-                    .to_string(),
-                superseded: Some("RUSTFLAGS"),
-            })
-        );
-        // Presence, not content: even an empty encoded variable wins for
-        // cargo, so the compat flags become the whole payload and the plain
-        // form is still superseded.
-        assert_eq!(
-            wrapper_build_rustflags(Some("1.101.0"), Some("   "), Some("")),
-            Some(WrapperRustflags {
-                variable: "CARGO_ENCODED_RUSTFLAGS",
-                value: "--cfg\u{1f}rusi_rustc_ge_1_101\u{1f}--check-cfg=cfg(rusi_rustc_ge_1_101)"
-                    .to_string(),
-                superseded: Some("RUSTFLAGS"),
-            })
-        );
-        // An empty RUSTFLAGS with no encoded variable reads as no inherited
-        // flags — the value is replaced wholesale either way.
-        assert_eq!(
-            wrapper_build_rustflags(Some("1.101.0"), Some("   "), None),
-            Some(WrapperRustflags {
-                variable: "RUSTFLAGS",
-                value: "--cfg rusi_rustc_ge_1_101 --check-cfg=cfg(rusi_rustc_ge_1_101)".to_string(),
-                superseded: None,
-            })
-        );
-        // One short of the fork keeps the older shape, as does the version
-        // the CI compiler-backend job pins; so does the two-component
-        // spelling of it.
-        assert_eq!(wrapper_build_rustflags(Some("1.100.0"), None, None), None);
-        assert_eq!(
-            wrapper_build_rustflags(Some("1.100.0-nightly"), None, None),
-            None
-        );
-        // An unknown release keeps the older shape: the wrapper build then
-        // fails with the compiler's own error rather than a wrong-shape
-        // guess.
-        assert_eq!(wrapper_build_rustflags(None, None, None), None);
-        assert_eq!(wrapper_build_rustflags(Some("unknown"), None, None), None);
-    }
-
-    #[test]
-    fn dotted_releases_parse_like_rustc_output() {
-        assert_eq!(parse_dotted_release("1.101.0"), Some((1, 101, 0)));
-        // Two components read as `.0`, matching `parse_rustc_release`.
-        assert_eq!(parse_dotted_release("1.101"), Some((1, 101, 0)));
-        assert_eq!(parse_dotted_release("1.98"), Some((1, 98, 0)));
-        assert_eq!(parse_dotted_release("1.100.7"), Some((1, 100, 7)));
-        assert_eq!(parse_dotted_release(""), None);
-        assert_eq!(parse_dotted_release("1.x.0"), None);
-        assert_eq!(parse_dotted_release("1.101.0.1"), None);
     }
 
     #[test]
