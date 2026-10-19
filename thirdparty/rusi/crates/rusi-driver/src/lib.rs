@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    Attribute, File, ForeignItem, ItemFn, ItemForeignMod, ItemMod, ItemStatic, LitStr, ReturnType,
-    Signature,
+    Attribute, Expr, ExprLit, File, ForeignItem, ImplItemFn, ItemFn, ItemForeignMod, ItemImpl,
+    ItemMacro, ItemMod, ItemStatic, Lit, LitStr, Meta, ReturnType, Signature, Token,
 };
 
 pub const BACKEND_KIND_STUB: &str = "compiler-stub";
@@ -2055,6 +2055,11 @@ struct NativeInteropCollector {
     usages: Vec<LibraryUsage>,
     security_signals: Vec<SecuritySignal>,
     foreign_symbols: HashMap<String, ForeignFunctionInfo>,
+    /// Self types of the `impl` blocks being visited, innermost last.
+    impl_type_stack: Vec<String>,
+    /// How many enclosing scopes (the file or inline modules) are compiled
+    /// for Windows only.
+    windows_only_depth: usize,
 }
 
 impl NativeInteropCollector {
@@ -2066,6 +2071,8 @@ impl NativeInteropCollector {
             usages: Vec::new(),
             security_signals: Vec::new(),
             foreign_symbols: HashMap::new(),
+            impl_type_stack: Vec::new(),
+            windows_only_depth: 0,
         }
     }
 
@@ -2144,6 +2151,17 @@ impl NativeInteropCollector {
         description: String,
         span: Span,
     ) {
+        self.push_signal_with_confidence(kind, severity, "high", description, span);
+    }
+
+    fn push_signal_with_confidence(
+        &mut self,
+        kind: &str,
+        severity: &str,
+        confidence: &str,
+        description: String,
+        span: Span,
+    ) {
         self.security_signals.push(SecuritySignal {
             id: stable_id(
                 "signal",
@@ -2151,7 +2169,7 @@ impl NativeInteropCollector {
             ),
             category: "native-interop".to_string(),
             severity: severity.to_string(),
-            confidence: "high".to_string(),
+            confidence: confidence.to_string(),
             description,
             package_path: self.file_ctx.package_path.clone(),
             purl: String::new(),
@@ -2160,10 +2178,52 @@ impl NativeInteropCollector {
             cfg_gate: None,
         });
     }
+    /// Whether the item with these attributes is compiled for Windows only,
+    /// on its own or through the file or module it sits in.
+    fn windows_only(&self, attrs: &[Attribute]) -> bool {
+        self.windows_only_depth > 0 || is_windows_only(attrs)
+    }
+
+    /// Flag an item exported under a runtime-symbol name. `what` names the
+    /// item kind in the description, and `note` is appended to it.
+    fn check_runtime_symbol(
+        &mut self,
+        attrs: &[Attribute],
+        ident: &str,
+        what: &str,
+        qualified_name: &str,
+        span: Span,
+        note: &str,
+    ) {
+        let Some(symbol) = ExportAttributes::from_attrs(attrs).symbol(ident) else {
+            return;
+        };
+        if !is_runtime_symbol(&symbol, self.windows_only(attrs)) {
+            return;
+        }
+        self.push_signal_with_severity(
+            "runtime-symbol-definition",
+            "high",
+            format!(
+                "Rust {what} {qualified_name} is exported as the core runtime symbol '{symbol}'; {note}"
+            ),
+            span,
+        );
+    }
 }
 
 impl<'ast> Visit<'ast> for NativeInteropCollector {
+    fn visit_file(&mut self, node: &'ast File) {
+        // `#![cfg(windows)]` at the top of the file.
+        let windows_only = is_windows_only(&node.attrs);
+        self.windows_only_depth += usize::from(windows_only);
+        syn::visit::visit_file(self, node);
+        self.windows_only_depth -= usize::from(windows_only);
+    }
+
     fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+        let windows_only = is_windows_only(&node.attrs);
+        self.windows_only_depth += usize::from(windows_only);
         if node.content.is_some() {
             self.module_stack.push(node.ident.to_string());
             syn::visit::visit_item_mod(self, node);
@@ -2171,6 +2231,78 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
         } else {
             syn::visit::visit_item_mod(self, node);
         }
+        self.windows_only_depth -= usize::from(windows_only);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
+        let self_type = match node.self_ty.as_ref() {
+            syn::Type::Path(type_path) => type_path
+                .path
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string()),
+            _ => None,
+        }
+        .unwrap_or_else(|| node.self_ty.to_token_stream().to_string());
+        self.impl_type_stack.push(self_type);
+        syn::visit::visit_item_impl(self, node);
+        self.impl_type_stack.pop();
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+        // `#[no_mangle]` exports an associated function exactly like a free
+        // one, so it interposes a runtime symbol just the same. rustc's
+        // runtime-symbol lints check free functions and statics only, which
+        // makes this the one place such a definition is reported at all.
+        let ident = node.sig.ident.to_string();
+        let owner = self.impl_type_stack.last().cloned().unwrap_or_default();
+        let qualified_name = self.qualify_name(&format!("{owner}::{ident}"));
+        if ExportAttributes::from_attrs(&node.attrs).is_exported() {
+            self.push_signal(
+                "native-export",
+                format!("exported Rust associated function {qualified_name} detected"),
+                node.sig.ident.span(),
+            );
+        }
+        self.check_runtime_symbol(
+            &node.attrs,
+            &ident,
+            "associated function",
+            &qualified_name,
+            node.sig.ident.span(),
+            "the compiler emits calls to this symbol from code that never names it, so a mismatched definition miscompiles unrelated code and can be interposed at link time; rustc's invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions lints do not check associated functions, so the compiler reports nothing here",
+        );
+        syn::visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_macro(&mut self, node: &'ast ItemMacro) {
+        // The stable backend does not expand macros, so an export a
+        // `macro_rules!` body (or an item-position invocation) spells out is
+        // read from its tokens: `#[no_mangle] .. fn read` or
+        // `#[export_name = "read"] .. fn ..`. Confidence is medium because a
+        // definition that is never invoked exports nothing.
+        let owner = node
+            .ident
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| node.mac.path.to_token_stream().to_string().replace(' ', ""));
+        let windows_only = self.windows_only(&node.attrs);
+        for (symbol, span) in macro_runtime_exports(node.mac.tokens.clone()) {
+            if !is_runtime_symbol(&symbol, windows_only) {
+                continue;
+            }
+            self.push_signal_with_confidence(
+                "runtime-symbol-definition",
+                "high",
+                "medium",
+                format!(
+                    "macro {} expands to an item exported as the core runtime symbol '{symbol}'; wherever it is invoked, the compiler emits calls to this symbol from code that never names it, so a mismatched definition miscompiles unrelated code and can be interposed at link time (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
+                    self.qualify_name(&owner)
+                ),
+                span,
+            );
+        }
+        syn::visit::visit_item_macro(self, node);
     }
 
     fn visit_item_foreign_mod(&mut self, node: &'ast ItemForeignMod) {
@@ -2277,7 +2409,7 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
 
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
         let ident = node.sig.ident.to_string();
-        if node.sig.abi.is_some() || has_export_attribute(&node.attrs) {
+        if node.sig.abi.is_some() || ExportAttributes::from_attrs(&node.attrs).is_exported() {
             self.push_signal(
                 "native-export",
                 format!(
@@ -2290,19 +2422,15 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
         // A runtime symbol is only interposed if it is actually exported, so
         // this is keyed off the export attributes rather than the name alone:
         // a private `fn memcpy` is a perfectly ordinary helper.
-        if let Some(symbol) = exported_symbol_name(&node.attrs, &ident)
-            && RUNTIME_SYMBOL_NAMES.contains(&symbol.as_str())
-        {
-            self.push_signal_with_severity(
-                "runtime-symbol-definition",
-                "high",
-                format!(
-                    "Rust function {} is exported as the core runtime symbol '{symbol}'; the compiler emits calls to this symbol from code that never names it, so a mismatched definition miscompiles unrelated code and can be interposed at link time (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
-                    self.qualify_name(&ident)
-                ),
-                node.sig.ident.span(),
-            );
-        }
+        let qualified_name = self.qualify_name(&ident);
+        self.check_runtime_symbol(
+            &node.attrs,
+            &ident,
+            "function",
+            &qualified_name,
+            node.sig.ident.span(),
+            "the compiler emits calls to this symbol from code that never names it, so a mismatched definition miscompiles unrelated code and can be interposed at link time (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
+        );
         if is_c_void_return(&node.sig.output) && node.sig.abi.is_some() {
             self.push_signal_with_severity(
                 "c-void-return",
@@ -2325,19 +2453,15 @@ impl<'ast> Visit<'ast> for NativeInteropCollector {
         // exported under a runtime-symbol name is interposed exactly like a
         // function definition is.
         let ident = node.ident.to_string();
-        if let Some(symbol) = exported_symbol_name(&node.attrs, &ident)
-            && RUNTIME_SYMBOL_NAMES.contains(&symbol.as_str())
-        {
-            self.push_signal_with_severity(
-                "runtime-symbol-definition",
-                "high",
-                format!(
-                    "Rust static {} is exported as the core runtime symbol '{symbol}'; the symbol can be interposed at link time like a function definition, so a mismatched type miscompiles unrelated code (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
-                    self.qualify_name(&ident)
-                ),
-                node.ident.span(),
-            );
-        }
+        let qualified_name = self.qualify_name(&ident);
+        self.check_runtime_symbol(
+            &node.attrs,
+            &ident,
+            "static",
+            &qualified_name,
+            node.ident.span(),
+            "the symbol can be interposed at link time like a function definition, so a mismatched type miscompiles unrelated code (rustc lints invalid_runtime_symbol_definitions and suspicious_runtime_symbol_definitions)",
+        );
         syn::visit::visit_item_static(self, node);
     }
 }
@@ -2360,89 +2484,303 @@ fn parse_link_attribute_name(attrs: &[Attribute]) -> Option<String> {
     None
 }
 
-/// Symbols the compiler and the C runtime assume it owns.
+/// Symbols the compiler and the C runtime assume they own, on every target.
 ///
 /// Rust 1.98 added the deny-by-default `invalid_runtime_symbol_definitions`
-/// and warn-by-default `suspicious_runtime_symbol_definitions` lints for the
-/// six core memory/string symbols (`memcpy` through `strlen` below). Rust
-/// 1.99 extended both lints to the POSIX symbols the standard library
-/// declares in its own FFI blocks — `malloc`, `realloc`, `free`
-/// (`sys::alloc::unix`), `exit` (`sys::exit`), and `open`, `read`, `write`,
-/// `close` (`sys::fs::unix`) — driving the check from the new
-/// `#[rustc_canonical_symbol]` registry instead of a hardcoded list;
-/// `calloc` and `posix_memalign` stay in rusi's set as the C runtime's
-/// allocator family. Defining one from Rust replaces the implementation the
-/// compiler emits calls to — LLVM lowers `slice` comparisons to `bcmp`/`memcmp`
-/// and `[u8]` copies to `memcpy` without those calls appearing in the source —
-/// so a wrong or recursive definition miscompiles code far from the definition
-/// site. Because the symbol is exported, it can also be interposed at link
-/// time by a dependency, which makes it a supply-chain concern and not only a
-/// correctness one. Both exported functions and exported statics are scanned:
-/// rustc's lints check the two through `check_fn` and `check_static`.
-const RUNTIME_SYMBOL_NAMES: &[&str] = &[
-    "bcmp",
+/// and warn-by-default `suspicious_runtime_symbol_definitions` lints for these
+/// six. Defining one from Rust replaces the implementation the compiler emits
+/// calls to — LLVM lowers `slice` comparisons to `bcmp`/`memcmp` and `[u8]`
+/// copies to `memcpy` without those calls appearing in the source — so a wrong
+/// or recursive definition miscompiles code far from the definition site.
+/// Because the symbol is exported, it can also be interposed at link time by a
+/// dependency, which makes it a supply-chain concern and not only a
+/// correctness one.
+const CORE_RUNTIME_SYMBOLS: &[&str] = &["bcmp", "memcmp", "memcpy", "memmove", "memset", "strlen"];
+
+/// Runtime symbols that only exist to interpose where the C runtime is a
+/// POSIX one.
+///
+/// Rust 1.99 extended both lints to the POSIX symbols the standard library
+/// declares in its own FFI blocks, driving the check from the
+/// `#[rustc_canonical_symbol]` registry: `open`, `read`, `write`, `close` and
+/// `exit` (declared for unix and wasi targets) and `malloc`, `realloc`, `free`
+/// (unix, wasi, teeos, trusty). `calloc` and `posix_memalign` complete the C
+/// runtime's allocator family. A Windows-only definition of one of these
+/// replaces nothing the compiler or the CRT calls, so it is not flagged.
+const POSIX_RUNTIME_SYMBOLS: &[&str] = &[
     "calloc",
     "close",
     "exit",
     "free",
     "malloc",
-    "memcmp",
-    "memcpy",
-    "memmove",
-    "memset",
     "open",
     "posix_memalign",
     "read",
     "realloc",
-    "strlen",
     "write",
 ];
 
-/// The linker symbol a function is exported under, if it is exported at all.
+/// Whether exporting `symbol` interposes a runtime symbol. Both exported
+/// functions and exported statics count: rustc's lints check the two through
+/// `check_fn` and `check_static`.
+fn is_runtime_symbol(symbol: &str, windows_only: bool) -> bool {
+    CORE_RUNTIME_SYMBOLS.contains(&symbol)
+        || (!windows_only && POSIX_RUNTIME_SYMBOLS.contains(&symbol))
+}
+
+/// What an item's attributes say about how it is exported.
 ///
-/// `#[export_name = "..."]` names the symbol outright; `#[no_mangle]` exports
-/// the function under its own identifier. Both spellings accepted by edition
-/// 2024 are recognized, including the `#[unsafe(...)]` wrapper that edition
-/// requires. Returns `None` for a function that is not exported, which is the
-/// overwhelming majority.
-fn exported_symbol_name(attrs: &[Attribute], ident: &str) -> Option<String> {
-    for attr in attrs {
-        if attr.path().is_ident("export_name") {
-            if let Ok(name) = attr.meta.require_name_value()
-                && let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(value),
-                    ..
-                }) = &name.value
-            {
-                return Some(value.value());
-            }
-            // An `#[export_name]` we cannot read still exports the symbol.
-            return Some(ident.to_string());
+/// Every spelling rustc accepts is read: `#[no_mangle]` and
+/// `#[export_name = ".."]`, the `#[unsafe(..)]` wrapper edition 2024 requires,
+/// and either one inside `#[cfg_attr(..)]` at any depth. The `cfg_attr`
+/// predicate is not evaluated: `cfg_attr(not(test), no_mangle)` is the common
+/// spelling, and the build that ships is the one that exports.
+#[derive(Debug, Default)]
+struct ExportAttributes {
+    no_mangle: bool,
+    /// `Some(None)` is an `#[export_name]` whose value cannot be read without
+    /// expanding an arbitrary macro.
+    export_name: Option<Option<String>>,
+}
+
+impl ExportAttributes {
+    fn from_attrs(attrs: &[Attribute]) -> Self {
+        let mut found = Self::default();
+        for attr in attrs {
+            found.collect(&attr.meta);
         }
-        if attr.path().is_ident("no_mangle") {
-            return Some(ident.to_string());
-        }
-        if attr.path().is_ident("unsafe") {
-            let mut symbol = None;
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("export_name") {
-                    symbol = Some(
-                        meta.value()
-                            .and_then(|value| value.parse::<LitStr>())
-                            .map(|value| value.value())
-                            .unwrap_or_else(|_| ident.to_string()),
-                    );
-                } else if meta.path.is_ident("no_mangle") {
-                    symbol = Some(ident.to_string());
+        found
+    }
+
+    fn collect(&mut self, meta: &Meta) {
+        let path = meta.path();
+        if path.is_ident("no_mangle") {
+            self.no_mangle = true;
+        } else if path.is_ident("export_name") {
+            let value = match meta {
+                Meta::NameValue(name_value) => literal_string(&name_value.value),
+                _ => None,
+            };
+            // rustc rejects a second `#[export_name]`; keep the first.
+            self.export_name.get_or_insert(value);
+        } else if let Meta::List(list) = meta {
+            if path.is_ident("unsafe") {
+                if let Ok(inner) = list.parse_args::<Meta>() {
+                    self.collect(&inner);
                 }
-                Ok(())
-            });
-            if symbol.is_some() {
-                return symbol;
+            } else if path.is_ident("cfg_attr")
+                && let Ok(metas) = list.parse_args_with(
+                    syn::punctuated::Punctuated::<Meta, Token![,]>::parse_terminated,
+                )
+            {
+                // The first entry is the predicate.
+                for inner in metas.iter().skip(1) {
+                    self.collect(inner);
+                }
             }
         }
     }
-    None
+
+    fn is_exported(&self) -> bool {
+        self.no_mangle || self.export_name.is_some()
+    }
+
+    /// The linker symbol the item is exported under, if it is exported at
+    /// all. As in rustc, `#[export_name]` wins over `#[no_mangle]` whichever
+    /// comes first; one whose value cannot be read still exports the item,
+    /// under a name assumed to be its own.
+    fn symbol(&self, ident: &str) -> Option<String> {
+        match &self.export_name {
+            Some(Some(name)) => Some(name.clone()),
+            Some(None) => Some(ident.to_string()),
+            None => self.no_mangle.then(|| ident.to_string()),
+        }
+    }
+}
+
+/// The string an attribute value evaluates to, when that is knowable without
+/// expanding arbitrary macros: a string literal, or `concat!` over literals
+/// and nested `concat!`s — the spelling that splits a symbol name so that no
+/// literal in the source reads `memset`.
+fn literal_string(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(value),
+            ..
+        }) => Some(value.value()),
+        Expr::Group(group) => literal_string(&group.expr),
+        Expr::Macro(mac) if mac.mac.path.is_ident("concat") => {
+            let parts = mac
+                .mac
+                .parse_body_with(syn::punctuated::Punctuated::<Expr, Token![,]>::parse_terminated)
+                .ok()?;
+            parts.iter().map(concat_fragment).collect()
+        }
+        _ => None,
+    }
+}
+
+/// One argument of `concat!`, rendered the way the macro renders it.
+fn concat_fragment(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Lit(ExprLit { lit, .. }) => match lit {
+            Lit::Str(value) => Some(value.value()),
+            Lit::Char(value) => Some(value.value().to_string()),
+            Lit::Int(value) => Some(value.base10_digits().to_string()),
+            Lit::Float(value) => Some(value.base10_digits().to_string()),
+            Lit::Bool(value) => Some(value.value.to_string()),
+            _ => None,
+        },
+        other => literal_string(other),
+    }
+}
+
+/// Whether `#[cfg(..)]` among `attrs` limits the item to Windows targets.
+fn is_windows_only(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("cfg")
+            && attr
+                .parse_args::<Meta>()
+                .is_ok_and(|predicate| cfg_implies_windows(&predicate))
+    })
+}
+
+/// Whether a cfg predicate can only hold on Windows: `windows`,
+/// `target_os = "windows"`, `target_family = "windows"`, or an `all(..)`
+/// containing one of them.
+fn cfg_implies_windows(predicate: &Meta) -> bool {
+    match predicate {
+        Meta::Path(path) => path.is_ident("windows"),
+        Meta::NameValue(name_value) => {
+            (name_value.path.is_ident("target_os") || name_value.path.is_ident("target_family"))
+                && literal_string(&name_value.value).as_deref() == Some("windows")
+        }
+        Meta::List(list) => {
+            list.path.is_ident("all")
+                && list
+                    .parse_args_with(
+                        syn::punctuated::Punctuated::<Meta, Token![,]>::parse_terminated,
+                    )
+                    .is_ok_and(|predicates| predicates.iter().any(cfg_implies_windows))
+        }
+    }
+}
+
+/// How an attribute inside a macro body exports the item after it.
+enum MacroExport {
+    NoMangle,
+    ExportName(String),
+    /// `#[export_name = $name]` and the like: the symbol is not in the tokens.
+    Unknown,
+}
+
+/// Exported runtime-symbol candidates spelled out in a macro body: an
+/// attribute carrying `no_mangle` or `export_name = "..."` (bare, under
+/// `unsafe(..)` or `cfg_attr(..)`), followed by `fn name` or `static name`.
+/// Returns each symbol with the span of the token that names it.
+fn macro_runtime_exports(tokens: proc_macro2::TokenStream) -> Vec<(String, Span)> {
+    use proc_macro2::{Delimiter, TokenTree};
+
+    fn attribute_export(tokens: proc_macro2::TokenStream) -> Option<MacroExport> {
+        let trees: Vec<TokenTree> = tokens.into_iter().collect();
+        let mut found = None;
+        for (index, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Ident(ident) if ident == "export_name" => {
+                    let value = match (trees.get(index + 1), trees.get(index + 2)) {
+                        (Some(TokenTree::Punct(eq)), Some(TokenTree::Literal(literal)))
+                            if eq.as_char() == '=' =>
+                        {
+                            syn::parse2::<LitStr>(TokenTree::Literal(literal.clone()).into())
+                                .ok()
+                                .map(|value| MacroExport::ExportName(value.value()))
+                        }
+                        _ => None,
+                    };
+                    return Some(value.unwrap_or(MacroExport::Unknown));
+                }
+                TokenTree::Ident(ident) if ident == "no_mangle" => {
+                    found = Some(MacroExport::NoMangle);
+                }
+                TokenTree::Group(group) => {
+                    if let Some(inner) = attribute_export(group.stream()) {
+                        if !matches!(inner, MacroExport::NoMangle) {
+                            return Some(inner);
+                        }
+                        found = Some(inner);
+                    }
+                }
+                _ => {}
+            }
+        }
+        found
+    }
+
+    fn walk(tokens: proc_macro2::TokenStream, out: &mut Vec<(String, Span)>) {
+        let trees: Vec<TokenTree> = tokens.into_iter().collect();
+        let mut pending: Option<MacroExport> = None;
+        let mut index = 0;
+        while index < trees.len() {
+            match &trees[index] {
+                TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                    if let Some(TokenTree::Group(group)) = trees.get(index + 1)
+                        && group.delimiter() == Delimiter::Bracket
+                    {
+                        if let Some(export) = attribute_export(group.stream()) {
+                            // As in rustc, a named export wins over `no_mangle`.
+                            if !matches!(
+                                (&pending, &export),
+                                (Some(MacroExport::ExportName(_)), MacroExport::NoMangle)
+                            ) {
+                                pending = Some(export);
+                            }
+                        }
+                        index += 2;
+                        continue;
+                    }
+                }
+                TokenTree::Punct(punct) if punct.as_char() == ';' => pending = None,
+                TokenTree::Ident(keyword) if keyword == "fn" || keyword == "static" => {
+                    if let Some(export) = pending.take() {
+                        let mut name_index = index + 1;
+                        if matches!(trees.get(name_index), Some(TokenTree::Ident(word)) if word == "mut")
+                        {
+                            name_index += 1;
+                        }
+                        // `fn $name` is a metavariable, and names nothing yet.
+                        let name = match trees.get(name_index) {
+                            Some(TokenTree::Ident(name)) => Some((name.to_string(), name.span())),
+                            _ => None,
+                        };
+                        match (export, name) {
+                            // The symbol is spelled out even when the item's
+                            // own name is a metavariable.
+                            (MacroExport::ExportName(symbol), name) => {
+                                let span = name.map_or_else(|| keyword.span(), |(_, span)| span);
+                                out.push((symbol, span));
+                            }
+                            (MacroExport::NoMangle, Some((name, span))) => out.push((name, span)),
+                            _ => {}
+                        }
+                    }
+                }
+                TokenTree::Group(group) => {
+                    if group.delimiter() == Delimiter::Brace {
+                        // A brace group ends whatever item the attribute
+                        // preceded.
+                        pending = None;
+                    }
+                    walk(group.stream(), out);
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(tokens, &mut out);
+    out
 }
 
 /// Whether a return type is `c_void`, in any of the ways it can be spelled.
@@ -2468,27 +2806,6 @@ fn is_c_void_return(output: &ReturnType) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "c_void")
-}
-
-fn has_export_attribute(attrs: &[Attribute]) -> bool {
-    for attr in attrs {
-        if attr.path().is_ident("no_mangle") || attr.path().is_ident("export_name") {
-            return true;
-        }
-        if attr.path().is_ident("unsafe") {
-            let mut found = false;
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("no_mangle") || meta.path.is_ident("export_name") {
-                    found = true;
-                }
-                Ok(())
-            });
-            if found {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 fn function_parameter_types(sig: &Signature) -> Vec<String> {
@@ -4958,6 +5275,230 @@ mod native_lint_signal_tests {
     fn does_not_flag_a_private_static_named_after_a_runtime_symbol() {
         let source = r#"static memcpy: fn(*mut u8, *const u8, usize) = || todo!();"#;
         assert!(descriptions_containing(source, "runtime symbol").is_empty());
+    }
+
+    /// Collect `(confidence, description)` for signals mentioning `needle`.
+    fn confidences_for(source: &str, needle: &str) -> Vec<(String, String)> {
+        let syntax = syn::parse_file(source).expect("fixture source parses");
+        let mut collector = NativeInteropCollector::new(NativeFileContext {
+            package_name: "demo".to_string(),
+            package_path: "demo".to_string(),
+            relative_file_path: "src/lib.rs".to_string(),
+            module_path: Vec::new(),
+        });
+        collector.visit_file(&syntax);
+        collector
+            .security_signals
+            .into_iter()
+            .filter(|signal| signal.description.contains(needle))
+            .map(|signal| (signal.confidence, signal.description))
+            .collect()
+    }
+
+    #[test]
+    fn export_name_wins_over_no_mangle_in_either_order() {
+        // rustc exports under `export_name` whichever attribute comes first,
+        // so a leading `no_mangle` must not hide the real symbol.
+        for source in [
+            r#"#[unsafe(no_mangle)] #[unsafe(export_name = "exit")]
+               pub extern "C" fn innocuous(code: i32) -> ! { loop {} }"#,
+            r#"#[unsafe(export_name = "exit")] #[unsafe(no_mangle)]
+               pub extern "C" fn innocuous(code: i32) -> ! { loop {} }"#,
+            r#"#[no_mangle] #[export_name = "exit"]
+               pub extern "C" fn innocuous(code: i32) -> ! { loop {} }"#,
+        ] {
+            let found = descriptions_containing(source, "runtime symbol");
+            assert_eq!(found.len(), 1, "{source}");
+            assert!(found[0].contains("'exit'"), "{}", found[0]);
+        }
+    }
+
+    #[test]
+    fn concat_export_names_are_evaluated() {
+        // `concat!` splits the name so no literal reads `memset`; rustc
+        // evaluates it, and so must the scan.
+        for source in [
+            r#"#[unsafe(export_name = concat!("mem", "set"))] pub extern "C" fn sneaky() {}"#,
+            r#"#[export_name = concat!("me", 'm', concat!("se", "t"))] pub extern "C" fn sneaky() {}"#,
+            r#"#[unsafe(export_name = concat!("st", "rlen"))] pub static SNEAKY: u8 = 0;"#,
+        ] {
+            let found = descriptions_containing(source, "runtime symbol");
+            assert_eq!(found.len(), 1, "{source}");
+            assert!(
+                found[0].contains("'memset'") || found[0].contains("'strlen'"),
+                "{}",
+                found[0]
+            );
+        }
+        // Not knowable without expansion: assumed to export under its own,
+        // innocuous name, so nothing is claimed.
+        assert!(
+            descriptions_containing(
+                r#"#[unsafe(export_name = env!("SYMBOL"))] pub extern "C" fn sneaky() {}"#,
+                "runtime symbol"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn exports_under_cfg_attr_are_seen() {
+        // `cfg_attr(not(test), no_mangle)` is the usual no_std spelling; the
+        // predicate is not evaluated because the shipped build exports.
+        for (source, symbol) in [
+            (
+                r#"#[cfg_attr(not(test), unsafe(no_mangle))]
+                   pub unsafe extern "C" fn write(fd: i32, buf: *const u8, n: usize) -> isize { 0 }"#,
+                "'write'",
+            ),
+            (
+                r#"#[cfg_attr(unix, unsafe(export_name = "read"))]
+                   pub unsafe extern "C" fn innocuous() {}"#,
+                "'read'",
+            ),
+            (
+                r#"#[cfg_attr(all(), cfg_attr(unix, no_mangle))]
+                   pub extern "C" fn memcpy() {}"#,
+                "'memcpy'",
+            ),
+        ] {
+            let found = descriptions_containing(source, "runtime symbol");
+            assert_eq!(found.len(), 1, "{source}");
+            assert!(found[0].contains(symbol), "{}", found[0]);
+        }
+        // The export itself is reported too.
+        assert_eq!(
+            descriptions_containing(
+                "#[cfg_attr(not(test), no_mangle)] fn exported_helper() {}",
+                "extern/exported Rust function",
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn flags_an_exported_associated_function() {
+        // rustc's runtime-symbol lints skip associated functions, but
+        // `#[no_mangle]` exports them all the same.
+        let found = descriptions_containing(
+            r#"pub struct Shim;
+               impl Shim {
+                   #[unsafe(no_mangle)]
+                   pub unsafe extern "C" fn close(fd: i32) -> i32 { fd }
+               }"#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("associated function"), "{}", found[0]);
+        assert!(found[0].contains("demo::Shim::close"), "{}", found[0]);
+        assert!(found[0].contains("'close'"), "{}", found[0]);
+        assert!(
+            found[0].contains("do not check associated functions"),
+            "{}",
+            found[0]
+        );
+        assert_eq!(
+            descriptions_containing(
+                "pub struct Shim; impl Shim { #[no_mangle] pub extern \"C\" fn hook() {} }",
+                "exported Rust associated function demo::Shim::hook",
+            )
+            .len(),
+            1
+        );
+        // Not exported: an ordinary method.
+        assert!(
+            descriptions_containing(
+                "pub struct File; impl File { pub fn close(self) {} pub fn read(&self) {} }",
+                "runtime symbol"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn flags_runtime_symbols_exported_from_macro_bodies() {
+        let found = confidences_for(
+            r#"macro_rules! shim {
+                   () => {
+                       #[unsafe(no_mangle)]
+                       pub unsafe extern "C" fn read(fd: i32, buf: *mut u8, n: usize) -> isize { 0 }
+                   };
+               }
+               macro_rules! named {
+                   ($name:ident) => {
+                       #[unsafe(export_name = "memcpy")]
+                       pub extern "C" fn $name() {}
+                   };
+               }
+               shim!();"#,
+            "runtime symbol",
+        );
+        let symbols: Vec<_> = found
+            .iter()
+            .map(|(confidence, description)| {
+                assert_eq!(confidence, "medium", "{description}");
+                assert!(description.starts_with("macro "), "{description}");
+                if description.contains("'read'") {
+                    "read"
+                } else {
+                    "memcpy"
+                }
+            })
+            .collect();
+        assert_eq!(symbols, ["read", "memcpy"]);
+        // `#[no_mangle] fn $name`: the symbol is chosen at the call site.
+        assert!(
+            descriptions_containing(
+                "macro_rules! any { ($name:ident) => { #[no_mangle] pub extern \"C\" fn $name() {} }; }",
+                "runtime symbol"
+            )
+            .is_empty()
+        );
+        // A runtime-symbol name with no export attribute is just a helper.
+        assert!(
+            descriptions_containing(
+                "macro_rules! helper { () => { fn read() {} #[no_mangle] fn hook() {} }; }",
+                "runtime symbol"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn posix_runtime_symbols_are_not_flagged_in_windows_only_code() {
+        // The POSIX runtime symbols are linted only for unix-like targets; a
+        // Windows-only definition interposes nothing.
+        for source in [
+            r#"#[cfg(windows)] #[unsafe(no_mangle)]
+               pub unsafe extern "C" fn write(fd: i32, buf: *const u8, n: usize) -> isize { 0 }"#,
+            r#"#[cfg(target_os = "windows")] mod win {
+                   #[unsafe(no_mangle)] pub extern "C" fn malloc(n: usize) -> *mut u8 { std::ptr::null_mut() }
+               }"#,
+            r#"#![cfg(all(windows, target_arch = "x86_64"))]
+               #[unsafe(no_mangle)] pub extern "C" fn close(fd: i32) -> i32 { fd }"#,
+        ] {
+            assert!(
+                descriptions_containing(source, "runtime symbol").is_empty(),
+                "{source}"
+            );
+        }
+        // The core memory symbols are lowered to on every target.
+        let found = descriptions_containing(
+            r#"#[cfg(windows)] #[unsafe(no_mangle)]
+               pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 { d }"#,
+            "runtime symbol",
+        );
+        assert_eq!(found.len(), 1);
+        // `any(windows, unix)` is not Windows-only.
+        assert_eq!(
+            descriptions_containing(
+                r#"#[cfg(any(windows, unix))] #[unsafe(no_mangle)] pub extern "C" fn close(fd: i32) -> i32 { fd }"#,
+                "runtime symbol"
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
