@@ -1,0 +1,46 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_eb3fa0a873dcb2::t_dc0c56e6cfd0df 726-729
+  s_eb3fa0a873dcb2::t_d9376731c47432 3067,3138,3157,3180
+  s_eb3fa0a873dcb2::t_6c66ef04bf8e04 730-731,2529-2538,2606-2607,2610-2612,2614-2615,2617,2620-2624,3014,3102,3135-3137,3139-3156,3158-3179,3181-3204,3454,3497,4333-4334
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  s_eb3fa0a873dcb2::t_3ebc89bd3dcc4f 29-34,36
+  s_eb3fa0a873dcb2::t_c840bd668af127 809-813,823-857,860-880
+  s_eb3fa0a873dcb2::t_4ab427016f1627 376-379,381,383,385
+  s_eb3fa0a873dcb2::t_14b418a1bad3ce 60-61
+  s_eb3fa0a873dcb2::t_6e3ff0a2201f8c 2075-2079
+thirdparty/rusi/crates/rusi-rustc-wrapper/build.rs
+  s_eb3fa0a873dcb2::t_b46f9dbfcb7297 109-136
+  s_eb3fa0a873dcb2::t_73f856cb182999 148-155
+  s_eb3fa0a873dcb2::t_7988504630b845 1-108,137-147,156-178
+docs/RUSI.md
+  s_eb3fa0a873dcb2::t_a8effd549a3c06 52
+thirdparty/rusi/README.md
+  s_eb3fa0a873dcb2::t_7746093ad9f72b 113,115-121,123
+thirdparty/rusi/fixtures/use-tree-app/src/main.rs
+  s_eb3fa0a873dcb2::t_1b4b3c8c8e3b2e 19
+  s_eb3fa0a873dcb2::t_c3d6611d736841 1-18,20-27
+thirdparty/rusi/fixtures/use-tree-app/Cargo.toml
+  s_eb3fa0a873dcb2::t_e8e138d7d7ab03 1-6
+thirdparty/rusi/crates/rusi-cli/tests/cli_smoke.rs
+  s_eb3fa0a873dcb2::t_a7b41010597a18 968-971
+.github/workflows/rusi-test.yml
+  s_eb3fa0a873dcb2::t_4848d09c2ae2f4 69-74,76-93,95,97,101-117,121-123,128,131,134,137-140,142-143,145-146,148
+thirdparty/rusi/fixtures/use-tree-app/Cargo.lock
+  s_eb3fa0a873dcb2::t_4ba49d89726b4e 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "561a3b650f8e788468016cf6730b808b2fd1d1d2",
+  "prompts": {},
+  "sessions": {
+    "s_eb3fa0a873dcb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14a505c7-bd8c-4d25-b29c-3e3b8733af79",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
