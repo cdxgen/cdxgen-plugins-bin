@@ -844,22 +844,45 @@ fn rusi_workspace_root(debug: bool) -> Result<PathBuf> {
 /// path under a world-writable directory lets another local user plant a
 /// `build.rs`, a `.cargo/config.toml` or a symlink ahead of us.
 fn rusi_cache_base() -> Result<PathBuf> {
-    let from_env = |key: &str| {
-        std::env::var_os(key)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    if let Some(dir) = from_env("RUSI_CACHE_DIR") {
+    let from_env = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty());
+    #[cfg(windows)]
+    let home = from_env("LOCALAPPDATA").map(PathBuf::from);
+    #[cfg(not(windows))]
+    let home = from_env("HOME").map(|home| PathBuf::from(home).join(".cache"));
+    cache_base_from(
+        from_env("RUSI_CACHE_DIR").map(PathBuf::from),
+        from_env("XDG_CACHE_HOME").map(PathBuf::from),
+        home,
+    )
+}
+
+/// [`rusi_cache_base`] over explicit values: `home` is the platform's per-user
+/// cache root (`$HOME/.cache`, or `%LOCALAPPDATA%` on Windows).
+///
+/// Every candidate must be absolute. A relative path resolves against the
+/// working directory — often the very repository being analyzed — and a tree
+/// planted there would be compiled and run. A relative `RUSI_CACHE_DIR` is an
+/// explicit choice, so it is an error rather than silently skipped; relative
+/// XDG and home values are ignored, as the XDG specification requires.
+fn cache_base_from(
+    rusi_cache_dir: Option<PathBuf>,
+    xdg_cache_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(dir) = rusi_cache_dir {
+        if !dir.is_absolute() {
+            return Err(anyhow::anyhow!(
+                "RUSI_CACHE_DIR={} is not an absolute path; the embedded compiler wrapper is \
+                 built and run from it, so it must not depend on the working directory",
+                dir.display()
+            ));
+        }
         return Ok(dir);
     }
-    if let Some(dir) = from_env("XDG_CACHE_HOME") {
+    if let Some(dir) = xdg_cache_home.filter(|dir| dir.is_absolute()) {
         return Ok(dir.join("rusi"));
     }
-    #[cfg(windows)]
-    let home = from_env("LOCALAPPDATA");
-    #[cfg(not(windows))]
-    let home = from_env("HOME").map(|home| home.join(".cache"));
-    home.map(|dir| dir.join("rusi")).ok_or_else(|| {
+    home.filter(|dir| dir.is_absolute()).map(|dir| dir.join("rusi")).ok_or_else(|| {
         anyhow::anyhow!(
             "no per-user cache directory for the embedded compiler wrapper; set RUSI_CACHE_DIR, \
              XDG_CACHE_HOME or HOME, or point RUSI_WRAPPER_SOURCE at a rusi checkout"
@@ -2585,6 +2608,39 @@ mod tests {
         names.sort();
         assert_eq!(names, ["rusi-rustc-wrapper", "rusi-schema"]);
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn wrapper_cache_base_requires_absolute_paths() {
+        // Built from the temp dir so the paths are absolute on every host.
+        let absolute = std::env::temp_dir().join("rusi-cache-base");
+        let relative = PathBuf::from("relative/cache");
+        let cache_base = super::cache_base_from;
+
+        assert_eq!(
+            cache_base(Some(absolute.clone()), Some(relative.clone()), None).ok(),
+            Some(absolute.clone())
+        );
+        let error = cache_base(Some(relative.clone()), Some(absolute.clone()), None)
+            .expect_err("a relative RUSI_CACHE_DIR is an error");
+        assert!(
+            error.to_string().contains("not an absolute path"),
+            "{error}"
+        );
+
+        // XDG_CACHE_HOME must be absolute; a relative one falls through.
+        assert_eq!(
+            cache_base(None, Some(absolute.clone()), None).ok(),
+            Some(absolute.join("rusi"))
+        );
+        let home = absolute.join("home-cache");
+        assert_eq!(
+            cache_base(None, Some(relative.clone()), Some(home.clone())).ok(),
+            Some(home.join("rusi"))
+        );
+        // ...and so must the home fallback.
+        assert!(cache_base(None, Some(relative.clone()), Some(relative)).is_err());
+        assert!(cache_base(None, None, None).is_err());
     }
 
     #[test]
