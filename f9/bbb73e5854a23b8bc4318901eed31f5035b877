@@ -1,0 +1,33 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  s_eb3fa0a873dcb2::t_15f4ecbec99b7f 2487,2490-2510,2523-2529,2538-2574,2576-2579,2582-2596,2598-2656,2658-2700,2702-2755,2760-2775,2777,2780-2783
+  s_eb3fa0a873dcb2::t_73f856cb182999 5394-5398,5440-5444
+  s_eb3fa0a873dcb2::t_462375a128ecbb 2756-2759
+  s_eb3fa0a873dcb2::t_737815101ebde3 23-24,2058-2062,2074-2075,2153-2163,2172,2181-2212,2216-2223,2225-2226,2234-2305,2412,2425-2433,2456-2464
+  s_eb3fa0a873dcb2::t_5d8781662cacff 5280-5393,5399-5439,5445-5501,5503
+  s_909512142d01e2::t_837473c1e6cb01 2533-2537,2657
+  s_eb3fa0a873dcb2::t_18f686d2cd6a64 2530-2531,5502
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9bbb73e5854a23b8bc4318901eed31f5035b877",
+  "prompts": {},
+  "sessions": {
+    "s_909512142d01e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3011842-123b-43cb-aa74-231b88f76e5a",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    },
+    "s_eb3fa0a873dcb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14a505c7-bd8c-4d25-b29c-3e3b8733af79",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
