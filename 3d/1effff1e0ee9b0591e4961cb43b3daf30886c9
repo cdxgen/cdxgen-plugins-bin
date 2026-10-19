@@ -1,0 +1,18 @@
+docs/LESSON3.md
+  h_6a4cc5cdf68def 9,89,97
+docs/RUSI.md
+  h_6a4cc5cdf68def 37,48-54,107
+thirdparty/rusi/README.md
+  h_6a4cc5cdf68def 121-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d1effff1e0ee9b0591e4961cb43b3daf30886c9",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

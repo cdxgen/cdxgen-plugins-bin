@@ -1,0 +1,14 @@
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  h_6a4cc5cdf68def 23-24,409-423,425-446,1074-1079,2361-2384,2422-2423,4312,4456-4497,4499-4501,4504-4510,4512-4515,4924-4960
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "643030243fff8d7489682c5e77003f1a062933b2",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

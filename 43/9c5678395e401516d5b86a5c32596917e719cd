@@ -1,0 +1,38 @@
+README.md
+  h_6a4cc5cdf68def 5,170
+docs/HELPERS.md
+  h_6a4cc5cdf68def 3
+docs/KOSI.md
+  h_6a4cc5cdf68def 11,37,41
+docs/LESSON10.md
+  h_6a4cc5cdf68def 1-90
+docs/LESSON3.md
+  h_6a4cc5cdf68def 44,97-99,109,112-113
+docs/LESSON4.md
+  h_6a4cc5cdf68def 74-75
+docs/LESSON5.md
+  h_6a4cc5cdf68def 86-87
+docs/LESSON7.md
+  h_6a4cc5cdf68def 59-61,78-79,105,108-109
+docs/LESSON8.md
+  h_6a4cc5cdf68def 1,7-8,12,41,46-82,91-92,99,110,112-118,127-128
+docs/LESSON9.md
+  h_6a4cc5cdf68def 1-107
+docs/README.md
+  h_6a4cc5cdf68def 10,20,40,55,71
+docs/RUSI.md
+  h_6a4cc5cdf68def 93
+docs/_sidebar.md
+  h_6a4cc5cdf68def 27-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "439c5678395e401516d5b86a5c32596917e719cd",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

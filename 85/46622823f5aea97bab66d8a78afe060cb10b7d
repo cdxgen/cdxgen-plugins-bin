@@ -1,0 +1,20 @@
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 309,317
+thirdparty/golem/internal/analyzer/slice_reachability.go
+  h_6a4cc5cdf68def 40,61,68,114,117,142-180,248,259
+thirdparty/golem/internal/analyzer/slice_reachability_test.go
+  h_6a4cc5cdf68def 82-96,174-176
+thirdparty/golem/internal/model/model.go
+  h_6a4cc5cdf68def 672-680
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8546622823f5aea97bab66d8a78afe060cb10b7d",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

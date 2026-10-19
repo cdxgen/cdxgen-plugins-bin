@@ -1,0 +1,18 @@
+thirdparty/cdxrs/Cargo.lock
+  h_6a4cc5cdf68def 1076,1078,1087,1105,1107,1114,1116,1512,1514
+thirdparty/cdxrs/Cargo.toml
+  h_6a4cc5cdf68def 20-23
+thirdparty/cdxrs/tests/validate.rs
+  h_6a4cc5cdf68def 381-415
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f93d6eb0a84e222d8562122e09af5d6a16f5da15",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

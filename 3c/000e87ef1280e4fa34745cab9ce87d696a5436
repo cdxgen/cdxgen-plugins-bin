@@ -1,0 +1,22 @@
+.github/workflows/rusi-test.yml
+  h_6a4cc5cdf68def 70-75
+thirdparty/rusi/README.md
+  h_6a4cc5cdf68def 113-119
+thirdparty/rusi/crates/rusi-driver/src/lib.rs
+  h_6a4cc5cdf68def 384-420,1044-1051,4255-4256,4398-4429
+thirdparty/rusi/crates/rusi-rustc-wrapper/Cargo.toml
+  h_6a4cc5cdf68def 5-7,15-20
+thirdparty/rusi/crates/rusi-rustc-wrapper/src/main.rs
+  h_6a4cc5cdf68def 28-40,59-64,379-381,385-388,832-835,1592-1594,2031-2035,5288-5290,5294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3c000e87ef1280e4fa34745cab9ce87d696a5436",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

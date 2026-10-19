@@ -1,0 +1,48 @@
+docs/GOLEM.md
+  h_6a4cc5cdf68def 88
+thirdparty/golem/JSON_ATTRIBUTE_REFERENCE.md
+  h_6a4cc5cdf68def 266,306-318
+thirdparty/golem/README.md
+  h_6a4cc5cdf68def 118
+thirdparty/golem/internal/analyzer/flow_filter.go
+  h_6a4cc5cdf68def 472
+thirdparty/golem/internal/analyzer/multimodule.go
+  h_6a4cc5cdf68def 167
+thirdparty/golem/internal/analyzer/slice_reachability.go
+  h_6a4cc5cdf68def 4-6,8,13-25,27-28,34-35,37-38,43-61,63,66-68,71-85,88,91-102,104-114,116,120-121,141,173-189,191-235,238-239
+thirdparty/golem/internal/analyzer/slice_reachability_test.go
+  h_6a4cc5cdf68def 4,6,42-56,58,64-65,68-71,73-75,78-85,88-96,104-124,126-166,185,196-197
+thirdparty/golem/internal/model/model.go
+  h_6a4cc5cdf68def 574-585,649-675
+thirdparty/golem/testdata/flowroot/go.mod
+  h_6a4cc5cdf68def 6-8,10,16-21
+thirdparty/golem/testdata/flowroot/main.go
+  h_6a4cc5cdf68def 1-9,13,16-17,20,25-32
+thirdparty/golem/testdata/flowroot/stubs/drvlib/go.mod
+  h_6a4cc5cdf68def 1-3
+thirdparty/golem/testdata/flowroot/stubs/drvlib/lib.go
+  h_6a4cc5cdf68def 1-21
+thirdparty/golem/testdata/flowroot/stubs/fnvallib/go.mod
+  h_6a4cc5cdf68def 1-3
+thirdparty/golem/testdata/flowroot/stubs/fnvallib/lib.go
+  h_6a4cc5cdf68def 1-16
+thirdparty/golem/testdata/flowroot/stubs/ifacelib/go.mod
+  h_6a4cc5cdf68def 1-3
+thirdparty/golem/testdata/flowroot/stubs/ifacelib/lib.go
+  h_6a4cc5cdf68def 1-22
+thirdparty/golem/testdata/flowrootlib/go.mod
+  h_6a4cc5cdf68def 1-3
+thirdparty/golem/testdata/flowrootlib/lib.go
+  h_6a4cc5cdf68def 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dfbbe1462297feaf272ab584d7449e023da4db89",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
