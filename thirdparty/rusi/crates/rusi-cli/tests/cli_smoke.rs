@@ -965,7 +965,10 @@ fn analyze_with_backend(fixture: &str, backend: &str) -> Result<Report> {
     // toolchain so the assertions actually run. Without this there is no way
     // to make them execute on a machine whose nightly has drifted, and a
     // suite that cannot be made to run is a suite nobody trusts.
-    if let Ok(toolchain) = std::env::var("RUSI_TEST_TOOLCHAIN") {
+    if let Some(toolchain) = std::env::var("RUSI_TEST_TOOLCHAIN")
+        .ok()
+        .filter(|toolchain| !toolchain.is_empty())
+    {
         args.push("--toolchain".to_string());
         args.push(toolchain);
     }

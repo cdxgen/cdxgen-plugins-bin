@@ -5,6 +5,7 @@
 //! copies — no network access, no file I/O.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use jsonschema::{Retrieve, Uri, ValidationOptions, Validator};
 use serde_json::Value;
@@ -77,17 +78,33 @@ impl Retrieve for EmbeddedRetriever {
     }
 }
 
-/// Compile and cache validators per spec version.
-fn get_validator(spec_version: &str) -> Result<Validator, String> {
-    let retriever = EmbeddedRetriever::new();
-    let main_schema: Value = match spec_version {
-        "1.6" => serde_json::from_str(BOM_1_6).map_err(|e| e.to_string())?,
-        "1.7" => serde_json::from_str(BOM_1_7).map_err(|e| e.to_string())?,
+/// The validator for a spec version, compiled once per process: compiling a
+/// CycloneDX schema with its referenced schemas is far costlier than
+/// validating a typical BOM against it.
+fn get_validator(spec_version: &str) -> Result<&'static Validator, String> {
+    static BOM_1_6_VALIDATOR: OnceLock<Result<Validator, String>> = OnceLock::new();
+    static BOM_1_7_VALIDATOR: OnceLock<Result<Validator, String>> = OnceLock::new();
+    let (cell, schema) = match spec_version {
+        "1.6" => (&BOM_1_6_VALIDATOR, BOM_1_6),
+        "1.7" => (&BOM_1_7_VALIDATOR, BOM_1_7),
         _ => return Err(format!("unsupported spec version: {spec_version}")),
     };
+    cell.get_or_init(|| compile_validator(schema))
+        .as_ref()
+        .map_err(Clone::clone)
+}
 
+fn compile_validator(schema: &str) -> Result<Validator, String> {
+    let main_schema: Value = serde_json::from_str(schema).map_err(|e| e.to_string())?;
     ValidationOptions::default()
-        .with_retriever(retriever)
+        .with_retriever(EmbeddedRetriever::new())
+        // An unknown format is otherwise accepted silently, which is how
+        // idn-email validation vanished when jsonschema 0.52 moved it behind
+        // the `idna` feature. Rejecting unknown formats turns any such
+        // feature reshuffle into a compile failure of the schema — reported
+        // as `schema.internal-error` and caught by the test suite — instead
+        // of quietly validating less.
+        .should_ignore_unknown_formats(false)
         .build(&main_schema)
         .map_err(|e| e.to_string())
 }
@@ -166,4 +183,38 @@ fn extract_bom_ref(bom: &Value, instance_path_str: &str) -> Option<String> {
         .get("bom-ref")
         .and_then(|v| v.as_str())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compile_validator, get_validator};
+
+    #[test]
+    fn unknown_formats_fail_schema_compilation() {
+        // The guard that keeps a jsonschema feature reshuffle from silently
+        // turning a format assertion into a no-op. Draft-07, like the
+        // CycloneDX schemas: a draft that asserts formats.
+        let error = compile_validator(
+            r#"{"$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "string", "format": "no-such-format"}"#,
+        )
+        .expect_err("an unknown format must not compile");
+        assert!(error.contains("no-such-format"), "{error}");
+    }
+
+    #[test]
+    fn every_format_the_vendored_schemas_assert_is_known() {
+        // date, date-time, idn-email and iri-reference across 1.6 and 1.7.
+        for version in ["1.6", "1.7"] {
+            assert!(get_validator(version).is_ok(), "{version}");
+        }
+    }
+
+    #[test]
+    fn validators_are_compiled_once() {
+        let first = get_validator("1.7").expect("compiles");
+        let second = get_validator("1.7").expect("compiles");
+        assert!(std::ptr::eq(first, second));
+        assert!(get_validator("1.5").is_err());
+    }
 }
