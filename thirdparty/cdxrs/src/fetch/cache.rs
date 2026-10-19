@@ -229,8 +229,13 @@ impl HttpCache {
     ///
     /// Every platform branch is exercised by the test suite on every host,
     /// because the inputs are parameters — not `#[cfg]` gates on the tests.
-    /// `xdg_cache_home` must be absolute (per the XDG spec); a relative value
-    /// is ignored so it cannot point inside the current working directory.
+    /// Every environment-derived root must be absolute by the *target*
+    /// platform's rules (`/`-rooted on Linux and macOS; drive or UNC rooted on
+    /// Windows), never the host's: a relative value is ignored so it cannot
+    /// point inside the current working directory. XDG requires this of
+    /// `XDG_CACHE_HOME` explicitly; `HOME`, `LOCALAPPDATA` and `USERPROFILE`
+    /// get the same treatment for the same reason. `CDXGEN_CACHE_DIR` is an
+    /// explicit choice and is taken as given.
     pub fn resolve_cache_for(
         platform: CachePlatform,
         cdxgen_cache_dir: Option<&str>,
@@ -249,23 +254,23 @@ impl HttpCache {
                 // host's own rules must not apply — on Windows the latter
                 // rejects `/var/cache` for lacking a drive prefix, silently
                 // falling back to `$HOME/.cache`.
-                .filter(|s| !s.is_empty() && s.starts_with('/'))
+                .filter(|s| is_posix_absolute(s))
                 .map(|d| PathBuf::from(d).join("cdxgen"))
                 .or_else(|| {
-                    home.filter(|s| !s.is_empty())
+                    home.filter(|s| is_posix_absolute(s))
                         .map(|h| PathBuf::from(h).join(".cache").join("cdxgen"))
                 }),
-            CachePlatform::Macos => home.filter(|s| !s.is_empty()).map(|h| {
+            CachePlatform::Macos => home.filter(|s| is_posix_absolute(s)).map(|h| {
                 PathBuf::from(h)
                     .join("Library")
                     .join("Caches")
                     .join("cdxgen")
             }),
             CachePlatform::Windows => localappdata
-                .filter(|s| !s.is_empty())
+                .filter(|s| is_windows_absolute(s))
                 .map(|d| PathBuf::from(d).join("cdxgen").join("cache"))
                 .or_else(|| {
-                    userprofile.filter(|s| !s.is_empty()).map(|p| {
+                    userprofile.filter(|s| is_windows_absolute(s)).map(|p| {
                         PathBuf::from(p)
                             .join("AppData")
                             .join("Local")
@@ -683,6 +688,28 @@ fn touch_file(path: &Path) {
     if let Ok(file) = fs::OpenOptions::new().write(true).open(path) {
         let _ = file.set_times(now);
     }
+}
+
+/// Absolute by POSIX rules: `/`-rooted.
+fn is_posix_absolute(path: &str) -> bool {
+    path.starts_with('/')
+}
+
+/// Absolute by Windows rules: a drive letter followed by a separator
+/// (`C:\` or `C:/`), or a UNC path (`\\server\share`). `C:cache` (relative
+/// to the drive's current directory) and `\cache` (relative to the current
+/// drive) are not.
+fn is_windows_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let drive_rooted = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let unc = bytes.len() >= 3
+        && matches!(bytes[0], b'\\' | b'/')
+        && matches!(bytes[1], b'\\' | b'/')
+        && !matches!(bytes[2], b'\\' | b'/');
+    drive_rooted || unc
 }
 
 #[cfg(test)]
@@ -1118,6 +1145,65 @@ mod tests {
     fn windows_no_home_disables_cache() {
         let p = HttpCache::resolve_cache_for(CachePlatform::Windows, None, None, None, None, None);
         assert_eq!(p, None);
+    }
+
+    #[test]
+    fn relative_home_roots_never_resolve_into_the_working_directory() {
+        // Linux: a relative HOME is ignored just like a relative XDG value.
+        let p = HttpCache::resolve_cache_for(
+            CachePlatform::Linux,
+            None,
+            Some("cache"),
+            Some("home/user"),
+            None,
+            None,
+        );
+        assert_eq!(p, None);
+        // macOS.
+        let p =
+            HttpCache::resolve_cache_for(CachePlatform::Macos, None, None, Some("."), None, None);
+        assert_eq!(p, None);
+        // Windows: drive-relative and root-relative values are not absolute;
+        // a relative LOCALAPPDATA falls back to an absolute USERPROFILE.
+        for relative in ["AppData\\Local", "C:AppData", "\\AppData", "/AppData"] {
+            let p = HttpCache::resolve_cache_for(
+                CachePlatform::Windows,
+                None,
+                None,
+                None,
+                Some(relative),
+                Some(r"C:\Users\tester"),
+            );
+            let normalized = p
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            assert_eq!(
+                normalized, "C:/Users/tester/AppData/Local/cdxgen/cache",
+                "{relative}"
+            );
+        }
+        let p = HttpCache::resolve_cache_for(
+            CachePlatform::Windows,
+            None,
+            None,
+            None,
+            None,
+            Some("Users\\tester"),
+        );
+        assert_eq!(p, None);
+    }
+
+    #[test]
+    fn windows_absolute_roots_include_unc_and_forward_slashes() {
+        assert!(is_windows_absolute(r"C:\Users"));
+        assert!(is_windows_absolute("d:/cache"));
+        assert!(is_windows_absolute(r"\\server\share"));
+        assert!(is_windows_absolute("//server/share"));
+        assert!(!is_windows_absolute("C:"));
+        assert!(!is_windows_absolute("C:cache"));
+        assert!(!is_windows_absolute(r"\cache"));
+        assert!(!is_windows_absolute(r"\\\\"));
+        assert!(!is_windows_absolute(""));
     }
 
     #[test]
