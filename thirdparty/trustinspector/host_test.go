@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -53,8 +54,8 @@ func TestDarwinHostTrustMaterials(t *testing.T) {
 		if material.SourceType != "host-store" {
 			t.Fatalf("expected host-store sourceType, got %q", material.SourceType)
 		}
-		if len(material.HostStores) != 1 {
-			t.Fatalf("expected exactly one hostStore, got %#v", material.HostStores)
+		if strings.HasPrefix(material.Name, "macos:") {
+			t.Fatalf("certificate named after its store: %q (%s)", material.Name, material.Subject)
 		}
 		switch material.HostStores[0] {
 		case "macos:System":
@@ -71,12 +72,47 @@ func TestDarwinHostTrustMaterials(t *testing.T) {
 	if !systemSeen || !rootsSeen {
 		t.Fatalf("expected both keychains, got system=%v roots=%v", systemSeen, rootsSeen)
 	}
-	// Certificates shipped in both keychains merge into one material with
-	// both stores.
+	// Issuers are linked across the host stores: Apple's Developer ID CA is
+	// issued by Apple Root CA.
+	linked := false
 	for _, material := range materials {
-		if len(material.Paths) > 1 && len(material.HostStores) == 1 {
-			t.Fatalf("shared certificate should carry both stores: %#v", material.HostStores)
+		if material.Name == "Developer ID Certification Authority" && len(material.Issuers) == 1 {
+			linked = true
 		}
+	}
+	if !linked {
+		t.Fatal("expected the Developer ID CA to be linked to its root")
+	}
+}
+
+// A certificate found in two host stores is one material carrying both store
+// labels. (The captured macOS keychains share no certificate, so this is a
+// separate case.)
+func TestHostStoresMergeAcrossStores(t *testing.T) {
+	pki := buildTestPKI(t)
+	accumulator := newMaterialAccumulator()
+	collectHostCertificates(accumulator, []*x509.Certificate{pki.rootA}, "windows:LocalMachine\\Root", "Cert:\\LocalMachine\\Root", "host-store")
+	collectHostCertificates(accumulator, []*x509.Certificate{pki.rootA}, "windows:LocalMachine\\AuthRoot", "Cert:\\LocalMachine\\AuthRoot", "host-store")
+	materials, _ := resolveHostMaterials(accumulator, nil)
+	if len(materials) != 1 || len(materials[0].HostStores) != 2 {
+		t.Fatalf("materials = %+v", materials)
+	}
+}
+
+// testdata/capture-windows-vm.sh carries its own copy of the store
+// enumeration script, which must stay the one host.go runs.
+func TestWindowsCaptureScriptMatchesHost(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "capture-windows-vm.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(data), "<<'PS'\n")
+	script, _, ok2 := strings.Cut(rest, "\nPS\n")
+	if !ok || !ok2 {
+		t.Fatal("no PS heredoc in capture-windows-vm.sh")
+	}
+	if got, want := strings.Join(strings.Fields(script), " "), strings.Join(strings.Fields(windowsCertStorePowerShellScript()), " "); got != want {
+		t.Fatalf("capture script drifted from host.go:\n%s\n%s", got, want)
 	}
 }
 

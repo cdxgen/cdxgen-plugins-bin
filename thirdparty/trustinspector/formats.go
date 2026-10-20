@@ -7,6 +7,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
+	"strings"
 )
 
 // Byte-level format detection and parsing for certificates and related
@@ -22,136 +24,190 @@ type sniffedMaterial struct {
 	certificates []parsedCertificate
 	privateKeys  []privateKeyMaterial
 	keystores    []keystoreMaterial
-	openPGP      bool // handled by the existing OpenPGP path
 }
 
 type parsedCertificate struct {
 	cert *x509.Certificate
-	// trustRejectedPurposes comes from the OpenSSL X509_CERT_AUX reject list
-	// of a "TRUSTED CERTIFICATE" PEM block; empty for ordinary certificates.
+	// trustAcceptedPurposes and trustRejectedPurposes come from the OpenSSL
+	// X509_CERT_AUX trust and reject lists of a "TRUSTED CERTIFICATE" PEM
+	// block; empty for ordinary certificates.
+	trustAcceptedPurposes []string
 	trustRejectedPurposes []string
 }
 
 type privateKeyMaterial struct {
-	format string // RSA, EC, PKCS8, ENCRYPTED-PKCS8, OPENSSH
+	format string // RSA, EC, DSA, PKCS8, ENCRYPTED-PKCS8, ENCRYPTED-RSA, ..., OPENSSH
 }
 
 type keystoreMaterial struct {
-	format   string // JKS, JCEKS, PKCS12
-	readable bool
+	format string // JKS, JCEKS, PKCS12
+	// complete is false when some or all of the store could not be read;
+	// certs holds what was read.
+	complete bool
 	certs    []*x509.Certificate
 }
 
-// contentError marks input that is not parseable as any known format; callers
-// treat it as "nothing found", never as a fatal error.
+// errNotTrustMaterial marks input that is not parseable as any known format;
+// callers treat it as "nothing found", never as a fatal error.
 var errNotTrustMaterial = errors.New("not recognized trust material")
 
-// sniffTrustMaterial classifies file content by inspecting its bytes:
-// PEM blocks (CERTIFICATE, TRUSTED CERTIFICATE, PKCS7, private keys), raw DER
-// certificates, PKCS#7, JKS/JCEKS keystores and PKCS#12 trust stores.
+// sniffTrustMaterial classifies file content by inspecting its bytes. Binary
+// containers come first (the JKS/JCEKS magic, the PKCS#12 PFX structure, DER
+// certificates and PKCS#7): their payload can carry PEM text (an alias, a
+// certificate extension) that must not shadow the real entries. PEM blocks
+// (CERTIFICATE, TRUSTED CERTIFICATE, PKCS7, private keys) are read only from
+// content that is none of those. OpenPGP armor is left to the OpenPGP reader.
 func sniffTrustMaterial(data []byte) (*sniffedMaterial, error) {
 	result := &sniffedMaterial{}
-	if looksLikeOpenPGP(data) {
-		result.openPGP = true
-		return result, nil
-	}
-	if hasPEMHeader(data) {
-		parsePEMBlocks(data, result)
-		if len(result.certificates) > 0 || len(result.privateKeys) > 0 || len(result.keystores) > 0 {
-			return result, nil
-		}
-	}
-	// Raw DER or binary forms.
-	if len(result.certificates) == 0 {
-		if certs, err := x509.ParseCertificates(data); err == nil && len(certs) > 0 {
-			for _, cert := range certs {
-				result.certificates = append(result.certificates, parsedCertificate{cert: cert})
-			}
-			return result, nil
-		}
-		if certs, err := parsePKCS7(data); err == nil && len(certs) > 0 {
-			for _, cert := range certs {
-				result.certificates = append(result.certificates, parsedCertificate{cert: cert})
-			}
-			return result, nil
-		}
-	}
 	if format, ok := javaKeystoreMagic(data); ok {
-		keystore := keystoreMaterial{format: format}
-		certs, err := readJavaTrustStore(data)
-		if err != nil {
-			result.keystores = append(result.keystores, keystoreMaterial{format: format, readable: false})
-			return result, nil
-		}
-		keystore.readable = true
-		keystore.certs = certs
-		result.keystores = append(result.keystores, keystore)
+		certs, complete := readJavaTrustStore(data)
+		result.keystores = append(result.keystores, keystoreMaterial{format: format, complete: complete, certs: certs})
 		return result, nil
 	}
-	if looksLikePKCS12(data) {
-		keystore := keystoreMaterial{format: "PKCS12"}
-		certs, err := readPKCS12TrustStore(data)
-		if err != nil {
-			result.keystores = append(result.keystores, keystoreMaterial{format: "PKCS12", readable: false})
-			return result, nil
-		}
-		keystore.readable = true
-		keystore.certs = certs
-		result.keystores = append(result.keystores, keystore)
+	if cost, ok := pkcs12Iterations(data); ok {
+		certs, err := readPKCS12TrustStore(data, cost)
+		result.keystores = append(result.keystores, keystoreMaterial{format: "PKCS12", complete: err == nil, certs: certs})
 		return result, nil
 	}
-	return nil, errNotTrustMaterial
+	if certs := parseDERCertificates(data); len(certs) > 0 {
+		for _, cert := range certs {
+			result.certificates = append(result.certificates, parsedCertificate{cert: cert})
+		}
+		return result, nil
+	}
+	if certs, err := parsePKCS7(data); err == nil && len(certs) > 0 {
+		for _, cert := range certs {
+			result.certificates = append(result.certificates, parsedCertificate{cert: cert})
+		}
+		return result, nil
+	}
+	parsePEMBlocks(data, result)
+	if len(result.certificates) == 0 && len(result.privateKeys) == 0 {
+		return nil, errNotTrustMaterial
+	}
+	return result, nil
 }
 
-func looksLikeOpenPGP(data []byte) bool {
-	return bytes.Contains(data, []byte("-----BEGIN PGP"))
+// parseDERCertificates reads one or more concatenated DER certificates. A
+// single certificate followed by other bytes (a trailing newline, say) is
+// accepted too, as OpenSSL's DER reader does.
+func parseDERCertificates(data []byte) []*x509.Certificate {
+	if len(data) == 0 || data[0] != 0x30 {
+		return nil
+	}
+	if certs, err := x509.ParseCertificates(data); err == nil {
+		return certs
+	}
+	var element asn1.RawValue
+	if _, err := asn1.Unmarshal(data, &element); err != nil {
+		return nil
+	}
+	if cert, err := x509.ParseCertificate(element.FullBytes); err == nil {
+		return []*x509.Certificate{cert}
+	}
+	return nil
 }
 
-func hasPEMHeader(data []byte) bool {
-	return bytes.Contains(data, []byte("-----BEGIN "))
+// pemBlock is one "-----BEGIN <type>-----" ... "-----END <type>-----" block:
+// its type and its text from the BEGIN marker through the END marker.
+type pemBlock struct {
+	typ  string
+	text []byte
 }
 
-// parsePEMBlocks walks PEM blocks in order and dispatches on the block type.
-// Unrecognized blocks are skipped, matching report-1 behavior.
-func parsePEMBlocks(data []byte, result *sniffedMaterial) {
-	remaining := data
-	for count := 0; count < pemScanLimit; count++ {
-		block, rest := pem.Decode(remaining)
-		if block == nil {
+// eachPEMBlock finds PEM blocks anywhere in data (embedded in a binary, or
+// with no newline after the END marker, both of which Go's crypto/x509
+// accepts in AppendCertsFromPEM's input once isolated) and calls fn for each,
+// at most pemScanLimit. A BEGIN marker with no matching END is skipped and
+// the scan goes on after it, so a broken block cannot hide the ones after it.
+// Nothing is decoded here.
+func eachPEMBlock(data []byte, fn func(pemBlock)) {
+	begin := []byte("-----BEGIN ")
+	dashes := []byte("-----")
+	offset := 0
+	for count := 0; count < pemScanLimit && offset < len(data); count++ {
+		index := bytes.Index(data[offset:], begin)
+		if index < 0 {
 			return
 		}
-		remaining = rest
-		switch block.Type {
-		case "CERTIFICATE":
-			if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+		start := offset + index
+		typeStart := start + len(begin)
+		offset = typeStart
+		typeLen := bytes.Index(data[typeStart:], dashes)
+		if typeLen <= 0 || typeLen > 64 || bytes.ContainsAny(data[typeStart:typeStart+typeLen], "\r\n") {
+			continue
+		}
+		typ := string(data[typeStart : typeStart+typeLen])
+		bodyStart := typeStart + typeLen
+		endMarker := []byte("-----END " + typ + "-----")
+		endIndex := bytes.Index(data[bodyStart:], endMarker)
+		if endIndex < 0 {
+			continue
+		}
+		// Another BEGIN before this block's END means this one is broken;
+		// the scan resumes at that BEGIN rather than swallowing its block.
+		if next := bytes.Index(data[bodyStart:bodyStart+endIndex], begin); next >= 0 {
+			continue
+		}
+		end := bodyStart + endIndex + len(endMarker)
+		fn(pemBlock{typ: typ, text: data[start:end]})
+		offset = end
+	}
+}
+
+// decode base64-decodes a block that was isolated by eachPEMBlock.
+func (b pemBlock) decode() []byte {
+	text := make([]byte, 0, len(b.text)+1)
+	text = append(append(text, b.text...), '\n')
+	if block, _ := pem.Decode(text); block != nil {
+		return block.Bytes
+	}
+	return nil
+}
+
+// parsePEMBlocks dispatches PEM blocks on their type. Unrecognized blocks are
+// skipped, matching report-1 behavior. Private keys are classified from the
+// BEGIN line and the RFC 1421 Proc-Type header only; their body is never
+// decoded (PLAN section 1, principle 7).
+func parsePEMBlocks(data []byte, result *sniffedMaterial) {
+	eachPEMBlock(data, func(block pemBlock) {
+		switch block.typ {
+		// "X509 CERTIFICATE" is OpenSSL's legacy label (PEM_STRING_X509_OLD),
+		// which it still reads as a certificate.
+		case "CERTIFICATE", "X509 CERTIFICATE":
+			if cert, err := x509.ParseCertificate(block.decode()); err == nil {
 				result.certificates = append(result.certificates, parsedCertificate{cert: cert})
 			}
 		case "TRUSTED CERTIFICATE":
-			if parsed, err := parseTrustedCertificate(block.Bytes); err == nil {
+			if parsed, err := parseTrustedCertificate(block.decode()); err == nil {
 				result.certificates = append(result.certificates, parsed)
 			}
-		case "PKCS7":
-			if certs, err := parsePKCS7(block.Bytes); err == nil {
+		case "PKCS7", "CMS":
+			if certs, err := parsePKCS7(block.decode()); err == nil {
 				for _, cert := range certs {
 					result.certificates = append(result.certificates, parsedCertificate{cert: cert})
 				}
 			}
 		default:
-			if format, ok := privateKeyPEMFormat(block.Type); ok {
+			if format, ok := privateKeyPEMFormat(block); ok {
 				result.privateKeys = append(result.privateKeys, privateKeyMaterial{format: format})
 			}
 		}
-	}
+	})
 }
 
-// privateKeyPEMFormat classifies a private key from its PEM header line only.
-// The body is never decoded (PLAN section 1, principle 7).
-func privateKeyPEMFormat(blockType string) (string, bool) {
-	switch blockType {
+// privateKeyPEMFormat classifies a private key from its BEGIN line, and marks
+// legacy OpenSSL keys whose Proc-Type header says ENCRYPTED. The header
+// cannot occur in the base64 body, whose alphabet has no ':' or ','.
+func privateKeyPEMFormat(block pemBlock) (string, bool) {
+	var format string
+	switch block.typ {
 	case "RSA PRIVATE KEY":
-		return "RSA", true
+		format = "RSA"
 	case "EC PRIVATE KEY":
-		return "EC", true
+		format = "EC"
+	case "DSA PRIVATE KEY":
+		format = "DSA"
 	case "PRIVATE KEY":
 		return "PKCS8", true
 	case "ENCRYPTED PRIVATE KEY":
@@ -161,11 +217,15 @@ func privateKeyPEMFormat(blockType string) (string, bool) {
 	default:
 		return "", false
 	}
+	if bytes.Contains(block.text, []byte("Proc-Type: 4,ENCRYPTED")) {
+		format = "ENCRYPTED-" + format
+	}
+	return format, true
 }
 
 // parseTrustedCertificate splits an OpenSSL "TRUSTED CERTIFICATE" DER into the
 // certificate and the appended X509_CERT_AUX, and returns the certificate with
-// its reject list.
+// its trust and reject lists.
 //
 // The on-disk layout is the certificate DER followed by the aux DER: OpenSSL's
 // i2d_X509_AUX/d2i_X509_AUX append or consume the aux structure after the
@@ -180,6 +240,9 @@ func privateKeyPEMFormat(blockType string) (string, bool) {
 //	    alias  UTF8String             OPTIONAL,
 //	    keyid  OCTET STRING           OPTIONAL,
 //	    other  [1] IMPLICIT SEQUENCE OF AlgorithmIdentifier OPTIONAL }
+//
+// A non-empty trust list matters as much as the reject list: OpenSSL then
+// rejects every purpose not on it (obj_trust in crypto/x509/x509_trust.c).
 func parseTrustedCertificate(der []byte) (parsedCertificate, error) {
 	parsed := parsedCertificate{}
 	var certValue asn1.RawValue
@@ -192,41 +255,94 @@ func parseTrustedCertificate(der []byte) (parsedCertificate, error) {
 		return parsed, err
 	}
 	parsed.cert = cert
-	if len(rest) > 0 {
-		if purposes := parseCertificateAuxReject(rest); len(purposes) > 0 {
-			parsed.trustRejectedPurposes = purposes
-		}
-	}
+	parsed.trustAcceptedPurposes, parsed.trustRejectedPurposes = parseCertificateAux(rest)
 	return parsed, nil
 }
 
-// parseCertificateAuxReject reads the reject OIDs out of an X509_CERT_AUX.
-// Unknown OIDs are reported dotted; recognized id-kp OIDs use the same short
-// names as extKeyUsage (RFC 5280 section 4.2.1.12).
-func parseCertificateAuxReject(aux []byte) []string {
-	var auxStructure struct {
-		Trust  []asn1.ObjectIdentifier `asn1:"optional"`
-		Reject []asn1.ObjectIdentifier `asn1:"tag:0,optional"`
-		Alias  string                  `asn1:"optional"`
-		KeyID  []byte                  `asn1:"optional"`
-		Other  []asn1.RawValue         `asn1:"tag:1,optional"`
+// parseCertificateAux reads the trust and reject OID lists out of an
+// X509_CERT_AUX. It walks the elements one by one instead of unmarshalling
+// the whole structure, so a field this reader does not need (an alias that
+// is not valid UTF-8, an OID arc wider than 64 bits) cannot hide the lists,
+// which OpenSSL still honors in that case. Recognized id-kp OIDs use the same
+// short names as extKeyUsage (RFC 5280 section 4.2.1.12); others stay dotted.
+func parseCertificateAux(aux []byte) (accepted, rejected []string) {
+	var outer asn1.RawValue
+	if _, err := asn1.Unmarshal(aux, &outer); err != nil || outer.Tag != asn1.TagSequence || !outer.IsCompound {
+		return nil, nil
 	}
-	if _, err := asn1.Unmarshal(aux, &auxStructure); err != nil {
-		return nil
+	remaining := outer.Bytes
+	for len(remaining) > 0 {
+		var element asn1.RawValue
+		var err error
+		if remaining, err = asn1.Unmarshal(remaining, &element); err != nil {
+			break
+		}
+		switch {
+		case element.Class == asn1.ClassUniversal && element.Tag == asn1.TagSequence && element.IsCompound:
+			accepted = append(accepted, purposeNames(element.Bytes)...)
+		case element.Class == asn1.ClassContextSpecific && element.Tag == 0 && element.IsCompound:
+			rejected = append(rejected, purposeNames(element.Bytes)...)
+		}
 	}
-	if len(auxStructure.Reject) == 0 {
-		return nil
+	return uniqueSortedStrings(accepted), uniqueSortedStrings(rejected)
+}
+
+// purposeNames reads a sequence of OBJECT IDENTIFIER elements into purpose
+// names.
+func purposeNames(content []byte) []string {
+	var names []string
+	for count := 0; len(content) > 0 && count < pemScanLimit; count++ {
+		var element asn1.RawValue
+		var err error
+		if content, err = asn1.Unmarshal(content, &element); err != nil {
+			break
+		}
+		if element.Class != asn1.ClassUniversal || element.Tag != asn1.TagOID {
+			continue
+		}
+		if oid, ok := dottedOID(element.Bytes); ok {
+			names = append(names, extKeyUsageOIDName(oid))
+		}
 	}
-	purposes := make([]string, 0, len(auxStructure.Reject))
-	for _, oid := range auxStructure.Reject {
-		purposes = append(purposes, extKeyUsageOIDName(oid))
+	return names
+}
+
+// dottedOID renders the content octets of an OBJECT IDENTIFIER (X.690
+// section 8.19) in dotted form, with arcs of any size.
+func dottedOID(content []byte) (string, bool) {
+	if len(content) == 0 || content[len(content)-1]&0x80 != 0 {
+		return "", false
 	}
-	return uniqueSortedStrings(purposes)
+	var arcs []*big.Int
+	arc := new(big.Int)
+	for _, b := range content {
+		arc.Lsh(arc, 7)
+		arc.Or(arc, big.NewInt(int64(b&0x7f)))
+		if b&0x80 == 0 {
+			arcs = append(arcs, arc)
+			arc = new(big.Int)
+		}
+	}
+	// The first subidentifier packs the first two arcs (X.690 8.19.4).
+	first := arcs[0]
+	parts := make([]string, 0, len(arcs)+1)
+	switch {
+	case first.Cmp(big.NewInt(40)) < 0:
+		parts = append(parts, "0", first.String())
+	case first.Cmp(big.NewInt(80)) < 0:
+		parts = append(parts, "1", new(big.Int).Sub(first, big.NewInt(40)).String())
+	default:
+		parts = append(parts, "2", new(big.Int).Sub(first, big.NewInt(80)).String())
+	}
+	for _, a := range arcs[1:] {
+		parts = append(parts, a.String())
+	}
+	return strings.Join(parts, "."), true
 }
 
 // extKeyUsageOIDName maps id-kp OIDs (RFC 5280 section 4.2.1.12) to their
 // short names; anything else stays dotted.
-func extKeyUsageOIDName(oid asn1.ObjectIdentifier) string {
+func extKeyUsageOIDName(oid string) string {
 	names := map[string]string{
 		"2.5.29.37.0":            "any",
 		"1.3.6.1.5.5.7.3.1":      "serverAuth",
@@ -241,10 +357,10 @@ func extKeyUsageOIDName(oid asn1.ObjectIdentifier) string {
 		"1.3.6.1.5.5.8.2.3":      "ipsecTunnel",
 		"1.3.6.1.5.5.8.2.4":      "ipsecUser",
 	}
-	if name, ok := names[oid.String()]; ok {
+	if name, ok := names[oid]; ok {
 		return name
 	}
-	return oid.String()
+	return oid
 }
 
 // parsePKCS7 extracts the certificate set from a PKCS#7 SignedData content
@@ -301,41 +417,20 @@ func parsePKCS7(der []byte) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-// looksLikePKCS12 is a cheap pre-check before handing bytes to the PKCS#12
-// decoder: the outer element must be a SEQUENCE carrying the PFX version
-// INTEGER 3 (RFC 7292 section 4: PFX ::= SEQUENCE { version INTEGER, ... }) —
-// the DER bytes 02 01 03 appear near the start of every PFX.
-func looksLikePKCS12(data []byte) bool {
-	if len(data) < 8 || data[0] != 0x30 {
-		return false
-	}
-	index := bytes.Index(data, []byte{0x02, 0x01, 0x03})
-	return index >= 0 && index < 16
-}
-
 // embeddedCertificateBlocks extracts PEM CERTIFICATE blocks from binary
-// content (go:embed pools, packaged resources). DER-embedded certificates are
-// out of scope (PLAN section 4.1).
+// content (go:embed pools, packaged resources). A Go string constant puts the
+// END marker straight against other bytes, which is why eachPEMBlock isolates
+// each block before decoding it. DER-embedded certificates are out of scope
+// (PLAN section 4.1).
 func embeddedCertificateBlocks(data []byte) []*x509.Certificate {
 	var certs []*x509.Certificate
-	begin := []byte("-----BEGIN CERTIFICATE-----")
-	offset := 0
-	for count := 0; count < pemScanLimit; count++ {
-		index := bytes.Index(data[offset:], begin)
-		if index < 0 {
-			return certs
+	eachPEMBlock(data, func(block pemBlock) {
+		if block.typ != "CERTIFICATE" {
+			return
 		}
-		block, rest := pem.Decode(data[offset+index:])
-		if block == nil {
-			return certs
-		}
-		offset += index + (len(data) - (offset + index) - len(rest))
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+		if cert, err := x509.ParseCertificate(block.decode()); err == nil {
 			certs = append(certs, cert)
 		}
-	}
+	})
 	return certs
 }

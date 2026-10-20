@@ -108,7 +108,7 @@ func newMaterialAccumulator() *materialAccumulator {
 }
 
 func materialDedupKey(material *trustMaterial) string {
-	return material.Kind + "\x00" + firstNonEmpty(material.CertSHA256, material.Fingerprint, material.SHA256, material.Path)
+	return material.Kind + "\x00" + firstNonEmpty(material.CertSHA256, material.Fingerprint, material.SHA256, material.dedupID, material.Path)
 }
 
 func (a *materialAccumulator) add(material *trustMaterial, location certLocation) {
@@ -127,7 +127,8 @@ func (a *materialAccumulator) add(material *trustMaterial, location certLocation
 }
 
 // resolve merges the accumulated locations into one material per identity.
-// path becomes the lexicographically smallest path, and sourceType,
+// path becomes the lexicographically smallest path (an embedded-binary
+// location only when there is no other), and sourceType,
 // sha1/sha256, trustDomain and fileExtension follow that path, which keeps
 // the report-1 meaning of those fields ("sha1/sha256 are the file digests of
 // path").
@@ -136,7 +137,16 @@ func (a *materialAccumulator) resolve() []trustMaterial {
 	for _, key := range a.order {
 		material := a.materials[key]
 		locations := a.locations[key]
-		sort.Slice(locations, func(i, j int) bool { return locations[i].path < locations[j].path })
+		// The primary location is the smallest path, preferring files that
+		// are trust material themselves over binaries embedding the
+		// certificate, so sourceType and the report-1 fields describe the
+		// trust store a certificate is in.
+		sort.Slice(locations, func(i, j int) bool {
+			if ei, ej := locations[i].sourceType == "embedded-binary", locations[j].sourceType == "embedded-binary"; ei != ej {
+				return ej
+			}
+			return locations[i].path < locations[j].path
+		})
 		var paths []string
 		var sourceTypes []string
 		var hostStores []string
@@ -201,12 +211,19 @@ func buildMaterialProperties(material *trustMaterial, location certLocation) []p
 		values = []property{
 			{Name: "cdx:crypto:sourceType", Value: location.sourceType},
 		}
+		// A keystore's readability is a fact about the file, not the
+		// location; keep it.
+		for _, p := range material.Properties {
+			if p.Name == "cdx:crypto:keystoreReadable" {
+				values = append(values, p)
+			}
+		}
 	}
 	return uniqueProperties(values)
 }
 
 func materialIdentity(material trustMaterial) string {
-	return firstNonEmpty(material.CertSHA256, material.Fingerprint, material.SHA256)
+	return firstNonEmpty(material.CertSHA256, material.Fingerprint, material.SHA256, material.dedupID)
 }
 
 // materialLess is the total order over materials:

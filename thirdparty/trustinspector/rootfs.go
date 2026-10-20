@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,17 +16,23 @@ import (
 // the parsing bounds (PLAN section 4.1).
 
 // Bounds (PLAN section 4.1). They are variables so tests can tighten them;
-// production values: 16 MiB per file, 128 MiB per binary, 20,000 files per
-// tree, depth 12, 100 warnings.
+// production values: 16 MiB per file, 128 MiB per binary, 20,000 files read
+// per tree, 500,000 directory entries visited per tree, depth 12, 100
+// warnings.
 var (
-	// maxMaterialFileBytes skips files over 16 MiB before reading them.
+	// maxMaterialFileBytes skips files over 16 MiB; reads are capped at it
+	// too, so a file cannot grow past it after the size check.
 	maxMaterialFileBytes = int64(16) << 20
 	// maxEmbeddedFileBytes bounds the --embedded binary scan at 128 MiB.
 	maxEmbeddedFileBytes = int64(128) << 20
-	// maxFilesPerTree stops a walk after 20,000 entries.
+	// maxFilesPerTree stops a walk after reading 20,000 files.
 	maxFilesPerTree = 20000
+	// maxEntriesPerTree stops a walk after visiting 500,000 entries of any
+	// type (directories, symlinks, files), so trees of empty directories or
+	// links cannot make a walk unbounded.
+	maxEntriesPerTree = 500000
 	// maxScanDepth is the maximum path depth (relative to the scanned
-	// directory) a file may have.
+	// directory) a file may have; deeper directories are not descended.
 	maxScanDepth = 12
 	// maxWarnings caps the envelope warnings list.
 	maxWarnings = 100
@@ -110,54 +119,138 @@ func candidateDirs() []candidateDir {
 	return dirs
 }
 
+// rootScan confines every file access of a scan to the scanned root.
+// os.Root resolves each name inside the root and refuses any symlink, in any
+// path component, that leads outside it, so an image cannot point the scan
+// at host files; symlinks as the final component and non-regular files
+// (FIFOs, devices, sockets) are skipped outright. Every name is
+// slash-separated and relative to the root; reported paths are that name with
+// a leading "/".
+type rootScan struct {
+	root        *os.Root
+	fsys        fs.FS
+	accumulator *materialAccumulator
+	warnings    *warningList
+	// collected records the files already parsed, so a file inside two
+	// candidate directories (etc/ssl/certs/java/cacerts) is read once, by the
+	// more specific candidate, which is walked first.
+	collected map[string]bool
+}
+
 // scanRootfsTrustMaterials walks the coverage table under root and returns
 // the deduplicated materials plus any warnings produced by bound hits.
 func scanRootfsTrustMaterials(root string, options scanOptions) ([]trustMaterial, []string, error) {
-	info, err := os.Stat(root)
+	confined, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !info.IsDir() {
-		return nil, nil, fmt.Errorf("%s is not a directory", root)
+	defer confined.Close()
+	scan := &rootScan{
+		root:        confined,
+		fsys:        confined.FS(),
+		accumulator: newMaterialAccumulator(),
+		warnings:    &warningList{},
+		collected:   map[string]bool{},
 	}
+	deselected := scan.deselectedCACertificates()
 
-	accumulator := newMaterialAccumulator()
-	warnings := &warningList{}
-	deselected := deselectedCACertificates(root)
-
-	for _, candidate := range candidateDirs() {
-		baseDir := filepath.Join(root, candidate.rel)
-		if _, err := os.Stat(baseDir); err != nil {
-			continue
-		}
+	candidates := candidateDirs()
+	for i := range candidates {
+		candidates[i].rel = filepath.ToSlash(candidates[i].rel)
+	}
+	// Most specific first: a file under two candidates takes the sourceType
+	// of the deeper one.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return strings.Count(candidates[i].rel, "/") > strings.Count(candidates[j].rel, "/")
+	})
+	for _, candidate := range candidates {
 		if candidate.isFile {
-			collectFileMaterial(accumulator, baseDir, root, candidate.sourceType, warnings)
+			scan.collectFile(candidate.rel, candidate.sourceType)
 			continue
 		}
-		walkMaterialDir(accumulator, baseDir, root, candidate.sourceType, warnings)
+		scan.walkMaterialDir(candidate.rel, candidate.sourceType)
 	}
 
 	// --extra-dir <rel>: generic directories requested on the command line.
 	for _, rel := range options.ExtraDirs {
-		baseDir := filepath.Join(root, filepath.FromSlash(rel))
-		if _, err := os.Stat(baseDir); err != nil {
-			continue
-		}
-		walkMaterialDir(accumulator, baseDir, root, "generic", warnings)
+		scan.walkMaterialDir(path.Clean(filepath.ToSlash(rel)), "generic")
 	}
 
 	// --embedded: opt-in scan of the whole root for PEM blocks inside ELF,
 	// Mach-O and PE binaries.
 	if options.Embedded {
-		walkEmbeddedBinaries(accumulator, root, warnings)
+		scan.walkEmbeddedBinaries()
 	}
 
-	materials := accumulator.resolve()
+	materials := scan.accumulator.resolve()
 	applyCADeselected(materials, deselected)
-	if issuerWarnings := linkIssuers(materials, accumulator.certs); len(issuerWarnings) > 0 {
-		warnings.add(issuerWarnings...)
+	if issuerWarnings := linkIssuers(materials, scan.accumulator.certs); len(issuerWarnings) > 0 {
+		scan.warnings.add(issuerWarnings...)
 	}
-	return materials, warnings.list(), nil
+	return materials, scan.warnings.list(), nil
+}
+
+// errNotRegularFile and errFileTooLarge are the reasons readRegularFile skips
+// a file.
+var (
+	errNotRegularFile = errors.New("not a regular file")
+	errFileTooLarge   = errors.New("file too large")
+)
+
+// readRegularFile reads a regular file of at most limit bytes. The final
+// path component must not be a symlink, the file must be regular when opened
+// (not a FIFO or device, which could block or never end), and the read itself
+// is capped, so a file growing after the size check is still bounded.
+func readRegularFile(open func() (fs.File, error), lstat func() (fs.FileInfo, error), limit int64) ([]byte, error) {
+	info, err := lstat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errNotRegularFile
+	}
+	if info.Size() > limit {
+		return nil, errFileTooLarge
+	}
+	file, err := open()
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	if info, err = file.Stat(); err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errNotRegularFile
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errFileTooLarge
+	}
+	return data, nil
+}
+
+// readFile reads name (relative to the root) under the confinement and
+// bounds of readRegularFile.
+func (s *rootScan) readFile(name string, limit int64) ([]byte, error) {
+	return readRegularFile(
+		func() (fs.File, error) { return s.root.Open(name) },
+		func() (fs.FileInfo, error) { return s.root.Lstat(name) },
+		limit,
+	)
+}
+
+// readHostFile reads a file named on the command line (certs mode): not
+// confined to a root, but held to the same regular-file and size rules.
+func readHostFile(name string, limit int64) ([]byte, error) {
+	return readRegularFile(
+		func() (fs.File, error) { return os.Open(name) },
+		func() (fs.FileInfo, error) { return os.Lstat(name) },
+		limit,
+	)
 }
 
 type warningList struct {
@@ -192,60 +285,61 @@ func (w *warningList) list() []string {
 }
 
 // walkMaterialDir walks one candidate directory with the bounds from PLAN
-// section 4.1: symlinks skipped, 16 MiB per file, 20,000 files per tree,
-// depth 12. Each bound hit adds an envelope warning.
-func walkMaterialDir(accumulator *materialAccumulator, baseDir, root, sourceType string, warnings *warningList) {
-	fileCount := 0
-	depthWarned := false
-	_ = filepath.WalkDir(baseDir, func(current string, d fs.DirEntry, walkErr error) error {
+// section 4.1: symlinks and non-regular files skipped, 16 MiB per file,
+// 20,000 files read and 500,000 entries visited per tree, depth 12 (deeper
+// directories are not descended). Each bound hit adds an envelope warning.
+func (s *rootScan) walkMaterialDir(base, sourceType string) {
+	if info, err := s.root.Stat(base); err != nil || !info.IsDir() {
+		return
+	}
+	fileCount, entryCount := 0, 0
+	_ = fs.WalkDir(s.fsys, base, func(name string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
+		entryCount++
+		if entryCount > maxEntriesPerTree {
+			s.warnings.add(fmt.Sprintf("entry limit (%d) reached in /%s", maxEntriesPerTree, base))
+			return fs.SkipAll
+		}
 		if d.IsDir() {
+			if name != base && strings.Count(strings.TrimPrefix(name, base+"/"), "/")+1 >= maxScanDepth {
+				s.warnings.add(fmt.Sprintf("depth limit (%d) exceeded in /%s", maxScanDepth, base))
+				return fs.SkipDir
+			}
 			return nil
 		}
-		if d.Type()&os.ModeSymlink != 0 {
+		if !d.Type().IsRegular() || s.collected[name] || !looksLikeTrustMaterialPath("/"+name, sourceType) {
 			return nil
 		}
 		fileCount++
 		if fileCount > maxFilesPerTree {
-			warnings.add(fmt.Sprintf("file count limit (%d) reached in %s", maxFilesPerTree, displayPath(baseDir, root)))
+			s.warnings.add(fmt.Sprintf("file count limit (%d) reached in /%s", maxFilesPerTree, base))
 			return fs.SkipAll
 		}
-		relBase, err := filepath.Rel(baseDir, current)
-		if err != nil {
-			return nil
-		}
-		if depth := strings.Count(relBase, string(filepath.Separator)) + 1; depth > maxScanDepth {
-			if !depthWarned {
-				depthWarned = true
-				warnings.add(fmt.Sprintf("depth limit (%d) exceeded in %s", maxScanDepth, displayPath(baseDir, root)))
-			}
-			return nil
-		}
-		if info, err := d.Info(); err == nil && info.Size() > maxMaterialFileBytes {
-			warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", maxMaterialFileBytes>>20, displayPath(current, root)))
-			return nil
-		}
-		collectFileMaterial(accumulator, current, root, sourceType, warnings)
+		s.collectFile(name, sourceType)
 		return nil
 	})
 }
 
-// collectFileMaterial parses one file and feeds everything it contains into
-// the accumulator. Parse failures are not errors: a file that is not trust
+// collectFile parses one file and feeds everything it contains into the
+// accumulator. Parse failures are not errors: a file that is not trust
 // material is simply skipped.
-func collectFileMaterial(accumulator *materialAccumulator, absolutePath, root, sourceType string, warnings *warningList) {
-	relPath := relativeRootPath(absolutePath, root)
-	if !looksLikeTrustMaterialPath(relPath, sourceType) {
+func (s *rootScan) collectFile(name, sourceType string) {
+	relPath := "/" + name
+	if s.collected[name] || !looksLikeTrustMaterialPath(relPath, sourceType) {
 		return
 	}
-	data, err := os.ReadFile(absolutePath)
+	data, err := s.readFile(name, maxMaterialFileBytes)
+	if errors.Is(err, errFileTooLarge) {
+		s.warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", maxMaterialFileBytes>>20, relPath))
+	}
 	if err != nil || len(data) == 0 {
 		return
 	}
+	s.collected[name] = true
 	for _, entry := range parseFileMaterials(data, relPath, sourceType) {
-		accumulator.add(entry.material, entry.location)
+		s.accumulator.add(entry.material, entry.location)
 	}
 }
 
@@ -270,29 +364,29 @@ func parseFileMaterials(data []byte, relPath, sourceType string) []parsedEntry {
 		sha256Value:   sha256Value,
 	}
 
-	// OpenPGP keyrings keep their report-1 handling.
-	if openPGPMaterials := parseOpenPGPMaterials(data, relPath, sha1Value, sha256Value, trustDomain, sourceType, fileExtension); len(openPGPMaterials) > 0 {
-		var entries []parsedEntry
-		for i := range openPGPMaterials {
-			entries = append(entries, parsedEntry{material: &openPGPMaterials[i], location: location})
-		}
-		return entries
+	// OpenPGP keyrings keep their report-1 handling. A file holding OpenPGP
+	// keys can hold certificates too, so both readers always run.
+	var entries []parsedEntry
+	openPGPMaterials := parseOpenPGPMaterials(data, relPath, sha1Value, sha256Value, trustDomain, sourceType, fileExtension)
+	for i := range openPGPMaterials {
+		entries = append(entries, parsedEntry{material: &openPGPMaterials[i], location: location})
 	}
 
 	sniffed, err := sniffTrustMaterial(data)
 	if err != nil {
-		return nil
+		return entries
 	}
-	var entries []parsedEntry
 	for _, parsed := range sniffed.certificates {
 		material := buildCertificateFields(parsed.cert)
 		setCertificateName(material, parsed.cert, relPath)
+		material.TrustAcceptedPurposes = parsed.trustAcceptedPurposes
 		material.TrustRejectedPurposes = parsed.trustRejectedPurposes
 		entries = append(entries, parsedEntry{material: material, location: location})
 	}
-	for _, privateKey := range sniffed.privateKeys {
+	for index, privateKey := range sniffed.privateKeys {
 		// Private keys carry the header-line format only; nothing is
-		// decoded and no digest is emitted (PLAN section 3).
+		// decoded and no digest is emitted (PLAN section 3). Each key in a
+		// file is its own material.
 		entries = append(entries, parsedEntry{
 			material: &trustMaterial{
 				Kind:       "private-key",
@@ -300,21 +394,26 @@ func parseFileMaterials(data []byte, relPath, sourceType string) []parsedEntry {
 				SourceType: sourceType,
 				Format:     privateKey.format,
 				Properties: []property{{Name: "cdx:crypto:sourceType", Value: sourceType}},
+				dedupID:    fmt.Sprintf("%s#%d", relPath, index),
 			},
 			location: certLocation{path: relPath, sourceType: sourceType},
 		})
 	}
 	for _, keystore := range sniffed.keystores {
-		if keystore.readable {
-			// A readable trust store yields its certificates; the container
-			// itself is not a material (kind "keystore" is reserved for
-			// stores that could not be read).
-			for _, cert := range keystore.certs {
-				material := buildCertificateFields(cert)
-				setCertificateName(material, cert, relPath)
-				entries = append(entries, parsedEntry{material: material, location: location})
-			}
+		// A trust store yields the certificates it could read; the container
+		// itself is a material only when it was not read in full, with
+		// keystoreReadable "false" (nothing read) or "partial".
+		for _, cert := range keystore.certs {
+			material := buildCertificateFields(cert)
+			setCertificateName(material, cert, relPath)
+			entries = append(entries, parsedEntry{material: material, location: location})
+		}
+		if keystore.complete {
 			continue
+		}
+		readable := "false"
+		if len(keystore.certs) > 0 {
+			readable = "partial"
 		}
 		entries = append(entries, parsedEntry{
 			material: &trustMaterial{
@@ -325,7 +424,7 @@ func parseFileMaterials(data []byte, relPath, sourceType string) []parsedEntry {
 				Format:     keystore.format,
 				Properties: []property{
 					{Name: "cdx:crypto:sourceType", Value: sourceType},
-					{Name: "cdx:crypto:keystoreReadable", Value: "false"},
+					{Name: "cdx:crypto:keystoreReadable", Value: readable},
 				},
 			},
 			location: certLocation{path: relPath, sourceType: sourceType},
@@ -347,7 +446,7 @@ func parseFileMaterials(data []byte, relPath, sourceType string) []parsedEntry {
 // follows cacert.pem, and the java-truststore walk only follows keystore
 // names; the content sniff then decides what the file really is.
 func looksLikeTrustMaterialPath(relPath, sourceType string) bool {
-	lowerPath := strings.ToLower(filepath.ToSlash(relPath))
+	lowerPath := strings.TrimPrefix(strings.ToLower(filepath.ToSlash(relPath)), "/")
 	if strings.HasPrefix(lowerPath, "etc/ssl/private/") || strings.HasPrefix(lowerPath, "etc/pki/tls/private/") {
 		return false
 	}
@@ -389,40 +488,30 @@ func isJavaKeystoreName(base string) bool {
 	return false
 }
 
-// relativeRootPath renders the reported path: root-relative with a leading
-// slash (the report-1 convention).
-func relativeRootPath(absolutePath, root string) string {
-	relPath := "/" + filepath.ToSlash(strings.TrimPrefix(absolutePath, root))
-	relPath = strings.ReplaceAll(relPath, "//", "/")
-	return relPath
-}
-
-func displayPath(absolutePath, root string) string {
-	return relativeRootPath(absolutePath, root)
-}
-
 // deselectedCACertificates reads etc/ca-certificates.conf and returns the
 // root-relative paths of entries disabled with a leading "!". Debian's
 // update-ca-certificates(8): "the listed certificates will be removed" /
 // lines prefixed with ! are deactivated; the files may still exist under
-// usr/share/ca-certificates.
+// usr/share/ca-certificates. Entries are relative to that directory; one that
+// resolves outside it is ignored.
 // https://manpages.debian.org/bookworm/ca-certificates/update-ca-certificates.8.en.html
-func deselectedCACertificates(root string) map[string]bool {
-	data, err := os.ReadFile(filepath.Join(root, "etc", "ca-certificates.conf"))
+func (s *rootScan) deselectedCACertificates() map[string]bool {
+	data, err := s.readFile("etc/ca-certificates.conf", maxMaterialFileBytes)
 	if err != nil {
 		return nil
 	}
+	const base = "usr/share/ca-certificates/"
 	deselected := map[string]bool{}
 	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		entry, ok := strings.CutPrefix(strings.TrimSpace(line), "!")
+		if !ok {
 			continue
 		}
-		if strings.HasPrefix(line, "!") {
-			entry := strings.TrimSpace(strings.TrimPrefix(line, "!"))
-			if entry != "" {
-				deselected[strings.TrimPrefix(filepath.ToSlash(filepath.Join("usr", "share", "ca-certificates", entry)), "/")] = true
-			}
+		if entry = strings.TrimSpace(entry); entry == "" {
+			continue
+		}
+		if name := path.Join(base, entry); strings.HasPrefix(name, base) {
+			deselected[name] = true
 		}
 	}
 	if len(deselected) == 0 {
@@ -451,6 +540,11 @@ func applyCADeselected(materials []trustMaterial, deselected map[string]bool) {
 		}
 		if deselected[strings.Trim(material.Path, "/")] {
 			material.SourceType = "ca-deselected"
+			for i := range material.Properties {
+				if material.Properties[i].Name == "cdx:crypto:sourceType" {
+					material.Properties[i].Value = "ca-deselected"
+				}
+			}
 		}
 		has := false
 		for _, sourceType := range material.SourceTypes {
@@ -465,7 +559,7 @@ func applyCADeselected(materials []trustMaterial, deselected map[string]bool) {
 	}
 }
 
-// embeddedExcludedDirs are virtual filesystems that are never scanned.
+// embeddedExcludedDirs are the root's virtual filesystems, never scanned.
 var embeddedExcludedDirs = map[string]bool{
 	"proc": true,
 	"sys":  true,
@@ -475,62 +569,80 @@ var embeddedExcludedDirs = map[string]bool{
 
 // walkEmbeddedBinaries scans the whole root for ELF/Mach-O/PE binaries (magic
 // check) holding PEM CERTIFICATE blocks, at most 128 MiB each (PLAN section
-// 4.1, --embedded). It is opt-in because it touches every regular file.
-func walkEmbeddedBinaries(accumulator *materialAccumulator, root string, warnings *warningList) {
-	fileCount := 0
-	depthWarned := false
-	_ = filepath.WalkDir(root, func(current string, d fs.DirEntry, walkErr error) error {
+// 4.1, --embedded). It is opt-in because it touches every regular file; only
+// a file whose first bytes carry an executable magic is read in full. The
+// location carries the binary's digests, like any other file.
+func (s *rootScan) walkEmbeddedBinaries() {
+	fileCount, entryCount := 0, 0
+	_ = fs.WalkDir(s.fsys, ".", func(name string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
+		entryCount++
+		if entryCount > maxEntriesPerTree {
+			s.warnings.add(fmt.Sprintf("entry limit (%d) reached during embedded scan", maxEntriesPerTree))
+			return fs.SkipAll
+		}
 		if d.IsDir() {
-			if current != root && embeddedExcludedDirs[d.Name()] {
+			if name == "." {
+				return nil
+			}
+			if !strings.Contains(name, "/") && embeddedExcludedDirs[name] {
+				return fs.SkipDir
+			}
+			if strings.Count(name, "/")+1 >= maxScanDepth {
+				s.warnings.add(fmt.Sprintf("depth limit (%d) exceeded during embedded scan", maxScanDepth))
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if d.Type()&os.ModeSymlink != 0 {
+		if !d.Type().IsRegular() || isPEMBasedPath(name) || !s.hasExecutableMagic(name) {
+			// PEM-suffixed files are parsed by the regular walks.
 			return nil
 		}
 		fileCount++
 		if fileCount > maxFilesPerTree {
-			warnings.add(fmt.Sprintf("file count limit (%d) reached during embedded scan", maxFilesPerTree))
+			s.warnings.add(fmt.Sprintf("file count limit (%d) reached during embedded scan", maxFilesPerTree))
 			return fs.SkipAll
 		}
-		rel, err := filepath.Rel(root, current)
+		data, err := s.readFile(name, maxEmbeddedFileBytes)
 		if err != nil {
 			return nil
 		}
-		if depth := strings.Count(rel, string(filepath.Separator)) + 1; depth > maxScanDepth {
-			if !depthWarned {
-				depthWarned = true
-				warnings.add(fmt.Sprintf("depth limit (%d) exceeded during embedded scan", maxScanDepth))
-			}
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || info.Size() == 0 || info.Size() > maxEmbeddedFileBytes {
-			return nil
-		}
-		if isPEMBasedPath(rel) {
-			// PEM-suffixed files are parsed by the regular walks.
-			return nil
-		}
-		data, err := os.ReadFile(current)
-		if err != nil || !isExecutableBinaryMagic(data) {
-			return nil
-		}
-		relPath := relativeRootPath(current, root)
+		relPath := "/" + name
+		sha1Value, sha256Value := digestBytes(data)
 		for _, cert := range embeddedCertificateBlocks(data) {
 			material := buildCertificateFields(cert)
 			setCertificateName(material, cert, relPath)
-			accumulator.add(material, certLocation{
-				path:       relPath,
-				sourceType: "embedded-binary",
+			s.accumulator.add(material, certLocation{
+				path:          relPath,
+				sourceType:    "embedded-binary",
+				trustDomain:   deriveTrustDomain(relPath),
+				fileExtension: strings.TrimPrefix(strings.ToLower(path.Ext(relPath)), "."),
+				sha1Value:     sha1Value,
+				sha256Value:   sha256Value,
 			})
 		}
 		return nil
 	})
+}
+
+// hasExecutableMagic reads only the first bytes of a regular file to check
+// for an ELF, Mach-O or PE magic.
+func (s *rootScan) hasExecutableMagic(name string) bool {
+	file, err := s.root.Open(name)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() || info.Size() < 4 || info.Size() > maxEmbeddedFileBytes {
+		return false
+	}
+	magic := make([]byte, 4)
+	if _, err := io.ReadFull(file, magic); err != nil {
+		return false
+	}
+	return isExecutableBinaryMagic(magic)
 }
 
 // isPEMBasedPath reports whether a path looks like a PEM/cert file so the

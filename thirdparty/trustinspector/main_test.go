@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -379,4 +380,21 @@ func decodeReportJSON(t *testing.T, data []byte) map[string]any {
 		t.Fatalf("decode report: %v", err)
 	}
 	return report
+}
+
+// Flags after file arguments are a usage error, not file names, and extra
+// dirs must name a directory inside the root.
+func TestCLIArgumentChecks(t *testing.T) {
+	var usage *usageError
+	if err := runCerts([]string{"a.pem", "--root", "r"}); !errors.As(err, &usage) {
+		t.Fatalf("certs with a trailing flag: %v", err)
+	}
+	if err := runRootfs([]string{"dir", "--embedded"}); !errors.As(err, &usage) {
+		t.Fatalf("rootfs with a trailing flag: %v", err)
+	}
+	for dir, ok := range map[string]bool{"": false, ".": false, "..": false, "a/../..": false, "/etc": false, "a/..b": true, "opt/app": true} {
+		if err := validateExtraDir(dir); (err == nil) != ok {
+			t.Errorf("validateExtraDir(%q) = %v", dir, err)
+		}
+	}
 }

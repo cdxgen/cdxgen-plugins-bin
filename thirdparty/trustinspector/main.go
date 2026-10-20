@@ -1,3 +1,9 @@
+// x509negativeserial=1 lets crypto/x509 parse certificates with a negative
+// serial number, which Go has rejected since 1.23 but OpenSSL, Java and the
+// CA stores that ship them still accept. trustinspector inventories what is
+// there, so one such certificate must not hide itself, or a whole keystore.
+//go:debug x509negativeserial=1
+
 package main
 
 import (
@@ -14,6 +20,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -99,9 +106,13 @@ type trustMaterial struct {
 	CRLDistributionPoints  []string `json:"crlDistributionPoints,omitempty"`
 	PolicyOIDs             []string `json:"policyOids,omitempty"`
 	HasNameConstraints     bool     `json:"hasNameConstraints,omitempty"`
+	TrustAcceptedPurposes  []string `json:"trustAcceptedPurposes,omitempty"`
 	TrustRejectedPurposes  []string `json:"trustRejectedPurposes,omitempty"`
 
 	certificate *x509.Certificate `json:"-"`
+	// dedupID overrides the dedup identity of materials that have no
+	// digest of their own (several private keys in one file).
+	dedupID string `json:"-"`
 }
 
 type pathInspection struct {
@@ -253,6 +264,9 @@ func runRootfs(args []string) error {
 		}
 		return &usageError{err: err}
 	}
+	if err := rejectTrailingFlags(flags.Args()); err != nil {
+		return err
+	}
 	if flags.NArg() != 1 {
 		return &usageError{err: errors.New("rootfs requires exactly one target directory")}
 	}
@@ -275,8 +289,22 @@ func runRootfs(args []string) error {
 // validateExtraDir rejects --extra-dir values that escape the scanned root.
 func validateExtraDir(dir string) error {
 	slash := filepath.ToSlash(dir)
-	if filepath.IsAbs(dir) || slash == ".." || strings.HasPrefix(slash, "../") || strings.Contains(slash, "/../") || strings.Contains(slash, "/..") {
+	clean := path.Clean(slash)
+	if dir == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") ||
+		path.IsAbs(slash) || filepath.IsAbs(dir) || filepath.VolumeName(dir) != "" {
 		return fmt.Errorf("extra dir %q must be a relative path inside the root", dir)
+	}
+	return nil
+}
+
+// rejectTrailingFlags reports a usage error for a flag given after the first
+// positional argument, which Go's flag package would otherwise take as a file
+// name (certs a.pem --root r would read files "--root" and "r").
+func rejectTrailingFlags(args []string) error {
+	for _, arg := range args {
+		if len(arg) > 1 && strings.HasPrefix(arg, "-") {
+			return &usageError{err: fmt.Errorf("flag %s must come before the file arguments", arg)}
+		}
 	}
 	return nil
 }
@@ -296,6 +324,9 @@ func runCerts(args []string) error {
 		}
 		return &usageError{err: err}
 	}
+	if err := rejectTrailingFlags(flags.Args()); err != nil {
+		return err
+	}
 	paths := uniqueSortedStrings(flags.Args())
 	if *stdin {
 		stdinPaths, err := readLines(os.Stdin)
@@ -314,25 +345,35 @@ func runCerts(args []string) error {
 	}
 	accumulator := newMaterialAccumulator()
 	warnings := &warningList{}
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
+	limit := maxMaterialFileBytes
+	if *embedded {
+		limit = maxEmbeddedFileBytes
+	}
+	for _, name := range paths {
+		// Regular files only, read with a cap: a FIFO or device named here
+		// must not block the run, nor a huge file exhaust memory.
+		data, err := readHostFile(name, limit)
+		if errors.Is(err, errFileTooLarge) {
+			warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", limit>>20, name))
+		}
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		if *embedded {
-			if isExecutableBinaryMagic(data) && int64(len(data)) <= maxEmbeddedFileBytes {
-				for _, cert := range embeddedCertificateBlocks(data) {
-					material := buildCertificateFields(cert)
-					setCertificateName(material, cert, path)
-					accumulator.add(material, certLocation{path: displayPathCerts(path, *root), sourceType: "generic"})
-				}
-				continue
+		displayPath := displayPathCerts(name, *root)
+		if *embedded && isExecutableBinaryMagic(data) {
+			sha1Value, sha256Value := digestBytes(data)
+			for _, cert := range embeddedCertificateBlocks(data) {
+				material := buildCertificateFields(cert)
+				setCertificateName(material, cert, displayPath)
+				accumulator.add(material, certLocation{path: displayPath, sourceType: "generic", sha1Value: sha1Value, sha256Value: sha256Value})
 			}
-			if !isExecutableBinaryMagic(data) {
-				// fall through to the regular parsers
-			}
+			continue
 		}
-		for _, entry := range parseFileMaterials(data, displayPathCerts(path, *root), "generic") {
+		if int64(len(data)) > maxMaterialFileBytes {
+			warnings.add(fmt.Sprintf("file over %d MiB skipped: %s", maxMaterialFileBytes>>20, name))
+			continue
+		}
+		for _, entry := range parseFileMaterials(data, displayPath, "generic") {
 			accumulator.add(entry.material, entry.location)
 		}
 	}

@@ -39,7 +39,14 @@ func inspectDarwinHostTrustMaterials() ([]trustMaterial, []string) {
 		}
 		collectHostCertificates(accumulator, parseHostCertificatesPEM(stdout), keychain.label, keychain.path, "host-store")
 	}
-	return accumulator.resolve(), warnings
+	return resolveHostMaterials(accumulator, warnings)
+}
+
+// resolveHostMaterials merges the host materials and links issuers across
+// stores (an intermediate in one store to its root in another).
+func resolveHostMaterials(accumulator *materialAccumulator, warnings []string) ([]trustMaterial, []string) {
+	materials := accumulator.resolve()
+	return materials, append(warnings, linkIssuers(materials, accumulator.certs)...)
 }
 
 // collectHostCertificates turns parsed host certificates into accumulated
@@ -48,9 +55,7 @@ func inspectDarwinHostTrustMaterials() ([]trustMaterial, []string) {
 func collectHostCertificates(accumulator *materialAccumulator, certs []*x509.Certificate, storeLabel, storePath, sourceType string) {
 	for _, cert := range certs {
 		material := buildCertificateFields(cert)
-		if material.Name == "" {
-			material.Name = storeLabel
-		}
+		setCertificateName(material, cert, storePath)
 		accumulator.add(material, certLocation{
 			path:       storePath,
 			sourceType: sourceType,
@@ -158,7 +163,7 @@ func inspectWindowsHostTrustMaterials() ([]trustMaterial, []string) {
 	if unparseable > 0 {
 		warnings = append(warnings, fmt.Sprintf("windows host stores: %d certificate(s) could not be parsed", unparseable))
 	}
-	return accumulator.resolve(), warnings
+	return resolveHostMaterials(accumulator, warnings)
 }
 
 // sortHostStoreLabels is used by tests to compare hostStores deterministically.

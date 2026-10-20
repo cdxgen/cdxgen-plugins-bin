@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -392,4 +394,156 @@ func goBuild(output, dir string) (string, error) {
 	command.Stderr = &stderr
 	err := command.Run()
 	return stderr.String(), err
+}
+
+// Review regressions for the rootfs scanner.
+
+// The G7 key-directory exclusion holds even when an extra dir covers it.
+func TestG7PrivateDirExcludedUnderExtraDir(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "etc/ssl/private/server.pem", fixture(t, "demo-leaf.crt"))
+	materials, _, err := scanRootfsTrustMaterials(root, scanOptions{ExtraDirs: []string{"etc/ssl"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 0 {
+		t.Fatalf("etc/ssl/private was scanned: %+v", materials)
+	}
+}
+
+// Reported paths are root-relative however the root argument is spelled.
+func TestUncleanRootArgument(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "etc/ssl/certs/a.pem", fixture(t, "demo-root.crt"))
+	for _, spelled := range []string{root + "/", root + "/./", filepath.Dir(root) + "//" + filepath.Base(root)} {
+		materials, _, err := scanRootfsTrustMaterials(spelled, scanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(materials) != 1 || materials[0].Path != "/etc/ssl/certs/a.pem" {
+			t.Fatalf("root %q: %+v", spelled, materials)
+		}
+	}
+}
+
+// A certificate in a CA store and in a binary keeps the CA store as its
+// primary location, with that file's digests, and the binary location has
+// the binary's digests.
+func TestEmbeddedLocationDoesNotBecomePrimary(t *testing.T) {
+	root := t.TempDir()
+	pemText := fixture(t, "demo-root.crt")
+	writeFileRel(t, root, "etc/ssl/certs/root.pem", pemText)
+	writeFileRel(t, root, "app/server", append([]byte("\x7fELF\x02\x01\x01\x00"), pemText...))
+	materials, _, err := scanRootfsTrustMaterials(root, scanOptions{Embedded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 1 {
+		t.Fatalf("materials = %+v", materials)
+	}
+	m := materials[0]
+	_, wantSHA := digestBytes(pemText)
+	if m.Path != "/etc/ssl/certs/root.pem" || m.SourceType != "ca-store" || m.SHA256 != wantSHA ||
+		!slices.Equal(m.Paths, []string{"/app/server", "/etc/ssl/certs/root.pem"}) ||
+		!slices.Equal(m.SourceTypes, []string{"ca-store", "embedded-binary"}) {
+		t.Fatalf("material = path %s sourceType %s sha256 %s paths %v sourceTypes %v", m.Path, m.SourceType, m.SHA256, m.Paths, m.SourceTypes)
+	}
+}
+
+// ca-deselected updates the sourceType property with the field, and a "!"
+// entry that climbs out of usr/share/ca-certificates is ignored.
+func TestCADeselectedPropertyAndEscape(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "usr/share/ca-certificates/mozilla/demo.crt", fixture(t, "demo-root.crt"))
+	writeFileRel(t, root, "etc/ssl/certs/leaf.pem", fixture(t, "demo-leaf.crt"))
+	writeFileRel(t, root, "etc/ca-certificates.conf", []byte("!mozilla/demo.crt\r\n!../../../etc/ssl/certs/leaf.pem\n"))
+	materials, _, err := scanRootfsTrustMaterials(root, scanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range materials {
+		deselected := m.SourceType == "ca-deselected"
+		if deselected != (m.Path == "/usr/share/ca-certificates/mozilla/demo.crt") {
+			t.Errorf("%s: sourceType %s", m.Path, m.SourceType)
+		}
+		if !hasProperty(m.Properties, "cdx:crypto:sourceType", m.SourceType) {
+			t.Errorf("%s: property disagrees with sourceType %s: %+v", m.Path, m.SourceType, m.Properties)
+		}
+	}
+}
+
+// Directories past the depth limit are not descended, and the entry limit
+// stops walks of empty directories.
+func TestWalkBoundsCountDirectories(t *testing.T) {
+	oldDepth, oldEntries := maxScanDepth, maxEntriesPerTree
+	maxScanDepth, maxEntriesPerTree = 3, 50
+	defer func() { maxScanDepth, maxEntriesPerTree = oldDepth, oldEntries }()
+	root := t.TempDir()
+	writeFileRel(t, root, "etc/ssl/certs/a/b/c/d/deep.pem", fixture(t, "demo-root.crt"))
+	for i := range 60 {
+		if err := os.MkdirAll(filepath.Join(root, "usr", "local", "share", "ca-certificates", fmt.Sprintf("d%02d", i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	materials, warnings, err := scanRootfsTrustMaterials(root, scanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 0 {
+		t.Fatalf("depth limit: %+v", materials)
+	}
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "depth limit (3) exceeded in /etc/ssl/certs") || !strings.Contains(joined, "entry limit (50) reached in /usr/local/share/ca-certificates") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+}
+
+// Debian's etc/ssl/certs/java/cacerts belongs to the java-truststore
+// candidate, not the enclosing ca-store one.
+func TestNestedCandidateKeepsSpecificSourceType(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "etc/ssl/certs/java/cacerts", fixture(t, "demo-truststore.jks"))
+	materials, _, err := scanRootfsTrustMaterials(root, scanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 2 {
+		t.Fatalf("materials = %+v", materials)
+	}
+	for _, m := range materials {
+		if !slices.Equal(m.SourceTypes, []string{"java-truststore"}) {
+			t.Fatalf("%s sourceTypes %v", m.Name, m.SourceTypes)
+		}
+	}
+}
+
+// Only the root's own run/ is skipped by the embedded scan.
+func TestEmbeddedSkipsOnlyTopLevelVirtualDirs(t *testing.T) {
+	root := t.TempDir()
+	binary := append([]byte("\x7fELF\x02\x01\x01\x00"), fixture(t, "demo-root.crt")...)
+	writeFileRel(t, root, "opt/app/run/server", binary)
+	writeFileRel(t, root, "run/ignored", binary)
+	materials, _, err := scanRootfsTrustMaterials(root, scanOptions{Embedded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 1 || !slices.Equal(materials[0].Paths, []string{"/opt/app/run/server"}) {
+		t.Fatalf("materials = %+v", materials)
+	}
+}
+
+// Oversized single-file candidates are skipped with a warning.
+func TestOversizedSingleFileCandidate(t *testing.T) {
+	old := maxMaterialFileBytes
+	maxMaterialFileBytes = 64
+	defer func() { maxMaterialFileBytes = old }()
+	root := t.TempDir()
+	writeFileRel(t, root, "etc/ssl/cert.pem", fixture(t, "demo-root.crt"))
+	materials, warnings, err := scanRootfsTrustMaterials(root, scanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(materials) != 0 || !slices.Contains(warnings, "file over 0 MiB skipped: /etc/ssl/cert.pem") {
+		t.Fatalf("materials %d, warnings %v", len(materials), warnings)
+	}
 }

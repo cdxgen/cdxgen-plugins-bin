@@ -2,13 +2,21 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fixture(t *testing.T, name string) []byte {
@@ -213,14 +221,20 @@ func TestEmbeddedCertificateBlocks(t *testing.T) {
 	}
 }
 
-func TestLooksLikePKCS12RequiresVersionMarker(t *testing.T) {
-	// A bare SEQUENCE is not enough; the PFX version marker 02 01 03 must be
-	// near the start.
-	if !looksLikePKCS12([]byte{0x30, 0x82, 0x01, 0x00, 0x02, 0x01, 0x03, 0x00}) {
-		t.Fatal("expected a PFX-shaped buffer to match")
+// The PKCS#12 check parses the PFX structure (version 3, data-typed
+// authSafe); a DER certificate whose serial happens to encode as 02 01 03
+// near the start is not mistaken for one.
+func TestPKCS12StructureDetection(t *testing.T) {
+	if _, ok := pkcs12Iterations(fixture(t, "demo-truststore.p12")); !ok {
+		t.Fatal("expected the keytool PKCS#12 fixture to be recognized")
 	}
-	if looksLikePKCS12([]byte{0x30, 0x00, 0x04, 0x05, 0x06}) {
-		t.Fatal("expected a plain SEQUENCE not to match")
+	if _, ok := pkcs12Iterations([]byte{0x30, 0x82, 0x01, 0x00, 0x02, 0x01, 0x03, 0x00}); ok {
+		t.Fatal("expected a truncated PFX-shaped buffer not to match")
+	}
+	for _, name := range []string{"demo-leaf.der", "demo-root.crt"} {
+		if _, ok := pkcs12Iterations(fixture(t, name)); ok {
+			t.Fatalf("%s recognized as PKCS#12", name)
+		}
 	}
 }
 
@@ -267,5 +281,126 @@ func TestGeneratedFixtureIntegrity(t *testing.T) {
 		if bytes.Contains(data, []byte("PRIVATE KEY")) {
 			t.Errorf("%s contains a private key marker", path)
 		}
+	}
+}
+
+// Review regressions for the format sniffer. Inputs are built from the
+// generated fixtures, with the hostile part made by hand in the test (none of
+// them come from a real issuer).
+
+// "-----BEGIN PGP" text in a certificate bundle must not hide its
+// certificates (OpenSSL trusts the root regardless of the comment).
+func TestPGPTextDoesNotHideCertificates(t *testing.T) {
+	data := append([]byte("# -----BEGIN PGP note\n"), fixture(t, "demo-root.crt")...)
+	entries := parseFileMaterials(data, "/etc/ssl/certs/bundle.pem", "ca-store")
+	if len(entries) != 1 || entries[0].material.Kind != "certificate" {
+		t.Fatalf("expected the root certificate, got %d entries", len(entries))
+	}
+}
+
+// A DER certificate carrying PEM text in an extension is read as the DER
+// certificate, not as the PEM text inside it.
+func TestDERCertificateWithPEMTextIsReadAsDER(t *testing.T) {
+	pki := buildTestPKI(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoy := pemEncodeCerts(t, pki.leaf)
+	tmpl := &x509.Certificate{
+		SerialNumber:    big.NewInt(9),
+		Subject:         pkix.Name{CommonName: "carrier"},
+		NotBefore:       time.Now().Add(-time.Hour),
+		NotAfter:        time.Now().Add(time.Hour),
+		ExtraExtensions: []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1}, Value: decoy}},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sniffed, err := sniffTrustMaterial(der)
+	if err != nil || len(sniffed.certificates) != 1 || sniffed.certificates[0].cert.Subject.CommonName != "carrier" {
+		t.Fatalf("expected only the carrier certificate, got %+v (%v)", sniffed, err)
+	}
+}
+
+// OpenSSL's legacy "X509 CERTIFICATE" label and a DER certificate followed
+// by a newline are both read, as OpenSSL reads them.
+func TestLegacyLabelAndTrailingBytes(t *testing.T) {
+	block, _ := pem.Decode(fixture(t, "demo-root.crt"))
+	legacy := pem.EncodeToMemory(&pem.Block{Type: "X509 CERTIFICATE", Bytes: block.Bytes})
+	if sniffed, err := sniffTrustMaterial(legacy); err != nil || len(sniffed.certificates) != 1 {
+		t.Fatalf("legacy label: %+v (%v)", sniffed, err)
+	}
+	der := append(fixture(t, "demo-leaf.der"), '\n')
+	if sniffed, err := sniffTrustMaterial(der); err != nil || len(sniffed.certificates) != 1 {
+		t.Fatalf("DER with a trailing newline: %+v (%v)", sniffed, err)
+	}
+}
+
+// A Go string constant leaves no newline after the END marker, and a broken
+// BEGIN marker earlier in the binary must not stop the scan.
+func TestEmbeddedPEMWithoutNewlineAndAfterBrokenBlock(t *testing.T) {
+	pemText := bytes.TrimSpace(fixture(t, "demo-root.crt"))
+	data := []byte("\x7fELF\x02\x01-----BEGIN CERTIFICATE-----\x00garbage\x00")
+	data = append(data, pemText...)
+	data = append(data, 0x01, 0x00, 0x02)
+	certs := embeddedCertificateBlocks(data)
+	if len(certs) != 1 || certs[0].Subject.CommonName != "Inspector Root A" {
+		t.Fatalf("expected the root after the broken block, got %d", len(certs))
+	}
+}
+
+// The aux trust list is read as well as the reject list, and a field this
+// reader does not need (an alias that is not valid UTF-8, an OID arc wider
+// than 64 bits) does not hide either list.
+func TestTrustedCertificateAuxTrustAndLenientParsing(t *testing.T) {
+	block, _ := pem.Decode(fixture(t, "demo-root.crt"))
+	oid := func(id asn1.ObjectIdentifier) []byte {
+		der, err := asn1.Marshal(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return der
+	}
+	tlv := func(tag byte, content ...[]byte) []byte {
+		body := bytes.Join(content, nil)
+		return append([]byte{tag, byte(len(body))}, body...)
+	}
+	// 2.25.72057594037927937: first subidentifier 2*40+25 = 105, then
+	// 2^56+1 in base 128.
+	bigArc := []byte{0x06, 0x0a, 0x69, 0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}
+	aux := tlv(0x30,
+		tlv(0x30, oid(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 4}), bigArc), // trust
+		tlv(0xa0, oid(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1})),         // reject
+		[]byte{0x0c, 0x02, 0xc3, 0x28},                                           // alias, invalid UTF-8
+	)
+	parsed, err := parseTrustedCertificate(append(append([]byte{}, block.Bytes...), aux...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(parsed.trustAcceptedPurposes, []string{"2.25.72057594037927937", "emailProtection"}) ||
+		!slices.Equal(parsed.trustRejectedPurposes, []string{"serverAuth"}) {
+		t.Fatalf("trust %v reject %v", parsed.trustAcceptedPurposes, parsed.trustRejectedPurposes)
+	}
+}
+
+// Private keys: DSA keys and legacy encrypted keys are classified from the
+// header, and two keys in one file are two materials.
+func TestPrivateKeyHeadersAndCount(t *testing.T) {
+	keys := []byte("-----BEGIN DSA PRIVATE KEY-----\nAAAA\n-----END DSA PRIVATE KEY-----\n" +
+		"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n-----END RSA PRIVATE KEY-----\n")
+	entries := parseFileMaterials(keys, "/etc/nginx/ssl/keys.pem", "server-config")
+	accumulator := newMaterialAccumulator()
+	for _, entry := range entries {
+		accumulator.add(entry.material, entry.location)
+	}
+	var formats []string
+	for _, m := range accumulator.resolve() {
+		formats = append(formats, m.Format)
+	}
+	slices.Sort(formats)
+	if !slices.Equal(formats, []string{"DSA", "ENCRYPTED-RSA"}) {
+		t.Fatalf("private key formats = %v", formats)
 	}
 }

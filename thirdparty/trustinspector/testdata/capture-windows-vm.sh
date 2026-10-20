@@ -46,12 +46,13 @@ PS
 
 bash "$HOME/work/cdx-hbom-windows/tools/vm-sync.sh" "$SCRATCH" "$VM_NAME"
 echo "running the cert store capture on the VM..."
-bash "$HOME/work/cdx-hbom-windows/tools/vm-run.sh" "$VM_NAME" \
-  powershell -NoProfile -ExecutionPolicy Bypass -File "tmp\\..\\hbom-work\\$VM_NAME\\capture-certstores.ps1" > /dev/null 2>&1 || true
-# vm-run executes inside hbom-work/<name>; use a relative path.
+# vm-run executes inside hbom-work/<name>; use a relative path. The fixture
+# is replaced only when the capture produced valid JSON.
 bash "$HOME/work/cdx-hbom-windows/tools/vm-run.sh" "$VM_NAME" \
   powershell -NoProfile -ExecutionPolicy Bypass -File capture-certstores.ps1 \
-  | tr -d '\r' > "$HERE/windows-certstores.json"
+  | tr -d '\r' > "$SCRATCH/windows-certstores.json"
+python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SCRATCH/windows-certstores.json"
+mv "$SCRATCH/windows-certstores.json" "$HERE/windows-certstores.json"
 
 count=$(python3 -c "import json,sys;data=json.load(open('$HERE/windows-certstores.json'));print(len(data) if isinstance(data,list) else 1)")
 echo "windows-certstores.json: $count entries"

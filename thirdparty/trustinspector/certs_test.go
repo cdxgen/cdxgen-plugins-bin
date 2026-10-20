@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -215,25 +214,20 @@ func scanBytesAsRoot(t *testing.T, data []byte, extra ...func(root string)) ([]t
 // committed fixture demo-negative-serial.crt (openssl -set_serial -42) is the
 // real certificate; the %x formatting of a negative big.Int would be "-2a",
 // but that path is unreachable through the parser.
-func TestNegativeSerialCertificateIsDropped(t *testing.T) {
+// A certificate with a negative serial (OpenSSL -set_serial -42) is
+// inventoried: main.go sets x509negativeserial=1, so Go parses it, and
+// serialHex keeps the sign.
+func TestNegativeSerialCertificateIsKept(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "generated", "demo-negative-serial.crt"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		t.Fatal("expected PEM block")
-	}
-	if _, err := x509.ParseCertificate(block.Bytes); err == nil {
-		t.Fatal("expected x509.ParseCertificate to reject the negative serial")
-	}
-	// The formatting that serialHex would use, documented for the report.
-	if got := big.NewInt(-42).String(); got != "-42" {
-		t.Fatalf("decimal formatting changed: %s", got)
-	}
 	entries := parseFileMaterials(data, "/etc/ssl/certs/neg.crt", "ca-store")
-	if len(entries) != 0 {
-		t.Fatalf("expected the negative-serial certificate to be dropped, got %d entries", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("expected the negative-serial certificate, got %d entries", len(entries))
+	}
+	if m := entries[0].material; m.Serial != "-42" || m.SerialHex != "-2a" {
+		t.Fatalf("serial %q serialHex %q", m.Serial, m.SerialHex)
 	}
 }
 
