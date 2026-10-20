@@ -1,0 +1,59 @@
+thirdparty/trustinspector/main.go
+  s_52f5c4eaf6e6b7::t_26da1b8113d41c 23
+  s_52f5c4eaf6e6b7::t_2b93d0f1fc9ac6 1-6
+  s_52f5c4eaf6e6b7::t_fe97dc164fd168 109,113-115
+  s_52f5c4eaf6e6b7::t_15a862ca1332a3 267-269,292-294,300-311,327-329,348-358,362-368,370-374,376
+thirdparty/trustinspector/formats.go
+  s_52f5c4eaf6e6b7::t_d87b1a9fc6afbd 141,143,147-152
+  s_52f5c4eaf6e6b7::t_ed876cd69fd54c 10-11,31-34,39,43-46,50-51,54-59,62-64,69-70,72-74,78-80,84-88,91-108,111-115,118-130,133-140,142,144-146,153-178,182,185-186,192,196,199-204,206,208-210,220-223,228,243-245,258-284,287,290-305,307-314,316-335,337-340,345,360,363,421-424,427-429,431,434
+  s_52f5c4eaf6e6b7::t_ca26c46312e255 67-68
+thirdparty/trustinspector/keystores_test.go
+  s_52f5c4eaf6e6b7::t_806c9f4ed4bdaa 8,10,164-223,227-229,232-234,236-262,264-284
+  s_52f5c4eaf6e6b7::t_d87b1a9fc6afbd 263
+  s_52f5c4eaf6e6b7::t_faad6f92a46904 16-18,35,58,87,96-104,129,134,139,150,160
+  s_52f5c4eaf6e6b7::t_566ef104ec600e 224-226,230-231,235
+thirdparty/trustinspector/rootfs_test.go
+  s_52f5c4eaf6e6b7::t_80e91c22420fcf 6,10,398-549
+thirdparty/trustinspector/host_test.go
+  s_52f5c4eaf6e6b7::t_dd81bae43959f6 4,57-58,75-77,79-80,83-116
+thirdparty/trustinspector/testdata/capture-windows-vm.sh
+  s_52f5c4eaf6e6b7::t_dd81bae43959f6 49-50,53-55
+thirdparty/trustinspector/rootfs.go
+  s_52f5c4eaf6e6b7::t_fe97dc164fd168 4,6,9,19-21,23-24,28,30-33,35,122-139,143,147-153,155,157-166,168,171,176,182,185,187-231,233-253,288-296,300-304,306-309,312,317,320,325-326,328-330,333-336,340,342,367-372,377,382,386,388-389,397,403-411,414-417,427,449,495-496,498-499,503,506-507,510-514,543-547,562,572-577,581-585,587-594,599-600,605,608,612-613,617-623,630-646
+  s_52f5c4eaf6e6b7::t_8beabfe2d3e2b0 647
+thirdparty/trustinspector/main_test.go
+  s_52f5c4eaf6e6b7::t_80e91c22420fcf 11,384-399
+  s_52f5c4eaf6e6b7::t_fb2a7b17891f96 400
+thirdparty/trustinspector/formats_test.go
+  s_52f5c4eaf6e6b7::t_faad6f92a46904 224-237
+  s_52f5c4eaf6e6b7::t_806c9f4ed4bdaa 5-6,8-10,13,16,19,286-406
+thirdparty/trustinspector/certs.go
+  s_52f5c4eaf6e6b7::t_945736a629e2f7 130-131,140-149,219
+  s_52f5c4eaf6e6b7::t_fe97dc164fd168 111,226
+  s_52f5c4eaf6e6b7::t_68073c7117b90c 214-218,220
+thirdparty/trustinspector/rootfs_unix_test.go
+  s_52f5c4eaf6e6b7::t_80e91c22420fcf 1-48
+thirdparty/trustinspector/keystores.go
+  s_52f5c4eaf6e6b7::t_945736a629e2f7 5-6,73-81,83-84,88-90,92,95-97,99,103-105,108-109,111-112,116,119-121,123,125-126,130,134-146,148-150,152-158,160-161,165-166,168-170,172-173,176-177,180-211,219,224-229,231,233,236-285,288-301,303,305-307,309-327,332-337,339-340,343,345-347,349-356
+  s_52f5c4eaf6e6b7::t_ca26c46312e255 212-218,220-223,230,232,234-235,286-287,341-342,348
+thirdparty/trustinspector/certs_test.go
+  s_52f5c4eaf6e6b7::t_2b93d0f1fc9ac6 217-220,226-230
+thirdparty/trustinspector/host.go
+  s_52f5c4eaf6e6b7::t_15a862ca1332a3 42-49,58,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be015ac9a308ca29ee30bb0c54a5abc82674b004",
+  "prompts": {},
+  "sessions": {
+    "s_52f5c4eaf6e6b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6df25678-2bd9-411d-a772-3a7751696245",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
