@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"sort"
@@ -126,19 +127,30 @@ func (a *Analyzer) cryptoEvidenceForFile(pkg *packages.Package, file *ast.File) 
 				a.addCryptoClassification(crypto, pkg, x, class, seenAssets, seenOperations, seenMaterials, seenProtocols, seenFindings)
 			}
 		case *ast.KeyValueExpr:
-			if ident, ok := x.Key.(*ast.Ident); ok && ident.Name == "InsecureSkipVerify" {
-				if lit, ok := x.Value.(*ast.Ident); ok && lit.Name == "true" {
-					class := cryptoClassification{assetType: "protocol", name: "TLS", protocolName: "TLS", protocolType: "tls", operationType: "configure", ruleID: "GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY", severity: "critical", summary: "TLS certificate verification is disabled.", recommendation: "Do not set InsecureSkipVerify except in tightly controlled test code."}
-					a.addCryptoClassification(crypto, pkg, x, class, seenAssets, seenOperations, seenMaterials, seenProtocols, seenFindings)
-				}
+			if ident, ok := x.Key.(*ast.Ident); ok && ident.Name == "InsecureSkipVerify" && insecureValue(pkg, x.Value) {
+				a.addCryptoClassification(crypto, pkg, x, insecureSkipVerifyClass, seenAssets, seenOperations, seenMaterials, seenProtocols, seenFindings)
 			}
 		case *ast.CompositeLit:
 			a.addTrustCustomisationFindings(crypto, pkg, x, seenFindings)
 		case *ast.CallExpr:
-			a.addEmbeddedPoolFinding(crypto, pkg, file, x, seenFindings)
+			a.addEmbeddedPoolFinding(crypto, pkg, x, seenFindings)
+		case *ast.FuncDecl:
+			if x.Body != nil {
+				a.addTrustAssignmentFindings(crypto, pkg, x.Body, seenFindings)
+			}
 		case *ast.ValueSpec:
 			a.addLiteralCryptoMaterials(crypto, pkg, x.Names, x.Values, seenMaterials, seenFindings)
 		case *ast.AssignStmt:
+			// cfg.InsecureSkipVerify = true, set after construction.
+			if len(x.Lhs) == len(x.Rhs) {
+				for i, lhs := range x.Lhs {
+					if selector, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok && selector.Sel.Name == "InsecureSkipVerify" && insecureValue(pkg, x.Rhs[i]) {
+						if typePath, ok := fieldOwnerTypePath(pkg, selector); ok && typePath == "crypto/tls.Config" {
+							a.addCryptoClassification(crypto, pkg, x, insecureSkipVerifyClass, seenAssets, seenOperations, seenMaterials, seenProtocols, seenFindings)
+						}
+					}
+				}
+			}
 			names := []*ast.Ident{}
 			for _, lhs := range x.Lhs {
 				if ident, ok := lhs.(*ast.Ident); ok {
@@ -154,6 +166,22 @@ func (a *Analyzer) cryptoEvidenceForFile(pkg *packages.Package, file *ast.File) 
 	}
 	return crypto
 }
+
+var insecureSkipVerifyClass = cryptoClassification{assetType: "protocol", name: "TLS", protocolName: "TLS", protocolType: "tls", operationType: "configure", ruleID: "GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY", severity: "critical", summary: "TLS certificate verification is disabled.", recommendation: "Do not set InsecureSkipVerify except in tightly controlled test code."}
+
+// insecureValue reports whether an InsecureSkipVerify value is true: by its
+// constant value when the package type-checked (so a const, or (true),
+// counts and a shadowed true does not), else by the literal true.
+func insecureValue(pkg *packages.Package, expr ast.Expr) bool {
+	if pkg.TypesInfo != nil {
+		if _, ok := pkg.TypesInfo.Types[expr]; ok {
+			return isConstantTrue(pkg, expr)
+		}
+	}
+	ident, ok := ast.Unparen(expr).(*ast.Ident)
+	return ok && ident.Name == "true"
+}
+
 func cryptoImportFamily(path string) (string, bool) {
 	if family, ok := cryptoImportFamilies[path]; ok {
 		return family, true
@@ -165,118 +193,301 @@ func cryptoImportFamily(path string) (string, bool) {
 }
 
 // Trust-customisation findings (PLAN section 4.6): code that replaces Go's
-// default trust decisions. A composite literal of type crypto/tls.Config or
-// crypto/x509.VerifyOptions is resolved through TypesInfo, never by name, so
-// aliases and other packages' structs with the same field names do not match.
-func (a *Analyzer) addTrustCustomisationFindings(crypto *model.CryptoEvidence, pkg *packages.Package, lit *ast.CompositeLit, seenFindings map[string]bool) {
-	typePath, ok := compositeLiteralTypePath(pkg, lit)
-	if !ok {
-		return
-	}
-	rootField, verifyFields := "", map[string]bool{}
+// default trust decisions. Types are resolved through TypesInfo, never by
+// name, so aliases match and other packages' structs with the same field
+// names do not; field values are judged by their constant value or nil-ness,
+// not their spelling.
+
+// trustSettings is what one crypto/tls.Config or crypto/x509.VerifyOptions
+// literal, or one field assignment, does to trust.
+type trustSettings struct {
+	typePath                                string
+	rootField                               string
+	customRoots, customVerify, skipVerifies bool
+}
+
+// trustFields returns the trust fields of a crypto/tls.Config or
+// crypto/x509.VerifyOptions type.
+func trustFields(typePath string) (rootField string, verifyFields map[string]bool, ok bool) {
 	switch typePath {
 	case "crypto/tls.Config":
-		rootField = "RootCAs"
-		verifyFields = map[string]bool{"VerifyPeerCertificate": true, "VerifyConnection": true}
+		return "RootCAs", map[string]bool{"VerifyPeerCertificate": true, "VerifyConnection": true}, true
 	case "crypto/x509.VerifyOptions":
-		rootField = "Roots"
-	default:
-		return
+		return "Roots", nil, true
 	}
-	hasCustomRoots := false
-	hasCustomVerify := false
-	hasInsecureSkipVerify := false
+	return "", nil, false
+}
+
+// literalTrustSettings reads the trust fields set in a composite literal.
+func literalTrustSettings(pkg *packages.Package, lit *ast.CompositeLit) (trustSettings, bool) {
+	typePath, ok := compositeLiteralTypePath(pkg, lit)
+	if !ok {
+		return trustSettings{}, false
+	}
+	rootField, verifyFields, ok := trustFields(typePath)
+	if !ok {
+		return trustSettings{}, false
+	}
+	settings := trustSettings{typePath: typePath, rootField: rootField}
 	for _, elt := range lit.Elts {
 		keyValue, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
 			// Unkeyed composite literals cannot be attributed to a field.
-			return
+			return trustSettings{}, false
 		}
 		ident, ok := keyValue.Key.(*ast.Ident)
 		if !ok {
-			return
+			return trustSettings{}, false
 		}
-		switch {
-		case ident.Name == rootField:
-			if !isNilIdent(keyValue.Value) {
-				hasCustomRoots = true
-			}
-		case verifyFields[ident.Name]:
-			if !isNilIdent(keyValue.Value) {
-				hasCustomVerify = true
-			}
-		case ident.Name == "InsecureSkipVerify":
-			if value, ok := keyValue.Value.(*ast.Ident); ok && value.Name == "true" {
-				hasInsecureSkipVerify = true
-			}
+		settings.apply(pkg, ident.Name, keyValue.Value, verifyFields)
+	}
+	return settings, true
+}
+
+// apply records the effect of setting field to value.
+func (s *trustSettings) apply(pkg *packages.Package, field string, value ast.Expr, verifyFields map[string]bool) {
+	switch {
+	case field == s.rootField:
+		s.customRoots = s.customRoots || !isTrustNeutral(pkg, value, field)
+	case verifyFields[field]:
+		s.customVerify = s.customVerify || !isTrustNeutral(pkg, value, field)
+	case field == "InsecureSkipVerify":
+		s.skipVerifies = s.skipVerifies || isConstantTrue(pkg, value)
+	}
+}
+
+func (a *Analyzer) addTrustCustomisationFindings(crypto *model.CryptoEvidence, pkg *packages.Package, lit *ast.CompositeLit, seenFindings map[string]bool) {
+	if settings, ok := literalTrustSettings(pkg, lit); ok {
+		a.addTrustFindings(crypto, pkg, lit, settings, seenFindings)
+		if settings.customVerify && settings.skipVerifies {
+			a.addVerifyReplacedFinding(crypto, pkg, lit, settings.typePath, seenFindings)
 		}
 	}
-	if hasCustomRoots {
-		a.addCryptoFinding(crypto, pkg, lit, seenFindings, model.CryptoFinding{
+}
+
+func (a *Analyzer) addTrustFindings(crypto *model.CryptoEvidence, pkg *packages.Package, node ast.Node, settings trustSettings, seenFindings map[string]bool) {
+	if settings.customRoots {
+		a.addCryptoFinding(crypto, pkg, node, seenFindings, model.CryptoFinding{
 			RuleID:         "GOLEM-CRYPTO-TLS-CUSTOM-ROOTS",
 			Severity:       "low",
 			Confidence:     "type-resolved",
 			Summary:        "TLS verification uses a custom trust root pool instead of the system roots.",
 			Recommendation: "Review the custom root set: certificates distrusted by the platform or the Go toolchain can still be trusted here, and platform updates no longer apply.",
-			Properties:     map[string]string{"field": rootField, "type": typePath},
+			Properties:     map[string]string{"field": settings.rootField, "type": settings.typePath},
 		})
 	}
-	if hasCustomVerify {
-		a.addCryptoFinding(crypto, pkg, lit, seenFindings, model.CryptoFinding{
+	if settings.customVerify {
+		a.addCryptoFinding(crypto, pkg, node, seenFindings, model.CryptoFinding{
 			RuleID:         "GOLEM-CRYPTO-TLS-CUSTOM-VERIFY",
 			Severity:       "medium",
 			Confidence:     "type-resolved",
-			Summary:        "TLS verification is replaced with a custom callback.",
-			Recommendation: "Review the callback: it must perform chain building and revocation checks itself, because the standard verifier no longer runs for this connection.",
-			Properties:     map[string]string{"type": typePath},
+			Summary:        "TLS verification runs a custom callback.",
+			Recommendation: "Review the callback: it runs after Go's standard verification, unless InsecureSkipVerify is also set, in which case it is the only verification left.",
+			Properties:     map[string]string{"type": settings.typePath},
 		})
-		if hasInsecureSkipVerify {
-			a.addCryptoFinding(crypto, pkg, lit, seenFindings, model.CryptoFinding{
-				RuleID:         "GOLEM-CRYPTO-TLS-VERIFY-REPLACED",
-				Severity:       "high",
-				Confidence:     "type-resolved",
-				Summary:        "InsecureSkipVerify is combined with a custom verify callback, fully replacing Go's certificate verification.",
-				Recommendation: "The custom callback is the only verification left; make sure it validates chains itself, including any intermediates the server presents.",
-				Properties:     map[string]string{"type": typePath},
-			})
-		}
 	}
 }
 
-// addEmbeddedPoolFinding flags (*crypto/x509.CertPool).AppendCertsFromPEM
-// calls whose argument resolves to a package-level variable carrying a
-// //go:embed directive: a certificate pool compiled into the binary, which
-// no store update can revoke.
-func (a *Analyzer) addEmbeddedPoolFinding(crypto *model.CryptoEvidence, pkg *packages.Package, file *ast.File, call *ast.CallExpr, seenFindings map[string]bool) {
-	selector, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
+func (a *Analyzer) addVerifyReplacedFinding(crypto *model.CryptoEvidence, pkg *packages.Package, node ast.Node, typePath string, seenFindings map[string]bool) {
+	a.addCryptoFinding(crypto, pkg, node, seenFindings, model.CryptoFinding{
+		RuleID:         "GOLEM-CRYPTO-TLS-VERIFY-REPLACED",
+		Severity:       "high",
+		Confidence:     "type-resolved",
+		Summary:        "InsecureSkipVerify is combined with a custom verify callback, fully replacing Go's certificate verification.",
+		Recommendation: "The custom callback is the only verification left, and Go's distrust decisions no longer apply; make sure it validates chains itself, including any intermediates the server presents.",
+		Properties:     map[string]string{"type": typePath},
+	})
+}
+
+// trustTarget identifies the configuration a statement changes: the
+// variable it is held in, or the expression for anything else (s.cfg).
+type trustTarget struct {
+	object types.Object
+	expr   string
+}
+
+// trustState tracks one configuration through a function body: where it was
+// made to skip verification and where it got a custom callback, and whether
+// both came from a single literal (already reported).
+type trustState struct {
+	skipNode, verifyNode ast.Node
+	sameLiteral          bool
+}
+
+// addTrustAssignmentFindings covers configurations changed after
+// construction: cfg.RootCAs = pool, cfg.VerifyPeerCertificate = f,
+// cfg.InsecureSkipVerify = true. Each such assignment is reported like the
+// literal field it sets, and a configuration that, within one function body,
+// both skips verification and gets a callback (in any mix of literals and
+// assignments) is reported as GOLEM-CRYPTO-TLS-VERIFY-REPLACED.
+func (a *Analyzer) addTrustAssignmentFindings(crypto *model.CryptoEvidence, pkg *packages.Package, body *ast.BlockStmt, seenFindings map[string]bool) {
+	if pkg.TypesInfo == nil {
 		return
 	}
-	method, ok := pkg.TypesInfo.Uses[selector.Sel].(*types.Func)
-	if !ok {
+	states := map[trustTarget]*trustState{}
+	var order []trustTarget
+	state := func(target trustTarget) *trustState {
+		if states[target] == nil {
+			states[target] = &trustState{}
+			order = append(order, target)
+		}
+		return states[target]
+	}
+	record := func(lhs, rhs ast.Expr, stmt ast.Node) {
+		if lit := compositeLiteralOf(rhs); lit != nil {
+			if settings, ok := literalTrustSettings(pkg, lit); ok && (settings.skipVerifies || settings.customVerify) {
+				st := state(trustTargetOf(pkg, lhs))
+				st.sameLiteral = settings.skipVerifies && settings.customVerify
+				if settings.skipVerifies {
+					st.skipNode = lit
+				}
+				if settings.customVerify {
+					st.verifyNode = lit
+				}
+			}
+			return
+		}
+		selector, ok := ast.Unparen(lhs).(*ast.SelectorExpr)
+		if !ok {
+			return
+		}
+		typePath, ok := fieldOwnerTypePath(pkg, selector)
+		if !ok {
+			return
+		}
+		rootField, verifyFields, ok := trustFields(typePath)
+		if !ok {
+			return
+		}
+		settings := trustSettings{typePath: typePath, rootField: rootField}
+		settings.apply(pkg, selector.Sel.Name, rhs, verifyFields)
+		a.addTrustFindings(crypto, pkg, stmt, settings, seenFindings)
+		if settings.skipVerifies || settings.customVerify {
+			st := state(trustTargetOf(pkg, selector.X))
+			st.sameLiteral = false
+			if settings.skipVerifies {
+				st.skipNode = stmt
+			}
+			if settings.customVerify {
+				st.verifyNode = stmt
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			if len(x.Lhs) == len(x.Rhs) {
+				for i := range x.Lhs {
+					record(x.Lhs[i], x.Rhs[i], x)
+				}
+			}
+		case *ast.ValueSpec:
+			if len(x.Names) == len(x.Values) {
+				for i := range x.Names {
+					record(x.Names[i], x.Values[i], x)
+				}
+			}
+		}
+		return true
+	})
+	for _, target := range order {
+		st := states[target]
+		if st.skipNode == nil || st.verifyNode == nil || st.sameLiteral {
+			continue
+		}
+		node := st.verifyNode
+		if st.skipNode.Pos() > node.Pos() {
+			node = st.skipNode
+		}
+		a.addVerifyReplacedFinding(crypto, pkg, node, "crypto/tls.Config", seenFindings)
+	}
+}
+
+// compositeLiteralOf returns the literal of T{...} or &T{...}.
+func compositeLiteralOf(expr ast.Expr) *ast.CompositeLit {
+	expr = ast.Unparen(expr)
+	if unary, ok := expr.(*ast.UnaryExpr); ok && unary.Op == token.AND {
+		expr = ast.Unparen(unary.X)
+	}
+	lit, _ := expr.(*ast.CompositeLit)
+	return lit
+}
+
+func trustTargetOf(pkg *packages.Package, expr ast.Expr) trustTarget {
+	expr = ast.Unparen(expr)
+	if ident, ok := expr.(*ast.Ident); ok {
+		if object := pkg.TypesInfo.ObjectOf(ident); object != nil {
+			return trustTarget{object: object}
+		}
+	}
+	return trustTarget{expr: types.ExprString(expr)}
+}
+
+// fieldOwnerTypePath returns the "package/path.TypeName" of the struct a
+// field selector reads (through pointers and aliases).
+func fieldOwnerTypePath(pkg *packages.Package, selector *ast.SelectorExpr) (string, bool) {
+	selection, ok := pkg.TypesInfo.Selections[selector]
+	if !ok || selection.Kind() != types.FieldVal {
+		return "", false
+	}
+	return namedTypePath(selection.Recv())
+}
+
+// isConstantTrue reports whether expr is a boolean constant equal to true
+// (true, (true), a true-valued const); a shadowed identifier named true is
+// not.
+func isConstantTrue(pkg *packages.Package, expr ast.Expr) bool {
+	tv, ok := pkg.TypesInfo.Types[expr]
+	return ok && tv.Value != nil && tv.Value.Kind() == constant.Bool && constant.BoolVal(tv.Value)
+}
+
+// isTrustNeutral reports whether setting field to expr leaves trust as it
+// was: nil, or the same field copied from another configuration, which is
+// reported where that one was customised.
+func isTrustNeutral(pkg *packages.Package, expr ast.Expr, field string) bool {
+	expr = ast.Unparen(expr)
+	if tv, ok := pkg.TypesInfo.Types[expr]; ok && tv.IsNil() {
+		return true
+	}
+	if selector, ok := expr.(*ast.SelectorExpr); ok && selector.Sel.Name == field {
+		if typePath, ok := fieldOwnerTypePath(pkg, selector); ok {
+			_, _, isTrustType := trustFields(typePath)
+			return isTrustType
+		}
+	}
+	return false
+}
+
+// addEmbeddedPoolFinding flags (*crypto/x509.CertPool).AppendCertsFromPEM
+// calls whose argument is a package-level variable carrying a //go:embed
+// directive (a []byte, or a string converted with []byte(...)), in this
+// package or another one: a certificate pool compiled into the binary, which
+// no store update can revoke.
+func (a *Analyzer) addEmbeddedPoolFinding(crypto *model.CryptoEvidence, pkg *packages.Package, call *ast.CallExpr, seenFindings map[string]bool) {
+	if pkg.TypesInfo == nil || len(call.Args) != 1 {
+		return
+	}
+	var method *types.Func
+	switch fun := ast.Unparen(call.Fun).(type) {
+	case *ast.SelectorExpr:
+		method, _ = pkg.TypesInfo.Uses[fun.Sel].(*types.Func)
+	case *ast.Ident:
+		method, _ = pkg.TypesInfo.Uses[fun].(*types.Func)
+	}
+	if method == nil || method.Name() != "AppendCertsFromPEM" {
 		return
 	}
 	signature, ok := method.Type().(*types.Signature)
-	if !ok || signature.Recv() == nil {
+	if !ok || signature.Recv() == nil || !isCertPoolType(signature.Recv().Type()) {
 		return
 	}
-	if !isCertPoolType(signature.Recv().Type()) {
+	variable := embeddedArgumentVariable(pkg, call.Args[0])
+	if variable == nil || !a.varDeclHasGoEmbed(pkg, variable) {
 		return
 	}
-	if len(call.Args) != 1 {
-		return
-	}
-	argument := ast.Unparen(call.Args[0])
-	ident, ok := argument.(*ast.Ident)
-	if !ok {
-		return
-	}
-	variable, ok := pkg.TypesInfo.Uses[ident].(*types.Var)
-	if !ok || variable.Parent() == nil || variable.Parent() != pkg.Types.Scope() {
-		return
-	}
-	if !varDeclHasGoEmbed(pkg, variable.Name()) {
-		return
+	properties := map[string]string{"variable": variable.Name()}
+	if variable.Pkg() != pkg.Types {
+		properties["package"] = variable.Pkg().Path()
 	}
 	a.addCryptoFinding(crypto, pkg, call, seenFindings, model.CryptoFinding{
 		RuleID:         "GOLEM-CRYPTO-X509-EMBEDDED-POOL",
@@ -284,8 +495,38 @@ func (a *Analyzer) addEmbeddedPoolFinding(crypto *model.CryptoEvidence, pkg *pac
 		Confidence:     "type-resolved",
 		Summary:        "A certificate pool is built from a //go:embed package variable compiled into the binary.",
 		Recommendation: "Embedded trust pools ignore later CA updates and distrust decisions; load roots from the system store or a refreshable source instead.",
-		Properties:     map[string]string{"variable": variable.Name()},
+		Properties:     properties,
 	})
+}
+
+// embeddedArgumentVariable unwraps parentheses, []byte(...) conversions and
+// x[:] slices down to a package-level variable, or returns nil.
+func embeddedArgumentVariable(pkg *packages.Package, expr ast.Expr) *types.Var {
+	for {
+		switch x := ast.Unparen(expr).(type) {
+		case *ast.CallExpr:
+			if tv, ok := pkg.TypesInfo.Types[x.Fun]; !ok || !tv.IsType() || len(x.Args) != 1 {
+				return nil
+			}
+			expr = x.Args[0]
+		case *ast.SliceExpr:
+			expr = x.X
+		case *ast.Ident:
+			return packageLevelVar(pkg.TypesInfo.Uses[x])
+		case *ast.SelectorExpr:
+			return packageLevelVar(pkg.TypesInfo.Uses[x.Sel])
+		default:
+			return nil
+		}
+	}
+}
+
+func packageLevelVar(object types.Object) *types.Var {
+	variable, ok := object.(*types.Var)
+	if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+		return nil
+	}
+	return variable
 }
 
 func (a *Analyzer) addCryptoFinding(crypto *model.CryptoEvidence, pkg *packages.Package, node ast.Node, seenFindings map[string]bool, finding model.CryptoFinding) {
@@ -298,7 +539,7 @@ func (a *Analyzer) addCryptoFinding(crypto *model.CryptoEvidence, pkg *packages.
 }
 
 // compositeLiteralTypePath resolves the named type of a composite literal and
-// returns "package/path.TypeName" for struct types from another package.
+// returns "package/path.TypeName".
 func compositeLiteralTypePath(pkg *packages.Package, lit *ast.CompositeLit) (string, bool) {
 	if pkg.TypesInfo == nil {
 		return "", false
@@ -307,8 +548,15 @@ func compositeLiteralTypePath(pkg *packages.Package, lit *ast.CompositeLit) (str
 	if typeValue == nil {
 		return "", false
 	}
+	return namedTypePath(typeValue)
+}
+
+// namedTypePath returns "package/path.TypeName" for a named type, a pointer
+// to one, or an alias of either.
+func namedTypePath(typeValue types.Type) (string, bool) {
+	typeValue = types.Unalias(typeValue)
 	if pointer, ok := typeValue.(*types.Pointer); ok {
-		typeValue = pointer.Elem()
+		typeValue = types.Unalias(pointer.Elem())
 	}
 	named, ok := typeValue.(*types.Named)
 	if !ok {
@@ -323,49 +571,63 @@ func compositeLiteralTypePath(pkg *packages.Package, lit *ast.CompositeLit) (str
 
 // isCertPoolType reports whether the type is *crypto/x509.CertPool.
 func isCertPoolType(typeValue types.Type) bool {
-	pointer, ok := typeValue.(*types.Pointer)
-	if !ok {
+	if _, ok := types.Unalias(typeValue).(*types.Pointer); !ok {
 		return false
 	}
-	named, ok := pointer.Elem().(*types.Named)
-	if !ok {
-		return false
+	path, ok := namedTypePath(typeValue)
+	return ok && path == "crypto/x509.CertPool"
+}
+
+// varDeclHasGoEmbed reports whether the variable is declared with a
+// //go:embed directive. The directive belongs to the variable's own spec:
+// in a grouped var ( ... ) block it sits above that spec, and blank lines
+// between it and the declaration are allowed, as cmd/go allows them. The
+// declaration is looked up in the variable's package, which may be an import
+// of pkg.
+func (a *Analyzer) varDeclHasGoEmbed(pkg *packages.Package, variable *types.Var) bool {
+	declPkg := pkg
+	if variable.Pkg() != pkg.Types {
+		declPkg = pkg.Imports[variable.Pkg().Path()]
+		if declPkg == nil {
+			return false
+		}
 	}
-	obj := named.Obj()
-	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "crypto/x509" && obj.Name() == "CertPool"
-}
-
-// isNilIdent reports whether the expression is the bare nil identifier
-// (explicitly unset fields do not customise trust).
-func isNilIdent(expr ast.Expr) bool {
-	ident, ok := ast.Unparen(expr).(*ast.Ident)
-	return ok && ident.Name == "nil"
-}
-
-// varDeclHasGoEmbed reports whether a package-level variable of this name is
-// declared with a //go:embed directive in its doc comment group, in any file
-// of the package (the use may be in a different file than the declaration).
-func varDeclHasGoEmbed(pkg *packages.Package, name string) bool {
-	for _, file := range pkg.Syntax {
+	for _, file := range declPkg.Syntax {
+		if file.Pos() > variable.Pos() || variable.Pos() > file.End() {
+			continue
+		}
+		previousEnd := file.Name.End()
 		for _, decl := range file.Decls {
 			genDecl, ok := decl.(*ast.GenDecl)
-			if !ok || genDecl.Tok != token.VAR {
+			if !ok || genDecl.Tok != token.VAR || genDecl.End() < variable.Pos() {
+				previousEnd = decl.End()
 				continue
 			}
-			if !commentGroupHasGoEmbed(genDecl.Doc) {
-				continue
+			if genDecl.Pos() > variable.Pos() {
+				return false
+			}
+			specStart := token.Pos(0)
+			if genDecl.Lparen.IsValid() {
+				previousEnd = genDecl.Lparen
 			}
 			for _, spec := range genDecl.Specs {
-				valueSpec, ok := spec.(*ast.ValueSpec)
-				if !ok {
+				valueSpec := spec.(*ast.ValueSpec)
+				specStart = valueSpec.Pos()
+				if !genDecl.Lparen.IsValid() {
+					specStart = genDecl.Pos()
+				}
+				if valueSpec.End() < variable.Pos() {
+					previousEnd = valueSpec.End()
 					continue
 				}
-				for _, specName := range valueSpec.Names {
-					if specName.Name == name {
+				for _, group := range file.Comments {
+					if group.Pos() > previousEnd && group.End() <= specStart && commentGroupHasGoEmbed(group) {
 						return true
 					}
 				}
+				return false
 			}
+			return false
 		}
 	}
 	return false
@@ -382,6 +644,7 @@ func commentGroupHasGoEmbed(group *ast.CommentGroup) bool {
 	}
 	return false
 }
+
 func (a *Analyzer) cryptoClassificationForSelector(pkg *packages.Package, sel *ast.SelectorExpr) (cryptoClassification, bool) {
 	obj := pkg.TypesInfo.Uses[sel.Sel]
 	if obj == nil || obj.Pkg() == nil {

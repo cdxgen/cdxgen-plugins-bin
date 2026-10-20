@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
+
+	"example.com/golem/tlstrust/bundle"
 )
 
 //go:embed certs.pem
@@ -43,4 +45,52 @@ func embeddedPool() {
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(embeddedPoolBytes)
 	_ = pool
+}
+
+type configAlias = tls.Config
+
+// positive: an alias of tls.Config (GOLEM-CRYPTO-TLS-CUSTOM-ROOTS).
+func aliasRoots(pool *x509.CertPool) {
+	_ = &configAlias{RootCAs: pool}
+}
+
+const skip = true
+
+func verifyConnection(tls.ConnectionState) error { return nil }
+
+// positive: a constant InsecureSkipVerify with VerifyConnection
+// (CUSTOM-VERIFY, VERIFY-REPLACED and INSECURE-SKIP-VERIFY).
+func constSkip() {
+	_ = &tls.Config{InsecureSkipVerify: (skip), VerifyConnection: verifyConnection}
+}
+
+// positive: fields set after construction (CUSTOM-ROOTS, CUSTOM-VERIFY,
+// INSECURE-SKIP-VERIFY, and VERIFY-REPLACED across the statements).
+func assignedAfter(pool *x509.CertPool) {
+	cfg := &tls.Config{}
+	cfg.RootCAs = pool
+	cfg.InsecureSkipVerify = true
+	cfg.VerifyPeerCertificate = verifyCallback
+	_ = cfg
+}
+
+//go:embed certs.pem
+var embeddedPoolString string
+
+var (
+	unrelated int
+
+	//go:embed certs.pem
+
+	groupedPoolBytes []byte
+)
+
+// positive: a string embed converted to []byte, a grouped var with a blank
+// line after its directive, and another package's embed
+// (GOLEM-CRYPTO-X509-EMBEDDED-POOL, three times).
+func embeddedVariants(pool *x509.CertPool) {
+	pool.AppendCertsFromPEM([]byte(embeddedPoolString))
+	pool.AppendCertsFromPEM(groupedPoolBytes[:])
+	pool.AppendCertsFromPEM([]byte(bundle.PEM))
+	_ = unrelated
 }

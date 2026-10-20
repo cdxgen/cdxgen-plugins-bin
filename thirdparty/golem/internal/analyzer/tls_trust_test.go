@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"maps"
 	"path/filepath"
 	"testing"
 )
@@ -25,17 +26,23 @@ func TestAnalyzeTLSTrustCustomisation(t *testing.T) {
 			t.Fatalf("expected type-resolved confidence for %s, got %q", finding.RuleID, finding.Confidence)
 		}
 	}
-	// Positives: two custom-roots sites (tls.Config and x509.VerifyOptions),
-	// two custom-verify sites (one of which is also VERIFY-REPLACED), one
-	// embedded pool.
+	// Positives (testdata/tlstrust/main.go):
+	//   custom roots: customRoots, verifyOptionsCustomRoots, aliasRoots,
+	//     assignedAfter;
+	//   custom verify: customVerify, verifyReplaced, constSkip, assignedAfter;
+	//   verify replaced: verifyReplaced, constSkip, assignedAfter (across
+	//     statements);
+	//   embedded pool: customRoots, embeddedPool, and the three in
+	//     embeddedVariants (string conversion, grouped var, other package).
+	// The existing InsecureSkipVerify rule fires for verifyReplaced,
+	// insecureOnly, constSkip and the assignment in assignedAfter, and not
+	// for the shadowed true in shadowedAndCopied.
 	expected := map[string]int{
-		"GOLEM-CRYPTO-TLS-CUSTOM-ROOTS":    2,
-		"GOLEM-CRYPTO-TLS-CUSTOM-VERIFY":   2,
-		"GOLEM-CRYPTO-TLS-VERIFY-REPLACED": 1,
-		"GOLEM-CRYPTO-X509-EMBEDDED-POOL":  2,
-		// The existing critical InsecureSkipVerify finding: one from
-		// verifyReplaced and one from the insecureOnly negative.
-		"GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY": 2,
+		"GOLEM-CRYPTO-TLS-CUSTOM-ROOTS":         4,
+		"GOLEM-CRYPTO-TLS-CUSTOM-VERIFY":        4,
+		"GOLEM-CRYPTO-TLS-VERIFY-REPLACED":      3,
+		"GOLEM-CRYPTO-X509-EMBEDDED-POOL":       5,
+		"GOLEM-CRYPTO-TLS-INSECURE-SKIP-VERIFY": 4,
 	}
 	for ruleID, want := range expected {
 		if counts[ruleID] != want {
@@ -48,17 +55,21 @@ func TestAnalyzeTLSTrustCustomisation(t *testing.T) {
 	if len(counts) != 0 {
 		t.Fatalf("unexpected additional findings: %#v", counts)
 	}
-	// The embedded-pool finding names the variable.
+	// The embedded-pool finding names the variable, and its package when it
+	// is another one.
+	variables := map[string]int{}
 	for _, finding := range report.Crypto.Findings {
 		if finding.RuleID == "GOLEM-CRYPTO-X509-EMBEDDED-POOL" {
-			if finding.Properties["variable"] != "embeddedPoolBytes" {
-				t.Fatalf("expected the embedded variable name, got %#v", finding.Properties)
-			}
+			variables[finding.Properties["package"]+"."+finding.Properties["variable"]]++
 		}
 		if finding.RuleID == "GOLEM-CRYPTO-TLS-CUSTOM-ROOTS" {
 			if finding.Properties["field"] == "" {
 				t.Fatalf("expected the root field name, got %#v", finding.Properties)
 			}
 		}
+	}
+	wantVariables := map[string]int{".embeddedPoolBytes": 2, ".embeddedPoolString": 1, ".groupedPoolBytes": 1, "example.com/golem/tlstrust/bundle.PEM": 1}
+	if !maps.Equal(variables, wantVariables) {
+		t.Fatalf("embedded pool variables = %v, want %v", variables, wantVariables)
 	}
 }

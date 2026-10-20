@@ -40,3 +40,28 @@ func notAPool(builder *strings.Builder) {
 	builder.WriteString("x")
 	_ = builder
 }
+
+// negative: a look-alike struct with the same field names is not tls.Config.
+type lookalikeConfig struct {
+	RootCAs               *x509.CertPool
+	VerifyPeerCertificate func([][]byte, [][]*x509.Certificate) error
+}
+
+func lookalike(pool *x509.CertPool) {
+	_ = &lookalikeConfig{RootCAs: pool, VerifyPeerCertificate: verifyCallback}
+}
+
+// negative: a shadowed true is false, and fields copied from another
+// configuration were reported where that one was customised.
+func shadowedAndCopied(base *tls.Config) {
+	true := false
+	_ = &tls.Config{InsecureSkipVerify: true, VerifyPeerCertificate: base.VerifyPeerCertificate, RootCAs: base.RootCAs}
+}
+
+// negative: resetting fields to nil, and verify options with intermediates
+// only.
+func resets(cfg *tls.Config, pool *x509.CertPool) {
+	cfg.RootCAs = nil
+	cfg.VerifyPeerCertificate = nil
+	_ = x509.VerifyOptions{Intermediates: pool}
+}
