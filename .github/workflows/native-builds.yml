@@ -29,7 +29,7 @@ jobs:
       with:
         persist-credentials: false
     - name: Use Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
       with:
         node-version: 24.x
         registry-url: https://registry.npmjs.org/
@@ -63,7 +63,7 @@ jobs:
         # shellcheck source=/dev/null
         . ~/.swiftly/env.sh
         hash -r
-    - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d  # v2.0.1
+    - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4  # v2.0.2
     - run: oras version
     - name: Build
       run: |
@@ -141,7 +141,7 @@ jobs:
       # amd64 only: musl-arm64 kosi is a declared gap (plugin-platform-support.sh).
       if: matrix.os == 'ubuntu-24.04'
     - name: Set up JDK 21
-      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
       with:
         distribution: temurin
         java-version: 21
@@ -189,7 +189,7 @@ jobs:
           ./kosi-portable.jar.sha256:text/plain
       if: matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     - name: Set up JDK 21
-      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
       with:
         distribution: temurin
         java-version: 21
@@ -238,7 +238,7 @@ jobs:
           ./sourcekitten.sha256:text/plain
       if: matrix.os == 'macos-15-intel'
     - name: Set up JDK 21
-      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
       with:
         distribution: temurin
         java-version: 21
