@@ -242,16 +242,20 @@ func readJavaTrustStore(data []byte) ([]*x509.Certificate, error) {
 
 // readPKCS12TrustStore decodes a PKCS#12 trust store with the public JDK
 // default password first, then the empty password (PLAN section 1, principle
-// 7). DecodeTrustStore is used deliberately: it never returns private keys.
+// 7). The retry runs on ANY error, not only a wrong-password error: JDK
+// cacerts shipped since Java 9 are written without a MAC, and go-pkcs12
+// rejects a non-empty password on a MAC-less file with "no MAC in data"
+// rather than ErrIncorrectPassword (observed against the Temurin 26 cacerts;
+// the check is in getSafeContents, pkcs12.go in
+// software.sslmate.com/src/go-pkcs12 v0.7.4). DecodeTrustStore is used
+// deliberately: it never returns private keys.
 func readPKCS12TrustStore(data []byte) ([]*x509.Certificate, error) {
 	certs, err := pkcs12.DecodeTrustStore(data, "changeit")
 	if err == nil {
 		return certs, nil
 	}
-	if errors.Is(err, pkcs12.ErrIncorrectPassword) {
-		return pkcs12.DecodeTrustStore(data, "")
+	if certs, emptyErr := pkcs12.DecodeTrustStore(data, ""); emptyErr == nil {
+		return certs, nil
 	}
-	// Wrong structure rather than wrong password; a second attempt with the
-	// empty password would not help.
 	return nil, err
 }

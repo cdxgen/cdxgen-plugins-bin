@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/asn1"
 	"testing"
+
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 func TestJavaTrustStoreJKS(t *testing.T) {
@@ -31,6 +37,71 @@ func TestPKCS12TrustStoreKeytool(t *testing.T) {
 	if len(certs) != 1 || certs[0].Subject.CommonName != "Inspector Issuing CA" {
 		t.Fatalf("expected the issuing CA, got %d certs", len(certs))
 	}
+}
+
+// TestPKCS12TrustStoreEmptyPassword pins the empty-password retry for stores
+// not written with the JDK default "changeit": "changeit" fails with
+// ErrIncorrectPassword and the retry must decode the store. The store is
+// encoded at test time with go-pkcs12's own encoder, the reference
+// implementation of the format.
+func TestPKCS12TrustStoreEmptyPassword(t *testing.T) {
+	pki := buildTestPKI(t)
+	data, err := pkcs12.EncodeTrustStore(rand.Reader, []*x509.Certificate{pki.intermediateA}, "")
+	if err != nil {
+		t.Fatalf("encode empty-password trust store: %v", err)
+	}
+	if _, err := pkcs12.DecodeTrustStore(data, "changeit"); err == nil {
+		t.Fatal("expected changeit to fail on an empty-password store")
+	}
+	certs, err := readPKCS12TrustStore(data)
+	if err != nil {
+		t.Fatalf("read with the empty-password retry: %v", err)
+	}
+	if len(certs) != 1 || !certs[0].Equal(pki.intermediateA) {
+		t.Fatalf("expected the intermediate, got %d certs", len(certs))
+	}
+}
+
+// TestPKCS12TrustStoreMACLess pins the retry for MAC-less stores, the shape
+// JDK cacerts ships in since Java 9: RFC 7292 makes macData OPTIONAL, and
+// go-pkcs12 rejects a non-empty password on such files with "no MAC in data"
+// (not ErrIncorrectPassword), so the retry must trigger on any error.
+func TestPKCS12TrustStoreMACLess(t *testing.T) {
+	pki := buildTestPKI(t)
+	data, err := pkcs12.EncodeTrustStore(rand.Reader, []*x509.Certificate{pki.intermediateA}, "")
+	if err != nil {
+		t.Fatalf("encode trust store: %v", err)
+	}
+	stripped, err := stripPKCS12MacData(data)
+	if err != nil {
+		t.Fatalf("strip macData: %v", err)
+	}
+	if bytes.Equal(stripped, data) {
+		t.Fatal("expected the stripped DER to differ from the encoded store")
+	}
+	if _, err := pkcs12.DecodeTrustStore(stripped, "changeit"); err == nil {
+		t.Fatal("expected changeit to fail on a MAC-less store")
+	}
+	certs, err := readPKCS12TrustStore(stripped)
+	if err != nil {
+		t.Fatalf("read MAC-less store with the empty password: %v", err)
+	}
+	if len(certs) != 1 || !certs[0].Equal(pki.intermediateA) {
+		t.Fatalf("expected the intermediate, got %d certs", len(certs))
+	}
+}
+
+// stripPKCS12MacData re-encodes a PFX DER with only its first two elements
+// (version and authSafe), dropping the optional macData (RFC 7292 appendix).
+func stripPKCS12MacData(data []byte) ([]byte, error) {
+	var pfx []asn1.RawValue
+	if _, err := asn1.Unmarshal(data, &pfx); err != nil {
+		return nil, err
+	}
+	if len(pfx) < 2 {
+		return nil, asn1.SyntaxError{Msg: "pfx too short"}
+	}
+	return asn1.Marshal(pfx[:2])
 }
 
 func TestJavaTrustStoreWrongMagicAndTruncation(t *testing.T) {

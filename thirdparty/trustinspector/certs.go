@@ -40,6 +40,9 @@ type certLocation struct {
 	fileExtension string
 	sha1Value     string
 	sha256Value   string
+	// hostStore labels the host trust store this location came from (host
+	// mode only), so a certificate found in several stores carries them all.
+	hostStore string
 }
 
 // materialAccumulator deduplicates materials by identity
@@ -93,8 +96,10 @@ func (a *materialAccumulator) resolve() []trustMaterial {
 		sort.Slice(locations, func(i, j int) bool { return locations[i].path < locations[j].path })
 		var paths []string
 		var sourceTypes []string
+		var hostStores []string
 		seenPath := map[string]bool{}
 		seenSource := map[string]bool{}
+		seenStore := map[string]bool{}
 		for _, location := range locations {
 			if !seenPath[location.path] {
 				seenPath[location.path] = true
@@ -104,14 +109,20 @@ func (a *materialAccumulator) resolve() []trustMaterial {
 				seenSource[location.sourceType] = true
 				sourceTypes = append(sourceTypes, location.sourceType)
 			}
+			if location.hostStore != "" && !seenStore[location.hostStore] {
+				seenStore[location.hostStore] = true
+				hostStores = append(hostStores, location.hostStore)
+			}
 		}
 		sort.Strings(paths)
 		sort.Strings(sourceTypes)
+		sort.Strings(hostStores)
 		first := locations[0]
 		material.Path = first.path
 		material.Paths = paths
 		material.SourceType = first.sourceType
 		material.SourceTypes = sourceTypes
+		material.HostStores = hostStores
 		material.SHA1 = first.sha1Value
 		material.SHA256 = first.sha256Value
 		material.TrustDomain = first.trustDomain

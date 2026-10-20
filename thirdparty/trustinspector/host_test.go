@@ -38,7 +38,10 @@ func TestDarwinHostTrustMaterials(t *testing.T) {
 	}
 	defer func() { commandRunner = oldRunner }()
 
-	materials := inspectDarwinHostTrustMaterials()
+	materials, warnings := inspectDarwinHostTrustMaterials()
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
 	if len(materials) == 0 {
 		t.Fatal("expected host materials from the captured keychains")
 	}
@@ -109,14 +112,29 @@ func TestWindowsHostTrustMaterials(t *testing.T) {
 	}
 	defer func() { windowsPowerShellJSONRunner = oldRunner }()
 
-	materials := inspectWindowsHostTrustMaterials()
+	materials, warnings := inspectWindowsHostTrustMaterials()
 	if len(materials) == 0 {
 		t.Fatal("expected materials from the captured VM output")
 	}
-	disallowedSeen := false
+	// The captured VM output carries one certificate Go cannot parse (an RSA
+	// modulus bug in a legacy CA certificate); it must surface as a warning,
+	// not silently disappear.
+	if len(warnings) == 0 || !strings.Contains(strings.Join(warnings, "; "), "could not be parsed") {
+		t.Fatalf("expected an unparseable-certificate warning, got %v", warnings)
+	}
+	var disallowedSeen, storeErrorWarned, sharedSeen bool
 	for _, material := range materials {
-		if len(material.HostStores) != 1 {
-			t.Fatalf("expected one hostStore per material, got %#v", material.HostStores)
+		if len(material.HostStores) == 0 || len(material.HostStores) > 2 {
+			t.Fatalf("expected one or two hostStores per material, got %#v", material.HostStores)
+		}
+		if len(material.HostStores) == 2 {
+			// Every AuthRoot certificate on this VM is also in Root; the
+			// merged material must carry both store labels.
+			sharedSeen = true
+			joined := strings.Join(material.HostStores, ",")
+			if !strings.Contains(joined, `windows:LocalMachine\AuthRoot`) || !strings.Contains(joined, `windows:LocalMachine\Root`) {
+				t.Fatalf("shared certificate should carry Root and AuthRoot, got %#v", material.HostStores)
+			}
 		}
 		label := material.HostStores[0]
 		switch {
@@ -126,8 +144,14 @@ func TestWindowsHostTrustMaterials(t *testing.T) {
 				t.Fatalf("Disallowed certificate must be ca-blocklist, got %q", material.SourceType)
 			}
 		case strings.HasPrefix(label, `windows:LocalMachine\`):
-			if material.SourceType != "host-store" {
-				t.Fatalf("expected host-store sourceType, got %q", material.SourceType)
+			hasStoreType := false
+			for _, sourceType := range material.SourceTypes {
+				if sourceType == "host-store" || sourceType == "ca-blocklist" {
+					hasStoreType = true
+				}
+			}
+			if !hasStoreType {
+				t.Fatalf("expected a host-store/ca-blocklist sourceType, got %#v", material.SourceTypes)
 			}
 		default:
 			t.Fatalf("unexpected hostStore %q", label)
@@ -135,6 +159,24 @@ func TestWindowsHostTrustMaterials(t *testing.T) {
 	}
 	if !disallowedSeen {
 		t.Fatal("expected a Disallowed store certificate in the fixture")
+	}
+	if !sharedSeen {
+		t.Fatal("expected certificates shared between Root and AuthRoot in the fixture")
+	}
+	// A per-store PowerShell failure is surfaced as a warning.
+	captured = append(captured, map[string]any{"store": "AuthRoot", "error": "access denied"})
+	windowsPowerShellJSONRunner = func(script string, payload map[string]any) ([]map[string]any, error) {
+		return captured, nil
+	}
+	materials, warnings = inspectWindowsHostTrustMaterials()
+	storeErrorWarned = false
+	for _, warning := range warnings {
+		if strings.Contains(warning, "windows host store AuthRoot: access denied") {
+			storeErrorWarned = true
+		}
+	}
+	if !storeErrorWarned {
+		t.Fatalf("expected the store error warning, got %v", warnings)
 	}
 }
 

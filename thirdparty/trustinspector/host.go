@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -22,31 +23,38 @@ var darwinHostKeychains = []struct {
 }
 
 // inspectDarwinHostTrustMaterials enumerates the system keychains through the
-// commandRunner seam so tests can substitute captured output.
-func inspectDarwinHostTrustMaterials() []trustMaterial {
+// commandRunner seam so tests can substitute captured output. A keychain
+// whose read fails is reported as a warning, never silently dropped.
+func inspectDarwinHostTrustMaterials() ([]trustMaterial, []string) {
 	accumulator := newMaterialAccumulator()
+	var warnings []string
 	for _, keychain := range darwinHostKeychains {
 		stdout, _, err := commandRunner("security", "find-certificate", "-a", "-p", keychain.path)
-		if err != nil || strings.TrimSpace(stdout) == "" {
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("host keychain %s: %v", keychain.path, err))
+			continue
+		}
+		if strings.TrimSpace(stdout) == "" {
 			continue
 		}
 		collectHostCertificates(accumulator, parseHostCertificatesPEM(stdout), keychain.label, keychain.path, "host-store")
 	}
-	return accumulator.resolve()
+	return accumulator.resolve(), warnings
 }
 
 // collectHostCertificates turns parsed host certificates into accumulated
-// materials tagged with the store label.
+// materials. The store label rides on the location so a certificate found in
+// several stores carries every hostStores label after the merge.
 func collectHostCertificates(accumulator *materialAccumulator, certs []*x509.Certificate, storeLabel, storePath, sourceType string) {
 	for _, cert := range certs {
 		material := buildCertificateFields(cert)
 		if material.Name == "" {
 			material.Name = storeLabel
 		}
-		material.HostStores = []string{storeLabel}
 		accumulator.add(material, certLocation{
 			path:       storePath,
 			sourceType: sourceType,
+			hostStore:  storeLabel,
 		})
 	}
 }
@@ -100,29 +108,36 @@ var windowsHostStoreLabels = map[string]string{
 
 // inspectWindowsHostTrustMaterials enumerates the LocalMachine certificate
 // stores through the windowsPowerShellJSONRunner seam. A certificate in
-// Disallowed is OS-level distrust and gets sourceType ca-blocklist.
-func inspectWindowsHostTrustMaterials() []trustMaterial {
+// Disallowed is OS-level distrust and gets sourceType ca-blocklist. Per-store
+// PowerShell failures and certificates Go cannot parse are reported as
+// envelope warnings instead of being silently dropped.
+func inspectWindowsHostTrustMaterials() ([]trustMaterial, []string) {
 	results, err := windowsPowerShellJSONRunner(windowsCertStorePowerShellScript(), nil)
 	if err != nil {
-		return nil
+		return nil, []string{fmt.Sprintf("windows host stores: %v", err)}
 	}
 	accumulator := newMaterialAccumulator()
+	storeErrors := map[string]string{}
+	unparseable := 0
 	for _, item := range results {
 		store, _ := item["store"].(string)
-		rawData, _ := item["rawData"].(string)
-		if _, hasError := item["error"]; hasError {
+		if message, hasError := item["error"].(string); hasError {
+			storeErrors[store] = message
 			continue
 		}
+		rawData, _ := item["rawData"].(string)
 		label, ok := windowsHostStoreLabels[store]
 		if !ok || rawData == "" {
 			continue
 		}
 		der, err := base64.StdEncoding.DecodeString(rawData)
 		if err != nil {
+			unparseable++
 			continue
 		}
 		cert, err := x509.ParseCertificate(der)
 		if err != nil {
+			unparseable++
 			continue
 		}
 		sourceType := "host-store"
@@ -131,7 +146,19 @@ func inspectWindowsHostTrustMaterials() []trustMaterial {
 		}
 		collectHostCertificates(accumulator, []*x509.Certificate{cert}, label, "Cert:\\LocalMachine\\"+store, sourceType)
 	}
-	return accumulator.resolve()
+	stores := make([]string, 0, len(storeErrors))
+	for store := range storeErrors {
+		stores = append(stores, store)
+	}
+	sort.Strings(stores)
+	var warnings []string
+	for _, store := range stores {
+		warnings = append(warnings, fmt.Sprintf("windows host store %s: %s", store, storeErrors[store]))
+	}
+	if unparseable > 0 {
+		warnings = append(warnings, fmt.Sprintf("windows host stores: %d certificate(s) could not be parsed", unparseable))
+	}
+	return accumulator.resolve(), warnings
 }
 
 // sortHostStoreLabels is used by tests to compare hostStores deterministically.

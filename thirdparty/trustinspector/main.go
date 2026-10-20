@@ -405,10 +405,10 @@ func runHost(args []string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		findings = inspectDarwinHost()
-		materials = inspectDarwinHostTrustMaterials()
+		materials, warnings = inspectDarwinHostTrustMaterials()
 	case "windows":
 		findings = inspectWindowsHost()
-		materials = inspectWindowsHostTrustMaterials()
+		materials, warnings = inspectWindowsHostTrustMaterials()
 	default:
 		// Linux: the host scan is a rootfs scan of /, without --embedded
 		// (PLAN section 4.2).
