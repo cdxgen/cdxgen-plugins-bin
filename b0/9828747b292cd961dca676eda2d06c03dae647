@@ -1,0 +1,19 @@
+thirdparty/trustinspector/formats.go
+  s_52f5c4eaf6e6b7::t_c108279efa8be3 1-341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b09828747b292cd961dca676eda2d06c03dae647",
+  "prompts": {},
+  "sessions": {
+    "s_52f5c4eaf6e6b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6df25678-2bd9-411d-a772-3a7751696245",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
