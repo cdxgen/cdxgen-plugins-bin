@@ -1,0 +1,46 @@
+thirdparty/trustinspector/testdata/pqc/slhdsa-int.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-174
+thirdparty/trustinspector/testdata/pqc/slhdsa-root.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-173
+docs/TRUSTINSPECTOR.md
+  s_52f5c4eaf6e6b7::t_69aef1d5db5b78 36
+thirdparty/trustinspector/README.md
+  s_52f5c4eaf6e6b7::t_69aef1d5db5b78 168-192
+thirdparty/trustinspector/testdata/pqc/mlkem768-leaf.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-84
+thirdparty/trustinspector/testdata/pqc/mldsa65-root.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-118
+thirdparty/trustinspector/testdata/pqc/ecdsa-leaf.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-61
+thirdparty/trustinspector/main.go
+  s_52f5c4eaf6e6b7::t_c4684d90c27feb 65-78
+  s_52f5c4eaf6e6b7::t_9b546e73d83e8e 79-88
+thirdparty/trustinspector/testdata/pqc/gen.sh
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-48
+thirdparty/trustinspector/certs_test.go
+  s_52f5c4eaf6e6b7::t_aac002fa98f943 5-7,9,15,18,369,374,379,390-489
+thirdparty/trustinspector/testdata/pqc/sha1-int.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-20
+thirdparty/trustinspector/testdata/pqc/mldsa44-int.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-105
+thirdparty/trustinspector/testdata/pqc/sha1-root.pem
+  s_52f5c4eaf6e6b7::t_22e29494424c1b 1-20
+thirdparty/trustinspector/certs.go
+  s_52f5c4eaf6e6b7::t_f20f4a2f6cf486 5-7,9,13,34-71,232-234,238,253-255,257-261,297-357,434-436,438-440,442-445,485-492,494,496-497,500-512,515-520,523-524,526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc6250df4b105e1d7391545931d7fb5195adc359",
+  "prompts": {},
+  "sessions": {
+    "s_52f5c4eaf6e6b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6df25678-2bd9-411d-a772-3a7751696245",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
