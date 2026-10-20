@@ -10,9 +10,9 @@ $upxArchiveSha256 = "eabc6792a347d45e945be7748423e7868fd01b0d2bcaa2f4b1031fd71ff
 $osqueryVersion = "5.23.1"
 $osqueryArchive = "osquery-$osqueryVersion.windows_x86_64.zip"
 $osqueryArchiveSha256 = "7bd411050ef6b5aae1b23956aec0dc5ce6e800c5656f0cd463ac70a6e1bdf30b"
-$dosaiVersion = "5.0.0-rc.1"
+$dosaiVersion = "5.0.0-rc.2"
 $dosaiArchive = "Dosai.exe"
-$dosaiArchiveSha256 = "d98981dfe6d4bb5417ee6dcece4a7807a6ba9216cfad5574eca3dd21e269a88f"
+$dosaiArchiveSha256 = "a1cfe789083a9b5a1f43a06fe5b424d86b8cd9d6170819e6dbed5e6a45355c5d"
 # The version the Go tools stamp via -X main.version; the Makefiles read the
 # same file, so a Windows binary and a Make-built binary of one commit always
 # agree.
